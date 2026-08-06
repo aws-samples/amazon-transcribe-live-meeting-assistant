@@ -1,0 +1,771 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-vdxcvpsm"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Desktop Capture App | LMA</title><link rel="canonical" href="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/desktop-capture-app/"/><link rel="sitemap" href="/amazon-transcribe-live-meeting-assistant/sitemap-index.xml"/><link rel="shortcut icon" href="/amazon-transcribe-live-meeting-assistant/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.1.6"/><meta name="generator" content="Starlight v0.41.6"/><meta property="og:title" content="Desktop Capture App"/><meta property="og:type" content="article"/><meta property="og:url" content="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/desktop-capture-app/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><meta property="og:site_name" content="LMA"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/common.DUFGQSCB.css"><style>@layer starlight.components{.card:where(.astro-zts4jgjd){--sl-card-border:var(--sl-color-purple);--sl-card-bg:var(--sl-color-purple-low);border:1px solid var(--sl-color-gray-5);background-color:var(--sl-color-black);flex-direction:column;gap:clamp(.5rem,.125rem + 1vw,1rem);padding:clamp(1rem,.125rem + 3vw,2.5rem)}.card:where(.astro-zts4jgjd):nth-child(4n+1){--sl-card-border:var(--sl-color-orange);--sl-card-bg:var(--sl-color-orange-low)}.card:where(.astro-zts4jgjd):nth-child(4n+3){--sl-card-border:var(--sl-color-green);--sl-card-bg:var(--sl-color-green-low)}.card:where(.astro-zts4jgjd):nth-child(4n+4){--sl-card-border:var(--sl-color-red);--sl-card-bg:var(--sl-color-red-low)}.card:where(.astro-zts4jgjd):nth-child(4n+5){--sl-card-border:var(--sl-color-blue);--sl-card-bg:var(--sl-color-blue-low)}.title:where(.astro-zts4jgjd){font-weight:600;font-size:var(--sl-text-h4);color:var(--sl-color-white);line-height:var(--sl-line-height-headings);align-items:center;gap:1rem}.card:where(.astro-zts4jgjd) .icon:where(.astro-zts4jgjd){border:1px solid var(--sl-card-border);background-color:var(--sl-card-bg);border-radius:.25rem;flex-shrink:0;padding:.2em}.card:where(.astro-zts4jgjd) .body:where(.astro-zts4jgjd){font-size:clamp(var(--sl-text-sm), calc(.5rem + 1vw), var(--sl-text-body));margin:0}.card-grid:where(.astro-lmor3ela){grid-template-columns:100%;gap:1rem;display:grid}.card-grid:where(.astro-lmor3ela)>*{margin-top:0!important}@media (width>=50rem){.card-grid:where(.astro-lmor3ela){grid-template-columns:1fr 1fr;gap:1.5rem}.stagger:where(.astro-lmor3ela){--stagger-height:5rem;padding-bottom:var(--stagger-height)}.stagger:where(.astro-lmor3ela)>:nth-child(2n){transform:translateY(var(--stagger-height))}}.sl-link-card:where(.astro-vodiqeol){border:1px solid var(--sl-color-gray-5);box-shadow:var(--sl-shadow-sm);border-radius:.5rem;grid-template-columns:1fr auto;gap:.5rem;padding:1rem;display:grid;position:relative}a:where(.astro-vodiqeol){line-height:var(--sl-line-height-headings);text-decoration:none}a:where(.astro-vodiqeol):before{content:"";position:absolute;inset:0}.stack:where(.astro-vodiqeol){flex-direction:column;gap:.5rem}.title:where(.astro-vodiqeol){color:var(--sl-color-white);font-weight:600;font-size:var(--sl-text-lg)}.description:where(.astro-vodiqeol){color:var(--sl-color-gray-3);line-height:1.5}.icon:where(.astro-vodiqeol){color:var(--sl-color-gray-3)}.sl-link-card:where(.astro-vodiqeol):hover{background:var(--sl-color-gray-7,var(--sl-color-gray-6));border-color:var(--sl-color-gray-2)}.sl-link-card:where(.astro-vodiqeol):hover .icon:where(.astro-vodiqeol){color:var(--sl-color-white)}}
+@layer starlight.components{svg:where(.astro-n5k4ipy7){color:var(--sl-icon-color);font-size:var(--sl-icon-size,1em);width:1em;height:1em}}
+</style><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/page.LAbJoB63.js"></script></head><body class="astro-vdxcvpsm"><a class="sl-skip-link astro-vxeigawq" href="#_top">Skip to content</a><div class="page sl-flex astro-gqpr5s5a"><header class="header astro-gqpr5s5a"><div class="header astro-nczgtkxc"><div class="title-wrapper sl-flex astro-nczgtkxc"><a href="/amazon-transcribe-live-meeting-assistant/" class="site-title sl-flex astro-clw6ags5"><img class="light:sl-hidden print:hidden astro-clw6ags5" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-dark.DjwyAsdJ.svg" width="120" height="40"><img class="dark:sl-hidden print:block astro-clw6ags5" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-light.Therjg_H.svg" width="120" height="40"><span class="astro-clw6ags5" translate="no">LMA</span></a></div><div class="sl-flex print:hidden astro-nczgtkxc"><site-search class="astro-nczgtkxc astro-r5ar4xm7" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-r5ar4xm7"><svg aria-hidden="true" class="astro-r5ar4xm7 astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-r5ar4xm7" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-r5ar4xm7" style="display: none;"><kbd class="astro-r5ar4xm7">Ctrl</kbd><kbd class="astro-r5ar4xm7">K</kbd></kbd></button><dialog style="padding:0" aria-label="Search" class="astro-r5ar4xm7"><div class="dialog-frame sl-flex astro-r5ar4xm7"><button data-close-modal class="sl-flex md:sl-hidden astro-r5ar4xm7">Cancel</button><div class="search-container astro-r5ar4xm7"><div id="starlight__search" class="astro-r5ar4xm7"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/Search.astro_astro_type_script_index_0_lang.CyJ7X4h2.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-nczgtkxc"><div class="sl-flex social-icons astro-nczgtkxc"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">GitHub</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-r2p65idu"><span class="sr-only astro-r2p65idu">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-r2p65idu"><option value="dark" class="astro-r2p65idu">Dark</option><option value="light" class="astro-r2p65idu">Light</option><option value="auto" selected class="astro-r2p65idu">Auto</option></select><svg aria-hidden="true" class="icon caret astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-gqpr5s5a" aria-label="Main"><starlight-menu-button class="print:hidden astro-vvx7mffu"><button aria-expanded="false" aria-label="Menu" aria-controls="starlight__sidebar" class="sl-flex md:sl-hidden astro-vvx7mffu"><svg aria-hidden="true" class="open-menu astro-vvx7mffu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-vvx7mffu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg></button></starlight-menu-button><script type="module">var e=class extends HTMLElement{btn=this.querySelector(`button`);constructor(){super(),this.btn.addEventListener(`click`,()=>this.toggleExpanded());let e=this.closest(`nav`);e&&e.addEventListener(`keyup`,e=>this.closeOnEscape(e)),matchMedia(`(min-width: 50em)`).addEventListener(`change`,()=>this.setExpanded(!1))}setExpanded(e){this.setAttribute(`aria-expanded`,String(e)),document.body.toggleAttribute(`data-mobile-menu-expanded`,e),document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}toggleExpanded(){this.setExpanded(this.getAttribute(`aria-expanded`)!==`true`)}closeOnEscape(e){e.code===`Escape`&&(this.setExpanded(!1),this.btn.focus())}};customElements.define(`starlight-menu-button`,e);</script><div id="starlight__sidebar" class="sidebar-pane astro-gqpr5s5a"><div class="sidebar-content sl-flex astro-gqpr5s5a"><sl-sidebar-state-persist data-hash="1hbgv5m" class="astro-f5yvicm7"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-ojxuodky"><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Overview</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/" class="astro-ojxuodky"><span class="astro-ojxuodky">Welcome</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Getting Started</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/prerequisites-and-deployment/" class="astro-ojxuodky"><span class="astro-ojxuodky">Prerequisites &amp; Deployment</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/quick-start-guide/" class="astro-ojxuodky"><span class="astro-ojxuodky">Quick Start Guide</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Core Features</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/transcription-and-translation/" class="astro-ojxuodky"><span class="astro-ojxuodky">Transcription &amp; Translation</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/meeting-assistant/" class="astro-ojxuodky"><span class="astro-ojxuodky">Meeting Assistant</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/transcript-summarization/" class="astro-ojxuodky"><span class="astro-ojxuodky">Transcript Summarization</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/meetings-query-tool/" class="astro-ojxuodky"><span class="astro-ojxuodky">Meetings Query Tool</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Meeting Sources</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/meeting-sources/" class="astro-ojxuodky"><span class="astro-ojxuodky">Meeting Sources Overview</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/stream-audio/" class="astro-ojxuodky"><span class="astro-ojxuodky">Stream Audio</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/browser-extension/" class="astro-ojxuodky"><span class="astro-ojxuodky">Browser Extension</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/desktop-capture-app/" aria-current="page" class="astro-ojxuodky"><span class="astro-ojxuodky">Desktop Capture App</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant/" class="astro-ojxuodky"><span class="astro-ojxuodky">Virtual Participant</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Voice Assistant &amp; Avatar</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/voice-assistant/" class="astro-ojxuodky"><span class="astro-ojxuodky">Voice Assistant</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/nova-sonic-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Nova Sonic Setup</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/elevenlabs-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">ElevenLabs Setup</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/simli-avatar-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Simli Avatar Setup</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">MCP Server Integration</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/mcp-servers/" class="astro-ojxuodky"><span class="astro-ojxuodky">MCP Servers Overview</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/mcp-api-key-auth/" class="astro-ojxuodky"><span class="astro-ojxuodky">MCP API Key Auth</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/salesforce-mcp-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Salesforce MCP</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-mcp-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Amazon QuickSuite MCP</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/deepwiki-mcp-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">DeepWiki MCP</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Web UI</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/web-ui-guide/" class="astro-ojxuodky"><span class="astro-ojxuodky">Web UI Guide</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Access Control &amp; Security</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/user-management/" class="astro-ojxuodky"><span class="astro-ojxuodky">User Management</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/user-based-access-control/" class="astro-ojxuodky"><span class="astro-ojxuodky">User-Based Access Control</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/infrastructure-and-security/" class="astro-ojxuodky"><span class="astro-ojxuodky">Infrastructure &amp; Security</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/security-scanning/" class="astro-ojxuodky"><span class="astro-ojxuodky">Security Scanning (SRT)</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Integration &amp; API</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="8"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/websocket-streaming-api/" class="astro-ojxuodky"><span class="astro-ojxuodky">WebSocket Streaming API</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/embeddable-components/" class="astro-ojxuodky"><span class="astro-ojxuodky">Embeddable Components</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/lambda-hook-functions/" class="astro-ojxuodky"><span class="astro-ojxuodky">Lambda Hook Functions</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Administration</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="9"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-parameters/" class="astro-ojxuodky"><span class="astro-ojxuodky">CloudFormation Parameters</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/stack-updates-and-upgrades/" class="astro-ojxuodky"><span class="astro-ojxuodky">Stack Updates &amp; Upgrades</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/well-architected/" class="astro-ojxuodky"><span class="astro-ojxuodky">Well-Architected Assessment</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting/" class="astro-ojxuodky"><span class="astro-ojxuodky">Troubleshooting</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/cleanup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Cleanup</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Development</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="10"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/developer-guide/" class="astro-ojxuodky"><span class="astro-ojxuodky">Developer Guide</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/lma-cli/" class="astro-ojxuodky"><span class="astro-ojxuodky">LMA CLI Reference</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/lma-sdk/" class="astro-ojxuodky"><span class="astro-ojxuodky">LMA SDK Reference</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">New &amp; Uncategorized</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="11"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-desktop-integration/" class="astro-ojxuodky"><span class="astro-ojxuodky">Amazon Quick Desktop Integration</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/blog-update-proposal/" class="astro-ojxuodky"><span class="astro-ojxuodky">Blog Update Proposal</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-service-role/" class="astro-ojxuodky"><span class="astro-ojxuodky">Cloudformation Service Role</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/dependency-upgrade-validation-runbook/" class="astro-ojxuodky"><span class="astro-ojxuodky">Dependency Upgrade Validation Runbook</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/teams-acs-sdk/" class="astro-ojxuodky"><span class="astro-ojxuodky">Teams Acs Sdk</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/upload-audio/" class="astro-ojxuodky"><span class="astro-ojxuodky">Upload Audio</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant-local-dev/" class="astro-ojxuodky"><span class="astro-ojxuodky">Virtual Participant Local Dev</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/zoom-credentials-and-join-reliability/" class="astro-ojxuodky"><span class="astro-ojxuodky">Zoom Credentials And Join Reliability</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/zoom-meeting-sdk/" class="astro-ojxuodky"><span class="astro-ojxuodky">Zoom Meeting Sdk</span></a></li></ul></details></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-b5gddk54"><div class="social-icons astro-b5gddk54"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">GitHub</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-r2p65idu"><span class="sr-only astro-r2p65idu">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-r2p65idu"><option value="dark" class="astro-r2p65idu">Dark</option><option value="light" class="astro-r2p65idu">Light</option><option value="auto" selected class="astro-r2p65idu">Auto</option></select><svg aria-hidden="true" class="icon caret astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></div></nav><div class="main-frame astro-gqpr5s5a"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-abfeecmu"><aside class="right-sidebar-container print:hidden astro-abfeecmu"><div class="right-sidebar astro-abfeecmu"><div class="lg:sl-hidden astro-q5mffni3"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-5ulgm6bh"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-5ulgm6bh"><details id="starlight__mobile-toc" class="astro-5ulgm6bh"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-5ulgm6bh"><span class="toggle sl-flex astro-5ulgm6bh">On this page<svg aria-hidden="true" class="caret astro-5ulgm6bh astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-5ulgm6bh"></span></summary><div class="dropdown astro-5ulgm6bh"><ul class="isMobile astro-cxyftcne" style="--depth: 0;"><li style="--depth: 0;" class="astro-cxyftcne"><a href="#_top" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Overview</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#how-it-works" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">How it works</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#optional-record-screen-video" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Optional: record screen video</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#recording-consent" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Recording consent</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#download-and-install-macos" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Download and install (macOS)</span></a><ul class="isMobile astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#apple-could-not-verify-is-free-of-malware-gatekeeper" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">”Apple could not verify… is free of malware” (Gatekeeper)</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#download-and-install-windows" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Download and install (Windows)</span></a><ul class="isMobile astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#windows-protected-your-pc-smartscreen" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">”Windows protected your PC” (SmartScreen)</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#using-the-menu-bar--dock-app-macos" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Using the menu-bar + Dock app (macOS)</span></a><ul class="isMobile astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#running-it-in-the-background" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Running it in the background</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#using-the-system-tray--taskbar-app-windows" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Using the system-tray + taskbar app (Windows)</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#updating-to-a-new-version" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Updating to a new version</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#uninstalling" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Uninstalling</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#multiple-lma-deployments-on-one-machine" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Multiple LMA deployments on one machine</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#desktop-capture-app-vs-virtual-participant" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Desktop Capture App vs Virtual Participant</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#supported-platforms" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Supported platforms</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#troubleshooting" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Troubleshooting</span></a><ul class="isMobile astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#macos" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">macOS</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#windows" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Windows</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#both-platforms" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Both platforms</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#see-also" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">See also</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.BcSo_yiZ.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-q5mffni3"><div class="sl-container astro-q5mffni3"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-cxyftcne" style="--depth: 0;"><li style="--depth: 0;" class="astro-cxyftcne"><a href="#_top" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Overview</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#how-it-works" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">How it works</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#optional-record-screen-video" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Optional: record screen video</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#recording-consent" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Recording consent</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#download-and-install-macos" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Download and install (macOS)</span></a><ul class="astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#apple-could-not-verify-is-free-of-malware-gatekeeper" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">”Apple could not verify… is free of malware” (Gatekeeper)</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#download-and-install-windows" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Download and install (Windows)</span></a><ul class="astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#windows-protected-your-pc-smartscreen" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">”Windows protected your PC” (SmartScreen)</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#using-the-menu-bar--dock-app-macos" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Using the menu-bar + Dock app (macOS)</span></a><ul class="astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#running-it-in-the-background" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Running it in the background</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#using-the-system-tray--taskbar-app-windows" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Using the system-tray + taskbar app (Windows)</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#updating-to-a-new-version" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Updating to a new version</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#uninstalling" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Uninstalling</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#multiple-lma-deployments-on-one-machine" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Multiple LMA deployments on one machine</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#desktop-capture-app-vs-virtual-participant" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Desktop Capture App vs Virtual Participant</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#supported-platforms" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Supported platforms</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#troubleshooting" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Troubleshooting</span></a><ul class="astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#macos" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">macOS</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#windows" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Windows</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#both-platforms" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Both platforms</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#see-also" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">See also</span></a></li></ul></nav></starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/TableOfContents.astro_astro_type_script_index_0_lang.Csloo1VZ.js"></script></div></div></div></aside><div class="main-pane astro-abfeecmu"><main data-pagefind-body class="astro-vdxcvpsm" lang="en" dir="ltr"><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><h1 id="_top" class="astro-2sm4b3ln">Desktop Capture App</h1></div></div><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><div class="sl-markdown-content"><div class="sl-heading-wrapper level-h1"><h1 id="desktop-capture-app">Desktop Capture App</h1><a class="sl-anchor-link" href="#desktop-capture-app"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Desktop Capture App”</span></a></div>
+<p>The <strong>Desktop Capture App</strong> (<strong>LMA Capture Client</strong>) is a lightweight native
+application (macOS and Windows) that streams your <strong>microphone</strong>, your computer’s
+<strong>system (meeting) audio</strong>, and — optionally — your <strong>screen video</strong> directly to
+LMA. Because it captures the operating system’s audio, not a browser tab, it can
+transcribe meetings you join from a <strong>native desktop app</strong> (Zoom, Microsoft Teams,
+Cisco Webex, Slack huddles, phone bridges, …), which the
+<a href="../browser-extension/">Chrome Extension</a> and <a href="../stream-audio/">Stream Audio</a>
+options cannot. It adds <strong>no bot</strong> or extra attendee to the meeting.</p>
+<blockquote>
+<p><strong>Status:</strong> macOS and Windows are available today. The app is distributed as
+source that you build locally with a one-step script — a native app using
+ScreenCaptureKit (macOS) or WASAPI/WPF (Windows) cannot be cross-compiled by
+LMA’s Linux build pipeline, and code-signing tools are OS-specific, so building
+on your own machine is both required and the most trustworthy option.</p>
+</blockquote>
+<video controls playsinline width="100%" style="max-width:100%; border-radius:8px; border:1px solid var(--sl-color-gray-4, #ddd);">
+  <source src="https://github.com/user-attachments/assets/9b323496-4eb9-4f22-aa45-0f2f05afaa2e" type="video/mp4">
+  <a href="https://github.com/user-attachments/assets/9b323496-4eb9-4f22-aa45-0f2f05afaa2e">Watch video</a>
+</video>
+<div class="sl-heading-wrapper level-h2"><h2 id="how-it-works">How it works</h2><a class="sl-anchor-link" href="#how-it-works"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “How it works”</span></a></div>
+<ul>
+<li>Your <strong>microphone</strong> is transcribed as the meeting owner — the <strong>“My Mic”</strong>
+channel (the AGENT channel downstream).</li>
+<li>Your computer’s <strong>system audio</strong> — the remote participants — is the
+<strong>“Meeting Audio”</strong> channel (the CALLER channel downstream).</li>
+<li>Audio streams to the <strong>same</strong> secure WebSocket transcriber endpoint the
+browser options use; the server is unchanged. From there it flows through the
+identical pipeline (real-time transcription, Meeting Assistant, summaries,
+knowledge base).</li>
+<li><strong>macOS</strong> captures system audio via <strong>ScreenCaptureKit</strong> (loopback) and the
+mic via <strong>AVAudioEngine</strong>. <strong>Windows</strong> captures system audio via <strong>WASAPI
+loopback</strong> and the mic via <strong>WASAPI capture</strong>. On both, the two mono sources
+are interleaved into 2-channel 16-bit PCM.</li>
+</ul>
+<blockquote>
+<p>On <strong>Windows</strong>, system-audio (loopback) capture is built into the OS and needs
+<strong>no special permission</strong> — there is no equivalent of the macOS Screen
+Recording prompt. The only OS gate is the microphone privacy setting.</p>
+</blockquote>
+<div class="sl-heading-wrapper level-h2"><h2 id="optional-record-screen-video">Optional: record screen video</h2><a class="sl-anchor-link" href="#optional-record-screen-video"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Optional: record screen video”</span></a></div>
+<p>In addition to audio, the app can <strong>capture and stream desktop video</strong> — a
+screen or a specific window — so LMA saves a <strong>video recording of the meeting</strong>
+alongside the audio, just like the Virtual Participant does. It’s <strong>off by
+default</strong>; turn it on per user in <strong>Settings (⚙)</strong>:</p>
+<ul>
+<li><strong>macOS</strong> encodes the chosen display/window with <strong>ScreenCaptureKit +
+VideoToolbox</strong> (H.264). It reuses the <strong>Screen Recording</strong> permission the app
+already needs for system audio — <strong>no new prompt</strong>.</li>
+<li><strong>Windows</strong> encodes with <strong>Windows.Graphics.Capture + Media Foundation</strong>
+(H.264). No extra permission is required.</li>
+</ul>
+<p>The video is streamed to the transcriber over a <strong>second WebSocket connection</strong>
+(so it never delays real-time audio/transcription), muxed with the meeting
+audio into a single <strong>MP4</strong> at the end of the call, saved to the LMA recordings
+bucket, and shown in the call detail page’s <strong>Recording Video</strong> player — the
+same place Virtual Participant recordings appear. Capture runs at ~5 fps and up
+to 1080p, which keeps CPU and bandwidth modest while staying legible for slides.</p>
+<p>When screen video is enabled, the one-time consent gate and the live recording
+view both show a <strong>“Screen video is ON”</strong> notice, since screen contents are more
+sensitive than audio alone. Video recording can be disabled deployment-wide with
+the <code dir="auto">EnableVideoRecording</code> CloudFormation parameter (the server then discards any
+video a client sends).</p>
+<blockquote>
+<p><strong>Backward compatible.</strong> The video stream is a purely additive, second WebSocket
+announced by a new <code dir="auto">START_VIDEO</code> message. Clients that don’t send it, and
+servers that predate it, behave exactly as before — audio streaming is
+untouched.</p>
+</blockquote>
+<div class="sl-heading-wrapper level-h2"><h2 id="recording-consent">Recording consent</h2><a class="sl-anchor-link" href="#recording-consent"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Recording consent”</span></a></div>
+<p>You are responsible for complying with the legal, corporate, and ethical
+restrictions that apply to recording meetings and calls — in many jurisdictions
+<strong>all participants must consent</strong> to being recorded. Do not use this app to
+stream, record, or transcribe calls if otherwise prohibited.</p>
+<p>The app shows this disclaimer <strong>before your first recording</strong> and requires you
+to agree (the same consent gate as the browser extension and the web UI’s
+Stream Audio tab). After that:</p>
+<ul>
+<li>A one-line reminder — <em>“Ensure all participants have consented to
+recording”</em> — stays visible next to the <strong>Start</strong> button; hovering it shows
+<strong>when you agreed</strong> and the exact text you agreed to.</li>
+<li><strong>Settings (⚙ gear)</strong> keeps your <strong>consent record</strong>: the date/time you
+agreed and the full disclaimer text, expandable for review.</li>
+<li>If the deployment’s disclaimer wording is <strong>changed</strong> by your administrator,
+the app asks you to agree to the <strong>new</strong> text once — your recorded consent
+covers the text you actually saw.</li>
+</ul>
+<p>The text is configurable per deployment via the <code dir="auto">RecordingDisclaimer</code>
+CloudFormation parameter, so organizations can substitute their own legal
+wording; the app picks it up from the <code dir="auto">lma-config.json</code> baked into the
+download.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="download-and-install-macos">Download and install (macOS)</h2><a class="sl-anchor-link" href="#download-and-install-macos"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Download and install (macOS)”</span></a></div>
+<ol>
+<li>
+<p>In the LMA web app, open <strong>Meeting Assistant ▸ Sources ▸ Desktop Capture App
+(Native)</strong> and click <strong>Download for macOS</strong>. The zip is <strong>preconfigured for
+your deployment</strong> (endpoint + Cognito settings baked in), so you only sign in
+with your normal LMA username and password.</p>
+</li>
+<li>
+<p>Unzip it.</p>
+</li>
+<li>
+<p>If you don’t already have Apple’s command-line tools, install them once:</p>
+<div class="expressive-code"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/ec.w36nc.css"><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/ec.0vx5m.js"></script><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">xcode-select</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--install</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="xcode-select --install"><div></div></button></div></figure></div>
+</li>
+<li>
+<p>In Terminal, <code dir="auto">cd</code> into the unzipped folder and run the installer <strong>with
+<code dir="auto">bash</code></strong> (not <code dir="auto">./</code>):</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">bash</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">install-macos.sh</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="bash install-macos.sh"><div></div></button></div></figure></div>
+<p>It clears the macOS download quarantine, checks prerequisites, builds the
+app, and installs it to <code dir="auto">/Applications/LMACaptureClient.app</code>. (Terminal is only
+used to build and install — you won’t run the app from Terminal.)</p>
+<blockquote>
+<p>⚠️ <strong>Use <code dir="auto">bash install-macos.sh</code>, not <code dir="auto">./install-macos.sh</code>.</strong> On recent
+macOS, running a freshly downloaded script directly makes the kernel
+<code dir="auto">execve()</code> a quarantined file, which Gatekeeper blocks with <em>“Apple could
+not verify … is free of malware”</em> <strong>before the script runs</strong> — so its own
+quarantine-clearing never happens. Running it via <code dir="auto">bash</code> reads the script as
+data (no <code dir="auto">execve</code> on a quarantined file), so it runs and clears the flag
+from the rest of the folder itself.</p>
+</blockquote>
+</li>
+<li>
+<p><strong>Launch it like a normal app.</strong> Click its <strong>Dock icon</strong> (the installer pins
+it), press <strong>⌘-Space</strong> (Spotlight) and type <strong>LMACaptureClient</strong>, or
+double-click it in Finder. An <strong>LMA</strong> item appears in the menu bar
+(top-right) and the app’s icon appears in the Dock.</p>
+<blockquote>
+<p><strong>Searching for it:</strong> in the Dock and menu bar the app is labelled
+<strong>LMA Capture Client (&#x3C;Stack>)</strong>, but Spotlight and <code dir="auto">open -a</code> match the
+bundle’s <em>filename</em> — <code dir="auto">LMACaptureClient-&#x26;lt;stack&#x26;gt;</code> — so search for that (the
+installer prints the exact name when it finishes).</p>
+</blockquote>
+<blockquote>
+<p>⚠️ <strong>Don’t launch it from Terminal.</strong> Always launch via Spotlight, Finder,
+or <code dir="auto">open /Applications/LMACaptureClient-&#x3C;stack>.app</code> — never the binary
+inside <code dir="auto">Contents/MacOS</code>.
+Only launching through macOS gives the app its own privacy identity; running
+it from Terminal makes macOS attribute Microphone / Screen Recording to
+<strong>Terminal</strong>, and system-audio capture silently won’t work.</p>
+</blockquote>
+</li>
+<li>
+<p>Approve the <strong>Microphone</strong> prompt. Then open <strong>System Settings ▸ Privacy &#x26;
+Security ▸ Screen Recording</strong>, enable <strong>LMA Capture Client</strong>, and <strong>quit and
+relaunch</strong> it (Screen Recording requires a restart to take effect). Screen
+Recording is what lets macOS capture system/meeting audio, even for audio-only
+capture.</p>
+</li>
+<li>
+<p>Left-click the <strong>LMA</strong> menu-bar item, sign in with your LMA username and
+password, and click <strong>Start</strong>. Your meeting appears in the
+<a href="../web-ui-guide/">Meetings List</a> with a live transcript.</p>
+</li>
+</ol>
+<blockquote>
+<p><strong>Tip: use headphones.</strong> Otherwise your speakers’ meeting audio can bleed into
+your microphone and appear faintly on both transcript channels.</p>
+</blockquote>
+<blockquote>
+<p><strong>Later:</strong> to move to a newer LMA release see
+<a href="#updating-to-a-new-version">Updating to a new version</a>; to remove the app see
+<a href="#uninstalling">Uninstalling</a>.</p>
+</blockquote>
+<div class="sl-heading-wrapper level-h3"><h3 id="apple-could-not-verify-is-free-of-malware-gatekeeper">”Apple could not verify… is free of malware” (Gatekeeper)</h3><a class="sl-anchor-link" href="#apple-could-not-verify-is-free-of-malware-gatekeeper"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “”Apple could not verify… is free of malware” (Gatekeeper)”</span></a></div>
+<p>macOS flags files downloaded from a browser, and on recent versions it <strong>blocks
+running a downloaded script directly</strong> (<code dir="auto">./install-macos.sh</code>) — the kernel
+<code dir="auto">execve()</code>s a quarantined file, Gatekeeper kills it, and the script’s own
+quarantine-clearing never gets to run. Run it via <code dir="auto">bash</code> instead, which isn’t
+blocked:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">bash</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">install-macos.sh</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="bash install-macos.sh"><div></div></button></div></figure></div>
+<p>To clear the whole folder up front instead (then either form works):</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">xattr</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-dr</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">com.apple.quarantine</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">.</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">./install-macos.sh</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="xattr -dr com.apple.quarantine ../install-macos.sh"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h2"><h2 id="download-and-install-windows">Download and install (Windows)</h2><a class="sl-anchor-link" href="#download-and-install-windows"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Download and install (Windows)”</span></a></div>
+<p>On Windows, loopback (system) audio capture is built into the OS and needs
+<strong>no special permission</strong> — the only OS gate is the microphone privacy toggle.</p>
+<ol>
+<li>
+<p>In the LMA web app, open <strong>Meeting Assistant ▸ Sources ▸ Desktop Capture App
+(Native)</strong>, choose <strong>Windows</strong>, and click <strong>Download for Windows</strong>. The zip is
+<strong>preconfigured for your deployment</strong> (endpoint + Cognito settings baked in),
+so you only sign in with your normal LMA username and password.</p>
+</li>
+<li>
+<p>Unzip it (right-click ▸ <strong>Extract All</strong>).</p>
+</li>
+<li>
+<p>Install the <strong>.NET 8 SDK</strong> once from
+<a href="https://dotnet.microsoft.com/download/dotnet/8.0">dotnet.microsoft.com</a>. No
+admin is required — it can install into your user folder.</p>
+</li>
+<li>
+<p>In <strong>PowerShell</strong>, <code dir="auto">cd</code> into the unzipped folder and run the
+build-and-install script:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="powershell"><code><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">.</span><span style="--0:#C792EA;--1:#8844AE">/</span><span style="--0:#7FDBCA;--1:#096E72">build-windows.ps1</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C792EA;--1:#8844AE">-</span><span style="--0:#D6DEEB;--1:#403F53">SelfContained </span><span style="--0:#C792EA;--1:#8844AE">-</span><span style="--0:#D6DEEB;--1:#403F53">Install</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="./build-windows.ps1 -SelfContained -Install"><div></div></button></div></figure></div>
+<p>It builds a standalone app, runs a built-in self-test, installs it to
+<code dir="auto">%LOCALAPPDATA%\Programs\LMA Capture Client (&#x3C;Stack>)</code> (no admin needed), and adds a
+<strong>Start Menu</strong> shortcut — so you don’t have to dig into the build output. It
+ends with <strong>INSTALL SUCCEEDED</strong>; that banner is the thing to look for.</p>
+<ul>
+<li>Omit <code dir="auto">-Install</code> to just build (the exe lands in
+<code dir="auto">bin\Release\net8.0-windows\win-x64\publish\</code>).</li>
+<li>Add <code dir="auto">-DesktopShortcut</code> for a desktop icon too.</li>
+<li>Add <code dir="auto">-ProgramFiles</code> to install machine-wide under <code dir="auto">%ProgramFiles%</code> instead
+(prompts for admin to do the copy).</li>
+</ul>
+</li>
+<li>
+<p><strong>Launch it</strong> from the <strong>Start Menu</strong> (press the <strong>Windows key</strong>, type <strong>LMA
+Capture Client</strong>, Enter). <strong>No window opens</strong> — the app lives in the <strong>system
+tray</strong>, at the bottom-right next to the clock:</p>
+<p><img alt="LMA tray icon: gray when idle, red while recording" loading="lazy" decoding="async" width="398" height="154" src="/amazon-transcribe-live-meeting-assistant/_astro/readme-audio-capture-windows-tray-icons.DpENFFn2_GFqlV.png" srcset=""></p>
+<p><strong>Left-click that icon</strong> for the controls panel. (Once you start recording, a
+<strong>taskbar button</strong> appears too — see
+<a href="#using-the-system-tray--taskbar-app-windows">Using the system-tray + taskbar app</a>.)
+If SmartScreen warns about an unrecognized app, choose <strong>More info ▸ Run
+anyway</strong> — expected for a locally built, unsigned app.</p>
+</li>
+<li>
+<p>If Windows blocks microphone access, enable it in <strong>Settings ▸ Privacy &#x26;
+security ▸ Microphone</strong> (turn on <em>Microphone access</em> and <em>Let desktop apps
+access your microphone</em>), then restart the app. <strong>System/meeting audio needs
+no permission.</strong></p>
+</li>
+<li>
+<p>Left-click the <strong>LMA</strong> tray icon, sign in with your LMA username and password,
+and click <strong>Start</strong>. Your meeting appears in the
+<a href="../web-ui-guide/">Meetings List</a> with a live transcript.</p>
+</li>
+</ol>
+<blockquote>
+<p><strong>Tip: use headphones.</strong> Otherwise your speakers’ meeting audio can bleed into
+your microphone and appear faintly on both transcript channels.</p>
+</blockquote>
+<blockquote>
+<p><strong>Later:</strong> to move to a newer LMA release see
+<a href="#updating-to-a-new-version">Updating to a new version</a>; to remove the app see
+<a href="#uninstalling">Uninstalling</a>.</p>
+</blockquote>
+<div class="sl-heading-wrapper level-h3"><h3 id="windows-protected-your-pc-smartscreen">”Windows protected your PC” (SmartScreen)</h3><a class="sl-anchor-link" href="#windows-protected-your-pc-smartscreen"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “”Windows protected your PC” (SmartScreen)”</span></a></div>
+<p>Expected for a locally built, unsigned app. Click <strong>More info</strong>, then <strong>Run
+anyway</strong>. (A future release may ship an Authenticode-signed build to avoid this.)</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="using-the-menu-bar--dock-app-macos">Using the menu-bar + Dock app (macOS)</h2><a class="sl-anchor-link" href="#using-the-menu-bar--dock-app-macos"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Using the menu-bar + Dock app (macOS)”</span></a></div>
+<p>Launched with no arguments (the normal case), the app lives in <strong>two places</strong>:
+an <strong>LMA</strong> item at the top-right of the menu bar, and an icon in the <strong>Dock</strong>
+(the installer pins it there).</p>
+<p>Menu-bar item:</p>
+<ul>
+<li><strong>Left-click</strong> the item for the controls popover: sign in / out,
+<strong>Start</strong> / <strong>Stop</strong> / <strong>Pause</strong>, <strong>mute mic</strong>, <strong>mute system audio</strong>, live
+per-channel <strong>level meters</strong>, and <strong>Open in LMA</strong> (jumps to the live meeting in
+your browser).</li>
+<li>While recording, the icon turns <strong>red</strong> so it’s obvious at a glance.</li>
+<li><strong>Right-click</strong> the item for <strong>Quit</strong> (kept out of the popover so it isn’t
+confused with <em>Stop</em>).</li>
+</ul>
+<p>Dock icon:</p>
+<ul>
+<li>While recording, the Dock icon shows a <strong>red dot</strong> and a <strong>REC</strong> badge
+(<strong>⏸</strong> while paused), and it clears when you stop.</li>
+<li><strong>Right-click</strong> the Dock icon for quick controls: <strong>Start / Pause / Resume /
+Stop Recording</strong> and <strong>Open Control Panel</strong>.</li>
+<li><strong>Click</strong> the Dock icon to open the control panel as a regular window (same
+controls as the popover).</li>
+</ul>
+<blockquote>
+<p><strong>Why both?</strong> On MacBooks with a notch, macOS silently hides menu-bar icons
+that don’t fit — and starting a recording adds the system’s orange mic
+indicator to the menu bar, which can push the LMA icon out of view at the
+exact moment you need it. The Dock icon is always visible, so you always have
+a way to see recording state and stop the recording. If your menu bar is
+crowded, you can also <strong>⌘-drag</strong> the LMA menu-bar icon further right so it’s
+among the last to be hidden.</p>
+</blockquote>
+<p>Popover options:</p>
+<ul>
+<li><strong>Remember my email</strong> — prefills your login next launch (email only; the
+password is never stored).</li>
+<li><strong>Start automatically at login</strong> — registers the app as a macOS login item.
+The installer already placed the app in <code dir="auto">/Applications</code>, so this works out of
+the box. You can also manage it in <strong>System Settings ▸ General ▸ Login Items</strong>.</li>
+<li><strong>Elapsed time</strong> — while recording, the panel and the menu-bar item show how
+long the recording has been running (also in the icon’s hover text).</li>
+<li><strong>Notifications</strong> — macOS notifies you when recording starts and stops; the
+stop notification opens the meeting in LMA when clicked. You are also notified
+if a window you chose for screen video closes and capture falls back to the
+whole screen.</li>
+<li><strong>Recent meeting names</strong> — the clock button beside the meeting-name field
+re-uses a recent name (handy for recurring meetings).</li>
+<li><strong>What will be captured</strong> — a summary box above <strong>Start Recording</strong> (and again
+while recording) names the <strong>microphone</strong> in use and, when screen video is on,
+<strong>which screen or window</strong> will be recorded, with a small preview of it. This
+is deliberately on the main panel rather than buried in Settings: sharing the
+wrong screen is easy to do and hard to undo.</li>
+<li><strong>Settings (⚙ gear, top-right of the popover)</strong> — opens a separate, resizable
+<strong>Settings window</strong> where you customize how the two channels are labeled in the
+LMA transcript, which microphone is captured, and screen video. Closing the
+Settings window brings the main panel back.
+<ul>
+<li>
+<p><strong>My mic</strong> speaker label — defaults to your signed-in email address.</p>
+</li>
+<li>
+<p><strong>System</strong> speaker label — defaults to <strong>“Other participants”</strong>.</p>
+</li>
+<li>
+<p><strong>Microphone</strong> — pick a specific input device, or leave <strong>System Default</strong>
+to follow your Sound settings. If a chosen mic is unplugged, recording
+falls back to the default. Changes are saved immediately and apply to the
+<strong>next</strong> recording (the gear is disabled while recording).</p>
+</li>
+<li>
+<p><strong>Also record screen video</strong> — off by default. When on, choose from a list of
+your <strong>screens and windows</strong>, each with a <strong>thumbnail preview</strong>, its name as
+macOS reports it (e.g. <em>DELL U2720Q</em>), and its <strong>resolution</strong> — so two
+similar monitors are easy to tell apart. <strong>Refresh</strong> re-scans and re-captures
+the previews. The chosen screen/window is recorded with the meeting and saved
+as a video in LMA (see
+<a href="#optional-record-screen-video">Optional: record screen video</a>).</p>
+<blockquote>
+<p>Thumbnail previews need <strong>macOS 14 or later</strong>. On macOS 13 the list still
+shows each source’s name and resolution.</p>
+</blockquote>
+</li>
+</ul>
+</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="running-it-in-the-background">Running it in the background</h3><a class="sl-anchor-link" href="#running-it-in-the-background"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Running it in the background”</span></a></div>
+<p>The app uses no audio or CPU when idle, so the intended usage is to leave it
+running and click <strong>Start</strong> when a meeting begins. <strong>To relaunch after
+quitting</strong>, click its Dock icon, press <strong>⌘-Space</strong> (Spotlight) and type
+<strong>LMACaptureClient</strong>, or run <code dir="auto">open /Applications/LMACaptureClient-&#x3C;stack>.app</code>.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="using-the-system-tray--taskbar-app-windows">Using the system-tray + taskbar app (Windows)</h2><a class="sl-anchor-link" href="#using-the-system-tray--taskbar-app-windows"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Using the system-tray + taskbar app (Windows)”</span></a></div>
+<p>Launched with no arguments (the normal case), the app lives in the <strong>system
+tray</strong> — the notification area at the bottom-right, next to the clock — with
+<strong>no window</strong>. While recording, it <em>also</em> takes a <strong>taskbar button</strong>, so a live
+recording is always visible and always stoppable.</p>
+<p>Tray icon:</p>
+<p><img alt="LMA tray icon: gray when idle, red while recording" loading="lazy" decoding="async" width="398" height="154" src="/amazon-transcribe-live-meeting-assistant/_astro/readme-audio-capture-windows-tray-icons.DpENFFn2_GFqlV.png" srcset=""></p>
+<ul>
+<li><strong>Left-click</strong> the icon for the controls panel: sign in / out,
+<strong>Start</strong> / <strong>Stop</strong> / <strong>Pause</strong>, <strong>mute mic</strong>, <strong>mute system audio</strong>, live
+per-channel <strong>level meters</strong>, and <strong>Open in LMA</strong> (jumps to the live meeting in
+your browser).</li>
+<li>While recording, the icon turns <strong>red</strong> so it’s obvious at a glance. The app
+asks Windows to keep it out of the ▲ overflow so the red icon stays visible; if
+Windows still hides it, drag it onto the taskbar once.</li>
+<li><strong>Right-click</strong> the icon for <strong>Quit</strong> (kept out of the panel so it isn’t
+confused with <em>Stop</em>).</li>
+<li>Want it one click away even when idle? Right-click <strong>LMA Capture Client</strong> in the
+Start Menu ▸ <strong>More</strong> ▸ <strong>Pin to taskbar</strong>. (Windows 10+ removed the API that
+would let the installer do this for you.)</li>
+<li><strong>Only one copy runs at a time.</strong> Opening the app again — from that pinned
+shortcut, the Start Menu, or the .exe — <strong>opens the controls panel</strong> of the copy
+already running instead of adding a second tray icon.</li>
+</ul>
+<p>Taskbar button (while recording):</p>
+<ul>
+<li>A taskbar button appears when you <strong>Start</strong> and disappears when you <strong>Stop</strong> —
+nothing clutters your taskbar between meetings.</li>
+<li>Its icon carries a <strong>red dot</strong>, and the button glows <strong>green while recording /
+yellow while paused</strong>.</li>
+<li><strong>Hover</strong> it for <strong>Pause/Resume</strong> and <strong>Stop</strong> buttons right in the thumbnail
+preview — no need to open a window.</li>
+<li><strong>Right-click</strong> it for quick actions: <strong>Start / Pause / Resume / Stop
+Recording</strong> and <strong>Open Control Panel</strong>.</li>
+<li><strong>Click</strong> it to open the control panel as a regular window (same controls as
+the tray panel).</li>
+<li><strong>Closing or minimizing that window does not stop the recording</strong> — it stays in
+the taskbar and keeps streaming. Recording only stops when you choose <strong>Stop</strong>.</li>
+</ul>
+<blockquote>
+<p><strong>Why both?</strong> Windows 11 tucks tray icons it hasn’t seen before into the ▲
+overflow flyout, and can hide them again later — potentially at the exact
+moment you want to check or stop a recording. The taskbar button can’t be
+hidden that way, so while you’re recording you always have a visible indicator
+and a one-click Stop. When nothing is recording the app goes back to tray-only
+and stays out of your way.</p>
+</blockquote>
+<p>Panel options:</p>
+<ul>
+<li><strong>Remember my email</strong> — prefills your login next launch (email only; the
+password is never stored).</li>
+<li><strong>Start automatically at login</strong> — adds a per-user startup entry that launches
+the tray app when you sign in; the toggle reflects the real system state.</li>
+<li><strong>Elapsed time</strong> — while recording, the panel, the tray tooltip, and the
+taskbar button show how long the recording has been running.</li>
+<li><strong>Notifications</strong> — a tray balloon appears when recording starts and stops;
+clicking the stop balloon opens the meeting in LMA. You are also notified if a
+window you chose for screen video closes and capture falls back to the whole
+screen.</li>
+<li><strong>Recent meeting names</strong> — the clock button beside the meeting-name field
+re-uses a recent name (handy for recurring meetings).</li>
+<li><strong>What will be captured</strong> — a summary box above <strong>Start Recording</strong> (and again
+while recording) names the <strong>microphone</strong> in use and, when screen video is on,
+<strong>which screen or window</strong> will be recorded. This is deliberately on the main
+panel rather than buried in Settings: sharing the wrong screen is easy to do
+and hard to undo.</li>
+<li><strong>Settings (⚙ gear, top-right of the panel)</strong> — opens a separate, resizable
+<strong>Settings window</strong> where you customize how the two channels are labeled in the
+LMA transcript, which microphone is captured, and screen video. Closing the
+Settings window brings the main panel back.
+Each label field shows its <strong>default in grey</strong>; leave the field blank to use
+it, or type to override.
+<ul>
+<li><strong>My mic</strong> speaker label — defaults to your signed-in email address.</li>
+<li><strong>System audio</strong> speaker label — defaults to <strong>“Other participants”</strong>.</li>
+<li><strong>Microphone</strong> — pick a specific input device, or leave <strong>System Default</strong>
+to follow Windows’ input device setting. If a chosen mic is unplugged,
+recording falls back to the default. Changes are saved immediately and
+apply to the <strong>next</strong> recording (the gear is disabled while recording).</li>
+<li><strong>Also record screen video</strong> — off by default. When on, choose from a list of
+your <strong>screens and windows</strong>, each with a <strong>thumbnail preview</strong>, the monitor’s
+own name (e.g. <em>DELL U2720Q</em>), and its <strong>resolution</strong>, so two similar monitors
+are easy to tell apart. The chosen screen/window is recorded with the meeting
+and saved as a video in LMA (see
+<a href="#optional-record-screen-video">Optional: record screen video</a>).</li>
+</ul>
+</li>
+</ul>
+<p>The app uses no audio or CPU when idle, so the intended usage is to leave it in
+the tray and click <strong>Start</strong> when a meeting begins. <strong>To relaunch after
+quitting</strong>, press the <strong>Windows key</strong>, type <strong>LMA Capture Client</strong>, and press
+Enter. If it’s already running, that just brings up its controls panel — you
+can’t accidentally end up with two.</p>
+<blockquote>
+<p><strong>Developer / headless mode.</strong> Any command-line flag runs a headless CLI that
+streams to stdout with a live VU meter (<code dir="auto">--cli</code> forces it). <code dir="auto">--selftest</code>
+validates the login crypto offline, and <code dir="auto">--capture-test &#x3C;seconds> &#x3C;out.wav></code>
+records the exact streamed stereo PCM with no server — useful for confirming
+<strong>ch0/Left = system, ch1/Right = mic</strong> by measuring per-channel RMS.</p>
+</blockquote>
+<div class="sl-heading-wrapper level-h2"><h2 id="updating-to-a-new-version">Updating to a new version</h2><a class="sl-anchor-link" href="#updating-to-a-new-version"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Updating to a new version”</span></a></div>
+<p>The app <strong>does not update itself</strong>. When your LMA deployment is upgraded to a
+new release, download the new package and re-run the same install command — it
+replaces the installed copy in place. There is <strong>no need to uninstall first</strong>.</p>
+<p><strong>1. Check which version you have.</strong> The controls panel footer and the
+<strong>Settings (⚙)</strong> window show a line like
+<code dir="auto">LMA Capture Client v0.3.6 · stack LMA-Bob</code>. Compare it with the version shown
+on the download button in the web app (<strong>Meeting Assistant ▸ Sources ▸ Desktop
+Capture App (Native)</strong> — e.g. <em>Download for macOS (0.3.7)</em>). If they match,
+you’re current.</p>
+<p><strong>2. Download the new package</strong> from that same page. It is re-generated for your
+deployment on every LMA upgrade, so it always carries the current
+<code dir="auto">lma-config.json</code> (endpoint, Cognito ids, recording disclaimer).</p>
+<p><strong>3. Unzip it into a new folder</strong> — don’t extract over the old one — and re-run
+the installer from the <strong>new</strong> folder:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># macOS — quit the app first (right-click the "LMA" menu-bar item ▸ Quit)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">bash</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">install-macos.sh</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="bash install-macos.sh"><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="powershell"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># Windows — closes the running copy for you, then replaces it</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">.</span><span style="--0:#C792EA;--1:#8844AE">/</span><span style="--0:#7FDBCA;--1:#096E72">build-windows.ps1</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C792EA;--1:#8844AE">-</span><span style="--0:#D6DEEB;--1:#403F53">SelfContained </span><span style="--0:#C792EA;--1:#8844AE">-</span><span style="--0:#D6DEEB;--1:#403F53">Install</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="./build-windows.ps1 -SelfContained -Install"><div></div></button></div></figure></div>
+<p>On Windows, pass the <strong>same flags you used originally</strong> — add <code dir="auto">-ProgramFiles</code> if
+you installed machine-wide (re-run from an elevated PowerShell), and
+<code dir="auto">-DesktopShortcut</code> if you want the desktop icon kept.</p>
+<p><strong>What is preserved across an update</strong> (as long as it’s the <em>same</em> LMA stack):</p>
+<ul>
+<li>Your <strong>saved settings</strong> — remembered email, speaker labels, microphone choice,
+screen-video preference, recent meeting names.</li>
+<li>Your <strong>recording-consent record</strong> — you are not re-prompted, unless your
+administrator changed the disclaimer wording, in which case you agree to the
+new text once.</li>
+<li><strong>macOS permissions</strong> — Microphone and Screen Recording stay granted. The
+installer signs with a persistent local identity, so rebuilds don’t invalidate
+the grants. (If macOS does re-ask, see
+<a href="#macos">Troubleshooting ▸ macOS</a>.)</li>
+<li><strong>Windows</strong> needs no permission for system audio, and the microphone grant
+persists.</li>
+</ul>
+<p>That’s because everything machine-scoped (bundle id, install path, registry key,
+login item) is derived from the <strong>stack name</strong>, which doesn’t change between
+releases. A package downloaded from a <strong>different</strong> LMA stack installs
+<strong>alongside</strong> the existing one rather than replacing it — see
+<a href="#multiple-lma-deployments-on-one-machine">Multiple LMA deployments on one machine</a>.</p>
+<p>You can delete the old package folder once the new install succeeds. Keeping it
+is harmless — its <code dir="auto">--uninstall</code> / <code dir="auto">-Uninstall</code> still works for the same stack.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="uninstalling">Uninstalling</h2><a class="sl-anchor-link" href="#uninstalling"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Uninstalling”</span></a></div>
+<p>Both platforms have a single command that removes the app <strong>and everything it
+put on your machine</strong>. Run it from any unzipped package folder for that stack
+(newest is fine):</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># macOS</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">bash</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">install-macos.sh</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">--uninstall</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="bash install-macos.sh --uninstall"><div></div></button></div></figure></div>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="powershell"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># Windows</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">.</span><span style="--0:#C792EA;--1:#8844AE">/</span><span style="--0:#7FDBCA;--1:#096E72">build-windows.ps1</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C792EA;--1:#8844AE">-</span><span style="--0:#D6DEEB;--1:#403F53">Uninstall</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="./build-windows.ps1 -Uninstall"><div></div></button></div></figure></div>
+<p>On <strong>Windows</strong> you can equally uninstall from <strong>Settings ▸ Apps ▸ Installed
+apps</strong> — the entry is <strong>LMA Capture Client (<em>Stack</em>)</strong> — which does the same
+thing and doesn’t need the package folder at all.</p>
+<p><strong>macOS <code dir="auto">--uninstall</code> removes:</strong> the running app (quit first if open), the
+<code dir="auto">LMACaptureClient-&#x3C;slug>.app</code> bundle from <code dir="auto">/Applications</code> (and <code dir="auto">~/Applications</code>),
+the Start-at-login item, the Dock pin, saved settings, and the Screen Recording +
+Microphone privacy grants. It <strong>leaves</strong> the one-time local signing certificate
+in your login keychain (harmless, and reused if you reinstall) and leaves the
+package folder itself — delete that yourself if you’re done.</p>
+<blockquote>
+<p>To remove the certificate too: <strong>Keychain Access ▸ login ▸ My Certificates</strong>,
+delete <strong>LMA Capture Client Local Signing</strong>.</p>
+</blockquote>
+<p><strong>Windows <code dir="auto">-Uninstall</code> removes:</strong> the running app, the install folder
+(<code dir="auto">%LOCALAPPDATA%\Programs\LMA Capture Client (&#x3C;Stack>)</code> and the <code dir="auto">%ProgramFiles%</code>
+copy if present), the Start Menu and Desktop shortcuts, the per-user settings key
+(<code dir="auto">HKCU\Software\AmazonLMA\CaptureClient\&#x3C;slug></code>), the start-at-login entry, and
+the <strong>Apps &#x26; features</strong> registration. If you installed machine-wide with
+<code dir="auto">-ProgramFiles</code>, run it from an <strong>elevated (admin)</strong> PowerShell — otherwise it
+warns that it couldn’t remove the <code dir="auto">%ProgramFiles%</code> copy.</p>
+<p>Uninstalling only affects this machine. Meetings, transcripts, and recordings
+already in LMA are untouched.</p>
+<p>If you have clients for <strong>several stacks</strong> installed, each has its own
+app/entry and its own uninstall — run the command from that stack’s package
+folder (or pick that stack’s entry in <strong>Apps &#x26; features</strong>) to remove just it.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="multiple-lma-deployments-on-one-machine">Multiple LMA deployments on one machine</h2><a class="sl-anchor-link" href="#multiple-lma-deployments-on-one-machine"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Multiple LMA deployments on one machine”</span></a></div>
+<p>If you work with more than one LMA stack, you can install <strong>one client per
+stack</strong> and run them side by side. Each download is stamped with the stack it
+came from, and the app namespaces everything machine-scoped by that name:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>What</th><th>macOS</th><th>Windows</th></tr></thead><tbody><tr><td>App / install name</td><td><code dir="auto">LMACaptureClient-&#x3C;slug>.app</code> (shown as <code dir="auto">LMA Capture Client (&#x3C;Stack>)</code>)</td><td><code dir="auto">LMA Capture Client (&#x3C;Stack>)</code></td></tr><tr><td>Identity</td><td>bundle id <code dir="auto">com.amazon.lma.captureclient.&#x3C;slug></code></td><td>registry <code dir="auto">HKCU\Software\AmazonLMA\CaptureClient\&#x3C;slug></code></td></tr><tr><td>Settings + consent record</td><td>per-stack preferences</td><td>per-stack registry key</td></tr><tr><td>Start at login</td><td>separate login item</td><td>separate <code dir="auto">Run</code> entry</td></tr><tr><td>Single instance</td><td>separate app</td><td>separate mutex, so both can run at once</td></tr><tr><td>OS permissions</td><td>separate Screen Recording / Microphone grants</td><td>n/a (loopback needs none)</td></tr></tbody></table>
+<p>The stack name is shown under the app title, in the window titles, in the tray /
+menu-bar tooltip, and in the About line at the bottom of the panel (alongside the
+app version) — so it’s always clear which deployment you are recording into.</p>
+<p><code dir="auto">&#x3C;slug></code> is the stack name lowercased with non-alphanumerics replaced by dashes,
+plus a short hash of the exact name — e.g. <code dir="auto">LMA-VideoTest</code> becomes
+<code dir="auto">lma-videotest-4581d5</code>. The hash is what keeps stacks whose names differ only in
+case or punctuation (<code dir="auto">LMA-Bob</code> and <code dir="auto">lma-bob</code> are both valid CloudFormation names)
+from sharing settings, permissions, or the single-instance lock.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="desktop-capture-app-vs-virtual-participant">Desktop Capture App vs Virtual Participant</h2><a class="sl-anchor-link" href="#desktop-capture-app-vs-virtual-participant"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Desktop Capture App vs Virtual Participant”</span></a></div>
+<p>Both transcribe meetings without a browser tab, but make different trade-offs.
+See the <a href="../meeting-sources/">Meeting Sources overview</a> for the full comparison
+of all capture options.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Dimension</th><th>Desktop Capture App</th><th><a href="../virtual-participant/">Virtual Participant</a></th></tr></thead><tbody><tr><td>How it captures</td><td>Runs on your computer; captures OS system audio + mic locally</td><td>Headless bot joins the meeting in the cloud</td></tr><tr><td>Meeting platforms</td><td>Any native or web app that plays audio on your computer</td><td>Only platforms it can automate (Zoom, Teams, Chime, Webex, Meet)</td></tr><tr><td>Speaker identification</td><td>❌ No per-speaker names (one “Meeting Audio” channel)</td><td>✅ Active-speaker names from the meeting platform</td></tr><tr><td>In-meeting voice assistant</td><td>❌ Web-UI chat assistant only</td><td>✅ Optional Nova Sonic voice assistant in the meeting</td></tr><tr><td>Visible to others</td><td>✅ No bot / extra attendee</td><td>❌ Visible bot joins the meeting</td></tr><tr><td>Who must be present</td><td>You, with the app running on your computer</td><td>✅ Runs unattended in the cloud</td></tr><tr><td>Video / screen recording</td><td>✅ Optional (screen or window, off by default)</td><td>✅ Records the meeting screen/video</td></tr></tbody></table>
+<p><strong>In short:</strong> choose the <strong>Desktop Capture App</strong> when you’re attending yourself,
+want no visible bot, or need a platform the Virtual Participant doesn’t support.
+Choose the <strong>Virtual Participant</strong> when you need per-speaker names, an in-meeting
+voice assistant, or hands-off unattended recording.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="supported-platforms">Supported platforms</h2><a class="sl-anchor-link" href="#supported-platforms"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Supported platforms”</span></a></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Platform</th><th>Audio capture</th><th>Screen video capture (optional)</th></tr></thead><tbody><tr><td>macOS 13+</td><td>ScreenCaptureKit loopback + AVAudioEngine mic</td><td>ScreenCaptureKit + VideoToolbox (H.264)</td></tr><tr><td>Windows 10/11</td><td>WASAPI loopback + WASAPI mic capture</td><td>Windows.Graphics.Capture + Media Foundation (H.264)</td></tr></tbody></table>
+<div class="sl-heading-wrapper level-h2"><h2 id="troubleshooting">Troubleshooting</h2><a class="sl-anchor-link" href="#troubleshooting"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Troubleshooting”</span></a></div>
+<div class="sl-heading-wrapper level-h3"><h3 id="macos">macOS</h3><a class="sl-anchor-link" href="#macos"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “macOS”</span></a></div>
+<ul>
+<li><strong>No remote-participant audio in the transcript.</strong> Grant <strong>Screen Recording</strong>
+to “LMA Capture Client” in System Settings and relaunch. Audio-only capture
+still requires the Screen Recording permission on macOS.</li>
+<li><strong>macOS keeps asking for Screen Recording permission even though it’s
+enabled.</strong> This happens when the app was rebuilt with an ad-hoc signature —
+macOS ties the permission to the exact binary, so every rebuild invalidates
+it while System Settings still shows it “enabled”. Fix: rebuild with the
+current <code dir="auto">install-macos.sh</code> (it now signs with a persistent local identity),
+then clear the stale records and re-grant once:
+<code dir="auto">tccutil reset ScreenCapture com.amazon.lma.captureclient.&#x3C;stack></code>, relaunch the app,
+start a recording, and approve the prompt. If System Settings shows duplicate
+“LMA Capture Client” rows, remove them with the <strong>–</strong> button first.</li>
+<li><strong>Build errors / <code dir="auto">xcode-select: command not found</code>.</strong> Install Apple’s
+command-line tools (<code dir="auto">xcode-select --install</code>), complete the popup, and re-run
+<code dir="auto">bash install-macos.sh</code>.</li>
+<li><strong>Updating / uninstalling.</strong> Re-run <code dir="auto">bash install-macos.sh</code> from the new
+package folder to update in place; run <code dir="auto">bash install-macos.sh --uninstall</code> to
+remove it completely. See <a href="#updating-to-a-new-version">Updating to a new version</a>
+and <a href="#uninstalling">Uninstalling</a>.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="windows">Windows</h3><a class="sl-anchor-link" href="#windows"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Windows”</span></a></div>
+<ul>
+<li><strong>“Windows protected your PC” (SmartScreen).</strong> Expected for a locally built,
+unsigned app. Click <strong>More info</strong>, then <strong>Run anyway</strong>.</li>
+<li><strong>No microphone / “access denied”.</strong> Enable <strong>Settings ▸ Privacy &#x26; security ▸
+Microphone</strong> (both <em>Microphone access</em> and <em>Let desktop apps access your
+microphone</em>), then restart the app. System audio is unaffected.</li>
+<li><strong>Unfamiliar errors scroll past during install (e.g. <code dir="auto">log4net:ERROR … lockingModel</code>).</strong> If the script ends with <strong>INSTALL SUCCEEDED</strong>, the install
+worked. Messages like that come from <strong>other software already on the PC</strong> —
+corporate sync, backup or security tools that register Windows Explorer (shell)
+extensions and get loaded into any process that talks to the shell. LMA doesn’t
+use log4net at all. The signals that matter are <code dir="auto">All self-tests PASSED</code> and
+<strong>INSTALL SUCCEEDED</strong>.</li>
+<li><strong><code dir="auto">dotnet</code> is not recognized / build errors.</strong> Install the
+<a href="https://dotnet.microsoft.com/download/dotnet/8.0">.NET 8 SDK</a>, open a fresh
+PowerShell window, and re-run <code dir="auto">./build-windows.ps1 -SelfContained -Install</code>.</li>
+<li><strong>No remote-participant audio.</strong> Make sure meeting audio is playing through
+your default playback device (the app captures the default render endpoint).
+Switching the default device mid-meeting is handled automatically.</li>
+<li><strong>Updating / uninstalling.</strong> Re-run <code dir="auto">./build-windows.ps1 -SelfContained -Install</code> from the new package folder to update in place (it closes the running
+copy for you). To remove it, use <strong>Settings ▸ Apps ▸ Installed apps ▸ LMA
+Capture Client (<em>Stack</em>) ▸ Uninstall</strong>, or run <code dir="auto">./build-windows.ps1 -Uninstall</code>. See <a href="#updating-to-a-new-version">Updating to a new version</a> and
+<a href="#uninstalling">Uninstalling</a>.</li>
+<li><strong>“Access to the path … is denied” when re-installing.</strong> A file in the install
+folder is still in use. Quit the app (right-click the tray icon ▸ <strong>Quit</strong>) and
+re-run. For a machine-wide (<code dir="auto">-ProgramFiles</code>) install, re-run from an elevated
+(admin) PowerShell.</li>
+</ul>
+<div class="sl-heading-wrapper level-h3"><h3 id="both-platforms">Both platforms</h3><a class="sl-anchor-link" href="#both-platforms"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Both platforms”</span></a></div>
+<ul>
+<li><strong>Sign-in fails.</strong> Use the same email and password you use for the LMA web
+app. If your organization uses SSO, this app’s username/password sign-in may
+not apply — use the <a href="../browser-extension/">Chrome Extension</a> instead.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="see-also">See also</h2><a class="sl-anchor-link" href="#see-also"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “See also”</span></a></div>
+<ul>
+<li><a href="../meeting-sources/">Meeting Sources overview</a> — compare all capture options</li>
+<li><a href="../browser-extension/">Chrome Extension</a></li>
+<li><a href="../virtual-participant/">Virtual Participant</a></li>
+</ul></div><footer class="sl-flex astro-xhxjzfa7"><div class="meta sl-flex astro-xhxjzfa7"></div><div class="pagination-links print:hidden astro-jgq3vlii" dir="ltr"><a href="/amazon-transcribe-live-meeting-assistant/browser-extension/" rel="prev" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-jgq3vlii">Previous<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Browser Extension</span></span></a><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant/" rel="next" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-jgq3vlii">Next<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Virtual Participant</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>
