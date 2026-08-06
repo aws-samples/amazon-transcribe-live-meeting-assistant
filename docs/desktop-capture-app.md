@@ -102,42 +102,6 @@ CloudFormation parameter, so organizations can substitute their own legal
 wording; the app picks it up from the `lma-config.json` baked into the
 download.
 
-## Upgrading from an earlier build
-
-The app was previously called **LMA Audio Client** / **LMA Audio Capture**. The
-rename also changed the identifiers macOS and Windows use to track the app
-(bundle id, registry key, start-at-login entry, install path), so a new install
-does **not** replace an old one — you would end up with both.
-
-**Uninstall the old version first**, using the installer from the package you
-originally downloaded:
-
-```bash
-# macOS — from the OLD (previously downloaded) package folder
-bash install-macos.sh --uninstall
-```
-
-```powershell
-# Windows — from the OLD (previously downloaded) package folder
-./build-windows.ps1 -Uninstall
-```
-
-If you no longer have the old package, remove it manually:
-
-- **macOS:** delete `/Applications/LMAAudioClient.app`, remove it from the Dock
-  and from **System Settings ▸ General ▸ Login Items**, then run
-  `tccutil reset ScreenCapture com.amazon.lma.audioclient` and
-  `tccutil reset Microphone com.amazon.lma.audioclient`.
-- **Windows:** uninstall **LMA Audio Capture** from **Settings ▸ Apps ▸ Installed
-  apps**, then delete the `HKCU\Software\AmazonLMA\AudioCapture` key and the
-  `LMAAudioCapture` value under
-  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`.
-
-Your saved settings (speaker labels, microphone choice) and the recording-consent
-record do not carry over — the new app will ask you to acknowledge the recording
-disclaimer once, and macOS will ask for Microphone and Screen Recording
-permission again, because to the OS it is a different app.
-
 ## Download and install (macOS)
 
 1. In the LMA web app, open **Meeting Assistant ▸ Sources ▸ Desktop Capture App
@@ -193,6 +157,10 @@ permission again, because to the OS it is a different app.
 > **Tip: use headphones.** Otherwise your speakers' meeting audio can bleed into
 > your microphone and appear faintly on both transcript channels.
 
+> **Later:** to move to a newer LMA release see
+> [Updating to a new version](#updating-to-a-new-version); to remove the app see
+> [Uninstalling](#uninstalling).
+
 ### "Apple could not verify… is free of malware" (Gatekeeper)
 
 macOS flags files downloaded from a browser, and on recent versions it **blocks
@@ -231,7 +199,7 @@ On Windows, loopback (system) audio capture is built into the OS and needs
    ./build-windows.ps1 -SelfContained -Install
    ```
    It builds a standalone app, runs a built-in self-test, installs it to
-   `%LOCALAPPDATA%\Programs\LMA Audio Capture` (no admin needed), and adds a
+   `%LOCALAPPDATA%\Programs\LMA Capture Client (<Stack>)` (no admin needed), and adds a
    **Start Menu** shortcut — so you don't have to dig into the build output. It
    ends with **INSTALL SUCCEEDED**; that banner is the thing to look for.
    - Omit `-Install` to just build (the exe lands in
@@ -240,7 +208,7 @@ On Windows, loopback (system) audio capture is built into the OS and needs
    - Add `-ProgramFiles` to install machine-wide under `%ProgramFiles%` instead
      (prompts for admin to do the copy).
 5. **Launch it** from the **Start Menu** (press the **Windows key**, type **LMA
-   Audio Capture**, Enter). **No window opens** — the app lives in the **system
+   Capture Client**, Enter). **No window opens** — the app lives in the **system
    tray**, at the bottom-right next to the clock:
 
    ![LMA tray icon: gray when idle, red while recording](../images/readme-audio-capture-windows-tray-icons.png)
@@ -260,6 +228,10 @@ On Windows, loopback (system) audio capture is built into the OS and needs
 
 > **Tip: use headphones.** Otherwise your speakers' meeting audio can bleed into
 > your microphone and appear faintly on both transcript channels.
+
+> **Later:** to move to a newer LMA release see
+> [Updating to a new version](#updating-to-a-new-version); to remove the app see
+> [Uninstalling](#uninstalling).
 
 ### "Windows protected your PC" (SmartScreen)
 
@@ -367,7 +339,7 @@ Tray icon:
   Windows still hides it, drag it onto the taskbar once.
 - **Right-click** the icon for **Quit** (kept out of the panel so it isn't
   confused with *Stop*).
-- Want it one click away even when idle? Right-click **LMA Audio Capture** in the
+- Want it one click away even when idle? Right-click **LMA Capture Client** in the
   Start Menu ▸ **More** ▸ **Pin to taskbar**. (Windows 10+ removed the API that
   would let the installer do this for you.)
 - **Only one copy runs at a time.** Opening the app again — from that pinned
@@ -436,7 +408,7 @@ Panel options:
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it in
 the tray and click **Start** when a meeting begins. **To relaunch after
-quitting**, press the **Windows key**, type **LMA Audio Capture**, and press
+quitting**, press the **Windows key**, type **LMA Capture Client**, and press
 Enter. If it's already running, that just brings up its controls panel — you
 can't accidentally end up with two.
 
@@ -445,6 +417,108 @@ can't accidentally end up with two.
 > validates the login crypto offline, and `--capture-test <seconds> <out.wav>`
 > records the exact streamed stereo PCM with no server — useful for confirming
 > **ch0/Left = system, ch1/Right = mic** by measuring per-channel RMS.
+
+## Updating to a new version
+
+The app **does not update itself**. When your LMA deployment is upgraded to a
+new release, download the new package and re-run the same install command — it
+replaces the installed copy in place. There is **no need to uninstall first**.
+
+**1. Check which version you have.** The controls panel footer and the
+**Settings (⚙)** window show a line like
+`LMA Capture Client v0.3.6 · stack LMA-Bob`. Compare it with the version shown
+on the download button in the web app (**Meeting Assistant ▸ Sources ▸ Desktop
+Capture App (Native)** — e.g. *Download for macOS (0.3.7)*). If they match,
+you're current.
+
+**2. Download the new package** from that same page. It is re-generated for your
+deployment on every LMA upgrade, so it always carries the current
+`lma-config.json` (endpoint, Cognito ids, recording disclaimer).
+
+**3. Unzip it into a new folder** — don't extract over the old one — and re-run
+the installer from the **new** folder:
+
+```bash
+# macOS — quit the app first (right-click the "LMA" menu-bar item ▸ Quit)
+bash install-macos.sh
+```
+
+```powershell
+# Windows — closes the running copy for you, then replaces it
+./build-windows.ps1 -SelfContained -Install
+```
+
+On Windows, pass the **same flags you used originally** — add `-ProgramFiles` if
+you installed machine-wide (re-run from an elevated PowerShell), and
+`-DesktopShortcut` if you want the desktop icon kept.
+
+**What is preserved across an update** (as long as it's the *same* LMA stack):
+
+- Your **saved settings** — remembered email, speaker labels, microphone choice,
+  screen-video preference, recent meeting names.
+- Your **recording-consent record** — you are not re-prompted, unless your
+  administrator changed the disclaimer wording, in which case you agree to the
+  new text once.
+- **macOS permissions** — Microphone and Screen Recording stay granted. The
+  installer signs with a persistent local identity, so rebuilds don't invalidate
+  the grants. (If macOS does re-ask, see
+  [Troubleshooting ▸ macOS](#macos).)
+- **Windows** needs no permission for system audio, and the microphone grant
+  persists.
+
+That's because everything machine-scoped (bundle id, install path, registry key,
+login item) is derived from the **stack name**, which doesn't change between
+releases. A package downloaded from a **different** LMA stack installs
+**alongside** the existing one rather than replacing it — see
+[Multiple LMA deployments on one machine](#multiple-lma-deployments-on-one-machine).
+
+You can delete the old package folder once the new install succeeds. Keeping it
+is harmless — its `--uninstall` / `-Uninstall` still works for the same stack.
+
+## Uninstalling
+
+Both platforms have a single command that removes the app **and everything it
+put on your machine**. Run it from any unzipped package folder for that stack
+(newest is fine):
+
+```bash
+# macOS
+bash install-macos.sh --uninstall
+```
+
+```powershell
+# Windows
+./build-windows.ps1 -Uninstall
+```
+
+On **Windows** you can equally uninstall from **Settings ▸ Apps ▸ Installed
+apps** — the entry is **LMA Capture Client (*Stack*)** — which does the same
+thing and doesn't need the package folder at all.
+
+**macOS `--uninstall` removes:** the running app (quit first if open), the
+`LMACaptureClient-<slug>.app` bundle from `/Applications` (and `~/Applications`),
+the Start-at-login item, the Dock pin, saved settings, and the Screen Recording +
+Microphone privacy grants. It **leaves** the one-time local signing certificate
+in your login keychain (harmless, and reused if you reinstall) and leaves the
+package folder itself — delete that yourself if you're done.
+
+> To remove the certificate too: **Keychain Access ▸ login ▸ My Certificates**,
+> delete **LMA Capture Client Local Signing**.
+
+**Windows `-Uninstall` removes:** the running app, the install folder
+(`%LOCALAPPDATA%\Programs\LMA Capture Client (<Stack>)` and the `%ProgramFiles%`
+copy if present), the Start Menu and Desktop shortcuts, the per-user settings key
+(`HKCU\Software\AmazonLMA\CaptureClient\<slug>`), the start-at-login entry, and
+the **Apps & features** registration. If you installed machine-wide with
+`-ProgramFiles`, run it from an **elevated (admin)** PowerShell — otherwise it
+warns that it couldn't remove the `%ProgramFiles%` copy.
+
+Uninstalling only affects this machine. Meetings, transcripts, and recordings
+already in LMA are untouched.
+
+If you have clients for **several stacks** installed, each has its own
+app/entry and its own uninstall — run the command from that stack's package
+folder (or pick that stack's entry in **Apps & features**) to remove just it.
 
 ## Multiple LMA deployments on one machine
 
@@ -518,14 +592,10 @@ voice assistant, or hands-off unattended recording.
 - **Build errors / `xcode-select: command not found`.** Install Apple's
   command-line tools (`xcode-select --install`), complete the popup, and re-run
   `bash install-macos.sh`.
-- **Uninstall.** From the unzipped folder, run `bash install-macos.sh
-  --uninstall`. It quits the app if running, deletes `LMACaptureClient.app` from
-  `/Applications`, removes the Start-at-login item, unpins it from the Dock,
-  clears the app's saved settings (remembered email, speaker labels, mic
-  choice), and resets its Screen Recording + Microphone permissions. The
-  one-time local signing certificate is left in your login keychain (harmless;
-  reused if you reinstall). To remove that too: **Keychain Access ▸ login ▸ My
-  Certificates**, delete "LMA Capture Client Local Signing".
+- **Updating / uninstalling.** Re-run `bash install-macos.sh` from the new
+  package folder to update in place; run `bash install-macos.sh --uninstall` to
+  remove it completely. See [Updating to a new version](#updating-to-a-new-version)
+  and [Uninstalling](#uninstalling).
 
 ### Windows
 
@@ -547,13 +617,16 @@ voice assistant, or hands-off unattended recording.
 - **No remote-participant audio.** Make sure meeting audio is playing through
   your default playback device (the app captures the default render endpoint).
   Switching the default device mid-meeting is handled automatically.
-- **Uninstall.** The app registers in **Settings ▸ Apps ▸ Installed apps** as
-  "LMA Audio Capture" — find it there and choose **Uninstall**. Or, from the
-  unzipped folder, run `./build-windows.ps1 -Uninstall`. Either way it removes
-  the installed app and its Start Menu / Desktop shortcuts and clears the app's
-  per-user settings (remembered email, start-at-login). If you installed
-  machine-wide with `-ProgramFiles`, run the uninstall from an elevated (admin)
-  PowerShell.
+- **Updating / uninstalling.** Re-run `./build-windows.ps1 -SelfContained
+  -Install` from the new package folder to update in place (it closes the running
+  copy for you). To remove it, use **Settings ▸ Apps ▸ Installed apps ▸ LMA
+  Capture Client (*Stack*) ▸ Uninstall**, or run `./build-windows.ps1
+  -Uninstall`. See [Updating to a new version](#updating-to-a-new-version) and
+  [Uninstalling](#uninstalling).
+- **"Access to the path … is denied" when re-installing.** A file in the install
+  folder is still in use. Quit the app (right-click the tray icon ▸ **Quit**) and
+  re-run. For a machine-wide (`-ProgramFiles`) install, re-run from an elevated
+  (admin) PowerShell.
 
 ### Both platforms
 
