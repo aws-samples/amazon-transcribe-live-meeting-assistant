@@ -21,7 +21,8 @@ options cannot. It adds **no bot** or extra attendee to the meeting.
 
 
 
-https://github.com/user-attachments/assets/4663740b-a0b3-45a1-b1f3-dc5461f12d18
+
+https://github.com/user-attachments/assets/9b323496-4eb9-4f22-aa45-0f2f05afaa2e
 
 
 
