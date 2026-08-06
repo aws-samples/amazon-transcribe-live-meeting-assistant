@@ -13,11 +13,12 @@ import { WriteStream } from 'fs';
 
 export type Uuid = string;             // UUID as defined by RFC#4122
 
-export type EventType = 
+export type EventType =
     | 'START' // required
-    | 'ADD_TRANSCRIPT_SEGMENT' // required 
+    | 'ADD_TRANSCRIPT_SEGMENT' // required
     | 'UPDATE_AGENT' // optional
     | 'ADD_S3_RECORDING_URL'  // optional
+    | 'ADD_S3_VIDEO_RECORDING_URL' // optional
     | 'ADD_CALL_CATEGORY' // optional
     | 'END'; // required
 
@@ -47,6 +48,15 @@ export type CallEndEvent = CallEventBase<'END'> & {
 
 export type CallRecordingEvent = CallEventBase<'ADD_S3_RECORDING_URL'> & {
     RecordingUrl: string,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
+};
+
+// Same shape the Virtual Participant emits, so the existing
+// call_event_processor -> updateVideoRecordingUrl pipeline consumes it as-is.
+export type CallVideoRecordingEvent = CallEventBase<'ADD_S3_VIDEO_RECORDING_URL'> & {
+    VideoRecordingUrl: string,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,
@@ -91,6 +101,14 @@ export type CallMetaData = {
     samplingRate: number,
     callEvent: string,
     activeSpeaker: string,
+    // START_VIDEO only: ms between audio-stream start and video-stream start,
+    // applied as an offset when muxing so video aligns with audio/transcript.
+    videoTimeOffsetMs?: number,
+    // START_VIDEO only: true when this is a socket RECONNECT for a video
+    // stream whose client-side encoder session never restarted — the bytes
+    // continue the same fMP4 stream, so the server appends to the same file
+    // instead of rotating to a new segment.
+    videoResume?: boolean,
     channels: {
         [channelId: string]: ChannelSpeakerData;
     };
@@ -106,5 +124,13 @@ export type SocketCallData = {
     recordingFileSize?: number
     startStreamTime: Date,
     speakerEvents: [],
-    ended: boolean
-}
+    ended: boolean,
+    /**
+     * Cognito `sub` of the user whose verified token opened this call's audio
+     * socket. Used to authorize later actions on the same callId (notably
+     * START_VIDEO on a SECOND socket) so one user cannot attach media to, or
+     * pull audio out of, another user's call. Undefined only for connections
+     * that predate the check (defensive; the handler treats that as a denial).
+     */
+    ownerSub?: string
+};

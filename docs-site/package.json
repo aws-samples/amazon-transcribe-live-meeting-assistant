@@ -4,16 +4,21 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
+    "setup": "bash ./setup.sh",
+    "predev": "npm run setup",
     "dev": "astro dev",
+    "prestart": "npm run setup",
     "start": "astro dev",
+    "prebuild": "npm run setup",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.38.3",
-    "astro": "^6.1.9",
-    "sharp": "^0.33.3",
-    "zod": "^3.25.76"
+    "@astrojs/markdown-remark": "^7.2.2",
+    "@astrojs/starlight": "^0.41.6",
+    "astro": "^7.1.6",
+    "sharp": "^0.35.3",
+    "zod": "^4.4.3"
   }
 }

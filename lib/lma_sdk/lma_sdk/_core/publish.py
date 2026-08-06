@@ -57,6 +57,18 @@ STACK_DEFINITIONS: list[StackDefinition] = [
         supports_change_detection=False,  # Always publish (fast)
     ),
     StackDefinition(
+        name="lma-desktop-capture-app-stack",
+        package_type=StackPackageType.ZIP_APP_SRC_WITH_TOKEN_REPLACE,
+        template_file="template.yaml",
+        # The downloadable app sources live under the stack's own source/
+        # subdir (source/macos/ and source/windows/); zip that tree (not the
+        # stack root, so the CloudFormation template itself is excluded from
+        # the download). CodeBuild packages each platform subdir into its own
+        # per-platform download zip.
+        source_dir="source",
+        supports_change_detection=False,  # Always publish (fast, small)
+    ),
+    StackDefinition(
         name="lma-vpc-stack",
         package_type=StackPackageType.CFN_PACKAGE,
         template_file="template.yaml",
@@ -481,6 +493,7 @@ class Publisher:
         # Track S3 locations for main template substitution
         vp_src_s3_location = ""
         browser_ext_src_s3_location = ""
+        desktop_capture_app_src_s3_location = ""
 
         # Publish each stack
         stack_results: list[StackPublishResult] = []
@@ -539,6 +552,8 @@ class Publisher:
                     vp_src_s3_location = result["vp_src_s3_location"]
                 if stack_def.name == "lma-browser-extension-stack" and result.get("browser_ext_src_s3_location"):
                     browser_ext_src_s3_location = result["browser_ext_src_s3_location"]
+                if stack_def.name == "lma-desktop-capture-app-stack" and result.get("desktop_capture_app_src_s3_location"):
+                    desktop_capture_app_src_s3_location = result["desktop_capture_app_src_s3_location"]
 
                 duration = time.time() - stack_start
                 stack_results.append(StackPublishResult(
@@ -581,6 +596,7 @@ class Publisher:
             version=version,
             vp_src_s3_location=vp_src_s3_location,
             browser_ext_src_s3_location=browser_ext_src_s3_location,
+            desktop_capture_app_src_s3_location=desktop_capture_app_src_s3_location,
             tmpdir=tmpdir,
         )
 
@@ -663,6 +679,7 @@ class Publisher:
         handlers = {
             StackPackageType.ZIP_AND_UPLOAD: self._publish_zip_and_upload,
             StackPackageType.ZIP_WITH_TOKEN_REPLACE: self._publish_zip_with_token_replace,
+            StackPackageType.ZIP_APP_SRC_WITH_TOKEN_REPLACE: self._publish_zip_app_src_with_token_replace,
             StackPackageType.CFN_PACKAGE: self._publish_cfn_package,
             StackPackageType.DELEGATE_SCRIPT: self._publish_delegate_script,
             StackPackageType.BUILD_SCRIPT: self._publish_build_script,
@@ -773,6 +790,81 @@ class Publisher:
             "browser_ext_src_s3_location": src_s3_location,
             "s3_template_url": https_url,
             "message": f"Zipped with token replacement and uploaded ({zip_filename})",
+        }
+
+    def _publish_zip_app_src_with_token_replace(
+        self, *, stack_def, project_dir, bucket, prefix_and_version, region, version, tmpdir, **_kw
+    ) -> dict:
+        """Zip an app source subtree (source_dir, relative to the stack dir) with
+        <VERSION_TOKEN> replacement, and upload both the zip and the stack's
+        template. Used by lma-desktop-capture-app-stack, whose downloadable app
+        lives under source/macos/ (kept separate from the stack's template.yaml
+        so the template isn't shipped in the download). CodeBuild later bakes the
+        deployment config into the zip.
+        """
+        stack_dir = project_dir / stack_def.name
+        src_dir = (stack_dir / stack_def.source_dir).resolve()
+        if not src_dir.is_dir():
+            raise LMAPublishError(f"App source dir not found: {src_dir}")
+
+        content_hash = _calculate_dir_hash(src_dir)
+        zip_filename = f"src-{content_hash}.zip"
+
+        # Copy source to a temp dir for token replacement (skip build artifacts
+        # and any local/dev secrets so they never ship in the public download).
+        temp_src_dir = tmpdir / f"{stack_def.name}-src"
+        skip_dirs = {".build", "build", ".git", "__pycache__", "node_modules"}
+        skip_files = {".env.local", "lma-config.json", ".DS_Store"}
+        shutil.copytree(
+            src_dir, temp_src_dir,
+            ignore=shutil.ignore_patterns(*skip_dirs, *skip_files),
+        )
+
+        # Replace <VERSION_TOKEN> anywhere it appears in text files (e.g. the
+        # install scripts / README reference the versioned zip name).
+        for root, dirs, files in os.walk(temp_src_dir):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for fname in files:
+                fpath = Path(root) / fname
+                try:
+                    content = fpath.read_text()
+                except (UnicodeDecodeError, OSError):
+                    continue  # binary/unreadable — leave as-is
+                if "<VERSION_TOKEN>" in content:
+                    fpath.write_text(content.replace("<VERSION_TOKEN>", version))
+
+        # Zip the token-replaced source tree.
+        zip_path = tmpdir / zip_filename
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for root, dirs, files in os.walk(temp_src_dir):
+                dirs[:] = [d for d in dirs if d not in skip_dirs]
+                for fname in files:
+                    fpath = Path(root) / fname
+                    arcname = fpath.relative_to(temp_src_dir)
+                    zf.write(fpath, arcname)
+
+        # Upload the source zip.
+        s3_zip_key = f"{prefix_and_version}/{stack_def.name}/{zip_filename}"
+        src_s3_location = f"{bucket}/{s3_zip_key}"
+        logger.info("Uploading %s to s3://%s", zip_filename, src_s3_location)
+        self._s3.upload_file(str(zip_path), bucket, s3_zip_key)
+
+        # Upload the stack template (with VERSION token replaced).
+        template_src = stack_dir / stack_def.template_file
+        template_out = tmpdir / f"{stack_def.name}-template.yaml"
+        template_out.write_text(template_src.read_text().replace("<VERSION_TOKEN>", version))
+        s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
+        self._s3.upload_file(str(template_out), bucket, s3_template_key)
+
+        https_url = f"https://s3.{region}.amazonaws.com/{bucket}/{s3_template_key}"
+        self._validate_template(https_url)
+
+        shutil.rmtree(temp_src_dir, ignore_errors=True)
+
+        return {
+            "desktop_capture_app_src_s3_location": src_s3_location,
+            "s3_template_url": https_url,
+            "message": f"Zipped app source with token replacement and uploaded ({zip_filename})",
         }
 
     def _publish_cfn_package(self, *, stack_def, project_dir, bucket, prefix_and_version, region, tmpdir, **_kw) -> dict:
@@ -897,6 +989,7 @@ class Publisher:
         version: str,
         vp_src_s3_location: str,
         browser_ext_src_s3_location: str = "",
+        desktop_capture_app_src_s3_location: str = "",
         tmpdir: Path = None,
     ) -> dict[str, Any]:
         """Replace tokens in lma-main.yaml, upload, and validate."""
@@ -913,6 +1006,7 @@ class Publisher:
             "<VERSION_TOKEN>": version,
             "<REGION_TOKEN>": region,
             "<BROWSER_EXTENSION_SRC_S3_LOCATION_TOKEN>": browser_ext_src_s3_location,
+            "<DESKTOP_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>": desktop_capture_app_src_s3_location,
             "<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>": vp_src_s3_location,
             "<BUILD_DATE_TIME_TOKEN>": build_date_time,
         }

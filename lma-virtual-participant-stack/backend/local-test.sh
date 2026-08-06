@@ -67,6 +67,11 @@ if [ $# -lt 3 ]; then
     echo "  export ZOOM_MEETING_SDK_CLIENT_ID=...      # pragma: allowlist secret"
     echo "  export ZOOM_MEETING_SDK_CLIENT_SECRET=...  # pragma: allowlist secret"
     echo "  $0 --dev LMA-dev-stack-2 ZOOM 98765432101 mypass"
+    echo ""
+    echo "Teams ACS SDK (optional): export before running to join Teams via the"
+    echo "Azure Communication Services SDK instead of the Teams web client:"
+    echo "  export ACS_CONNECTION_STRING='endpoint=...;accesskey=...'  # pragma: allowlist secret"
+    echo "  $0 --dev LMA-dev-stack-2 TEAMS 1234567890123 mypass"
     exit 1
 fi
 
@@ -378,6 +383,15 @@ SIMLI_TRANSPORT_MODE=${SIMLI_TRANSPORT_MODE:-livekit}
 ZOOM_MEETING_SDK_CLIENT_ID=${ZOOM_MEETING_SDK_CLIENT_ID:-}
 ZOOM_MEETING_SDK_CLIENT_SECRET=${ZOOM_MEETING_SDK_CLIENT_SECRET:-}
 MEETING_ZOOM_METHOD=${MEETING_ZOOM_METHOD:-auto}
+
+# Teams ACS SDK Configuration
+# When the connection string is set, Teams meetings join via the Azure
+# Communication Services calling SDK instead of the Teams web client:
+#   export ACS_CONNECTION_STRING="endpoint=https://...;accesskey=..."  # pragma: allowlist secret
+# MEETING_TEAMS_METHOD can force "dom" or "sdk"; "auto" (default) picks sdk
+# when the connection string is present.
+ACS_CONNECTION_STRING=${ACS_CONNECTION_STRING:-}
+MEETING_TEAMS_METHOD=${MEETING_TEAMS_METHOD:-auto}
 
 # Display Configuration (for local testing)
 DISPLAY=:99

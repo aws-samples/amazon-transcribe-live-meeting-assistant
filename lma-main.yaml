@@ -504,6 +504,23 @@ Parameters:
       (Optional) Zoom Meeting SDK app Client Secret. Paired with
       ZoomMeetingSdkClientId. Used to sign the SDK join signature.
 
+  AcsConnectionString:
+    Type: String
+    NoEcho: true
+    Default: ""
+    AllowedPattern: "^(|endpoint=https://.+;accesskey=.+)$"
+    ConstraintDescription: >-
+      Must be blank, or a full Azure Communication Services connection string of
+      the form endpoint=https://<resource>.communication.azure.com/;accesskey=<key>
+      (copy the "Connection string" field from Settings > Keys in the Azure portal —
+      not the endpoint or key on their own).
+    Description: >-
+      (Optional) Azure Communication Services connection string
+      (endpoint=https://...;accesskey=...). When provided, the Virtual
+      Participant joins Microsoft Teams meetings via the ACS calling SDK
+      (Teams interoperability) instead of automating the Teams web client.
+      Leave blank to use the default web-client join.
+
   EnableVideoRecording:
     Type: String
     Default: "true"
@@ -511,10 +528,14 @@ Parameters:
       - "true"
       - "false"
     Description: >-
-      Default for capturing meeting video (screen recording) by the Virtual
-      Participant, in addition to audio. This is the deployment-wide default;
-      users can override it per meeting with the "Record meeting video" toggle in
-      the LMA UI. Video recordings consume additional CPU and S3 storage.
+      Enables meeting video (screen recording) in addition to audio, for BOTH
+      video sources: the Virtual Participant and the Desktop Capture App. For the
+      Virtual Participant this is the deployment-wide default and users can
+      override it per meeting with the "Record meeting video" toggle in the LMA
+      UI; for the Desktop Capture App it is a hard on/off (users opt in per
+      machine in the app's Settings, and the server discards video when this is
+      false). Video recordings consume additional CPU, ephemeral storage, and S3
+      storage.
 
   AudioRecordingExpirationInDays:
     Type: Number
@@ -755,6 +776,7 @@ Metadata:
           - VoiceAssistantActivationDuration
           - ZoomMeetingSdkClientId
           - ZoomMeetingSdkClientSecret
+          - AcsConnectionString
       - Label:
           default: Meeting Assist Bedrock Guardrails
         Parameters:
@@ -863,6 +885,8 @@ Metadata:
         default: Zoom Meeting SDK Client ID (Optional)
       ZoomMeetingSdkClientSecret:
         default: Zoom Meeting SDK Client Secret (Optional)
+      AcsConnectionString:
+        default: Azure Communication Services Connection String for Teams SDK Join (Optional)
       VoiceAssistantProvider:
         default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
       VoiceAssistantActivationMode:
@@ -2530,6 +2554,8 @@ Resources:
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         EnableAudioRecording: !Ref EnableAudioRecording
+        EnableVideoRecording: !Ref EnableVideoRecording
+        VideoRecordingsPrefix: "lma-video-recordings/"
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
@@ -2573,6 +2599,7 @@ Resources:
         EnableAudioRecording: !Ref EnableAudioRecording
         ZoomMeetingSdkClientId: !Ref ZoomMeetingSdkClientId
         ZoomMeetingSdkClientSecret: !Ref ZoomMeetingSdkClientSecret
+        AcsConnectionString: !Ref AcsConnectionString
         EnableVideoRecording: !Ref EnableVideoRecording
         ElevenLabsApiKey: !Ref ElevenLabsApiKey
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
@@ -2661,6 +2688,25 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
+  DESKTOPCAPTUREAPPSTACK:
+    Type: AWS::CloudFormation::Stack
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-desktop-capture-app-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        WebSocketEndpoint: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.WebSocketEndpoint
+        CognitoUserPoolId: !GetAtt COGNITOSTACK.Outputs.UserPoolId
+        CognitoClientId: !GetAtt COGNITOSTACK.Outputs.CognitoClientId
+        Region: !Ref AWS::Region
+        CloudfrontEndpoint: !GetAtt AISTACK.Outputs.CloudfrontEndpoint
+        WebAppCloudFrontDistribution: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
+        WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
+        SourceCodeLocation: <DESKTOP_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+
 Outputs:
   QuickSightManifestUrl:
     Description: S3 URL for QuickSight manifest file to import recordings bucket data
@@ -2673,6 +2719,10 @@ Outputs:
   ChromeExtensionDownloadUrl:
     Description: LMA Chrome Browser extension download link
     Value: !GetAtt BROWSEREXTENSIONSTACK.Outputs.ExtensionDownloadLocation
+
+  DesktopCaptureAppDownloadUrl:
+    Description: LMA Desktop Capture App (macOS) download link
+    Value: !GetAtt DESKTOPCAPTUREAPPSTACK.Outputs.DesktopCaptureAppDownloadLocation
 
   LMAWebsocketEndpoint:
     Description: Websocket endpoint for websocket integration

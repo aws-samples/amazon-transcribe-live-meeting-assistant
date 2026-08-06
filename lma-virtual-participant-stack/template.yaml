@@ -161,6 +161,17 @@ Parameters:
       (Optional) Zoom Meeting SDK app Client Secret. Paired with
       ZoomMeetingSdkClientId. Used to sign the SDK join signature.
 
+  AcsConnectionString:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >-
+      (Optional) Azure Communication Services connection string
+      (endpoint=https://...;accesskey=...). When provided, the Virtual
+      Participant joins Microsoft Teams meetings via the ACS calling SDK
+      (Teams interoperability) instead of automating the Teams web client.
+      Leave blank to use the default web-client join.
+
   EnableVideoRecording:
     Type: String
     Default: "true"
@@ -640,6 +651,11 @@ Resources:
             version: 0.2
             phases:
               pre_build:
+                # CONTINUE (not the default ABORT) so a pre_build failure still
+                # reaches post_build's finally, which is what posts the response
+                # to CloudFormation. Aborting here would strand the stack until
+                # the 1-hour custom-resource timeout with no diagnostic.
+                on-failure: CONTINUE
                 commands:
                   - echo Logging in to Amazon ECR...
                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
@@ -651,6 +667,7 @@ Resources:
                   - echo SOCI CLI installed successfully
                   - export PASSWORD=$(aws ecr get-login-password --region ${AWS::Region})
               build:
+                on-failure: CONTINUE
                 commands:
                   - echo Build started on `date`
                   - echo `pwd`
@@ -668,6 +685,14 @@ Resources:
                   - ctr image tag docker.io/library/${ImageRepo}:latest ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
               post_build:
                 commands:
+                  # pre_build/build use on-failure CONTINUE so the finally below
+                  # always reports to CloudFormation; skip the SOCI/deploy work
+                  # when an earlier phase already failed.
+                  - |
+                    if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then
+                      echo "Earlier phase failed — skipping SOCI index and ECS deploy."
+                      exit 1
+                    fi
                   - echo Generating SOCI index for faster startup...
                   - soci create ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
                   - echo Pushing SOCI index to ECR...
@@ -728,6 +753,17 @@ Resources:
                       echo "Deployment initiated successfully!"
                     else
                       echo "No ECS service found in cluster - skipping deployment."
+                    fi
+                finally:
+                  - |
+                    if [ -n "$CFN_RESPONSE_URL" ]; then
+                      if [ "$CODEBUILD_BUILD_SUCCEEDING" = "1" ]; then
+                        RESP_STATUS=SUCCESS; RESP_REASON="Container build and deploy completed"
+                      else
+                        RESP_STATUS=FAILED; RESP_REASON="Container build failed; see CodeBuild logs"
+                      fi
+                      RESP_PAYLOAD=$(printf '{"Status":"%s","Reason":"%s (build %s)","PhysicalResourceId":"vp-container-build","StackId":"%s","RequestId":"%s","LogicalResourceId":"%s","Data":{}}' "$RESP_STATUS" "$RESP_REASON" "$CODEBUILD_BUILD_ID" "$CFN_STACK_ID" "$CFN_REQUEST_ID" "$CFN_LOGICAL_RESOURCE_ID")
+                      curl -s -X PUT -H 'Content-Type:' --data-binary "$RESP_PAYLOAD" "$CFN_RESPONSE_URL"
                     fi
           - { ImageRepo: !Ref ImageRepo, ClusterArn: !GetAtt Cluster.Arn }
       Environment:
@@ -815,33 +851,38 @@ Resources:
       TracingConfig:
         Mode: Active
       Code:
-        ZipFile: !Sub |
+        ZipFile: |
           import boto3
-          from time import sleep
           import cfnresponse
 
+          # The container build exceeds the 15-minute Lambda ceiling, so this
+          # function cannot wait for it. It starts the build with the callback
+          # details injected as env vars; the buildspec's post_build "finally"
+          # posts SUCCESS/FAILED to CloudFormation when the build completes.
           def handler(event, context):
 
             request_type = event['RequestType']
             print(request_type)
 
-            if request_type in ['Create', 'Update']:
-              client = boto3.client("codebuild")
+            try:
+              if request_type in ['Create', 'Update']:
+                client = boto3.client("codebuild")
+                build_id = client.start_build(
+                  projectName=event['ResourceProperties']['PROJECT'],
+                  environmentVariablesOverride=[
+                    {'name': 'CFN_RESPONSE_URL', 'value': event['ResponseURL']},
+                    {'name': 'CFN_STACK_ID', 'value': event['StackId']},
+                    {'name': 'CFN_REQUEST_ID', 'value': event['RequestId']},
+                    {'name': 'CFN_LOGICAL_RESOURCE_ID', 'value': event['LogicalResourceId']},
+                  ],
+                )['build']['id']
+                print(f"started {build_id}; build will post the CFN response")
+                return
 
-              build_id = client.start_build(
-                projectName=event['ResourceProperties']['PROJECT']
-              )['build']['id']
-              status = 'STARTING'
-
-              while status != 'SUCCEEDED':
-                if status in ['FAILED', 'FAULT', 'TIMED_OUT', 'STOPPED']:
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
-                  return
-                sleep(15)
-                status = client.batch_get_builds(ids=[build_id])['builds'][0]['buildStatus']
-                print(status)
-
-            cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, event.get('PhysicalResourceId'))
+            except Exception as e:
+              print(e)
+              cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)[:200]})
 
   BuildCustomResource:
     Type: Custom::BuildCode
@@ -1529,6 +1570,110 @@ Resources:
         - Key: Name
           Value: !Sub "${AWS::StackName}-VP-Instance"
           PropagateAtLaunch: true
+        # Patch group tag consumed by VPPatchBaseline / VPPatchMaintenanceWindow
+        # below. This is what wires these hosts into SSM Patch Manager so OS
+        # security updates are applied on a schedule (the UserData intentionally
+        # does NOT patch at boot, to avoid startup slowdown and mid-meeting
+        # reboots). Without a Patch Manager configuration referencing this tag,
+        # nothing patches these hosts and they drift out of Mirador SLA.
+        - Key: LMA-VP-PatchGroup
+          Value: !Sub "${AWS::StackName}-VP"
+          PropagateAtLaunch: true
+
+  # ---------------------------------------------------------------------------
+  # SSM Patch Manager — owns OS security patching for the VP EC2 hosts.
+  #
+  # The VP LaunchTemplate pins the AMI to the SSM "recommended" ECS-optimized
+  # AL2 parameter, so a fresh launch is patched-at-launch. But long-lived hosts
+  # still accrue OS CVEs between launches, and the UserData deliberately does
+  # not run `yum update` at boot (it slowed launch and caused kernel-reboot
+  # mid-meeting task kills). These resources apply security patches during a
+  # scheduled maintenance window instead — no container-startup cost, and the
+  # reboot cadence is governed by the window rather than an ad-hoc boot-time
+  # kernel install.
+  # ---------------------------------------------------------------------------
+  VPPatchBaseline:
+    Type: AWS::SSM::PatchBaseline
+    Condition: UseEC2LaunchType
+    Properties:
+      Name: !Sub "${AWS::StackName}-VP-PatchBaseline"
+      Description: "Security patch baseline for LMA Virtual Participant EC2 hosts (Amazon Linux 2)"
+      OperatingSystem: AMAZON_LINUX_2
+      ApprovalRules:
+        PatchRules:
+          - PatchFilterGroup:
+              PatchFilters:
+                - Key: CLASSIFICATION
+                  Values:
+                    - Security
+                    - Bugfix
+                - Key: SEVERITY
+                  Values:
+                    - Critical
+                    - Important
+                    - Medium
+            # Auto-approve after 0 days so security/bugfix updates are applied
+            # at the next maintenance window rather than waiting out a delay.
+            ApproveAfterDays: 0
+            ComplianceLevel: HIGH
+      PatchGroups:
+        - !Sub "${AWS::StackName}-VP"
+
+  VPPatchMaintenanceWindow:
+    Type: AWS::SSM::MaintenanceWindow
+    Condition: UseEC2LaunchType
+    Properties:
+      Name: !Sub "${AWS::StackName}-VP-PatchWindow"
+      Description: "Weekly maintenance window to apply OS security patches to VP EC2 hosts"
+      # Sundays 08:00 UTC — off-peak for meetings. Adjust per your ops calendar.
+      Schedule: "cron(0 8 ? * SUN *)"
+      ScheduleTimezone: "UTC"
+      Duration: 2
+      Cutoff: 1
+      AllowUnassociatedTargets: false
+
+  VPPatchMaintenanceWindowTarget:
+    Type: AWS::SSM::MaintenanceWindowTarget
+    Condition: UseEC2LaunchType
+    Properties:
+      WindowId: !Ref VPPatchMaintenanceWindow
+      Name: !Sub "${AWS::StackName}-VP-PatchTargets"
+      Description: "VP EC2 hosts selected by patch group tag"
+      ResourceType: INSTANCE
+      Targets:
+        - Key: "tag:LMA-VP-PatchGroup"
+          Values:
+            - !Sub "${AWS::StackName}-VP"
+
+  VPPatchMaintenanceWindowTask:
+    Type: AWS::SSM::MaintenanceWindowTask
+    Condition: UseEC2LaunchType
+    Properties:
+      WindowId: !Ref VPPatchMaintenanceWindow
+      Name: !Sub "${AWS::StackName}-VP-RunPatchBaseline"
+      Description: "Run AWS-RunPatchBaseline (Install) on VP EC2 hosts"
+      TaskType: RUN_COMMAND
+      TaskArn: AWS-RunPatchBaseline
+      Priority: 1
+      # 100% so a single-host ASG is still patched; raise MaxErrors tolerance so
+      # one unreachable host doesn't fail the whole window.
+      MaxConcurrency: "100%"
+      MaxErrors: "100%"
+      Targets:
+        - Key: WindowTargetIds
+          Values:
+            - !Ref VPPatchMaintenanceWindowTarget
+      TaskInvocationParameters:
+        MaintenanceWindowRunCommandParameters:
+          Parameters:
+            Operation:
+              - Install
+            # RebootIfNeeded lets kernel/security updates take effect. It runs
+            # only inside the maintenance window, so any task-killing reboot is
+            # confined to the off-peak window rather than happening at boot.
+            RebootOption:
+              - RebootIfNeeded
+          Comment: "LMA VP scheduled security patching"
 
   VPCapacityProvider:
     Type: AWS::ECS::CapacityProvider
@@ -1658,6 +1803,8 @@ Resources:
               Value: !Ref ZoomMeetingSdkClientId
             - Name: ZOOM_MEETING_SDK_CLIENT_SECRET
               Value: !Ref ZoomMeetingSdkClientSecret
+            - Name: ACS_CONNECTION_STRING
+              Value: !Ref AcsConnectionString
             - Name: LMA_USER_SUB
               Value: ""
             - Name: DYNAMODB_TABLE_NAME

@@ -45,7 +45,7 @@ const formatSize = (bytes) => {
  * remain Zoom-only (see ZoomCredentialsManager); this component is only the
  * profile.
  */
-const ChromeProfileManager = ({ platform }) => {
+const ChromeProfileManager = ({ platform = undefined }) => {
   const [profile, setProfile] = useState({ present: false, sizeBytes: null, lastModified: null });
   const [loading, setLoading] = useState(true);
   const [confirmVisible, setConfirmVisible] = useState(false);
@@ -171,10 +171,6 @@ const ChromeProfileManager = ({ platform }) => {
 ChromeProfileManager.propTypes = {
   // Meeting platform to scope the stored profile to (e.g. 'ZOOM', 'WEBEX').
   platform: PropTypes.string,
-};
-
-ChromeProfileManager.defaultProps = {
-  platform: undefined,
 };
 
 export default ChromeProfileManager;

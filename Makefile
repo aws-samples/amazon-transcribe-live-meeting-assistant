@@ -22,6 +22,12 @@ else
   PYTHON := $(CURDIR)/$(VENV_DIR)/bin/python
   PIP := $(CURDIR)/$(VENV_DIR)/bin/pip
 endif
+# setup-python installs cfn-lint into the venv, which is not on PATH in CI.
+ifeq ($(wildcard $(VENV_DIR)/bin/cfn-lint),)
+  CFN_LINT := cfn-lint
+else
+  CFN_LINT := $(CURDIR)/$(VENV_DIR)/bin/cfn-lint
+endif
 
 # Project paths
 AI_STACK_DIR := lma-ai-stack
@@ -75,8 +81,8 @@ help: ## Show this help message
 .DEFAULT_GOAL := all
 all: lint ## Run all linting (default)
 
-# Required Node.js version (major) - must match .nvmrc
-NODE_VERSION := 20
+# Required Node.js version (major) - keep in sync with .gitlab-ci.yml
+NODE_VERSION := 22
 
 ##@ Setup
 setup: setup-node setup-python setup-cli-dev ## Set up dev environment (Node version, Python venv, CLI)
@@ -171,9 +177,9 @@ lint-cfn: ## Validate CloudFormation templates with cfn-lint
 	for template in $(CFN_TEMPLATES); do \
 		if [ -f "$$template" ]; then \
 			echo "  Checking $$template..."; \
-			if ! cfn-lint --non-zero-exit-code error "$$template" > /dev/null 2>&1; then \
+			if ! $(CFN_LINT) --non-zero-exit-code error "$$template" > /dev/null 2>&1; then \
 				echo -e "$(RED)  FAIL: $$template$(NC)"; \
-				cfn-lint --non-zero-exit-code error "$$template"; \
+				$(CFN_LINT) --non-zero-exit-code error "$$template"; \
 				FAILED=1; \
 			fi; \
 		else \
@@ -235,7 +241,7 @@ format: ## Format Python code with ruff
 
 lint-cicd: ## CI/CD lint — checks only, no modifications
 	@echo "Running code quality checks (CI/CD mode — no auto-fix)..."
-	@if ! cfn-lint --non-zero-exit-code error $(AI_STACK_DIR)/deployment/lma-ai-stack.yaml; then \
+	@if ! $(CFN_LINT) --non-zero-exit-code error $(AI_STACK_DIR)/deployment/lma-ai-stack.yaml; then \
 		echo -e "$(RED)ERROR: cfn-lint failed!$(NC)"; \
 		exit 1; \
 	fi
@@ -274,7 +280,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli ## Run all tests
+test: test-ui test-sdk test-cli test-lambdas ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -285,6 +291,27 @@ test-cli: ## Run LMA CLI unit tests
 	@echo "Running LMA CLI tests..."
 	cd lib/lma_cli_pkg && $(PYTHON) -m pytest tests/ -v
 	@echo -e "$(GREEN)✅ LMA CLI tests passed!$(NC)"
+
+# Lambda unit tests live next to each function's source and use local (sibling)
+# imports, so each directory must be run with that dir on sys.path — a single
+# top-level `pytest lambda_functions/` collides on duplicate module names. This
+# target discovers every dir containing test_*.py and runs pytest from within
+# it. No AWS required (the suites mock boto3 / set dummy env).
+test-lambdas: ## Run all Lambda function unit tests (no AWS; each dir isolated)
+	@echo "Running Lambda function unit tests..."
+	@FAILED=0; RAN=0; \
+	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
+		files=$$(cd "$$d" && ls test_*.py 2>/dev/null); \
+		[ -z "$$files" ] && continue; \
+		RAN=$$((RAN+1)); \
+		echo -e "$(CYAN)  pytest $$d$(NC)"; \
+		if ! ( cd "$$d" && AWS_DEFAULT_REGION=$${AWS_DEFAULT_REGION:-us-east-1} \
+			AWS_REGION=$${AWS_REGION:-us-east-1} \
+			$(PYTHON) -m pytest -q $$files ); then FAILED=1; fi; \
+	done; \
+	if [ $$RAN -eq 0 ]; then echo -e "$(YELLOW)  no lambda tests found$(NC)"; fi; \
+	if [ $$FAILED -ne 0 ]; then echo -e "$(RED)❌ Some Lambda tests failed$(NC)"; exit 1; fi; \
+	echo -e "$(GREEN)✅ Lambda function tests passed!$(NC)"
 
 # Checksum file for UI test change detection
 UI_TEST_CHECKSUM_FILE := .ui-test-checksum
@@ -306,6 +333,90 @@ test-ui-force: ## Run React UI tests (ignore checksum, always run)
 	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run
 	@find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}' > $(UI_TEST_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
+
+##@ Docker Build Checks
+# These target names collide with real paths (e.g. the integ-tests/ dir), so
+# declare them PHONY or make treats them as up-to-date files and skips them.
+.PHONY: docker-build-check docker-build-check-transcriber docker-build-check-vp \
+        docker-build-check-all integ-tests integ-tests-live integ-deploy-and-test test-lambdas
+# Build the container images the SAME way the in-stack CodeBuild projects do,
+# locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
+# renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then
+# rolls back. The transcriber image runs 'tsc && eslint' at build time, so this
+# also catches missing lint/build config. Requires a running Docker daemon.
+docker-build-check: docker-build-check-transcriber ## Build container images locally as CodeBuild does (transcriber; use docker-build-check-all for VP too)
+	@echo -e "$(GREEN)✅ Docker build check passed!$(NC)"
+
+docker-build-check-transcriber: ## Build the WebSocket transcriber image (fast; runs tsc + eslint 10)
+	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@echo -e "$(CYAN)Building transcriber image (source/app/)...$(NC)"
+	@cd $(WEBSOCKET_APP_DIR) && docker build --pull -t lma-transcriber-buildcheck:local . \
+		&& docker rmi lma-transcriber-buildcheck:local >/dev/null 2>&1 || true
+	@echo -e "$(GREEN)✅ Transcriber image built.$(NC)"
+
+docker-build-check-vp: ## Build the Virtual Participant image (heavy; downloads CloakBrowser Chromium)
+	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@echo -e "$(CYAN)Building Virtual Participant image (backend/) — this is heavy...$(NC)"
+	@cd $(VP_BACKEND_DIR) && docker build --pull -t lma-vp-buildcheck:local . \
+		&& docker rmi lma-vp-buildcheck:local >/dev/null 2>&1 || true
+	@echo -e "$(GREEN)✅ Virtual Participant image built.$(NC)"
+
+docker-build-check-all: docker-build-check-transcriber docker-build-check-vp ## Build BOTH container images locally
+	@echo -e "$(GREEN)✅ All Docker build checks passed!$(NC)"
+
+##@ Integration Testing
+# End-to-end tests against a LIVE deployed stack (see integ-tests/README.md and
+# the 'integ-tests' Claude skill). Requires the LMA SDK installed in the venv
+# (make setup-cli-dev) and AWS creds (AWS_PROFILE=default). Resolves the target
+# stack from STACK, else $LMA_STACK_NAME, else 'LMA'.
+INTEG_STACK ?= $(or $(STACK),$(LMA_STACK_NAME),LMA)
+
+integ-tests: ## Run integration tests vs a live stack (Usage: make integ-tests STACK=<name>)
+	@echo -e "$(CYAN)Running LMA integration tests against stack '$(INTEG_STACK)'...$(NC)"
+	@if [ ! -x "$(VENV_DIR)/bin/pytest" ] && ! $(PYTHON) -c "import pytest" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: pytest not found. Run 'make setup-cli-dev' first.$(NC)"; exit 1; \
+	fi
+	@if ! $(PYTHON) -c "import lma_sdk" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: lma_sdk not importable. Run 'make setup-cli-dev' first.$(NC)"; exit 1; \
+	fi
+	$(PYTHON) -m pytest integ-tests/ --stack-name "$(INTEG_STACK)" -m "not live"
+	@echo -e "$(GREEN)✅ Integration tests passed against '$(INTEG_STACK)'!$(NC)"
+
+integ-tests-live: ## Integration tests INCLUDING a real VP meeting join (Usage: make integ-tests-live STACK=<name> PLATFORM=ZOOM MEETING_ID=<id> [MEETING_PASSWORD=<pw>])
+ifndef MEETING_ID
+	$(error MEETING_ID is not set. Usage: make integ-tests-live STACK=<name> PLATFORM=ZOOM MEETING_ID=<id> [MEETING_PASSWORD=<pw>])
+endif
+	@echo -e "$(CYAN)Running LMA integration tests (incl. live $(or $(PLATFORM),ZOOM) join) against '$(INTEG_STACK)'...$(NC)"
+	$(PYTHON) -m pytest integ-tests/ --stack-name "$(INTEG_STACK)" \
+		--vp-platform "$(or $(PLATFORM),ZOOM)" \
+		--vp-meeting-id "$(MEETING_ID)" \
+		--vp-meeting-password "$(MEETING_PASSWORD)"
+	@echo -e "$(GREEN)✅ Integration tests (incl. live join) passed against '$(INTEG_STACK)'!$(NC)"
+
+# Deploy (create-if-new / update-if-exists) from local code, then run the
+# integration tests. This is the one-shot entry point the 'run integration tests'
+# Claude skill uses. STACK defaults to 'lma-integtest1' here (not 'LMA') so the
+# skill never touches a prod-looking stack by accident. ADMIN_EMAIL is required
+# only when the stack does not yet exist.
+INTEG_DEPLOY_STACK ?= $(or $(STACK),$(LMA_STACK_NAME),lma-integtest1)
+integ-deploy-and-test: ## Deploy (create/update) a stack from local code, then run integ-tests (Usage: make integ-deploy-and-test [STACK=<name>] [ADMIN_EMAIL=<email>])
+	@if ! $(PYTHON) -c "import lma_sdk" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: lma_sdk not importable. Run 'make setup-cli-dev' first.$(NC)"; exit 1; \
+	fi
+	@STACK_NAME="$(INTEG_DEPLOY_STACK)"; \
+	if aws cloudformation describe-stacks --stack-name "$$STACK_NAME" >/dev/null 2>&1; then \
+		echo -e "$(CYAN)Stack '$$STACK_NAME' exists — updating from local code...$(NC)"; \
+		$(VENV_DIR)/bin/lma deploy --stack-name "$$STACK_NAME" --from-code . --wait; \
+	else \
+		if [ -z "$(ADMIN_EMAIL)" ]; then \
+			echo -e "$(RED)ERROR: stack '$$STACK_NAME' does not exist and ADMIN_EMAIL is not set.$(NC)"; \
+			echo -e "$(YELLOW)Usage: make integ-deploy-and-test STACK=$$STACK_NAME ADMIN_EMAIL=you@example.com$(NC)"; \
+			exit 1; \
+		fi; \
+		echo -e "$(CYAN)Stack '$$STACK_NAME' not found — creating from local code (admin=$(ADMIN_EMAIL))...$(NC)"; \
+		$(VENV_DIR)/bin/lma deploy --stack-name "$$STACK_NAME" --from-code . --admin-email "$(ADMIN_EMAIL)" --wait; \
+	fi
+	@$(MAKE) integ-tests STACK="$(INTEG_DEPLOY_STACK)"
 
 ##@ UI Development
 # Usage: make ui-start STACK_NAME=<stack-name>

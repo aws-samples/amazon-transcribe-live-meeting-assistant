@@ -35,6 +35,7 @@ export interface MeetingDetails {
   invite: MeetingInvite;
 
   zoomMethod: 'dom' | 'sdk';
+  teamsMethod: 'dom' | 'sdk';
 
   // LMA Configuration
   lmaIdentity: string;
@@ -130,11 +131,10 @@ class DetailsManager {
     );
 
     const zoomSdkCredsPresent = !!((process.env.ZOOM_MEETING_SDK_CLIENT_ID || '').trim() && (process.env.ZOOM_MEETING_SDK_CLIENT_SECRET || '').trim());
-    const zoomMethodOverride = (process.env.MEETING_ZOOM_METHOD || 'auto').toLowerCase();
-    const zoomMethod: 'dom' | 'sdk' =
-      zoomMethodOverride === 'sdk' ? 'sdk'
-      : zoomMethodOverride === 'dom' ? 'dom'
-      : zoomSdkCredsPresent ? 'sdk' : 'dom';
+    const zoomMethod = resolveJoinMethod(process.env.MEETING_ZOOM_METHOD, zoomSdkCredsPresent);
+
+    const acsConnectionStringPresent = !!(process.env.ACS_CONNECTION_STRING || '').trim();
+    const teamsMethod = resolveJoinMethod(process.env.MEETING_TEAMS_METHOD, acsConnectionStringPresent);
 
     this._details = {
       // Meeting Configuration
@@ -149,6 +149,7 @@ class DetailsManager {
       },
 
       zoomMethod,
+      teamsMethod,
 
       // LMA Configuration
       lmaIdentity: replacePlaceholders(lmaIdentity),
@@ -231,6 +232,13 @@ class DetailsManager {
 // Export singleton instance
 export const detailsManager = new DetailsManager();
 export const details = detailsManager.details;
+
+export function resolveJoinMethod(override: string | undefined, credentialsPresent: boolean): 'dom' | 'sdk' {
+  const mode = (override || 'auto').toLowerCase();
+  if (mode === 'sdk') return 'sdk';
+  if (mode === 'dom') return 'dom';
+  return credentialsPresent ? 'sdk' : 'dom';
+}
 
 /**
  * Returns true when a chat message is a direct, two-token dismissal of LMA.

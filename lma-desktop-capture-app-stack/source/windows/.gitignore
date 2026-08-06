@@ -1,0 +1,6 @@
+bin/
+obj/
+*.user
+*.wav
+*.out
+lma-tray-crash.log

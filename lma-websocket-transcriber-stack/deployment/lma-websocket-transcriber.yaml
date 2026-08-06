@@ -303,6 +303,48 @@ Parameters:
       meeting will not be recorded.
       If set to true, the meeting will be recorded.
 
+  CpuHealthThresholdPercent:
+    Type: Number
+    Default: 50
+    MinValue: 1
+    MaxValue: 100
+    Description: >-
+      CPU-load percentage above which the container reports unhealthy to the load
+      balancer. Raise this if tasks are being replaced during end-of-call video
+      muxing (ffmpeg can saturate a vCPU for minutes on a long recording), which
+      would drop every call on that task.
+
+  EnableVideoRecording:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable or disable server-side handling of the optional desktop-video
+      stream sent by the native audio capture apps. If set to false, any video
+      streamed by clients is discarded.
+
+  VideoMaxTotalBytes:
+    Type: Number
+    Default: 34359738368
+    Description: >-
+      Maximum total bytes of in-progress video held on the task's ephemeral
+      volume across all concurrent calls (default 32 GiB, against 50 GiB of
+      storage). Beyond this, further video data is dropped and recordings are
+      truncated — audio is never affected.
+
+  VideoRecordingsPrefix:
+    Type: String
+    Default: "lma-video-recordings/"
+    AllowedPattern: ".*/$"
+    ConstraintDescription: must end with a forward slash (/)
+    Description: >-
+      The Amazon S3 prefix where muxed video recordings (MP4) will be saved.
+      MUST end in "/" — the enforcing pattern matters because the parent stack's
+      lifecycle rule keys off this exact prefix, so a mismatched value would
+      leave recordings that never expire.
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -364,6 +406,9 @@ Conditions:
       - !Equals [!Ref TranscribeLanguageCode, "en-GB"]
       - !Equals [!Ref TranscribeLanguageCode, "es-US"]
   ShouldInstallPcaIntegration: !Not [!Equals [!Ref PcaS3BucketName, ""]]
+  # Video handling needs a bigger task (ffmpeg mux) and more ephemeral storage.
+  # Audio-only deployments keep the original, cheaper shape.
+  ShouldEnableVideoRecording: !Equals [!Ref EnableVideoRecording, "true"]
 
 Outputs:
   S3BucketName:
@@ -651,7 +696,14 @@ Resources:
                 - echo Building websocket container image
                 - cd $CODEBUILD_SRC_DIR
                 - echo `pwd`
-                - docker build -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/
+                # --pull + --no-cache force a fresh base-image pull and a re-run
+                # of the Dockerfile's `apt-get upgrade` security-patch layer on
+                # every build. Without these, CodeBuild can reuse a cached base
+                # layer and re-bake stale OS packages (e.g. the vulnerable
+                # liblzma5 5.4.1-1 flagged by Mirador/CVE-2026-34743) even though
+                # the Dockerfile already applies the fix. Patching happens here at
+                # build time, so it adds zero container-startup cost.
+                - docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/
                 - >
                   printf '{"RepositoryUri":"%s","ProjectName":"%s","ArtifactBucket":"%s"}'
                   $REPOSITORY_URI $PROJECT_NAME $ARTIFACT_BUCKET > build.json
@@ -1111,7 +1163,7 @@ Resources:
             - Name: NODE_ENV
               Value: "DEV"
             - Name: CPU_HEALTH_THRESHOLD
-              Value: "50"
+              Value: !Ref CpuHealthThresholdPercent
             - Name: USERPOOL_ID
               Value: !Ref UserPoolId
             - Name: RECORDINGS_BUCKET_NAME
@@ -1159,6 +1211,19 @@ Resources:
               Value: !Ref CustomLanguageModelName
             - Name: SHOULD_RECORD_CALL
               Value: !Ref EnableAudioRecording
+            - Name: ENABLE_VIDEO_RECORDING
+              Value: !Ref EnableVideoRecording
+            - Name: VIDEO_RECORDINGS_KEY_PREFIX
+              Value: !Ref VideoRecordingsPrefix
+            # Ceiling on video bytes held on the shared ephemeral volume across
+            # ALL concurrent calls. Keep it well under EphemeralStorage so the
+            # audio .raw/.wav files and the muxed output always have room.
+            - Name: VIDEO_MAX_TOTAL_BYTES
+              Value: !Ref VideoMaxTotalBytes
+            # Partition-correct S3 hostname suffix (amazonaws.com,
+            # amazonaws.com.cn, ...) for the recording URLs the UI presigns.
+            - Name: AWS_URL_SUFFIX
+              Value: !Ref AWS::URLSuffix
             - Name: CodeLocation
               Value: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
             - Name: WS_LOG_LEVEL
@@ -1179,10 +1244,28 @@ Resources:
           PortMappings:
             - ContainerPort: 8080
               Protocol: tcp
-      Cpu: 256
+          # ECS SIGKILLs this many seconds after SIGTERM. The app uses the window
+          # to finish in-flight end-of-call video muxes (see SHUTDOWN_MUX_GRACE_MS
+          # in index.ts); without the headroom a deploy silently loses recordings.
+          StopTimeout: 120
+      # Sized for the workload actually enabled. The desktop-video lane streams
+      # fMP4 to disk during calls and runs an ffmpeg mux at call end, which needs
+      # ~1 vCPU / 2 GB; audio alone fit comfortably in 256/1024. Keeping the
+      # smaller shape when video is off avoids a 24/7 cost increase (~3x) for
+      # deployments that never use it.
+      Cpu: !If [ShouldEnableVideoRecording, 1024, 256]
       ExecutionRoleArn: !GetAtt TranscriberWebsocketTaskDefExecutionRole.Arn
       Family: !Sub ${AWS::StackName}TranscriberWebsocketTaskDef
-      Memory: 1024
+      Memory: !If [ShouldEnableVideoRecording, 2048, 1024]
+      # Video temp files share this volume with every concurrent call's .raw and
+      # .wav plus the muxed output. The Fargate default is 20 GiB; give the video
+      # configuration more headroom so one busy task can't fill the disk and
+      # break UNRELATED calls' audio recordings. (The app also enforces per-call
+      # and global byte budgets — see VIDEO_MAX_TOTAL_BYTES.)
+      EphemeralStorage: !If
+        - ShouldEnableVideoRecording
+        - SizeInGiB: 50
+        - !Ref AWS::NoValue
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE

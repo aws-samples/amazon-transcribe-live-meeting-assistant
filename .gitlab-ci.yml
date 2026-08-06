@@ -1,7 +1,19 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 #
-# LMA GitLab CI/CD pipeline. See docs/security-scanning.md.
+# LMA GitLab CI/CD pipeline.
+#
+# Two stages:
+#   fast_checks     — no-AWS lint + unit tests + build checks. Runs on every
+#                     push and MR so developers get feedback without a deploy.
+#   security_review — SRT (Sample Security Review Tool). See docs/security-scanning.md.
+#
+# What is intentionally NOT here: the integration tests (integ-tests/) and
+# docker-build-check need a live AWS account / Docker daemon and are run locally
+# via `make integ-tests STACK=<name>` / `make docker-build-check`. See the
+# 'integ-tests' skill and docs/dependency-upgrade-validation-runbook.md. A gated
+# integration stage could be added later (idp1-style, with a resource_group
+# mutex) if a CI deploy target becomes available.
 
 image: public.ecr.aws/docker/library/python:3.13-bookworm
 
@@ -9,13 +21,69 @@ default:
   timeout: 1h
 
 stages:
+  - fast_checks
   - security_review
 
-# SRT (Sample Security Review Tool) — runs on MRs targeting `develop` only.
-# Suppression decisions are read from the committed .srt/issues.json.
+# Avoid duplicate (branch + MR) pipelines: prefer the MR pipeline when an MR is
+# open for the branch.
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+# ── fast_checks: lint + unit tests + build checks (no AWS) ──────────────────
+code_checks:
+  stage: fast_checks
+  interruptible: true
+  # Larger runner: the Vite production build + tsc/eslint are CPU-bound.
+  tags:
+    - size:large
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  # Cache UI deps across runs, keyed on the lockfile.
+  cache:
+    key:
+      files:
+        - lma-ai-stack/source/ui/package-lock.json
+    paths:
+      - lma-ai-stack/source/ui/node_modules/
+  before_script:
+    - apt-get update -y
+    - apt-get install -y make curl git
+    # Node 22 LTS (>=22.22.2 required by jsdom 30; vite 8 / rolldown native
+    # bindings are optional deps that npm silently skips on an older engine).
+    # Keep in sync with NODE_VERSION in the root Makefile.
+    - NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
+    - curl -fsSL https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-$NODE_ARCH.tar.xz | tar -xJ -C /usr/local --strip-components=1
+    - node --version && npm --version
+    # Python venv + lint tools + SDK/CLI with test extras (used by all pytest suites).
+    - make setup-python
+    - make setup-cli-dev
+  script:
+    # CloudFormation lint (no AWS).
+    - make lint-cfn
+    # Python unit suites (all mock boto3 / use dummy env — no AWS).
+    - make test-sdk
+    - make test-cli
+    - make test-lambdas
+    # UI: lint + tests (force = ignore the local checksum cache).
+    - make lint-ui-force
+    - make test-ui-force
+    # TypeScript build checks for the transcriber + VP stacks (tsc/eslint).
+    - make lint-typescript
+    # Fastify 5 websocket smoke test (boots the server, round-trips a frame).
+    - cd lma-websocket-transcriber-stack/source/app && npm ci && npm run smoke
+
+# ── security_review: SRT ────────────────────────────────────────────────────
+# Runs on MRs targeting `develop` only. Suppression decisions are read from the
+# committed .srt/issues.json.
 srt_security_review:
   stage: security_review
   timeout: 30m
+  needs: []
   tags:
     - size:large  # SRT needs ~16 GB RAM for the full scan toolchain
 
