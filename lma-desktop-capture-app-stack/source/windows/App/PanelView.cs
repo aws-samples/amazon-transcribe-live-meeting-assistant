@@ -365,15 +365,17 @@ public sealed class PanelView : Border
     /// <summary>
     /// Repopulate the video source dropdown (displays + titled windows).
     ///
-    /// Each row shows the source name, an icon indicating display vs window, and
-    /// the pixel size — "Display 2" alone doesn't let a user tell two identical
-    /// monitors apart, and recording the wrong screen is a privacy problem.
+    /// Each row shows the source name, an icon indicating display vs window, the
+    /// pixel size, and a live preview thumbnail — "Display 2" alone doesn't let a
+    /// user tell two identical monitors apart, and recording the wrong screen is
+    /// a privacy problem. (Feature parity with the macOS Settings picker.)
     /// The list now supplies its own default entry (the first display, with the
     /// empty id), so this no longer prepends one.
     /// </summary>
     private void RefreshVideoPicker()
     {
         _loadingVideoPicker = true;
+        List<(string Id, Image Slot)> slots = new();
         try
         {
             _videoPicker.Items.Clear();
@@ -382,8 +384,10 @@ public sealed class PanelView : Border
             var sources = VideoCapture.ListSources();
             foreach (var src in sources)
             {
-                var item = new ComboBoxItem { Content = SourceRow(src), Tag = src.Id };
+                var (row, slot) = SourceRow(src);
+                var item = new ComboBoxItem { Content = row, Tag = src.Id };
                 _videoPicker.Items.Add(item);
+                slots.Add((src.Id, slot));
                 if (src.Id.Length == 0) defaultItem ??= item;
                 if (src.Id == selected) _videoPicker.SelectedItem = item;
             }
@@ -392,15 +396,75 @@ public sealed class PanelView : Border
             _videoPicker.SelectedItem ??= defaultItem ?? _videoPicker.Items.Cast<object>().FirstOrDefault();
         }
         finally { _loadingVideoPicker = false; }
+        LoadThumbnails(slots);
     }
 
     /// <summary>
-    /// One picker row: icon + name, with the resolution underneath as the
-    /// distinguishing detail.
+    /// Fill the picker rows' preview slots asynchronously, mirroring the macOS
+    /// loadThumbnails: capped (windows are listed front-to-back, so the first
+    /// ones are the likely picks), sequential (each preview is a real screen
+    /// copy; a dozen at once would stutter a live recording), and generation-
+    /// checked so a refresh abandons a stale pass instead of painting previews
+    /// onto rows that no longer exist. Rows keep their placeholder until (and
+    /// unless) a preview arrives, so the list never jumps.
     /// </summary>
-    private static UIElement SourceRow(VideoCapture.Source src)
+    private int _thumbnailGeneration;
+    private const int MaxThumbnails = 12;
+
+    private void LoadThumbnails(List<(string Id, Image Slot)> slots)
+    {
+        int generation = ++_thumbnailGeneration;
+        var work = slots.Take(MaxThumbnails).ToList();
+        Task.Run(() =>
+        {
+            foreach (var (id, slot) in work)
+            {
+                if (generation != _thumbnailGeneration) return; // list moved on
+                var thumb = VideoCapture.Thumbnail(id);
+                if (thumb is not { } t) continue;
+                // The BitmapSource is created on the UI thread from the raw
+                // pixels — WPF bitmaps have thread affinity unless frozen.
+                Dispatcher.BeginInvoke(() =>
+                {
+                    if (generation != _thumbnailGeneration) return;
+                    slot.Source = System.Windows.Media.Imaging.BitmapSource.Create(
+                        t.Width, t.Height, 96, 96,
+                        // Bgr32, not Bgra32: GDI leaves the alpha byte 0, which
+                        // Bgra32 would render fully transparent.
+                        PixelFormats.Bgr32, null,
+                        t.PixelsBgra, t.Width * 4);
+                });
+            }
+        });
+    }
+
+    /// <summary>
+    /// One picker row: preview thumbnail + icon + name, with the resolution
+    /// underneath as the distinguishing detail. Returns the Image slot the async
+    /// thumbnail loader fills in later (grey placeholder until then, so rows
+    /// have a stable size and a missing preview never blocks choosing).
+    /// </summary>
+    private static (UIElement Row, Image Slot) SourceRow(VideoCapture.Source src)
     {
         var row = new StackPanel { Orientation = Orientation.Horizontal };
+        // 44×28 matches the macOS SourceThumbnail row size.
+        var slot = new Image
+        {
+            Width = 44, Height = 28,
+            Stretch = Stretch.Uniform,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        row.Children.Add(new Border
+        {
+            Child = slot,
+            Width = 44, Height = 28,
+            Background = new SolidColorBrush(Color.FromRgb(0xE4, 0xE4, 0xE4)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0xC8, 0xC8, 0xC8)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(2),
+            Margin = new Thickness(0, 2, 6, 2),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
         row.Children.Add(new TextBlock
         {
             // Windows ships Segoe MDL2 Assets on Win10+; these two glyphs are
@@ -413,7 +477,7 @@ public sealed class PanelView : Border
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 6, 0),
         });
-        var text = new StackPanel();
+        var text = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
         text.Children.Add(new TextBlock
         {
             Text = src.Name,
@@ -430,7 +494,7 @@ public sealed class PanelView : Border
             });
         }
         row.Children.Add(text);
-        return row;
+        return (row, slot);
     }
 
     private string CurrentEmail()

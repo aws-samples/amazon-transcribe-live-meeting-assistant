@@ -427,10 +427,10 @@ Panel options:
     recording falls back to the default. Changes are saved immediately and
     apply to the **next** recording (the gear is disabled while recording).
   - **Also record screen video** — off by default. When on, choose from a list of
-    your **screens and windows**, each labeled with the monitor's own name (e.g.
-    *DELL U2720Q*) and its **resolution**, so two similar monitors are easy to
-    tell apart. The chosen screen/window is recorded with the meeting and saved
-    as a video in LMA (see
+    your **screens and windows**, each with a **thumbnail preview**, the monitor's
+    own name (e.g. *DELL U2720Q*), and its **resolution**, so two similar monitors
+    are easy to tell apart. The chosen screen/window is recorded with the meeting
+    and saved as a video in LMA (see
     [Optional: record screen video](#optional-record-screen-video)).
 
 The app uses no audio or CPU when idle, so the intended usage is to leave it in
