@@ -407,5 +407,124 @@ def test_codebuild_skips_container_pipeline_under_microvm(raw: str) -> None:
 
 def test_microvm_image_sets_launch_type_env(template: dict) -> None:
     """The container dispatches to the supervisor on this variable."""
+    env = template["Resources"]["VPMicrovmImage"]["Properties"]["EnvironmentVariables"]
+    assert {"Key": "VP_LAUNCH_TYPE", "Value": "MICROVM"} in env
+
+
+# ---------------------------------------------------------------------------
+# Schema validation for AWS::Lambda::MicrovmImage
+#
+# cfn-lint ships no schema for this resource type yet (service launched
+# 2026-06), so a malformed property is otherwise only caught by CloudFormation
+# — several minutes into a deploy, followed by a full stack rollback. That
+# happened once during development: five property errors at once, including
+# EnvironmentVariables being a map where the resource wants an array.
+#
+# schemas/AWS-Lambda-MicrovmImage.json is the real provider schema, captured via
+#   aws cloudformation describe-type --type RESOURCE \
+#     --type-name AWS::Lambda::MicrovmImage --query Schema
+# Refresh it the same way if the resource gains properties.
+# ---------------------------------------------------------------------------
+
+SCHEMA_PATH = (
+    Path(__file__).resolve().parent / "schemas" / "AWS-Lambda-MicrovmImage.json"
+)
+
+
+_PLACEHOLDERS = {
+    "BuildRoleArn": "arn:aws:iam::123456789012:role/placeholder",
+    "BaseImageArn": "arn:aws:lambda:us-west-2:aws:microvm-image:al2023-1",
+    "EgressNetworkConnectors": (
+        "arn:aws:lambda:us-west-2:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
+    ),
+    "Uri": "s3://bucket/key.zip",
+    "LogGroup": "/aws/lambda-microvms/placeholder",
+}
+
+
+def _resolve_intrinsics(value, prop_name=None):
+    """Replace CFN intrinsics with representative strings so the shape can be
+    validated against the JSON schema (which knows nothing about !Sub/!Ref)."""
+    if isinstance(value, dict):
+        if len(value) == 1:
+            key = next(iter(value))
+            if key in (
+                "Ref",
+                "Fn::Sub",
+                "Fn::GetAtt",
+                "Fn::Join",
+                "Fn::Select",
+                "Fn::ImportValue",
+            ):
+                # Several properties carry ARN/URI regex patterns, so the
+                # stand-in must be shaped like the real thing. The caller
+                # passes the property name to pick a plausible value.
+                return _PLACEHOLDERS.get(prop_name, "resolved-value")
+            if key == "Fn::If":
+                # Validate the "true" branch; both branches are shape-identical
+                # for the properties we care about.
+                return _resolve_intrinsics(value[key][1], prop_name)
+        return {k: _resolve_intrinsics(v, k) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_resolve_intrinsics(v, prop_name) for v in value]
+    return value
+
+
+def test_microvm_image_matches_the_provider_schema(template: dict) -> None:
+    """Validate VPMicrovmImage against the real CloudFormation schema.
+
+    This is the test that turns a ~7-minute deploy + rollback into a sub-second
+    local failure.
+    """
+    # Hard import (not importorskip): jsonschema is a declared dev dependency
+    # in lib/lma_sdk. Skipping would silently disable the one check that catches
+    # this failure class before a deploy.
+    import jsonschema
+
+    schema = json.loads(SCHEMA_PATH.read_text())
+    props = _resolve_intrinsics(template["Resources"]["VPMicrovmImage"]["Properties"])
+
+    # Read-only attributes are outputs, never inputs.
+    validatable = {
+        k: v
+        for k, v in schema.items()
+        if k in ("properties", "definitions", "additionalProperties", "required")
+    }
+    for read_only in schema.get("readOnlyProperties", []):
+        name = read_only.split("/")[-1]
+        validatable.get("required", []) and None
+        if name in props:
+            del props[name]
+
+    jsonschema.validate(instance=props, schema=validatable)
+
+
+def test_microvm_image_sets_every_required_property(template: dict) -> None:
+    """The CFN resource marks ALL properties required, unlike the API.
+
+    Relying on service-side defaults (as the API allows) fails validation, so
+    each one must be set explicitly.
+    """
+    schema = json.loads(SCHEMA_PATH.read_text())
     props = template["Resources"]["VPMicrovmImage"]["Properties"]
-    assert props["EnvironmentVariables"]["VP_LAUNCH_TYPE"] == "MICROVM"
+    read_only = {p.split("/")[-1] for p in schema.get("readOnlyProperties", [])}
+    missing = [r for r in schema["required"] if r not in props and r not in read_only]
+    assert not missing, f"VPMicrovmImage is missing required properties: {missing}"
+
+
+def test_microvm_image_is_arm64(template: dict) -> None:
+    # ARM_64 is the only value the schema permits, and the reason the ARM64
+    # CloakBrowser Chromium question was the gating one for this whole change.
+    props = template["Resources"]["VPMicrovmImage"]["Properties"]
+    assert props["CpuConfigurations"] == [{"Architecture": "ARM_64"}]
+
+
+def test_microvm_environment_variables_are_key_value_pairs(template: dict) -> None:
+    # A plain map here is valid-looking YAML but fails CFN validation with
+    # "expected type: JSONArray, found: JSONObject".
+    env = template["Resources"]["VPMicrovmImage"]["Properties"]["EnvironmentVariables"]
+    assert isinstance(env, list)
+    for item in env:
+        assert set(item) == {"Key", "Value"}, f"bad env var entry: {item}"
+    # The container dispatches to the supervisor on this variable.
+    assert any(e["Key"] == "VP_LAUNCH_TYPE" and e["Value"] == "MICROVM" for e in env)

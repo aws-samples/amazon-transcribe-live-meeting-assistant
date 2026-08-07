@@ -1903,7 +1903,24 @@ Resources:
       Name: !Sub "${LMAStackName}-vp"
       Description: !Sub "LMA Virtual Participant (${LMAStackName})"
       BaseImageArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:microvm-image:al2023-1"
+      # NOTE: the CloudFormation resource marks EVERY property required, even
+      # those the underlying API treats as optional (verified against
+      # `describe-type AWS::Lambda::MicrovmImage`). So BaseImageVersion,
+      # CpuConfigurations, Logging and EgressNetworkConnectors must all be set
+      # explicitly rather than relying on service defaults.
+      BaseImageVersion: "1.0"
       BuildRoleArn: !GetAtt VPMicrovmBuildRole.Arn
+      # MicroVMs are ARM64-only; ARM_64 is the sole permitted value.
+      CpuConfigurations:
+        - Architecture: ARM_64
+      Logging:
+        CloudWatch:
+          LogGroup: !Sub "/aws/lambda-microvms/${LMAStackName}-vp"
+      # Default internet egress: the VP must reach Zoom/Teams/Webex/Chime plus
+      # AWS public APIs (Transcribe, Kinesis, DynamoDB, AppSync). No VPC
+      # connector, which is part of what removes the VPC dependency here.
+      EgressNetworkConnectors:
+        - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
       CodeArtifact:
         Uri: !Sub "s3://${MicrovmSourceCodeLocation}"
       Resources:
@@ -1917,8 +1934,8 @@ Resources:
       AdditionalOsCapabilities:
         - ALL
       EnvironmentVariables:
-        VP_LAUNCH_TYPE: MICROVM
-        STACK_ONLY_SUPERVISED: "true"
+        - Key: VP_LAUNCH_TYPE
+          Value: MICROVM
       Hooks:
         Port: 9000
         MicrovmImageHooks:
