@@ -1908,7 +1908,10 @@ Resources:
       # `describe-type AWS::Lambda::MicrovmImage`). So BaseImageVersion,
       # CpuConfigurations, Logging and EgressNetworkConnectors must all be set
       # explicitly rather than relying on service defaults.
-      BaseImageVersion: "1.0"
+      # Major version only. "1.0" is rejected at create time with
+      # "Expected a single major version number (e.g., 1)". Valid values come
+      # from `list-managed-microvm-image-versions` (currently "0" and "1").
+      BaseImageVersion: "1"
       BuildRoleArn: !GetAtt VPMicrovmBuildRole.Arn
       # MicroVMs are ARM64-only; ARM_64 is the sole permitted value.
       CpuConfigurations:

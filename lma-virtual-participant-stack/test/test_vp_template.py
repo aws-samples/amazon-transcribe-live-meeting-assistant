@@ -528,3 +528,18 @@ def test_microvm_environment_variables_are_key_value_pairs(template: dict) -> No
         assert set(item) == {"Key", "Value"}, f"bad env var entry: {item}"
     # The container dispatches to the supervisor on this variable.
     assert any(e["Key"] == "VP_LAUNCH_TYPE" and e["Value"] == "MICROVM" for e in env)
+
+
+def test_base_image_version_is_a_bare_major_version(template: dict) -> None:
+    """BaseImageVersion must be a single major version number.
+
+    "1.0" passes CloudFormation's schema validation (it is just a string) but is
+    rejected by the service at create time:
+      Invalid baseMicroVMImageVersion: 1.0. Expected a single major version
+      number (e.g., 1).
+    Valid values come from `list-managed-microvm-image-versions`.
+    """
+    version = template["Resources"]["VPMicrovmImage"]["Properties"]["BaseImageVersion"]
+    assert re.fullmatch(r"\d+", str(version)), (
+        f"BaseImageVersion must be a bare major version, got {version!r}"
+    )
