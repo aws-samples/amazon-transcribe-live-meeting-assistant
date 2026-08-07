@@ -75,10 +75,18 @@ RUN BD="${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
 
 RUN mkdir -p /srv/cloakbrowser-profiles
 
-EXPOSE 5900 5901
+# 5900 raw VNC, 5901 noVNC/websockify, 9000 Lambda MicroVMs lifecycle hooks.
+# 9000 is unused (and unexposed to any listener) under the ECS launch types.
+EXPOSE 5900 5901 9000
 
 RUN chmod +x /srv/entrypoint.sh
 RUN useradd -m -d /home/appuser -s /bin/bash appuser
 RUN chown -R appuser:appuser /srv /opt/cloakbrowser
 USER appuser
+
+# Default entrypoint stays entrypoint.sh so ECS (EC2/FARGATE) behaviour is
+# byte-for-byte unchanged. The MicroVM image build overrides CMD to run the
+# supervisor instead — it boots the same stack via entrypoint.sh STACK_ONLY,
+# answers the lifecycle hooks, and spawns the app once /run delivers the
+# per-meeting config. See src/microvm-supervisor.ts.
 ENTRYPOINT ["/srv/entrypoint.sh"]

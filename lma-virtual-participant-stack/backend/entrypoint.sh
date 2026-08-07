@@ -202,6 +202,20 @@ echo "   Agent mic → agent_output.monitor → Chromium microphone"
 echo ""
 echo "✓ Barge-in enabled: Nova hears meeting audio only, not her own voice"
 
+# MicroVM mode: everything above this line is the "pre-snapshot stack" (Xvfb,
+# fluxbox, x11vnc, websockify, PulseAudio routing) and is exactly what we want
+# captured in the Firecracker snapshot. The VP application itself must NOT start
+# here, because per-meeting config does not exist yet — it arrives later in the
+# /run lifecycle hook, and the supervisor spawns the app at that point.
+#
+# Reusing this script (rather than reimplementing the boot in TypeScript) keeps
+# ECS and MicroVM on one code path, so audio-routing changes can't silently
+# drift between them.
+if [ "$STACK_ONLY" = "true" ]; then
+    echo "=== STACK_ONLY: pre-snapshot stack is up; not starting the VP app ==="
+    exit 0
+fi
+
 echo "=== Starting Virtual Participant Application ==="
 
 # Check if running in dev mode
