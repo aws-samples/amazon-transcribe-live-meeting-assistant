@@ -74,6 +74,8 @@ code_checks:
     - make test-ui-force
     # TypeScript build checks for the transcriber + VP stacks (tsc/eslint).
     - make lint-typescript
+    # Virtual Participant backend unit tests (launch modes, MicroVM hooks).
+    - make test-vp
     # Fastify 5 websocket smoke test (boots the server, round-trips a frame).
     - cd lma-websocket-transcriber-stack/source/app && npm ci && npm run smoke
 
