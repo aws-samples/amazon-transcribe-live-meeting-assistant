@@ -561,3 +561,49 @@ def test_getatt_references_to_microvm_image_use_real_attributes(raw: str) -> Non
     assert not invalid, (
         f"invalid VPMicrovmImage attributes {sorted(invalid)}; valid: {sorted(valid)}"
     )
+
+
+def _inline_lambda_source(raw: str, marker: str) -> str:
+    """Extract and de-indent an inline `Code: ZipFile: |` Python body."""
+    block = raw.split(marker, 1)[1].split("ZipFile: |\n", 1)[1]
+    lines: list[str] = []
+    for line in block.split("\n"):
+        if line.strip() == "":
+            lines.append("")
+            continue
+        # The block ends at the first line indented less than its body.
+        if not line.startswith("          "):
+            break
+        lines.append(line)
+    indent = min(
+        (len(x) - len(x.lstrip()) for x in lines if x.strip()),
+        default=0,
+    )
+    return "\n".join(x[indent:] if len(x) >= indent else x for x in lines)
+
+
+def test_launcher_inline_python_is_syntactically_valid(raw: str) -> None:
+    """Compile the launcher's inline source.
+
+    An inline ZipFile body is never checked by cfn-lint or any linter, so a
+    syntax error would deploy successfully and only fail when the first meeting
+    tries to start.
+    """
+    import ast
+
+    src = _inline_lambda_source(raw, "VPMicrovmLauncherFunction:")
+    ast.parse(src)  # raises SyntaxError on malformed code
+    # Sanity-check that the extraction actually captured the handler.
+    assert "def lambda_handler" in src
+
+
+def test_launcher_attaches_an_ingress_connector(raw: str) -> None:
+    """Without ingress the MicroVM endpoint forwards nothing.
+
+    RunMicrovm succeeds and returns an endpoint either way, so omitting this
+    surfaces only as a VNC viewer that cannot connect.
+    """
+    src = _inline_lambda_source(raw, "VPMicrovmLauncherFunction:")
+    assert "ingressNetworkConnectors=" in src
+    assert "ALL_INGRESS" in src
+    assert "INTERNET_EGRESS" in src
