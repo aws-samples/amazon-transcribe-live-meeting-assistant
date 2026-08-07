@@ -32,6 +32,7 @@ import PropTypes from 'prop-types';
 // bare-string exports map, so disable the false-positive unresolved error.
 // eslint-disable-next-line import/no-unresolved
 import RFB from '@novnc/novnc';
+import { generateClient } from 'aws-amplify/api';
 import {
   Container,
   Header,
@@ -43,6 +44,10 @@ import {
   Toggle,
   Badge,
 } from '@cloudscape-design/components';
+import { buildVncConnection, isMicrovmEndpoint, fetchMicrovmAuthToken } from './vncConnection';
+
+// Used only on the MicroVM transport, to mint a short-lived VNC auth token.
+const gqlClient = generateClient();
 
 const VNCViewer = ({
   vpId,
@@ -132,17 +137,32 @@ const VNCViewer = ({
           throw new Error('No Cognito ID token available');
         }
 
-        // Append token as query parameter to the WebSocket URL
-        // Format: wss://cloudfront-domain/vnc/{vpId}?token={idToken}
-        const url = new URL(vncEndpoint);
-        url.searchParams.append('token', idToken);
-        const wsUrl = url.toString();
+        // Two transports, depending on VPLaunchType (see vncConnection.js):
+        //  - ECS: wss://<cloudfront>/vnc/<vpId>?token=<cognito id token>
+        //  - MicroVM: the VM's own endpoint, with a short-lived port-scoped
+        //    token passed as a WebSocket subprotocol (browsers can't set the
+        //    X-aws-proxy-auth header that Lambda would otherwise expect).
+        let authToken;
+        if (isMicrovmEndpoint(vncEndpoint)) {
+          authToken = await fetchMicrovmAuthToken(gqlClient, vpId);
+        }
+        const { url: wsUrl, wsProtocols } = buildVncConnection({
+          endpoint: vncEndpoint,
+          idToken,
+          authToken,
+        });
 
-        console.log('Connecting to VNC via CloudFront with authentication');
+        console.log(
+          isMicrovmEndpoint(vncEndpoint)
+            ? 'Connecting to VNC via the MicroVM endpoint'
+            : 'Connecting to VNC via CloudFront with authentication',
+        );
         console.log('Virtual Participant ID:', vpId);
 
         const rfb = new RFB(canvasRef.current, wsUrl, {
           credentials: { password: '' },
+          // noVNC 1.7 forwards this to `new WebSocket(url, protocols)`.
+          ...(wsProtocols.length > 0 ? { wsProtocols } : {}),
         });
 
         // Configure RFB

@@ -203,6 +203,7 @@ type Mutation @aws_iam {
 	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools
 	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
+	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools
 	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools
 	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools
@@ -759,6 +760,18 @@ input UpdateLLMPromptTemplateInput {
 type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
 	LLMPromptTemplateId: ID!
 	Success: Boolean!
+}
+
+# Short-lived auth token for reaching a Virtual Participant's noVNC port when
+# the VP runs on Lambda MicroVMs (VPLaunchType=MICROVM).
+#
+# Minting requires IAM credentials (lambda:CreateMicrovmAuthToken), so it happens
+# server-side. Tokens are capped at 60 minutes by the service while meetings can
+# run up to 8 hours, so the viewer mints one per session and again on reconnect
+# rather than receiving one at VP launch.
+type MicrovmVncToken @aws_cognito_user_pools {
+	authToken: String!
+	expiresAt: AWSDateTime!
 }
 
 # VNC Preview Control
