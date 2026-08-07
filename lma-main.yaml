@@ -678,10 +678,16 @@ Parameters:
     AllowedValues:
       - FARGATE
       - EC2
+      - MICROVM
     Description: >-
-      Launch type for Virtual Participant containers.
+      Compute platform for Virtual Participant containers.
       FARGATE: Serverless with SOCI for 40-60% faster startup (~$2/month).
       EC2 (default): Warm instances with cached images for 85-90% faster startup (~$33/month).
+      MICROVM: AWS Lambda MicroVMs — starts from a Firecracker snapshot in ~5s,
+      bills per meeting instead of per warm instance, and needs no ALB, no
+      autoscaling and no OS patching. ONLY available in us-east-1, us-east-2,
+      us-west-2, ap-northeast-1 and eu-west-1 (not in GovCloud or
+      ap-southeast-2); deployment fails in other regions.
 
   VPInstanceType:
     Type: String

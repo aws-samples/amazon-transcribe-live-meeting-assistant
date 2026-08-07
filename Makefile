@@ -333,6 +333,11 @@ test-vp: ## Run Virtual Participant backend unit tests (no AWS)
 	cd $(VP_BACKEND_DIR) && npm ci --prefer-offline --no-audit && npm test
 	@echo -e "$(GREEN)✅ Virtual Participant unit tests passed!$(NC)"
 
+test-vp-template: ## Static tests on the VP CloudFormation template (no AWS)
+	@echo "Running Virtual Participant template tests..."
+	$(PYTHON) -m pytest $(VP_DIR)/test/test_vp_template.py -q
+	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
+
 test-ui-force: ## Run React UI tests (ignore checksum, always run)
 	@echo "Running UI tests (forced)..."
 	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run
@@ -344,7 +349,7 @@ test-ui-force: ## Run React UI tests (ignore checksum, always run)
 # declare them PHONY or make treats them as up-to-date files and skips them.
 .PHONY: docker-build-check docker-build-check-transcriber docker-build-check-vp \
         docker-build-check-all integ-tests integ-tests-live integ-deploy-and-test test-lambdas \
-        test-vp test-vp-microvm-e2e
+        test-vp test-vp-template test-vp-microvm-e2e
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then

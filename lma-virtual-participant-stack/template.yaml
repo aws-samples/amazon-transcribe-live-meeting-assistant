@@ -456,7 +456,16 @@ Parameters:
     AllowedValues:
       - FARGATE
       - EC2
-    Description: Launch type for Virtual Participant containers (FARGATE with SOCI or EC2 with caching)
+      - MICROVM
+    Description: >-
+      Compute platform for Virtual Participant containers. EC2 (default) uses an
+      ECS cluster with a warm-instance capacity provider and image caching.
+      FARGATE uses serverless ECS tasks with SOCI lazy loading. MICROVM uses AWS
+      Lambda MicroVMs — no ALB, no VPC/subnets, no autoscaling, no host patching,
+      per-meeting billing, and near-instant start from a Firecracker snapshot.
+      IMPORTANT: MICROVM requires a region where Lambda MicroVMs is available
+      (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1) and is not
+      available in GovCloud. Deploying MICROVM in an unsupported region will fail.
 
   VPInstanceType:
     Type: String
@@ -518,6 +527,14 @@ Conditions:
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
   UseEC2LaunchType: !Equals [!Ref VPLaunchType, "EC2"]
   UseFargateLaunchType: !Equals [!Ref VPLaunchType, "FARGATE"]
+  UseMicrovmLaunchType: !Equals [!Ref VPLaunchType, "MICROVM"]
+  # Everything ECS-shaped: the cluster, task definition, ECS service, ALB target
+  # group / listener rules, and the RunTask dispatch paths. Gating on this (rather
+  # than adding a third branch at each of the ~20 existing launch-type sites)
+  # keeps MICROVM additive — under MICROVM none of that infrastructure is created.
+  UseECSLaunchType: !Or
+    - !Condition UseEC2LaunchType
+    - !Condition UseFargateLaunchType
 
 Resources:
   LogsPolicy:
@@ -1267,6 +1284,13 @@ Resources:
     # below (when UseEC2LaunchType is true) instead of inline here, because
     # both can't be set simultaneously. For Fargate-only deployments the
     # association resource is skipped and Fargate is implicitly available.
+    #
+    # Under VPLaunchType=MICROVM the cluster is created but stays empty. It is
+    # kept (rather than made conditional) deliberately: ~14 places reference
+    # Cluster/TaskDefinition — IAM policies, the CodeBuild redeploy buildspec,
+    # stack outputs — and an empty ECS cluster with an unused task definition
+    # costs nothing. Making them conditional would mean conditionalising all of
+    # those references for no operational gain.
     Properties:
       ClusterSettings:
         - Name: containerInsights
@@ -1708,6 +1732,478 @@ Resources:
         - CapacityProvider: !Ref VPCapacityProvider
           Weight: 1
 
+  ##########################################################################
+  # MICROVM Launch Type (conditional)
+  #
+  # AWS Lambda MicroVMs run the same container image inside a Firecracker
+  # microVM, booted from a memory+disk snapshot. Compared to the ECS launch
+  # types this removes the ALB + target groups, the ASG/capacity provider, and
+  # SSM host patching, and bills per meeting rather than per warm instance.
+  #
+  # Two roles, per the service model:
+  #   BuildRole     - assumed while Lambda builds the image from the Dockerfile
+  #   ExecutionRole - assumed by the running MicroVM (what the VP itself can do)
+  ##########################################################################
+
+  VPMicrovmBuildRole:
+    Type: AWS::IAM::Role
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            # Confused-deputy guard: only this account's Lambda can assume it.
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: MicrovmImageBuild
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Read the zipped Dockerfile + app source that the image is built from.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${SourceCodeLocation}"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
+
+  # Runtime role for the VP inside the MicroVM. Mirrors the ECS task role's
+  # permissions, minus everything ALB-related (there is no ALB to register with).
+  VPMicrovmExecutionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "Transcribe and Bedrock do not support resource-level permissions"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: 'Wildcards required for Transcribe/Bedrock which lack resource-level permissions'
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Ref LogsPolicy
+      Policies:
+        - PolicyName: VPMicrovmRuntime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                  - kinesis:PutRecords
+                Resource: !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+              - Effect: Allow
+                # Transcribe streaming does not support resource-level permissions.
+                Action:
+                  - transcribe:StartStreamTranscription
+                  - transcribe:StartStreamTranscriptionWebSocket
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*"
+
+  # The MicroVM image: a versioned Firecracker snapshot built from the same
+  # Dockerfile the ECS launch types use.
+  #
+  # Snapshot semantics drive the hook config: /ready must return 200 only once
+  # Xvfb/x11vnc/websockify/PulseAudio are serving, because that is the instant
+  # the snapshot is taken. /validate additionally lets Lambda sample which
+  # snapshot pages are touched so it can prefetch them on later launches.
+  VPMicrovmImage:
+    Type: AWS::Lambda::MicrovmImage
+    Condition: UseMicrovmLaunchType
+    # cfn-lint 1.51 ships no schema for this resource type yet (service launched
+    # 2026-06), so E3006 would otherwise fail `make lint-cfn` in CI. Scoped to
+    # this resource rather than disabling the rule globally.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3006
+    Properties:
+      Name: !Sub "${LMAStackName}-vp"
+      Description: !Sub "LMA Virtual Participant (${LMAStackName})"
+      BaseImageArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:microvm-image:al2023-1"
+      BuildRoleArn: !GetAtt VPMicrovmBuildRole.Arn
+      CodeArtifact:
+        Uri: !Sub "s3://${SourceCodeLocation}"
+      Resources:
+        # Observed peak is ~1650 MB for Chromium + Simli + Nova Sonic; 4 GB
+        # leaves room for Xvfb, PulseAudio and the ffmpeg video mux. MicroVMs
+        # burst to 4x this baseline automatically and bill the excess only while
+        # it is actually used.
+        - MinimumMemoryInMiB: 4096
+      # Chromium's sandbox needs namespace/capability access beyond the default
+      # restricted set.
+      AdditionalOsCapabilities:
+        - ALL
+      EnvironmentVariables:
+        VP_LAUNCH_TYPE: MICROVM
+        STACK_ONLY_SUPERVISED: "true"
+      Hooks:
+        Port: 9000
+        MicrovmImageHooks:
+          Ready: ENABLED
+          # Generous: a cold first boot pulls CloakBrowser Chromium into memory
+          # and starts X + audio. Returning 503 until healthy is the contract.
+          ReadyTimeoutInSeconds: 600
+          Validate: ENABLED
+          ValidateTimeoutInSeconds: 300
+        MicrovmHooks:
+          Run: ENABLED
+          RunTimeoutInSeconds: 30
+          Suspend: ENABLED
+          SuspendTimeoutInSeconds: 30
+          Resume: ENABLED
+          ResumeTimeoutInSeconds: 30
+          Terminate: ENABLED
+          TerminateTimeoutInSeconds: 30
+
+  # EventBridge Scheduler assumes this to invoke the launcher for meetings booked
+  # in advance (the MICROVM equivalent of TargetECSRole, which Scheduler uses to
+  # call ecs:RunTask on the ECS launch types).
+  VPScheduleInvokeLauncherRole:
+    Type: AWS::IAM::Role
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: InvokeLauncher
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt VPMicrovmLauncherFunction.Arn
+
+  VPMicrovmLauncherRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "RunMicrovm/CreateMicrovmAuthToken do not support resource-level permissions on the image"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: 'lambda-microvms actions are scoped by region/account; the service does not support resource-level permissions for RunMicrovm'
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Ref LogsPolicy
+      Policies:
+        - PolicyName: MicrovmLaunch
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # cfn-lint's IAM action list predates Lambda MicroVMs (2026-06),
+              # so these raise W3037 "not one of [...]". Left unsuppressed to
+              # match how the equally-new bedrock:InvokeModelWithBidirectionalStream
+              # is handled above: the warning clears when cfn-lint's spec catches
+              # up, and `make lint-cfn` only fails on E-level findings.
+              - Effect: Allow
+                Action:
+                  - lambda:RunMicrovm
+                  - lambda:GetMicrovm
+                  - lambda:TerminateMicrovm
+                  - lambda:CreateMicrovmAuthToken
+                Resource: "*"
+              # Hand the MicroVM its runtime role.
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt VPMicrovmExecutionRole.Arn
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: lambda.amazonaws.com
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+
+  # Launches one MicroVM per meeting. Called by the scheduler state machine
+  # (MICROVM dispatch path) and by EventBridge Scheduler for scheduled meetings,
+  # since neither has a native lambda-microvms integration.
+  VPMicrovmLauncherFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS'
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; the state machine handles retries and failure states"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive ARNs and table names"
+    Condition: UseMicrovmLaunchType
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-VPMicrovmLauncher"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      # RunMicrovm plus the wait for RUNNING; observed ~5s, but allow for
+      # throttling backoff and a cold image.
+      Timeout: 300
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Role: !GetAtt VPMicrovmLauncherRole.Arn
+      Environment:
+        Variables:
+          MICROVM_IMAGE_ARN: !GetAtt VPMicrovmImage.Arn
+          EXECUTION_ROLE_ARN: !GetAtt VPMicrovmExecutionRole.Arn
+          VP_TABLE_NAME: !Ref VirtualParticipantTableName
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        ZipFile: |
+          """Launch one Lambda MicroVM per Virtual Participant meeting.
+
+          Invoked two ways:
+            - by the VP scheduler state machine (immediate "start now" meetings),
+              with the state machine's {apiInfo, data} payload;
+            - by EventBridge Scheduler for meetings booked in advance, with a
+              flat payload of the same per-meeting fields.
+
+          Per-meeting config CANNOT be passed as environment variables: MicroVM
+          image env vars are baked into the image and shared by every MicroVM
+          launched from it. It goes in runHookPayload instead, which the
+          container's /run hook applies before starting the VP app.
+
+          Returns {"ok": bool, "reason": str, ...} rather than raising for soft
+          failures, so the state machine can route them to MarkVPFailed and show
+          the user a real reason (mirroring how CheckRunTaskFailures inspects
+          the ECS RunTask result).
+          """
+          import json
+          import logging
+          import os
+          import time
+
+          import boto3
+
+          logger = logging.getLogger()
+          logger.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO")))
+
+          microvms = boto3.client("lambda-microvms")
+          dynamodb = boto3.client("dynamodb")
+
+          # Must stay in sync with PER_MEETING_KEYS in the container's
+          # src/launch-mode.ts. Anything not listed here is ignored by the
+          # container, so adding a value needs a change in both places.
+          FIELD_MAP = {
+              "VIRTUAL_PARTICIPANT_ID": ("virtualParticipantId", "id"),
+              "MEETING_PLATFORM": ("meetingPlatform",),
+              "MEETING_ID": ("meetingId",),
+              "MEETING_PASSWORD": ("meetingPassword",),
+              "MEETING_NAME": ("meetingName",),
+              "MEETING_TIME": ("meetingTime",),
+              "LMA_USER": ("userName", "owner"),
+              "LMA_USER_SUB": ("userSub",),
+              "USER_ACCESS_TOKEN": ("accessToken",),
+              # NOTE: 'rereshToken' is the existing (misspelled) key used by the
+              # state machine and the UI. Accept both so this keeps working if
+              # the typo is ever fixed.
+              "USER_REFRESH_TOKEN": ("rereshToken", "refreshToken"),
+              "USER_ID_TOKEN": ("idToken",),
+              "ZOOM_CREDENTIALS_SECRET_NAME": ("zoomCredentialsSecretName",),
+              "ENABLE_VIDEO_RECORDING": ("enableVideoRecording",),
+          }
+
+          SECRET_KEYS = {
+              "USER_ACCESS_TOKEN",
+              "USER_ID_TOKEN",
+              "USER_REFRESH_TOKEN",
+              "MEETING_PASSWORD",
+          }
+
+          # Matches RUN_HOOK_PAYLOAD_MAX_BYTES in src/launch-mode.ts.
+          RUN_HOOK_PAYLOAD_MAX_BYTES = 16384
+
+          # Meetings can run long, but a MicroVM's hard ceiling is 8 hours.
+          MAX_DURATION_SECONDS = 28800
+
+
+          def _redact(config):
+              return {
+                  k: (f"<redacted:{len(v)}>" if k in SECRET_KEYS else v)
+                  for k, v in config.items()
+              }
+
+
+          def _extract(payload):
+              """Pull per-meeting fields out of either payload shape."""
+              data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+              config = {}
+              for env_key, candidates in FIELD_MAP.items():
+                  for candidate in candidates:
+                      value = data.get(candidate)
+                      if value not in (None, ""):
+                          config[env_key] = str(value).lower() if isinstance(value, bool) else str(value)
+                          break
+              return config
+
+
+          def lambda_handler(event, context):
+              logger.info("MicroVM launcher invoked")
+              config = _extract(event if isinstance(event, dict) else {})
+              logger.info("Per-meeting config: %s", json.dumps(_redact(config)))
+
+              vp_id = config.get("VIRTUAL_PARTICIPANT_ID")
+              if not vp_id:
+                  # Without this we cannot report status back to the UI at all.
+                  return {"ok": False, "reason": "no virtualParticipantId in payload"}
+
+              run_hook_payload = json.dumps(config)
+              size = len(run_hook_payload.encode("utf-8"))
+              if size > RUN_HOOK_PAYLOAD_MAX_BYTES:
+                  # Refuse rather than let the service truncate: the payload
+                  # carries auth tokens, and a silently-truncated one fails much
+                  # later as a confusing in-meeting auth error.
+                  return {
+                      "ok": False,
+                      "reason": (
+                          f"runHookPayload is {size} bytes, over the "
+                          f"{RUN_HOOK_PAYLOAD_MAX_BYTES}-byte limit"
+                      ),
+                  }
+
+              try:
+                  response = microvms.run_microvm(
+                      imageIdentifier=os.environ["MICROVM_IMAGE_ARN"],
+                      executionRoleArn=os.environ["EXECUTION_ROLE_ARN"],
+                      # Auto-suspend is deliberately DISABLED: a suspended VP
+                      # stops capturing audio, so it would silently miss meeting
+                      # content. The VP runs to completion and is terminated when
+                      # the meeting ends.
+                      idlePolicy={
+                          "autoResumeEnabled": False,
+                          "maxIdleDurationSeconds": MAX_DURATION_SECONDS,
+                          "suspendedDurationSeconds": 0,
+                      },
+                      maximumDurationInSeconds=MAX_DURATION_SECONDS,
+                      runHookPayload=run_hook_payload,
+                      clientToken=vp_id,
+                  )
+              except microvms.exceptions.ServiceQuotaExceededException as exc:
+                  logger.error("MicroVM quota exceeded: %s", exc)
+                  return {"ok": False, "reason": f"MicroVM quota exceeded: {exc}"}
+              except Exception as exc:  # noqa: BLE001 - surface any reason to the UI
+                  logger.exception("RunMicrovm failed")
+                  return {"ok": False, "reason": f"RunMicrovm failed: {exc}"}
+
+              microvm_id = response["microvmId"]
+              endpoint = response.get("endpoint", "")
+              logger.info("Started MicroVM %s endpoint=%s", microvm_id, endpoint)
+
+              # Wait for RUNNING so a failure to start is reported now, while the
+              # state machine can still mark the VP failed, rather than leaving
+              # the UI waiting on a VP that never boots.
+              state = response.get("state", "PENDING")
+              deadline = time.time() + 120
+              while state in ("PENDING", "STARTING") and time.time() < deadline:
+                  time.sleep(2)
+                  state = microvms.get_microvm(microvmIdentifier=microvm_id).get("state", state)
+
+              if state != "RUNNING":
+                  logger.error("MicroVM %s did not reach RUNNING (state=%s)", microvm_id, state)
+                  try:
+                      microvms.terminate_microvm(microvmIdentifier=microvm_id)
+                  except Exception:  # noqa: BLE001 - best-effort cleanup
+                      logger.warning("Could not terminate %s", microvm_id)
+                  return {"ok": False, "reason": f"MicroVM state={state}", "microvmId": microvm_id}
+
+              # Publish the endpoint so the UI's VNC viewer can reach this VM.
+              # Under ECS the container self-registers with an ALB; here the
+              # launcher already knows the address, so it records it instead.
+              try:
+                  dynamodb.update_item(
+                      TableName=os.environ["VP_TASK_REGISTRY_TABLE_NAME"],
+                      Key={"vpId": {"S": vp_id}},
+                      UpdateExpression=(
+                          "SET microvmId = :m, vncEndpoint = :e, launchType = :l, "
+                          "createdAt = :c, expiresAt = :x"
+                      ),
+                      ExpressionAttributeValues={
+                          ":m": {"S": microvm_id},
+                          ":e": {"S": f"wss://{endpoint}" if endpoint else ""},
+                          ":l": {"S": "MICROVM"},
+                          ":c": {"S": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                          ":x": {"N": str(int(time.time()) + MAX_DURATION_SECONDS + 3600)},
+                      },
+                  )
+              except Exception:  # noqa: BLE001 - the VM is up; don't fail the meeting
+                  logger.exception("Could not write MicroVM endpoint to the registry")
+
+              return {
+                  "ok": True,
+                  "reason": "",
+                  "microvmId": microvm_id,
+                  "endpoint": endpoint,
+                  "virtualParticipantId": vp_id,
+              }
+
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
     Metadata:
@@ -1878,8 +2374,13 @@ Resources:
         - UseEC2LaunchType
         - - EC2
         - - FARGATE
-      Cpu: !If [UseFargateLaunchType, "2 vCPU", !Ref AWS::NoValue]
-      Memory: !If [UseFargateLaunchType, "4 GB", !Ref AWS::NoValue]
+      # Fargate requires task-level Cpu/Memory; EC2 sets them per container
+      # instead (see ContainerDefinitions above). Keyed on "not EC2" rather than
+      # UseFargateLaunchType so that under MICROVM — where this task definition
+      # is created but never used, and RequiresCompatibilities falls back to
+      # FARGATE — the template still describes a valid Fargate task.
+      Cpu: !If [UseEC2LaunchType, !Ref AWS::NoValue, "2 vCPU"]
+      Memory: !If [UseEC2LaunchType, !Ref AWS::NoValue, "4 GB"]
     DependsOn:
       - Cluster
       - BuildCustomResource
@@ -1887,6 +2388,11 @@ Resources:
   # ECS Service to register tasks with target group
   VirtualParticipantService:
     Type: AWS::ECS::Service
+    # Not created under MICROVM: `LaunchType` only accepts EC2/FARGATE, and the
+    # service exists solely to keep an ALB target-group association (DesiredCount
+    # is 0 — tasks are started per meeting by RunTask, not by this service).
+    # MicroVMs have neither an ALB nor a task definition.
+    Condition: UseECSLaunchType
     Properties:
       ServiceName: !Sub "${LMAStackName}-vp-service-${VPLaunchType}"
       Cluster: !Ref Cluster
@@ -2064,6 +2570,19 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: "*"
+        # Only needed for the MICROVM dispatch path, where the state machine
+        # invokes the launcher Lambda instead of using the optimized ECS
+        # runTask integration.
+        - !If
+          - UseMicrovmLaunchType
+          - PolicyName: InvokeMicrovmLauncher
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: lambda:InvokeFunction
+                  Resource: !GetAtt VPMicrovmLauncherFunction.Arn
+          - !Ref AWS::NoValue
         - PolicyName: SchedulePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -2211,7 +2730,58 @@ Resources:
                   "apiInfo.$": "$.apiInfo",
                   "data.$": "States.JsonMerge($.computed, $.data, false)"
                 },
-                "Next": "RunTask"
+                "Next": "${DispatchStateName}"
+              },
+              "RunMicrovm": {
+                "Comment": "MICROVM launch type. Step Functions has no optimized integration for lambda-microvms, so this invokes the launcher Lambda, which calls RunMicrovm, waits for RUNNING, and writes the endpoint to the VP registry. Reuses MarkVPFailed for error handling exactly as RunTask does.",
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${MicrovmLauncherFunctionArn}",
+                  "Payload.$": "$"
+                },
+                "Next": "MicrovmLaunched",
+                "ResultPath": "$.microvmResult",
+                "ResultSelector": {
+                  "payload.$": "$.Payload"
+                },
+                "Retry": [
+                  {
+                    "Comment": "RunMicrovm is rate-limited to 5 TPS per account; back off rather than failing the meeting.",
+                    "ErrorEquals": ["Lambda.TooManyRequestsException", "States.TaskFailed"],
+                    "IntervalSeconds": 3,
+                    "MaxAttempts": 4,
+                    "BackoffRate": 2.0
+                  }
+                ],
+                "Catch": [
+                  {
+                    "ErrorEquals": ["States.ALL"],
+                    "Next": "MarkVPFailed",
+                    "ResultPath": "$.runTaskError"
+                  }
+                ]
+              },
+              "MicrovmLaunched": {
+                "Comment": "The launcher reports ok=false for soft failures (quota exhausted, image not ready) that do not throw. Mirror CheckRunTaskFailures and route those to MarkVPFailed.",
+                "Type": "Choice",
+                "Choices": [
+                  {
+                    "Variable": "$.microvmResult.payload.ok",
+                    "BooleanEquals": false,
+                    "Next": "MarkMicrovmSoftFailure"
+                  }
+                ],
+                "Default": "End"
+              },
+              "MarkMicrovmSoftFailure": {
+                "Type": "Pass",
+                "Parameters": {
+                  "Error": "MicrovmLaunchFailed",
+                  "Cause.$": "States.Format('RunMicrovm did not start the VP. Reason: {}', $.microvmResult.payload.reason)"
+                },
+                "ResultPath": "$.runTaskError",
+                "Next": "MarkVPFailed"
               },
               "RunTask": {
                 "Type": "Task",
@@ -2409,58 +2979,7 @@ Resources:
                   "ScheduleExpression.$": "States.Format('at({})', $.data.meetingTime)",
                   "ScheduleExpressionTimezone": "UTC",
                   "State": "ENABLED",
-                  "Target": {
-                    "Arn": "${ClusterArn}",
-                    "RoleArn": "${TargetECSRoleArn}",
-                    "EcsParameters": {
-                      "EnableECSManagedTags": false,
-                      "EnableExecuteCommand": false,
-                      "LaunchType": "${VPLaunchType}",
-                      "NetworkConfiguration": {
-                        "AwsvpcConfiguration": {
-                          "AssignPublicIp": "DISABLED",
-                          "SecurityGroups": [
-                            "${VPSecurityGroupId}"
-                          ],
-                          "Subnets": [
-                            "${PrivateSubnet1}",
-                            "${PrivateSubnet2}"
-                          ]
-                        }
-                      },
-                      "TaskCount": 1,
-                      "TaskDefinitionArn": "${TaskDefinition}"
-                    },
-                    "Input": {
-                      "containerOverrides": [
-                        {
-                          "name": "scribe",
-                          "environment": [
-                            {
-                              "name": "MEETING_PLATFORM",
-                              "value.$": "$.data.meetingPlatform"
-                            },
-                            {
-                              "name": "MEETING_ID",
-                              "value.$": "$.data.meetingID"
-                            },
-                            {
-                              "name": "MEETING_PASSWORD",
-                              "value.$": "$.data.meetingPassword"
-                            },
-                            {
-                              "name": "MEETING_NAME",
-                              "value.$": "$.data.meetingName"
-                            },
-                            {
-                              "Name": "LMA_USER",
-                              "Value.$": "$.data.userName"
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  }
+                  ${ScheduledMeetingTarget}
                 },
                 "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:createSchedule",
                 "End": true
@@ -2526,10 +3045,62 @@ Resources:
           # JSON fragment used in the RunTask state. For EC2, drive RunTask
           # via the capacity provider so ECS auto-scales the ASG when the
           # cluster is full. For Fargate, fall back to plain LaunchType.
+          # Under MICROVM the RunTask state is never entered (see
+          # DispatchStateName), but the fragment must still be valid JSON for
+          # the state machine definition to parse.
           RunTaskDispatch: !If
             - UseEC2LaunchType
             - !Sub '"CapacityProviderStrategy": [{ "CapacityProvider": "${VPCapacityProvider}", "Weight": 1 }]'
             - '"LaunchType": "FARGATE"'
+          # Which dispatch state MergeZoomSecret hands off to. Both states exist
+          # in every deployment (the definition is static); only the entry point
+          # differs, which keeps this a one-line switch instead of two variants
+          # of the whole state machine.
+          DispatchStateName: !If [UseMicrovmLaunchType, "RunMicrovm", "RunTask"]
+          # EventBridge Scheduler target for meetings booked in advance.
+          # Scheduler has a native ECS runTask target but none for
+          # lambda-microvms, so MICROVM schedules invoke the launcher Lambda
+          # instead. Both variants are single-line JSON fragments spliced into
+          # the CreateSchedule state; keeping them here (rather than two copies
+          # of the state) means the scheduled and immediate paths stay in step.
+          ScheduledMeetingTarget: !If
+            - UseMicrovmLaunchType
+            - !Sub >-
+              "Target": {"Arn": "${VPMicrovmLauncherFunction.Arn}",
+              "RoleArn": "${VPScheduleInvokeLauncherRole.Arn}",
+              "Input": {"data": {"meetingPlatform.$": "$.data.meetingPlatform",
+              "meetingId.$": "$.data.meetingID",
+              "meetingPassword.$": "$.data.meetingPassword",
+              "meetingName.$": "$.data.meetingName",
+              "meetingTime.$": "$.data.meetingTime",
+              "userName.$": "$.data.userName",
+              "virtualParticipantId.$": "$.data.virtualParticipantId",
+              "accessToken.$": "$.data.accessToken",
+              "idToken.$": "$.data.idToken",
+              "rereshToken.$": "$.data.rereshToken"}}}
+            - !Sub >-
+              "Target": {"Arn": "${Cluster.Arn}",
+              "RoleArn": "${TargetECSRole.Arn}",
+              "EcsParameters": {"EnableECSManagedTags": false,
+              "EnableExecuteCommand": false, "LaunchType": "${VPLaunchType}",
+              "NetworkConfiguration": {"AwsvpcConfiguration":
+              {"AssignPublicIp": "DISABLED",
+              "SecurityGroups": ["${VPSecurityGroupId}"],
+              "Subnets": ["${PrivateSubnet1}", "${PrivateSubnet2}"]}},
+              "TaskCount": 1, "TaskDefinitionArn": "${TaskDefinition}"},
+              "Input": {"containerOverrides": [{"name": "scribe",
+              "environment": [{"name": "MEETING_PLATFORM",
+              "value.$": "$.data.meetingPlatform"},
+              {"name": "MEETING_ID", "value.$": "$.data.meetingID"},
+              {"name": "MEETING_PASSWORD", "value.$": "$.data.meetingPassword"},
+              {"name": "MEETING_NAME", "value.$": "$.data.meetingName"},
+              {"Name": "LMA_USER", "Value.$": "$.data.userName"}]}]}}
+          # Only invoked under MICROVM. A placeholder ARN keeps the definition
+          # parseable for ECS deployments, where the launcher is not created.
+          MicrovmLauncherFunctionArn: !If
+            - UseMicrovmLaunchType
+            - !GetAtt VPMicrovmLauncherFunction.Arn
+            - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:unused-microvm-launcher"
 
   UpdateLMASettingsWithStateMachine:
     Type: AWS::CloudFormation::CustomResource
