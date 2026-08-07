@@ -543,3 +543,21 @@ def test_base_image_version_is_a_bare_major_version(template: dict) -> None:
     assert re.fullmatch(r"\d+", str(version)), (
         f"BaseImageVersion must be a bare major version, got {version!r}"
     )
+
+
+def test_getatt_references_to_microvm_image_use_real_attributes(raw: str) -> None:
+    """Every !GetAtt on VPMicrovmImage must name a real read-only attribute.
+
+    CloudFormation rejects an unknown one at CREATE time ("Requested attribute
+    Arn does not exist in schema for AWS::Lambda::MicrovmImage") — after the
+    image has already been built, so the failed deploy is an expensive one. The
+    attribute here is ImageArn, not the conventional Arn.
+    """
+    schema = json.loads(SCHEMA_PATH.read_text())
+    valid = {p.split("/")[-1] for p in schema.get("readOnlyProperties", [])}
+    used = set(re.findall(r"!GetAtt\s+VPMicrovmImage\.([A-Za-z0-9]+)", raw))
+    assert used, "expected at least one !GetAtt on VPMicrovmImage"
+    invalid = used - valid
+    assert not invalid, (
+        f"invalid VPMicrovmImage attributes {sorted(invalid)}; valid: {sorted(valid)}"
+    )

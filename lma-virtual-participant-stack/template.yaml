@@ -2069,7 +2069,7 @@ Resources:
       Role: !GetAtt VPMicrovmLauncherRole.Arn
       Environment:
         Variables:
-          MICROVM_IMAGE_ARN: !GetAtt VPMicrovmImage.Arn
+          MICROVM_IMAGE_ARN: !GetAtt VPMicrovmImage.ImageArn
           EXECUTION_ROLE_ARN: !GetAtt VPMicrovmExecutionRole.Arn
           VP_TABLE_NAME: !Ref VirtualParticipantTableName
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
