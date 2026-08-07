@@ -2632,6 +2632,10 @@ Resources:
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
+        # Same source, packaged with the Dockerfile at the zip ROOT, which is
+        # what CreateMicrovmImage requires (codeArtifact takes only a URI, so a
+        # subdirectory cannot be pointed at). Only used when VPLaunchType=MICROVM.
+        MicrovmSourceCodeLocation: <VIRTUAL_PARTICIPANT_MICROVM_SRC_S3_LOCATION_TOKEN>
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn

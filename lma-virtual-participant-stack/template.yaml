@@ -129,6 +129,15 @@ Parameters:
     Type: String
     Description: S3 location of the browser extension source code zipfile
 
+  MicrovmSourceCodeLocation:
+    Type: String
+    Default: ""
+    Description: >-
+      S3 location of the VP source packaged with the Dockerfile at the ZIP ROOT,
+      as CreateMicrovmImage requires (its codeArtifact takes a bare URI, so it
+      cannot be pointed at a subdirectory of the main source zip). Only used when
+      VPLaunchType=MICROVM.
+
   # transcibe parameters
 
   EnableAudioRecording:
@@ -674,6 +683,17 @@ Resources:
                 # the 1-hour custom-resource timeout with no diagnostic.
                 on-failure: CONTINUE
                 commands:
+                  # Under VPLaunchType=MICROVM the image is built by
+                  # CreateMicrovmImage from the S3 source zip, not by this
+                  # project: there is no ECR image, no SOCI index and no ECS
+                  # service to redeploy. Skip straight to reporting success so
+                  # the custom resource completes.
+                  - |
+                    if [ "$VP_LAUNCH_TYPE" = "MICROVM" ]; then
+                      echo "MICROVM launch type: skipping ECR/SOCI container build."
+                      echo "The MicroVM image is built by Lambda from the S3 source artifact."
+                      exit 0
+                    fi
                   - echo Logging in to Amazon ECR...
                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
                   - echo Installing SOCI CLI for image optimization...
@@ -686,6 +706,12 @@ Resources:
               build:
                 on-failure: CONTINUE
                 commands:
+                  # MICROVM: nothing to build here (see pre_build).
+                  - |
+                    if [ "$VP_LAUNCH_TYPE" = "MICROVM" ]; then
+                      echo "MICROVM launch type: no container build required."
+                      exit 0
+                    fi
                   - echo Build started on `date`
                   - echo `pwd`
                   - echo `ls -altr`
@@ -709,6 +735,14 @@ Resources:
                     if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then
                       echo "Earlier phase failed — skipping SOCI index and ECS deploy."
                       exit 1
+                    fi
+                  # MICROVM: no ECR image to index and no ECS service to
+                  # redeploy. Fall through to the `finally` block below, which
+                  # is what posts SUCCESS to CloudFormation.
+                  - |
+                    if [ "$VP_LAUNCH_TYPE" = "MICROVM" ]; then
+                      echo "MICROVM launch type: skipping SOCI index and ECS deploy."
+                      exit 0
                     fi
                   - echo Generating SOCI index for faster startup...
                   - soci create ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
@@ -797,6 +831,10 @@ Resources:
             Value: !Sub "${SourceCodeLocation}"
           - Name: CONTAINERD_ADDRESS
             Value: "/var/run/docker/containerd/containerd.sock"
+          # Read by the buildspec to skip the ECR/SOCI/ECS pipeline entirely
+          # under MICROVM, where Lambda builds the image from the S3 artifact.
+          - Name: VP_LAUNCH_TYPE
+            Value: !Ref VPLaunchType
       ServiceRole: !GetAtt BuildRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
@@ -1771,7 +1809,7 @@ Resources:
                 Action:
                   - s3:GetObject
                   - s3:GetObjectVersion
-                Resource: !Sub "arn:${AWS::Partition}:s3:::${SourceCodeLocation}"
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${MicrovmSourceCodeLocation}"
               - Effect: Allow
                 Action:
                   - logs:CreateLogGroup
@@ -1867,7 +1905,7 @@ Resources:
       BaseImageArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:microvm-image:al2023-1"
       BuildRoleArn: !GetAtt VPMicrovmBuildRole.Arn
       CodeArtifact:
-        Uri: !Sub "s3://${SourceCodeLocation}"
+        Uri: !Sub "s3://${MicrovmSourceCodeLocation}"
       Resources:
         # Observed peak is ~1650 MB for Chromium + Simli + Nova Sonic; 4 GB
         # leaves room for Xvfb, PulseAudio and the ffmpeg video mux. MicroVMs

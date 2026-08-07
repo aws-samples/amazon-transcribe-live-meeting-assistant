@@ -362,3 +362,50 @@ def test_launcher_can_pass_only_the_execution_role(template: dict) -> None:
     assert pass_role[0]["Condition"]["StringEquals"]["iam:PassedToService"] == (
         "lambda.amazonaws.com"
     )
+
+
+def test_microvm_image_uses_the_root_dockerfile_artifact(template: dict) -> None:
+    """CreateMicrovmImage needs the Dockerfile at the ZIP ROOT.
+
+    The main VP source zip is rooted at the stack directory, so its Dockerfile
+    lands at `backend/Dockerfile`, and codeArtifact accepts only a bare URI —
+    there is no way to point it at a subdirectory. The publish step therefore
+    produces a second artifact rooted at backend/, and the image must reference
+    THAT one.
+    """
+    props = template["Resources"]["VPMicrovmImage"]["Properties"]
+    uri = json.dumps(props["CodeArtifact"]["Uri"])
+    assert "MicrovmSourceCodeLocation" in uri
+    assert "SourceCodeLocation}" not in uri.replace("MicrovmSourceCodeLocation}", "")
+
+
+def test_microvm_source_location_parameter_exists(template: dict) -> None:
+    param = template["Parameters"]["MicrovmSourceCodeLocation"]
+    # Defaults to empty so ECS deployments need not supply it.
+    assert param.get("Default") == ""
+
+
+def test_build_role_reads_the_microvm_artifact(template: dict) -> None:
+    role = template["Resources"]["VPMicrovmBuildRole"]
+    text = json.dumps(role)
+    assert "MicrovmSourceCodeLocation" in text
+
+
+def test_codebuild_skips_container_pipeline_under_microvm(raw: str) -> None:
+    """Under MICROVM there is no ECR image, SOCI index, or ECS service.
+
+    All three buildspec phases must short-circuit, and VP_LAUNCH_TYPE must
+    actually reach the build environment or the guards never fire.
+    """
+    assert raw.count('if [ "$VP_LAUNCH_TYPE" = "MICROVM" ]') >= 3, (
+        "expected guards in pre_build, build and post_build"
+    )
+    assert "- Name: VP_LAUNCH_TYPE" in raw, (
+        "VP_LAUNCH_TYPE must be passed to the CodeBuild environment"
+    )
+
+
+def test_microvm_image_sets_launch_type_env(template: dict) -> None:
+    """The container dispatches to the supervisor on this variable."""
+    props = template["Resources"]["VPMicrovmImage"]["Properties"]
+    assert props["EnvironmentVariables"]["VP_LAUNCH_TYPE"] == "MICROVM"

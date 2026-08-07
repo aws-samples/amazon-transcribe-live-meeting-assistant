@@ -49,7 +49,7 @@ fi
 # Run the supervisor as the entrypoint, the way the MicroVM image config does.
 # No AWS env is supplied: the point is to prove the launch mechanics work, and
 # the app is expected to fail later for lack of AWS config (asserted below).
-info "Starting container with the supervisor entrypoint"
+info "Starting container (real entrypoint; VP_LAUNCH_TYPE=MICROVM dispatches to the supervisor)"
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 docker run -d --name "$CONTAINER" \
   -e VP_LAUNCH_TYPE=MICROVM \
@@ -57,7 +57,7 @@ docker run -d --name "$CONTAINER" \
   -e MICROVM_ENDPOINT=probe.lambda-microvm.us-west-2.on.aws \
   -e AWS_REGION=us-west-2 \
   -p 19000:9000 \
-  --entrypoint node "$IMAGE" /srv/dist/microvm-supervisor.js >/dev/null || {
+  "$IMAGE" >/dev/null || {
     echo "docker run failed"; exit 1; }
 
 hook() { # $1 = hook name -> prints "HTTP_CODE BODY"

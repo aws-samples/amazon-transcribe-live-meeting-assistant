@@ -4407,6 +4407,227 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/addChatToken.js
 
+  ##########################################################################
+  # MicroVM VNC auth tokens
+  #
+  # When a Virtual Participant runs on Lambda MicroVMs (VPLaunchType=MICROVM)
+  # there is no ALB in front of noVNC — the browser connects straight to the
+  # MicroVM's own HTTPS endpoint, which requires a port-scoped JWE auth token.
+  #
+  # Minting needs IAM credentials (lambda:CreateMicrovmAuthToken), so it happens
+  # here rather than in the browser. Tokens are capped at 60 minutes by the
+  # service while meetings can run to 8 hours, so the viewer mints one per
+  # session (and again on reconnect) instead of receiving one at VP launch.
+  #
+  # Created unconditionally: this stack does not receive VPLaunchType, and an
+  # unused Lambda + resolver costs nothing. The mutation simply returns an error
+  # for VPs that are not running on a MicroVM.
+  ##########################################################################
+
+  MicrovmVncTokenFunctionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "CreateMicrovmAuthToken does not support resource-level permissions"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: 'lambda-microvms does not support resource-level permissions for CreateMicrovmAuthToken'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: MintMicrovmAuthToken
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:CreateMicrovmAuthToken
+                Resource: "*"
+              - Effect: Allow
+                # Look up the caller's VP to (a) find its microvmId and (b) verify
+                # ownership before handing out a token.
+                Action:
+                  - dynamodb:GetItem
+                Resource:
+                  - !GetAtt VPTaskRegistry.Arn
+                  - !GetAtt VirtualParticipantTable.Arn
+
+  MicrovmVncTokenFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function only calls AWS public APIs; no VPC resources"
+          - id: W92
+            reason: "Reserved concurrency not required; invoked once per viewer session"
+    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only table names"
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 15
+      MemorySize: 256
+      Role: !GetAtt MicrovmVncTokenFunctionRole.Arn
+      Environment:
+        Variables:
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
+          VP_TABLE_NAME: !Ref VirtualParticipantTable
+      Code:
+        ZipFile: |
+          """Mint a short-lived MicroVM auth token for a VP's noVNC port.
+
+          Authorization: the caller must own (or have been shared) the VP. The
+          VP id alone is not sufficient — it appears in URLs and logs, so
+          treating it as a bearer token would let any authenticated user view
+          any meeting.
+          """
+          import logging
+          import os
+
+          import boto3
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          microvms = boto3.client("lambda-microvms")
+          dynamodb = boto3.client("dynamodb")
+
+          # websockify serves noVNC here inside the container. Scope the token to
+          # this single port so it cannot be used to reach anything else in the VM
+          # (the app's own hook port 9000, for instance).
+          NOVNC_PORT = 5901
+          TOKEN_TTL_MINUTES = 60
+
+
+          def lambda_handler(event, context):
+              args = event.get("arguments", {}) or {}
+              vp_id = args.get("vpId")
+              identity = event.get("identity", {}) or {}
+              claims = identity.get("claims", {}) or {}
+              caller = claims.get("email") or claims.get("cognito:username") or ""
+
+              if not vp_id:
+                  raise Exception("vpId is required")
+              if not caller:
+                  raise Exception("Unauthenticated")
+
+              vp = dynamodb.get_item(
+                  TableName=os.environ["VP_TABLE_NAME"],
+                  Key={"id": {"S": vp_id}},
+              ).get("Item")
+              if not vp:
+                  raise Exception(f"Virtual Participant {vp_id} not found")
+
+              owner = vp.get("owner", {}).get("S", "")
+              shared = [v.get("S", "") for v in vp.get("sharedWith", {}).get("L", [])]
+              if caller != owner and caller not in shared:
+                  logger.warning("Caller %s is not authorized for VP %s", caller, vp_id)
+                  raise Exception("Not authorized for this Virtual Participant")
+
+              registry = dynamodb.get_item(
+                  TableName=os.environ["VP_TASK_REGISTRY_TABLE_NAME"],
+                  Key={"vpId": {"S": vp_id}},
+              ).get("Item")
+              microvm_id = (registry or {}).get("microvmId", {}).get("S", "")
+              if not microvm_id:
+                  # Either the VP is on ECS (where the ALB transport is used and no
+                  # token is needed) or it has not started yet.
+                  raise Exception(
+                      f"No MicroVM is registered for {vp_id}; it may be starting, "
+                      "or running on an ECS launch type"
+                  )
+
+              response = microvms.create_microvm_auth_token(
+                  microvmIdentifier=microvm_id,
+                  expirationInMinutes=TOKEN_TTL_MINUTES,
+                  allowedPorts=[{"port": NOVNC_PORT}],
+              )
+              token = response["authToken"]["X-aws-proxy-auth"]
+              expires_at = response.get("expiresAt")
+              logger.info("Minted VNC token for VP %s (microvm %s)", vp_id, microvm_id)
+              return {
+                  "authToken": token,
+                  "expiresAt": expires_at.isoformat().replace("+00:00", "Z")
+                  if hasattr(expires_at, "isoformat")
+                  else str(expires_at),
+              }
+
+  MicrovmVncTokenDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt MicrovmVncTokenFunction.Arn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  MicrovmVncTokenDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MicrovmVncTokenManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt MicrovmVncTokenDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MicrovmVncTokenFunction.Arn
+
+  CreateMicrovmVncTokenResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createMicrovmVncToken
+      DataSourceName: !GetAtt MicrovmVncTokenDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "createMicrovmVncToken"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($context.error)
+          $utils.error($context.error.message, $context.error.type)
+        #end
+        $utils.toJson($context.result)
+
   ToggleVNCPreviewResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -7269,12 +7490,17 @@ Resources:
             #     are intentionally omitted -- they are already covered by *.amazonaws.com.
             #     registry.modelcontextprotocol.io is allowed so the MCP Servers UI can
             #     browse/install servers from the official MCP registry.
+            #     wss://*.lambda-microvm.<region>.on.aws is the per-MicroVM noVNC
+            #     endpoint used when VPLaunchType=MICROVM (there is no ALB/CloudFront
+            #     in that path). Region-scoped rather than *.on.aws to keep the
+            #     allowlist tight. A missing entry here fails SILENTLY with no
+            #     backend logs, which is painful to diagnose.
             #   - script-src/style-src: 'unsafe-inline' and 'unsafe-eval' retained
             #     for React SPA compatibility.
             #   - object-src: 'none' (no plugins needed).
             #   - base-uri: 'none' (prevent base tag injection).
             #   - frame-ancestors: 'self' (prevent clickjacking).
-            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com https://registry.modelcontextprotocol.io wss://*.amazonaws.com wss://*.cloudfront.net ws://localhost:*;"
+            ContentSecurityPolicy: !Sub "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com https://registry.modelcontextprotocol.io wss://*.amazonaws.com wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws ws://localhost:*;"
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000
