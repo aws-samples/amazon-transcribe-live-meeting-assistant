@@ -399,7 +399,10 @@ def test_launcher_payload_limit_matches_container(launcher: str) -> None:
     ts = (TEMPLATE.parent / "backend" / "src" / "launch-mode.ts").read_text()
     ts_limit = int(re.search(r"RUN_HOOK_PAYLOAD_MAX_BYTES = (\d+)", ts).group(1))
     py_limit = int(re.search(r"RUN_HOOK_PAYLOAD_MAX_BYTES = (\d+)", launcher).group(1))
-    assert ts_limit == py_limit == 16384
+    # 4096, not the 16384 the developer guide states: the service model says
+    # {"max": 4096} and a live launch failed at that boundary. Both sides must
+    # agree, or one silently builds a payload the service rejects.
+    assert ts_limit == py_limit == 4096
 
 
 def test_launcher_disables_auto_suspend(launcher: str) -> None:
@@ -680,3 +683,40 @@ def test_launcher_attaches_an_ingress_connector(launcher: str) -> None:
     assert "ingressNetworkConnectors=" in launcher
     assert "ALL_INGRESS" in launcher
     assert "INTERNET_EGRESS" in launcher
+
+
+def test_both_microvm_roles_can_decrypt_the_dynamodb_key(template: dict) -> None:
+    """Registry access needs KMS as well as DynamoDB.
+
+    Both tables use the customer-managed key. The launcher stages the VP's
+    configuration there and the container reads it back (the runHookPayload limit
+    is 4096, too small for the real config), so a missing grant means the VP
+    starts with no configuration at all.
+    """
+    for role_name in ("VPMicrovmExecutionRole", "VPMicrovmLauncherRole"):
+        text = json.dumps(template["Resources"][role_name])
+        assert "kms:Decrypt" in text, f"{role_name} needs kms:Decrypt"
+        assert "CustomerManagedEncryptionKeyArn" in text, (
+            f"{role_name} must scope KMS to the stack's key"
+        )
+
+
+def test_run_hook_payload_carries_only_a_pointer(launcher: str) -> None:
+    """The service enforces 4096 bytes, not the documented 16 KB.
+
+    Three Cognito JWTs alone are ~3.6 KB, so the launcher must stage the full
+    config in the registry and send only the vpId. Sending it inline fails with
+    "Member must have length less than or equal to 4096".
+    """
+    assert "_write_config_to_registry" in launcher
+    # The payload built for RunMicrovm must contain nothing but the id.
+    payload_line = [
+        line
+        for line in launcher.splitlines()
+        if "run_hook_payload = json.dumps" in line
+    ]
+    assert payload_line, "could not find the runHookPayload construction"
+    assert "VIRTUAL_PARTICIPANT_ID" in payload_line[0]
+    assert "payload_config" not in payload_line[0], (
+        "the full config must not be sent inline; it exceeds the 4096-byte limit"
+    )

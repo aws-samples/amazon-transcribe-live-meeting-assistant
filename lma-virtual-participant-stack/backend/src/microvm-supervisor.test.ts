@@ -31,11 +31,20 @@ interface Harness {
     spawned: Array<Record<string, string | undefined>>;
     child: ChildProcess & { killed: boolean; signals: string[] };
     bootCalls: () => number;
+    fetchCalls: string[];
 }
 
-function harness(opts: { boot?: boolean; healthy?: boolean | boolean[] } = {}): Harness {
+function harness(
+    opts: {
+        boot?: boolean;
+        healthy?: boolean | boolean[];
+        staged?: Record<string, string>;
+        fetchThrows?: boolean;
+    } = {},
+): Harness {
     const logs: string[] = [];
     const spawned: Array<Record<string, string | undefined>> = [];
+    const fetchCalls: string[] = [];
     const env: Record<string, string | undefined> = {};
     const child = fakeChild();
     let bootCalls = 0;
@@ -54,9 +63,22 @@ function harness(opts: { boot?: boolean; healthy?: boolean | boolean[] } = {}): 
             spawned.push({ ...e });
             return child;
         },
+        fetchConfig: async (vpId) => {
+            fetchCalls.push(vpId);
+            if (opts.fetchThrows) throw new Error('registry unavailable');
+            return opts.staged ?? {};
+        },
         log: (m) => logs.push(m),
     };
-    return { sup: new Supervisor(deps, env), env, logs, spawned, child, bootCalls: () => bootCalls };
+    return {
+        sup: new Supervisor(deps, env),
+        env,
+        logs,
+        spawned,
+        child,
+        bootCalls: () => bootCalls,
+        fetchCalls,
+    };
 }
 
 test('hookNameFromPath extracts hook names from the runtime prefix', () => {
@@ -198,4 +220,64 @@ test('image-level env wins over the run payload', async () => {
     h.env.MEETING_ID = 'baked-in';
     await h.sup.onRun(JSON.stringify({ runHookPayload: '{"MEETING_ID":"from-hook"}' }));
     assert.equal(h.env.MEETING_ID, 'baked-in');
+});
+
+test('/run fetches staged config from the registry using the vpId pointer', async () => {
+    // The service enforces a 4096-byte runHookPayload (the developer guide's
+    // 16 KB is wrong), and three Cognito JWTs alone are ~3.6 KB — so the payload
+    // carries only the vpId and the real config comes from the registry.
+    const h = harness({
+        staged: {
+            GRAPHQL_ENDPOINT: 'https://gql.example.com/graphql',
+            RECORDINGS_BUCKET_NAME: 'bucket',
+            MEETING_ID: 'from-registry',
+        },
+    });
+    await h.sup.onRun(
+        JSON.stringify({
+            microvmId: 'mvm-1',
+            runHookPayload: JSON.stringify({ VIRTUAL_PARTICIPANT_ID: 'vp-42' }),
+        }),
+    );
+    assert.deepEqual(h.fetchCalls, ['vp-42']);
+    assert.equal(h.env.GRAPHQL_ENDPOINT, 'https://gql.example.com/graphql');
+    assert.equal(h.env.RECORDINGS_BUCKET_NAME, 'bucket');
+    assert.equal(h.env.MEETING_ID, 'from-registry');
+    assert.equal(h.spawned.length, 1);
+});
+
+test('/run lets inline payload values win over the registry', async () => {
+    // Keeps a future larger payload limit working unchanged: anything sent
+    // inline overrides the staged copy.
+    const h = harness({ staged: { MEETING_ID: 'stale', MEETING_NAME: 'from-registry' } });
+    await h.sup.onRun(
+        JSON.stringify({
+            runHookPayload: JSON.stringify({
+                VIRTUAL_PARTICIPANT_ID: 'vp-1',
+                MEETING_ID: 'inline-wins',
+            }),
+        }),
+    );
+    assert.equal(h.env.MEETING_ID, 'inline-wins');
+    assert.equal(h.env.MEETING_NAME, 'from-registry');
+});
+
+test('/run still starts the app when the registry read fails', async () => {
+    // Starting lets the app publish a FAILED status with a legible reason;
+    // refusing to start would leave the UI with no signal at all.
+    const h = harness({ fetchThrows: true });
+    assert.equal(
+        await h.sup.onRun(
+            JSON.stringify({ runHookPayload: JSON.stringify({ VIRTUAL_PARTICIPANT_ID: 'vp-9' }) }),
+        ),
+        200,
+    );
+    assert.equal(h.spawned.length, 1);
+    assert.ok(h.logs.some((l) => l.includes('could not fetch staged config')));
+});
+
+test('/run does not query the registry without a vpId', async () => {
+    const h = harness();
+    await h.sup.onRun(JSON.stringify({ runHookPayload: JSON.stringify({ MEETING_ID: '1' }) }));
+    assert.deepEqual(h.fetchCalls, []);
 });

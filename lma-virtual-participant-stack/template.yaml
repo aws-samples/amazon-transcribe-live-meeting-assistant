@@ -1885,6 +1885,20 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+              # Both tables use the customer-managed key, so DynamoDB access alone
+              # is not enough. The container reads its staged configuration and
+              # MicroVM endpoint from the registry, so without this the VP starts
+              # with no configuration at all.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
               - Effect: Allow
                 # Transcribe streaming does not support resource-level permissions.
                 Action:

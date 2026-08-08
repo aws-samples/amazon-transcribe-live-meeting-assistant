@@ -72,9 +72,10 @@ test('buildRunHookPayload omits empty values so app-side defaults still apply', 
 });
 
 test('buildRunHookPayload throws rather than truncating an oversized payload', () => {
-    // Three real Cognito JWTs are the realistic worst case; simulate with
-    // values that together exceed the 16 KB service limit.
-    const big = 'x'.repeat(7000);
+    // The service enforces 4096 (not the documented 16 KB), so three real
+    // Cognito JWTs already overflow it — which is why the launcher stages config
+    // in the registry and sends only a vpId pointer.
+    const big = 'x'.repeat(2000);
     assert.throws(
         () =>
             buildRunHookPayload({
@@ -82,15 +83,23 @@ test('buildRunHookPayload throws rather than truncating an oversized payload', (
                 USER_ID_TOKEN: big,
                 USER_REFRESH_TOKEN: big,
             }),
-        /exceeding the 16384-byte limit/,
+        /exceeding the 4096-byte limit/,
     );
 });
 
-test('buildRunHookPayload accepts a realistic three-JWT payload', () => {
-    // Guards the "will 3 JWTs fit?" question with a concrete number: Cognito
-    // access/id tokens run ~1-1.5 KB, refresh tokens ~1-2 KB.
-    const jwt = 'h.'.padEnd(1500, 'p') + '.s';
-    const payload = buildRunHookPayload({
+test('a vpId-pointer payload fits comfortably inside the 4096-byte limit', () => {
+    // This is what the launcher actually sends. The full config is staged in the
+    // VP task registry instead (see RUN_HOOK_PAYLOAD_MAX_BYTES).
+    const pointer = buildRunHookPayload({ VIRTUAL_PARTICIPANT_ID: 'vp-abc-123' });
+    assert.ok(Buffer.byteLength(pointer, 'utf8') < 100);
+});
+
+test('three real JWTs would NOT fit inline, which is why config is staged', () => {
+    // Real Cognito access/id tokens run ~1.2-1.5 KB each and refresh tokens can
+    // exceed 2 KB, so a realistic set overflows the 4096-byte service limit —
+    // measured at 4086 bytes with 1.2 KB tokens, i.e. 10 bytes of headroom.
+    const jwt = 'h.'.padEnd(1400, 'p') + '.s';
+    const full = {
         VIRTUAL_PARTICIPANT_ID: 'vp-abc',
         MEETING_PLATFORM: 'Zoom',
         MEETING_ID: '999 888 7777',
@@ -104,8 +113,8 @@ test('buildRunHookPayload accepts a realistic three-JWT payload', () => {
         USER_REFRESH_TOKEN: jwt,
         ZOOM_CREDENTIALS_SECRET_NAME: 'LMA-Stack/zoom-credentials/abc',
         ENABLE_VIDEO_RECORDING: 'true',
-    });
-    assert.ok(Buffer.byteLength(payload, 'utf8') < RUN_HOOK_PAYLOAD_MAX_BYTES);
+    };
+    assert.throws(() => buildRunHookPayload(full), /exceeding the 4096-byte limit/);
 });
 
 test('parseRunHookPayload is tolerant of malformed input', () => {

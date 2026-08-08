@@ -63,8 +63,19 @@ SECRET_KEYS = {
     "MEETING_PASSWORD",
 }
 
-# Matches RUN_HOOK_PAYLOAD_MAX_BYTES in src/launch-mode.ts.
-RUN_HOOK_PAYLOAD_MAX_BYTES = 16384
+# The AWS developer guide says runHookPayload allows 16 KB, but the SERVICE
+# enforces 4096 (see RunMicrovmRequestRunHookPayloadString in the
+# lambda-microvms service model: {"max": 4096}). A live launch failed with
+# "Value at 'runHookPayload' failed to satisfy constraint: Member must have
+# length less than or equal to 4096".
+#
+# 4096 is not enough: three Cognito JWTs alone are ~3.6 KB, so the per-meeting
+# values alone measured 4086 bytes with no room for the ~3.7 KB of static stack
+# config. So the payload carries only a POINTER — the vpId — and the container
+# reads the full configuration from the VP task registry, which the launcher
+# writes first. The registry is KMS-encrypted and TTL'd, and the container
+# already reads it for the MicroVM endpoint.
+RUN_HOOK_PAYLOAD_MAX_BYTES = 4096
 
 # Static, per-stack configuration (GraphQL endpoint, S3 buckets, Transcribe
 # settings, voice-assistant config, ...) that the ECS task definition supplies as
@@ -156,6 +167,30 @@ def _extract(payload):
     return config
 
 
+def _write_config_to_registry(vp_id: str, config: dict) -> bool:
+    """Stage the VP's full configuration in the task registry.
+
+    Written BEFORE RunMicrovm so it is present when the container's /run hook
+    fires. The registry table is KMS-encrypted and TTL'd, which matters because
+    the config includes three Cognito JWTs and the meeting password.
+    """
+    try:
+        dynamodb.update_item(
+            TableName=os.environ["VP_TASK_REGISTRY_TABLE_NAME"],
+            Key={"vpId": {"S": vp_id}},
+            UpdateExpression="SET vpConfig = :c, configStagedAt = :t, expiresAt = :x",
+            ExpressionAttributeValues={
+                ":c": {"S": json.dumps(config)},
+                ":t": {"S": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
+                ":x": {"N": str(int(time.time()) + MAX_DURATION_SECONDS + 3600)},
+            },
+        )
+        logger.info("Staged %d config values for VP %s", len(config), vp_id)
+        return True
+    except Exception:  # noqa: BLE001 - reported to the UI by the caller
+        logger.exception("Could not stage VP config in the registry")
+        return False
+
 def lambda_handler(event, context):
     logger.info("MicroVM launcher invoked")
     config = _extract(event if isinstance(event, dict) else {})
@@ -168,12 +203,16 @@ def lambda_handler(event, context):
 
     # Static stack config first so per-meeting values win on any collision.
     payload_config = {**_static_config(), **config}
-    run_hook_payload = json.dumps(payload_config)
+
+    # Stash the full configuration in the registry BEFORE starting the MicroVM,
+    # so it is already there when the container's /run hook fires and reads it.
+    if not _write_config_to_registry(vp_id, payload_config):
+        return {"ok": False, "reason": "could not stage VP config in the registry"}
+
+    # The payload itself carries only a pointer (see RUN_HOOK_PAYLOAD_MAX_BYTES).
+    run_hook_payload = json.dumps({"VIRTUAL_PARTICIPANT_ID": vp_id})
     size = len(run_hook_payload.encode("utf-8"))
     if size > RUN_HOOK_PAYLOAD_MAX_BYTES:
-        # Refuse rather than let the service truncate: the payload
-        # carries auth tokens, and a silently-truncated one fails much
-        # later as a confusing in-meeting auth error.
         return {
             "ok": False,
             "reason": (

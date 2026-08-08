@@ -93,12 +93,20 @@ export function isAllowedConfigKey(key: string): boolean {
 }
 
 /**
- * Hard limit on `runHookPayload` (RunMicrovm). AWS documents 16 KB / 16,384
- * bytes. We refuse to build a payload larger than this rather than let the
- * service truncate it -- silently losing, say, USER_REFRESH_TOKEN would surface
- * much later as a confusing auth failure inside the meeting.
+ * Hard limit on `runHookPayload` (RunMicrovm).
+ *
+ * The AWS developer guide says 16 KB; the SERVICE enforces 4096. The service
+ * model is authoritative (`RunMicrovmRequestRunHookPayloadString: {max: 4096}`),
+ * and a live launch failed with "Value at 'runHookPayload' failed to satisfy
+ * constraint: Member must have length less than or equal to 4096".
+ *
+ * 4096 is too small for the real payload: three Cognito JWTs alone are ~3.6 KB,
+ * so the per-meeting values measured 4086 bytes with nothing left for the ~3.7 KB
+ * of static stack config. The launcher therefore stages the full configuration in
+ * the VP task registry and the payload carries only the vpId; the supervisor
+ * reads the rest back (see SupervisorDeps.fetchConfig).
  */
-export const RUN_HOOK_PAYLOAD_MAX_BYTES = 16384;
+export const RUN_HOOK_PAYLOAD_MAX_BYTES = 4096;
 
 /**
  * Resolve the launch type. Defaults to FARGATE to match the pre-existing

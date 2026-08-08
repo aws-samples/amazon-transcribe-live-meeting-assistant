@@ -52,6 +52,15 @@ export interface SupervisorDeps {
     stackHealthy: () => Promise<boolean>;
     /** Spawn the VP application with the given environment. */
     spawnApp: (env: Record<string, string | undefined>) => ChildProcess;
+    /**
+     * Fetch this VP's staged configuration from the task registry.
+     *
+     * The /run payload carries only a vpId pointer, because the service enforces
+     * a 4096-byte runHookPayload (the developer guide's 16 KB figure is wrong)
+     * and three Cognito JWTs alone are ~3.6 KB. The launcher stages the full
+     * config in the registry before starting the MicroVM.
+     */
+    fetchConfig: (vpId: string) => Promise<PerMeetingConfig>;
     log: (msg: string) => void;
 }
 
@@ -125,7 +134,21 @@ export class Supervisor {
         }
         this.state.microvmId = parsedId;
 
-        const config: PerMeetingConfig = parseRunHookPayload(body);
+        let config: PerMeetingConfig = parseRunHookPayload(body);
+
+        // The payload is only a pointer; the real configuration is staged in the
+        // registry (see fetchConfig). Values already in the payload still win,
+        // so a future larger limit could carry them inline again unchanged.
+        const vpId = config.VIRTUAL_PARTICIPANT_ID;
+        if (vpId) {
+            try {
+                const staged = await this.deps.fetchConfig(vpId);
+                config = { ...staged, ...config };
+            } catch (err) {
+                this.deps.log(`[run] WARNING: could not fetch staged config: ${String(err)}`);
+            }
+        }
+
         const applied = applyPerMeetingConfig(this.env, config);
         this.deps.log(
             `[run] microvmId=${parsedId ?? 'unknown'} applied=${applied.join(',') || '(none)'} ` +
@@ -200,6 +223,40 @@ export function hookNameFromPath(path: string | undefined): string | undefined {
 
 /* c8 ignore start - process wiring, exercised by the container e2e test */
 
+/**
+ * Read the VP's staged configuration from the task registry.
+ *
+ * Retried because the container can reach /run before the launcher's write is
+ * visible. Uses the AWS SDK already bundled in the image.
+ */
+async function defaultFetchConfig(vpId: string): Promise<PerMeetingConfig> {
+    const tableName = process.env.VP_TASK_REGISTRY_TABLE_NAME;
+    if (!tableName) {
+        console.log('[supervisor] VP_TASK_REGISTRY_TABLE_NAME not set; no staged config');
+        return {};
+    }
+    const { DynamoDBClient, GetItemCommand } = await import('@aws-sdk/client-dynamodb');
+    const client = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' });
+    for (let attempt = 1; attempt <= 10; attempt += 1) {
+        try {
+            const result = await client.send(
+                new GetItemCommand({ TableName: tableName, Key: { vpId: { S: vpId } } }),
+            );
+            const raw = result.Item?.vpConfig?.S;
+            if (raw) {
+                const parsed = JSON.parse(raw) as Record<string, string>;
+                console.log(`[supervisor] loaded ${Object.keys(parsed).length} staged config values`);
+                return parsed as PerMeetingConfig;
+            }
+        } catch (err) {
+            console.error('[supervisor] error reading staged config:', err);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    console.error('[supervisor] staged config not found after 10 attempts');
+    return {};
+}
+
 function defaultSpawnApp(env: Record<string, string | undefined>): ChildProcess {
     const child = spawn('node', [APP_ENTRY], {
         env: env as NodeJS.ProcessEnv,
@@ -221,6 +278,7 @@ async function main(): Promise<void> {
             bootStack,
             stackHealthy,
             spawnApp: defaultSpawnApp,
+            fetchConfig: defaultFetchConfig,
             log: (m) => console.log(`[supervisor] ${m}`),
         },
         process.env as Record<string, string | undefined>,
