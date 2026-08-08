@@ -1965,9 +1965,19 @@ Resources:
       # restricted set.
       AdditionalOsCapabilities:
         - ALL
+      # BOOTSTRAP values only. Everything else is staged per launch in the VP task
+      # registry (runHookPayload caps at 4096 bytes — see the launcher), but the
+      # container needs these three to find that config in the first place:
+      # without the table name it cannot read the registry, which is where the
+      # table name would otherwise live. Keeping the set this small also means a
+      # stack parameter change does not force an image rebuild.
       EnvironmentVariables:
         - Key: VP_LAUNCH_TYPE
           Value: MICROVM
+        - Key: AWS_REGION
+          Value: !Ref AWS::Region
+        - Key: VP_TASK_REGISTRY_TABLE_NAME
+          Value: !Ref VPTaskRegistryTableName
       Hooks:
         Port: 9000
         MicrovmImageHooks:

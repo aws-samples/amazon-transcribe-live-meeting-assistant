@@ -720,3 +720,27 @@ def test_run_hook_payload_carries_only_a_pointer(launcher: str) -> None:
     assert "payload_config" not in payload_line[0], (
         "the full config must not be sent inline; it exceeds the 4096-byte limit"
     )
+
+
+def test_image_carries_the_bootstrap_env_vars(template: dict) -> None:
+    """The container needs enough env to FIND its staged config.
+
+    Config is staged in the VP task registry (runHookPayload caps at 4096), but
+    the container cannot read the registry without the table name — and the table
+    name is itself part of that config. A live launch failed exactly this way:
+    "VP_TASK_REGISTRY_TABLE_NAME not set; no staged config", after which the VP
+    ran with defaults (platform Chime, empty meeting id) and never reported
+    status.
+
+    Keep this set MINIMAL: every value here is baked into the image, so adding one
+    means a stack parameter change forces an image rebuild.
+    """
+    env = template["Resources"]["VPMicrovmImage"]["Properties"]["EnvironmentVariables"]
+    keys = {item["Key"] for item in env}
+    required = {"VP_LAUNCH_TYPE", "VP_TASK_REGISTRY_TABLE_NAME", "AWS_REGION"}
+    missing = required - keys
+    assert not missing, f"image is missing bootstrap env vars: {sorted(missing)}"
+    # Guard against the image quietly becoming the config channel again.
+    assert len(keys) <= 5, (
+        f"image env should stay minimal (bootstrap only), found {sorted(keys)}"
+    )
