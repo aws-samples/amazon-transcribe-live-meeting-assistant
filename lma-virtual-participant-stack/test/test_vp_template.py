@@ -187,18 +187,12 @@ def _render_definition(
 
     rendered = body.replace("${DispatchStates}", dispatch_frag)
     for name in re.findall(r"\$\{([A-Za-z0-9_.]+)\}", rendered):
-        if name in ("RunTaskDispatch", "DispatchStateName", "ScheduledMeetingTarget"):
+        if name in ("DispatchStateName", "ScheduledMeetingTarget"):
             continue
         rendered = rendered.replace("${" + name + "}", "PLACEHOLDER")
 
     dispatch = "RunMicrovm" if is_microvm else "RunTask"
-    run_task_dispatch = (
-        '"CapacityProviderStrategy": [{ "CapacityProvider": "CP", "Weight": 1 }]'
-        if is_ec2
-        else '"LaunchType": "FARGATE"'
-    )
     rendered = rendered.replace("${DispatchStateName}", dispatch)
-    rendered = rendered.replace("${RunTaskDispatch}", run_task_dispatch)
     rendered = rendered.replace(
         "${ScheduledMeetingTarget}",
         _render_target(variables["ScheduledMeetingTarget"], is_microvm),

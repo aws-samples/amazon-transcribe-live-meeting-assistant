@@ -77,12 +77,6 @@ def render(launch_type: str) -> str:
     rendered = rendered.replace(
         "${DispatchStateName}", "RunMicrovm" if is_microvm else "RunTask"
     )
-    rendered = rendered.replace(
-        "${RunTaskDispatch}",
-        '"CapacityProviderStrategy": [{ "CapacityProvider": "cp", "Weight": 1 }]'
-        if launch_type == "EC2"
-        else '"LaunchType": "FARGATE"',
-    )
     for key, value in SUBSTITUTIONS.items():
         rendered = rendered.replace("${" + key + "}", value)
     rendered = re.sub(r"\$\{[^}]+\}", "placeholder", rendered)

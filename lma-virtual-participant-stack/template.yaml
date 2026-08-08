@@ -2926,10 +2926,6 @@ Resources:
           # Under MICROVM the RunTask state is never entered (see
           # DispatchStateName), but the fragment must still be valid JSON for
           # the state machine definition to parse.
-          RunTaskDispatch: !If
-            - UseEC2LaunchType
-            - !Sub '"CapacityProviderStrategy": [{ "CapacityProvider": "${VPCapacityProvider}", "Weight": 1 }]'
-            - '"LaunchType": "FARGATE"'
           # Which dispatch state MergeZoomSecret hands off to. Both states exist
           # in every deployment (the definition is static); only the entry point
           # differs, which keeps this a one-line switch instead of two variants
@@ -2948,13 +2944,13 @@ Resources:
           # and fail cfn-lint E1019 / CloudFormation validation.
           DispatchStates: !If
             - UseMicrovmLaunchType
-            - |-
+            - !Sub >-
               "RunMicrovm": {
               "Comment": "MICROVM launch type. Step Functions has no optimized integration for lambda-microvms, so this invokes the launcher Lambda, which calls RunMicrovm, waits for RUNNING, and writes the endpoint to the VP registry. Reuses MarkVPFailed for error handling exactly as RunTask does.",
               "Type": "Task",
               "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
               "Parameters": {
-              "FunctionName": "${MicrovmLauncherFunctionArn}",
+              "FunctionName": "${VPMicrovmLauncherFunction.Arn}",
               "Payload.$": "$"
               },
               "Next": "MicrovmLaunched",
@@ -3000,14 +2996,14 @@ Resources:
               "ResultPath": "$.runTaskError",
               "Next": "MarkVPFailed"
               },
-            - |-
+            - !Sub >-
               "RunTask": {
               "Type": "Task",
               "Resource": "arn:${AWS::Partition}:states:::ecs:runTask",
               "Parameters": {
-              "Cluster": "${ClusterArn}",
+              "Cluster": "${Cluster.Arn}",
               "TaskDefinition": "${TaskDefinition}",
-              ${RunTaskDispatch},
+              "LaunchType": "${VPLaunchType}",
               "NetworkConfiguration": {
               "AwsvpcConfiguration": {
               "AssignPublicIp": "DISABLED",
