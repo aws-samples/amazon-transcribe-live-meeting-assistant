@@ -228,3 +228,14 @@ test('PER_MEETING_KEYS covers every value the ECS launchers override', () => {
         );
     }
 });
+
+test('microvmVncEndpoint accepts an already-wss endpoint from the registry', () => {
+    // The launcher writes `wss://<host>` into the VP task registry, and the
+    // container reads it back from there — the endpoint only exists AFTER
+    // RunMicrovm returns, so it cannot travel in the /run payload (which is
+    // sent as part of that same call).
+    assert.equal(
+        microvmVncEndpoint('wss://abc.lambda-microvm.us-west-2.on.aws'),
+        'wss://abc.lambda-microvm.us-west-2.on.aws',
+    );
+});

@@ -493,6 +493,8 @@ class Publisher:
         # Track S3 locations for main template substitution
         vp_src_s3_location = ""
         vp_microvm_src_s3_location = ""
+        vp_launcher_s3_key = ""
+        artifact_bucket = ""
         browser_ext_src_s3_location = ""
         desktop_capture_app_src_s3_location = ""
 
@@ -553,6 +555,9 @@ class Publisher:
                     vp_src_s3_location = result["vp_src_s3_location"]
                 if stack_def.name == "lma-virtual-participant-stack" and result.get("vp_microvm_src_s3_location"):
                     vp_microvm_src_s3_location = result["vp_microvm_src_s3_location"]
+                if stack_def.name == "lma-virtual-participant-stack" and result.get("vp_launcher_s3_key"):
+                    vp_launcher_s3_key = result["vp_launcher_s3_key"]
+                    artifact_bucket = result.get("artifact_bucket", "")
                 if stack_def.name == "lma-browser-extension-stack" and result.get("browser_ext_src_s3_location"):
                     browser_ext_src_s3_location = result["browser_ext_src_s3_location"]
                 if stack_def.name == "lma-desktop-capture-app-stack" and result.get("desktop_capture_app_src_s3_location"):
@@ -599,6 +604,8 @@ class Publisher:
             version=version,
             vp_src_s3_location=vp_src_s3_location,
             vp_microvm_src_s3_location=vp_microvm_src_s3_location,
+            vp_launcher_s3_key=vp_launcher_s3_key,
+            artifact_bucket=artifact_bucket,
             browser_ext_src_s3_location=browser_ext_src_s3_location,
             desktop_capture_app_src_s3_location=desktop_capture_app_src_s3_location,
             tmpdir=tmpdir,
@@ -751,6 +758,27 @@ class Publisher:
             )
             self._s3.upload_file(str(microvm_zip_path), bucket, s3_microvm_key)
 
+        # Third artifact: the MicroVM launcher Lambda deployment package.
+        #
+        # It cannot be inline `Code: ZipFile` — that is a single file capped at
+        # 4 KB, and the handler imports microvm_client.py (which exists because
+        # the Lambda runtime's bundled botocore has no lambda-microvms service
+        # model). The VP stack is plain CloudFormation with no SAM transform, so
+        # CodeUri is not available either; hence an explicit S3 zip.
+        launcher_dir = stack_dir / "lambda_functions" / "microvm_launcher"
+        vp_launcher_s3_key = ""
+        if launcher_dir.is_dir():
+            launcher_zip = tmpdir / f"microvm-launcher-{content_hash}.zip"
+            with zipfile.ZipFile(launcher_zip, "w", zipfile.ZIP_DEFLATED) as zf:
+                for fpath in sorted(launcher_dir.rglob("*")):
+                    if fpath.is_file() and "__pycache__" not in fpath.parts:
+                        zf.write(fpath, fpath.relative_to(launcher_dir))
+            vp_launcher_s3_key = (
+                f"{prefix_and_version}/{stack_def.name}/{launcher_zip.name}"
+            )
+            logger.info("Uploading %s to s3://%s/%s", launcher_zip.name, bucket, vp_launcher_s3_key)
+            self._s3.upload_file(str(launcher_zip), bucket, vp_launcher_s3_key)
+
         # Upload template
         template_path = stack_dir / stack_def.template_file
         s3_template_key = f"{prefix_and_version}/{stack_def.name}/template.yaml"
@@ -763,6 +791,8 @@ class Publisher:
         return {
             "vp_src_s3_location": vp_src_s3_location,
             "vp_microvm_src_s3_location": vp_microvm_src_s3_location,
+            "vp_launcher_s3_key": vp_launcher_s3_key,
+            "artifact_bucket": bucket,
             "s3_template_url": https_url,
             "message": f"Zipped and uploaded ({zip_filename})",
         }
@@ -1019,6 +1049,8 @@ class Publisher:
         version: str,
         vp_src_s3_location: str,
         vp_microvm_src_s3_location: str,
+        vp_launcher_s3_key: str,
+        artifact_bucket: str,
         browser_ext_src_s3_location: str = "",
         desktop_capture_app_src_s3_location: str = "",
         tmpdir: Path = None,
@@ -1040,6 +1072,8 @@ class Publisher:
             "<DESKTOP_CAPTURE_APP_SRC_S3_LOCATION_TOKEN>": desktop_capture_app_src_s3_location,
             "<VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>": vp_src_s3_location,
             "<VIRTUAL_PARTICIPANT_MICROVM_SRC_S3_LOCATION_TOKEN>": vp_microvm_src_s3_location,
+            "<VIRTUAL_PARTICIPANT_LAUNCHER_S3_KEY_TOKEN>": vp_launcher_s3_key,
+            "<ARTIFACT_BUCKET_NAME_TOKEN>": artifact_bucket,
             "<BUILD_DATE_TIME_TOKEN>": build_date_time,
         }
         for token, value in replacements.items():

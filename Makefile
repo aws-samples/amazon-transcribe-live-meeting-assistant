@@ -333,9 +333,9 @@ test-vp: ## Run Virtual Participant backend unit tests (no AWS)
 	cd $(VP_BACKEND_DIR) && npm ci --prefer-offline --no-audit && npm test
 	@echo -e "$(GREEN)✅ Virtual Participant unit tests passed!$(NC)"
 
-test-vp-template: ## Static tests on the VP CloudFormation template (no AWS)
-	@echo "Running Virtual Participant template tests..."
-	$(PYTHON) -m pytest $(VP_DIR)/test/test_vp_template.py -q
+test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
+	@echo "Running Virtual Participant template + MicroVM client tests..."
+	$(PYTHON) -m pytest $(VP_DIR)/test/test_vp_template.py $(VP_DIR)/test/test_microvm_client.py -q
 	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
 
 test-ui-force: ## Run React UI tests (ignore checksum, always run)

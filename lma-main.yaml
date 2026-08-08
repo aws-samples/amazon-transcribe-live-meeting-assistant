@@ -2636,6 +2636,10 @@ Resources:
         # what CreateMicrovmImage requires (codeArtifact takes only a URI, so a
         # subdirectory cannot be pointed at). Only used when VPLaunchType=MICROVM.
         MicrovmSourceCodeLocation: <VIRTUAL_PARTICIPANT_MICROVM_SRC_S3_LOCATION_TOKEN>
+        # Bucket + key for the MicroVM launcher Lambda's deployment package.
+        # Passed separately because Code.S3Bucket needs the bucket alone.
+        ArtifactBucket: <ARTIFACT_BUCKET_NAME_TOKEN>
+        MicrovmLauncherS3Key: <VIRTUAL_PARTICIPANT_LAUNCHER_S3_KEY_TOKEN>
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn

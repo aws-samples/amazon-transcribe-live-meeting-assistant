@@ -1090,6 +1090,43 @@ export class VirtualParticipantStatusManager {
    * Publishes the full VNC WebSocket URL with vpId path for multi-user routing
    * Should only be called AFTER task is registered with ALB and healthy
    */
+  /**
+   * Read this VP's MicroVM endpoint from the task registry.
+   *
+   * Written by the launcher Lambda immediately after RunMicrovm. Retried
+   * briefly because the container can reach this point before the launcher's
+   * write lands.
+   */
+  async getMicrovmEndpointFromRegistry(attempts = 10, delayMs = 1000): Promise<string> {
+    const tableName = process.env.VP_TASK_REGISTRY_TABLE_NAME;
+    if (!tableName) {
+      console.error('VP_TASK_REGISTRY_TABLE_NAME not set - cannot look up MicroVM endpoint');
+      return '';
+    }
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const result = await this.dynamoClient.send(
+          new GetItemCommand({
+            TableName: tableName,
+            Key: { vpId: { S: this.participantId } },
+          }),
+        );
+        const endpoint = result.Item?.vncEndpoint?.S || '';
+        if (endpoint) {
+          console.log(`Resolved MicroVM endpoint from registry: ${endpoint}`);
+          return endpoint;
+        }
+      } catch (error) {
+        console.error('Error reading MicroVM endpoint from registry:', error);
+      }
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    console.error(`MicroVM endpoint not in registry after ${attempts} attempts`);
+    return '';
+  }
+
   async setVncReady(): Promise<boolean> {
     try {
       console.log(`Signaling VNC ready for VP ${this.participantId}`);
@@ -1101,9 +1138,15 @@ export class VirtualParticipantStatusManager {
       // subprotocol.
       let vncEndpoint: string;
       if (isMicrovmLaunch(process.env.VP_LAUNCH_TYPE)) {
-        vncEndpoint = microvmVncEndpoint(process.env.MICROVM_ENDPOINT);
+        // The endpoint only exists AFTER RunMicrovm returns, so it cannot be in
+        // the /run payload (which is sent as part of that same call). The
+        // launcher writes it to the VP task registry instead, and we read it
+        // back here.
+        vncEndpoint = microvmVncEndpoint(
+          process.env.MICROVM_ENDPOINT || (await this.getMicrovmEndpointFromRegistry()),
+        );
         if (!vncEndpoint) {
-          console.error('MICROVM_ENDPOINT not set - cannot publish VNC endpoint');
+          console.error('No MicroVM endpoint available - cannot publish VNC endpoint');
           return false;
         }
       } else {

@@ -72,6 +72,19 @@ def raw() -> str:
     return TEMPLATE.read_text()
 
 
+LAUNCHER_SRC = TEMPLATE.parent / "lambda_functions" / "microvm_launcher" / "index.py"
+
+
+@pytest.fixture(scope="module")
+def launcher() -> str:
+    """The MicroVM launcher Lambda's source.
+
+    It is a real deployment package (not inline `Code: ZipFile`) because it
+    imports microvm_client.py, and inline code is one file capped at 4 KB.
+    """
+    return LAUNCHER_SRC.read_text()
+
+
 def test_microvm_is_an_allowed_launch_type(template: dict) -> None:
     allowed = template["Parameters"]["VPLaunchType"]["AllowedValues"]
     assert set(allowed) == {"EC2", "FARGATE", "MICROVM"}
@@ -358,7 +371,7 @@ def test_scheduled_microvm_target_invokes_the_launcher(template: dict) -> None:
         assert f"{key}.$" in data, f"scheduled MICROVM target must pass {key}"
 
 
-def test_launcher_field_map_matches_container_per_meeting_keys(raw: str) -> None:
+def test_launcher_field_map_matches_container_per_meeting_keys(launcher: str) -> None:
     """The launcher's FIELD_MAP must cover the container's PER_MEETING_KEYS.
 
     These are two separate files (inline Python here, TypeScript in the
@@ -367,7 +380,7 @@ def test_launcher_field_map_matches_container_per_meeting_keys(raw: str) -> None
     """
     ts = (TEMPLATE.parent / "backend" / "src" / "launch-mode.ts").read_text()
     ts_keys = set(re.findall(r"^\s+'([A-Z_]+)',$", ts, re.M))
-    py_block = raw.split("FIELD_MAP = {", 1)[1].split("}", 1)[0]
+    py_block = launcher.split("FIELD_MAP = {", 1)[1].split("}", 1)[0]
     py_keys = set(re.findall(r'"([A-Z_]+)":', py_block))
 
     assert ts_keys, "could not parse PER_MEETING_KEYS from launch-mode.ts"
@@ -378,21 +391,21 @@ def test_launcher_field_map_matches_container_per_meeting_keys(raw: str) -> None
     )
 
 
-def test_launcher_payload_limit_matches_container(raw: str) -> None:
+def test_launcher_payload_limit_matches_container(launcher: str) -> None:
     # Both sides must refuse the same size, or one truncates auth tokens.
     ts = (TEMPLATE.parent / "backend" / "src" / "launch-mode.ts").read_text()
     ts_limit = int(re.search(r"RUN_HOOK_PAYLOAD_MAX_BYTES = (\d+)", ts).group(1))
-    py_limit = int(re.search(r"RUN_HOOK_PAYLOAD_MAX_BYTES = (\d+)", raw).group(1))
+    py_limit = int(re.search(r"RUN_HOOK_PAYLOAD_MAX_BYTES = (\d+)", launcher).group(1))
     assert ts_limit == py_limit == 16384
 
 
-def test_launcher_disables_auto_suspend(raw: str) -> None:
+def test_launcher_disables_auto_suspend(launcher: str) -> None:
     """A suspended VP stops capturing audio and would miss meeting content."""
-    block = raw.split("idlePolicy={", 1)[1].split("}", 1)[0]
+    block = launcher.split("idlePolicy={", 1)[1].split("}", 1)[0]
     assert '"autoResumeEnabled": False' in block
-    assert "MAX_DURATION_SECONDS" in raw
+    assert "MAX_DURATION_SECONDS" in launcher
     # MicroVMs cap at 8 hours (28800s); the launcher must not request more.
-    assert re.search(r"MAX_DURATION_SECONDS = 28800", raw)
+    assert re.search(r"MAX_DURATION_SECONDS = 28800", launcher)
 
 
 def test_execution_role_has_no_alb_permissions(template: dict) -> None:
@@ -630,7 +643,7 @@ def _inline_lambda_source(raw: str, marker: str) -> str:
     return "\n".join(x[indent:] if len(x) >= indent else x for x in lines)
 
 
-def test_launcher_inline_python_is_syntactically_valid(raw: str) -> None:
+def test_launcher_python_is_syntactically_valid(launcher: str) -> None:
     """Compile the launcher's inline source.
 
     An inline ZipFile body is never checked by cfn-lint or any linter, so a
@@ -639,19 +652,16 @@ def test_launcher_inline_python_is_syntactically_valid(raw: str) -> None:
     """
     import ast
 
-    src = _inline_lambda_source(raw, "VPMicrovmLauncherFunction:")
-    ast.parse(src)  # raises SyntaxError on malformed code
-    # Sanity-check that the extraction actually captured the handler.
-    assert "def lambda_handler" in src
+    ast.parse(launcher)  # raises SyntaxError on malformed code
+    assert "def lambda_handler" in launcher
 
 
-def test_launcher_attaches_an_ingress_connector(raw: str) -> None:
+def test_launcher_attaches_an_ingress_connector(launcher: str) -> None:
     """Without ingress the MicroVM endpoint forwards nothing.
 
     RunMicrovm succeeds and returns an endpoint either way, so omitting this
     surfaces only as a VNC viewer that cannot connect.
     """
-    src = _inline_lambda_source(raw, "VPMicrovmLauncherFunction:")
-    assert "ingressNetworkConnectors=" in src
-    assert "ALL_INGRESS" in src
-    assert "INTERNET_EGRESS" in src
+    assert "ingressNetworkConnectors=" in launcher
+    assert "ALL_INGRESS" in launcher
+    assert "INTERNET_EGRESS" in launcher
