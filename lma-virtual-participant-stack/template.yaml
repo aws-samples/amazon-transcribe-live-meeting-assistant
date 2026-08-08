@@ -2804,201 +2804,7 @@ Resources:
                 },
                 "Next": "${DispatchStateName}"
               },
-              "RunMicrovm": {
-                "Comment": "MICROVM launch type. Step Functions has no optimized integration for lambda-microvms, so this invokes the launcher Lambda, which calls RunMicrovm, waits for RUNNING, and writes the endpoint to the VP registry. Reuses MarkVPFailed for error handling exactly as RunTask does.",
-                "Type": "Task",
-                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
-                "Parameters": {
-                  "FunctionName": "${MicrovmLauncherFunctionArn}",
-                  "Payload.$": "$"
-                },
-                "Next": "MicrovmLaunched",
-                "ResultPath": "$.microvmResult",
-                "ResultSelector": {
-                  "payload.$": "$.Payload"
-                },
-                "Retry": [
-                  {
-                    "Comment": "RunMicrovm is rate-limited to 5 TPS per account; back off rather than failing the meeting.",
-                    "ErrorEquals": ["Lambda.TooManyRequestsException", "States.TaskFailed"],
-                    "IntervalSeconds": 3,
-                    "MaxAttempts": 4,
-                    "BackoffRate": 2.0
-                  }
-                ],
-                "Catch": [
-                  {
-                    "ErrorEquals": ["States.ALL"],
-                    "Next": "MarkVPFailed",
-                    "ResultPath": "$.runTaskError"
-                  }
-                ]
-              },
-              "MicrovmLaunched": {
-                "Comment": "The launcher reports ok=false for soft failures (quota exhausted, image not ready) that do not throw. Mirror CheckRunTaskFailures and route those to MarkVPFailed.",
-                "Type": "Choice",
-                "Choices": [
-                  {
-                    "Variable": "$.microvmResult.payload.ok",
-                    "BooleanEquals": false,
-                    "Next": "MarkMicrovmSoftFailure"
-                  }
-                ],
-                "Default": "End"
-              },
-              "MarkMicrovmSoftFailure": {
-                "Type": "Pass",
-                "Parameters": {
-                  "Error": "MicrovmLaunchFailed",
-                  "Cause.$": "States.Format('RunMicrovm did not start the VP. Reason: {}', $.microvmResult.payload.reason)"
-                },
-                "ResultPath": "$.runTaskError",
-                "Next": "MarkVPFailed"
-              },
-              "RunTask": {
-                "Type": "Task",
-                "Resource": "arn:${AWS::Partition}:states:::ecs:runTask",
-                "Parameters": {
-                  "Cluster": "${ClusterArn}",
-                  "TaskDefinition": "${TaskDefinition}",
-                  ${RunTaskDispatch},
-                  "NetworkConfiguration": {
-                    "AwsvpcConfiguration": {
-                      "AssignPublicIp": "DISABLED",
-                      "SecurityGroups": [
-                        "${VPSecurityGroupId}"
-                      ],
-                      "Subnets": [
-                        "${PrivateSubnet1}",
-                        "${PrivateSubnet2}"
-                      ]
-                    }
-                  },
-                  "Overrides": {
-                    "ContainerOverrides": [
-                      {
-                        "Name": "scribe",
-                        "Environment": [
-                          {
-                            "Name": "MEETING_PLATFORM",
-                            "Value.$": "$.data.meetingPlatform"
-                          },
-                          {
-                            "Name": "MEETING_ID",
-                            "Value.$": "$.data.meetingID"
-                          },
-                          {
-                            "Name": "MEETING_PASSWORD",
-                            "Value.$": "$.data.meetingPassword"
-                          },
-                          {
-                            "Name": "MEETING_NAME",
-                            "Value.$": "$.data.meetingName"
-                          },
-                          {
-                            "Name": "LMA_USER",
-                            "Value.$": "$.data.userName"
-                          },
-                          {
-                            "Name": "USER_ACCESS_TOKEN",
-                            "Value.$": "$.data.accessToken"
-                          },
-                          {
-                            "Name": "USER_ID_TOKEN",
-                            "Value.$": "$.data.idToken"
-                          },
-                          {
-                            "Name": "USER_REFRESH_TOKEN",
-                            "Value.$": "$.data.rereshToken"
-                          },
-                          {
-                            "Name": "VIRTUAL_PARTICIPANT_ID",
-                            "Value.$": "$.data.virtualParticipantId"
-                          },
-                          {
-                            "Name": "ZOOM_CREDENTIALS_SECRET_NAME",
-                            "Value.$": "$.data.zoomCredentialsSecretName"
-                          },
-                          {
-                            "Name": "LMA_USER_SUB",
-                            "Value.$": "$.data.userSub"
-                          },
-                          {
-                            "Name": "ENABLE_VIDEO_RECORDING",
-                            "Value.$": "$.data.enableVideoRecording"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                },
-                "Next": "CheckRunTaskFailures",
-                "ResultPath": "$.runTaskResult",
-                "ResultSelector": {
-                  "failures.$": "$.Failures",
-                  "tasks.$": "$.Tasks"
-                },
-                "Catch": [
-                  {
-                    "ErrorEquals": ["States.ALL"],
-                    "Next": "MarkVPFailed",
-                    "ResultPath": "$.runTaskError"
-                  }
-                ]
-              },
-              "CheckRunTaskFailures": {
-                "Comment": "ECS RunTask returns HTTP 200 with a non-empty `failures` array when capacity/agent/etc. issues prevent the task from being placed. The Catch above only catches thrown exceptions, not these soft failures — so we have to inspect the result and route to MarkVPFailed explicitly. Also detect `PROVISIONING` (task queued waiting for the capacity provider to launch a new EC2 host) and surface that to the user as WAITING_FOR_CAPACITY.",
-                "Type": "Choice",
-                "Choices": [
-                  {
-                    "Variable": "$.runTaskResult.failures[0]",
-                    "IsPresent": true,
-                    "Next": "MarkRunTaskSoftFailure"
-                  },
-                  {
-                    "Variable": "$.runTaskResult.tasks[0].LastStatus",
-                    "StringEquals": "PROVISIONING",
-                    "Next": "MarkWaitingForCapacity"
-                  }
-                ],
-                "Default": "End"
-              },
-              "MarkRunTaskSoftFailure": {
-                "Type": "Pass",
-                "Parameters": {
-                  "Cause.$": "States.Format('ECS RunTask returned without scheduling the task. Reason: {}, Detail: {}', $.runTaskResult.failures[0].Reason, $.runTaskResult.failures[0].Detail)"
-                },
-                "ResultPath": "$.runTaskError",
-                "Next": "MarkVPFailed"
-              },
-              "MarkWaitingForCapacity": {
-                "Type": "Task",
-                "Comment": "Task is queued (lastStatus=PROVISIONING) waiting for the capacity provider to launch a new EC2 host. Write WAITING_FOR_CAPACITY to the VP record so the UI shows progress instead of sitting silently at INITIALIZING for 60-90s. The container's entrypoint.sh writes BOOTING as soon as the container starts, which overwrites this.",
-                "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
-                "Parameters": {
-                  "TableName": "${VirtualParticipantTableName}",
-                  "Key": {
-                    "id": { "S.$": "$.data.virtualParticipantId" }
-                  },
-                  "UpdateExpression": "SET #s = :status, #ea = :now",
-                  "ExpressionAttributeNames": {
-                    "#s": "status",
-                    "#ea": "updatedAt"
-                  },
-                  "ExpressionAttributeValues": {
-                    ":status": { "S": "WAITING_FOR_CAPACITY" },
-                    ":now": { "S.$": "$$.State.EnteredTime" }
-                  }
-                },
-                "ResultPath": null,
-                "End": true,
-                "Catch": [
-                  {
-                    "ErrorEquals": ["States.ALL"],
-                    "Next": "End"
-                  }
-                ]
-              },
+              ${DispatchStates}
               "End": {
                 "Type": "Pass",
                 "End": true
@@ -3129,6 +2935,216 @@ Resources:
           # differs, which keeps this a one-line switch instead of two variants
           # of the whole state machine.
           DispatchStateName: !If [UseMicrovmLaunchType, "RunMicrovm", "RunTask"]
+          # The dispatch states themselves.
+          #
+          # These cannot BOTH be present: Step Functions rejects a definition
+          # containing unreachable states ("MISSING_TRANSITION_TARGET: State
+          # \"RunTask\" is not reachable"), so only the active launch type's
+          # states may be emitted. A block scalar is used rather than a quoted
+          # string because the JSON contains both quote characters.
+          # Plain block scalars, NOT !Sub: these fragments are spliced into the
+          # OUTER !Sub, which is where ${ClusterArn} etc. are in scope. A nested
+          # !Sub would try to resolve them against its own (empty) variable map
+          # and fail cfn-lint E1019 / CloudFormation validation.
+          DispatchStates: !If
+            - UseMicrovmLaunchType
+            - |-
+              "RunMicrovm": {
+              "Comment": "MICROVM launch type. Step Functions has no optimized integration for lambda-microvms, so this invokes the launcher Lambda, which calls RunMicrovm, waits for RUNNING, and writes the endpoint to the VP registry. Reuses MarkVPFailed for error handling exactly as RunTask does.",
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Parameters": {
+              "FunctionName": "${MicrovmLauncherFunctionArn}",
+              "Payload.$": "$"
+              },
+              "Next": "MicrovmLaunched",
+              "ResultPath": "$.microvmResult",
+              "ResultSelector": {
+              "payload.$": "$.Payload"
+              },
+              "Retry": [
+              {
+              "Comment": "RunMicrovm is rate-limited to 5 TPS per account; back off rather than failing the meeting.",
+              "ErrorEquals": ["Lambda.TooManyRequestsException", "States.TaskFailed"],
+              "IntervalSeconds": 3,
+              "MaxAttempts": 4,
+              "BackoffRate": 2.0
+              }
+              ],
+              "Catch": [
+              {
+              "ErrorEquals": ["States.ALL"],
+              "Next": "MarkVPFailed",
+              "ResultPath": "$.runTaskError"
+              }
+              ]
+              },
+              "MicrovmLaunched": {
+              "Comment": "The launcher reports ok=false for soft failures (quota exhausted, image not ready) that do not throw. Mirror CheckRunTaskFailures and route those to MarkVPFailed.",
+              "Type": "Choice",
+              "Choices": [
+              {
+              "Variable": "$.microvmResult.payload.ok",
+              "BooleanEquals": false,
+              "Next": "MarkMicrovmSoftFailure"
+              }
+              ],
+              "Default": "End"
+              },
+              "MarkMicrovmSoftFailure": {
+              "Type": "Pass",
+              "Parameters": {
+              "Error": "MicrovmLaunchFailed",
+              "Cause.$": "States.Format('RunMicrovm did not start the VP. Reason: {}', $.microvmResult.payload.reason)"
+              },
+              "ResultPath": "$.runTaskError",
+              "Next": "MarkVPFailed"
+              },
+            - |-
+              "RunTask": {
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::ecs:runTask",
+              "Parameters": {
+              "Cluster": "${ClusterArn}",
+              "TaskDefinition": "${TaskDefinition}",
+              ${RunTaskDispatch},
+              "NetworkConfiguration": {
+              "AwsvpcConfiguration": {
+              "AssignPublicIp": "DISABLED",
+              "SecurityGroups": [
+              "${VPSecurityGroupId}"
+              ],
+              "Subnets": [
+              "${PrivateSubnet1}",
+              "${PrivateSubnet2}"
+              ]
+              }
+              },
+              "Overrides": {
+              "ContainerOverrides": [
+              {
+              "Name": "scribe",
+              "Environment": [
+              {
+              "Name": "MEETING_PLATFORM",
+              "Value.$": "$.data.meetingPlatform"
+              },
+              {
+              "Name": "MEETING_ID",
+              "Value.$": "$.data.meetingID"
+              },
+              {
+              "Name": "MEETING_PASSWORD",
+              "Value.$": "$.data.meetingPassword"
+              },
+              {
+              "Name": "MEETING_NAME",
+              "Value.$": "$.data.meetingName"
+              },
+              {
+              "Name": "LMA_USER",
+              "Value.$": "$.data.userName"
+              },
+              {
+              "Name": "USER_ACCESS_TOKEN",
+              "Value.$": "$.data.accessToken"
+              },
+              {
+              "Name": "USER_ID_TOKEN",
+              "Value.$": "$.data.idToken"
+              },
+              {
+              "Name": "USER_REFRESH_TOKEN",
+              "Value.$": "$.data.rereshToken"
+              },
+              {
+              "Name": "VIRTUAL_PARTICIPANT_ID",
+              "Value.$": "$.data.virtualParticipantId"
+              },
+              {
+              "Name": "ZOOM_CREDENTIALS_SECRET_NAME",
+              "Value.$": "$.data.zoomCredentialsSecretName"
+              },
+              {
+              "Name": "LMA_USER_SUB",
+              "Value.$": "$.data.userSub"
+              },
+              {
+              "Name": "ENABLE_VIDEO_RECORDING",
+              "Value.$": "$.data.enableVideoRecording"
+              }
+              ]
+              }
+              ]
+              }
+              },
+              "Next": "CheckRunTaskFailures",
+              "ResultPath": "$.runTaskResult",
+              "ResultSelector": {
+              "failures.$": "$.Failures",
+              "tasks.$": "$.Tasks"
+              },
+              "Catch": [
+              {
+              "ErrorEquals": ["States.ALL"],
+              "Next": "MarkVPFailed",
+              "ResultPath": "$.runTaskError"
+              }
+              ]
+              },
+              "CheckRunTaskFailures": {
+              "Comment": "ECS RunTask returns HTTP 200 with a non-empty `failures` array when capacity/agent/etc. issues prevent the task from being placed. The Catch above only catches thrown exceptions, not these soft failures — so we have to inspect the result and route to MarkVPFailed explicitly. Also detect `PROVISIONING` (task queued waiting for the capacity provider to launch a new EC2 host) and surface that to the user as WAITING_FOR_CAPACITY.",
+              "Type": "Choice",
+              "Choices": [
+              {
+              "Variable": "$.runTaskResult.failures[0]",
+              "IsPresent": true,
+              "Next": "MarkRunTaskSoftFailure"
+              },
+              {
+              "Variable": "$.runTaskResult.tasks[0].LastStatus",
+              "StringEquals": "PROVISIONING",
+              "Next": "MarkWaitingForCapacity"
+              }
+              ],
+              "Default": "End"
+              },
+              "MarkRunTaskSoftFailure": {
+              "Type": "Pass",
+              "Parameters": {
+              "Cause.$": "States.Format('ECS RunTask returned without scheduling the task. Reason: {}, Detail: {}', $.runTaskResult.failures[0].Reason, $.runTaskResult.failures[0].Detail)"
+              },
+              "ResultPath": "$.runTaskError",
+              "Next": "MarkVPFailed"
+              },
+              "MarkWaitingForCapacity": {
+              "Type": "Task",
+              "Comment": "Task is queued (lastStatus=PROVISIONING) waiting for the capacity provider to launch a new EC2 host. Write WAITING_FOR_CAPACITY to the VP record so the UI shows progress instead of sitting silently at INITIALIZING for 60-90s. The container's entrypoint.sh writes BOOTING as soon as the container starts, which overwrites this.",
+              "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
+              "Parameters": {
+              "TableName": "${VirtualParticipantTableName}",
+              "Key": {
+              "id": { "S.$": "$.data.virtualParticipantId" }
+              },
+              "UpdateExpression": "SET #s = :status, #ea = :now",
+              "ExpressionAttributeNames": {
+              "#s": "status",
+              "#ea": "updatedAt"
+              },
+              "ExpressionAttributeValues": {
+              ":status": { "S": "WAITING_FOR_CAPACITY" },
+              ":now": { "S.$": "$$.State.EnteredTime" }
+              }
+              },
+              "ResultPath": null,
+              "End": true,
+              "Catch": [
+              {
+              "ErrorEquals": ["States.ALL"],
+              "Next": "End"
+              }
+              ]
+              },
           # EventBridge Scheduler target for meetings booked in advance.
           # Scheduler has a native ECS runTask target but none for
           # lambda-microvms, so MICROVM schedules invoke the launcher Lambda

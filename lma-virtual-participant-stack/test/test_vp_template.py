@@ -181,8 +181,12 @@ def _render_definition(
     """Resolve the !Sub substitutions the way CloudFormation would, then parse."""
     body, variables = _state_machine_definition(template)
 
-    rendered = body
-    for name in re.findall(r"\$\{([A-Za-z0-9_.]+)\}", body):
+    dispatch_frag = variables["DispatchStates"]["Fn::If"][1 if is_microvm else 2]
+    if isinstance(dispatch_frag, dict):
+        dispatch_frag = dispatch_frag["Fn::Sub"]
+
+    rendered = body.replace("${DispatchStates}", dispatch_frag)
+    for name in re.findall(r"\$\{([A-Za-z0-9_.]+)\}", rendered):
         if name in ("RunTaskDispatch", "DispatchStateName", "ScheduledMeetingTarget"):
             continue
         rendered = rendered.replace("${" + name + "}", "PLACEHOLDER")
@@ -235,17 +239,67 @@ def _render_target(fragment: object, is_microvm: bool) -> str:
     return re.sub(r"\$\{[A-Za-z0-9_.:]+\}", "PLACEHOLDER", text)
 
 
-def test_both_dispatch_states_exist_in_every_deployment(template: dict) -> None:
-    """RunTask and RunMicrovm both live in the static definition.
+@pytest.mark.parametrize("launch_type", LAUNCH_TYPES)
+def test_only_the_active_launch_types_states_are_emitted(
+    template: dict, launch_type: str
+) -> None:
+    """Step Functions rejects unreachable states.
 
-    Only the entry point differs (DispatchStateName), which keeps the change a
-    one-line switch rather than two variants of the whole state machine.
+    An earlier attempt kept BOTH dispatch blocks in one static definition and
+    switched only the entry point. CloudFormation accepted it; Step Functions did
+    not:
+      MISSING_TRANSITION_TARGET: State "RunTask" is not reachable.
+    So the states are substituted per launch type, and the other set must be
+    absent entirely.
     """
-    body, _ = _state_machine_definition(template)
-    assert '"RunTask": {' in body
-    assert '"RunMicrovm": {' in body
-    assert '"MicrovmLaunched": {' in body
-    assert '"MarkMicrovmSoftFailure": {' in body
+    is_microvm = launch_type == "MICROVM"
+    states = _rendered_states(template, is_microvm=is_microvm)
+
+    microvm_states = {"RunMicrovm", "MicrovmLaunched", "MarkMicrovmSoftFailure"}
+    ecs_states = {"RunTask", "CheckRunTaskFailures", "MarkRunTaskSoftFailure"}
+    present, absent = (
+        (microvm_states, ecs_states) if is_microvm else (ecs_states, microvm_states)
+    )
+    for name in present:
+        assert name in states, f"{launch_type} must include {name}"
+    for name in absent:
+        assert name not in states, (
+            f"{launch_type} must NOT include {name} — it would be unreachable"
+        )
+
+
+@pytest.mark.parametrize("launch_type", LAUNCH_TYPES)
+def test_no_unreachable_or_dangling_states(template: dict, launch_type: str) -> None:
+    """Every state reachable from StartAt, every target existing.
+
+    This is exactly the invariant Step Functions enforces at deploy time, so
+    checking it here converts a failed stack update into a local test failure.
+    """
+    is_microvm = launch_type == "MICROVM"
+    definition = _render_definition(
+        template, is_microvm=is_microvm, is_ec2=(launch_type == "EC2")
+    )
+    states = definition["States"]
+
+    targets = {definition["StartAt"]}
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key in ("Next", "Default") and isinstance(value, str):
+                    targets.add(value)
+                else:
+                    walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(definition)
+
+    unreachable = sorted(s for s in states if s not in targets)
+    dangling = sorted(t for t in targets if t not in states)
+    assert not unreachable, f"{launch_type}: unreachable states {unreachable}"
+    assert not dangling, f"{launch_type}: transitions to missing states {dangling}"
 
 
 def test_microvm_soft_failures_route_to_the_existing_failure_state(
