@@ -38,7 +38,9 @@ export class VirtualParticipantStatusManager {
   constructor(participantId: string) {
     this.participantId = participantId;
     this.graphqlEndpoint = process.env.GRAPHQL_ENDPOINT || '';
-    this.awsRegion = process.env.AWS_REGION || 'us-east-1';
+    // AWS_REGION is reserved for MicroVM images, so the launcher passes the
+    // region as VP_AWS_REGION. Prefer whatever the runtime set, then ours.
+    this.awsRegion = process.env.AWS_REGION || process.env.VP_AWS_REGION || 'us-east-1';
     
     if (!this.graphqlEndpoint) {
       console.warn('GRAPHQL_ENDPOINT not configured - GraphQL status updates disabled');

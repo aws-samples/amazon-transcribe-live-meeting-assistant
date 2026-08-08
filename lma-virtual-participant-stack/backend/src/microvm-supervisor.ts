@@ -236,7 +236,8 @@ async function defaultFetchConfig(vpId: string): Promise<PerMeetingConfig> {
         return {};
     }
     const { DynamoDBClient, GetItemCommand } = await import('@aws-sdk/client-dynamodb');
-    const client = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' });
+    const region = process.env.AWS_REGION || process.env.VP_AWS_REGION || 'us-east-1';
+    const client = new DynamoDBClient({ region });
     for (let attempt = 1; attempt <= 10; attempt += 1) {
         try {
             const result = await client.send(

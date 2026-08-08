@@ -737,10 +737,53 @@ def test_image_carries_the_bootstrap_env_vars(template: dict) -> None:
     """
     env = template["Resources"]["VPMicrovmImage"]["Properties"]["EnvironmentVariables"]
     keys = {item["Key"] for item in env}
-    required = {"VP_LAUNCH_TYPE", "VP_TASK_REGISTRY_TABLE_NAME", "AWS_REGION"}
+    # VP_AWS_REGION, not AWS_REGION: the latter is reserved by the service and
+    # rejected at image-build time (see test_image_env_avoids_reserved_keys).
+    required = {"VP_LAUNCH_TYPE", "VP_TASK_REGISTRY_TABLE_NAME", "VP_AWS_REGION"}
     missing = required - keys
     assert not missing, f"image is missing bootstrap env vars: {sorted(missing)}"
     # Guard against the image quietly becoming the config channel again.
     assert len(keys) <= 5, (
         f"image env should stay minimal (bootstrap only), found {sorted(keys)}"
     )
+
+
+# Keys the Lambda runtime owns. The MicroVM image build rejects these outright:
+# "Environment variable key 'AWS_REGION' is reserved" — which failed a deploy
+# after the image had already spent minutes building. Sourced from the documented
+# Lambda reserved environment variables.
+RESERVED_ENV_KEYS = frozenset(
+    {
+        "_HANDLER",
+        "_X_AMZN_TRACE_ID",
+        "AWS_DEFAULT_REGION",
+        "AWS_REGION",
+        "AWS_EXECUTION_ENV",
+        "AWS_LAMBDA_FUNCTION_NAME",
+        "AWS_LAMBDA_FUNCTION_MEMORY_SIZE",
+        "AWS_LAMBDA_FUNCTION_VERSION",
+        "AWS_LAMBDA_INITIALIZATION_TYPE",
+        "AWS_LAMBDA_LOG_GROUP_NAME",
+        "AWS_LAMBDA_LOG_STREAM_NAME",
+        "AWS_ACCESS_KEY",
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_LAMBDA_RUNTIME_API",
+        "LAMBDA_TASK_ROOT",
+        "LAMBDA_RUNTIME_DIR",
+    }
+)
+
+
+def test_image_env_avoids_reserved_keys(template: dict) -> None:
+    """No image environment variable may use a reserved Lambda key.
+
+    These are rejected at image-build time, so the failure costs a full build
+    plus a stack rollback. AWS_REGION is the one that actually bit us — pass the
+    region under a non-reserved name (VP_AWS_REGION) instead.
+    """
+    env = template["Resources"]["VPMicrovmImage"]["Properties"]["EnvironmentVariables"]
+    used = {item["Key"] for item in env}
+    clashes = used & RESERVED_ENV_KEYS
+    assert not clashes, f"reserved env keys in the MicroVM image: {sorted(clashes)}"

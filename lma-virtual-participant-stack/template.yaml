@@ -1974,7 +1974,12 @@ Resources:
       EnvironmentVariables:
         - Key: VP_LAUNCH_TYPE
           Value: MICROVM
-        - Key: AWS_REGION
+        # NOT "AWS_REGION": that key is reserved by the service and rejected at
+        # image-build time ("Environment variable key 'AWS_REGION' is reserved").
+        # The MicroVM runtime may not populate it either, and the container's
+        # fallback is us-east-1 — wrong for any other region — so pass the region
+        # under our own name and prefer it in the container.
+        - Key: VP_AWS_REGION
           Value: !Ref AWS::Region
         - Key: VP_TASK_REGISTRY_TABLE_NAME
           Value: !Ref VPTaskRegistryTableName
