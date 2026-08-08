@@ -66,6 +66,62 @@ SECRET_KEYS = {
 # Matches RUN_HOOK_PAYLOAD_MAX_BYTES in src/launch-mode.ts.
 RUN_HOOK_PAYLOAD_MAX_BYTES = 16384
 
+# Static, per-stack configuration (GraphQL endpoint, S3 buckets, Transcribe
+# settings, voice-assistant config, ...) that the ECS task definition supplies as
+# ~60 container environment variables.
+#
+# These CANNOT be MicroVM image environment variables:
+#   - the image caps at 50, and 60 are needed;
+#   - they are per-stack values, so baking them into the image would force a full
+#     image rebuild (minutes) on every parameter change.
+#
+# So they travel in runHookPayload alongside the per-meeting values. Measured at
+# ~3.7 KB for a real stack, leaving room for the three Cognito JWTs inside the
+# 16 KB limit. STATIC_CONFIG_JSON is populated from the CloudFormation template,
+# which is where these values already live.
+# Read from the ECS task definition rather than duplicating ~60 values into this
+# Lambda's environment: the task definition is where they already live, so there
+# is exactly one source of truth and no drift when a stack parameter changes.
+# (The task definition is created under MICROVM too — it is unused for running
+# tasks, but it carries the resolved configuration.)
+_STATIC_CONFIG_CACHE: dict | None = None
+
+
+def _static_config() -> dict:
+    """Static per-stack config, from the VP ECS task definition.
+
+    Cached for the life of the execution environment: the values only change on a
+    stack update, which replaces this Lambda anyway.
+    """
+    global _STATIC_CONFIG_CACHE
+    if _STATIC_CONFIG_CACHE is not None:
+        return _STATIC_CONFIG_CACHE
+
+    task_definition = os.environ.get("TASK_DEFINITION_ARN", "")
+    if not task_definition:
+        logger.warning("TASK_DEFINITION_ARN not set - no static config available")
+        _STATIC_CONFIG_CACHE = {}
+        return _STATIC_CONFIG_CACHE
+
+    try:
+        described = boto3.client("ecs").describe_task_definition(
+            taskDefinition=task_definition
+        )
+        containers = described["taskDefinition"]["containerDefinitions"]
+        env = containers[0].get("environment", [])
+        # Per-meeting values are supplied per launch and must not be frozen here.
+        config = {
+            item["name"]: item["value"]
+            for item in env
+            if item["name"] not in FIELD_MAP and item.get("value")
+        }
+        logger.info("Loaded %d static config values from the task definition", len(config))
+        _STATIC_CONFIG_CACHE = config
+    except Exception:  # noqa: BLE001 - degrade rather than fail the meeting
+        logger.exception("Could not read static config from the task definition")
+        _STATIC_CONFIG_CACHE = {}
+    return _STATIC_CONFIG_CACHE
+
 # Meetings can run long, but a MicroVM's hard ceiling is 8 hours.
 MAX_DURATION_SECONDS = 28800
 
@@ -110,7 +166,9 @@ def lambda_handler(event, context):
         # Without this we cannot report status back to the UI at all.
         return {"ok": False, "reason": "no virtualParticipantId in payload"}
 
-    run_hook_payload = json.dumps(config)
+    # Static stack config first so per-meeting values win on any collision.
+    payload_config = {**_static_config(), **config}
+    run_hook_payload = json.dumps(payload_config)
     size = len(run_hook_payload.encode("utf-8"))
     if size > RUN_HOOK_PAYLOAD_MAX_BYTES:
         # Refuse rather than let the service truncate: the payload

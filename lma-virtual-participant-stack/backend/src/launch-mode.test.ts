@@ -14,6 +14,7 @@ import {
     applyPerMeetingConfig,
     redactPerMeetingConfig,
     microvmVncEndpoint,
+    isAllowedConfigKey,
     RUN_HOOK_PAYLOAD_MAX_BYTES,
     PER_MEETING_KEYS,
 } from './launch-mode.js';
@@ -238,4 +239,71 @@ test('microvmVncEndpoint accepts an already-wss endpoint from the registry', () 
         microvmVncEndpoint('wss://abc.lambda-microvm.us-west-2.on.aws'),
         'wss://abc.lambda-microvm.us-west-2.on.aws',
     );
+});
+
+test('isAllowedConfigKey accepts stack config but blocks process-hijack vars', () => {
+    // Static per-stack config (~60 values) rides in the same payload, so keys are
+    // allow-listed by shape rather than enumerated — adding a template variable
+    // must not require a container change.
+    for (const ok of [
+        'GRAPHQL_ENDPOINT',
+        'RECORDINGS_BUCKET_NAME',
+        'TRANSCRIBE_LANGUAGE_CODE',
+        'NOVA_SYSTEM_PROMPT',
+        'MEETING_ID',
+    ]) {
+        assert.equal(isAllowedConfigKey(ok), true, `${ok} should be allowed`);
+    }
+    // Anything that could hijack the process or inject credentials is refused.
+    for (const bad of [
+        'PATH',
+        'HOME',
+        'NODE_OPTIONS',
+        'LD_PRELOAD',
+        'LD_LIBRARY_PATH',
+        'AWS_ACCESS_KEY_ID',
+        'AWS_SECRET_ACCESS_KEY',
+        'AWS_SESSION_TOKEN',
+        'VP_LAUNCH_TYPE',
+        'STACK_ONLY',
+        'lowercase',
+        'Mixed_Case',
+        '2LEADING_DIGIT',
+        '',
+    ]) {
+        assert.equal(isAllowedConfigKey(bad), false, `${bad} should be blocked`);
+    }
+});
+
+test('parseRunHookPayload accepts static stack config alongside per-meeting keys', () => {
+    const parsed = parseRunHookPayload({
+        runHookPayload: JSON.stringify({
+            MEETING_ID: '42',
+            GRAPHQL_ENDPOINT: 'https://x.appsync-api.us-west-2.amazonaws.com/graphql',
+            RECORDINGS_BUCKET_NAME: 'my-bucket',
+            PATH: '/evil',
+            LD_PRELOAD: '/evil.so',
+        }),
+    });
+    assert.equal(parsed.MEETING_ID, '42');
+    assert.equal(
+        (parsed as Record<string, string>).GRAPHQL_ENDPOINT,
+        'https://x.appsync-api.us-west-2.amazonaws.com/graphql',
+    );
+    assert.equal((parsed as Record<string, string>).RECORDINGS_BUCKET_NAME, 'my-bucket');
+    // The blocked keys must not survive: this is what a missing GRAPHQL_ENDPOINT
+    // taught us to check, and what stops a tampered payload replacing PATH.
+    assert.equal((parsed as Record<string, string>).PATH, undefined);
+    assert.equal((parsed as Record<string, string>).LD_PRELOAD, undefined);
+});
+
+test('applyPerMeetingConfig applies static config keys too', () => {
+    const env: Record<string, string | undefined> = {};
+    const applied = applyPerMeetingConfig(env, {
+        MEETING_ID: '7',
+        GRAPHQL_ENDPOINT: 'https://gql',
+    } as Record<string, string>);
+    assert.equal(env.MEETING_ID, '7');
+    assert.equal(env.GRAPHQL_ENDPOINT, 'https://gql');
+    assert.equal(applied.length, 2);
 });

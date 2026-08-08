@@ -2040,13 +2040,29 @@ Resources:
                   - lambda:TerminateMicrovm
                   - lambda:CreateMicrovmAuthToken
                 Resource: "*"
+              # Attaching ingress/egress connectors to a MicroVM is a separate,
+              # explicitly-authorized action on the connector resource itself —
+              # RunMicrovm permission alone is not sufficient.
+              - Effect: Allow
+                Action: lambda:PassNetworkConnector
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:ALL_INGRESS"
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
               # Hand the MicroVM its runtime role.
+              #
+              # No iam:PassedToService condition: RunMicrovm does NOT populate
+              # that context key, so any condition on it evaluates to a deny.
+              # Confirmed with `aws iam simulate-principal-policy` — with the
+              # key absent the request is implicitDeny, and the live call failed
+              # with "no identity-based policy allows the iam:PassRole action".
+              # Least privilege is preserved by Resource: this one role only.
               - Effect: Allow
                 Action: iam:PassRole
                 Resource: !GetAtt VPMicrovmExecutionRole.Arn
-                Condition:
-                  StringEquals:
-                    iam:PassedToService: lambda.amazonaws.com
+              # Read the resolved static config (see TASK_DEFINITION_ARN above).
+              - Effect: Allow
+                Action: ecs:DescribeTaskDefinition
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -2055,6 +2071,19 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+              # Both tables are encrypted with the customer-managed key, so
+              # DynamoDB access alone is not enough — writes fail with a KMS
+              # AccessDeniedException. Same pattern as TaskRole above.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   # Launches one MicroVM per meeting. Called by the scheduler state machine
   # (MICROVM dispatch path) and by EventBridge Scheduler for scheduled meetings,
@@ -2085,6 +2114,10 @@ Resources:
       Environment:
         Variables:
           MICROVM_IMAGE_ARN: !GetAtt VPMicrovmImage.ImageArn
+          # Source of the ~60 static per-stack config values forwarded to the
+          # container in runHookPayload. Read from the task definition so there
+          # is one source of truth (see _static_config in the launcher).
+          TASK_DEFINITION_ARN: !Ref TaskDefinition
           EXECUTION_ROLE_ARN: !GetAtt VPMicrovmExecutionRole.Arn
           VP_TABLE_NAME: !Ref VirtualParticipantTableName
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName

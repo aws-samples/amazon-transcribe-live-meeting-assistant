@@ -379,7 +379,10 @@ def test_launcher_field_map_matches_container_per_meeting_keys(launcher: str) ->
     so keep them in step.
     """
     ts = (TEMPLATE.parent / "backend" / "src" / "launch-mode.ts").read_text()
-    ts_keys = set(re.findall(r"^\s+'([A-Z_]+)',$", ts, re.M))
+    # Parse ONLY the PER_MEETING_KEYS array — the file also contains
+    # BLOCKED_ENV_KEYS, which the same loose pattern would otherwise pick up.
+    ts_block = ts.split("PER_MEETING_KEYS = [", 1)[1].split("]", 1)[0]
+    ts_keys = set(re.findall(r"'([A-Z_]+)'", ts_block))
     py_block = launcher.split("FIELD_MAP = {", 1)[1].split("}", 1)[0]
     py_keys = set(re.findall(r'"([A-Z_]+)":', py_block))
 
@@ -416,12 +419,24 @@ def test_execution_role_has_no_alb_permissions(template: dict) -> None:
 
 
 def test_launcher_can_pass_only_the_execution_role(template: dict) -> None:
+    """iam:PassRole must be scoped by Resource, and carry NO PassedToService.
+
+    RunMicrovm does not populate the iam:PassedToService context key, so a
+    condition on it evaluates to a deny — verified with
+    `aws iam simulate-principal-policy` (implicitDeny when the key is absent)
+    after a live launch failed with "no identity-based policy allows the
+    iam:PassRole action". Least privilege comes from naming the single role.
+    """
     role = template["Resources"]["VPMicrovmLauncherRole"]
     statements = role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
     pass_role = [s for s in statements if s.get("Action") == "iam:PassRole"]
     assert len(pass_role) == 1, "expected exactly one iam:PassRole statement"
-    assert pass_role[0]["Condition"]["StringEquals"]["iam:PassedToService"] == (
-        "lambda.amazonaws.com"
+    # Must target exactly the MicroVM execution role, never "*".
+    resource = json.dumps(pass_role[0]["Resource"])
+    assert "VPMicrovmExecutionRole" in resource
+    assert pass_role[0]["Resource"] != "*"
+    assert "Condition" not in pass_role[0], (
+        "a PassedToService condition here denies the call; see the docstring"
     )
 
 

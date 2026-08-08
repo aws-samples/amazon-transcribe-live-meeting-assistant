@@ -51,6 +51,48 @@ export const PER_MEETING_KEYS = [
 export type PerMeetingKey = (typeof PER_MEETING_KEYS)[number];
 
 /**
+ * Static, per-stack configuration the launcher forwards in the same payload
+ * (GraphQL endpoint, S3 buckets, Transcribe settings, voice-assistant config...).
+ *
+ * On ECS these arrive as ~60 container environment variables from the task
+ * definition. They cannot be MicroVM image environment variables: the image caps
+ * at 50, and they are per-stack values, so baking them in would force an image
+ * rebuild on every parameter change. Measured at ~3.7 KB, well inside the 16 KB
+ * runHookPayload budget alongside the per-meeting values.
+ *
+ * Accepted keys are allow-listed by SHAPE rather than enumerated, so adding a
+ * variable to the template does not require a container change — while still
+ * refusing anything that could hijack the process (PATH, LD_*, AWS credentials).
+ */
+const BLOCKED_ENV_KEYS = new Set([
+    'PATH',
+    'HOME',
+    'USER',
+    'SHELL',
+    'NODE_OPTIONS',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'VP_LAUNCH_TYPE',
+    'STACK_ONLY',
+]);
+
+/**
+ * True when a payload key may be applied to the environment.
+ *
+ * Upper snake case only, and never one of the blocked names above. This is what
+ * stops a malformed or tampered payload from replacing PATH or injecting
+ * credentials.
+ */
+export function isAllowedConfigKey(key: string): boolean {
+    if (BLOCKED_ENV_KEYS.has(key)) return false;
+    if (key.startsWith('LD_') || key.startsWith('AWS_ACCESS') || key.startsWith('AWS_SECRET')) {
+        return false;
+    }
+    return /^[A-Z][A-Z0-9_]*$/.test(key);
+}
+
+/**
  * Hard limit on `runHookPayload` (RunMicrovm). AWS documents 16 KB / 16,384
  * bytes. We refuse to build a payload larger than this rather than let the
  * service truncate it -- silently losing, say, USER_REFRESH_TOKEN would surface
@@ -161,13 +203,13 @@ export function parseRunHookPayload(body: RunHookBody | string | undefined): Per
 
     const record = inner as Record<string, unknown>;
     const out: PerMeetingConfig = {};
-    for (const key of PER_MEETING_KEYS) {
-        const value = record[key];
+    for (const [key, value] of Object.entries(record)) {
+        if (!isAllowedConfigKey(key)) continue;
         if (typeof value === 'string' && value !== '') {
-            out[key] = value;
+            out[key as PerMeetingKey] = value;
         } else if (typeof value === 'number' || typeof value === 'boolean') {
             // MEETING_TIME / ENABLE_VIDEO_RECORDING may arrive non-stringified.
-            out[key] = String(value);
+            out[key as PerMeetingKey] = String(value);
         }
     }
     return out;
@@ -193,8 +235,7 @@ export function applyPerMeetingConfig(
 ): string[] {
     const overwrite = options.overwrite === true;
     const applied: string[] = [];
-    for (const key of PER_MEETING_KEYS) {
-        const value = config[key];
+    for (const [key, value] of Object.entries(config) as [PerMeetingKey, string][]) {
         if (value === undefined) continue;
         const existing = env[key];
         if (!overwrite && existing !== undefined && existing !== '') continue;
