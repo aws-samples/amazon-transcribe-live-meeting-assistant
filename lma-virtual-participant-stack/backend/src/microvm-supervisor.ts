@@ -50,6 +50,11 @@ export interface SupervisorDeps {
     bootStack: () => Promise<boolean>;
     /** True when the pre-snapshot stack is currently healthy. */
     stackHealthy: () => Promise<boolean>;
+    /**
+     * Exercise the real workload so Lambda can sample which snapshot pages it
+     * touches. Called from /validate. Returns true if the exercise succeeded.
+     */
+    warmWorkload: () => Promise<boolean>;
     /** Spawn the VP application with the given environment. */
     spawnApp: (env: Record<string, string | undefined>) => ChildProcess;
     /**
@@ -101,15 +106,33 @@ export class Supervisor {
     }
 
     /**
-     * `/validate` — called after a test run from the snapshot. Also lets Lambda
-     * sample which snapshot pages are touched so it can prefetch them, which is
-     * why it is worth implementing even though it only reports health.
+     * `/validate` — called after a test run from the snapshot.
+     *
+     * Critically, this is not just a health check. Lambda SAMPLES the snapshot
+     * pages touched while handling this request and prefetches them on later
+     * launches. AWS's guidance is explicit: "run mock payloads through the
+     * application during validate".
+     *
+     * A port-only check here cost ~142s per launch: Chromium (~200 MB of binary
+     * and its shared libraries) was never touched during validate, so none of it
+     * was prefetched and the first real launch faulted every page in on demand.
+     * Locally, with a warm page cache, the same launch takes 0.3-3s.
+     *
+     * So launch a real browser here and throw it away. It makes image builds
+     * slower once, in exchange for every launch being faster.
      */
     async onValidate(): Promise<number> {
         this.state.hooksSeen.push('validate');
         const healthy = await this.deps.stackHealthy();
-        this.deps.log(`[validate] healthy=${healthy}`);
-        return healthy ? 200 : 503;
+        if (!healthy) {
+            this.deps.log('[validate] stack not healthy yet');
+            return 503;
+        }
+        const warmed = await this.deps.warmWorkload();
+        this.deps.log(`[validate] healthy=true workloadWarmed=${warmed}`);
+        // Still report success if the warm-up failed: a missed prefetch costs
+        // startup latency, but failing validate would fail the whole image build.
+        return 200;
     }
 
     /**
@@ -258,6 +281,67 @@ async function defaultFetchConfig(vpId: string): Promise<PerMeetingConfig> {
     return {};
 }
 
+/**
+ * Launch and discard a real Chromium so Lambda samples its snapshot pages.
+ *
+ * This is the whole point of the /validate hook (see onValidate): without it,
+ * Chromium's ~200 MB of pages are faulted in on the first real launch, which
+ * measured ~142s on a MicroVM versus 0.3-3s with a warm page cache.
+ *
+ * Uses the same launcher and args shape as the VP itself, so the pages touched
+ * here are the pages the real launch needs.
+ */
+async function defaultWarmWorkload(): Promise<boolean> {
+    try {
+        const { launchPersistentContext } = await import('cloakbrowser');
+        const started = Date.now();
+        const context = await launchPersistentContext({
+            headless: false,
+            humanize: true,
+            humanPreset: 'default',
+            userDataDir: '/tmp/validate-warm-profile',
+            viewport: { width: 1920, height: 950 },
+            args: [
+                '--fingerprint=11111',
+                '--fingerprint-platform=windows',
+                '--no-sandbox',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-dev-shm-usage',
+                '--disable-extensions',
+                '--disable-crash-reporter',
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--password-store=basic',
+                '--use-mock-keychain',
+                '--test-type',
+                // A different port from the real launch (9222) so this throwaway
+                // browser cannot collide with it.
+                '--remote-debugging-port=9333',
+            ],
+            launchOptions: { ignoreDefaultArgs: ['--mute-audio', '--enable-automation'] },
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any);
+        // Render a page so the renderer, GPU-fallback and font paths are touched
+        // too, not just the browser-process startup path.
+        try {
+            const page = await context.newPage();
+            await page.goto('data:text/html,<h1>warm</h1>', { timeout: 20_000 });
+            await page.close();
+        } catch {
+            // A page failure still leaves the binary pages sampled; keep going.
+        }
+        await context.close();
+        console.log(
+            `[supervisor] validate warm-up launched Chromium in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+        );
+        return true;
+    } catch (err) {
+        console.error('[supervisor] validate warm-up failed:', err);
+        return false;
+    }
+}
+
 function defaultSpawnApp(env: Record<string, string | undefined>): ChildProcess {
     const child = spawn('node', [APP_ENTRY], {
         env: env as NodeJS.ProcessEnv,
@@ -279,6 +363,7 @@ async function main(): Promise<void> {
             bootStack,
             stackHealthy,
             spawnApp: defaultSpawnApp,
+            warmWorkload: defaultWarmWorkload,
             fetchConfig: defaultFetchConfig,
             log: (m) => console.log(`[supervisor] ${m}`),
         },

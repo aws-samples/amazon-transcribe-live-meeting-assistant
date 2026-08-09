@@ -32,6 +32,7 @@ interface Harness {
     child: ChildProcess & { killed: boolean; signals: string[] };
     bootCalls: () => number;
     fetchCalls: string[];
+    warmCalls: number[];
 }
 
 function harness(
@@ -40,11 +41,13 @@ function harness(
         healthy?: boolean | boolean[];
         staged?: Record<string, string>;
         fetchThrows?: boolean;
+        warmFails?: boolean;
     } = {},
 ): Harness {
     const logs: string[] = [];
     const spawned: Array<Record<string, string | undefined>> = [];
     const fetchCalls: string[] = [];
+    const warmCalls: number[] = [];
     const env: Record<string, string | undefined> = {};
     const child = fakeChild();
     let bootCalls = 0;
@@ -63,6 +66,10 @@ function harness(
             spawned.push({ ...e });
             return child;
         },
+        warmWorkload: async () => {
+            warmCalls.push(1);
+            return opts.warmFails !== true;
+        },
         fetchConfig: async (vpId) => {
             fetchCalls.push(vpId);
             if (opts.fetchThrows) throw new Error('registry unavailable');
@@ -78,6 +85,7 @@ function harness(
         child,
         bootCalls: () => bootCalls,
         fetchCalls,
+        warmCalls,
     };
 }
 
@@ -119,9 +127,27 @@ test('/ready returns 503 when the boot itself fails', async () => {
     assert.equal(await h.sup.onReady(), 503);
 });
 
-test('/validate reports stack health', async () => {
-    assert.equal(await harness().sup.onValidate(), 200);
-    assert.equal(await harness({ healthy: false }).sup.onValidate(), 503);
+test('/validate exercises the real workload so Lambda prefetches its pages', async () => {
+    // This is the fix for a ~142s browser launch: Lambda samples the snapshot
+    // pages touched during /validate and prefetches them on later launches. A
+    // port-only health check never touched Chromium, so none of its ~200 MB was
+    // prefetched and the first real launch faulted it all in on demand.
+    const h = harness();
+    assert.equal(await h.sup.onValidate(), 200);
+    assert.equal(h.warmCalls.length, 1, 'validate must exercise the workload');
+});
+
+test('/validate returns 503 before the stack is healthy, without warming', async () => {
+    const h = harness({ healthy: false });
+    assert.equal(await h.sup.onValidate(), 503);
+    assert.equal(h.warmCalls.length, 0, 'no point warming an unhealthy stack');
+});
+
+test('/validate still succeeds when the warm-up fails', async () => {
+    // A missed prefetch costs startup latency; failing validate would fail the
+    // entire image build, which is far worse.
+    const h = harness({ warmFails: true });
+    assert.equal(await h.sup.onValidate(), 200);
 });
 
 test('/run applies per-meeting config to the env and spawns the app', async () => {

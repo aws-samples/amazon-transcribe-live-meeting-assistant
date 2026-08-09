@@ -1925,7 +1925,11 @@ Resources:
           # and starts X + audio. Returning 503 until healthy is the contract.
           ReadyTimeoutInSeconds: 600
           Validate: ENABLED
-          ValidateTimeoutInSeconds: 300
+          # Generous: /validate now launches a real Chromium so Lambda samples
+          # (and can prefetch) its snapshot pages. That first launch is the slow
+          # one — the very cost this is here to move off the hot path — so it
+          # needs room to complete. Max allowed is 3600.
+          ValidateTimeoutInSeconds: 900
         MicrovmHooks:
           Run: ENABLED
           RunTimeoutInSeconds: 30
