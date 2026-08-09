@@ -356,6 +356,11 @@ const main = async (): Promise<void> => {
     console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
     console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
 
+    // Timing instrumentation: browser launch dominated VP startup on MicroVMs
+    // (~142s vs ~1-3s for the identical image and args locally), and the launch
+    // is a single opaque await. Logging the elapsed time makes any regression
+    // visible in CloudWatch instead of requiring a log-timestamp reconstruction.
+    const browserLaunchStart = Date.now();
     const context = await launchPersistentContext({
         headless: false,
         humanize: true,
@@ -371,6 +376,9 @@ const main = async (): Promise<void> => {
             ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
         },
     } as any);
+    console.log(
+        `[browser] launchPersistentContext took ${((Date.now() - browserLaunchStart) / 1000).toFixed(1)}s`,
+    );
     browserContext = context;
     // Sane default for actions; the one meeting-length wait (end-of-meeting
     // watcher) passes its own explicit { timeout }. Do NOT set a multi-hour

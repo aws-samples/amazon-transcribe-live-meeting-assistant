@@ -168,9 +168,10 @@ def test_microvm_image_requests_chromium_capabilities(template: dict) -> None:
     props = template["Resources"]["VPMicrovmImage"]["Properties"]
     # Chromium's sandbox needs more than the default restricted capability set.
     assert props["AdditionalOsCapabilities"] == ["ALL"]
-    # 8 GB baseline => 4 vCPU (2:1 memory:vCPU). CPU, not memory, is the
-    # constraint: a cold Chromium launch took 135s at the 2 vCPU baseline.
-    assert props["Resources"][0]["MinimumMemoryInMiB"] >= 8192
+    # Observed peak ~1650 MB for Chromium + avatar + voice, plus X and audio.
+    # An 8 GB baseline was tried for faster browser launch and changed nothing
+    # (135s at 4 GB vs 149s at 8 GB), so the extra cost was not justified.
+    assert props["Resources"][0]["MinimumMemoryInMiB"] >= 4096
 
 
 def test_microvm_image_suppresses_only_the_missing_schema_rule(template: dict) -> None:

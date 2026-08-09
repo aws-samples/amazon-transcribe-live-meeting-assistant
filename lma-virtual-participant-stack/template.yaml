@@ -1887,16 +1887,14 @@ Resources:
       CodeArtifact:
         Uri: !Sub "s3://${MicrovmSourceCodeLocation}"
       Resources:
-        # 8 GB baseline => 4 vCPU baseline (CPU is allocated at a 2:1
-        # memory:vCPU ratio), bursting to 16 GB / 8 vCPU.
+        # 4 GB baseline => 2 vCPU (CPU is allocated at a 2:1 memory:vCPU ratio),
+        # bursting to 16 GB / 8 vCPU. Observed peak is ~1650 MB for Chromium +
+        # Simli + Nova Sonic, so memory is not the constraint.
         #
-        # Memory is not the constraint — observed peak is ~1650 MB for Chromium +
-        # Simli + Nova Sonic. CPU is: a cold Chromium launch with a fresh profile
-        # took 135s at the 4 GB / 2 vCPU baseline, which is the single largest
-        # component of VP startup. Above-baseline usage is billed only while
-        # active, so the higher baseline mainly raises the floor for bursty work
-        # like browser startup rather than the steady-state cost.
-        - MinimumMemoryInMiB: 8192
+        # An 8 GB baseline (4 vCPU) was tried to speed up browser launch and made
+        # no difference — 135s at 4 GB vs 149s at 8 GB — so the launch delay is
+        # not CPU-bound and the larger baseline was pure extra cost. Reverted.
+        - MinimumMemoryInMiB: 4096
       # Chromium's sandbox needs namespace/capability access beyond the default
       # restricted set.
       AdditionalOsCapabilities:
