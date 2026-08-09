@@ -120,7 +120,6 @@ def test_microvm_resources_are_conditional(template: dict) -> None:
     for name in (
         "VPMicrovmImage",
         "VPMicrovmBuildRole",
-        "VPMicrovmExecutionRole",
         "VPMicrovmLauncherRole",
         "VPMicrovmLauncherFunction",
         "VPScheduleInvokeLauncherRole",
@@ -169,8 +168,9 @@ def test_microvm_image_requests_chromium_capabilities(template: dict) -> None:
     props = template["Resources"]["VPMicrovmImage"]["Properties"]
     # Chromium's sandbox needs more than the default restricted capability set.
     assert props["AdditionalOsCapabilities"] == ["ALL"]
-    # Observed peak ~1650 MB for Chromium + avatar + voice; plus X and audio.
-    assert props["Resources"][0]["MinimumMemoryInMiB"] >= 4096
+    # 8 GB baseline => 4 vCPU (2:1 memory:vCPU). CPU, not memory, is the
+    # constraint: a cold Chromium launch took 135s at the 2 vCPU baseline.
+    assert props["Resources"][0]["MinimumMemoryInMiB"] >= 8192
 
 
 def test_microvm_image_suppresses_only_the_missing_schema_rule(template: dict) -> None:
@@ -414,14 +414,25 @@ def test_launcher_disables_auto_suspend(launcher: str) -> None:
     assert re.search(r"MAX_DURATION_SECONDS = 28800", launcher)
 
 
-def test_execution_role_has_no_alb_permissions(template: dict) -> None:
-    """MicroVMs have no ALB; granting ELB rights would be dead privilege."""
-    role = template["Resources"]["VPMicrovmExecutionRole"]
-    text = json.dumps(role)
-    assert "elasticloadbalancing" not in text.lower()
+def test_microvm_reuses_the_ecs_task_role(template: dict) -> None:
+    """The MicroVM execution role IS TaskRole, deliberately.
+
+    A separate hand-written role drifted from TaskRole and the VP failed at run
+    time on missing appsync:EventConnect, the VP profiles bucket (S3 403 on
+    profile restore), Bedrock, Secrets Manager and more. Sharing the role means
+    the MicroVM path inherits every permission the VP application needs, and
+    there is only one place to update.
+    """
+    assert "VPMicrovmExecutionRole" not in template["Resources"], (
+        "the separate MicroVM execution role should be gone; TaskRole is shared"
+    )
+    trust = template["Resources"]["TaskRole"]["Properties"]["AssumeRolePolicyDocument"]
+    services = trust["Statement"][0]["Principal"]["Service"]
+    assert "lambda.amazonaws.com" in services, "MicroVMs assume the role via lambda"
+    assert "ecs-tasks.amazonaws.com" in services, "ECS launch types must still work"
 
 
-def test_launcher_can_pass_only_the_execution_role(template: dict) -> None:
+def test_launcher_can_pass_only_the_task_role(template: dict) -> None:
     """iam:PassRole must be scoped by Resource, and carry NO PassedToService.
 
     RunMicrovm does not populate the iam:PassedToService context key, so a
@@ -434,9 +445,9 @@ def test_launcher_can_pass_only_the_execution_role(template: dict) -> None:
     statements = role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
     pass_role = [s for s in statements if s.get("Action") == "iam:PassRole"]
     assert len(pass_role) == 1, "expected exactly one iam:PassRole statement"
-    # Must target exactly the MicroVM execution role, never "*".
+    # Must target exactly the role the MicroVM runs as, never "*".
     resource = json.dumps(pass_role[0]["Resource"])
-    assert "VPMicrovmExecutionRole" in resource
+    assert "TaskRole" in resource
     assert pass_role[0]["Resource"] != "*"
     assert "Condition" not in pass_role[0], (
         "a PassedToService condition here denies the call; see the docstring"
@@ -693,8 +704,10 @@ def test_both_microvm_roles_can_decrypt_the_dynamodb_key(template: dict) -> None
     is 4096, too small for the real config), so a missing grant means the VP
     starts with no configuration at all.
     """
-    for role_name in ("VPMicrovmExecutionRole", "VPMicrovmLauncherRole"):
-        text = json.dumps(template["Resources"][role_name])
+    for role_name in ("TaskRole", "VPMicrovmLauncherRole"):
+        # str(), not json.dumps: the resource tree contains intrinsics that are
+        # not JSON-serialisable once parsed by the CFN loader.
+        text = str(template["Resources"][role_name])
         assert "kms:Decrypt" in text, f"{role_name} needs kms:Decrypt"
         assert "CustomerManagedEncryptionKeyArn" in text, (
             f"{role_name} must scope KMS to the stack's key"

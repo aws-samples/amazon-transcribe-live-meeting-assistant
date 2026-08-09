@@ -1076,7 +1076,16 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              # ecs-tasks for the EC2/FARGATE launch types; lambda for MICROVM,
+              # where this same role is the MicroVM execution role. Sharing one
+              # role is deliberate: a separate hand-written MicroVM role drifted
+              # from this one and the VP failed at run time on missing
+              # appsync:EventConnect, the VP profiles bucket, Bedrock, Secrets
+              # Manager and more. One role means the MicroVM path automatically
+              # inherits every permission the VP application needs.
+              Service:
+                - ecs-tasks.amazonaws.com
+                - lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
@@ -1832,84 +1841,6 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
 
-  # Runtime role for the VP inside the MicroVM. Mirrors the ECS task role's
-  # permissions, minus everything ALB-related (there is no ALB to register with).
-  VPMicrovmExecutionRole:
-    Type: AWS::IAM::Role
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W11
-            reason: "Transcribe and Bedrock do not support resource-level permissions"
-      cdk_nag:
-        rules_to_suppress:
-          - id: AwsSolutions-IAM5
-            reason: 'Wildcards required for Transcribe/Bedrock which lack resource-level permissions'
-    Condition: UseMicrovmLaunchType
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      ManagedPolicyArns:
-        - !Ref LogsPolicy
-      Policies:
-        - PolicyName: VPMicrovmRuntime
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action:
-                  - kinesis:PutRecord
-                  - kinesis:PutRecords
-                Resource: !Sub "arn:${AWS::Partition}:kinesis:${AWS::Region}:${AWS::AccountId}:stream/${CallDataStreamName}"
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/*"
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                  - dynamodb:UpdateItem
-                  - dynamodb:DeleteItem
-                  - dynamodb:Query
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
-              # Both tables use the customer-managed key, so DynamoDB access alone
-              # is not enough. The container reads its staged configuration and
-              # MicroVM endpoint from the registry, so without this the VP starts
-              # with no configuration at all.
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:Encrypt
-                  - kms:GenerateDataKey
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
-              - Effect: Allow
-                # Transcribe streaming does not support resource-level permissions.
-                Action:
-                  - transcribe:StartStreamTranscription
-                  - transcribe:StartStreamTranscriptionWebSocket
-                Resource: "*"
-              - Effect: Allow
-                Action:
-                  - appsync:GraphQL
-                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*"
-
   # The MicroVM image: a versioned Firecracker snapshot built from the same
   # Dockerfile the ECS launch types use.
   #
@@ -1956,11 +1887,16 @@ Resources:
       CodeArtifact:
         Uri: !Sub "s3://${MicrovmSourceCodeLocation}"
       Resources:
-        # Observed peak is ~1650 MB for Chromium + Simli + Nova Sonic; 4 GB
-        # leaves room for Xvfb, PulseAudio and the ffmpeg video mux. MicroVMs
-        # burst to 4x this baseline automatically and bill the excess only while
-        # it is actually used.
-        - MinimumMemoryInMiB: 4096
+        # 8 GB baseline => 4 vCPU baseline (CPU is allocated at a 2:1
+        # memory:vCPU ratio), bursting to 16 GB / 8 vCPU.
+        #
+        # Memory is not the constraint — observed peak is ~1650 MB for Chromium +
+        # Simli + Nova Sonic. CPU is: a cold Chromium launch with a fresh profile
+        # took 135s at the 4 GB / 2 vCPU baseline, which is the single largest
+        # component of VP startup. Above-baseline usage is billed only while
+        # active, so the higher baseline mainly raises the floor for bursty work
+        # like browser startup rather than the steady-state cost.
+        - MinimumMemoryInMiB: 8192
       # Chromium's sandbox needs namespace/capability access beyond the default
       # restricted set.
       AdditionalOsCapabilities:
@@ -2087,7 +2023,7 @@ Resources:
               # Least privilege is preserved by Resource: this one role only.
               - Effect: Allow
                 Action: iam:PassRole
-                Resource: !GetAtt VPMicrovmExecutionRole.Arn
+                Resource: !GetAtt TaskRole.Arn
               # Read the resolved static config (see TASK_DEFINITION_ARN above).
               - Effect: Allow
                 Action: ecs:DescribeTaskDefinition
@@ -2147,7 +2083,7 @@ Resources:
           # container in runHookPayload. Read from the task definition so there
           # is one source of truth (see _static_config in the launcher).
           TASK_DEFINITION_ARN: !Ref TaskDefinition
-          EXECUTION_ROLE_ARN: !GetAtt VPMicrovmExecutionRole.Arn
+          EXECUTION_ROLE_ARN: !GetAtt TaskRole.Arn
           VP_TABLE_NAME: !Ref VirtualParticipantTableName
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
           LOG_LEVEL: !Ref LogLevel

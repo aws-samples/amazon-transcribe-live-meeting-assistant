@@ -32,11 +32,25 @@ def lambda_handler(event, context):
     vp_id = args.get("vpId")
     identity = event.get("identity", {}) or {}
     claims = identity.get("claims", {}) or {}
-    caller = claims.get("email") or claims.get("cognito:username") or ""
+    # Same precedence the VP manager uses (see virtual_participant_manager), and
+    # it must include identity.username: a live call failed "Unauthenticated"
+    # because only the claims were checked and this deployment populates
+    # identity.username instead.
+    caller = (
+        claims.get("email")
+        or claims.get("cognito:username")
+        or identity.get("username")
+        or ""
+    )
 
     if not vp_id:
         raise Exception("vpId is required")
     if not caller:
+        logger.error(
+            "No caller identity; claims=%s identity keys=%s",
+            sorted(claims),
+            sorted(identity),
+        )
         raise Exception("Unauthenticated")
 
     vp = dynamodb.get_item(
