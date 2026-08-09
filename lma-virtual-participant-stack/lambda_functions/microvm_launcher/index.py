@@ -40,7 +40,12 @@ dynamodb = boto3.client("dynamodb")
 FIELD_MAP = {
     "VIRTUAL_PARTICIPANT_ID": ("virtualParticipantId", "id"),
     "MEETING_PLATFORM": ("meetingPlatform",),
-    "MEETING_ID": ("meetingId",),
+    # NOTE the capital D in "meetingID": that is what the scheduler state machine
+    # and EventBridge Scheduler send ($.data.meetingID). The DynamoDB-stream
+    # scheduler path uses "meetingId", so accept both — a live join failed with an
+    # EMPTY meeting id (and a misleading "Invalid meeting ID" from Zoom) because
+    # only the lowercase spelling was checked.
+    "MEETING_ID": ("meetingID", "meetingId"),
     "MEETING_PASSWORD": ("meetingPassword",),
     "MEETING_NAME": ("meetingName",),
     "MEETING_TIME": ("meetingTime",),

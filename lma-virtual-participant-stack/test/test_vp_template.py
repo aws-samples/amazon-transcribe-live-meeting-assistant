@@ -800,3 +800,34 @@ def test_image_env_avoids_reserved_keys(template: dict) -> None:
     used = {item["Key"] for item in env}
     clashes = used & RESERVED_ENV_KEYS
     assert not clashes, f"reserved env keys in the MicroVM image: {sorted(clashes)}"
+
+
+def test_launcher_field_names_match_the_state_machine(raw: str, launcher: str) -> None:
+    """Every FIELD_MAP candidate must name a real $.data key.
+
+    A live join failed with an EMPTY meeting id — and a misleading "Invalid
+    meeting ID" from Zoom — because the launcher read "meetingId" while the
+    scheduler state machine sends "meetingID" (capital D). Nothing else catches a
+    silent field-name mismatch: the value is simply absent and the app falls back
+    to its default.
+    """
+    authoritative = set(re.findall(r"\$\.data\.([a-zA-Z]+)", raw))
+    assert authoritative, "could not find any $.data.* keys in the template"
+
+    block = launcher.split("FIELD_MAP = {", 1)[1].split("\n}", 1)[0]
+    entries = re.findall(r'"([A-Z_]+)":\s*\(([^)]*)\)', block)
+    assert entries, "could not parse FIELD_MAP"
+
+    # Keys the launcher may source from elsewhere (e.g. the DynamoDB row rather
+    # than the state machine payload).
+    row_only = {"id", "owner", "refreshToken", "meetingId"}
+
+    for env_key, raw_candidates in entries:
+        candidates = [
+            c.strip().strip("\"'") for c in raw_candidates.split(",") if c.strip()
+        ]
+        matched = [c for c in candidates if c in authoritative or c in row_only]
+        assert matched, (
+            f"{env_key} maps to {candidates}, none of which the template sends; "
+            f"available: {sorted(authoritative)}"
+        )
