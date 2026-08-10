@@ -77,10 +77,12 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
-| VPLaunchType | Compute launch type for Virtual Participant tasks | EC2 | EC2, FARGATE |
+| VPLaunchType | Compute launch type for Virtual Participant tasks. `MICROVM` runs each VP in an AWS Lambda MicroVM (Firecracker) instead of an ECS task — see [MicroVM launch type](virtual-participant.md#microvm-launch-type) for requirements and trade-offs. | EC2 | EC2, FARGATE, MICROVM |
 | VPInstanceType | EC2 instance type for Virtual Participant. `t3.medium` (default) runs 1 voice + avatar VP (container capped at 3500 MB); the capacity-provider auto-scaler launches additional hosts when concurrent demand exceeds capacity. Bump to `t3.large` or a `c5.*`/`m5.*` instance for more concurrent VPs per host. | t3.medium | t3.medium, t3.large, t3.xlarge, c5.large, c5.xlarge, c5.2xlarge, m5.large, m5.xlarge |
 | VPMinInstances | Minimum warm EC2 instances always running. Set to `0` to fully scale down when idle (cold-start adds ~60-90s to the first VP). | 1 | 0-10 |
 | VPMaxInstances | Maximum EC2 instances. Capacity-provider managed scaling launches new hosts up to this cap when concurrent demand exceeds the current cluster's capacity. | 10 | 1-100 |
+
+`VPInstanceType`, `VPMinInstances` and `VPMaxInstances` apply only to `VPLaunchType=EC2`. Under `MICROVM` there are no hosts to size or scale — each meeting gets its own MicroVM, billed for its lifetime.
 
 The VP stack also creates these infrastructure resources used by the auto-scaling, AI DOM resolver, and per-user persistent Chromium profile features:
 
