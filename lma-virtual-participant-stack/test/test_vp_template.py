@@ -765,6 +765,28 @@ def test_egress_connector_uses_private_subnets_and_the_vp_security_group(
     assert cfg["AssociatedComputeResourceTypes"] == ["MicroVm"]
 
 
+def test_egress_connector_operator_role_has_no_source_account_condition(
+    template: dict,
+) -> None:
+    """CreateNetworkConnector does not populate aws:SourceAccount.
+
+    A confused-deputy condition on the trust policy therefore evaluates to a
+    DENY, and the connector create fails with "The service is unable to assume
+    the provided NetworkConnectorOperatorRole." This is the same trap as the
+    iam:PassedToService condition on VPMicrovmLauncherRole -- both cost a full
+    deploy cycle to discover, so both are pinned here.
+
+    Confidentiality is preserved by the role's minimal permission set (ENI
+    management only) rather than by a condition key the service never sends.
+    """
+    role = template["Resources"]["VPMicrovmEgressOperatorRole"]
+    for statement in role["Properties"]["AssumeRolePolicyDocument"]["Statement"]:
+        assert "Condition" not in statement, (
+            "aws:SourceAccount is not populated by CreateNetworkConnector; "
+            "a condition here makes the connector un-assumable"
+        )
+
+
 def test_egress_connector_sets_an_operator_role(template: dict) -> None:
     """Required by the service even though the CFN schema marks it optional.
 

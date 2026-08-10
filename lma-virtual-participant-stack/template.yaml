@@ -1800,9 +1800,12 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-            Condition:
-              StringEquals:
-                aws:SourceAccount: !Ref AWS::AccountId
+            # No aws:SourceAccount condition. CreateNetworkConnector does NOT
+            # populate that context key, so the condition evaluates to a deny
+            # and the create fails with "The service is unable to assume the
+            # provided NetworkConnectorOperatorRole." Same trap as the
+            # iam:PassedToService condition on the launcher role below.
+            # Verified: a role with no condition assumes fine.
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       # Lambda assumes this to create/delete the ENIs that carry MicroVM egress.
       ManagedPolicyArns:
