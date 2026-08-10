@@ -229,10 +229,23 @@ export class Supervisor {
             case 'terminate':
                 return this.onTerminate();
             default:
-                this.deps.log(`[hook] unknown hook '${hook}'`);
+                // Truncate and strip control characters: `hook` comes from the
+                // request path, so an attacker-influenced value could otherwise
+                // forge log lines (CWE-117) or bloat the log.
+                this.deps.log(`[hook] unknown hook '${sanitizeForLog(hook)}'`);
                 return 200;
         }
     }
+}
+
+/**
+ * Make a request-derived string safe to log: strip CR/LF and other control
+ * characters that could forge log entries, and cap the length.
+ */
+export function sanitizeForLog(value: string, max = 64): string {
+    // eslint-disable-next-line no-control-regex
+    const clean = value.replace(/[\u0000-\u001f\u007f]/g, '?');
+    return clean.length > max ? `${clean.slice(0, max)}\u2026` : clean;
 }
 
 /** Extract the hook name from a request path, or undefined if not a hook path. */
@@ -394,7 +407,12 @@ async function main(): Promise<void> {
                 try {
                     status = await supervisor.dispatch(hook, body);
                 } catch (err) {
-                    console.error(`[supervisor] hook ${hook} threw:`, err);
+                    // Pass the hook name as an ARGUMENT, not interpolated into the
+                    // format string: it derives from the request path, and a
+                    // template literal there is a tainted-format-string finding
+                    // (CodeQL js/tainted-format-string). dispatch() only acts on
+                    // known hook names, but this is also logged for unknown ones.
+                    console.error('[supervisor] hook %s threw:', hook, err);
                 }
                 res.writeHead(status, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({ hook, status, state: supervisor.state }));

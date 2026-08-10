@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Mint a short-lived MicroVM auth token for a VP's noVNC port.
 
 Authorization: the caller must own (or have been shared) the VP. The

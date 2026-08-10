@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Static tests for the VNC ALB gating in the AI stack template.
 
 The VNC ALB exists only to route the UI's noVNC connection to an ECS task's

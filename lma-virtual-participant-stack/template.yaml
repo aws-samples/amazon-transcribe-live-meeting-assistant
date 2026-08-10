@@ -439,20 +439,23 @@ Parameters:
   # Startup Optimization Parameters
   VPLaunchType:
     Type: String
-    Default: EC2
+    Default: MICROVM
     AllowedValues:
       - FARGATE
       - EC2
       - MICROVM
     Description: >-
-      Compute platform for Virtual Participant containers. EC2 (default) uses an
-      ECS cluster with a warm-instance capacity provider and image caching.
-      FARGATE uses serverless ECS tasks with SOCI lazy loading. MICROVM uses AWS
-      Lambda MicroVMs — no ALB, no VPC/subnets, no autoscaling, no host patching,
-      per-meeting billing, and near-instant start from a Firecracker snapshot.
+      Compute platform for Virtual Participant containers. MICROVM (default) uses
+      AWS Lambda MicroVMs — no load balancer, no autoscaling, no host patching,
+      per-meeting billing, and a fast start from a Firecracker snapshot (live view
+      ready in ~20-25s); meetings are capped at 8 hours. EC2 uses an ECS cluster
+      with a warm-instance capacity provider and image caching. FARGATE uses
+      serverless ECS tasks with SOCI lazy loading.
       IMPORTANT: MICROVM requires a region where Lambda MicroVMs is available
       (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1) and is not
-      available in GovCloud. Deploying MICROVM in an unsupported region will fail.
+      available in GovCloud. Deploying MICROVM in an unsupported region fails
+      with "Unrecognized resource types: [AWS::Lambda::MicrovmImage]" — set
+      EC2 or FARGATE in those regions.
 
   VPInstanceType:
     Type: String

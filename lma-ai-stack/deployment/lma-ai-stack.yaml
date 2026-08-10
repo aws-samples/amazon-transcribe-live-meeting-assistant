@@ -474,7 +474,11 @@ Parameters:
 
   VPLaunchType:
     Type: String
-    Default: FARGATE
+    # Must match the default in lma-main.yaml and the VP stack. lma-main always
+    # passes this explicitly, so the default only applies to a standalone deploy
+    # of this stack — but a mismatch there would create an idle VNC ALB (or omit
+    # one that is needed), so the three are kept in step.
+    Default: MICROVM
     AllowedValues:
       - EC2
       - FARGATE

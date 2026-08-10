@@ -18,7 +18,7 @@ title: "Virtual Participant"
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
 - [Launch Types](#launch-types)
-  - [MicroVM launch type](#microvm-launch-type)
+  - [MicroVM launch type (default)](#microvm-launch-type-default)
 - [EC2 Instance Types](#ec2-instance-types)
 - [Auto-Scaling](#auto-scaling)
 - [Chat Introduction Message](#chat-introduction-message)
@@ -55,7 +55,7 @@ See [Meeting Sources](meeting-sources.md) for the full comparison.
 1. Navigate to **Virtual Participant** in the LMA UI.
 2. Enter meeting details: URL, platform, meeting ID/password, and meeting name.
 3. Click **Join Now**.
-4. The VP starts in approximately 30-60 seconds (EC2) or 1-2 minutes (Fargate).
+4. The VP starts in approximately 20-25 seconds (MicroVM, the default), 30-60 seconds (EC2), or 1-2 minutes (Fargate).
 5. Once joined, the VP posts an introduction message in the meeting chat.
 6. View VP status in the UI as it progresses through its lifecycle (see [Status Lifecycle](#status-lifecycle)).
 
@@ -147,19 +147,9 @@ The VNC preview provides real-time browser viewing and remote control of the VP'
 
 ## Launch Types
 
-### EC2 (Default, Recommended)
+### MicroVM launch type (default)
 
-EC2 launch type uses warm instances with cached Docker images. This provides 85-90% faster startup compared to cold Fargate launches, with the VP ready in approximately 30-60 seconds. The estimated cost is approximately $33/month for always-on instances.
-
-EC2 is the recommended launch type for most deployments due to its significantly faster startup time.
-
-### Fargate
-
-Fargate launch type is serverless and uses SOCI (Seekable OCI) for faster container image pulls, providing 40-60% faster startup than standard Fargate. The base cost is approximately $2/month, making it more economical for infrequent use. However, startup time is longer at 1-2 minutes.
-
-### MicroVM launch type
-
-`VPLaunchType=MICROVM` runs each Virtual Participant inside an [AWS Lambda MicroVM](https://docs.aws.amazon.com/lambda/latest/dg/microvms.html) — a Firecracker VM resumed from a memory+disk snapshot — instead of an ECS task. It runs **the same container image** as the ECS launch types; only the surrounding infrastructure differs.
+`VPLaunchType=MICROVM` is the **default**. It runs each Virtual Participant inside an [AWS Lambda MicroVM](https://docs.aws.amazon.com/lambda/latest/dg/microvms.html) — a Firecracker VM resumed from a memory+disk snapshot — instead of an ECS task. It runs **the same container image** as the ECS launch types; only the surrounding infrastructure differs.
 
 **Requirements and limits** (all imposed by the service, not by LMA):
 
@@ -179,6 +169,16 @@ Fargate launch type is serverless and uses SOCI (Seekable OCI) for faster contai
 - **Egress through your VPC.** A `AWS::Lambda::NetworkConnector` routes MicroVM outbound traffic through the private subnets, so the VP reaches meeting platforms from the same NAT gateway Elastic IP as an ECS task. This costs no hourly charge (NAT data processing applies, which the ECS launch types already pay) and keeps meeting-platform-visible behavior identical across launch types.
 
 **Still requires a VPC.** The WebSocket transcriber mandates the VPC and its NAT gateways regardless of how the VP is hosted, so `MICROVM` does not remove the VPC stack — it removes the VP's ALB.
+
+### EC2
+
+EC2 launch type uses warm instances with cached Docker images. This provides 85-90% faster startup compared to cold Fargate launches, with the VP ready in approximately 30-60 seconds. The estimated cost is approximately $33/month for always-on instances.
+
+EC2 is the recommended choice in regions where Lambda MicroVMs are not available and startup latency matters.
+
+### Fargate
+
+Fargate launch type is serverless and uses SOCI (Seekable OCI) for faster container image pulls, providing 40-60% faster startup than standard Fargate. The base cost is approximately $2/month, making it more economical for infrequent use. However, startup time is longer at 1-2 minutes.
 
 ## EC2 Instance Types
 

@@ -674,20 +674,24 @@ Parameters:
   # Virtual Participant Startup Optimization Parameters
   VPLaunchType:
     Type: String
-    Default: EC2
+    Default: MICROVM
     AllowedValues:
       - FARGATE
       - EC2
       - MICROVM
     Description: >-
       Compute platform for Virtual Participant containers.
-      FARGATE: Serverless with SOCI for 40-60% faster startup (~$2/month).
-      EC2 (default): Warm instances with cached images for 85-90% faster startup (~$33/month).
-      MICROVM: AWS Lambda MicroVMs — starts from a Firecracker snapshot in ~5s,
-      bills per meeting instead of per warm instance, and needs no ALB, no
-      autoscaling and no OS patching. ONLY available in us-east-1, us-east-2,
-      us-west-2, ap-northeast-1 and eu-west-1 (not in GovCloud or
-      ap-southeast-2); deployment fails in other regions.
+      MICROVM (default): AWS Lambda MicroVMs — each meeting runs in its own
+      Firecracker microVM resumed from a snapshot. Live view ready in ~20-25s,
+      billed per meeting rather than per warm instance, and needs no load
+      balancer, no autoscaling and no OS patching. Requires a region where
+      Lambda MicroVMs are available (us-east-1, us-east-2, us-west-2,
+      ap-northeast-1, eu-west-1 — not GovCloud); meetings are capped at 8 hours.
+      EC2: Warm instances with cached images; ~$33/month per always-on instance,
+      plus autoscaling and OS patching to manage. Use where MicroVMs are
+      unavailable and startup latency matters.
+      FARGATE: Serverless, ~$2/month base, but 1-2 minute startup. Use where
+      MicroVMs are unavailable and cost matters more than latency.
 
   VPInstanceType:
     Type: String

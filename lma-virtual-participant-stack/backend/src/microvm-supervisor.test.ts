@@ -6,7 +6,12 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import type { ChildProcess } from 'child_process';
-import { Supervisor, hookNameFromPath, type SupervisorDeps } from './microvm-supervisor.js';
+import {
+    Supervisor,
+    hookNameFromPath,
+    sanitizeForLog,
+    type SupervisorDeps,
+} from './microvm-supervisor.js';
 
 /** Minimal ChildProcess stand-in: records kill signals, never spawns anything. */
 function fakeChild(): ChildProcess & { killed: boolean; signals: string[] } {
@@ -306,4 +311,27 @@ test('/run does not query the registry without a vpId', async () => {
     const h = harness();
     await h.sup.onRun(JSON.stringify({ runHookPayload: JSON.stringify({ MEETING_ID: '1' }) }));
     assert.deepEqual(h.fetchCalls, []);
+});
+
+test('sanitizeForLog strips control characters from request-derived values', () => {
+    // The hook name comes from the request path and is logged, so CR/LF would let
+    // a caller forge log lines (CWE-117 log injection).
+    assert.equal(sanitizeForLog('run\nFAKE: injected'), 'run?FAKE: injected');
+    assert.equal(sanitizeForLog('a\r\nb'), 'a??b');
+    assert.equal(sanitizeForLog('\u0000\u001f\u007f'), '???');
+    assert.equal(sanitizeForLog('ordinary-hook'), 'ordinary-hook');
+});
+
+test('sanitizeForLog caps length so a huge path cannot bloat the log', () => {
+    const out = sanitizeForLog('x'.repeat(500));
+    assert.ok(out.length <= 65, `expected <= 65 chars, got ${out.length}`);
+    assert.ok(out.endsWith('\u2026'), 'should mark truncation');
+});
+
+test('an unknown hook is logged sanitized, not raw', async () => {
+    const h = harness();
+    await h.sup.dispatch('bogus\ninjected', '');
+    const all = h.logs.join('\n');
+    assert.ok(!all.includes('bogus\ninjected'), 'raw newline must not reach the log');
+    assert.ok(all.includes('bogus?injected'));
 });

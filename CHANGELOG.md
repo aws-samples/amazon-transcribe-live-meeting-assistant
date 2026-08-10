@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **AWS Lambda MicroVMs as the new default Virtual Participant platform** — `VPLaunchType` gains a third option, **`MICROVM`**, and now defaults to it. Each Virtual Participant runs in its own Firecracker microVM resumed from a memory+disk snapshot, using the *same container image* as the ECS launch types. The live view is ready in ~20-25 seconds, billing is per meeting rather than per warm instance, and there is no load balancer, no autoscaling and no host OS patching to manage — which also removes the class of dropped meetings caused by SSM Patch Manager rebooting an EC2 host mid-call. Under `MICROVM` the VNC ALB and its target group, listener, security groups, CloudFront `/vnc/*` behavior and Lambda@Edge auth function are not created at all (the viewer connects to each MicroVM's own HTTPS endpoint with a short-lived, port-scoped auth token), and MicroVM egress is routed through the VPC's private subnets so meeting platforms see the same NAT Elastic IP as an ECS task. `EC2` and `FARGATE` remain fully supported and unchanged — select one of them in regions without Lambda MicroVM availability.
+
+### Changed
+
+- **Published regions are now us-east-1, us-west-2, ap-northeast-1 (Tokyo) and eu-west-1 (Ireland)** — ap-southeast-2 (Sydney) is temporarily replaced by Tokyo because Lambda MicroVMs are not yet available there, and `cloudformation:ValidateTemplate` rejects the Virtual Participant template in a region that does not recognize `AWS::Lambda::MicrovmImage`. Existing Sydney deployments are unaffected; to deploy in an unsupported region, publish yourself and set `VPLaunchType` to `EC2` or `FARGATE`.
+- Removed 14 unused environment variables from the Virtual Participant task definition (63 → 49) and 5 template parameters that only fed them.
+
+### Fixed
+
+- Ending a meeting now terminates a MicroVM-hosted Virtual Participant. The manager previously only knew how to stop ECS tasks, so a MicroVM ran until its 8-hour service ceiling — continuing to capture audio for a meeting nobody was in.
+- The Virtual Participant no longer reports `ACTIVE` when it has not actually joined (for example when a meeting platform redirects it to a sign-in page); it now fails with a specific reason instead.
+- Fixed the live VNC viewer failing with "Failed to connect" under `MICROVM`.
+- Zoom sign-in no longer fails on a slow page load, and a navigation that completes just after its timeout is no longer discarded.
+
 ## [0.3.6] - 2026-08-06
 
 ### Added

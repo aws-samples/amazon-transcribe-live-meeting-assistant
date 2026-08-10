@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Unit tests for the Virtual Participant CloudFormation template.
 
 These are static-analysis tests (no AWS): they parse template.yaml and assert
@@ -85,12 +88,82 @@ def launcher() -> str:
     return LAUNCHER_SRC.read_text()
 
 
+# Regions where AWS Lambda MicroVMs are available. Every region LMA publishes to
+# must be in this set, because MICROVM is now the default launch type AND
+# cloudformation:ValidateTemplate (which publish calls per region) rejects the VP
+# template outright where AWS::Lambda::MicrovmImage is unknown -- regardless of
+# the parameter value. Verified in ap-southeast-2.
+MICROVM_REGIONS = {
+    "us-east-1",
+    "us-east-2",
+    "us-west-2",
+    "ap-northeast-1",
+    "eu-west-1",
+}
+
+
 def test_microvm_is_an_allowed_launch_type(template: dict) -> None:
     allowed = template["Parameters"]["VPLaunchType"]["AllowedValues"]
     assert set(allowed) == {"EC2", "FARGATE", "MICROVM"}
-    # Default must stay EC2: MICROVM is opt-in until validated on live meetings,
-    # and is unavailable in some regions LMA publishes to (e.g. ap-southeast-2).
-    assert template["Parameters"]["VPLaunchType"]["Default"] == "EC2"
+    # MICROVM is the default: it is faster to start, has no warm-instance cost,
+    # and needs no ALB / autoscaling / host patching. Published regions are
+    # restricted to those that support it (see test_published_regions_*).
+    assert template["Parameters"]["VPLaunchType"]["Default"] == "MICROVM"
+
+
+def test_launch_type_default_matches_across_all_three_templates() -> None:
+    """lma-main, the VP stack and the AI stack must agree on the default.
+
+    lma-main always passes VPLaunchType explicitly, so a mismatch is invisible in
+    a normal deploy — but the AI stack's default decides whether the VNC ALB is
+    created, so a standalone deploy of it would either pay for an idle load
+    balancer or omit one the ECS paths need.
+    """
+    repo = TEMPLATE.parents[1]
+    paths = {
+        "lma-main.yaml": repo / "lma-main.yaml",
+        "vp-stack": TEMPLATE,
+        "ai-stack": repo / "lma-ai-stack" / "deployment" / "lma-ai-stack.yaml",
+    }
+    defaults = {}
+    for label, path in paths.items():
+        doc = yaml.load(path.read_text(), Loader=_CfnLoader)
+        defaults[label] = doc["Parameters"]["VPLaunchType"]["Default"]
+    assert len(set(defaults.values())) == 1, f"VPLaunchType defaults differ: {defaults}"
+
+
+def test_published_regions_all_support_microvms() -> None:
+    """aws-release.sh must not publish to a region without MicroVM support.
+
+    publish calls cloudformation:ValidateTemplate on the VP template in the target
+    region, and that call fails with "Unrecognized resource types:
+    [AWS::Lambda::MicrovmImage]" where the type is unknown -- so publishing to
+    such a region aborts the release, whatever VPLaunchType says.
+    """
+    release = (TEMPLATE.parents[1] / "aws-release.sh").read_text()
+    published = set(re.findall(r"^\./publish\.sh\s+\S+\s+\S+\s+(\S+)", release, re.M))
+    assert published, "no publish.sh invocations found in aws-release.sh"
+    unsupported = published - MICROVM_REGIONS
+    assert not unsupported, (
+        f"aws-release.sh publishes to region(s) without Lambda MicroVM support: "
+        f"{sorted(unsupported)}. Either remove them or stop defaulting to MICROVM."
+    )
+
+
+def test_readme_launch_buttons_match_published_regions() -> None:
+    """A Launch Stack button for an unpublished region 404s on the template URL."""
+    repo = TEMPLATE.parents[1]
+    release = (repo / "aws-release.sh").read_text()
+    published = set(re.findall(r"^\./publish\.sh\s+\S+\s+\S+\s+(\S+)", release, re.M))
+    readme = (repo / "README.md").read_text()
+    # Only the Quick Deploy table's console links, not arbitrary doc links.
+    button_regions = set(
+        re.findall(r"https://([a-z0-9-]+)\.console\.aws\.amazon\.com/cloudformation", readme)
+    )
+    assert button_regions == published, (
+        f"README Launch Stack regions {sorted(button_regions)} do not match "
+        f"published regions {sorted(published)}"
+    )
 
 
 def test_launch_type_conditions_exist(template: dict) -> None:
@@ -429,8 +502,14 @@ def test_microvm_reuses_the_ecs_task_role(template: dict) -> None:
     )
     trust = template["Resources"]["TaskRole"]["Properties"]["AssumeRolePolicyDocument"]
     services = trust["Statement"][0]["Principal"]["Service"]
-    assert "lambda.amazonaws.com" in services, "MicroVMs assume the role via lambda"
-    assert "ecs-tasks.amazonaws.com" in services, "ECS launch types must still work"
+    # Compare as a SET, not with `in`. `services` is a YAML-parsed list of service
+    # principals, so `"x" in services` is exact list membership -- but CodeQL reads
+    # it as substring-sanitization of a URL (py/incomplete-url-substring-sanitization,
+    # 2 high alerts). Set equality is both stricter and unambiguous.
+    assert isinstance(services, list), "Principal.Service must be a list of principals"
+    assert set(services) == {"ecs-tasks.amazonaws.com", "lambda.amazonaws.com"}, (
+        "TaskRole must be assumable by ECS tasks AND by Lambda (for MicroVMs)"
+    )
 
 
 def test_launcher_can_pass_only_the_task_role(template: dict) -> None:
