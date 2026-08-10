@@ -4504,6 +4504,16 @@ Resources:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
+  # Dedicated, KMS-encrypted log group, matching every other function in this
+  # stack. The function logs VP ids and caller identities, so its logs must not
+  # land in an unencrypted default group.
+  MicrovmVncTokenFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/MicrovmVncTokenFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   MicrovmVncTokenFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -4528,6 +4538,8 @@ Resources:
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
           VP_TABLE_NAME: !Ref VirtualParticipantTable
       CodeUri: ../source/lambda_functions/microvm_vnc_token
+      LoggingConfig:
+        LogGroup: !Ref MicrovmVncTokenFunctionLogGroup
 
   MicrovmVncTokenDataSourceRole:
     Type: AWS::IAM::Role

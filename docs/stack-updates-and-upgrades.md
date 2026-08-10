@@ -52,7 +52,8 @@ The CLI auto-selects the correct template for your region and streams deployment
 |--------|-------------|
 | US East (N. Virginia) | `https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml` |
 | US West (Oregon) | `https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml` |
-| AP Southeast (Sydney) | `https://s3.ap-southeast-2.amazonaws.com/aws-bigdata-blog-replica-ap-southeast-2/artifacts/lma/lma-main.yaml` |
+| Asia Pacific (Tokyo) | `https://s3.ap-northeast-1.amazonaws.com/aws-ml-blog-ap-northeast-1/artifacts/lma/lma-main.yaml` |
+| Europe (Ireland) | `https://s3.eu-west-1.amazonaws.com/aws-ml-blog-eu-west-1/artifacts/lma/lma-main.yaml` |
 
 ## Building from Source
 

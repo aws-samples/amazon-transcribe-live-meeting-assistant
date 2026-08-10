@@ -150,6 +150,27 @@ def test_published_regions_all_support_microvms() -> None:
     )
 
 
+def test_cli_template_urls_match_published_regions() -> None:
+    """`lma deploy --region X` resolves a public template from this map.
+
+    A region in aws-release.sh but missing here cannot be deployed with the CLI
+    without an explicit --template-url; a region here but not published points at
+    an S3 object that does not exist.
+    """
+    repo = TEMPLATE.parents[1]
+    release = (repo / "aws-release.sh").read_text()
+    published = set(re.findall(r"^\./publish\.sh\s+\S+\s+\S+\s+(\S+)", release, re.M))
+    cli = (
+        repo / "lib" / "lma_cli_pkg" / "lma_cli" / "commands" / "stack.py"
+    ).read_text()
+    block = cli[cli.index("TEMPLATE_URLS = {") : cli.index("}", cli.index("TEMPLATE_URLS = {"))]
+    mapped = set(re.findall(r'^\s*"([a-z0-9-]+)":', block, re.M))
+    assert mapped == published, (
+        f"CLI TEMPLATE_URLS regions {sorted(mapped)} do not match published "
+        f"regions {sorted(published)}"
+    )
+
+
 def test_readme_launch_buttons_match_published_regions() -> None:
     """A Launch Stack button for an unpublished region 404s on the template URL."""
     repo = TEMPLATE.parents[1]
