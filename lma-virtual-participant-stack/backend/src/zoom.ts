@@ -11,7 +11,12 @@ import {
 } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick, humanType } from './prejoin-actions.js';
-import { fetchZoomCredentials, loginToZoom, dismissPostLoginInterstitials } from './zoom-login.js';
+import {
+    fetchZoomCredentials,
+    loginToZoom,
+    dismissPostLoginInterstitials,
+    gotoZoomSignin,
+} from './zoom-login.js';
 
 // Zoom's audio/video toggles use SVG icons inside a clickable <button>.
 // SVGs aren't reliable click targets, so we walk up to the nearest
@@ -622,7 +627,7 @@ export default class Zoom {
                     // half-interacted state the automation left behind.
                     if (loginResult.manualReason === 'captcha') {
                         try {
-                            await page.goto('https://zoom.us/signin', { waitUntil: 'domcontentloaded' });
+                            await gotoZoomSignin(page);
                             console.log('[zoom] Reloaded sign-in page for clean manual CAPTCHA sign-in.');
                         } catch (e) {
                             console.warn('[zoom] Could not reload sign-in page for manual login (non-fatal).');

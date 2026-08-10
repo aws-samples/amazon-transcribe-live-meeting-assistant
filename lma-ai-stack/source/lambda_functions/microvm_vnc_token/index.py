@@ -8,6 +8,7 @@ any meeting.
 
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 
 import boto3
 from microvm_client import MicrovmClient, MicrovmError
@@ -108,11 +109,18 @@ def lambda_handler(event, context):
         logger.error("Could not mint a token for %s: %s", microvm_id, exc)
         raise Exception(f"Could not mint a VNC token: {exc}") from exc
     token = response["authToken"]["X-aws-proxy-auth"]
-    expires_at = response.get("expiresAt")
+    # CreateMicrovmAuthToken returns ONLY authToken -- there is no expiresAt in
+    # the response (verified against the service model: output members are
+    # exactly ["authToken"]). Compute it from the TTL we asked for.
+    #
+    # This previously did `str(response.get("expiresAt"))`, which produced the
+    # literal string "None". The GraphQL field is AWSDateTime!, so AppSync failed
+    # to serialize it and nulled the ENTIRE parent object -- the viewer got
+    # `createMicrovmVncToken: null` and reported "Failed to connect" even though
+    # a perfectly valid token had been minted.
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=TOKEN_TTL_MINUTES)
     logger.info("Minted VNC token for VP %s (microvm %s)", vp_id, microvm_id)
     return {
         "authToken": token,
-        "expiresAt": expires_at.isoformat().replace("+00:00", "Z")
-        if hasattr(expires_at, "isoformat")
-        else str(expires_at),
+        "expiresAt": expires_at.isoformat().replace("+00:00", "Z"),
     }
