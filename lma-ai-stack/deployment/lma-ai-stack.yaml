@@ -5580,6 +5580,15 @@ Resources:
                 - elasticloadbalancing:DescribeTargetHealth
                 - elasticloadbalancing:DescribeTags
               Resource: "*"
+            # Terminate a MicroVM-hosted VP. Without this, ending a meeting had
+            # no effect under VPLaunchType=MICROVM and the MicroVM ran until its
+            # 8-hour duration limit. MicroVM ids are generated per launch, so
+            # there is no ARN pattern to scope to.
+            - Effect: Allow
+              Action:
+                - lambda:TerminateMicrovm
+                - lambda:GetMicrovm
+              Resource: "*"
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
     Metadata:

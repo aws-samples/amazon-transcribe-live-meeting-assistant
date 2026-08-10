@@ -336,7 +336,7 @@ test-vp: ## Run Virtual Participant backend unit tests (no AWS)
 test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
 	@echo "Running Virtual Participant template + MicroVM client tests..."
 	$(PYTHON) -m pytest $(VP_DIR)/test/test_vp_template.py $(VP_DIR)/test/test_microvm_client.py \
-		$(VP_DIR)/test/test_ai_stack_vnc_alb.py -q
+		$(VP_DIR)/test/test_ai_stack_vnc_alb.py $(VP_DIR)/test/test_microvm_manager.py -q
 	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
 
 test-ui-force: ## Run React UI tests (ignore checksum, always run)
