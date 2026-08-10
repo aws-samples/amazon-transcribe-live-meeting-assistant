@@ -60,10 +60,29 @@ def lambda_handler(event, context):
     if not vp:
         raise Exception(f"Virtual Participant {vp_id} not found")
 
-    owner = vp.get("owner", {}).get("S", "")
-    shared = [v.get("S", "") for v in vp.get("sharedWith", {}).get("L", [])]
-    if caller != owner and caller not in shared:
-        logger.warning("Caller %s is not authorized for VP %s", caller, vp_id)
+    # Field names and semantics match the canonical subscription filter in
+    # source/appsync/subscription.js: Owner (capital O) equals identity.username,
+    # and SharedWith CONTAINS it. SharedWith is a comma-ish String, not a List —
+    # reading it as a List (and "owner" lowercase) made every request fail
+    # "Not authorized", because both lookups silently returned empty.
+    owner = vp.get("Owner", {}).get("S", "") or vp.get("owner", {}).get("S", "")
+    shared_raw = vp.get("SharedWith", {}).get("S", "")
+    shared = {v.strip() for v in shared_raw.split(",") if v.strip()}
+
+    # Admins may view any VP, matching the subscription filter's group check.
+    groups = identity.get("groups") or claims.get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [g.strip() for g in groups.split(",") if g.strip()]
+    is_admin = "Admin" in groups
+
+    if not is_admin and caller != owner and caller not in shared:
+        logger.warning(
+            "Caller %s is not authorized for VP %s (owner=%s shared=%s)",
+            caller,
+            vp_id,
+            owner,
+            sorted(shared),
+        )
         raise Exception("Not authorized for this Virtual Participant")
 
     registry = dynamodb.get_item(

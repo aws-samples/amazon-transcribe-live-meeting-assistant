@@ -218,15 +218,38 @@ export default class Zoom {
     /** True once we've left the prejoin screen (join/passcode controls gone,
      *  or any in-meeting signal present). */
     private async hasLeftPrejoin(page: Page): Promise<boolean> {
+        // Bailing out to a NON-MEETING page also removes the prejoin controls, so
+        // "controls are gone" alone is not evidence of a successful join. Zoom
+        // bounced a VP to app.zoom.us/signin (with reCAPTCHA) and this returned
+        // true, so the VP reported ACTIVE and transcribed silence for the whole
+        // meeting. Treat leaving the /wc/ web-client path as a failure, not a join.
+        const url = page.url();
+        if (/\/signin|\/oauth|\/postattendee|\/leave|recaptcha/i.test(url)) {
+            return false;
+        }
         return page
             .evaluate(() => {
                 const join = document.querySelector('button.preview-join-button, button.zm-btn.preview-join-button');
                 const pwd = document.querySelector('#input-for-pwd');
-                if (!join && !pwd) return true;
-                // Or in-meeting chrome appeared even while a control lingers.
-                return !!document.querySelector('[class*="footer-button"], footer.footer, [class*="meeting-client"]');
+                const inMeeting = !!document.querySelector(
+                    '[class*="footer-button"], footer.footer, [class*="meeting-client"]',
+                );
+                if (inMeeting) return true;
+                // Controls gone AND still on a web-client page: treat as left.
+                return !join && !pwd;
             })
             .catch(() => false);
+    }
+
+    /**
+     * True when Zoom has redirected us off the meeting web client entirely
+     * (sign-in wall, OAuth, post-attendee, or a reCAPTCHA challenge).
+     *
+     * This is a hard failure: the VP is not in the meeting and never will be
+     * without human intervention, so it must not report ACTIVE.
+     */
+    private isOffMeetingPage(page: Page): boolean {
+        return /\/signin|\/oauth|\/postattendee|recaptcha/i.test(page.url());
     }
 
     /**
@@ -1039,6 +1062,14 @@ export default class Zoom {
                 await clickJoin();
                 if (await waitLeftPrejoin(6000)) {
                     console.log('Join succeeded on retry — left the prejoin screen.');
+                } else if (this.isOffMeetingPage(page)) {
+                    // Zoom bounced us to a sign-in wall / CAPTCHA. Fail loudly:
+                    // reporting ACTIVE here means transcribing silence for the
+                    // whole meeting while the UI claims everything is fine.
+                    throw new Error(
+                        `Zoom redirected the Virtual Participant away from the meeting to ${page.url()} ` +
+                            '— sign-in or CAPTCHA challenge, so the meeting was never joined.',
+                    );
                 } else {
                     console.warn('Still on prejoin after retry — handing off to admission poll / dialog-watchdog.');
                 }

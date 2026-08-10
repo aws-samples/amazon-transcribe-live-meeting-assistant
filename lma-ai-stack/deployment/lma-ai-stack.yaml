@@ -4465,6 +4465,18 @@ Resources:
                 Resource:
                   - !GetAtt VPTaskRegistry.Arn
                   - !GetAtt VirtualParticipantTable.Arn
+              # Both tables are encrypted with the customer-managed key, so
+              # dynamodb:GetItem alone is not enough — the read fails with a KMS
+              # AccessDeniedException and the VNC viewer shows only
+              # "Failed to connect: undefined".
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   MicrovmVncTokenFunction:
     Type: AWS::Serverless::Function
