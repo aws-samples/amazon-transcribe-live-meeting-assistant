@@ -472,6 +472,19 @@ Parameters:
     Type: String
     Description: Public subnet 2 for ALB
 
+  VPLaunchType:
+    Type: String
+    Default: FARGATE
+    AllowedValues:
+      - EC2
+      - FARGATE
+      - MICROVM
+    Description: >-
+      How Virtual Participants are hosted. Under MICROVM each MicroVM exposes its
+      own HTTPS endpoint for noVNC, so the VNC ALB, its target group, listener and
+      security group are not created at all (they would otherwise sit idle with no
+      registered targets).
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -573,6 +586,10 @@ Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # The VNC ALB exists only to route the UI's noVNC connection to an ECS task's
+  # websockify port. MicroVMs each return a dedicated HTTPS endpoint from
+  # RunMicrovm, so under MICROVM the ALB has no targets and is pure cost.
+  ShouldCreateVNCALB: !Not [!Equals [!Ref VPLaunchType, "MICROVM"]]
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
@@ -703,20 +720,25 @@ Outputs:
   AppSyncEventApiHttpUrl:
     Description: AppSync Event API HTTP URL for publishing
     Value: !GetAtt EventApiDns.HttpUrl
+  # Empty string under MICROVM, where no ALB is created. The VP stack accepts
+  # these as plain (defaultable) String parameters and only wires them into the
+  # ECS launch paths, which are themselves not created under MICROVM.
   VNCTargetGroupArn:
     Description: ARN of the VNC Target Group for Virtual Participant ECS tasks
-    Value: !Ref VNCTargetGroup
+    Value: !If [ShouldCreateVNCALB, !Ref VNCTargetGroup, ""]
   VNCALBSecurityGroupId:
     Description: Security Group ID for VNC ALB
-    Value: !Ref ALBSecurityGroup
+    Value: !If [ShouldCreateVNCALB, !Ref ALBSecurityGroup, ""]
   VPSecurityGroupId:
     Description: Security Group ID for Virtual Participant ECS tasks
     Value: !Ref VPSecurityGroup
   VNCALBListenerArn:
     Description: ARN of the VNC ALB Listener for dynamic routing rules
-    Value: !Ref VNCALBListener
-    Export:
-      Name: !Sub "${AWS::StackName}-VNCALBListenerArn"
+    Value: !If [ShouldCreateVNCALB, !Ref VNCALBListener, ""]
+    # No Export: an exported empty string is still an export, and cross-stack
+    # export values cannot be changed while an importer exists. Nothing in this
+    # solution imports it (the VP stack takes it as a parameter), so dropping
+    # the export removes a needless update constraint.
   MCPServersTableName:
     Description: Name of the MCP Servers DynamoDB table
     Value: !Ref MCPServersTable
@@ -5498,7 +5520,10 @@ Resources:
           KINESIS_STREAM_NAME: !Ref CallDataStream
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
           VP_SCHEDULE_GROUP_NAME: !Ref VPScheduleGroupName
-          ALB_LISTENER_ARN: !Ref VNCALBListener
+          # Empty under MICROVM (no ALB). The manager only uses this to clean up
+          # per-VP listener rules and target groups, which exist solely on the
+          # ECS launch paths.
+          ALB_LISTENER_ARN: !If [ShouldCreateVNCALB, !Ref VNCALBListener, ""]
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref VirtualParticipantTable
@@ -6921,9 +6946,15 @@ Resources:
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
-  # Custom resource to create Lambda@Edge function in us-east-1
+  # Custom resource to create Lambda@Edge function in us-east-1.
+  #
+  # Authenticates the /vnc/* CloudFront behavior, so it is only needed for the
+  # ECS launch types. Under MICROVM the viewer authenticates with a port-scoped
+  # MicroVM auth token instead (see MicrovmVncTokenFunction), and this
+  # replicated edge function would otherwise linger in us-east-1 unused.
   EdgeAuthFunction:
     Type: Custom::EdgeAuthFunction
+    Condition: ShouldCreateVNCALB
     Properties:
       ServiceToken: !GetAtt EdgeAuthDeployerFunction.Arn
       FunctionName: !Sub '${AWS::StackName}-VNCEdgeAuth'
@@ -6939,9 +6970,13 @@ Resources:
   # VNC Application Load Balancer for VNC Viewer Remove FrameBuffer Stream
   ##########################################################################
 
-  # Custom resource to get CloudFront prefix list ID dynamically
+  # Custom resource to get CloudFront prefix list ID dynamically.
+  #
+  # Only the VNC ALB security group consumes the prefix list, so this whole
+  # trio (role, function, custom resource) is gated with the ALB itself.
   GetCloudFrontPrefixListRole:
     Type: AWS::IAM::Role
+    Condition: ShouldCreateVNCALB
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -6979,6 +7014,7 @@ Resources:
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Condition: ShouldCreateVNCALB
     Properties:
       Handler: index.handler
       Runtime: python3.12
@@ -7022,6 +7058,7 @@ Resources:
 
   CloudFrontPrefixList:
     Type: Custom::CloudFrontPrefixList
+    Condition: ShouldCreateVNCALB
     Properties:
       ServiceToken: !GetAtt GetCloudFrontPrefixListFunction.Arn
 
@@ -7042,6 +7079,7 @@ Resources:
   # ALB Security Group - Allow traffic from CloudFront only
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Condition: ShouldCreateVNCALB
     Properties:
       GroupDescription: Security group for VNC Application Load Balancer
       VpcId: !Ref VPC
@@ -7058,6 +7096,7 @@ Resources:
   # Security group rules between ALB and ECS
   ALBToECSEgressRule:
     Type: AWS::EC2::SecurityGroupEgress
+    Condition: ShouldCreateVNCALB
     Properties:
       GroupId: !Ref ALBSecurityGroup
       IpProtocol: tcp
@@ -7068,6 +7107,7 @@ Resources:
 
   ECSFromALBIngressRule:
     Type: AWS::EC2::SecurityGroupIngress
+    Condition: ShouldCreateVNCALB
     Properties:
       GroupId: !Ref VPSecurityGroup
       IpProtocol: tcp
@@ -7081,6 +7121,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     # checkov:skip=CKV_AWS_91: "ALB ingress is restricted to CloudFront prefix list only; request-level audit trail is maintained via CloudFront access logs written to the shared logging bucket. ALB access logs would only show CloudFront edge IPs (not client IPs)."
     # checkov:skip=CKV_AWS_150: "Deletion protection not required for this deployment-managed resource; stack deletion is expected to clean up all resources"
+    Condition: ShouldCreateVNCALB
     Properties:
       Type: application
       Scheme: internet-facing
@@ -7100,6 +7141,7 @@ Resources:
   # Target Group for ECS tasks
   VNCTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: ShouldCreateVNCALB
     Properties:
       Port: 5901
       Protocol: HTTP
@@ -7124,6 +7166,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     # checkov:skip=CKV_AWS_103: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth
     # checkov:skip=CKV_AWS_2: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth; ALB security group restricts traffic to CloudFront only
+    Condition: ShouldCreateVNCALB
     Properties:
       LoadBalancerArn: !Ref VNCALB
       Port: 80
@@ -7500,45 +7543,57 @@ Resources:
         Enabled: true
         HttpVersion: http2
         IPV6Enabled: true
-        Origins:
-          - Id: webapp-s3-bucket
-            DomainName: !GetAtt WebAppBucket.RegionalDomainName
-            S3OriginConfig:
-              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
-          - Id: vnc-alb
-            DomainName: !GetAtt VNCALB.DNSName
-            CustomOriginConfig:
-              HTTPPort: 80
-              HTTPSPort: 443
-              OriginProtocolPolicy: http-only
-        CacheBehaviors:
-          - PathPattern: /vnc/*
-            TargetOriginId: vnc-alb
-            ViewerProtocolPolicy: https-only
-            AllowedMethods:
-              - GET
-              - HEAD
-              - OPTIONS
-              - PUT
-              - POST
-              - PATCH
-              - DELETE
-            CachedMethods:
-              - GET
-              - HEAD
-            ForwardedValues:
-              QueryString: true
-              Headers:
-                - "*"
-              Cookies:
-                Forward: all
-            Compress: false
-            DefaultTTL: 0
-            MinTTL: 0
-            MaxTTL: 0
-            LambdaFunctionAssociations:
-              - EventType: viewer-request
-                LambdaFunctionARN: !GetAtt EdgeAuthFunction.FunctionArn
+        # The vnc-alb origin and its /vnc/* behavior exist only for the ECS
+        # launch types. Under MICROVM the viewer connects straight to each
+        # MicroVM's own HTTPS endpoint, so both are omitted -- CloudFormation
+        # rejects a distribution whose origin references an ALB that the
+        # ShouldCreateVNCALB condition did not create.
+        Origins: !If
+          - ShouldCreateVNCALB
+          - - Id: webapp-s3-bucket
+              DomainName: !GetAtt WebAppBucket.RegionalDomainName
+              S3OriginConfig:
+                OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+            - Id: vnc-alb
+              DomainName: !GetAtt VNCALB.DNSName
+              CustomOriginConfig:
+                HTTPPort: 80
+                HTTPSPort: 443
+                OriginProtocolPolicy: http-only
+          - - Id: webapp-s3-bucket
+              DomainName: !GetAtt WebAppBucket.RegionalDomainName
+              S3OriginConfig:
+                OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+        CacheBehaviors: !If
+          - ShouldCreateVNCALB
+          - - PathPattern: /vnc/*
+              TargetOriginId: vnc-alb
+              ViewerProtocolPolicy: https-only
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+                - PUT
+                - POST
+                - PATCH
+                - DELETE
+              CachedMethods:
+                - GET
+                - HEAD
+              ForwardedValues:
+                QueryString: true
+                Headers:
+                  - "*"
+                Cookies:
+                  Forward: all
+              Compress: false
+              DefaultTTL: 0
+              MinTTL: 0
+              MaxTTL: 0
+              LambdaFunctionAssociations:
+                - EventType: viewer-request
+                  LambdaFunctionARN: !GetAtt EdgeAuthFunction.FunctionArn
+          - !Ref AWS::NoValue
         PriceClass: !Ref CloudFrontPriceClass
         Restrictions: !If
           - ShouldEnableGeoRestriction

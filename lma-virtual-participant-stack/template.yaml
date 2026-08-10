@@ -328,23 +328,11 @@ Parameters:
       The Amazon S3 prefix for in-progress video segment uploads. Cleaned up after
       each meeting's video is assembled; a lifecycle rule reaps any leftovers (must end in "/")
 
-  CallAnalyticsPrefix:
-    Type: String
-    Default: lca-call-analytics/
-    Description: The Amazon S3 prefix where the post-call analytics files will be saved, when using analytics api mode (must end in "/")
-
   CallDataStreamName:
     Type: String
     Description: >-
       The Name of Kinesis Data Stream to write the call data to.
 
-  TranscribeApiMode:
-    Type: String
-    Default: standard
-    AllowedValues:
-      - standard
-      - analytics
-    Description: Set the default operational mode for Transcribe
 
   IsContentRedactionEnabled:
     Type: String
@@ -424,37 +412,12 @@ Parameters:
       - hi-IN
       - th-TH
 
-  TranscribePiiEntityTypes:
-    Type: String
-    # yamllint disable rule:line-length
-    Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
-    # yamllint enable rule:line-length
-    Description: >-
-      Select the PII entity types you want to identify or redact. Remove the values that you don't
-      want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
-
   CustomVocabularyName:
     Type: String
     Default: ""
     Description: >-
       The name of the vocabulary to use when processing the transcription job. Leave blank if no
       custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account.
-
-  CustomLanguageModelName:
-    Type: String
-    Default: ""
-    Description: >-
-      The name of the custom language model to use when processing the transcription job. Leave blank if no
-      custom language model is to be used. If yes, the custom language model must pre-exist in your account.
-
-  ShowSpeakerLabel:
-    Type: String
-    Default: "false"
-    Description: >-
-      Enable diarization on Transcribe streaming
-    AllowedValues:
-      - "true"
-      - "false"
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -1807,6 +1770,75 @@ Resources:
   #   ExecutionRole - assumed by the running MicroVM (what the VP itself can do)
   ##########################################################################
 
+  # Routes MicroVM outbound traffic through the same private subnets the ECS
+  # launch types use, so it leaves via the VPC's NAT gateway and the meeting
+  # platforms see the same stable Elastic IP.
+  #
+  # The Lambda-managed INTERNET_EGRESS connector was the default, but it exits
+  # from an AWS-owned shared address pool. Zoom scores source-IP reputation and
+  # redirected anonymous joins to a sign-in page with reCAPTCHA -- the container
+  # image, fingerprint and code being byte-identical to the ECS path. Making
+  # egress match ECS removes that as a variable.
+  #
+  # Costs no hourly charge (unlike an ALB); NAT data processing applies, which
+  # the ECS launch types already pay.
+  VPMicrovmEgressOperatorRole:
+    Type: AWS::IAM::Role
+    Condition: UseMicrovmLaunchType
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: >-
+              EC2 network-interface actions do not support resource-level
+              permissions; this is the AWS-managed policy for the purpose.
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      # Lambda assumes this to create/delete the ENIs that carry MicroVM egress.
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+
+  VPMicrovmEgressConnector:
+    Type: AWS::Lambda::NetworkConnector
+    Condition: UseMicrovmLaunchType
+    # cfn-lint 1.51 ships no schema for this resource type yet (service launched
+    # 2026-04), so E3006 would otherwise fail `make lint-cfn`.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3006
+    Properties:
+      Name: !Sub "${LMAStackName}-vp-egress"
+      # REQUIRED despite the CloudFormation schema listing only Configuration:
+      # the service rejects the create with "NetworkConnectorOperatorRole is
+      # required for VPC_EGRESS connector type". Verified against a live create.
+      OperatorRole: !GetAtt VPMicrovmEgressOperatorRole.Arn
+      Configuration:
+        VpcEgressConfiguration:
+          # Private subnets only -- these are the ones with a NAT route.
+          SubnetIds:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          # Reuse the VP task security group (all egress allowed), so MicroVM and
+          # ECS traffic are governed by exactly one rule set.
+          SecurityGroupIds:
+            - !Ref VPSecurityGroupId
+          NetworkProtocol: IPv4
+          # "MicroVm" is the only permitted value today.
+          AssociatedComputeResourceTypes:
+            - MicroVm
+
   VPMicrovmBuildRole:
     Type: AWS::IAM::Role
     Condition: UseMicrovmLaunchType
@@ -1879,11 +1911,12 @@ Resources:
       Logging:
         CloudWatch:
           LogGroup: !Sub "/aws/lambda-microvms/${LMAStackName}-vp"
-      # Default internet egress: the VP must reach Zoom/Teams/Webex/Chime plus
-      # AWS public APIs (Transcribe, Kinesis, DynamoDB, AppSync). No VPC
-      # connector, which is part of what removes the VPC dependency here.
+      # Egress via the VPC connector (see VPMicrovmEgressConnector) rather than
+      # the Lambda-managed INTERNET_EGRESS pool, so the VP reaches
+      # Zoom/Teams/Webex/Chime and the AWS public APIs from the VPC's NAT
+      # Elastic IP -- the same source address the ECS launch types use.
       EgressNetworkConnectors:
-        - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
+        - !GetAtt VPMicrovmEgressConnector.Arn
       CodeArtifact:
         Uri: !Sub "s3://${MicrovmSourceCodeLocation}"
       Resources:
@@ -2014,7 +2047,9 @@ Resources:
                 Action: lambda:PassNetworkConnector
                 Resource:
                   - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:ALL_INGRESS"
-                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
+                  # The customer-owned VPC egress connector, not the
+                  # Lambda-managed INTERNET_EGRESS one.
+                  - !GetAtt VPMicrovmEgressConnector.Arn
               # Hand the MicroVM its runtime role.
               #
               # No iam:PassedToService condition: RunMicrovm does NOT populate
@@ -2086,6 +2121,9 @@ Resources:
           # is one source of truth (see _static_config in the launcher).
           TASK_DEFINITION_ARN: !Ref TaskDefinition
           EXECUTION_ROLE_ARN: !GetAtt TaskRole.Arn
+          # The ARN embeds a service-generated id, so it cannot be constructed
+          # from the connector's Name.
+          EGRESS_CONNECTOR_ARN: !GetAtt VPMicrovmEgressConnector.Arn
           VP_TABLE_NAME: !Ref VirtualParticipantTableName
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
           LOG_LEVEL: !Ref LogLevel
@@ -2109,35 +2147,12 @@ Resources:
           Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: SHOULD_RECORD_CALL
-              Value: !Ref EnableAudioRecording
             - Name: RECORDINGS_BUCKET_NAME
               Value: !Ref S3BucketName
             - Name: RECORDINGS_KEY_PREFIX
               Value: !Ref AudioFilePrefix
-            - Name: CALL_ANALYTICS_FILE_PREFIX
-              Value: !Ref CallAnalyticsPrefix
-            - Name: POST_CALL_CONTENT_REDACTION_OUTPUT
-              Value: "redacted"
-            - Name: SERVERHOST
-              Value: "0.0.0.0"
-            - Name: SERVERPORT
-              Value: "8080"
-            - Name: KINESIS_STREAM_NAME
-              Value: !Ref CallDataStreamName
             - Name: CALL_DATA_STREAM_NAME
               Value: !Ref CallDataStreamName
-            - Name: SAVE_PARTIAL_TRANSCRIPTS
-              Value: "true"
-            - Name: SHOW_SPEAKER_LABEL
-              Value: !Ref ShowSpeakerLabel
-            - Name: TRANSCRIBE_API_MODE
-              Value: !Ref TranscribeApiMode
-            - Name: IS_CONTENT_REDACTION_ENABLED
-              Value: !If
-                - ShouldEnableContentRedaction
-                - "true"
-                - "false"
             - Name: ENABLE_CONTENT_REDACTION
               Value: !If
                 - ShouldEnableContentRedaction
@@ -2147,8 +2162,6 @@ Resources:
               Value: !Ref TranscribeContentRedactionType
             - Name: TRANSCRIBE_CONTENT_REDACTION_TYPE
               Value: !Ref TranscribeContentRedactionType
-            - Name: TRANSCRIBE_PII_ENTITY_TYPES
-              Value: !Ref TranscribePiiEntityTypes
             - Name: TRANSCRIBE_LANGUAGE_CODE
               Value: !Ref TranscribeLanguageCode
             - Name: TRANSCRIBE_LANGUAGE_OPTIONS
@@ -2157,8 +2170,6 @@ Resources:
               Value: !Ref TranscribePreferredLanguage
             - Name: CUSTOM_VOCABULARY_NAME
               Value: !Ref CustomVocabularyName
-            - Name: CUSTOM_LANGUAGE_MODEL_NAME
-              Value: !Ref CustomLanguageModelName
             - Name: LMA_IDENTITY
               Value: !Ref LMAIdentity
             - Name: INTRO_MESSAGE
@@ -2208,8 +2219,6 @@ Resources:
               Value: !Ref VideoChunksPrefix
             - Name: CLOUDFRONT_DOMAIN
               Value: !Ref CloudFrontDomainName
-            - Name: VNC_TARGET_GROUP_ARN
-              Value: !Ref VNCTargetGroupArn
             - Name: VPC_ID
               Value: !Ref VPC
             - Name: ALB_LISTENER_ARN
@@ -2240,8 +2249,6 @@ Resources:
               Value: !Ref NovaSonicConfigTableName
             - Name: STRANDS_LAMBDA_ARN
               Value: !Ref StrandsLambdaArn
-            - Name: LOG_LEVEL
-              Value: !Ref LogLevel
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:

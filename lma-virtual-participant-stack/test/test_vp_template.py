@@ -522,12 +522,21 @@ SCHEMA_PATH = (
 )
 
 
+CONNECTOR_SCHEMA_PATH = (
+    Path(__file__).resolve().parent / "schemas" / "AWS-Lambda-NetworkConnector.json"
+)
+
+
 _PLACEHOLDERS = {
     "BuildRoleArn": "arn:aws:iam::123456789012:role/placeholder",
     "BaseImageArn": "arn:aws:lambda:us-west-2:aws:microvm-image:al2023-1",
     "EgressNetworkConnectors": (
         "arn:aws:lambda:us-west-2:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
     ),
+    "OperatorRole": "arn:aws:iam::123456789012:role/placeholder",
+    # subnet-/sg- prefixed: the connector schema pattern-checks these.
+    "SubnetIds": "subnet-0123456789abcdef0",
+    "SecurityGroupIds": "sg-0123456789abcdef0",
     "Uri": "s3://bucket/key.zip",
     "LogGroup": "/aws/lambda-microvms/placeholder",
 }
@@ -586,6 +595,32 @@ def test_microvm_image_matches_the_provider_schema(template: dict) -> None:
         validatable.get("required", []) and None
         if name in props:
             del props[name]
+
+    jsonschema.validate(instance=props, schema=validatable)
+
+
+def test_egress_connector_matches_the_provider_schema(template: dict) -> None:
+    """Validate VPMicrovmEgressConnector against the real CloudFormation schema.
+
+    Same rationale as the MicrovmImage schema test: this resource type is new
+    enough that cfn-lint has no schema for it, so without this the first
+    validation is a live deploy. Note the schema alone is NOT sufficient -- it
+    marks OperatorRole optional while the service requires it for VPC_EGRESS
+    (see test_egress_connector_sets_an_operator_role).
+    """
+    import jsonschema
+
+    schema = json.loads(CONNECTOR_SCHEMA_PATH.read_text())
+    props = _resolve_intrinsics(
+        template["Resources"]["VPMicrovmEgressConnector"]["Properties"]
+    )
+    validatable = {
+        k: v
+        for k, v in schema.items()
+        if k in ("properties", "definitions", "additionalProperties", "required")
+    }
+    for read_only in schema.get("readOnlyProperties", []):
+        props.pop(read_only.split("/")[-1], None)
 
     jsonschema.validate(instance=props, schema=validatable)
 
@@ -694,7 +729,77 @@ def test_launcher_attaches_an_ingress_connector(launcher: str) -> None:
     """
     assert "ingressNetworkConnectors=" in launcher
     assert "ALL_INGRESS" in launcher
-    assert "INTERNET_EGRESS" in launcher
+    assert "egressNetworkConnectors=" in launcher
+
+
+def test_launcher_reads_the_egress_connector_arn_from_the_environment(
+    launcher: str,
+) -> None:
+    """The VPC egress connector ARN cannot be constructed.
+
+    Unlike the Lambda-managed connectors (whose ARNs end in a well-known name
+    like ALL_INGRESS), a customer-owned connector's ARN embeds a
+    service-generated id -- `network-connector:nc-<uuid>` -- with no relation to
+    the Name property. Building it by string format would silently produce an
+    ARN that does not exist, and RunMicrovm would fail every meeting.
+    """
+    assert 'os.environ.get("EGRESS_CONNECTOR_ARN")' in launcher
+
+
+def test_egress_connector_uses_private_subnets_and_the_vp_security_group(
+    template: dict,
+) -> None:
+    """Egress must match the ECS path: out through the VPC's NAT gateway.
+
+    The Lambda-managed INTERNET_EGRESS pool uses AWS-owned shared addresses, and
+    Zoom redirected anonymous joins from those to a sign-in page with reCAPTCHA
+    while the byte-identical container on ECS joined fine. Only the private
+    subnets carry a NAT route, so public subnets here would break egress.
+    """
+    conn = template["Resources"]["VPMicrovmEgressConnector"]
+    assert conn["Condition"] == "UseMicrovmLaunchType"
+    cfg = conn["Properties"]["Configuration"]["VpcEgressConfiguration"]
+    assert cfg["SubnetIds"] == [{"Ref": "PrivateSubnet1"}, {"Ref": "PrivateSubnet2"}]
+    assert cfg["SecurityGroupIds"] == [{"Ref": "VPSecurityGroupId"}]
+    # "MicroVm" is the only value the service accepts today.
+    assert cfg["AssociatedComputeResourceTypes"] == ["MicroVm"]
+
+
+def test_egress_connector_sets_an_operator_role(template: dict) -> None:
+    """Required by the service even though the CFN schema marks it optional.
+
+    A live create without it fails with "NetworkConnectorOperatorRole is
+    required for VPC_EGRESS connector type". Lambda assumes this role to manage
+    the ENIs that carry egress traffic.
+    """
+    conn = template["Resources"]["VPMicrovmEgressConnector"]
+    assert conn["Properties"]["OperatorRole"] == {
+        "Fn::GetAtt": "VPMicrovmEgressOperatorRole.Arn"
+    }
+
+
+def test_microvm_image_egresses_through_the_vpc_connector(
+    template: dict,
+) -> None:
+    """The image and the run call must agree on the egress path."""
+    image = template["Resources"]["VPMicrovmImage"]
+    assert image["Properties"]["EgressNetworkConnectors"] == [
+        {"Fn::GetAtt": "VPMicrovmEgressConnector.Arn"}
+    ]
+
+
+def test_launcher_may_pass_the_vpc_egress_connector(template: dict) -> None:
+    """PassNetworkConnector is checked against the connector resource itself.
+
+    RunMicrovm permission alone is not sufficient, so switching the egress
+    connector without updating this policy would fail every launch.
+    """
+    role = template["Resources"]["VPMicrovmLauncherRole"]
+    statements = role["Properties"]["Policies"][0]["PolicyDocument"]["Statement"]
+    pass_stmt = next(
+        s for s in statements if s.get("Action") == "lambda:PassNetworkConnector"
+    )
+    assert {"Fn::GetAtt": "VPMicrovmEgressConnector.Arn"} in pass_stmt["Resource"]
 
 
 def test_both_microvm_roles_can_decrypt_the_dynamodb_key(template: dict) -> None:

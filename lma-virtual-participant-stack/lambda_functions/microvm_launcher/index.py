@@ -141,13 +141,23 @@ def _static_config() -> dict:
 # Meetings can run long, but a MicroVM's hard ceiling is 8 hours.
 MAX_DURATION_SECONDS = 28800
 
-# Lambda-managed connectors. ALL_INGRESS exposes the VM's ports via its
-# dedicated HTTPS endpoint (needed for noVNC on 5901); INTERNET_EGRESS
-# lets the VP reach the meeting platforms and AWS public APIs.
+# ALL_INGRESS is Lambda-managed and exposes the VM's ports via its dedicated
+# HTTPS endpoint (needed for noVNC on 5901), so its ARN is well-known.
 _REGION = os.environ.get("AWS_REGION", "us-east-1")
 _CONNECTOR = "arn:aws:lambda:{}:aws:network-connector:aws-network-connector:{}"
 INGRESS_CONNECTOR = _CONNECTOR.format(_REGION, "ALL_INGRESS")
-EGRESS_CONNECTOR = _CONNECTOR.format(_REGION, "INTERNET_EGRESS")
+
+# Egress goes through a customer-owned VPC connector so the VP leaves via the
+# VPC's NAT Elastic IP -- the same source address the ECS launch types use, which
+# matters because meeting platforms score source-IP reputation.
+#
+# Read from the environment rather than constructed: the connector ARN embeds a
+# service-generated id (network-connector:nc-<uuid>), not its Name. Falls back to
+# the Lambda-managed pool so a partially-updated stack still launches rather than
+# failing the meeting outright.
+EGRESS_CONNECTOR = os.environ.get("EGRESS_CONNECTOR_ARN") or _CONNECTOR.format(
+    _REGION, "INTERNET_EGRESS"
+)
 
 
 def _redact(config):
