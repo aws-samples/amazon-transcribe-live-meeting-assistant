@@ -149,6 +149,22 @@ info "POST /validate"
 resp="$(hook validate)"; code="${resp%% *}"
 [ "$code" = "200" ] && ok "/validate returned 200" || bad "/validate returned $code"
 
+# /validate is RETRIED by the platform, and it launches a real Chromium to warm
+# the snapshot page cache. A fixed profile directory failed every retry with
+# "Failed to create .../SingletonLock: File exists" because the first attempt's
+# directory is captured in the snapshot. Assert a second call still warms.
+info "POST /validate again (retry must still warm the workload)"
+resp="$(hook validate)"; code="${resp%% *}"
+[ "$code" = "200" ] && ok "/validate retry returned 200" || bad "/validate retry returned $code"
+warmed=$(docker logs "$CONTAINER" 2>&1 | grep -c 'workloadWarmed=true' || true)
+if [ "${warmed:-0}" -ge 2 ]; then
+  ok "workload warmed on BOTH validate calls (snapshot prefetch will sample Chromium)"
+else
+  info "  warm count: ${warmed:-0}"
+  info "  $(docker logs "$CONTAINER" 2>&1 | grep -i 'warm-up failed' | head -2)"
+  bad "expected the workload to warm on each /validate call"
+fi
+
 info "POST /run with per-meeting config"
 PAYLOAD='{"MEETING_PLATFORM":"Teams","MEETING_ID":"243574196567966","MEETING_NAME":"E2E probe","VIRTUAL_PARTICIPANT_ID":"vp-e2e","USER_ACCESS_TOKEN":"secret-token-value","MEETING_PASSWORD":"hunter2"}'
 BODY="{\"microvmId\":\"mvm-e2e\",\"runHookPayload\":$(python3 -c "import json,sys;print(json.dumps(sys.argv[1]))" "$PAYLOAD")}"

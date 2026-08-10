@@ -294,12 +294,19 @@ async function defaultFetchConfig(vpId: string): Promise<PerMeetingConfig> {
 async function defaultWarmWorkload(): Promise<boolean> {
     try {
         const { launchPersistentContext } = await import('cloakbrowser');
+        // A UNIQUE profile dir per attempt. /validate is retried, and the first
+        // attempt's directory (including Chromium's SingletonLock) is captured in
+        // the snapshot, so a fixed path fails every subsequent attempt with
+        // "Failed to create .../SingletonLock: File exists".
+        const { mkdtempSync } = await import('fs');
+        const { tmpdir } = await import('os');
+        const profileDir = mkdtempSync(`${tmpdir()}/validate-warm-`);
         const started = Date.now();
         const context = await launchPersistentContext({
             headless: false,
             humanize: true,
             humanPreset: 'default',
-            userDataDir: '/tmp/validate-warm-profile',
+            userDataDir: profileDir,
             viewport: { width: 1920, height: 950 },
             args: [
                 '--fingerprint=11111',
