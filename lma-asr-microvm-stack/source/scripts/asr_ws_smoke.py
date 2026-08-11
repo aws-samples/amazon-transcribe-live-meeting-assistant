@@ -50,13 +50,24 @@ import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 
-# Reuse the ONE authoritative subprotocol builder (API doc §4) from the router
-# client so the smoke test and the production router can't drift on the handshake.
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+DEFAULT_PORT = 8080
 
-from router.microvm_client import DEFAULT_PORT, websocket_subprotocols  # noqa: E402
+
+def websocket_subprotocols(token: str, *, port: int = DEFAULT_PORT) -> list[str]:
+    """Build the three WebSocket subprotocols for the upgrade.
+
+    Base protocol first (required), then the port-scoped auth token, then the
+    target port. Browsers cannot set handshake headers, so auth rides on the
+    subprotocol list; the MicroVM proxy strips all three before forwarding the
+    upgrade to the ASR server. Kept in lock-step with the transcriber's
+    ``subprotocols()`` in ``calleventdata/asr-microvm.ts`` and the web UI's
+    ``vncConnection.js``.
+    """
+    return [
+        "lambda-microvms",
+        f"lambda-microvms.authentication.{token}",
+        f"lambda-microvms.port.{port}",
+    ]
 
 _BYTES_PER_SAMPLE = 2
 _MIC_RATE = 16000

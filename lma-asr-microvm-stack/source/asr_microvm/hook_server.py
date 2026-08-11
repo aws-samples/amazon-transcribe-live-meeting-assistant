@@ -54,6 +54,13 @@ WARM_TONE_MS = int(os.environ.get("ASR_WARM_TONE_MS", "2000"))
 SAMPLE_RATE = 16000
 CHUNK_MS = 100
 BYTES_PER_SAMPLE = 2
+# Pace the warm audio instead of flooding it. The server's ingest queue is bounded
+# (64 frames) and drops frames rather than growing without bound, so an unpaced
+# send overruns it: the first build logged "backpressure=3 dropped=2", which both
+# corrupts the warm transcript and under-samples the pages /validate is supposed to
+# make Lambda prefetch. 25 ms per 100 ms frame is 4x real time — fast enough to keep
+# the hook quick, slow enough that the queue never fills.
+WARM_PACING_S = float(os.environ.get("ASR_WARM_PACING_S", "0.025"))
 
 
 def log(message: str) -> None:
@@ -109,6 +116,8 @@ def exercise_asr(timeout_s: float = EXERCISE_TIMEOUT_S) -> bool:
             ws.send(json.dumps(config))
             for offset in range(0, len(pcm), chunk_bytes):
                 ws.send(pcm[offset : offset + chunk_bytes])
+                if WARM_PACING_S > 0:
+                    time.sleep(WARM_PACING_S)
             ws.send(json.dumps({"type": "eos"}))
             while True:
                 remaining = timeout_s - (time.monotonic() - started)

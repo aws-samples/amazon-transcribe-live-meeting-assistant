@@ -35,7 +35,15 @@ logger.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO"), logging.IN
 microvms = MicrovmClient()
 
 ASR_PORT = 8080
-TOKEN_TTL_MINUTES = int(os.environ.get("TOKEN_TTL_MINUTES", "180"))
+# CreateMicrovmAuthToken rejects anything above 60 minutes ("ExpirationMinutes
+# 180 exceeded max allowed of 60"), so this is clamped rather than trusted. A
+# meeting outliving its token is fine: the token authorizes the WebSocket
+# upgrade, and a reconnect mints a fresh one through the "token" action.
+MAX_TOKEN_TTL_MINUTES = 60
+TOKEN_TTL_MINUTES = min(
+    int(os.environ.get("TOKEN_TTL_MINUTES", str(MAX_TOKEN_TTL_MINUTES))),
+    MAX_TOKEN_TTL_MINUTES,
+)
 MAX_MEETING_SECONDS = min(int(os.environ.get("MAX_MEETING_SECONDS", "14400")), 28800)
 ACQUIRE_TIMEOUT_SECONDS = int(os.environ.get("ACQUIRE_TIMEOUT_SECONDS", "240"))
 POLL_INTERVAL_SECONDS = 2

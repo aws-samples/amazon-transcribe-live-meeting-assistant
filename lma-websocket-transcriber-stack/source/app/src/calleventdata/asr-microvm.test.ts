@@ -17,7 +17,7 @@ import { AddressInfo } from 'node:net';
 import { FastifyInstance } from 'fastify';
 import WebSocket, { WebSocketServer } from 'ws';
 
-import { AsrChannelSession } from './asr-microvm';
+import { AsrChannelSession, coalesceBacklog } from './asr-microvm';
 import { SpeakerNameRegistry } from './asr-audio';
 import { TranscriptSegmentRecord } from './transcribe';
 import { CallMetaData, SocketCallData } from './eventtypes';
@@ -348,4 +348,28 @@ test('start reports failure when the engine rejects the session', async () => {
     await session.finish();
     await asr.close();
     assert.equal(rows.length, 0);
+});
+
+test('a buffered backlog is flushed as a few large frames, losing nothing', () => {
+    // 60 seconds of 100 ms frames — what a slow MicroVM launch would accumulate.
+    const pending = Array.from({ length: 600 }, (_, i) => Buffer.alloc(3200, i % 251));
+    const frames = coalesceBacklog(pending);
+
+    // The engine's ingest queue holds 64 entries and drops beyond that, so the
+    // flush must be far fewer entries than the backlog.
+    assert.ok(frames.length <= 64, `expected <= 64 frames, got ${frames.length}`);
+    assert.equal(
+        Buffer.concat(frames).length,
+        pending.reduce((total, chunk) => total + chunk.length, 0)
+    );
+    assert.ok(Buffer.concat(frames).equals(Buffer.concat(pending)));
+});
+
+test('an empty backlog flushes nothing', () => {
+    assert.deepEqual(coalesceBacklog([]), []);
+});
+
+test('a backlog smaller than one frame is sent uncopied', () => {
+    const only = Buffer.alloc(3200, 4);
+    assert.deepEqual(coalesceBacklog([only]), [only]);
 });

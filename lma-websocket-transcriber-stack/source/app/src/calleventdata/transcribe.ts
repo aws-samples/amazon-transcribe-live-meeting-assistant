@@ -198,6 +198,45 @@ export const writeCallVideoRecordingEvent = async (
     await writeCallEvent(callVideoRecordingEvent, server);
 };
 
+/**
+ * Maximum bytes per Transcribe `AudioChunk`.
+ *
+ * The audio source is iterated with `for await`, so a chunk is whatever Node's
+ * opportunistic read returns — not a fixed frame. Whenever the read loop starts
+ * late or stalls, the queued audio comes out as one large buffer and Transcribe
+ * rejects the request with "Your stream is too big. Reduce the frame size and try
+ * your request again.", which aborts transcription for the rest of the meeting.
+ *
+ * That is exactly what a MicroVM ASR acquisition does: it delays the start of the
+ * Transcribe consumer by seconds, so a fallback to Amazon Transcribe would open
+ * with an oversized frame and never recover.
+ *
+ * 16 KB = 512 ms at 16 kHz mono PCM16. Kept in sync with MAX_AUDIO_CHUNK_BYTES in
+ * the Virtual Participant scribe (scribe.ts), which fixed the same failure for
+ * ffmpeg-sourced audio (GitHub #536).
+ */
+export const MAX_AUDIO_CHUNK_BYTES = 16 * 1024;
+
+/**
+ * Split a PCM buffer into frames no larger than `maxBytes`.
+ *
+ * Slices rather than drops: every byte is forwarded, in order, so no audio is
+ * lost. Buffers already within the limit pass through uncopied.
+ */
+export const frameAudioChunk = (
+    chunk: Buffer,
+    maxBytes: number = MAX_AUDIO_CHUNK_BYTES
+): Buffer[] => {
+    if (chunk.length <= maxBytes) {
+        return [chunk];
+    }
+    const frames: Buffer[] = [];
+    for (let offset = 0; offset < chunk.length; offset += maxBytes) {
+        frames.push(chunk.subarray(offset, Math.min(offset + maxBytes, chunk.length)));
+    }
+    return frames;
+};
+
 // True when a Transcribe streaming error indicates the SessionId we tried to
 // resume is no longer valid (expired / closed / unknown), so the next attempt
 // must start a fresh session rather than reuse the stale id. Kept in sync with
@@ -347,7 +386,12 @@ export const startTranscribe = async (
                 audioInputStream.pipe(audioSink, { end: false });
                 try {
                     for await (const chunk of audioSink) {
-                        yield { AudioEvent: { AudioChunk: chunk } };
+                        // Never yield a chunk Transcribe would reject as too big
+                        // (see frameAudioChunk): audio queued while this consumer
+                        // was starting arrives as one large buffer.
+                        for (const frame of frameAudioChunk(chunk)) {
+                            yield { AudioEvent: { AudioChunk: frame } };
+                        }
                     }
                 } finally {
                     audioInputStream.unpipe(audioSink);

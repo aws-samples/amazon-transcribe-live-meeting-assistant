@@ -11,6 +11,7 @@ never suspend a MicroVM mid-meeting (a suspended VM stops transcribing).
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -222,3 +223,26 @@ def test_an_unknown_action_is_reported() -> None:
 
 def test_the_meeting_ceiling_never_exceeds_the_service_limit() -> None:
     assert index.MAX_MEETING_SECONDS <= 28800
+
+
+def test_the_token_ttl_never_exceeds_the_service_limit() -> None:
+    """CreateMicrovmAuthToken rejects >60 minutes outright.
+
+    A live acquire failed with "ExpirationMinutes 180 exceeded max allowed of
+    60", which terminated the MicroVM and fell the meeting back to Amazon
+    Transcribe, so this is clamped and pinned.
+    """
+    assert index.TOKEN_TTL_MINUTES <= 60
+
+    with mock.patch.dict(os.environ, {"TOKEN_TTL_MINUTES": "600"}):
+        importlib.reload(index)
+        assert index.TOKEN_TTL_MINUTES == 60
+    importlib.reload(index)
+
+
+def test_the_minted_token_asks_for_the_clamped_ttl() -> None:
+    client = fake_microvms()
+    with mock.patch.object(index, "microvms", client):
+        index.lambda_handler({"action": "token", "microvmId": "mvm-1"}, None)
+
+    assert client.create_microvm_auth_token.call_args.kwargs["expiration_in_minutes"] <= 60

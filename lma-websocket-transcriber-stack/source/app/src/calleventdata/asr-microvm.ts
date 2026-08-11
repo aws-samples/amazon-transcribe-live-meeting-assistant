@@ -53,6 +53,11 @@ const ASR_MAX_PENDING_BYTES = parseInt(
 );
 // Outbound frame size: 100 ms of 16 kHz mono 16-bit PCM.
 const ASR_SEND_CHUNK_BYTES = parseInt(process.env['ASR_SEND_CHUNK_BYTES'] || '3200', 10);
+// Frame size used when flushing a backlog: 5 seconds of the same PCM.
+const ASR_BACKLOG_FRAME_BYTES = parseInt(
+    process.env['ASR_BACKLOG_FRAME_BYTES'] || String(16000 * 2 * 5),
+    10
+);
 const ASR_MAX_RETRIES = parseInt(process.env['ASR_MAX_RETRIES'] || '5', 10);
 const ASR_RETRY_BACKOFF_MS = parseInt(process.env['ASR_RETRY_BACKOFF_MS'] || '2000', 10);
 const ASR_MAX_BACKOFF_MS = parseInt(process.env['ASR_MAX_BACKOFF_MS'] || '10000', 10);
@@ -216,6 +221,37 @@ const subprotocols = (authToken?: string): string[] =>
 
 const backoffDelay = (attempt: number): number =>
     Math.max(ASR_MIN_BACKOFF_MS, Math.min(attempt * ASR_RETRY_BACKOFF_MS, ASR_MAX_BACKOFF_MS));
+
+/**
+ * Merge buffered audio into a few large frames before flushing it.
+ *
+ * The engine's ingest queue is bounded (64 frames) and DROPS frames rather than
+ * growing without bound, so sending a whole backlog as hundreds of 100 ms frames
+ * in one tight loop loses audio. Each merged frame is one queue entry, so a
+ * 60-second backlog becomes 12 entries instead of 600 and nothing is dropped; the
+ * engine then decodes the catch-up faster than real time.
+ */
+export const coalesceBacklog = (
+    pending: Buffer[],
+    maxFrameBytes: number = ASR_BACKLOG_FRAME_BYTES
+): Buffer[] => {
+    const frames: Buffer[] = [];
+    let batch: Buffer[] = [];
+    let batchBytes = 0;
+    for (const chunk of pending) {
+        batch.push(chunk);
+        batchBytes += chunk.length;
+        if (batchBytes >= maxFrameBytes) {
+            frames.push(batch.length === 1 ? batch[0] : Buffer.concat(batch));
+            batch = [];
+            batchBytes = 0;
+        }
+    }
+    if (batchBytes > 0) {
+        frames.push(batch.length === 1 ? batch[0] : Buffer.concat(batch));
+    }
+    return frames;
+};
 
 /**
  * One channel's ASR session: a WebSocket to the MicroVM plus the mapping from
@@ -442,8 +478,8 @@ export class AsrChannelSession {
             };
             try {
                 socket.send(JSON.stringify(config));
-                for (const chunk of this.pending) {
-                    socket.send(chunk);
+                for (const frame of coalesceBacklog(this.pending)) {
+                    socket.send(frame);
                 }
             } catch (error) {
                 this.server.log.error(
