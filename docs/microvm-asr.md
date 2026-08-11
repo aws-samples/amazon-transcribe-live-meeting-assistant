@@ -101,8 +101,9 @@ Relevant parameters (all under *On-demand ASR and Diarization* in the console):
 | `AsrSpeakerModelId` | `titanet-small` | Speaker-embedding model, or `none` for transcription only |
 | `AsrBaselineMemoryMiB` | `8192` | Memory per MicroVM; CPU is 1 vCPU per 2 GiB, so this is 4 vCPU |
 | `AsrMaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
-| `AsrMaxSpeakers` | `0` | Cap on distinct speakers per channel (0 = discover) |
+| `AsrMaxSpeakers` | `4` | Cap on distinct speakers per channel (0 = discover, not recommended) |
 | `AsrSpeakerThreshold` | `0.5` | Higher splits voices more eagerly; lower merges more eagerly |
+| `AsrMinSegmentMs` | `1200` | Shortest utterance worth embedding; shorter ones inherit the current speaker |
 
 ## Using it
 
@@ -301,8 +302,28 @@ no transcript when the engine is unavailable.
 mismatch` means the pinned checksum does not match the download; `model file ... is
 not in the archive` means the file names in the catalog entry are wrong.
 
-**Too many speakers detected.** Lower `AsrSpeakerThreshold`, or set
-`AsrMaxSpeakers` when you know how many people are in the room.
+**One person appears as several speakers.** This is the failure mode to expect
+first, and it is what the three tuning knobs exist for. A measured example: a live
+single-speaker meeting produced eight identities with `AsrSpeakerThreshold=0.5`,
+`AsrMaxSpeakers=0` and a 400 ms embedding floor, almost entirely from one- and
+two-word utterances ("Coffee", "And on my left") whose embeddings are too short to
+be reliable. In order of effect:
+
+1. **`AsrMaxSpeakers`** — the hard bound. Set it to the number of people who
+   actually share a channel (`1` for a personal microphone). Once the cap is
+   reached, utterances are assigned to their closest match instead of minting new
+   identities.
+2. **`AsrMinSegmentMs`** — raise it (1200 → 2000) so short utterances inherit the
+   current speaker rather than being embedded at all.
+3. **`AsrSpeakerThreshold`** — lower it (0.5 → 0.3) so a same-speaker match
+   succeeds more readily. Too low merges genuinely different people.
+
+`AsrMaxSpeakers` and `AsrSpeakerThreshold` reach the engine as per-session config
+from the transcriber, so changing them only redeploys the Fargate service (~2 min).
+`AsrMinSegmentMs` is baked into the image, so changing it rebuilds it (~5 min).
+
+**Too many speakers detected on genuinely multi-speaker audio.** Lower
+`AsrSpeakerThreshold`, or set `AsrMaxSpeakers` to the room size.
 
 ## Licences
 

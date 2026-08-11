@@ -364,6 +364,7 @@ def build_diarization_config(
     speaker_model: str | Path | None = None,
     threshold: float | None = None,
     max_speakers: int | None = None,
+    min_segment_ms: int | None = None,
     num_threads: int | None = None,
 ) -> DiarizationConfig:
     """Resolve a :class:`DiarizationConfig` from env + optional overrides (NFR5).
@@ -372,7 +373,7 @@ def build_diarization_config(
     the build-time warmup resolve the embedding model identically (no drift by
     construction). Precedence (highest first): the explicit argument, then the
     matching env var (``ASR_SPEAKER_MODEL`` / ``ASR_SPEAKER_THRESHOLD`` /
-    ``ASR_MAX_SPEAKERS`` / ``ASR_NUM_THREADS``), then the default —
+    ``ASR_MAX_SPEAKERS`` / ``ASR_MIN_SEGMENT_MS`` / ``ASR_NUM_THREADS``), then the default —
     ``<model_dir>/speaker_embedding.onnx`` for the model, with ``model_dir``
     falling back to ``$ASR_MODEL_DIR`` then :data:`DEFAULT_MODEL_DIR`.
     """
@@ -393,6 +394,10 @@ def build_diarization_config(
         threshold = float(os.environ.get("ASR_SPEAKER_THRESHOLD", "0.5"))
     if max_speakers is None:
         max_speakers = int(os.environ.get("ASR_MAX_SPEAKERS", "0"))
+    if min_segment_ms is None:
+        min_segment_ms = int(
+            os.environ.get("ASR_MIN_SEGMENT_MS", str(DiarizationConfig.min_segment_ms))
+        )
 
     return DiarizationConfig(
         embedder=SpeakerEmbedderConfig(
@@ -402,6 +407,7 @@ def build_diarization_config(
         ),
         threshold=threshold,
         max_speakers=max_speakers,
+        min_segment_ms=min_segment_ms,
     )
 
 

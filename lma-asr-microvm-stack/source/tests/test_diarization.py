@@ -707,3 +707,25 @@ def test_create_sherpa_embedder_fails_closed_on_missing_model() -> None:
     ):
         create_sherpa_embedder(config)
 
+
+
+def test_build_diarization_config_reads_min_segment_ms_from_env(monkeypatch) -> None:
+    """The short-segment floor is tunable per image.
+
+    A live meeting with one speaker produced EIGHT identities because short
+    utterances ("Coffee", "And on my left") were each embedded and each missed the
+    similarity threshold. Raising this floor makes a short segment inherit the
+    current speaker instead of minting a new one, so it has to be reachable
+    without a code change.
+    """
+    monkeypatch.setenv("ASR_MIN_SEGMENT_MS", "1500")
+    assert build_diarization_config().min_segment_ms == 1500
+
+
+def test_build_diarization_config_min_segment_ms_argument_wins(monkeypatch) -> None:
+    monkeypatch.setenv("ASR_MIN_SEGMENT_MS", "1500")
+    assert build_diarization_config(min_segment_ms=250).min_segment_ms == 250
+
+
+def test_build_diarization_config_min_segment_ms_defaults_to_the_dataclass() -> None:
+    assert build_diarization_config().min_segment_ms == DiarizationConfig.min_segment_ms

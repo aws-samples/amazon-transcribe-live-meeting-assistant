@@ -36,6 +36,7 @@ Metadata:
           - AsrMaxMeetingSeconds
           - AsrMaxSpeakers
           - AsrSpeakerThreshold
+          - AsrMinSegmentMs
           - AsrLogLevel
 
 Parameters:
@@ -172,12 +173,15 @@ Parameters:
 
   AsrMaxSpeakers:
     Type: Number
-    Default: 0
+    Default: 4
     MinValue: 0
     MaxValue: 30
     Description: >-
-      Default cap on distinct speakers per audio channel (0 discovers as many as
-      appear). Set 1 when each channel only ever carries one person.
+      Cap on distinct speakers per audio channel. Once reached, an utterance is
+      assigned to its closest match instead of minting another identity, which
+      bounds the damage when embeddings are noisy. 0 discovers as many as appear —
+      NOT recommended as a default: a live single-speaker meeting fragmented into
+      eight identities that way. Set 1 when a channel only ever carries one person.
 
   AsrSpeakerThreshold:
     Type: String
@@ -186,6 +190,18 @@ Parameters:
     Description: >-
       Cosine similarity above which two utterances are treated as the same
       speaker. Higher splits voices more eagerly; lower merges more eagerly.
+
+  AsrMinSegmentMs:
+    Type: Number
+    Default: 1200
+    MinValue: 0
+    MaxValue: 5000
+    Description: >-
+      Shortest utterance worth computing a speaker embedding for. A shorter one
+      inherits the current speaker instead of minting a new identity, because an
+      embedding from a fraction of a second is unreliable: a live single-speaker
+      meeting produced eight identities at the 400 ms engine default, mostly from
+      one- and two-word utterances.
 
   AsrLogLevel:
     Type: String
@@ -475,6 +491,8 @@ Resources:
           Value: !Ref AsrMaxSpeakers
         - Key: ASR_SPEAKER_THRESHOLD
           Value: !Ref AsrSpeakerThreshold
+        - Key: ASR_MIN_SEGMENT_MS
+          Value: !Ref AsrMinSegmentMs
         - !If
           - SetDiarizationExplicitly
           - Key: ASR_DIARIZE

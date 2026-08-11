@@ -384,11 +384,26 @@ Parameters:
 
   AsrMaxSpeakers:
     Type: Number
-    Default: 0
+    Default: 4
     MinValue: 0
     MaxValue: 30
     Description: >-
-      Cap on distinct speakers per audio channel (0 discovers as many as appear).
+      Cap on distinct speakers per audio channel. Once reached, an utterance is
+      assigned to its closest match rather than minting another identity, which
+      bounds the damage when embeddings are noisy. 0 discovers as many as appear,
+      which is not recommended: a live single-speaker meeting fragmented into eight
+      identities that way. Set 1 when a channel only ever carries one person.
+
+  AsrMinSegmentMs:
+    Type: Number
+    Default: 1200
+    MinValue: 0
+    MaxValue: 5000
+    Description: >-
+      Shortest utterance worth computing a speaker embedding for. Anything shorter
+      inherits the current speaker instead of minting a new identity, because an
+      embedding from a fraction of a second is unreliable. Raise it if short
+      utterances keep appearing as new speakers.
 
   AsrSpeakerThreshold:
     Type: String
@@ -948,6 +963,7 @@ Metadata:
           - AsrMaxMeetingSeconds
           - AsrMaxSpeakers
           - AsrSpeakerThreshold
+          - AsrMinSegmentMs
           - AsrModelUrl
           - AsrModelSha256
           - AsrModelEncoderFile
@@ -1092,6 +1108,8 @@ Metadata:
         default: ASR Maximum Speakers Per Channel
       AsrSpeakerThreshold:
         default: ASR Speaker Similarity Threshold
+      AsrMinSegmentMs:
+        default: ASR Minimum Utterance For Speaker ID (ms)
       AsrModelUrl:
         default: Custom ASR Model URL
       AsrModelSha256:
@@ -2742,6 +2760,7 @@ Resources:
         AsrMaxMeetingSeconds: !Ref AsrMaxMeetingSeconds
         AsrMaxSpeakers: !Ref AsrMaxSpeakers
         AsrSpeakerThreshold: !Ref AsrSpeakerThreshold
+        AsrMinSegmentMs: !Ref AsrMinSegmentMs
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LogLevel: !Ref LogLevel

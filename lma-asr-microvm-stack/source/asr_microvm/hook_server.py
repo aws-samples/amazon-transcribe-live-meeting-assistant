@@ -54,13 +54,15 @@ WARM_TONE_MS = int(os.environ.get("ASR_WARM_TONE_MS", "2000"))
 SAMPLE_RATE = 16000
 CHUNK_MS = 100
 BYTES_PER_SAMPLE = 2
-# Pace the warm audio instead of flooding it. The server's ingest queue is bounded
-# (64 frames) and drops frames rather than growing without bound, so an unpaced
-# send overruns it: the first build logged "backpressure=3 dropped=2", which both
-# corrupts the warm transcript and under-samples the pages /validate is supposed to
-# make Lambda prefetch. 25 ms per 100 ms frame is 4x real time — fast enough to keep
-# the hook quick, slow enough that the queue never fills.
-WARM_PACING_S = float(os.environ.get("ASR_WARM_PACING_S", "0.025"))
+# Pace the warm audio in real time rather than flooding it. The server's ingest
+# queue is bounded (64 frames) and drops frames rather than growing without bound,
+# so an unpaced send overruns it: builds logged "backpressure=3 dropped=2", and 4x
+# real time still dropped a frame because the bundled WAV is 67 frames against a
+# 64-slot queue. Dropped audio corrupts the warm transcript and under-samples the
+# pages /validate exists to make Lambda prefetch, so the exercise sends at the rate
+# a real client would. It costs nothing: the hook is already bounded by the decode
+# (~7s), against a 900s timeout.
+WARM_PACING_S = float(os.environ.get("ASR_WARM_PACING_S", str(CHUNK_MS / 1000)))
 
 
 def log(message: str) -> None:
