@@ -187,12 +187,21 @@ echo "Created agent_output sink (module $AGENT_SINK)"
 COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio rate=16000 channels=1 format=s16le sink_properties=device.description="Combined_Audio_For_Transcription")
 echo "Created combined_audio sink (module $COMBINED_SINK)"
 
-# 20ms latency: 1ms caused underruns on smaller instances.
-pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=20
+# 80ms latency: 1ms caused underruns on smaller instances, and 20ms still
+# underran on a 2-vCPU MicroVM once Chromium, the avatar rescale, video recording
+# and Transcribe were all competing (GitHub #543). These loopbacks feed
+# transcription and the recording, so extra buffering costs nothing perceptible.
+#
+# This loopback is the SOLE route for meeting audio into combined_audio. The app
+# used to ALSO pipe it in from scribe.ts, which delivered every utterance to
+# Transcribe twice at two different latencies -- Transcribe then transcribed both
+# ("Jack and Jill, Jack and Jill went up ...", GitHub #542). Do not re-add a
+# second writer here or in the app.
+pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=80
 echo "Routed meeting audio to combined sink"
 
 # Route agent_output.monitor to combined_audio sink
-pactl load-module module-loopback source=agent_output.monitor sink=combined_audio latency_msec=20
+pactl load-module module-loopback source=agent_output.monitor sink=combined_audio latency_msec=80
 echo "Routed agent audio to combined sink"
 
 # Create a virtual microphone source from agent_output for Chromium
