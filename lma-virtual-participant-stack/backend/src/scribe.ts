@@ -16,6 +16,57 @@ let currentSpeaker = "none";
 // Local testing mode - skip AWS services
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+/**
+ * Maximum bytes per Transcribe `AudioChunk`.
+ *
+ * ffmpeg's stdout is consumed with `for await`, so the buffer size is whatever
+ * Node's opportunistic read happens to return — not a fixed frame. When the read
+ * loop stalls briefly (CPU pressure from Chromium + avatar + video recording) a
+ * burst of audio accumulates and the next read can exceed Transcribe's per-frame
+ * limit. The request is then rejected with "Your stream is too big. Reduce the
+ * frame size and try your request again." and, before this fix, transcription
+ * aborted for the rest of the meeting (GitHub #536).
+ *
+ * 16 KB = 512 ms at 16 kHz mono PCM16 (16000 * 2 bytes/s). Comfortably under the
+ * service limit while keeping frames large enough not to add per-frame overhead.
+ */
+export const MAX_AUDIO_CHUNK_BYTES = 16 * 1024;
+
+/**
+ * Split a PCM buffer into frames no larger than `maxBytes`.
+ *
+ * Slices rather than drops: every byte is forwarded, in order, so no audio is
+ * lost. Buffers already within the limit are passed through as-is (no copy), so
+ * the common case costs nothing.
+ */
+export function frameAudioChunk(
+    chunk: Buffer,
+    maxBytes: number = MAX_AUDIO_CHUNK_BYTES,
+): Buffer[] {
+    if (chunk.length <= maxBytes) return [chunk];
+    const frames: Buffer[] = [];
+    for (let offset = 0; offset < chunk.length; offset += maxBytes) {
+        frames.push(chunk.subarray(offset, Math.min(offset + maxBytes, chunk.length)));
+    }
+    return frames;
+}
+
+/**
+ * True when a Transcribe error is a transient framing/throughput complaint
+ * rather than a permanent misconfiguration.
+ *
+ * "Your stream is too big" arrives as a BadRequestException, which the
+ * non-retryable predicate would otherwise treat as a fatal configuration error —
+ * aborting the meeting's transcription and logging a message about
+ * TRANSCRIBE_LANGUAGE_CODE that has nothing to do with the actual failure.
+ * Reconnecting is both correct and safe: the retry path already preserves the
+ * transcript timeline via transcribeTimeOffsetSeconds (GitHub #292).
+ */
+export function isTransientFramingError(error: { message?: string }): boolean {
+    const message = error?.message || '';
+    return /stream is too big|reduce the frame size/i.test(message);
+}
+
 // True when a Transcribe streaming error indicates the SessionId we tried to
 // resume is no longer valid (expired / closed / unknown), so the next attempt
 // must start a fresh session rather than reuse the stale id. Kept in sync with
@@ -134,12 +185,17 @@ export class TranscriptionService {
 
         try {
             for await (const chunk of this.process.stdout!) {
-                if (!details.start) {
-                    yield {
-                        AudioEvent: { AudioChunk: Buffer.alloc(chunk.length) },
-                    };
-                } else {
-                    yield { AudioEvent: { AudioChunk: chunk } };
+                // Cap the frame size (see MAX_AUDIO_CHUNK_BYTES). ffmpeg can hand
+                // over a buffer larger than Transcribe accepts, which used to
+                // abort transcription for the rest of the meeting (GitHub #536).
+                for (const frame of frameAudioChunk(chunk)) {
+                    if (!details.start) {
+                        // Before the meeting starts, send silence of the same
+                        // length so the stream stays open without capturing audio.
+                        yield { AudioEvent: { AudioChunk: Buffer.alloc(frame.length) } };
+                    } else {
+                        yield { AudioEvent: { AudioChunk: frame } };
+                    }
                 }
                 if (!this.startTime) {
                     this.startTime = Date.now();
@@ -373,13 +429,19 @@ export class TranscriptionService {
                 // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
                 console.error(`Transcription error (consecutive failure ${consecutiveFailures + 1}/${maxRetries}):`, error.message);
 
+                // A framing/throughput complaint is transient, so it must be
+                // checked FIRST: "Your stream is too big" is a
+                // BadRequestException with httpStatusCode 400 and would otherwise
+                // match every clause below, aborting the meeting's transcription
+                // and blaming the language configuration (GitHub #536).
                 const isNonRetryable =
-                    error.name === 'BadRequestException' ||
-                    error.name === 'ValidationException' ||
-                    error.name === 'InvalidParameterException' ||
-                    error.$metadata?.httpStatusCode === 400 ||
-                    error.message?.includes('validation error') ||
-                    error.message?.includes('non-retryable streaming request');
+                    !isTransientFramingError(error) &&
+                    (error.name === 'BadRequestException' ||
+                        error.name === 'ValidationException' ||
+                        error.name === 'InvalidParameterException' ||
+                        error.$metadata?.httpStatusCode === 400 ||
+                        error.message?.includes('validation error') ||
+                        error.message?.includes('non-retryable streaming request'));
 
                 // If the resumed SessionId is no longer valid (expired / closed /
                 // not found / invalid), clear it so the next retry starts a FRESH
@@ -405,9 +467,19 @@ export class TranscriptionService {
                 this.teardownSessionProcesses();
 
                 if (isNonRetryable) {
+                    // Only mention the language settings when the error is
+                    // plausibly about them. Pointing at TRANSCRIBE_LANGUAGE_* for
+                    // every 400 sent a real investigation down the wrong path
+                    // (GitHub #536): the failing request was an oversized audio
+                    // frame and the language configuration was correct.
+                    const looksLanguageRelated = /language|vocabulary|LanguageCode|LanguageOptions/i.test(
+                        error.message || '',
+                    );
                     console.error(
-                        'Non-retryable Transcribe configuration error — aborting without further retries. ' +
-                        'Check TRANSCRIBE_LANGUAGE_CODE / TRANSCRIBE_LANGUAGE_OPTIONS / TRANSCRIBE_PREFERRED_LANGUAGE.',
+                        `Non-retryable Transcribe error — aborting without further retries: ${error.message}` +
+                            (looksLanguageRelated
+                                ? ' Check TRANSCRIBE_LANGUAGE_CODE / TRANSCRIBE_LANGUAGE_OPTIONS / TRANSCRIBE_PREFERRED_LANGUAGE.'
+                                : ''),
                     );
                     break;
                 }
