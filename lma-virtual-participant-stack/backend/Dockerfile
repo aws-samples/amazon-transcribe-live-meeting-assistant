@@ -81,7 +81,31 @@ EXPOSE 5900 5901 9000
 
 RUN chmod +x /srv/entrypoint.sh
 RUN useradd -m -d /home/appuser -s /bin/bash appuser
-RUN chown -R appuser:appuser /srv /opt/cloakbrowser
+
+# Pin PulseAudio to the pipeline's native format: 16 kHz mono.
+#
+# PulseAudio's compiled default is 48 kHz stereo, and every stage of the VP audio
+# path is 16 kHz mono PCM16 (Nova Sonic in and out, Transcribe, the pacat
+# playback streams). With the default, Nova's voice was resampled 16k->48k into
+# agent_output, again through the loopback into combined_audio, and again through
+# module-remap-source into Chromium's virtual mic — three conversions before the
+# meeting heard it, which made the assistant sound warbly (GitHub #538).
+#
+# resample-method: PulseAudio defaults to speex-float-1, tuned for speed. Any
+# residual conversion should favour quality; speex-float-5 is still cheap.
+# Written as the appuser's own config since the daemon runs as that user.
+RUN mkdir -p /home/appuser/.config/pulse && \
+    printf '%s\n' \
+      'default-sample-rate = 16000' \
+      'alternate-sample-rate = 16000' \
+      'default-sample-channels = 1' \
+      'default-sample-format = s16le' \
+      'resample-method = speex-float-5' \
+      'avoid-resampling = yes' \
+      'flat-volumes = no' \
+      > /home/appuser/.config/pulse/daemon.conf
+
+RUN chown -R appuser:appuser /srv /opt/cloakbrowser /home/appuser/.config
 USER appuser
 
 # Default entrypoint stays entrypoint.sh so ECS (EC2/FARGATE) behaviour is
