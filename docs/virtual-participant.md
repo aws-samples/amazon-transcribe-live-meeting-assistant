@@ -18,6 +18,7 @@ title: "Virtual Participant"
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
 - [Launch Types](#launch-types)
+  - [MicroVM launch type (default)](#microvm-launch-type-default)
 - [EC2 Instance Types](#ec2-instance-types)
 - [Auto-Scaling](#auto-scaling)
 - [Chat Introduction Message](#chat-introduction-message)
@@ -30,7 +31,7 @@ title: "Virtual Participant"
 
 > **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
 
-The Virtual Participant (VP) is a headless Chrome browser running on ECS (Fargate or EC2) that joins meetings as a separate participant, driven by Playwright. It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
+The Virtual Participant (VP) is a headless Chrome browser that joins meetings as a separate participant, driven by Playwright. It runs on ECS (EC2 or Fargate) or, where available, in an AWS Lambda MicroVM — see [Launch Types](#launch-types). It captures audio and metadata, sending them to the LMA Kinesis Data Stream for transcription and processing.
 
 ## When to use Virtual Participant
 
@@ -54,7 +55,7 @@ See [Meeting Sources](meeting-sources.md) for the full comparison.
 1. Navigate to **Virtual Participant** in the LMA UI.
 2. Enter meeting details: URL, platform, meeting ID/password, and meeting name.
 3. Click **Join Now**.
-4. The VP starts in approximately 30-60 seconds (EC2) or 1-2 minutes (Fargate).
+4. The VP starts in approximately 20-25 seconds (MicroVM, the default), 30-60 seconds (EC2), or 1-2 minutes (Fargate).
 5. Once joined, the VP posts an introduction message in the meeting chat.
 6. View VP status in the UI as it progresses through its lifecycle (see [Status Lifecycle](#status-lifecycle)).
 
@@ -64,10 +65,10 @@ The VP reports a granular status as it boots, joins, and runs. The UI uses these
 
 | Status | What's happening |
 | --- | --- |
-| `INITIALIZING` | Step Functions has submitted the ECS RunTask request; container is being scheduled |
+| `INITIALIZING` | Step Functions has submitted the ECS RunTask request (or `RunMicrovm` under `MICROVM`); the VP is being scheduled |
 | `WAITING_FOR_CAPACITY` | The task is queued waiting for compute placement (typically 60-90 seconds). On **EC2**, the capacity-provider auto-scaler may be launching a new host (see [Auto-Scaling](#auto-scaling)); on **Fargate**, this is the brief serverless provisioning / networking step. The UI tailors this message to your deployment's `VPLaunchType`. |
 | `BOOTING` | Container started; pulling Chrome image, starting Xvfb / VNC / PulseAudio |
-| `REGISTERING_NETWORK` | Registering the task with the live-view ALB (typically 30-60 seconds) |
+| `REGISTERING_NETWORK` | Registering the task with the live-view ALB (typically 30-60 seconds). Skipped under `MICROVM`, which has no ALB — each MicroVM exposes its own HTTPS endpoint. |
 | `HYDRATING_PROFILE` | Restoring the per-user Chromium profile (cookies, "trusted device" markers) from S3 |
 | `LAUNCHING_BROWSER` | Launching Chromium via Playwright (`chromium.launchPersistentContext`) |
 | `VNC_READY` | Browser is up; live-view viewer can connect |
@@ -146,17 +147,42 @@ The VNC preview provides real-time browser viewing and remote control of the VP'
 
 ## Launch Types
 
-### EC2 (Default, Recommended)
+### MicroVM launch type (default)
+
+`VPLaunchType=MICROVM` is the **default**. It runs each Virtual Participant inside an [AWS Lambda MicroVM](https://docs.aws.amazon.com/lambda/latest/dg/microvms.html) — a Firecracker VM resumed from a memory+disk snapshot — instead of an ECS task. It runs **the same container image** as the ECS launch types; only the surrounding infrastructure differs.
+
+**Requirements and limits** (all imposed by the service, not by LMA):
+
+| | |
+|---|---|
+| Architecture | **ARM64 only** |
+| Regions | us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1 |
+| Max meeting duration | **8 hours** (hard ceiling) |
+| Connections per MicroVM | 8 (not adjustable) |
+
+**What it changes:**
+
+- **No ALB.** Each MicroVM returns its own HTTPS endpoint, so the VNC ALB, its target group, listener, security groups, CloudFront `/vnc/*` behavior and the Lambda@Edge auth function are not created at all. The viewer authenticates with a short-lived, port-scoped MicroVM auth token instead. This is why `MICROVM` also removes those resources from the AI stack.
+- **No hosts to scale.** No EC2 ASG, no capacity provider, no SSM host patching. Billing is per meeting rather than per warm instance, and there is no `WAITING_FOR_CAPACITY` wait for a host to launch.
+- **Faster startup.** The Firecracker snapshot is taken with Xvfb, x11vnc, websockify and PulseAudio already running, and the image-build `/validate` hook exercises a real Chromium so Lambda prefetches its snapshot pages. Measured on a live deployment: VNC ready in ~20-25s.
+- **Config delivery.** ECS passes per-meeting values as `ContainerOverrides` environment variables. MicroVM image environment variables are baked into the image and shared by every MicroVM launched from it (and capped at 50), so the launcher stages the full configuration in the VP task registry and the `/run` hook payload carries only the VP id. The service caps `runHookPayload` at 4096 bytes, which three Cognito JWTs alone exceed.
+- **Egress through your VPC.** A `AWS::Lambda::NetworkConnector` routes MicroVM outbound traffic through the private subnets, so the VP reaches meeting platforms from the same NAT gateway Elastic IP as an ECS task. This costs no hourly charge (NAT data processing applies, which the ECS launch types already pay) and keeps meeting-platform-visible behavior identical across launch types.
+
+**Still requires a VPC.** The WebSocket transcriber mandates the VPC and its NAT gateways regardless of how the VP is hosted, so `MICROVM` does not remove the VPC stack — it removes the VP's ALB.
+
+### EC2
 
 EC2 launch type uses warm instances with cached Docker images. This provides 85-90% faster startup compared to cold Fargate launches, with the VP ready in approximately 30-60 seconds. The estimated cost is approximately $33/month for always-on instances.
 
-EC2 is the recommended launch type for most deployments due to its significantly faster startup time.
+EC2 is the recommended choice in regions where Lambda MicroVMs are not available and startup latency matters.
 
 ### Fargate
 
 Fargate launch type is serverless and uses SOCI (Seekable OCI) for faster container image pulls, providing 40-60% faster startup than standard Fargate. The base cost is approximately $2/month, making it more economical for infrequent use. However, startup time is longer at 1-2 minutes.
 
 ## EC2 Instance Types
+
+> Applies to `VPLaunchType=EC2` only. Fargate and MicroVM have no instances to size.
 
 Each VP container is capped at 3500 MB (observed peak memory is ~1650 MB with Chromium + Simli + Nova Sonic; the cap leaves headroom). A full voice-assistant + Simli-avatar meeting draws ~1.35 vCPU steady-state and runs reliably on the default **`t3.medium`** (the CloakBrowser stack downscales the avatar to 256×256@15fps and disables the emulated GPU, which keeps the encode cheap). Pick a larger instance mainly for **more concurrent VPs per host** rather than for a single meeting's headroom — and ensure host memory accommodates your expected concurrent VPs plus ~600 MB for the OS / ECS agent:
 
@@ -176,6 +202,8 @@ Each VP container is capped at 3500 MB (observed peak memory is ~1650 MB with Ch
 `t3` instances are burstable: a single voice + avatar VP fits the `t3.medium` baseline, but if you run **multiple concurrent** VPs per host (or very long meetings), prefer `c5.*` / `m5.*` for guaranteed sustained CPU.
 
 ## Auto-Scaling
+
+> Applies to `VPLaunchType=EC2` only. Fargate scales per task, and MicroVM launches one Firecracker VM per meeting with no cluster to scale.
 
 The VP cluster uses an **ECS capacity provider with managed scaling**:
 

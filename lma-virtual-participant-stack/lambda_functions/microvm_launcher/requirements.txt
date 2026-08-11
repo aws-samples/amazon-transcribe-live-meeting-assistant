@@ -1,0 +1,2 @@
+# No third-party dependencies: microvm_client.py uses only botocore's SigV4
+# signer and urllib, both present in every Lambda runtime.

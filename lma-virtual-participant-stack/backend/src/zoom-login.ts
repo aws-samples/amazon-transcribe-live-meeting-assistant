@@ -268,6 +268,55 @@ const waitForSignInFormReady = async (
  *   we still wait up to `manualActionTimeoutMs` for the user to clear it)
  * - 'invalid-credentials' if the credentials are wrong
  */
+/**
+ * Navigation budget for the Zoom sign-in page.
+ *
+ * `index.ts` sets page.setDefaultTimeout(20_000), which is a sensible guard for
+ * in-meeting selector lookups but far too short for THIS navigation:
+ * zoom.us/signin is the full marketing-shell page and pulls in analytics
+ * subframes (doubleclick, etc.). On a cold MicroVM a live join failed with
+ * "page.goto: Timeout 20000ms exceeded" while Chromium logged "Slow network is
+ * detected" four times — and the page then landed on /myhome anyway, i.e. the
+ * navigation was working, just slower than the budget.
+ */
+export const SIGNIN_NAV_TIMEOUT_MS = 60_000;
+
+/**
+ * Navigate to a Zoom sign-in URL, tolerating a timeout that still arrived.
+ *
+ * `domcontentloaded` can time out while the document has in fact loaded (or
+ * Zoom has already redirected us onward to /myhome). Treating that as a hard
+ * failure threw away a working session and failed the meeting, so a timeout is
+ * only fatal if we did not actually reach a Zoom page.
+ *
+ * Returns the URL settled on. Throws only when navigation genuinely failed.
+ */
+export const gotoZoomSignin = async (
+    page: Page,
+    url = 'https://zoom.us/signin',
+): Promise<string> => {
+    try {
+        await page.goto(url, {
+            waitUntil: 'domcontentloaded',
+            timeout: SIGNIN_NAV_TIMEOUT_MS,
+        });
+    } catch (err) {
+        const current = page.url();
+        // Any zoom.us page means the navigation effectively succeeded: either
+        // /signin rendered late, or Zoom redirected us to an authenticated
+        // landing page (/myhome, /profile) because the saved session is valid.
+        if (/https:\/\/(app\.)?zoom\.us\//.test(current)) {
+            console.warn(
+                `[zoom-login] ${url} reported "${String(err).split('\n')[0]}" but the page ` +
+                    `settled at ${current} — continuing.`,
+            );
+            return current;
+        }
+        throw err;
+    }
+    return page.url();
+};
+
 const hasZoomAuthCookie = async (page: Page): Promise<boolean> => {
     // Zoom marks its session cookies as HttpOnly, so they're invisible to
     // `document.cookie` from JavaScript. Use the context's cookies() API
@@ -309,7 +358,7 @@ export async function loginToZoom(
     // detection block. Going to /signin and letting Zoom decide whether
     // we're authenticated is more reliable.)
     console.log('[zoom-login] Navigating to Zoom sign-in page');
-    await page.goto('https://zoom.us/signin', { waitUntil: 'domcontentloaded' });
+    await gotoZoomSignin(page);
     await sleepJitter(800, 600);
 
     // If Zoom redirected us away from /signin, the saved session is still

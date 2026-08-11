@@ -2,6 +2,22 @@
 
 echo "=== LMA Virtual Participant Startup ==="
 
+# MicroVM dispatch.
+#
+# Under VPLaunchType=MICROVM the container must not run the VP app directly:
+# the app needs per-meeting config, which does not exist yet at image-build
+# time (it arrives later in the /run lifecycle hook). So hand off to the
+# supervisor, which boots the pre-snapshot stack, serves the lifecycle hooks,
+# and spawns the app once /run delivers the config.
+#
+# STACK_ONLY guards against recursion: the supervisor re-invokes THIS script
+# with STACK_ONLY=true to bring the stack up, and that invocation must fall
+# through to the boot sequence below rather than spawning another supervisor.
+if [ "$VP_LAUNCH_TYPE" = "MICROVM" ] && [ "$STACK_ONLY" != "true" ]; then
+    echo "=== MICROVM launch type: handing off to the lifecycle-hook supervisor ==="
+    exec node /srv/dist/microvm-supervisor.js
+fi
+
 # Identify exactly which container image this task is running (build date +
 # git commit), so logs make it obvious whether the expected code is deployed.
 if [ -f /srv/build-info.json ]; then
@@ -201,6 +217,20 @@ echo "   Meeting only → meeting_audio.monitor → Nova (no feedback!)"
 echo "   Agent mic → agent_output.monitor → Chromium microphone"
 echo ""
 echo "✓ Barge-in enabled: Nova hears meeting audio only, not her own voice"
+
+# MicroVM mode: everything above this line is the "pre-snapshot stack" (Xvfb,
+# fluxbox, x11vnc, websockify, PulseAudio routing) and is exactly what we want
+# captured in the Firecracker snapshot. The VP application itself must NOT start
+# here, because per-meeting config does not exist yet — it arrives later in the
+# /run lifecycle hook, and the supervisor spawns the app at that point.
+#
+# Reusing this script (rather than reimplementing the boot in TypeScript) keeps
+# ECS and MicroVM on one code path, so audio-routing changes can't silently
+# drift between them.
+if [ "$STACK_ONLY" = "true" ]; then
+    echo "=== STACK_ONLY: pre-snapshot stack is up; not starting the VP app ==="
+    exit 0
+fi
 
 echo "=== Starting Virtual Participant Application ==="
 

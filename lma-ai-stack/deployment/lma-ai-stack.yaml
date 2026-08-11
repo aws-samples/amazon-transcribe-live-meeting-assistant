@@ -472,6 +472,23 @@ Parameters:
     Type: String
     Description: Public subnet 2 for ALB
 
+  VPLaunchType:
+    Type: String
+    # Must match the default in lma-main.yaml and the VP stack. lma-main always
+    # passes this explicitly, so the default only applies to a standalone deploy
+    # of this stack — but a mismatch there would create an idle VNC ALB (or omit
+    # one that is needed), so the three are kept in step.
+    Default: MICROVM
+    AllowedValues:
+      - EC2
+      - FARGATE
+      - MICROVM
+    Description: >-
+      How Virtual Participants are hosted. Under MICROVM each MicroVM exposes its
+      own HTTPS endpoint for noVNC, so the VNC ALB, its target group, listener and
+      security group are not created at all (they would otherwise sit idle with no
+      registered targets).
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -573,6 +590,10 @@ Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # The VNC ALB exists only to route the UI's noVNC connection to an ECS task's
+  # websockify port. MicroVMs each return a dedicated HTTPS endpoint from
+  # RunMicrovm, so under MICROVM the ALB has no targets and is pure cost.
+  ShouldCreateVNCALB: !Not [!Equals [!Ref VPLaunchType, "MICROVM"]]
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
@@ -703,20 +724,25 @@ Outputs:
   AppSyncEventApiHttpUrl:
     Description: AppSync Event API HTTP URL for publishing
     Value: !GetAtt EventApiDns.HttpUrl
+  # Empty string under MICROVM, where no ALB is created. The VP stack accepts
+  # these as plain (defaultable) String parameters and only wires them into the
+  # ECS launch paths, which are themselves not created under MICROVM.
   VNCTargetGroupArn:
     Description: ARN of the VNC Target Group for Virtual Participant ECS tasks
-    Value: !Ref VNCTargetGroup
+    Value: !If [ShouldCreateVNCALB, !Ref VNCTargetGroup, ""]
   VNCALBSecurityGroupId:
     Description: Security Group ID for VNC ALB
-    Value: !Ref ALBSecurityGroup
+    Value: !If [ShouldCreateVNCALB, !Ref ALBSecurityGroup, ""]
   VPSecurityGroupId:
     Description: Security Group ID for Virtual Participant ECS tasks
     Value: !Ref VPSecurityGroup
   VNCALBListenerArn:
     Description: ARN of the VNC ALB Listener for dynamic routing rules
-    Value: !Ref VNCALBListener
-    Export:
-      Name: !Sub "${AWS::StackName}-VNCALBListenerArn"
+    Value: !If [ShouldCreateVNCALB, !Ref VNCALBListener, ""]
+    # No Export: an exported empty string is still an export, and cross-stack
+    # export values cannot be changed while an importer exists. Nothing in this
+    # solution imports it (the VP stack takes it as a parameter), so dropping
+    # the export removes a needless update constraint.
   MCPServersTableName:
     Description: Name of the MCP Servers DynamoDB table
     Value: !Ref MCPServersTable
@@ -4407,6 +4433,173 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/addChatToken.js
 
+  ##########################################################################
+  # MicroVM VNC auth tokens
+  #
+  # When a Virtual Participant runs on Lambda MicroVMs (VPLaunchType=MICROVM)
+  # there is no ALB in front of noVNC — the browser connects straight to the
+  # MicroVM's own HTTPS endpoint, which requires a port-scoped JWE auth token.
+  #
+  # Minting needs IAM credentials (lambda:CreateMicrovmAuthToken), so it happens
+  # here rather than in the browser. Tokens are capped at 60 minutes by the
+  # service while meetings can run to 8 hours, so the viewer mints one per
+  # session (and again on reconnect) instead of receiving one at VP launch.
+  #
+  # Created unconditionally: this stack does not receive VPLaunchType, and an
+  # unused Lambda + resolver costs nothing. The mutation simply returns an error
+  # for VPs that are not running on a MicroVM.
+  ##########################################################################
+
+  MicrovmVncTokenFunctionRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "CreateMicrovmAuthToken does not support resource-level permissions"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: 'lambda-microvms does not support resource-level permissions for CreateMicrovmAuthToken'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: MintMicrovmAuthToken
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:CreateMicrovmAuthToken
+                Resource: "*"
+              - Effect: Allow
+                # Look up the caller's VP to (a) find its microvmId and (b) verify
+                # ownership before handing out a token.
+                Action:
+                  - dynamodb:GetItem
+                Resource:
+                  - !GetAtt VPTaskRegistry.Arn
+                  - !GetAtt VirtualParticipantTable.Arn
+              # Both tables are encrypted with the customer-managed key, so
+              # dynamodb:GetItem alone is not enough — the read fails with a KMS
+              # AccessDeniedException and the VNC viewer shows only
+              # "Failed to connect: undefined".
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  # Dedicated, KMS-encrypted log group, matching every other function in this
+  # stack. The function logs VP ids and caller identities, so its logs must not
+  # land in an unencrypted default group.
+  MicrovmVncTokenFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/MicrovmVncTokenFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  MicrovmVncTokenFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function only calls AWS public APIs; no VPC resources"
+          - id: W92
+            reason: "Reserved concurrency not required; invoked once per viewer session"
+    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only table names"
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 15
+      MemorySize: 256
+      Role: !GetAtt MicrovmVncTokenFunctionRole.Arn
+      Environment:
+        Variables:
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
+          VP_TABLE_NAME: !Ref VirtualParticipantTable
+      CodeUri: ../source/lambda_functions/microvm_vnc_token
+      LoggingConfig:
+        LogGroup: !Ref MicrovmVncTokenFunctionLogGroup
+
+  MicrovmVncTokenDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt MicrovmVncTokenFunction.Arn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  MicrovmVncTokenDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MicrovmVncTokenManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt MicrovmVncTokenDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt MicrovmVncTokenFunction.Arn
+
+  CreateMicrovmVncTokenResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createMicrovmVncToken
+      DataSourceName: !GetAtt MicrovmVncTokenDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "createMicrovmVncToken"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($context.error)
+          $utils.error($context.error.message, $context.error.type)
+        #end
+        $utils.toJson($context.result)
+
   ToggleVNCPreviewResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -5343,7 +5536,10 @@ Resources:
           KINESIS_STREAM_NAME: !Ref CallDataStream
           VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistry
           VP_SCHEDULE_GROUP_NAME: !Ref VPScheduleGroupName
-          ALB_LISTENER_ARN: !Ref VNCALBListener
+          # Empty under MICROVM (no ALB). The manager only uses this to clean up
+          # per-VP listener rules and target groups, which exist solely on the
+          # ECS launch paths.
+          ALB_LISTENER_ARN: !If [ShouldCreateVNCALB, !Ref VNCALBListener, ""]
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref VirtualParticipantTable
@@ -5399,6 +5595,15 @@ Resources:
                 - elasticloadbalancing:DeregisterTargets
                 - elasticloadbalancing:DescribeTargetHealth
                 - elasticloadbalancing:DescribeTags
+              Resource: "*"
+            # Terminate a MicroVM-hosted VP. Without this, ending a meeting had
+            # no effect under VPLaunchType=MICROVM and the MicroVM ran until its
+            # 8-hour duration limit. MicroVM ids are generated per launch, so
+            # there is no ARN pattern to scope to.
+            - Effect: Allow
+              Action:
+                - lambda:TerminateMicrovm
+                - lambda:GetMicrovm
               Resource: "*"
       LoggingConfig:
         LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
@@ -6766,9 +6971,15 @@ Resources:
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
-  # Custom resource to create Lambda@Edge function in us-east-1
+  # Custom resource to create Lambda@Edge function in us-east-1.
+  #
+  # Authenticates the /vnc/* CloudFront behavior, so it is only needed for the
+  # ECS launch types. Under MICROVM the viewer authenticates with a port-scoped
+  # MicroVM auth token instead (see MicrovmVncTokenFunction), and this
+  # replicated edge function would otherwise linger in us-east-1 unused.
   EdgeAuthFunction:
     Type: Custom::EdgeAuthFunction
+    Condition: ShouldCreateVNCALB
     Properties:
       ServiceToken: !GetAtt EdgeAuthDeployerFunction.Arn
       FunctionName: !Sub '${AWS::StackName}-VNCEdgeAuth'
@@ -6784,9 +6995,13 @@ Resources:
   # VNC Application Load Balancer for VNC Viewer Remove FrameBuffer Stream
   ##########################################################################
 
-  # Custom resource to get CloudFront prefix list ID dynamically
+  # Custom resource to get CloudFront prefix list ID dynamically.
+  #
+  # Only the VNC ALB security group consumes the prefix list, so this whole
+  # trio (role, function, custom resource) is gated with the ALB itself.
   GetCloudFrontPrefixListRole:
     Type: AWS::IAM::Role
+    Condition: ShouldCreateVNCALB
     Properties:
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
@@ -6824,6 +7039,7 @@ Resources:
     # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
     # checkov:skip=CKV_AWS_116: "DLQ not required for Cfn Custom Resource function"
     # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    Condition: ShouldCreateVNCALB
     Properties:
       Handler: index.handler
       Runtime: python3.12
@@ -6867,6 +7083,7 @@ Resources:
 
   CloudFrontPrefixList:
     Type: Custom::CloudFrontPrefixList
+    Condition: ShouldCreateVNCALB
     Properties:
       ServiceToken: !GetAtt GetCloudFrontPrefixListFunction.Arn
 
@@ -6887,6 +7104,7 @@ Resources:
   # ALB Security Group - Allow traffic from CloudFront only
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
+    Condition: ShouldCreateVNCALB
     Properties:
       GroupDescription: Security group for VNC Application Load Balancer
       VpcId: !Ref VPC
@@ -6903,6 +7121,7 @@ Resources:
   # Security group rules between ALB and ECS
   ALBToECSEgressRule:
     Type: AWS::EC2::SecurityGroupEgress
+    Condition: ShouldCreateVNCALB
     Properties:
       GroupId: !Ref ALBSecurityGroup
       IpProtocol: tcp
@@ -6913,6 +7132,7 @@ Resources:
 
   ECSFromALBIngressRule:
     Type: AWS::EC2::SecurityGroupIngress
+    Condition: ShouldCreateVNCALB
     Properties:
       GroupId: !Ref VPSecurityGroup
       IpProtocol: tcp
@@ -6926,6 +7146,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     # checkov:skip=CKV_AWS_91: "ALB ingress is restricted to CloudFront prefix list only; request-level audit trail is maintained via CloudFront access logs written to the shared logging bucket. ALB access logs would only show CloudFront edge IPs (not client IPs)."
     # checkov:skip=CKV_AWS_150: "Deletion protection not required for this deployment-managed resource; stack deletion is expected to clean up all resources"
+    Condition: ShouldCreateVNCALB
     Properties:
       Type: application
       Scheme: internet-facing
@@ -6945,6 +7166,7 @@ Resources:
   # Target Group for ECS tasks
   VNCTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Condition: ShouldCreateVNCALB
     Properties:
       Port: 5901
       Protocol: HTTP
@@ -6969,6 +7191,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     # checkov:skip=CKV_AWS_103: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth
     # checkov:skip=CKV_AWS_2: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth; ALB security group restricts traffic to CloudFront only
+    Condition: ShouldCreateVNCALB
     Properties:
       LoadBalancerArn: !Ref VNCALB
       Port: 80
@@ -7269,12 +7492,17 @@ Resources:
             #     are intentionally omitted -- they are already covered by *.amazonaws.com.
             #     registry.modelcontextprotocol.io is allowed so the MCP Servers UI can
             #     browse/install servers from the official MCP registry.
+            #     wss://*.lambda-microvm.<region>.on.aws is the per-MicroVM noVNC
+            #     endpoint used when VPLaunchType=MICROVM (there is no ALB/CloudFront
+            #     in that path). Region-scoped rather than *.on.aws to keep the
+            #     allowlist tight. A missing entry here fails SILENTLY with no
+            #     backend logs, which is painful to diagnose.
             #   - script-src/style-src: 'unsafe-inline' and 'unsafe-eval' retained
             #     for React SPA compatibility.
             #   - object-src: 'none' (no plugins needed).
             #   - base-uri: 'none' (prevent base tag injection).
             #   - frame-ancestors: 'self' (prevent clickjacking).
-            ContentSecurityPolicy: "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com https://registry.modelcontextprotocol.io wss://*.amazonaws.com wss://*.cloudfront.net ws://localhost:*;"
+            ContentSecurityPolicy: !Sub "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com https://registry.modelcontextprotocol.io wss://*.amazonaws.com wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws ws://localhost:*;"
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000
@@ -7340,45 +7568,57 @@ Resources:
         Enabled: true
         HttpVersion: http2
         IPV6Enabled: true
-        Origins:
-          - Id: webapp-s3-bucket
-            DomainName: !GetAtt WebAppBucket.RegionalDomainName
-            S3OriginConfig:
-              OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
-          - Id: vnc-alb
-            DomainName: !GetAtt VNCALB.DNSName
-            CustomOriginConfig:
-              HTTPPort: 80
-              HTTPSPort: 443
-              OriginProtocolPolicy: http-only
-        CacheBehaviors:
-          - PathPattern: /vnc/*
-            TargetOriginId: vnc-alb
-            ViewerProtocolPolicy: https-only
-            AllowedMethods:
-              - GET
-              - HEAD
-              - OPTIONS
-              - PUT
-              - POST
-              - PATCH
-              - DELETE
-            CachedMethods:
-              - GET
-              - HEAD
-            ForwardedValues:
-              QueryString: true
-              Headers:
-                - "*"
-              Cookies:
-                Forward: all
-            Compress: false
-            DefaultTTL: 0
-            MinTTL: 0
-            MaxTTL: 0
-            LambdaFunctionAssociations:
-              - EventType: viewer-request
-                LambdaFunctionARN: !GetAtt EdgeAuthFunction.FunctionArn
+        # The vnc-alb origin and its /vnc/* behavior exist only for the ECS
+        # launch types. Under MICROVM the viewer connects straight to each
+        # MicroVM's own HTTPS endpoint, so both are omitted -- CloudFormation
+        # rejects a distribution whose origin references an ALB that the
+        # ShouldCreateVNCALB condition did not create.
+        Origins: !If
+          - ShouldCreateVNCALB
+          - - Id: webapp-s3-bucket
+              DomainName: !GetAtt WebAppBucket.RegionalDomainName
+              S3OriginConfig:
+                OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+            - Id: vnc-alb
+              DomainName: !GetAtt VNCALB.DNSName
+              CustomOriginConfig:
+                HTTPPort: 80
+                HTTPSPort: 443
+                OriginProtocolPolicy: http-only
+          - - Id: webapp-s3-bucket
+              DomainName: !GetAtt WebAppBucket.RegionalDomainName
+              S3OriginConfig:
+                OriginAccessIdentity: !Sub "origin-access-identity/cloudfront/${CloudFrontOriginAccessIdentity}"
+        CacheBehaviors: !If
+          - ShouldCreateVNCALB
+          - - PathPattern: /vnc/*
+              TargetOriginId: vnc-alb
+              ViewerProtocolPolicy: https-only
+              AllowedMethods:
+                - GET
+                - HEAD
+                - OPTIONS
+                - PUT
+                - POST
+                - PATCH
+                - DELETE
+              CachedMethods:
+                - GET
+                - HEAD
+              ForwardedValues:
+                QueryString: true
+                Headers:
+                  - "*"
+                Cookies:
+                  Forward: all
+              Compress: false
+              DefaultTTL: 0
+              MinTTL: 0
+              MaxTTL: 0
+              LambdaFunctionAssociations:
+                - EventType: viewer-request
+                  LambdaFunctionARN: !GetAtt EdgeAuthFunction.FunctionArn
+          - !Ref AWS::NoValue
         PriceClass: !Ref CloudFrontPriceClass
         Restrictions: !If
           - ShouldEnableGeoRestriction

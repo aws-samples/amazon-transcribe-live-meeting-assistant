@@ -3,7 +3,19 @@
 # See the LICENSE file in the project root for full license information.
 
 #
-./publish.sh aws-ml-blog artifacts/lma us-east-1 public 
+# Published regions are limited to those where AWS Lambda MicroVMs are
+# available, because VPLaunchType now defaults to MICROVM.
+#
+# `cloudformation:ValidateTemplate` (called by publish for every sub-stack)
+# rejects the Virtual Participant template outright in a region that does not
+# know AWS::Lambda::MicrovmImage — "Template format error: Unrecognized resource
+# types" — regardless of the parameter value. Verified in ap-southeast-2.
+#
+# MicroVMs are currently available in exactly five regions: us-east-1, us-east-2,
+# us-west-2, ap-northeast-1, eu-west-1. ap-southeast-2 (Sydney) was published
+# previously and is replaced by ap-northeast-1 (Tokyo) until MicroVMs reach it.
+./publish.sh aws-ml-blog artifacts/lma us-east-1 public
 ./publish.sh aws-ml-blog artifacts/lma us-west-2 public
-./publish.sh aws-bigdata-blog-replica artifacts/lma ap-southeast-2 public
+./publish.sh aws-ml-blog artifacts/lma ap-northeast-1 public
+./publish.sh aws-ml-blog artifacts/lma eu-west-1 public
 make docs-deploy

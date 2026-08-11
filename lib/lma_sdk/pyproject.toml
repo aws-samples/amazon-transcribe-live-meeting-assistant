@@ -25,6 +25,10 @@ dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "moto[s3,cloudformation,sts]>=5.0",
+    # Validates CloudFormation resource shapes against captured provider
+    # schemas (see lma-virtual-participant-stack/test/schemas/). Needed for
+    # resource types cfn-lint has no schema for yet.
+    "jsonschema>=4.0",
 ]
 
 [tool.setuptools.packages.find]
