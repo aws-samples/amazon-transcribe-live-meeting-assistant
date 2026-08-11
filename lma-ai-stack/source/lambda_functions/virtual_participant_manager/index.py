@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 import boto3
 from alb_cleanup import ALBCleanupManager
 from ecs_manager import ECSTaskManager
+from microvm_manager import MicrovmManager
 
 # Configure logging
 logger = logging.getLogger()
@@ -31,6 +32,7 @@ class VirtualParticipantManager:
         self.table = dynamodb.Table(table_name)
         self.ecs_manager = ECSTaskManager()
         self.alb_cleanup_manager = ALBCleanupManager()
+        self.microvm_manager = MicrovmManager()
 
     def get_current_timestamp(self) -> str:
         """Get current timestamp in ISO format"""
@@ -90,26 +92,44 @@ class VirtualParticipantManager:
             task_details = self.get_task_details_from_registry(vp_id)
 
             if task_details:
-                task_arn = task_details.get("taskArn")
-                cluster_arn = task_details.get("clusterArn")
-                logger.info(f"Found task details in registry for VP {vp_id}")
-
-                # Direct termination using stored ARNs
-                ecs_termination_success = self.ecs_manager.stop_vp_task_by_arn(
-                    task_arn, cluster_arn, vp_id, end_reason
-                )
-
-                # Clean up ALB resources (target group and listener rule)
-                listener_arn = os.environ.get("ALB_LISTENER_ARN")
-                if listener_arn:
-                    logger.info(f"Cleaning up ALB resources for VP {vp_id}")
-                    alb_cleanup_success = self.alb_cleanup_manager.cleanup_vp_alb_resources(
-                        vp_id, listener_arn
+                # A MicroVM-hosted VP has a microvmId and no taskArn. Dispatch on
+                # what the registry actually holds rather than on a launch-type
+                # setting, so a stack whose parameter changed mid-meeting still
+                # terminates the VPs that are already running.
+                microvm_id = task_details.get("microvmId")
+                if microvm_id:
+                    logger.info(f"Found MicroVM {microvm_id} in registry for VP {vp_id}")
+                    # Naming: this flag gates the registry cleanup below and is
+                    # reported as the termination result, so it covers both hosts.
+                    ecs_termination_success = self.microvm_manager.terminate_microvm(
+                        microvm_id, vp_id
                     )
+                    # No ALB under MICROVM: each MicroVM is reached through its
+                    # own HTTPS endpoint, so there is no target group or listener
+                    # rule to remove.
                 else:
-                    logger.warning(
-                        "ALB_LISTENER_ARN environment variable not set, skipping ALB cleanup"
+                    task_arn = task_details.get("taskArn")
+                    cluster_arn = task_details.get("clusterArn")
+                    logger.info(f"Found task details in registry for VP {vp_id}")
+
+                    # Direct termination using stored ARNs
+                    ecs_termination_success = self.ecs_manager.stop_vp_task_by_arn(
+                        task_arn, cluster_arn, vp_id, end_reason
                     )
+
+                    # Clean up ALB resources (target group and listener rule)
+                    listener_arn = os.environ.get("ALB_LISTENER_ARN")
+                    if listener_arn:
+                        logger.info(f"Cleaning up ALB resources for VP {vp_id}")
+                        alb_cleanup_success = (
+                            self.alb_cleanup_manager.cleanup_vp_alb_resources(
+                                vp_id, listener_arn
+                            )
+                        )
+                    else:
+                        logger.warning(
+                            "ALB_LISTENER_ARN environment variable not set, skipping ALB cleanup"
+                        )
 
                 # Clean up registry entry
                 if ecs_termination_success:

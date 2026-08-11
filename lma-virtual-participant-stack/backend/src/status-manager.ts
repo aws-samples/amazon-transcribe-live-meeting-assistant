@@ -14,6 +14,7 @@ import {
 } from '@aws-sdk/client-elastic-load-balancing-v2';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
+import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
 
 export interface VPTaskRegistryItem {
   vpId: string;
@@ -37,7 +38,9 @@ export class VirtualParticipantStatusManager {
   constructor(participantId: string) {
     this.participantId = participantId;
     this.graphqlEndpoint = process.env.GRAPHQL_ENDPOINT || '';
-    this.awsRegion = process.env.AWS_REGION || 'us-east-1';
+    // AWS_REGION is reserved for MicroVM images, so the launcher passes the
+    // region as VP_AWS_REGION. Prefer whatever the runtime set, then ours.
+    this.awsRegion = process.env.AWS_REGION || process.env.VP_AWS_REGION || 'us-east-1';
     
     if (!this.graphqlEndpoint) {
       console.warn('GRAPHQL_ENDPOINT not configured - GraphQL status updates disabled');
@@ -837,6 +840,13 @@ export class VirtualParticipantStatusManager {
    * Now creates dedicated target group and listener rule per VP
    */
   async registerWithTargetGroup(): Promise<boolean> {
+    // MICROVM has no ALB: RunMicrovm returns a dedicated HTTPS endpoint which
+    // the launcher publishes, and there is no ECS task metadata endpoint to
+    // read a private IP from. Report success so callers proceed.
+    if (isMicrovmLaunch(process.env.VP_LAUNCH_TYPE)) {
+      console.log('MICROVM launch: skipping ALB target-group registration');
+      return true;
+    }
     try {
       // Get task private IP
       const privateIp = await this.getTaskPrivateIp();
@@ -1056,6 +1066,12 @@ export class VirtualParticipantStatusManager {
    * Deregister this task from the ALB target group and clean up resources
    */
   async deregisterFromTargetGroup(): Promise<boolean> {
+    // Nothing was ever registered under MICROVM (see registerWithTargetGroup).
+    // Returning early also avoids pointless ELBv2 calls on the teardown path,
+    // which runs from three separate places including an emergency handler.
+    if (isMicrovmLaunch(process.env.VP_LAUNCH_TYPE)) {
+      return true;
+    }
     try {
       console.log(`Deregistering VP ${this.participantId} from ALB`);
       
@@ -1076,21 +1092,78 @@ export class VirtualParticipantStatusManager {
    * Publishes the full VNC WebSocket URL with vpId path for multi-user routing
    * Should only be called AFTER task is registered with ALB and healthy
    */
+  /**
+   * Read this VP's MicroVM endpoint from the task registry.
+   *
+   * Written by the launcher Lambda immediately after RunMicrovm. Retried
+   * briefly because the container can reach this point before the launcher's
+   * write lands.
+   */
+  async getMicrovmEndpointFromRegistry(attempts = 10, delayMs = 1000): Promise<string> {
+    const tableName = process.env.VP_TASK_REGISTRY_TABLE_NAME;
+    if (!tableName) {
+      console.error('VP_TASK_REGISTRY_TABLE_NAME not set - cannot look up MicroVM endpoint');
+      return '';
+    }
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        const result = await this.dynamoClient.send(
+          new GetItemCommand({
+            TableName: tableName,
+            Key: { vpId: { S: this.participantId } },
+          }),
+        );
+        const endpoint = result.Item?.vncEndpoint?.S || '';
+        if (endpoint) {
+          console.log(`Resolved MicroVM endpoint from registry: ${endpoint}`);
+          return endpoint;
+        }
+      } catch (error) {
+        console.error('Error reading MicroVM endpoint from registry:', error);
+      }
+      if (attempt < attempts) {
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+    console.error(`MicroVM endpoint not in registry after ${attempts} attempts`);
+    return '';
+  }
+
   async setVncReady(): Promise<boolean> {
     try {
       console.log(`Signaling VNC ready for VP ${this.participantId}`);
       
-      // Get CloudFront domain from environment variable (same as AppSync URL pattern)
-      const cloudFrontDomain = process.env.CLOUDFRONT_DOMAIN;
-      
-      if (!cloudFrontDomain) {
-        console.error('CLOUDFRONT_DOMAIN environment variable not set');
-        return false;
+      // Under MICROVM the browser connects straight to this MicroVM's own
+      // endpoint (no CloudFront/ALB, no /vnc/<vpId> path routing). The launcher
+      // passes it in as MICROVM_ENDPOINT; isolation comes from the per-MicroVM
+      // endpoint plus a port-scoped auth token the UI supplies as a WebSocket
+      // subprotocol.
+      let vncEndpoint: string;
+      if (isMicrovmLaunch(process.env.VP_LAUNCH_TYPE)) {
+        // The endpoint only exists AFTER RunMicrovm returns, so it cannot be in
+        // the /run payload (which is sent as part of that same call). The
+        // launcher writes it to the VP task registry instead, and we read it
+        // back here.
+        vncEndpoint = microvmVncEndpoint(
+          process.env.MICROVM_ENDPOINT || (await this.getMicrovmEndpointFromRegistry()),
+        );
+        if (!vncEndpoint) {
+          console.error('No MicroVM endpoint available - cannot publish VNC endpoint');
+          return false;
+        }
+      } else {
+        // Get CloudFront domain from environment variable (same as AppSync URL pattern)
+        const cloudFrontDomain = process.env.CLOUDFRONT_DOMAIN;
+
+        if (!cloudFrontDomain) {
+          console.error('CLOUDFRONT_DOMAIN environment variable not set');
+          return false;
+        }
+
+        // Construct full VNC URL with vpId path for multi-user routing
+        vncEndpoint = `wss://${cloudFrontDomain}/vnc/${this.participantId}`;
       }
-      
-      // Construct full VNC URL with vpId path for multi-user routing
-      const vncEndpoint = `wss://${cloudFrontDomain}/vnc/${this.participantId}`;
-      
+
       console.log(`VNC WebSocket URL with path: ${vncEndpoint}`);
       
       // Get current VP to preserve CallId

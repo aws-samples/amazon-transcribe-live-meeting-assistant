@@ -328,6 +328,18 @@ test-ui: ## Run React UI tests (skips if source unchanged)
 		echo -e "$(GREEN)✅ UI tests passed!$(NC)"; \
 	fi
 
+test-vp: ## Run Virtual Participant backend unit tests (no AWS)
+	@echo "Running Virtual Participant backend unit tests..."
+	cd $(VP_BACKEND_DIR) && npm ci --prefer-offline --no-audit && npm test
+	@echo -e "$(GREEN)✅ Virtual Participant unit tests passed!$(NC)"
+
+test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
+	@echo "Running Virtual Participant template + MicroVM client tests..."
+	$(PYTHON) -m pytest $(VP_DIR)/test/test_vp_template.py $(VP_DIR)/test/test_microvm_client.py \
+		$(VP_DIR)/test/test_ai_stack_vnc_alb.py $(VP_DIR)/test/test_microvm_manager.py \
+		$(VP_DIR)/test/test_microvm_vnc_token.py -q
+	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
+
 test-ui-force: ## Run React UI tests (ignore checksum, always run)
 	@echo "Running UI tests (forced)..."
 	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run
@@ -338,7 +350,8 @@ test-ui-force: ## Run React UI tests (ignore checksum, always run)
 # These target names collide with real paths (e.g. the integ-tests/ dir), so
 # declare them PHONY or make treats them as up-to-date files and skips them.
 .PHONY: docker-build-check docker-build-check-transcriber docker-build-check-vp \
-        docker-build-check-all integ-tests integ-tests-live integ-deploy-and-test test-lambdas
+        docker-build-check-all integ-tests integ-tests-live integ-deploy-and-test test-lambdas \
+        test-vp test-vp-template test-vp-microvm-e2e
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then
@@ -363,6 +376,19 @@ docker-build-check-vp: ## Build the Virtual Participant image (heavy; downloads 
 
 docker-build-check-all: docker-build-check-transcriber docker-build-check-vp ## Build BOTH container images locally
 	@echo -e "$(GREEN)✅ All Docker build checks passed!$(NC)"
+
+# Container-level e2e for the MicroVM launch path. Needs no AWS: it drives the
+# Lambda MicroVMs lifecycle hooks against a locally-run container and asserts
+# the things unit tests can't reach — that the pre-snapshot stack really comes
+# up (Xvfb/x11vnc/websockify/PulseAudio 3-sink topology), that /ready gates the
+# snapshot on health, that /run injects per-meeting config into a real app
+# process, that ALB self-registration is skipped, and that secrets stay out of
+# logs. Builds the image on first run (heavy), reuses it afterwards.
+test-vp-microvm-e2e: ## VP MicroVM launch-path e2e against a local container (no AWS; builds image if absent)
+	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@echo -e "$(CYAN)Running VP MicroVM launch-path e2e...$(NC)"
+	@bash $(VP_BACKEND_DIR)/test/microvm-e2e.sh lma-vp-microvm-e2e
+	@echo -e "$(GREEN)✅ VP MicroVM e2e passed!$(NC)"
 
 ##@ Integration Testing
 # End-to-end tests against a LIVE deployed stack (see integ-tests/README.md and

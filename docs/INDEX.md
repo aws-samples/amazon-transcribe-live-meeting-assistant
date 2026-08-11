@@ -33,7 +33,7 @@ title: "LMA Documentation"
 - [Upload Audio](upload-audio.md) — Upload a pre-recorded audio/video file for batch transcription and summary
 - [Browser Extension](browser-extension.md) — Chrome extension for capturing browser tab audio from any meeting platform
 - [Desktop Capture App](desktop-capture-app.md) — Native macOS / Windows app (menu bar / system tray) that captures system + mic audio for meetings joined from native desktop apps (no browser, no bot)
-- [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
+- [Virtual Participant](virtual-participant.md) — Headless Chrome bot that joins Zoom, Teams, Chime, Google Meet, and WebEx meetings; runs on AWS Lambda MicroVMs (default), EC2, or Fargate
 - [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md) — Per-user Zoom credentials, AI-driven sign-in loop, persistent Chromium profiles, AI DOM resolver fallback
 - [Zoom Meeting SDK Join](zoom-meeting-sdk.md) — Join Zoom via the Zoom Meeting Web SDK (alternative to web-client automation), credentials, and approval requirements
 - [Teams ACS SDK Join](teams-acs-sdk.md) — Join Microsoft Teams via Azure Communication Services interop (alternative to web-client automation), ACS resource setup and connection string

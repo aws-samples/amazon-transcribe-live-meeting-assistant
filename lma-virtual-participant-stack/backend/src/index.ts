@@ -18,6 +18,7 @@ import { simliAvatar } from './simli-avatar.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { acquireProfile, persistProfile, releaseProfile } from './profile-store.js';
+import { requiresAlbSelfRegistration } from './launch-mode.js';
 import {
     patchPreferencesFor3pCookies,
     patchPreferencesForExternalProtocols,
@@ -130,6 +131,12 @@ const closeAndPersistProfile = async (): Promise<void> => {
 // Local testing mode - skip ALB registration and AppSync updates
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+// Launch mode. Under MICROVM there is no ALB in front of noVNC: RunMicrovm
+// returns a dedicated HTTPS endpoint that the launcher publishes, so the
+// container must not attempt to discover its own IP or self-register (there is
+// no ECS task metadata endpoint either). See launch-mode.ts.
+const needsAlbRegistration = requiresAlbSelfRegistration(process.env.VP_LAUNCH_TYPE);
+
 // Read the build stamp baked into the image at build time (see Dockerfile).
 // Logged at startup so it's trivial to confirm which image a task runs.
 const readBuildInfo = (): { buildDate: string; gitCommit: string; buildSource: string } => {
@@ -232,8 +239,9 @@ const main = async (): Promise<void> => {
         throw new Error('VNC server initialization failed');
     }
 
-    // Register with ALB target group and wait for healthy (skip in local test mode)
-    if (statusManager && !isLocalTest) {
+    // Register with ALB target group and wait for healthy (skip in local test mode
+    // and under MICROVM, which has no ALB — the MicroVM endpoint replaces it).
+    if (statusManager && !isLocalTest && needsAlbRegistration) {
         try {
             await statusManager.setRegisteringNetwork();
             console.log('Registering task with ALB target group...');
@@ -251,6 +259,8 @@ const main = async (): Promise<void> => {
         }
     } else if (isLocalTest) {
         console.log('✓ Skipping ALB registration (local test mode)');
+    } else if (!needsAlbRegistration) {
+        console.log('✓ Skipping ALB registration (MICROVM launch: endpoint published by launcher)');
     }
 
     // VNC ready signal is deferred until AFTER fresh-profile warmup so the
@@ -346,6 +356,11 @@ const main = async (): Promise<void> => {
     console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
     console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
 
+    // Timing instrumentation: browser launch dominated VP startup on MicroVMs
+    // (~142s vs ~1-3s for the identical image and args locally), and the launch
+    // is a single opaque await. Logging the elapsed time makes any regression
+    // visible in CloudWatch instead of requiring a log-timestamp reconstruction.
+    const browserLaunchStart = Date.now();
     const context = await launchPersistentContext({
         headless: false,
         humanize: true,
@@ -361,6 +376,9 @@ const main = async (): Promise<void> => {
             ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
         },
     } as any);
+    console.log(
+        `[browser] launchPersistentContext took ${((Date.now() - browserLaunchStart) / 1000).toFixed(1)}s`,
+    );
     browserContext = context;
     // Sane default for actions; the one meeting-length wait (end-of-meeting
     // watcher) passes its own explicit { timeout }. Do NOT set a multi-hour
