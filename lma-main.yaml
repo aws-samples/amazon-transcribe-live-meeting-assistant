@@ -988,7 +988,7 @@ Metadata:
       PrivateSubnet2:
         default: Existing Private Subnet 2
       VPLaunchType:
-        default: VP Launch Type (FARGATE or EC2)
+        default: VP Launch Type (LAMBDA MICROVM, FARGATE or EC2)
       VPInstanceType:
         default: VP EC2 Instance Type
       VPMinInstances:
