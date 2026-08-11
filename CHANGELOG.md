@@ -22,6 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Virtual Participant no longer reports `ACTIVE` when it has not actually joined (for example when a meeting platform redirects it to a sign-in page); it now fails with a specific reason instead.
 - Fixed the live VNC viewer failing with "Failed to connect" under `MICROVM`.
 - Zoom sign-in no longer fails on a slow page load, and a navigation that completes just after its timeout is no longer discarded.
+- **The Virtual Participant no longer stops transcribing part-way through a meeting.** An oversized audio frame from ffmpeg was rejected by Amazon Transcribe, and that error was misclassified as a permanent configuration error — so transcription aborted for the rest of the call while the VP stayed `ACTIVE`, showing no sign of trouble in the UI (the accompanying log message also pointed at the language settings, which were not involved). Audio frames are now capped and split without losing audio, and a framing error reconnects using the existing session-resume path, which already keeps transcript timestamps on the meeting timeline.
+- **Voice assistant audio quality** — the PulseAudio sinks ran at the daemon default (48 kHz stereo) while the whole audio pipeline is 16 kHz mono, so the assistant's voice was resampled three times before the meeting heard it, making it sound warbly. The daemon and all three sinks are now pinned to 16 kHz mono, and the container warns at startup if that ever drifts. Affects all launch types.
 
 ## [0.3.6] - 2026-08-06
 
