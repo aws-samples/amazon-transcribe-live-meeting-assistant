@@ -173,15 +173,18 @@ sleep 2
 echo "Creating PulseAudio audio routing for meeting and agent..."
 
 # Create a null sink for meeting audio (Chromium output)
-MEETING_SINK=$(pactl load-module module-null-sink sink_name=meeting_audio sink_properties=device.description="Meeting_Audio")
+# rate/channels are pinned on every sink: a null sink otherwise adopts the
+# daemon default (48 kHz stereo), and each 16 kHz mono stream would then be
+# resampled on the way in AND on the way out (GitHub #538).
+MEETING_SINK=$(pactl load-module module-null-sink sink_name=meeting_audio rate=16000 channels=1 format=s16le sink_properties=device.description="Meeting_Audio")
 echo "Created meeting_audio sink (module $MEETING_SINK)"
 
 # Create a null sink for agent audio output (Nova/ElevenLabs)
-AGENT_SINK=$(pactl load-module module-null-sink sink_name=agent_output sink_properties=device.description="Agent_Audio_Output")
+AGENT_SINK=$(pactl load-module module-null-sink sink_name=agent_output rate=16000 channels=1 format=s16le sink_properties=device.description="Agent_Audio_Output")
 echo "Created agent_output sink (module $AGENT_SINK)"
 
 # Create a combined sink that mixes meeting + agent audio for transcription
-COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio sink_properties=device.description="Combined_Audio_For_Transcription")
+COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio rate=16000 channels=1 format=s16le sink_properties=device.description="Combined_Audio_For_Transcription")
 echo "Created combined_audio sink (module $COMBINED_SINK)"
 
 # 20ms latency: 1ms caused underruns on smaller instances.
@@ -205,6 +208,18 @@ echo "✓ Audio routing configured"
 echo "PulseAudio Devices:"
 echo "--- Sinks ---"
 pactl list short sinks
+
+# Assert the sinks really are 16 kHz mono. `pactl list short sinks` prints the
+# sample spec, so a regression here (e.g. a sink created without rate=) shows up
+# as a loud warning instead of only as degraded voice-assistant audio quality
+# that takes a live meeting to notice (GitHub #538).
+if pactl list short sinks | grep -qE 's16le[[:space:]]+1ch[[:space:]]+16000Hz'; then
+    echo "✓ Audio sinks are 16 kHz mono — no resampling in the Nova/Transcribe path"
+else
+    echo "⚠️  WARNING: audio sinks are NOT 16 kHz mono. Nova audio will be resampled" >&2
+    echo "    (warbly voice assistant). Expected 's16le 1ch 16000Hz'; got:" >&2
+    pactl list short sinks >&2
+fi
 echo "--- Sources ---"
 pactl list short sources
 
