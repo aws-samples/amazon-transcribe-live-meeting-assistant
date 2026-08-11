@@ -279,6 +279,69 @@ Parameters:
       - "true"
       - "false"
 
+  AsrLauncherFunctionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of the MicroVM ASR session launcher. When empty, meetings are
+      always transcribed by Amazon Transcribe streaming.
+
+  AsrEngineDefault:
+    Type: String
+    Default: transcribe
+    AllowedValues:
+      - transcribe
+      - microvm
+    Description: >-
+      Transcription engine used when a client does not ask for one. "microvm"
+      routes every streaming meeting to the on-demand ASR + diarization engine,
+      which does not support content redaction, custom vocabularies, custom
+      language models or language identification.
+
+  AsrDiarizationDefault:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Whether meetings on the MicroVM ASR engine request speaker labels when the
+      client does not say. Clients asking for diarization always get it.
+
+  AsrDiarizationAvailable:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Whether the deployed ASR image contains a speaker-embedding model. Surfaced
+      to the web UI so the Stream Audio page only offers diarization when it can
+      actually be served.
+
+  AsrMaxSpeakers:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 30
+    Description: >-
+      Cap on distinct speakers per audio channel for the MicroVM ASR engine
+      (0 discovers as many as appear).
+
+  AsrSpeakerThreshold:
+    Type: String
+    Default: "0.5"
+    Description: >-
+      Cosine similarity above which the MicroVM ASR engine treats two utterances
+      as the same speaker. Higher splits voices more eagerly.
+
+  AsrEndpointingMs:
+    Type: Number
+    Default: 1200
+    MinValue: 200
+    MaxValue: 5000
+    Description: Trailing silence in ms that closes an utterance on the MicroVM ASR engine.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -409,6 +472,7 @@ Conditions:
   # Video handling needs a bigger task (ffmpeg mux) and more ephemeral storage.
   # Audio-only deployments keep the original, cheaper shape.
   ShouldEnableVideoRecording: !Equals [!Ref EnableVideoRecording, "true"]
+  ShouldEnableMicrovmAsr: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
 
 Outputs:
   S3BucketName:
@@ -1091,6 +1155,14 @@ Resources:
               - logs:PutLogEvents
             Effect: Allow
             Resource: !GetAtt TranscriberWebsocketTaskDefWebsocketContainerLogGroup.Arn
+          # Acquire, re-token and release ASR MicroVMs. Scoped to the launcher
+          # function: the task never calls the lambda-microvms API directly.
+          - !If
+            - ShouldEnableMicrovmAsr
+            - Action: lambda:InvokeFunction
+              Effect: Allow
+              Resource: !Ref AsrLauncherFunctionArn
+            - !Ref AWS::NoValue
         Version: "2012-10-17"
       PolicyName: !Sub ${AWS::StackName}-TranscriberWebsocketTaskDefTaskRoleDefaultPolicy
       Roles:
@@ -1226,6 +1298,20 @@ Resources:
               Value: !Ref AWS::URLSuffix
             - Name: CodeLocation
               Value: !Sub "arn:aws:s3:::${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}/<LMA_WEBSOCKET_ZIP_FILENAME>"
+            # MicroVM ASR engine. With no launcher ARN the engine is unavailable
+            # and every meeting is transcribed by Amazon Transcribe.
+            - Name: ASR_LAUNCHER_FUNCTION_ARN
+              Value: !Ref AsrLauncherFunctionArn
+            - Name: ASR_ENGINE_DEFAULT
+              Value: !Ref AsrEngineDefault
+            - Name: ASR_DIARIZE_DEFAULT
+              Value: !Ref AsrDiarizationDefault
+            - Name: ASR_MAX_SPEAKERS
+              Value: !Ref AsrMaxSpeakers
+            - Name: ASR_SPEAKER_THRESHOLD
+              Value: !Ref AsrSpeakerThreshold
+            - Name: ASR_ENDPOINTING_MS
+              Value: !Ref AsrEndpointingMs
             - Name: WS_LOG_LEVEL
               Value: !Ref LogLevel
             - Name: DEBUG
@@ -1534,6 +1620,13 @@ Resources:
             - !GetAtt WebSocketCloudFrontDistribution.DomainName
             - "/api/v1/ws"
         recordingDisclaimer: !Ref RecordingDisclaimer
+        # Read by the Stream Audio page: the diarization checkbox is only offered
+        # when an ASR image with a speaker model is actually deployed.
+        AsrDiarizationAvailable: !If
+          - ShouldEnableMicrovmAsr
+          - !Ref AsrDiarizationAvailable
+          - "false"
+        AsrEngineDefault: !Ref AsrEngineDefault
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

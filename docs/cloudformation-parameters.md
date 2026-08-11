@@ -65,6 +65,28 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | TranscribeContentRedactionType | Type of content redaction | PII | PII |
 | ContentRedactionLanguages | Languages that support content redaction | en-US | en-US, en-AU, en-GB, es-US |
 
+## On-demand ASR and Diarization (MicroVM)
+
+Alternative streaming engine to Amazon Transcribe, giving per-voice speaker labels.
+Off by default. A meeting transcribed by this engine does not go through Amazon
+Transcribe, so the redaction, custom vocabulary, custom language model and language
+identification parameters above do not apply to it. Requires a region where AWS
+Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-asr.md).
+
+| Parameter | Description | Default | Allowed Values |
+|-----------|-------------|---------|----------------|
+| TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe unless a client opts in | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
+| AsrModelId | ASR model baked into the MicroVM image (English only by default, NVIDIA Open Model License) | nemotron-streaming-en-0.6b-560ms-int8 | nemotron-streaming-en-0.6b-560ms-int8, Custom |
+| AsrSpeakerModelId | Speaker-embedding model used for diarization (CC-BY-4.0); "none" builds a transcription-only image | titanet-small | titanet-small, none |
+| AsrBaselineMemoryMiB | Memory per ASR MicroVM; CPU is 1 vCPU per 2 GiB, so 8192 gives 4 vCPU | 8192 | 4096, 8192, 16384 |
+| AsrMaxMeetingSeconds | Hard lifetime ceiling per MicroVM and the cost backstop if a transcriber task dies without releasing it | 14400 | 600–28800 |
+| AsrMaxSpeakers | Cap on distinct speakers per audio channel (0 discovers as many as appear) | 0 | 0–30 |
+| AsrSpeakerThreshold | Cosine similarity above which two utterances are the same speaker; higher splits more eagerly | 0.5 | 0.0–1.0 |
+| AsrModelUrl | (Custom model only) URL of the model archive | (none) | Any HTTPS URL |
+| AsrModelSha256 | (Custom model only) SHA256 of the archive; required, the build fails without a match | (none) | Hex digest |
+| AsrModelEncoderFile / AsrModelDecoderFile / AsrModelJoinerFile / AsrModelTokensFile | (Custom model only) filenames inside the archive | (none) | Filenames |
+| AsrSherpaOnnxVersion / AsrOnnxruntimeVersion | (Custom model only) runtime versions that can load the model | (none) | Published versions |
+
 ## End-of-Call Summary
 
 | Parameter | Description | Default | Allowed Values |

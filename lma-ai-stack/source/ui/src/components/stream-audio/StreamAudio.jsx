@@ -151,6 +151,10 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [isFlashing, setIsFlashing] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
+  // Live speaker diarization, served by the MicroVM ASR engine instead of
+  // Amazon Transcribe. Only offered when the deployment built an ASR image with
+  // a speaker model (settings.AsrDiarizationAvailable).
+  const [enableStreamDiarization, setEnableStreamDiarization] = useState(false);
 
   // --- Upload mode state --------------------------------------------------
   const [uploadFiles, setUploadFiles] = useState([]);
@@ -297,6 +301,9 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       callId: `${meetingPrefix} - ${getTimestampStr()}`,
       agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
       fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
+      // Asking for diarization selects the MicroVM ASR engine, which is where
+      // per-voice speaker labels come from.
+      enableDiarization: enableStreamDiarization,
     };
     setCallMetaData(callMetaDataCopy);
     return callMetaDataCopy;
@@ -308,7 +315,12 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     `);
     const recordingCallMetaData = getFinalCallMetadata();
     try {
-      audioContext.current = new window.AudioContext();
+      // 16 kHz is the ASR models' native rate, so capturing there means no
+      // resampling anywhere in the chain. Other rates still work (the
+      // transcriber resamples), they just cost CPU and buy no accuracy.
+      audioContext.current = enableStreamDiarization
+        ? new window.AudioContext({ sampleRate: 16000 })
+        : new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: true,
@@ -690,6 +702,28 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                   </Grid>
                 </FormField>
               </ColumnLayout>
+
+              {mode === MODE_STREAM && `${settings.AsrDiarizationAvailable}` === 'true' && (
+                <Box margin={{ top: 'l' }}>
+                  <FormField
+                    label="Speaker diarization (experimental)"
+                    description={
+                      'Labels the transcript by voice rather than by audio channel, so several people ' +
+                      'sharing one microphone are told apart. Transcription then runs on this ' +
+                      "deployment's on-demand ASR engine instead of Amazon Transcribe, which does not " +
+                      'support content redaction, custom vocabularies or language identification.'
+                    }
+                  >
+                    <Checkbox
+                      checked={enableStreamDiarization}
+                      onChange={({ detail }) => setEnableStreamDiarization(detail.checked)}
+                      disabled={recording}
+                    >
+                      Enable speaker diarization
+                    </Checkbox>
+                  </FormField>
+                </Box>
+              )}
 
               {recording && mode === MODE_STREAM && (
                 <Box

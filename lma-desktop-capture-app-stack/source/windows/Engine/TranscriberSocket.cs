@@ -140,6 +140,9 @@ public sealed class TranscriberSocket
             ["toNumber"] = _config.ToNumber,
             ["samplingRate"] = _config.SampleRate,
             ["callEvent"] = "START",
+            // Selects the MicroVM ASR engine server-side; the transcriber falls
+            // back to Amazon Transcribe when that engine is not deployed.
+            ["enableDiarization"] = _config.DiarizationEnabled,
         };
         SendJson(meta, "START");
     }

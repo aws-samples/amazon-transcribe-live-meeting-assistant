@@ -546,6 +546,70 @@ interface Segment {
     Transcript: string;
 }
 
+export interface TranscriptSegmentRecord {
+    SegmentId: string;
+    Channel: string;
+    StartTime: number;
+    EndTime: number;
+    Transcript: string;
+    IsPartial: boolean;
+    Speaker: string;
+}
+
+// Shared by every transcription engine (Amazon Transcribe and the MicroVM ASR),
+// so both produce identical ADD_TRANSCRIPT_SEGMENT records downstream.
+export const writeSegmentToKds = async (
+    segment: TranscriptSegmentRecord,
+    callMetadata: CallMetaData,
+    server: FastifyInstance
+): Promise<void> => {
+    const now = new Date().toISOString();
+    const kdsObject: AddTranscriptSegmentEvent = {
+        EventType: 'ADD_TRANSCRIPT_SEGMENT',
+        CallId: callMetadata.callId,
+        Channel: segment.Channel,
+        SegmentId: segment.SegmentId,
+        StartTime: segment.StartTime,
+        EndTime: segment.EndTime,
+        Transcript: segment.Transcript,
+        IsPartial: segment.IsPartial,
+        CreatedAt: now,
+        UpdatedAt: now,
+        Sentiment: undefined,
+        TranscriptEvent: undefined,
+        UtteranceEvent: undefined,
+        Speaker: segment.Speaker,
+        AccessToken: callMetadata.accessToken,
+        IdToken: callMetadata.idToken,
+        RefreshToken: callMetadata.refreshToken,
+    };
+
+    const putParams = {
+        StreamName: kdsStreamName,
+        PartitionKey: callMetadata.callId,
+        Data: Buffer.from(JSON.stringify(kdsObject)),
+    };
+
+    try {
+        await kinesisClient.send(new PutRecordCommand(putParams));
+        server.log.debug(
+            `[${kdsObject.EventType}]: [${callMetadata.callId}] - Written ${
+                kdsObject.EventType
+            } event to KDS: ${JSON.stringify(kdsObject)}`
+        );
+    } catch (error) {
+        server.log.error(
+            `[${kdsObject.EventType}]: [${
+                callMetadata.callId
+            }] - Error writing ${
+                kdsObject.EventType
+            } to KDS : ${normalizeErrorForLogging(
+                error
+            )} KDS object: ${JSON.stringify(kdsObject)}`
+        );
+    }
+};
+
 function processTranscriptionResults(
     speakerName: string,
     result: Result,
@@ -674,52 +738,19 @@ export const writeTranscriptionSegment = async function (
                 if (segment.EndTime > maxEndTime) {
                     maxEndTime = segment.EndTime;
                 }
-                const now = new Date().toISOString();
-                const kdsObject: AddTranscriptSegmentEvent = {
-                    EventType: 'ADD_TRANSCRIPT_SEGMENT',
-                    CallId: callMetadata.callId,
-                    Channel: result.ChannelId === 'ch_0' ? 'CALLER' : 'AGENT',
-                    SegmentId: segment.SegmentId,
-                    StartTime: segment.StartTime,
-                    EndTime: segment.EndTime,
-                    Transcript: segment.Transcript,
-                    IsPartial: result.IsPartial,
-                    CreatedAt: now,
-                    UpdatedAt: now,
-                    Sentiment: undefined,
-                    TranscriptEvent: undefined,
-                    UtteranceEvent: undefined,
-                    Speaker: segment.Speaker,
-                    AccessToken: callMetadata.accessToken,
-                    IdToken: callMetadata.idToken,
-                    RefreshToken: callMetadata.refreshToken,
-                };
-
-                const putParams = {
-                    StreamName: kdsStreamName,
-                    PartitionKey: callMetadata.callId,
-                    Data: Buffer.from(JSON.stringify(kdsObject)),
-                };
-
-                const putCmd = new PutRecordCommand(putParams);
-                try {
-                    await kinesisClient.send(putCmd);
-                    server.log.debug(
-                        `[${kdsObject.EventType}]: [${callMetadata.callId}] - Written ${
-                            kdsObject.EventType
-                        } event to KDS: ${JSON.stringify(kdsObject)}`
-                    );
-                } catch (error) {
-                    server.log.error(
-                        `[${kdsObject.EventType}]: [${
-                            callMetadata.callId
-                        }] - Error writing ${
-                            kdsObject.EventType
-                        } to KDS : ${normalizeErrorForLogging(
-                            error
-                        )} KDS object: ${JSON.stringify(kdsObject)}`
-                    );
-                }
+                await writeSegmentToKds(
+                    {
+                        SegmentId: segment.SegmentId,
+                        Channel: result.ChannelId === 'ch_0' ? 'CALLER' : 'AGENT',
+                        StartTime: segment.StartTime,
+                        EndTime: segment.EndTime,
+                        Transcript: segment.Transcript,
+                        IsPartial: result.IsPartial ?? false,
+                        Speaker: segment.Speaker,
+                    },
+                    callMetadata,
+                    server
+                );
             }
         }
     }

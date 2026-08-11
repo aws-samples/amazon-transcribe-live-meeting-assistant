@@ -20,6 +20,7 @@ import CryptoKit
 ///   --agent-id   "alice@example.com"  (label for the mic channel)
 ///   --from       "Other participants" (label for the meeting channel)
 ///   --sample-rate 48000
+///   --diarization  (label the transcript per voice; use --sample-rate 16000 with it)
 ///   --debug-wav  /tmp/lma-debug.wav  (tee exact streamed PCM for verification)
 ///   --config     /path/to/lma-config.json  (override config-file location)
 struct Config {
@@ -32,6 +33,13 @@ struct Config {
     var toNumber: String
     var sampleRate: Int
     var debugWavPath: String   // empty = disabled
+
+    /// Label the transcript per voice ("Speaker 1 (mic)") instead of per audio
+    /// channel. Served by the deployment's on-demand ASR engine rather than
+    /// Amazon Transcribe, so it requires that engine to be deployed. The models
+    /// run at 16 kHz, so `--sample-rate 16000` avoids a resample in the
+    /// transcriber; other rates work unchanged.
+    var diarizationEnabled: Bool
 
     // In-app SRP login (alternative to pasting --token/--id-token).
     var username: String
@@ -152,6 +160,9 @@ struct Config {
             toNumber: value("to", "LMA_TO", nil, "System"),
             sampleRate: sr,
             debugWavPath: value("debug-wav", "LMA_DEBUG_WAV"),
+            diarizationEnabled: ["1", "true", "yes"].contains(
+                value("diarization", "LMA_ENABLE_DIARIZATION", "enableDiarization").lowercased()
+            ),
             username: value("username", "LMA_USERNAME"),
             password: value("password", "LMA_PASSWORD"),
             userPoolId: value("user-pool-id", "LMA_USER_POOL_ID", "userPoolId"),

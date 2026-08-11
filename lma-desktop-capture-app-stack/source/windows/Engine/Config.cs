@@ -29,6 +29,14 @@ public sealed class Config
     public int SampleRate = 48000;
     public string DebugWavPath = "";   // empty = disabled
 
+    /// <summary>Label the transcript per voice ("Speaker 1 (mic)") instead of per audio
+    /// channel (--diarization 1 / LMA_ENABLE_DIARIZATION / enableDiarization in
+    /// lma-config.json). Served by the deployment's on-demand ASR engine rather than
+    /// Amazon Transcribe, so it requires that engine to be deployed; the transcriber
+    /// falls back to Amazon Transcribe when it is not. The models run at 16 kHz, so
+    /// --sample-rate 16000 avoids a resample; other rates work unchanged.</summary>
+    public bool DiarizationEnabled = false;
+
     // In-app SRP login (alternative to pasting --token/--id-token).
     public string Username = "";
     public string Password = "";
@@ -115,6 +123,8 @@ public sealed class Config
             ToNumber = Value("to", "LMA_TO", null, "System"),
             SampleRate = sr,
             DebugWavPath = Value("debug-wav", "LMA_DEBUG_WAV"),
+            DiarizationEnabled = new[] { "1", "true", "yes" }.Contains(
+                Value("diarization", "LMA_ENABLE_DIARIZATION", "enableDiarization").ToLowerInvariant()),
             Username = Value("username", "LMA_USERNAME"),
             Password = Value("password", "LMA_PASSWORD"),
             UserPoolId = Value("user-pool-id", "LMA_USER_POOL_ID", "userPoolId"),

@@ -98,6 +98,9 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
             "toNumber": config.toNumber,
             "samplingRate": config.sampleRate,
             "callEvent": "START",
+            // Selects the MicroVM ASR engine server-side; the transcriber falls
+            // back to Amazon Transcribe when that engine is not deployed.
+            "enableDiarization": config.diarizationEnabled,
         ]
         sendJSON(meta, label: "START")
     }

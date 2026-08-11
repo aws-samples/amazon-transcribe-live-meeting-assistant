@@ -49,6 +49,10 @@ export default defineConfig({
               label: "Transcription & Translation",
               slug: "transcription-and-translation",
             },
+            {
+              label: "On-demand ASR & Diarization (MicroVM)",
+              slug: "microvm-asr",
+            },
             { label: "Meeting Assistant", slug: "meeting-assistant" },
             {
               label: "Transcript Summarization",

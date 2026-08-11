@@ -323,6 +323,125 @@ Parameters:
       must pre-exist in your account,  match the Language Code selected above, and
       use the 'Narrow Band' base model.
 
+  TranscriptionEngine:
+    Type: String
+    Default: AmazonTranscribe
+    AllowedValues:
+      - AmazonTranscribe
+      - MicrovmAsr
+    Description: >-
+      Streaming transcription engine for Stream Audio and the Audio Capture apps.
+      AmazonTranscribe is the default. MicrovmAsr deploys an on-demand ASR +
+      speaker-diarization engine on AWS Lambda MicroVMs and makes per-voice
+      speaker labels available; meetings that opt in are then NOT transcribed by
+      Amazon Transcribe, so content redaction, custom vocabularies, custom
+      language models and language identification do not apply to them, and the
+      default model is English only. REQUIRES a region where AWS Lambda MicroVMs
+      is available (it is not available in GovCloud). Deploying it does not change
+      existing behaviour on its own: meetings still use Amazon Transcribe unless a
+      client asks for diarization.
+
+  AsrModelId:
+    Type: String
+    Default: nemotron-streaming-en-0.6b-560ms-int8
+    AllowedValues:
+      - nemotron-streaming-en-0.6b-560ms-int8
+      - Custom
+    Description: >-
+      MicroVM ASR model. The default is English-only under the NVIDIA Open Model
+      License. Choose Custom and set AsrModelUrl / AsrModelSha256 / the file names
+      to bake a different model, e.g. for licensing reasons.
+
+  AsrSpeakerModelId:
+    Type: String
+    Default: titanet-small
+    AllowedValues:
+      - titanet-small
+      - none
+    Description: >-
+      Speaker-embedding model used for diarization (TitaNet-small, CC-BY-4.0).
+      "none" builds a transcription-only ASR image.
+
+  AsrBaselineMemoryMiB:
+    Type: Number
+    Default: 8192
+    AllowedValues:
+      - 4096
+      - 8192
+      - 16384
+    Description: >-
+      Baseline memory per ASR MicroVM; CPU is allocated at 2 GiB per vCPU, so 8192
+      gives 4 vCPU. Both audio channels of a meeting decode on one MicroVM.
+
+  AsrMaxMeetingSeconds:
+    Type: Number
+    Default: 14400
+    MinValue: 600
+    MaxValue: 28800
+    Description: >-
+      Hard ceiling on one ASR MicroVM's lifetime, and the cost backstop if a
+      transcriber task dies without releasing it. Service maximum is 8 hours.
+
+  AsrMaxSpeakers:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 30
+    Description: >-
+      Cap on distinct speakers per audio channel (0 discovers as many as appear).
+
+  AsrSpeakerThreshold:
+    Type: String
+    Default: "0.5"
+    AllowedPattern: "^0?\\.[0-9]+$"
+    Description: >-
+      Cosine similarity above which two utterances are treated as the same
+      speaker. Higher splits voices more eagerly; lower merges more eagerly.
+
+  AsrModelUrl:
+    Type: String
+    Default: ""
+    Description: (Custom model only) URL of the model archive.
+
+  AsrModelSha256:
+    Type: String
+    Default: ""
+    Description: >-
+      (Custom model only) SHA256 of the model archive. Required: the image build
+      fails rather than baking unverified weights.
+
+  AsrModelEncoderFile:
+    Type: String
+    Default: ""
+    Description: (Custom model only) Encoder filename inside the archive.
+
+  AsrModelDecoderFile:
+    Type: String
+    Default: ""
+    Description: (Custom model only) Decoder filename inside the archive.
+
+  AsrModelJoinerFile:
+    Type: String
+    Default: ""
+    Description: (Custom model only) Joiner filename inside the archive.
+
+  AsrModelTokensFile:
+    Type: String
+    Default: ""
+    Description: (Custom model only) Tokens filename inside the archive.
+
+  AsrSherpaOnnxVersion:
+    Type: String
+    Default: ""
+    Description: >-
+      (Custom model only) sherpa-onnx version to install. Model exports and runtime
+      versions are coupled, so this must match the model.
+
+  AsrOnnxruntimeVersion:
+    Type: String
+    Default: ""
+    Description: (Custom model only) onnxruntime version to install.
+
   ModelValidation:
     Type: String
     Default: "true"
@@ -820,6 +939,24 @@ Metadata:
           - CustomVocabularyName
           - CustomLanguageModelName
       - Label:
+          default: On-demand ASR and Diarization (MicroVM, alternative to Amazon Transcribe)
+        Parameters:
+          - TranscriptionEngine
+          - AsrModelId
+          - AsrSpeakerModelId
+          - AsrBaselineMemoryMiB
+          - AsrMaxMeetingSeconds
+          - AsrMaxSpeakers
+          - AsrSpeakerThreshold
+          - AsrModelUrl
+          - AsrModelSha256
+          - AsrModelEncoderFile
+          - AsrModelDecoderFile
+          - AsrModelJoinerFile
+          - AsrModelTokensFile
+          - AsrSherpaOnnxVersion
+          - AsrOnnxruntimeVersion
+      - Label:
           default: Transcript Event Processing Configuration
         Parameters:
           - TranscriptLambdaHookFunctionArn
@@ -941,6 +1078,36 @@ Metadata:
         default: Transcription Custom Vocabulary Name
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
+      TranscriptionEngine:
+        default: Streaming Transcription Engine
+      AsrModelId:
+        default: ASR Model
+      AsrSpeakerModelId:
+        default: Speaker Embedding Model (diarization)
+      AsrBaselineMemoryMiB:
+        default: ASR MicroVM Baseline Memory (MiB)
+      AsrMaxMeetingSeconds:
+        default: ASR MicroVM Maximum Lifetime (seconds)
+      AsrMaxSpeakers:
+        default: ASR Maximum Speakers Per Channel
+      AsrSpeakerThreshold:
+        default: ASR Speaker Similarity Threshold
+      AsrModelUrl:
+        default: Custom ASR Model URL
+      AsrModelSha256:
+        default: Custom ASR Model SHA256
+      AsrModelEncoderFile:
+        default: Custom ASR Model Encoder Filename
+      AsrModelDecoderFile:
+        default: Custom ASR Model Decoder Filename
+      AsrModelJoinerFile:
+        default: Custom ASR Model Joiner Filename
+      AsrModelTokensFile:
+        default: Custom ASR Model Tokens Filename
+      AsrSherpaOnnxVersion:
+        default: Custom ASR sherpa-onnx Version
+      AsrOnnxruntimeVersion:
+        default: Custom ASR onnxruntime Version
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
@@ -1044,6 +1211,10 @@ Conditions:
   ZoomSdkEnabled: !And
     - !Not [!Equals [!Ref ZoomMeetingSdkClientId, ""]]
     - !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
+  ShouldDeployMicrovmAsr: !Equals [!Ref TranscriptionEngine, "MicrovmAsr"]
+  ShouldEnableAsrDiarization: !And
+    - !Condition ShouldDeployMicrovmAsr
+    - !Not [!Equals [!Ref AsrSpeakerModelId, "none"]]
 
 Resources:
   ##########################################################################
@@ -2535,6 +2706,46 @@ Resources:
         LMAStackName: !Ref "AWS::StackName"
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
+  # On-demand streaming ASR + speaker diarization on AWS Lambda MicroVMs, used by
+  # the WebSocket transcriber as an alternative to Amazon Transcribe streaming.
+  # One MicroVM per meeting, launched at meeting start and terminated at the end.
+  ASRMICROVMSTACK:
+    Type: AWS::CloudFormation::Stack
+    Condition: ShouldDeployMicrovmAsr
+    DependsOn:
+      - IsStacknameLengthOK
+      - ValidateParameters
+    Properties:
+      # yamllint disable rule:line-length
+      TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-asr-microvm-stack/template.yaml
+      # yamllint enable rule:line-length
+      Parameters:
+        LMAStackName: !Ref AWS::StackName
+        # Image build context with the Dockerfile at the zip ROOT, which is what
+        # CreateMicrovmImage requires. Rewritten per deployment with the resolved
+        # model selection by the stack's AsrImageSource custom resource.
+        SourceCodeLocation: <ASR_MICROVM_SRC_S3_LOCATION_TOKEN>
+        LambdaArtifactBucket: <ARTIFACT_BUCKET_NAME_TOKEN>
+        AsrLauncherS3Key: <ASR_MICROVM_LAUNCHER_S3_KEY_TOKEN>
+        AsrImageSourceS3Key: <ASR_MICROVM_IMAGE_SOURCE_S3_KEY_TOKEN>
+        AsrModelId: !Ref AsrModelId
+        AsrSpeakerModelId: !Ref AsrSpeakerModelId
+        AsrModelUrl: !Ref AsrModelUrl
+        AsrModelSha256: !Ref AsrModelSha256
+        AsrModelEncoderFile: !Ref AsrModelEncoderFile
+        AsrModelDecoderFile: !Ref AsrModelDecoderFile
+        AsrModelJoinerFile: !Ref AsrModelJoinerFile
+        AsrModelTokensFile: !Ref AsrModelTokensFile
+        AsrSherpaOnnxVersion: !Ref AsrSherpaOnnxVersion
+        AsrOnnxruntimeVersion: !Ref AsrOnnxruntimeVersion
+        AsrBaselineMemoryMiB: !Ref AsrBaselineMemoryMiB
+        AsrMaxMeetingSeconds: !Ref AsrMaxMeetingSeconds
+        AsrMaxSpeakers: !Ref AsrMaxSpeakers
+        AsrSpeakerThreshold: !Ref AsrSpeakerThreshold
+        LoggingBucketName: !Ref LoggingBucket
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        LogLevel: !Ref LogLevel
+
   WEBSOCKETTRANSCRIBERSTACK:
     Type: AWS::CloudFormation::Stack
     Properties:
@@ -2560,6 +2771,16 @@ Resources:
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
+        AsrLauncherFunctionArn: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
+          - ""
+        # Deploying the engine does not silently switch meetings onto it: clients
+        # still get Amazon Transcribe unless they ask for diarization.
+        AsrEngineDefault: transcribe
+        AsrDiarizationAvailable: !If [ShouldEnableAsrDiarization, "true", "false"]
+        AsrMaxSpeakers: !Ref AsrMaxSpeakers
+        AsrSpeakerThreshold: !Ref AsrSpeakerThreshold
         PcaS3BucketName: ""
         PcaTranscriptsPrefix: ""
         PcaPlaybackAudioFilePrefix: ""

@@ -24,6 +24,11 @@ import {
     CallMetaData,
     SocketCallData,
     writeCallRecordingEvent,
+    resolveAsrEngine,
+    startMicrovmAsr,
+    pushAsrAudio,
+    stopMicrovmAsr,
+    shouldFallbackToTranscribe,
 } from './calleventdata';
 
 import {
@@ -296,11 +301,41 @@ const onBinaryMessage = async (
         socketData.audioInputStream.write(data);
         socketData.writeRecordingStream.write(data);
         socketData.recordingFileSize += data.length;
+        pushAsrAudio(socketData, data);
     } else {
         server.log.error(
             `[ON BINARY MESSAGE]: [${clientIP}] - Error: received audio data before metadata. Check logs for errors in START event.`
         );
     }
+};
+
+/**
+ * Start transcription for a call with the engine it asked for.
+ *
+ * The MicroVM ASR engine has to acquire a MicroVM before it can transcribe
+ * anything, so a failure there (quota, region, image still building) falls back
+ * to Amazon Transcribe rather than losing the meeting's transcript. Audio that
+ * arrives during the acquisition is buffered by both engines.
+ */
+const startTranscription = async (
+    socketData: SocketCallData,
+    server_: typeof server
+): Promise<void> => {
+    if (resolveAsrEngine(socketData.callMetadata, server_) === 'microvm') {
+        if (await startMicrovmAsr(socketData, server_)) {
+            return;
+        }
+        if (!shouldFallbackToTranscribe()) {
+            server_.log.error(
+                `[TRANSCRIBING]: [${socketData.callMetadata.callId}] - MicroVM ASR could not start and fallback is disabled; this meeting will not be transcribed.`
+            );
+            return;
+        }
+        server_.log.warn(
+            `[TRANSCRIBING]: [${socketData.callMetadata.callId}] - MicroVM ASR could not start; falling back to Amazon Transcribe.`
+        );
+    }
+    void startTranscribe(socketData, server_);
 };
 
 const onTextMessage = async (
@@ -415,7 +450,9 @@ const onTextMessage = async (
                 refreshToken: callMetaData.refreshToken,
                 shouldRecordCall: callMetaData.shouldRecordCall,
                 samplingRate: callMetaData.samplingRate,
-                channels: callMetaData.channels
+                channels: callMetaData.channels,
+                asrEngine: callMetaData.asrEngine,
+                enableDiarization: callMetaData.enableDiarization
             },
             audioInputStream: audioInputStream,
             writeRecordingStream: writeRecordingStream,
@@ -428,7 +465,7 @@ const onTextMessage = async (
             ownerSub: getAuthenticatedCaller(request)?.sub,
         };
         socketMap.set(ws, socketCallMap);
-        startTranscribe(socketCallMap, server);
+        await startTranscription(socketCallMap, server);
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
         const socketData = socketMap.get(ws);
         server.log.debug(
@@ -680,6 +717,19 @@ const endCall = async (
                 socketData.audioInputStream.end();
                 socketData.audioInputStream.destroy();
             }
+
+            // Flushes the tail utterance on each channel, then terminates the
+            // MicroVM. No-op for meetings transcribed by Amazon Transcribe.
+            try {
+                await stopMicrovmAsr(socketData, server);
+            } catch (error) {
+                server.log.error(
+                    `[${callMetaData.callEvent}]: [${
+                        callMetaData.callId
+                    }] - Error stopping the MicroVM ASR engine: ${normalizeErrorForLogging(error)}`
+                );
+            }
+
             if (socketData) {
                 server.log.debug(
                     `[${callMetaData.callEvent}]: [${
@@ -820,6 +870,22 @@ const shutdown = async (signal: string): Promise<void> => {
     }
     shuttingDown = true;
     server.log.info(`[SHUTDOWN]: Received ${signal}; finishing in-flight work.`);
+
+    // Release ASR MicroVMs explicitly. Their maximumDurationInSeconds is only a
+    // backstop, so without this a deploy or scale-in would leave one running
+    // (and billing) per in-flight meeting until that ceiling expired.
+    for (const socketData of socketMap.values()) {
+        if (socketData.asr) {
+            try {
+                await stopMicrovmAsr(socketData, server);
+            } catch (err) {
+                server.log.error(
+                    `[SHUTDOWN]: Error releasing the ASR MicroVM for ${socketData.callMetadata.callId}: ${normalizeErrorForLogging(err)}`
+                );
+            }
+        }
+    }
+
     try {
         await awaitPendingMuxes(server, SHUTDOWN_MUX_GRACE_MS);
     } catch (err) {

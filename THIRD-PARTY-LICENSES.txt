@@ -489,3 +489,38 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 
   This Form is Incompatible With Secondary Licenses, as defined by the
   Mozilla Public License, v. 2.0.
+
+----------------
+
+** sherpa-onnx - https://github.com/k2-fsa/sherpa-onnx
+
+Apache License 2.0 - https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE
+
+Installed into the on-demand ASR MicroVM image (lma-asr-microvm-stack) when the
+TranscriptionEngine parameter is set to MicrovmAsr. Not used by the default
+Amazon Transcribe path.
+
+----------------
+
+** Speech recognition and speaker-embedding model weights (downloaded at image
+   build time, NOT redistributed by this project)
+
+The on-demand ASR MicroVM image downloads the model selected by the AsrModelId
+and AsrSpeakerModelId CloudFormation parameters from its published source and
+verifies it against a pinned SHA256. The weights are baked into that image inside
+the deploying AWS account; this project distributes no model weights. Each model's
+own license file is copied into the image next to its weights.
+
+Defaults:
+
+  * NVIDIA Nemotron speech-streaming EN 0.6B (streaming ASR)
+    NVIDIA Open Model License
+    https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
+
+  * NVIDIA TitaNet-small speaker embedding (diarization)
+    CC-BY-4.0
+    https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large
+
+You are responsible for complying with the license of whichever model you select,
+including any model you supply yourself via the Custom model parameters. See
+docs/microvm-asr.md.

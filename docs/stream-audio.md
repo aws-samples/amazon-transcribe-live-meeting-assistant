@@ -75,6 +75,8 @@ Chrome browser is required. Stream Audio relies on Chrome's tab audio capture AP
 
 Stream Audio combines your microphone input and the selected tab's audio into a stereo (two-channel) audio stream. Your microphone is assigned to one channel while the tab audio is assigned to the other, enabling speaker attribution during transcription. The combined stream is sent via WebSocket to the Fargate-based transcription server for real-time processing.
 
+Because attribution is per channel, several people sharing one microphone appear as a single speaker. If a deployment enables the experimental [on-demand ASR & diarization engine](microvm-asr.md), an **Enable speaker diarization** checkbox appears here and labels the transcript per voice instead.
+
 ## Important Notice
 
 Always obtain permission from all participants before recording a meeting or conversation. Recording others without their knowledge or consent may violate local laws and organizational policies.
@@ -84,3 +86,4 @@ Always obtain permission from all participants before recording a meeting or con
 - [Upload Audio](upload-audio.md) -- Transcribe an existing audio/video recording instead of streaming live
 - [Virtual Participant](virtual-participant.md) -- Join meetings as a separate automated participant
 - [WebSocket Streaming API](websocket-streaming-api.md) -- Technical details on the streaming protocol
+- [On-demand ASR & Speaker Diarization (MicroVM)](microvm-asr.md) -- Label the transcript per voice rather than per audio channel
