@@ -89,7 +89,6 @@ const isStaleSessionError = (error: any): boolean => {
 export class TranscriptionService {
     private process: ChildProcess | null = null;           // FFmpeg: combined_audio.monitor → Transcribe
     private novaAudioProcess: ChildProcess | null = null;  // FFmpeg: meeting_audio.monitor → Nova/recording
-    private meetingToCombinedPipe: ChildProcess | null = null; // pacat: meeting audio → combined_audio sink
     private startTime: number | null = null;
     // Cumulative timeline offset (seconds) applied to Transcribe timestamps.
     // Amazon Transcribe resets Item.StartTime/EndTime to 0 on every new
@@ -625,15 +624,6 @@ export class TranscriptionService {
             try { this.novaAudioProcess.kill(); } catch (_) { /* ignore */ }
             this.novaAudioProcess = null;
         }
-        if (this.meetingToCombinedPipe) {
-            try {
-                if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
-                    this.meetingToCombinedPipe.stdin.end();
-                }
-                this.meetingToCombinedPipe.kill();
-            } catch (_) { /* ignore */ }
-            this.meetingToCombinedPipe = null;
-        }
     }
 
     async stopTranscription(): Promise<void> {
@@ -732,26 +722,9 @@ export class TranscriptionService {
     // Channel separation (meeting vs combined) prevents Nova from hearing its own voice.
     private async writeAudio(transcribeResponse: any, recordingStream: any): Promise<void> {
         try {
-            // Pipe meeting audio into combined_audio sink for Transcribe
-            this.meetingToCombinedPipe = spawn('pacat', [
-                '--playback',
-                '--device=combined_audio',
-                '--format=s16le',
-                '--rate=16000',
-                '--channels=1',
-                '--raw',
-                '--latency-msec=20'
-            ]);
-            
-            this.meetingToCombinedPipe.on('error', (error: any) => {
-                console.error(`pacat (meeting→combined) error: ${error.message}`);
-            });
-            
-            this.meetingToCombinedPipe.stderr?.on('data', (data: any) => {
-                const msg = data.toString().trim();
-                if (msg) console.log(`pacat (meeting→combined): ${msg}`);
-            });
-            
+            // (Meeting audio reaches combined_audio via the module-loopback set up
+            // in entrypoint.sh — see the note in the stdout handler below.)
+
             // Capture meeting-only audio for Nova and recording
             this.novaAudioProcess = spawn('ffmpeg', [
                 '-f', 'pulse',
@@ -788,10 +761,15 @@ export class TranscriptionService {
                     try {
                         recordingStream.write(chunk);
 
-                        // Forward meeting audio to combined_audio sink for Transcribe
-                        if (this.meetingToCombinedPipe && this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
-                            this.meetingToCombinedPipe.stdin.write(chunk);
-                        }
+                        // NOTE: meeting audio is deliberately NOT forwarded to
+                        // combined_audio here. entrypoint.sh already routes
+                        // meeting_audio.monitor -> combined_audio with a
+                        // module-loopback, so writing it again from this process
+                        // delivered every utterance to Transcribe TWICE, at two
+                        // different latencies. Transcribe duly transcribed both:
+                        // "Jack and Jill, Jack and Jill went up ..." (GitHub #542).
+                        // This process still feeds the recording and the voice
+                        // assistant, which have no other source.
 
                         if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
                             voiceAssistant.sendAudioChunk(chunk);

@@ -136,13 +136,18 @@ def test_entrypoint_warns_if_the_sinks_are_not_16k_mono(entrypoint: str) -> None
 
 
 def test_pacat_streams_use_the_pipeline_rate() -> None:
-    """The playback/capture streams either side of the sinks must agree.
+    """The playback stream either side of the sinks must agree with them.
 
-    nova-agent.ts plays Nova's output into agent_output and scribe.ts pipes
-    meeting audio into combined_audio; both must match the sink format or the
-    resample simply moves rather than disappears.
+    nova-agent.ts plays Nova's output into agent_output, and ffmpeg captures the
+    monitors at 16 kHz; a mismatch would just move the resample rather than
+    remove it.
+
+    scribe.ts is deliberately NOT checked here: its pacat pipe into
+    combined_audio was removed as the duplicate writer behind #542. See
+    test_audio_single_writer.py, which asserts it stays removed.
     """
     nova = (BACKEND / "src" / "nova-agent.ts").read_text()
     scribe = (BACKEND / "src" / "scribe.ts").read_text()
     assert f"NOVA_PLAYBACK_RATE || '{PIPELINE_RATE}'" in nova
-    assert f"'--rate={PIPELINE_RATE}'" in scribe or f"--rate=16000" in scribe
+    # ffmpeg still captures the monitors at the pipeline rate.
+    assert f"'-ar', '{PIPELINE_RATE}'" in scribe or f"String(this.sampleRate)" in scribe
