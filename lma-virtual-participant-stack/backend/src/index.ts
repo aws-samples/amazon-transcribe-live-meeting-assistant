@@ -11,6 +11,7 @@ import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { videoRecorder } from './video-recorder.js';
+import { installAudioDiagnostics } from './audio-diagnostics.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -435,6 +436,13 @@ const main = async (): Promise<void> => {
     const page = await context.newPage();
     page.setDefaultTimeout(20000);
 
+    // Observational audio diagnostics for GitHub #543. Installed BEFORE any
+    // navigation: addInitScript only runs in documents created afterwards, which
+    // is why the Simli getUserMedia override (injected once the avatar is ready)
+    // never ran on Teams at all. Read-only by design — the previous attempt at
+    // this path mutated constraints and silently killed transcription (#545).
+    await installAudioDiagnostics(page);
+
     // Renderer-crash latch. A renderer OOM crash leaves every page.evaluate
     // hanging on "Target crashed", so meeting.initialize() never returns and
     // the UI stays stuck on JOINING. We race initialize() against this latch
@@ -468,6 +476,9 @@ const main = async (): Promise<void> => {
         if (
             text.includes('[LMA-Simli]') ||
             text.includes('[Simli]') ||
+            // Audio path diagnostics (#543): requested constraints, the settings
+            // actually applied, and outbound Opus packet cadence.
+            text.includes('[LMA-Audio]') ||
             type === 'error' ||
             type === 'warning'
         ) {
