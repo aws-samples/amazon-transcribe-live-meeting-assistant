@@ -10,6 +10,7 @@ import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick, humanType } from './prejoin-actions.js';
+import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 
 /** Polls before a sustained condition is believed. 3 x 20s poll = ~60s grace. */
 export const POLLS_BEFORE_END = 3;
@@ -584,8 +585,11 @@ export default class Teams {
         await substep('Entering the meeting room…');
         try {
             console.log("Getting meeting link.");
-            await page.goto(
-                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?p=${details.invite.meetingPassword}&anon=true`
+            await gotoMeetingPage(
+                page,
+                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?p=${details.invite.meetingPassword}&anon=true`,
+                MEETING_HOST_PATTERNS.teams,
+                'teams-join',
             );
         } catch {
             console.log("Your scribe was unable to join the meeting.");
