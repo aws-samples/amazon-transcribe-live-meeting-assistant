@@ -254,6 +254,25 @@ export function formatDeviceSpecs(entries: Array<{ name: string; spec: string }>
     return entries.map((e) => `${e.name}=[${e.spec}]`).join(' ');
 }
 
+/**
+ * Pull the default sink and source out of `pactl info`.
+ *
+ * Worth logging because a live Teams call was seen capturing with
+ * `deviceId: "default"` — so the meeting's microphone was whatever PulseAudio
+ * ranked first, not a device we chose. With a duplicated graph present
+ * (agent_mic AND agent_mic.2) that is genuinely ambiguous, and if it ever
+ * resolved to combined_audio.monitor the meeting would be fed its own mixed
+ * audio back. entrypoint.sh now pins it, and this is how we confirm the pin held.
+ */
+export function parsePactlDefaults(stdout: string): { sink?: string; source?: string } {
+    const sink = /^Default Sink:\s*(.+)$/m.exec(stdout);
+    const source = /^Default Source:\s*(.+)$/m.exec(stdout);
+    return {
+        sink: sink ? sink[1].trim() : undefined,
+        source: source ? source[1].trim() : undefined,
+    };
+}
+
 /* c8 ignore start - needs a live PulseAudio; the parser above is what is tested */
 
 /**
@@ -266,6 +285,14 @@ export function startAudioDeviceSpecPolling(intervalMs = DEVICE_SPEC_INTERVAL_MS
     const kinds = ['sinks', 'sources', 'source-outputs'];
 
     const sample = () => {
+        exec('pactl info', { timeout: 4000 }, (err, stdout) => {
+            if (err) return;
+            const d = parsePactlDefaults(stdout);
+            const line = `sink=${d.sink ?? '?'} source=${d.source ?? '?'}`;
+            if (last.get('defaults') === line) return;
+            last.set('defaults', line);
+            console.log(`[LMA-Audio] pulse defaults: ${line}`);
+        });
         for (const kind of kinds) {
             exec(`pactl list short ${kind}`, { timeout: 4000 }, (err, stdout) => {
                 if (err) return; // pulse not up yet, or tearing down

@@ -159,7 +159,11 @@ def test_only_nova_writes_into_agent_output() -> None:
 
 def test_pulse_loopback_latency_tolerates_cpu_jitter(entrypoint_lines: list[str]) -> None:
     for line in entrypoint_lines:
-        if "module-loopback" not in line:
+        # Only lines that CREATE a loopback. entrypoint.sh also greps the module
+        # list for an existing loopback to stay idempotent under /ready retries
+        # (see test_audio_graph_idempotency.py), and that detection pattern
+        # naturally mentions module-loopback without setting a latency.
+        if "load-module module-loopback" not in line:
             continue
         match = re.search(r"latency_msec=(\d+)", line)
         assert match, f"loopback should set latency_msec explicitly: {line.strip()}"

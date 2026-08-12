@@ -19,6 +19,7 @@ import { test } from 'node:test';
 import {
     classifyAudioWindow,
     formatDeviceSpecs,
+    parsePactlDefaults,
     parsePactlShort,
     EXPECTED_PACKETS_PER_SECOND,
     MIN_CAPTURE_RATIO,
@@ -242,4 +243,31 @@ test('formatting is stable so unchanged devices produce no log line', () => {
 
 test('an empty listing formats to something falsy, not the string "undefined"', () => {
     assert.equal(formatDeviceSpecs([]), '');
+});
+
+test('the default sink and source are extracted from pactl info', () => {
+    // A live Teams call captured with deviceId "default", so which source the
+    // meeting's microphone actually is was left to PulseAudio. entrypoint.sh now
+    // pins it; this is how the pin is confirmed to have held.
+    const info = [
+        'Server String: /run/user/1000/pulse/native',
+        'Default Sink: meeting_audio',
+        'Default Source: agent_mic',
+        'Cookie: 1234:5678',
+    ].join('\n');
+    assert.deepEqual(parsePactlDefaults(info), { sink: 'meeting_audio', source: 'agent_mic' });
+});
+
+test('a default that fell through to a duplicate or a monitor is visible', () => {
+    // The two outcomes worth catching: the ".2" copy of a duplicated graph, and
+    // combined_audio.monitor — which would feed the meeting its own mixed audio.
+    assert.equal(parsePactlDefaults('Default Source: agent_mic.2').source, 'agent_mic.2');
+    assert.equal(
+        parsePactlDefaults('Default Source: combined_audio.monitor').source,
+        'combined_audio.monitor',
+    );
+});
+
+test('missing pactl info fields read as undefined, not as a crash', () => {
+    assert.deepEqual(parsePactlDefaults(''), { sink: undefined, source: undefined });
 });
