@@ -11,7 +11,7 @@ import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { videoRecorder } from './video-recorder.js';
-import { installAudioDiagnostics } from './audio-diagnostics.js';
+import { installAudioDiagnostics, startAudioDiagnosticsPolling } from './audio-diagnostics.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -442,6 +442,10 @@ const main = async (): Promise<void> => {
     // never ran on Teams at all. Read-only by design — the previous attempt at
     // this path mutated constraints and silently killed transcription (#545).
     await installAudioDiagnostics(page);
+    // Node-side draining: page console.log does NOT reach CloudWatch under
+    // cloakbrowser (only warnings/errors do), which is why the first version of
+    // these diagnostics produced nothing across three live sessions.
+    const stopAudioDiagnostics = startAudioDiagnosticsPolling(page);
 
     // Renderer-crash latch. A renderer OOM crash leaves every page.evaluate
     // hanging on "Target crashed", so meeting.initialize() never returns and
@@ -719,7 +723,13 @@ const main = async (): Promise<void> => {
         // Cleanup - set flag to prevent uncaughtException from killing process mid-cleanup
         cleanupInProgress = true;
         console.log('Cleaning up...');
-        
+
+        // Stop the diagnostics timer first: an un-cleared interval holding a page
+        // reference would keep the Node process alive past teardown.
+        try {
+            stopAudioDiagnostics();
+        } catch { /* never block cleanup */ }
+
         try {
             // Stop transcription service
             await transcriptionService.stopTranscription();

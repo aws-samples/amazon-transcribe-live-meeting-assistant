@@ -8,44 +8,48 @@
  * READ-ONLY diagnostics for the voice assistant audio path (GitHub #543).
  *
  * The assistant's audio crackles on Teams but not Zoom. Three fixes have failed,
- * each reasoned from a plausible mechanism rather than a measurement:
+ * each reasoned from a mechanism rather than a measurement:
  *
- *   1. #538 pinned the PulseAudio sinks to 16 kHz mono. Real inefficiency, but
- *      Zoom sounded fine on identical sinks, so resampling was never the cause.
- *   2. #544 cut the avatar's per-frame canvas work and widened the audio buffers.
- *      Simli reconnects went 2 -> 0, but the rescale path was not even active in
- *      the failing session and it still crackled.
- *   3. #545 forced echoCancellation/noiseSuppression/autoGainControl off. That
- *      BROKE Teams transcription outright and was reverted.
+ *   #538 pinned the PulseAudio sinks to 16 kHz mono — real inefficiency, but Zoom
+ *        sounded fine on identical sinks, so resampling was never the cause.
+ *   #544 cut the avatar's per-frame canvas work and widened the audio buffers —
+ *        Simli reconnects went 2 -> 0, but the rescale path was not even active in
+ *        the failing session and it still crackled.
+ *   #545 forced echoCancellation/noiseSuppression/autoGainControl off — this BROKE
+ *        Teams transcription outright and was reverted.
  *
- * What is actually known, from measuring the container's own recording of
- * `agent_output`: the signal leaving the container is pristine on BOTH platforms
+ * What IS established, by measuring the container's own recording of
+ * `agent_output`: the signal leaving the container is pristine on both platforms
  * (0 sample-level discontinuities above the click threshold, 0 clipped samples,
- * peak 18245/32767, 16 kHz mono). So the damage happens after the audio leaves
- * PulseAudio — somewhere in Chromium's capture, processing or Opus encode — and
- * that segment has never been instrumented.
+ * peak 18245/32767). So the damage happens after the audio leaves PulseAudio, in
+ * Chromium's capture / processing / Opus encode — a segment never instrumented.
+ *
+ * WHY THIS DOES NOT LOG FROM THE PAGE
+ * -----------------------------------
+ * A first version of this file logged from inside the page with console.log and
+ * produced NOTHING across three live sessions. Counting the captured console lines
+ * by type explains why:
+ *
+ *     Browser log:       0
+ *     Browser warning:   6
+ *     Browser error:     4
+ *
+ * `page.on('console')` in index.ts is working, but plain `console.log` from the
+ * page never arrives under cloakbrowser — only warnings and errors do. The Simli
+ * override's own init-script logs were silent for the same reason, which is why
+ * the audio processing module went unsuspected for so long.
+ *
+ * So the page side only ACCUMULATES observations onto `window.__lmaAudio`, and
+ * Node drains and prints them on an interval with its own console.log, which
+ * demonstrably reaches CloudWatch. No dependency on console forwarding.
  *
  * EVERYTHING HERE IS OBSERVATIONAL. Nothing mutates constraints, tracks or
- * streams. #545 proved that touching this path can silently kill transcription,
- * so the next change to it must be driven by numbers rather than by another
- * hypothesis.
- *
- * What to look for in the logs:
- *
- *   - `[LMA-Audio] gUM requested` — what the meeting client asks for. Never seen
- *     before; the Simli override that would have logged it is injected too late
- *     to run on Teams at all (zero browser-side lines in a live session).
- *   - `[LMA-Audio] track settings` — what processing is ACTUALLY in effect, which
- *     can differ from what was requested.
- *   - `[LMA-Audio] outbound` — the decisive one. Opus at 20 ms should send ~50
- *     packets/s at a steady cadence. Irregular `pps`, or growth in
- *     `sendDelayPerPacketMs`, localises the fault to Chromium's encode/send on
- *     this host. A clean, steady ~50 pps means the audio leaves correctly and our
- *     code is not the problem.
+ * streams; getUserMedia returns the original stream object unchanged. #545 proved
+ * that touching this path can silently kill transcription.
  */
 import type { Page } from 'playwright-core';
 
-/** How often to sample outbound audio stats. */
+/** How often Node drains the page-side buffer and samples sender stats. */
 export const STATS_INTERVAL_MS = 5000;
 
 /** Opus at the standard 20 ms frame duration. */
@@ -54,41 +58,30 @@ export const EXPECTED_PACKETS_PER_SECOND = 50;
 /** One sampled window of outbound audio sender stats. */
 export interface OutboundAudioSample {
     packetsPerSecond: number;
-    audioLevel?: number;
-    totalAudioEnergy?: number;
-    /** Mean send delay added per packet in this window, in milliseconds. */
     sendDelayPerPacketMs?: number;
-    bytesPerSecond?: number;
 }
 
 /**
- * Classify a sample against the expected Opus cadence.
- *
- * Pure so the thresholds are unit-testable without a browser. Deliberately
- * conservative: this only reports, and a wrong label here costs nothing, whereas
- * a wrong "fix" cost us transcription.
+ * Classify a sample against the expected Opus cadence. Pure, so the thresholds
+ * are testable without a browser.
  */
 export function classifyOutboundAudio(sample: OutboundAudioSample): {
     healthy: boolean;
     reason: string;
 } {
     const pps = sample.packetsPerSecond;
-    // Nothing being sent at all is a different failure from an irregular cadence.
     if (pps <= 0) return { healthy: false, reason: 'no audio packets being sent' };
-    // Allow +/-20%: the sampling window is not frame-aligned, so a little drift is
-    // expected even on a perfectly healthy sender.
-    const low = EXPECTED_PACKETS_PER_SECOND * 0.8;
-    const high = EXPECTED_PACKETS_PER_SECOND * 1.2;
-    if (pps < low) {
+    // +/-20%: the sampling window is not frame-aligned, so a healthy sender drifts.
+    if (pps < EXPECTED_PACKETS_PER_SECOND * 0.8) {
         return {
             healthy: false,
-            reason: `packet cadence ${pps.toFixed(1)}/s is below the expected ~${EXPECTED_PACKETS_PER_SECOND}/s — encoder or capture is starving`,
+            reason: `cadence ${pps.toFixed(1)}/s is below the expected ~${EXPECTED_PACKETS_PER_SECOND}/s — encoder or capture starving`,
         };
     }
-    if (pps > high) {
+    if (pps > EXPECTED_PACKETS_PER_SECOND * 1.2) {
         return {
             healthy: false,
-            reason: `packet cadence ${pps.toFixed(1)}/s exceeds the expected ~${EXPECTED_PACKETS_PER_SECOND}/s — bursting after a stall`,
+            reason: `cadence ${pps.toFixed(1)}/s exceeds the expected ~${EXPECTED_PACKETS_PER_SECOND}/s — bursting after a stall`,
         };
     }
     if ((sample.sendDelayPerPacketMs ?? 0) > 20) {
@@ -101,103 +94,141 @@ export function classifyOutboundAudio(sample: OutboundAudioSample): {
 }
 
 /**
- * Install the observers. Must be called BEFORE navigation: `addInitScript` only
- * runs in documents created after it is registered, which is precisely why the
- * Simli override never ran on Teams.
+ * Install the page-side collectors. Must run BEFORE navigation: addInitScript only
+ * applies to documents created afterwards — the reason the Simli override never
+ * took effect on Teams.
  */
 export async function installAudioDiagnostics(page: Page): Promise<void> {
-    await page.addInitScript(
-        ({ intervalMs, expectedPps }: { intervalMs: number; expectedPps: number }) => {
-            const md = navigator.mediaDevices;
+    await page.addInitScript(() => {
+        const w = window as unknown as Record<string, unknown>;
+        // Buffer of observations for Node to drain. Never logged from here: page
+        // console.log does not reach CloudWatch under cloakbrowser.
+        if (!w.__lmaAudio) w.__lmaAudio = [];
+        const push = (msg: string) => {
+            const buf = w.__lmaAudio as string[];
+            // Bounded, so a long meeting cannot grow this without limit.
+            if (buf.length < 500) buf.push(msg);
+        };
 
-            // ---- 1. Observe getUserMedia, without changing anything ----------
-            if (md && md.getUserMedia) {
-                const original = md.getUserMedia.bind(md);
-                md.getUserMedia = async function (constraints?: MediaStreamConstraints) {
-                    if (constraints && constraints.audio) {
-                        try {
-                            console.log(
-                                `[LMA-Audio] gUM requested audio=${JSON.stringify(constraints.audio)}`,
-                            );
-                        } catch {
-                            /* logging must never affect capture */
-                        }
-                    }
-                    const stream = await original(constraints);
-                    // Report what the browser actually applied — this can differ
-                    // from the request, and it is the ground truth for whether
-                    // echo cancellation / noise suppression / AGC are running.
+        // ---- observe getUserMedia (no mutation) ----
+        const md = navigator.mediaDevices;
+        if (md && md.getUserMedia) {
+            const original = md.getUserMedia.bind(md);
+            md.getUserMedia = async function (constraints?: MediaStreamConstraints) {
+                if (constraints && constraints.audio) {
                     try {
-                        for (const track of stream.getAudioTracks()) {
-                            const s = track.getSettings ? track.getSettings() : {};
-                            console.log(`[LMA-Audio] track settings ${JSON.stringify(s)}`);
-                        }
+                        push(`gUM requested audio=${JSON.stringify(constraints.audio)}`);
                     } catch {
-                        /* ignore */
+                        /* never affect capture */
                     }
-                    return stream;
-                };
-            }
+                }
+                const stream = await original(constraints);
+                try {
+                    for (const t of stream.getAudioTracks()) {
+                        push(`track settings ${JSON.stringify(t.getSettings ? t.getSettings() : {})}`);
+                    }
+                } catch {
+                    /* ignore */
+                }
+                return stream;
+            };
+        }
 
-            // ---- 2. Sample outbound audio sender stats -----------------------
-            // Wrap RTCPeerConnection so every connection the meeting client makes
-            // is sampled, without needing to know how it builds them.
-            const NativePC = window.RTCPeerConnection;
-            if (!NativePC) return;
-            const pcs = new Set<RTCPeerConnection>();
+        // ---- collect outbound audio senders for Node to poll ----
+        const NativePC = window.RTCPeerConnection;
+        if (NativePC) {
+            const pcs: RTCPeerConnection[] = [];
+            w.__lmaPCs = pcs;
             const Wrapped = function (this: unknown, ...args: unknown[]) {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const pc = new (NativePC as any)(...args);
-                pcs.add(pc);
+                if (pcs.length < 32) pcs.push(pc);
                 return pc;
             } as unknown as typeof RTCPeerConnection;
             Wrapped.prototype = NativePC.prototype;
             window.RTCPeerConnection = Wrapped;
-
-            const prev = new Map<string, { packets: number; bytes: number; delay: number; ts: number }>();
-            setInterval(() => {
-                pcs.forEach((pc) => {
-                    if (pc.connectionState === 'closed') {
-                        pcs.delete(pc);
-                        return;
-                    }
-                    pc.getStats()
-                        .then((report) => {
-                            report.forEach((s: Record<string, unknown>) => {
-                                if (s.type !== 'outbound-rtp' || s.kind !== 'audio') return;
-                                const id = String(s.id);
-                                const packets = Number(s.packetsSent ?? 0);
-                                const bytes = Number(s.bytesSent ?? 0);
-                                const delay = Number(s.totalPacketSendDelay ?? 0);
-                                const ts = Number(s.timestamp ?? Date.now());
-                                const last = prev.get(id);
-                                prev.set(id, { packets, bytes, delay, ts });
-                                if (!last || ts <= last.ts) return;
-                                const secs = (ts - last.ts) / 1000;
-                                const dPackets = packets - last.packets;
-                                const pps = dPackets / secs;
-                                const bps = (bytes - last.bytes) / secs;
-                                const perPacketMs =
-                                    dPackets > 0 ? ((delay - last.delay) / dPackets) * 1000 : 0;
-                                const verdict =
-                                    pps <= 0
-                                        ? 'NO AUDIO SENT'
-                                        : pps < expectedPps * 0.8 || pps > expectedPps * 1.2
-                                          ? 'IRREGULAR'
-                                          : 'steady';
-                                console.log(
-                                    `[LMA-Audio] outbound pps=${pps.toFixed(1)} (expect ~${expectedPps}) ` +
-                                        `bytes/s=${bps.toFixed(0)} sendDelayPerPacketMs=${perPacketMs.toFixed(2)} ` +
-                                        `verdict=${verdict}`,
-                                );
-                            });
-                        })
-                        .catch(() => undefined);
-                });
-            }, intervalMs);
-
-            console.log('[LMA-Audio] diagnostics installed (observational only)');
-        },
-        { intervalMs: STATS_INTERVAL_MS, expectedPps: EXPECTED_PACKETS_PER_SECOND },
-    );
+            push('RTCPeerConnection instrumented');
+        }
+        push(`diagnostics installed in frame ${location.href.slice(0, 120)}`);
+    });
 }
+
+/* c8 ignore start - needs a live page; exercised by the container e2e test */
+
+/**
+ * Start Node-side draining. Logs with Node's console.log, which reaches
+ * CloudWatch — unlike page console.log (see the module docstring).
+ *
+ * Returns a stop function so the caller can clear the timer on teardown.
+ */
+export function startAudioDiagnosticsPolling(page: Page): () => void {
+    const prev = new Map<string, { packets: number; delay: number; ts: number }>();
+
+    const timer = setInterval(() => {
+        void (async () => {
+            try {
+                // 1. Drain page-side observations.
+                const lines: string[] = await page.evaluate(() => {
+                    const w = window as unknown as Record<string, unknown>;
+                    const buf = (w.__lmaAudio as string[]) || [];
+                    w.__lmaAudio = [];
+                    return buf;
+                });
+                for (const line of lines) console.log(`[LMA-Audio] ${line}`);
+
+                // 2. Sample outbound audio sender stats from every peer connection.
+                const samples: Array<{ id: string; packets: number; bytes: number; delay: number; ts: number }> =
+                    await page.evaluate(async () => {
+                        const w = window as unknown as Record<string, unknown>;
+                        const pcs = (w.__lmaPCs as RTCPeerConnection[]) || [];
+                        const out: Array<{ id: string; packets: number; bytes: number; delay: number; ts: number }> = [];
+                        for (const pc of pcs) {
+                            if (pc.connectionState === 'closed') continue;
+                            try {
+                                const report = await pc.getStats();
+                                report.forEach((s: Record<string, unknown>) => {
+                                    if (s.type !== 'outbound-rtp' || s.kind !== 'audio') return;
+                                    out.push({
+                                        id: String(s.id),
+                                        packets: Number(s.packetsSent ?? 0),
+                                        bytes: Number(s.bytesSent ?? 0),
+                                        delay: Number(s.totalPacketSendDelay ?? 0),
+                                        ts: Number(s.timestamp ?? 0),
+                                    });
+                                });
+                            } catch {
+                                /* ignore a dead pc */
+                            }
+                        }
+                        return out;
+                    });
+
+                for (const s of samples) {
+                    const last = prev.get(s.id);
+                    prev.set(s.id, { packets: s.packets, delay: s.delay, ts: s.ts });
+                    if (!last || s.ts <= last.ts) continue;
+                    const secs = (s.ts - last.ts) / 1000;
+                    const dPackets = s.packets - last.packets;
+                    const pps = dPackets / secs;
+                    const perPacketMs = dPackets > 0 ? ((s.delay - last.delay) / dPackets) * 1000 : 0;
+                    const verdict = classifyOutboundAudio({
+                        packetsPerSecond: pps,
+                        sendDelayPerPacketMs: perPacketMs,
+                    });
+                    console.log(
+                        `[LMA-Audio] outbound pps=${pps.toFixed(1)} ` +
+                            `sendDelayPerPacketMs=${perPacketMs.toFixed(2)} ` +
+                            `${verdict.healthy ? 'OK' : 'PROBLEM'}: ${verdict.reason}`,
+                    );
+                }
+            } catch {
+                // Page closed / navigated / CDP hiccup. Diagnostics must never
+                // affect the meeting, so swallow and try again next tick.
+            }
+        })();
+    }, STATS_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+}
+
+/* c8 ignore stop */
