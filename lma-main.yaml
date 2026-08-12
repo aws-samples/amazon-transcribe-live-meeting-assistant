@@ -2598,6 +2598,14 @@ Resources:
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
         ChatButtonConfigTableName: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.ChatButtonConfigTableName
         NovaSonicConfigTableName: !GetAtt NOVASONICONFIGSTACK.Outputs.NovaSonicConfigTableName
+        AsrConfigTableName: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
+          - ""
+        AsrConfigTableArn: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableArn
+          - ""
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CallDataStream: !Ref CallDataStream
         CallDataStreamArn: !GetAtt CallDataStream.Arn
@@ -2766,6 +2774,7 @@ Resources:
         AsrMaxSpeakers: !Ref AsrMaxSpeakers
         AsrSpeakerThreshold: !Ref AsrSpeakerThreshold
         AsrMinSegmentMs: !Ref AsrMinSegmentMs
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LogLevel: !Ref LogLevel
@@ -2803,8 +2812,13 @@ Resources:
         # still get Amazon Transcribe unless they ask for diarization.
         AsrEngineDefault: transcribe
         AsrDiarizationAvailable: !If [ShouldEnableAsrDiarization, "true", "false"]
+        AsrConfigTableName: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
+          - ""
         AsrMaxSpeakers: !Ref AsrMaxSpeakers
         AsrSpeakerThreshold: !Ref AsrSpeakerThreshold
+        AsrMinSegmentMs: !Ref AsrMinSegmentMs
         PcaS3BucketName: ""
         PcaTranscriptsPrefix: ""
         PcaPlaybackAudioFilePrefix: ""

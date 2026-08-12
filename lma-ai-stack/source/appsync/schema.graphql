@@ -201,6 +201,7 @@ type Mutation @aws_iam {
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools
 	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools
+	updateAsrConfig(input: UpdateAsrConfigInput!): UpdateAsrConfigOutput @aws_cognito_user_pools
 	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
@@ -247,6 +248,7 @@ type Query @aws_cognito_user_pools
 	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
 	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
 	getNovaSonicConfig(NovaSonicConfigId: ID!): NovaSonicConfig @aws_cognito_user_pools @aws_iam
+	getAsrConfig(AsrConfigId: ID!): AsrConfig @aws_cognito_user_pools @aws_iam
 	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools @aws_iam
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
@@ -744,6 +746,33 @@ input UpdateNovaSonicConfigInput {
 
 type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
 	NovaSonicConfigId: ID!
+	Success: Boolean!
+}
+
+# On-demand ASR + diarization runtime configuration.
+#
+# Overrides for the diarization operating point, which is empirical and specific to
+# the speaker model: an omitted or empty field means "use the stack parameter", so
+# this record holds only what an operator has deliberately changed. Values are
+# strings so that "" can mean unset without colliding with 0.
+type AsrConfig @aws_cognito_user_pools @aws_iam {
+	AsrConfigId: ID!
+	speakerThreshold: String
+	minSegmentMs: String
+	maxSpeakers: String
+	endpointingMs: String
+	requireCorroboration: Boolean
+	diarizeByDefault: Boolean
+	engineDefaultMicrovm: Boolean
+}
+
+input UpdateAsrConfigInput {
+	AsrConfigId: ID!
+	ConfigData: String!
+}
+
+type UpdateAsrConfigOutput @aws_cognito_user_pools @aws_iam {
+	AsrConfigId: ID!
 	Success: Boolean!
 }
 

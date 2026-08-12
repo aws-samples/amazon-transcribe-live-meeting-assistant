@@ -224,6 +224,11 @@ Parameters:
       - DEBUG
     Description: Log level for the ASR control-plane Lambda functions.
 
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Default: ""
+    Description: ARN of the customer managed KMS key used to encrypt the config table.
+
   LoggingBucketName:
     Type: String
     Default: ""
@@ -237,6 +242,7 @@ Parameters:
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasLoggingBucket: !Not [!Equals [!Ref LoggingBucketName, ""]]
+  HasEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, ""]]
   ForceDiarizationOn: !Equals [!Ref AsrEnableDiarization, "On"]
   SetDiarizationExplicitly: !Not [!Equals [!Ref AsrEnableDiarization, "Auto"]]
 
@@ -392,6 +398,31 @@ Resources:
       SpeakerModelId: !Ref AsrSpeakerModelId
       SpeakerModelUrl: !Ref AsrSpeakerModelUrl
       SpeakerModelSha256: !Ref AsrSpeakerModelSha256
+
+  # Runtime overrides for the diarization operating point, edited from the web UI's
+  # ASR Config page. Everything here is per-session in the WebSocket protocol, so a
+  # change takes effect on the NEXT meeting with no rebuild and no stack update —
+  # which is what makes the threshold practical to tune (it is model-specific and
+  # measured, see source/catalog.json).
+  AsrConfigTable:
+    Type: AWS::DynamoDB::Table
+    # DDB-002: Data plane logging disabled due to cost; control plane logging via CloudTrail is sufficient
+    Properties:
+      KeySchema:
+        - AttributeName: AsrConfigId
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: AsrConfigId
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasEncryptionKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+        - !Ref AWS::NoValue
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
 
   ##########################################################################
   # MicroVM image
@@ -639,6 +670,14 @@ Outputs:
   DiarizationAvailable:
     Description: Whether the image can produce speaker labels.
     Value: !GetAtt AsrImageSource.DiarizationAvailable
+
+  AsrConfigTableName:
+    Description: Runtime ASR configuration table, edited from the ASR Config admin page.
+    Value: !Ref AsrConfigTable
+
+  AsrConfigTableArn:
+    Description: ARN of the runtime ASR configuration table.
+    Value: !GetAtt AsrConfigTable.Arn
 
   MicrovmLogGroup:
     Description: CloudWatch log group for ASR MicroVM sessions.

@@ -155,6 +155,10 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // Amazon Transcribe. Only offered when the deployment built an ASR image with
   // a speaker model (settings.AsrDiarizationAvailable).
   const [enableStreamDiarization, setEnableStreamDiarization] = useState(false);
+  // How many people share this microphone/tab. Nobody but the user can know it, so
+  // it is asked for rather than guessed — the same question Upload Audio asks.
+  // Blank means "discover as many speakers as appear".
+  const [streamMaxSpeakers, setStreamMaxSpeakers] = useState('');
 
   // --- Upload mode state --------------------------------------------------
   const [uploadFiles, setUploadFiles] = useState([]);
@@ -304,6 +308,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       // Asking for diarization selects the MicroVM ASR engine, which is where
       // per-voice speaker labels come from.
       enableDiarization: enableStreamDiarization,
+      maxSpeakers: Number.parseInt(streamMaxSpeakers, 10) || 0,
     };
     setCallMetaData(callMetaDataCopy);
     return callMetaDataCopy;
@@ -722,6 +727,35 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                       Enable speaker diarization
                     </Checkbox>
                   </FormField>
+                  {enableStreamDiarization && (
+                    <Box margin={{ top: 's' }}>
+                      <FormField
+                        label="Speakers on this side (optional)"
+                        description={
+                          'How many people share your microphone or the shared tab, if you know. ' +
+                          'Leave blank to discover as many voices as appear. Setting it caps the ' +
+                          'labels per channel, which helps when short utterances would otherwise ' +
+                          'be mistaken for new speakers.'
+                        }
+                        errorText={
+                          streamMaxSpeakers !== '' &&
+                          (Number.isNaN(Number.parseInt(streamMaxSpeakers, 10)) ||
+                            Number.parseInt(streamMaxSpeakers, 10) < 1 ||
+                            Number.parseInt(streamMaxSpeakers, 10) > 30)
+                            ? 'Must be between 1 and 30, or blank'
+                            : undefined
+                        }
+                      >
+                        <Input
+                          value={streamMaxSpeakers}
+                          type="number"
+                          placeholder="discover automatically"
+                          onChange={({ detail }) => setStreamMaxSpeakers(detail.value)}
+                          disabled={recording}
+                        />
+                      </FormField>
+                    </Box>
+                  )}
                 </Box>
               )}
 

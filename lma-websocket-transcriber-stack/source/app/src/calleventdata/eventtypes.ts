@@ -111,6 +111,12 @@ export type CallMetaData = {
     asrEngine?: string,
     /** Label the transcript per voice instead of per audio channel. */
     enableDiarization?: boolean,
+    /**
+     * How many people share this client's audio, when the user knows. Only they
+     * can know it — the Upload Audio page asks the same question. Absent or 0
+     * means discover as many speakers as appear.
+     */
+    maxSpeakers?: number,
     // START_VIDEO only: ms between audio-stream start and video-stream start,
     // applied as an offset when muxing so video aligns with audio/transcript.
     videoTimeOffsetMs?: number,

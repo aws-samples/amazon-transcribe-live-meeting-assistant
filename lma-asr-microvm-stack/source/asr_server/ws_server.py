@@ -470,6 +470,8 @@ class AsrSession:
                     # (not the shared graph), so they can be honoured per session.
                     speaker_threshold=config.speaker_threshold,
                     max_speakers=config.max_speakers,
+                    min_segment_ms=config.min_segment_ms,
+                    require_corroboration=config.require_corroboration,
                 )
                 self._recognizer = await asyncio.to_thread(
                     self._engine.new_session, session_config

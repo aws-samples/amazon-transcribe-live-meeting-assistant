@@ -806,3 +806,47 @@ def test_assign_rejects_an_empty_embedding_without_truthiness() -> None:
     registry = SpeakerRegistry()
     with pytest.raises(ValueError, match="non-empty"):
         registry.assign([])
+
+
+def test_new_session_honours_per_session_diarization_overrides() -> None:
+    """All four knobs must be changeable per session.
+
+    The operating point is empirical and model-specific, so it has to be tunable
+    from runtime config (the ASR Config page) rather than only by rebuilding the
+    image — a five-minute rebuild per experiment made tuning impractical.
+    """
+    engine = DiarizingEngine(
+        ScriptedEngine(),
+        ScriptedEmbedder([VOICE_A]),
+        _config(threshold=0.5, max_speakers=0, min_segment_ms=400, require_corroboration=False),
+    )
+
+    session = engine.new_session(
+        SessionConfig(
+            sample_rate=SAMPLE_RATE,
+            speaker_threshold=0.2,
+            max_speakers=3,
+            min_segment_ms=2500,
+            require_corroboration=True,
+        )
+    )
+
+    assert isinstance(session, DiarizingRecognizer)
+    assert session.registry._threshold == pytest.approx(0.2)  # noqa: SLF001
+    assert session.registry._max_speakers == 3  # noqa: SLF001
+    assert session.registry._require_corroboration is True  # noqa: SLF001
+    assert session._min_segment_samples == SAMPLE_RATE * 2500 // 1000  # noqa: SLF001
+
+
+def test_new_session_falls_back_to_the_engine_defaults() -> None:
+    engine = DiarizingEngine(
+        ScriptedEngine(),
+        ScriptedEmbedder([VOICE_A]),
+        _config(threshold=0.31, min_segment_ms=1234, require_corroboration=True),
+    )
+
+    session = engine.new_session(SessionConfig(sample_rate=SAMPLE_RATE))
+
+    assert session.registry._threshold == pytest.approx(0.31)  # noqa: SLF001
+    assert session.registry._require_corroboration is True  # noqa: SLF001
+    assert session._min_segment_samples == SAMPLE_RATE * 1234 // 1000  # noqa: SLF001

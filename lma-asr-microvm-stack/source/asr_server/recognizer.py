@@ -133,18 +133,25 @@ class SessionConfig:
       engine this varies per session (applied to the per-session VAD gate). For the
       streaming engine it is baked into the shared recognizer's endpoint rules and
       so cannot vary per session; ``None`` means "use the engine's built-in value".
-    * ``speaker_threshold`` / ``max_speakers`` — speaker-diarization knobs, honoured
-      only when diarization is enabled (:mod:`asr_server.diarization`). Unlike the
-      two above, these genuinely DO vary per session: they live in the per-session
-      speaker registry rather than in any shared ONNX graph, so a connection can
-      declare its own conversation size (e.g. ``max_speakers=2`` for a two-party
-      call) with no engine rebuild. ``None`` means "use the engine's default".
+    * ``speaker_threshold`` / ``max_speakers`` / ``min_segment_ms`` /
+      ``require_corroboration`` — speaker-diarization knobs, honoured only when
+      diarization is enabled (:mod:`asr_server.diarization`). Unlike the two above,
+      these genuinely DO vary per session: they live in the per-session speaker
+      registry rather than in any shared ONNX graph, so a connection can declare its
+      own conversation size (e.g. ``max_speakers=2`` for a two-party call) with no
+      engine rebuild. ``None`` means "use the engine's default".
+
+      They are per-session precisely so the operating point can be tuned without
+      rebuilding an image: the correct threshold is empirical and specific to the
+      speaker model, so it has to be changeable in seconds, not minutes.
     """
 
     sample_rate: int = 16000
     endpointing_ms: int | None = None
     speaker_threshold: float | None = None
     max_speakers: int | None = None
+    min_segment_ms: int | None = None
+    require_corroboration: bool | None = None
 
 
 class SessionConfigError(ValueError):

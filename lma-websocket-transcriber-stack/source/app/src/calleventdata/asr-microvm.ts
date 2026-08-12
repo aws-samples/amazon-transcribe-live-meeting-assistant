@@ -20,6 +20,7 @@ import { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
+import { AsrRuntimeConfig, getAsrRuntimeConfig } from './asr-config';
 import { CallMetaData, SocketCallData } from './eventtypes';
 import { TranscriptSegmentRecord, writeSegmentToKds } from './transcribe';
 import { normalizeErrorForLogging } from '../utils/common';
@@ -36,13 +37,11 @@ import {
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const ASR_ENGINE_DEFAULT = (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase();
 const ASR_LAUNCHER_FUNCTION_ARN = process.env['ASR_LAUNCHER_FUNCTION_ARN'] || '';
+// The diarization knobs and the deployment default engine come from asr-config.ts,
+// which layers the ASR Config table's overrides over these same env defaults.
 // Development escape hatch: connect straight to a locally running ASR server
 // (ws://host:8080) instead of launching a MicroVM.
 const ASR_DIRECT_ENDPOINT = process.env['ASR_DIRECT_ENDPOINT'] || '';
-const ASR_DIARIZE_DEFAULT = (process.env['ASR_DIARIZE_DEFAULT'] || 'true') === 'true';
-const ASR_MAX_SPEAKERS = parseInt(process.env['ASR_MAX_SPEAKERS'] || '0', 10);
-const ASR_SPEAKER_THRESHOLD = parseFloat(process.env['ASR_SPEAKER_THRESHOLD'] || '0.5');
-const ASR_ENDPOINTING_MS = parseInt(process.env['ASR_ENDPOINTING_MS'] || '1200', 10);
 const ASR_READY_TIMEOUT_MS = parseInt(process.env['ASR_READY_TIMEOUT_MS'] || '30000', 10);
 const ASR_FINISH_TIMEOUT_MS = parseInt(process.env['ASR_FINISH_TIMEOUT_MS'] || '5000', 10);
 // Audio held while the MicroVM starts or a session reconnects, as bytes of 16 kHz
@@ -79,6 +78,8 @@ interface AsrSessionOptions {
     maxSpeakers: number;
     speakerThreshold: number;
     endpointingMs: number;
+    minSegmentMs?: number;
+    requireCorroboration?: boolean;
 }
 
 export interface AsrSessionSet {
@@ -124,12 +125,16 @@ export const shouldFallbackToTranscribe = (): boolean =>
  */
 export const resolveAsrEngine = (
     callMetaData: CallMetaData,
-    server?: FastifyInstance
+    server?: FastifyInstance,
+    runtime?: AsrRuntimeConfig
 ): AsrEngineName => {
+    const deploymentDefault = runtime
+        ? (runtime.engineDefaultMicrovm ? 'microvm' : 'transcribe')
+        : ASR_ENGINE_DEFAULT;
     const requested =
         callMetaData.asrEngine?.toLowerCase() ||
         (callMetaData.enableDiarization ? 'microvm' : '') ||
-        ASR_ENGINE_DEFAULT;
+        deploymentDefault;
     if (requested !== 'microvm') {
         return 'transcribe';
     }
@@ -475,6 +480,14 @@ export class AsrChannelSession {
                 diarize: this.options.diarize,
                 max_speakers: this.options.maxSpeakers,
                 speaker_threshold: this.options.speakerThreshold,
+                // Omitted rather than nulled when unset, so the engine keeps
+                // whatever the image was built with.
+                ...(this.options.minSegmentMs === undefined
+                    ? {}
+                    : { min_segment_ms: this.options.minSegmentMs }),
+                ...(this.options.requireCorroboration === undefined
+                    ? {}
+                    : { require_corroboration: this.options.requireCorroboration }),
             };
             try {
                 socket.send(JSON.stringify(config));
@@ -661,11 +674,17 @@ export const startMicrovmAsr = async (
 ): Promise<boolean> => {
     const callMetadata = socketData.callMetadata;
 
+    const runtime = await getAsrRuntimeConfig(server);
     const options: AsrSessionOptions = {
-        diarize: callMetadata.enableDiarization ?? ASR_DIARIZE_DEFAULT,
-        maxSpeakers: ASR_MAX_SPEAKERS,
-        speakerThreshold: ASR_SPEAKER_THRESHOLD,
-        endpointingMs: ASR_ENDPOINTING_MS,
+        diarize: callMetadata.enableDiarization ?? runtime.diarizeByDefault,
+        // A client-supplied count wins: only the person in the meeting knows how
+        // many people share their microphone (the Upload Audio page asks the same
+        // question). 0 still means "discover as many as appear".
+        maxSpeakers: callMetadata.maxSpeakers ?? runtime.maxSpeakers,
+        speakerThreshold: runtime.speakerThreshold,
+        endpointingMs: runtime.endpointingMs,
+        minSegmentMs: runtime.minSegmentMs,
+        requireCorroboration: runtime.requireCorroboration,
     };
     const registry = new SpeakerNameRegistry();
     const sessions = new Map<AsrChannelId, AsrChannelSession>();

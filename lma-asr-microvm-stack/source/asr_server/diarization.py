@@ -675,6 +675,8 @@ class DiarizingEngine(RecognizerEngine):
         inner_session = self._inner.new_session(config)
         threshold = self._config.threshold
         max_speakers = self._config.max_speakers
+        min_segment_ms = self._config.min_segment_ms
+        require_corroboration = self._config.require_corroboration
         sample_rate = self._config.embedder.sample_rate
         if config is not None:
             sample_rate = config.sample_rate
@@ -682,14 +684,18 @@ class DiarizingEngine(RecognizerEngine):
                 threshold = config.speaker_threshold
             if config.max_speakers is not None:
                 max_speakers = config.max_speakers
+            if config.min_segment_ms is not None:
+                min_segment_ms = config.min_segment_ms
+            if config.require_corroboration is not None:
+                require_corroboration = config.require_corroboration
         return DiarizingRecognizer(
             inner_session,
             self._embedder,
             sample_rate=sample_rate,
             threshold=threshold,
             max_speakers=max_speakers,
-            min_segment_ms=self._config.min_segment_ms,
-            require_corroboration=self._config.require_corroboration,
+            min_segment_ms=min_segment_ms,
+            require_corroboration=require_corroboration,
         )
 
 

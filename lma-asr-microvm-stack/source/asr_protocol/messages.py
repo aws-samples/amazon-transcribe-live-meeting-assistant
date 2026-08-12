@@ -40,8 +40,17 @@ class Config(BaseModel):
     # conversation size is known, e.g. 2 for a two-party call.
     max_speakers: int = 0
     # Cosine similarity above which two utterances are treated as one speaker.
-    # Higher splits more eagerly; lower merges more eagerly.
+    # Higher splits more eagerly; lower merges more eagerly. The right value is
+    # specific to the speaker model the image was built with, so it is negotiated
+    # per session rather than fixed at build time.
     speaker_threshold: float = 0.5
+    # Shortest utterance worth embedding; a shorter one inherits the current
+    # speaker instead of minting an identity from an unreliable embedding.
+    # ``None`` means "use the server's configured value".
+    min_segment_ms: int | None = None
+    # Withhold the first embedding that matches nobody until a second one agrees
+    # with it. ``None`` means "use the server's configured value".
+    require_corroboration: bool | None = None
 
 
 class Eos(BaseModel):

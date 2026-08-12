@@ -105,6 +105,31 @@ Relevant parameters (all under *On-demand ASR and Diarization* in the console):
 | `AsrSpeakerThreshold` | `0.2` | Measured operating point for TitaNet; **specific to the speaker model** |
 | `AsrMinSegmentMs` | `2500` | Shortest utterance worth embedding; shorter ones inherit the current speaker |
 
+## Tuning it without a redeploy
+
+The diarization operating point is empirical and specific to the speaker model, so
+it lives in runtime configuration rather than only in stack parameters. **Configuration
+▸ ASR Config** (admin only) edits it, and the next meeting to start picks it up — no
+stack update, no image rebuild.
+
+Every field is an override: leave it blank and the CloudFormation parameter applies.
+There is no default record to keep in sync.
+
+| Field | Effect |
+|---|---|
+| Speaker similarity threshold | The usual fix when one person fragments. Model-specific |
+| Minimum utterance for speaker ID | Raise it to stop short utterances minting speakers |
+| Maximum speakers per channel | Hard cap; a client that knows its own meeting size overrides it |
+| Endpointing silence | Trailing silence that closes an utterance |
+| Diarize by default | Whether meetings request speaker labels when the client is silent on it |
+| Use this engine for every meeting | Routes all streaming meetings here, with the Transcribe feature losses above |
+| Require corroboration | Off by default; see the troubleshooting section |
+
+Stream Audio also asks **Speakers on this side** when diarization is ticked. Only the
+person in the meeting knows how many people share their microphone, which is why it is
+asked for rather than inferred; blank means discover as many as appear, and a value
+there overrides the deployment-wide cap for that meeting.
+
 ## Using it
 
 **Web UI.** On the **Stream Audio** page, tick **Enable speaker diarization**

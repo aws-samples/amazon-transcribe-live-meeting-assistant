@@ -286,6 +286,14 @@ Parameters:
       (Optional) ARN of the MicroVM ASR session launcher. When empty, meetings are
       always transcribed by Amazon Transcribe streaming.
 
+  AsrConfigTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Runtime ASR configuration table. Read at meeting start so the
+      diarization operating point can be tuned from the ASR Config admin page
+      without a stack update. Empty means always use the parameters below.
+
   AsrEngineDefault:
     Type: String
     Default: transcribe
@@ -343,6 +351,16 @@ Parameters:
     MinValue: 200
     MaxValue: 5000
     Description: Trailing silence in ms that closes an utterance on the MicroVM ASR engine.
+
+  AsrMinSegmentMs:
+    Type: Number
+    Default: 2500
+    MinValue: 0
+    MaxValue: 5000
+    Description: >-
+      Shortest utterance the MicroVM ASR engine will compute a speaker embedding
+      for; shorter ones inherit the current speaker. Sent per session, so it can
+      also be overridden from the ASR Config page.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -475,6 +493,7 @@ Conditions:
   # Audio-only deployments keep the original, cheaper shape.
   ShouldEnableVideoRecording: !Equals [!Ref EnableVideoRecording, "true"]
   ShouldEnableMicrovmAsr: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
+  HasAsrConfigTable: !Not [!Equals [!Ref AsrConfigTableName, ""]]
 
 Outputs:
   S3BucketName:
@@ -1165,6 +1184,13 @@ Resources:
               Effect: Allow
               Resource: !Ref AsrLauncherFunctionArn
             - !Ref AWS::NoValue
+          # Runtime diarization overrides, read once per meeting (and cached).
+          - !If
+            - HasAsrConfigTable
+            - Action: dynamodb:GetItem
+              Effect: Allow
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AsrConfigTableName}"
+            - !Ref AWS::NoValue
         Version: "2012-10-17"
       PolicyName: !Sub ${AWS::StackName}-TranscriberWebsocketTaskDefTaskRoleDefaultPolicy
       Roles:
@@ -1314,6 +1340,10 @@ Resources:
               Value: !Ref AsrSpeakerThreshold
             - Name: ASR_ENDPOINTING_MS
               Value: !Ref AsrEndpointingMs
+            - Name: ASR_MIN_SEGMENT_MS
+              Value: !Ref AsrMinSegmentMs
+            - Name: ASR_CONFIG_TABLE_NAME
+              Value: !Ref AsrConfigTableName
             - Name: WS_LOG_LEVEL
               Value: !Ref LogLevel
             - Name: DEBUG

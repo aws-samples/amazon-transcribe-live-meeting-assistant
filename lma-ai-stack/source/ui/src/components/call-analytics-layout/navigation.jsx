@@ -19,6 +19,7 @@ import {
   BROWSER_EXTENSION_PATH,
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
+  ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   DEFAULT_PATH,
@@ -65,6 +66,8 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${MEETINGS_QUERY_PATH}`;
   } else if (path.includes(MCP_SERVERS_PATH)) {
     activeHref = `#${MCP_SERVERS_PATH}`;
+  } else if (path.includes(ASR_CONFIG_PATH)) {
+    activeHref = `#${ASR_CONFIG_PATH}`;
   } else if (path.includes(NOVA_SONIC_CONFIG_PATH)) {
     activeHref = `#${NOVA_SONIC_CONFIG_PATH}`;
   } else if (path.includes(TRANSCRIPT_SUMMARY_PATH)) {

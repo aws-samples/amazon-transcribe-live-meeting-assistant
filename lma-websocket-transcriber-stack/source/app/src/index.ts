@@ -29,6 +29,7 @@ import {
     pushAsrAudio,
     stopMicrovmAsr,
     shouldFallbackToTranscribe,
+    getAsrRuntimeConfig,
 } from './calleventdata';
 
 import {
@@ -321,7 +322,10 @@ const startTranscription = async (
     socketData: SocketCallData,
     server_: typeof server
 ): Promise<void> => {
-    if (resolveAsrEngine(socketData.callMetadata, server_) === 'microvm') {
+    // Runtime config decides the deployment default, so the engine can be switched
+    // from the ASR Config page without redeploying the task.
+    const runtime = await getAsrRuntimeConfig(server_);
+    if (resolveAsrEngine(socketData.callMetadata, server_, runtime) === 'microvm') {
         if (await startMicrovmAsr(socketData, server_)) {
             return;
         }
@@ -452,7 +456,8 @@ const onTextMessage = async (
                 samplingRate: callMetaData.samplingRate,
                 channels: callMetaData.channels,
                 asrEngine: callMetaData.asrEngine,
-                enableDiarization: callMetaData.enableDiarization
+                enableDiarization: callMetaData.enableDiarization,
+                maxSpeakers: callMetaData.maxSpeakers
             },
             audioInputStream: audioInputStream,
             writeRecordingStream: writeRecordingStream,
