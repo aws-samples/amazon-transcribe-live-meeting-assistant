@@ -255,6 +255,76 @@ export function formatDeviceSpecs(entries: Array<{ name: string; spec: string }>
 }
 
 /**
+ * Map device index -> name from `pactl list short sinks|sources`.
+ *
+ * Needed because `pactl list short source-outputs` identifies a stream's device
+ * by INDEX, and indices are not positions in the listing: a live session showed
+ * four sources occupying indices 1-4, so "the third line" is not source 3. Without
+ * this map, "which device is Chromium capturing" is unanswerable — and that is
+ * precisely the question, because if the meeting's microphone were
+ * combined_audio.monitor rather than agent_mic, Teams would be receiving the
+ * meeting's own audio mixed back in.
+ */
+export function parsePactlIndexToName(stdout: string): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const line of stdout.split('\n')) {
+        const cols = line.split('\t');
+        if (cols.length < 2) continue;
+        if (!/^\d+$/.test(cols[0].trim())) continue;
+        map.set(cols[0].trim(), cols[1].trim());
+    }
+    return map;
+}
+
+/** One capturing stream, resolved to a device name and an owning application. */
+export interface CaptureStream {
+    index: string;
+    sourceIndex: string;
+    spec: string;
+    app: string;
+}
+
+/**
+ * Parse the LONG form of `pactl list source-outputs`.
+ *
+ * The short form omits the one field that matters most — `application.name` —
+ * so there is no way to tell Chromium's capture apart from ffmpeg's or a
+ * loopback's. With it, a single log line answers whether the meeting's microphone
+ * is the device we intended.
+ */
+export function parsePactlSourceOutputs(stdout: string): CaptureStream[] {
+    const out: CaptureStream[] = [];
+    // Blocks are separated by the "Source Output #N" header.
+    for (const block of stdout.split(/Source Output #/).slice(1)) {
+        const index = (/^(\d+)/.exec(block) ?? [])[1] ?? '?';
+        const sourceIndex = (/^\s*Source:\s*(\d+)\s*$/m.exec(block) ?? [])[1] ?? '?';
+        const spec = (/^\s*Sample Specification:\s*(.+)$/m.exec(block) ?? [])[1]?.trim() ?? '?';
+        // application.name is quoted; media.name is the fallback label when a
+        // stream has no application (module-loopback, for instance).
+        const app =
+            (/application\.name = "([^"]*)"/.exec(block) ?? [])[1] ??
+            (/media\.name = "([^"]*)"/.exec(block) ?? [])[1] ??
+            'unknown';
+        out.push({ index, sourceIndex, spec, app });
+    }
+    return out;
+}
+
+/** Render capture streams with their device names resolved. */
+export function formatCaptureStreams(
+    streams: CaptureStream[],
+    sourceNames: Map<string, string>,
+): string {
+    return streams
+        .map(
+            (s) =>
+                `${s.app}<-${sourceNames.get(s.sourceIndex) ?? `source#${s.sourceIndex}`}` +
+                `[${s.spec}]`,
+        )
+        .join(' ');
+}
+
+/**
  * Pull the default sink and source out of `pactl info`.
  *
  * Worth logging because a live Teams call was seen capturing with
@@ -282,26 +352,51 @@ export function parsePactlDefaults(stdout: string): { sink?: string; source?: st
  */
 export function startAudioDeviceSpecPolling(intervalMs = DEVICE_SPEC_INTERVAL_MS): () => void {
     const last = new Map<string, string>();
-    const kinds = ['sinks', 'sources', 'source-outputs'];
+    const kinds = ['sinks', 'sources'];
+    /** Latest source index -> name, so capture streams can be resolved by name. */
+    let sourceNames = new Map<string, string>();
+
+    const run = (cmd: string): Promise<string | null> =>
+        new Promise((resolve) => {
+            exec(cmd, { timeout: 4000 }, (err, stdout) => resolve(err ? null : stdout));
+        });
 
     const sample = () => {
-        exec('pactl info', { timeout: 4000 }, (err, stdout) => {
-            if (err) return;
-            const d = parsePactlDefaults(stdout);
-            const line = `sink=${d.sink ?? '?'} source=${d.source ?? '?'}`;
-            if (last.get('defaults') === line) return;
-            last.set('defaults', line);
-            console.log(`[LMA-Audio] pulse defaults: ${line}`);
-        });
-        for (const kind of kinds) {
-            exec(`pactl list short ${kind}`, { timeout: 4000 }, (err, stdout) => {
-                if (err) return; // pulse not up yet, or tearing down
+        void (async () => {
+            const info = await run('pactl info');
+            if (info) {
+                const d = parsePactlDefaults(info);
+                const line = `sink=${d.sink ?? '?'} source=${d.source ?? '?'}`;
+                if (last.get('defaults') !== line) {
+                    last.set('defaults', line);
+                    console.log(`[LMA-Audio] pulse defaults: ${line}`);
+                }
+            }
+
+            for (const kind of kinds) {
+                const stdout = await run(`pactl list short ${kind}`);
+                if (!stdout) continue; // pulse not up yet, or tearing down
+                if (kind === 'sources') sourceNames = parsePactlIndexToName(stdout);
                 const line = formatDeviceSpecs(parsePactlShort(stdout));
-                if (last.get(kind) === line) return;
+                if (last.get(kind) === line) continue;
                 last.set(kind, line);
                 console.log(`[LMA-Audio] pulse ${kind}: ${line || '(none)'}`);
-            });
-        }
+            }
+
+            // Capture streams last, so the index->name map is current. The LONG
+            // form is required: the short form omits application.name, which is
+            // the only way to tell Chromium's capture from ffmpeg's or a
+            // loopback's — and therefore the only way to confirm the meeting's
+            // microphone is the device we intended.
+            const outputs = await run('pactl list source-outputs');
+            if (outputs) {
+                const line = formatCaptureStreams(parsePactlSourceOutputs(outputs), sourceNames);
+                if (last.get('captures') !== line) {
+                    last.set('captures', line);
+                    console.log(`[LMA-Audio] pulse captures: ${line || '(none)'}`);
+                }
+            }
+        })();
     };
 
     sample();

@@ -19,7 +19,10 @@ import { test } from 'node:test';
 import {
     classifyAudioWindow,
     formatDeviceSpecs,
+    formatCaptureStreams,
     parsePactlDefaults,
+    parsePactlIndexToName,
+    parsePactlSourceOutputs,
     parsePactlShort,
     EXPECTED_PACKETS_PER_SECOND,
     MIN_CAPTURE_RATIO,
@@ -270,4 +273,109 @@ test('a default that fell through to a duplicate or a monitor is visible', () =>
 
 test('missing pactl info fields read as undefined, not as a crash', () => {
     assert.deepEqual(parsePactlDefaults(''), { sink: undefined, source: undefined });
+});
+
+/**
+ * Resolving capture streams to device NAMES and owning applications.
+ *
+ * The question these answer: is the meeting's microphone the device we intended?
+ * A live session logged four sources occupying indices 1-4 with capture streams on
+ * 1, 3 and 4 — and because the short listing identifies a device only by index,
+ * there was no way to tell whether Chromium was reading agent_mic or
+ * combined_audio.monitor. The latter would mean Teams is being fed the meeting's
+ * own audio mixed back in, which is a complete explanation of garbled playback
+ * that leaves every packet counter clean.
+ */
+const SOURCES_SHORT = [
+    '1\tmeeting_audio.monitor\tmodule-null-sink.c\ts16le 1ch 16000Hz\tIDLE',
+    '2\tagent_output.monitor\tmodule-null-sink.c\ts16le 1ch 16000Hz\tRUNNING',
+    '3\tcombined_audio.monitor\tmodule-null-sink.c\ts16le 1ch 16000Hz\tRUNNING',
+    '4\tagent_mic\tmodule-remap-source.c\ts16le 1ch 16000Hz\tRUNNING',
+].join('\n');
+
+test('device indices are mapped to names rather than to listing positions', () => {
+    // The indices in the live capture started at 1, so "the third line" is not
+    // source 3. Position-based mapping would silently mislabel every stream.
+    const map = parsePactlIndexToName(SOURCES_SHORT);
+    assert.equal(map.get('1'), 'meeting_audio.monitor');
+    assert.equal(map.get('4'), 'agent_mic');
+    assert.equal(map.size, 4);
+});
+
+test('a capture stream is resolved to its application and device name', () => {
+    const streams = parsePactlSourceOutputs(
+        [
+            'Source Output #3',
+            '\tDriver: protocol-native.c',
+            '\tClient: 12',
+            '\tSource: 4',
+            '\tSample Specification: s16le 2ch 48000Hz',
+            '\tProperties:',
+            '\t\tapplication.name = "Chromium"',
+        ].join('\n'),
+    );
+    assert.equal(streams.length, 1);
+    assert.deepEqual(streams[0], {
+        index: '3',
+        sourceIndex: '4',
+        spec: 's16le 2ch 48000Hz',
+        app: 'Chromium',
+    });
+    assert.equal(
+        formatCaptureStreams(streams, parsePactlIndexToName(SOURCES_SHORT)),
+        'Chromium<-agent_mic[s16le 2ch 48000Hz]',
+    );
+});
+
+test('the failure mode this exists to catch is legible in one line', () => {
+    // Chromium capturing combined_audio.monitor: the meeting would hear itself.
+    const streams = parsePactlSourceOutputs(
+        [
+            'Source Output #5',
+            '\tSource: 3',
+            '\tSample Specification: s16le 2ch 48000Hz',
+            '\tProperties:',
+            '\t\tapplication.name = "Chromium"',
+        ].join('\n'),
+    );
+    assert.equal(
+        formatCaptureStreams(streams, parsePactlIndexToName(SOURCES_SHORT)),
+        'Chromium<-combined_audio.monitor[s16le 2ch 48000Hz]',
+    );
+});
+
+test('several capture streams are parsed from one listing', () => {
+    const streams = parsePactlSourceOutputs(
+        [
+            'Source Output #0',
+            '\tSource: 2',
+            '\tSample Specification: s16le 1ch 16000Hz',
+            '\tProperties:',
+            '\t\tmedia.name = "Loopback to Combined_Audio"',
+            'Source Output #3',
+            '\tSource: 4',
+            '\tSample Specification: s16le 2ch 48000Hz',
+            '\tProperties:',
+            '\t\tapplication.name = "Chromium"',
+        ].join('\n'),
+    );
+    assert.equal(streams.length, 2);
+    // A loopback has no application.name; media.name keeps it identifiable rather
+    // than collapsing every anonymous stream into one indistinguishable label.
+    assert.equal(streams[0].app, 'Loopback to Combined_Audio');
+    assert.equal(streams[1].app, 'Chromium');
+});
+
+test('a stream on an unknown source index is labelled, not dropped', () => {
+    // If the map is stale, showing "source#9" is far better than hiding a capture.
+    const streams = parsePactlSourceOutputs(
+        ['Source Output #1', '\tSource: 9', '\tSample Specification: s16le 1ch 16000Hz'].join('\n'),
+    );
+    assert.match(formatCaptureStreams(streams, new Map()), /source#9/);
+    assert.equal(streams[0].app, 'unknown');
+});
+
+test('an empty listing yields no streams', () => {
+    assert.deepEqual(parsePactlSourceOutputs(''), []);
+    assert.equal(formatCaptureStreams([], new Map()), '');
 });
