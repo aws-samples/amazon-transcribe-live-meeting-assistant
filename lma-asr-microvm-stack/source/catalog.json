@@ -18,7 +18,9 @@
         "tokens": "tokens.txt"
       },
       "sampleRate": 16000,
-      "languages": ["en"],
+      "languages": [
+        "en"
+      ],
       "license": "NVIDIA Open Model License",
       "licenseUrl": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b",
       "sherpaOnnx": "1.13.4",
@@ -38,7 +40,40 @@
       "license": "CC-BY-4.0",
       "licenseUrl": "https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large",
       "approxDownloadMb": 39,
-      "provenanceVerified": "2026-08-05"
+      "provenanceVerified": "2026-08-05",
+      "recommendedThreshold": 0.2,
+      "embeddingDim": 192,
+      "measured": "2026-08-12, native 16 kHz meeting audio: same-speaker cosine median 0.25-0.51 (p5 0.099), different-speaker median -0.02 (p95 0.074, max 0.107). Separates people well; the operating point is far below the sherpa default of 0.5."
+    },
+    {
+      "id": "wespeaker-en-cam++-lm",
+      "name": "WeSpeaker CAM++ (large-margin), English",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_CAM++_LM.onnx",
+      "sha256": "e197af7e9d473030cf486b3124149a19bf37014d0e4485e4c70c483b0ec10cb2",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/wenet-e2e/wespeaker",
+      "approxDownloadMb": 28,
+      "provenanceVerified": "2026-08-12",
+      "embeddingDim": 512,
+      "recommendedThreshold": 0.3,
+      "measured": "2026-08-12: same-speaker median 0.27, different-speaker median 0.30 (p95 0.53) on the same audio \u2014 the two distributions overlap, so it separated speakers WORSE than TitaNet here. Not recommended without your own measurement."
+    },
+    {
+      "id": "wespeaker-en-resnet293-lm",
+      "name": "WeSpeaker ResNet293 (large-margin), English",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet293_LM.onnx",
+      "sha256": "f65dbc820e534eef64ae12d1e289e20244d60e60f7f00d7b092092b1c458be2e",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/wenet-e2e/wespeaker",
+      "approxDownloadMb": 109,
+      "provenanceVerified": "2026-08-12",
+      "embeddingDim": 256,
+      "recommendedThreshold": 0.8,
+      "measured": "2026-08-12: every similarity runs high \u2014 same-speaker median 0.84-0.93 but different-speaker median 0.54 (p95 0.74). Needs a much higher threshold than the others and the tails still overlap; it looked perfect on single-speaker audio alone, which is why a same-speaker-only test is not sufficient evidence."
     },
     {
       "id": "none",
@@ -49,5 +84,6 @@
       "license": "n/a",
       "approxDownloadMb": 0
     }
-  ]
+  ],
+  "thresholdNote": "recommendedThreshold is per model and NOT interchangeable: cosine similarity scales differ between embedders. Changing the speaker model without re-measuring its operating point will either fragment one speaker into many or merge several into one."
 }

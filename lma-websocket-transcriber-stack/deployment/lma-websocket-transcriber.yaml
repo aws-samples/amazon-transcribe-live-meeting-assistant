@@ -330,10 +330,12 @@ Parameters:
 
   AsrSpeakerThreshold:
     Type: String
-    Default: "0.5"
+    Default: "0.2"
     Description: >-
       Cosine similarity above which the MicroVM ASR engine treats two utterances
-      as the same speaker. Higher splits voices more eagerly.
+      as the same speaker. Higher splits voices more eagerly. Specific to the
+      speaker model in the ASR image; 0.2 is the measured operating point for the
+      default TitaNet embedder.
 
   AsrEndpointingMs:
     Type: Number

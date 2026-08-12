@@ -729,3 +729,80 @@ def test_build_diarization_config_min_segment_ms_argument_wins(monkeypatch) -> N
 
 def test_build_diarization_config_min_segment_ms_defaults_to_the_dataclass() -> None:
     assert build_diarization_config().min_segment_ms == DiarizationConfig.min_segment_ms
+
+
+# --- Assignment policy: regressions from measured production failures --------
+
+
+def _vec(*values: float) -> list[float]:
+    return list(values)
+
+
+def test_a_single_dissimilar_embedding_does_not_mint_a_speaker_when_corroborating() -> None:
+    """One outlier is not evidence of a new person.
+
+    Measured on a real single-speaker meeting: eleven utterances from one person
+    produced EIGHT identities, because every short or noisy utterance scored below
+    the threshold against its own speaker's centroid and each miss minted someone.
+    """
+    registry = SpeakerRegistry(threshold=0.9, require_corroboration=True)
+    first = registry.assign(_vec(1.0, 0.0))
+
+    # Orthogonal to the known speaker, so far below threshold — but alone.
+    assert registry.assign(_vec(0.0, 1.0)) == first
+    assert registry.num_speakers == 1
+
+
+def test_two_agreeing_outliers_do_mint_a_speaker_when_corroborating() -> None:
+    registry = SpeakerRegistry(threshold=0.9, require_corroboration=True)
+    first = registry.assign(_vec(1.0, 0.0))
+    registry.assign(_vec(0.0, 1.0))
+    second = registry.assign(_vec(0.0, 1.0))
+
+    assert second != first
+    assert registry.num_speakers == 2
+
+
+def test_disagreeing_outliers_do_not_mint_a_speaker() -> None:
+    """Two unrelated noisy segments are noise, not two new people."""
+    registry = SpeakerRegistry(threshold=0.9, require_corroboration=True)
+    registry.assign(_vec(1.0, 0.0, 0.0))
+    registry.assign(_vec(0.0, 1.0, 0.0))
+    registry.assign(_vec(0.0, 0.0, 1.0))
+
+    assert registry.num_speakers == 1
+
+
+def test_a_withheld_outlier_does_not_pollute_the_centroid_it_borrowed() -> None:
+    """The provisional label must not drag the existing speaker's centroid."""
+    registry = SpeakerRegistry(threshold=0.9, require_corroboration=True)
+    label = registry.assign(_vec(1.0, 0.0))
+    before = registry.centroid(label)
+    registry.assign(_vec(0.0, 1.0))
+
+    assert registry.centroid(label) == before
+
+
+def test_corroboration_is_off_by_default() -> None:
+    """Measured: it only helps a mis-set threshold, and can merge speakers."""
+    registry = SpeakerRegistry(threshold=0.9)
+    first = registry.assign(_vec(1.0, 0.0))
+
+    assert registry.assign(_vec(0.0, 1.0)) != first
+    assert registry.num_speakers == 2
+
+
+def test_the_speaker_cap_still_wins_over_corroboration() -> None:
+    registry = SpeakerRegistry(threshold=0.9, max_speakers=1, require_corroboration=True)
+    first = registry.assign(_vec(1.0, 0.0))
+    registry.assign(_vec(0.0, 1.0))
+
+    assert registry.assign(_vec(0.0, 1.0)) == first
+    assert registry.num_speakers == 1
+
+
+def test_assign_rejects_an_empty_embedding_without_truthiness() -> None:
+    """Guards on length, not truthiness: a numpy array raises on ``not array``."""
+    registry = SpeakerRegistry()
+    with pytest.raises(ValueError, match="non-empty"):
+        registry.assign([])

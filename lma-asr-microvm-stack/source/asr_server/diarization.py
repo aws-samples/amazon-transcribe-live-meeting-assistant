@@ -197,13 +197,23 @@ class SpeakerRegistry:
     and never renumbered, so a label already sent to a client stays valid.
     """
 
-    def __init__(self, *, threshold: float = 0.5, max_speakers: int = 0) -> None:
+    def __init__(
+        self,
+        *,
+        threshold: float = 0.5,
+        max_speakers: int = 0,
+        require_corroboration: bool = False,
+    ) -> None:
         if not -1.0 <= threshold <= 1.0:
             raise ValueError("threshold must be in [-1, 1] (cosine similarity)")
         if max_speakers < 0:
             raise ValueError("max_speakers must be >= 0 (0 means unbounded)")
         self._threshold = threshold
         self._max_speakers = max_speakers
+        self._require_corroboration = require_corroboration
+        # A single dissimilar embedding is not evidence of a new person. Held here
+        # until a second one agrees with it (see assign).
+        self._pending: list[float] | None = None
         # Per speaker: the component-wise SUM of accepted embeddings plus the
         # count, so the centroid is a true running mean without storing history.
         self._sums: dict[str, list[float]] = {}
@@ -237,11 +247,14 @@ class SpeakerRegistry:
         """Return the speaker label for ``embedding``, minting one if needed.
 
         Picks the best-scoring existing centroid. That match wins if it clears
-        ``threshold``; otherwise a new speaker is minted, unless ``max_speakers``
-        is already reached, in which case the best match is used regardless (the
-        cap is a hard promise about how many identities can appear).
+        ``threshold``. Otherwise a new speaker is minted, subject to two guards:
+
+        * ``max_speakers``, when set, is a hard promise about how many identities
+          can appear — at the cap the best match wins regardless of score.
+        * ``require_corroboration`` withholds the first dissimilar embedding
+          (see :meth:`_mint_with_corroboration`).
         """
-        if not embedding:
+        if len(embedding) == 0:
             raise ValueError("embedding must be non-empty")
 
         best_label: str | None = None
@@ -256,14 +269,55 @@ class SpeakerRegistry:
             best_score >= self._threshold
             or (self._max_speakers and len(self._labels) >= self._max_speakers)
         ):
+            self._pending = None
             self._accumulate(best_label, embedding)
             return best_label
 
+        if best_label is not None and self._require_corroboration:
+            corroborated = self._mint_with_corroboration(embedding)
+            if not corroborated:
+                # Attribute to the closest existing speaker for now WITHOUT folding
+                # this embedding into that centroid: it may well belong to someone
+                # new, and polluting the centroid would hurt both identities.
+                return best_label
+
+        return self._mint(embedding)
+
+    def _mint_with_corroboration(self, embedding: Sequence[float]) -> bool:
+        """Whether a second dissimilar-but-self-consistent embedding has arrived.
+
+        One embedding that matches nobody is weak evidence: a short or noisy
+        utterance from a *known* speaker scores just as low. Measured on a real
+        single-speaker meeting, that produced eight identities for one person. So
+        the first outlier is only remembered; a new speaker is minted when a later
+        outlier resembles it, which is what a genuinely new voice looks like.
+
+        The cost is that a real new speaker's first utterance is attributed to the
+        closest existing speaker.
+
+        MEASURED, and the reason this is OFF by default: replaying real meeting
+        audio through this registry, corroboration cut a single speaker from 8
+        identities to 2 at the (too high) 0.5 threshold — but with the threshold set
+        correctly for the embedder it changed nothing on that meeting and dropped
+        two-speaker attribution purity from 100% to 80%, and at 0.5 it merged two
+        genuinely different speakers into one label. Set the threshold for your
+        embedder first; reach for this only when embeddings are known to be noisy
+        (narrowband audio, a weaker embedder) and phantom speakers persist.
+        """
+        pending = self._pending
+        if pending is not None and _cosine(embedding, pending) >= self._threshold:
+            self._pending = None
+            return True
+        self._pending = list(embedding)
+        return False
+
+    def _mint(self, embedding: Sequence[float]) -> str:
         label = f"{_SPEAKER_PREFIX}{len(self._labels)}"
         self._labels.append(label)
         self._sums[label] = [0.0] * len(embedding)
         self._counts[label] = 0
         self._accumulate(label, embedding)
+        self._pending = None
         return label
 
     def _accumulate(self, speaker: str, embedding: Sequence[float]) -> None:
@@ -321,6 +375,10 @@ class DiarizationConfig:
     threshold: float = 0.5
     max_speakers: int = 0
     min_segment_ms: int = 400
+    # Off by default: measured on real meeting audio, it only helps when the
+    # threshold is wrong for the embedder, and at a too-high threshold it merged
+    # two different speakers into one. See SpeakerRegistry.assign.
+    require_corroboration: bool = False
 
 
 def diarization_enabled(speaker_model: str | Path | None = None) -> bool:
@@ -365,6 +423,7 @@ def build_diarization_config(
     threshold: float | None = None,
     max_speakers: int | None = None,
     min_segment_ms: int | None = None,
+    require_corroboration: bool | None = None,
     num_threads: int | None = None,
 ) -> DiarizationConfig:
     """Resolve a :class:`DiarizationConfig` from env + optional overrides (NFR5).
@@ -398,6 +457,10 @@ def build_diarization_config(
         min_segment_ms = int(
             os.environ.get("ASR_MIN_SEGMENT_MS", str(DiarizationConfig.min_segment_ms))
         )
+    if require_corroboration is None:
+        require_corroboration = (
+            os.environ.get("ASR_REQUIRE_CORROBORATION", "0").strip().lower() in _TRUTHY
+        )
 
     return DiarizationConfig(
         embedder=SpeakerEmbedderConfig(
@@ -408,6 +471,7 @@ def build_diarization_config(
         threshold=threshold,
         max_speakers=max_speakers,
         min_segment_ms=min_segment_ms,
+        require_corroboration=require_corroboration,
     )
 
 
@@ -451,6 +515,7 @@ class DiarizingRecognizer(Recognizer):
         max_speakers: int = 0,
         min_segment_ms: int = 400,
         max_buffer_ms: int = 30000,
+        require_corroboration: bool = False,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
@@ -461,7 +526,11 @@ class DiarizingRecognizer(Recognizer):
         self._inner = inner
         self._embedder = embedder
         self._sample_rate = sample_rate
-        self._registry = SpeakerRegistry(threshold=threshold, max_speakers=max_speakers)
+        self._registry = SpeakerRegistry(
+            threshold=threshold,
+            max_speakers=max_speakers,
+            require_corroboration=require_corroboration,
+        )
         self._min_segment_samples = sample_rate * min_segment_ms // 1000
         # Hard ceiling on retained audio. A ``final`` prunes everything up to its
         # end, so this only bites if the inner engine never finalizes (e.g. a very
@@ -620,6 +689,7 @@ class DiarizingEngine(RecognizerEngine):
             threshold=threshold,
             max_speakers=max_speakers,
             min_segment_ms=self._config.min_segment_ms,
+            require_corroboration=self._config.require_corroboration,
         )
 
 

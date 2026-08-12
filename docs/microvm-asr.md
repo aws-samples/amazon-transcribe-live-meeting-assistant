@@ -101,9 +101,9 @@ Relevant parameters (all under *On-demand ASR and Diarization* in the console):
 | `AsrSpeakerModelId` | `titanet-small` | Speaker-embedding model, or `none` for transcription only |
 | `AsrBaselineMemoryMiB` | `8192` | Memory per MicroVM; CPU is 1 vCPU per 2 GiB, so this is 4 vCPU |
 | `AsrMaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
-| `AsrMaxSpeakers` | `4` | Cap on distinct speakers per channel (0 = discover, not recommended) |
-| `AsrSpeakerThreshold` | `0.5` | Higher splits voices more eagerly; lower merges more eagerly |
-| `AsrMinSegmentMs` | `1200` | Shortest utterance worth embedding; shorter ones inherit the current speaker |
+| `AsrMaxSpeakers` | `0` | Optional cap per channel; 0 discovers as many as appear |
+| `AsrSpeakerThreshold` | `0.2` | Measured operating point for TitaNet; **specific to the speaker model** |
+| `AsrMinSegmentMs` | `2500` | Shortest utterance worth embedding; shorter ones inherit the current speaker |
 
 ## Using it
 
@@ -302,25 +302,53 @@ no transcript when the engine is unavailable.
 mismatch` means the pinned checksum does not match the download; `model file ... is
 not in the archive` means the file names in the catalog entry are wrong.
 
-**One person appears as several speakers.** This is the failure mode to expect
-first, and it is what the three tuning knobs exist for. A measured example: a live
-single-speaker meeting produced eight identities with `AsrSpeakerThreshold=0.5`,
-`AsrMaxSpeakers=0` and a 400 ms embedding floor, almost entirely from one- and
-two-word utterances ("Coffee", "And on my left") whose embeddings are too short to
-be reliable. In order of effect:
+**One person appears as several speakers.** This was the first real failure, and it
+is now measured rather than guessed. A live single-speaker meeting produced **eight**
+identities for one person; every hallucinated label was a 1.2–2.4 s utterance while
+long speech clustered correctly.
 
-1. **`AsrMaxSpeakers`** — the hard bound. Set it to the number of people who
-   actually share a channel (`1` for a personal microphone). Once the cap is
-   reached, utterances are assigned to their closest match instead of minting new
-   identities.
-2. **`AsrMinSegmentMs`** — raise it (1200 → 2000) so short utterances inherit the
-   current speaker rather than being embedded at all.
-3. **`AsrSpeakerThreshold`** — lower it (0.5 → 0.3) so a same-speaker match
-   succeeds more readily. Too low merges genuinely different people.
+The cause was the threshold, not the model. Replaying the production registry over
+that meeting's real embeddings, with a second recording (two people, one per channel)
+as the different-speaker control:
 
-`AsrMaxSpeakers` and `AsrSpeakerThreshold` reach the engine as per-session config
-from the transcriber, so changing them only redeploys the Fargate service (~2 min).
-`AsrMinSegmentMs` is baked into the image, so changing it rebuilds it (~5 min).
+| Embedder | Same speaker | Different speakers | Operating point |
+|---|---|---|---|
+| TitaNet-small (default) | median 0.25–0.51, p5 0.099 | median −0.02, p95 0.074, **max 0.107** | **0.2** |
+| WeSpeaker CAM++_LM | median 0.27 | median 0.30, p95 0.53 | distributions overlap |
+| WeSpeaker ResNet293_LM | median 0.84–0.93 | median 0.54, p95 0.74 | ~0.8, tails still overlap |
+
+TitaNet separates different people very well — they never exceeded 0.107 — but the
+same speaker only scores 0.25–0.5, so the sherpa default of 0.5 split constantly.
+Identities produced for that one-speaker meeting (ideal: 1):
+
+| Threshold | Min segment | Identities |
+|---|---|---|
+| 0.5 (old default) | 1200 ms | 8 |
+| 0.25 | 2500 ms | 2 |
+| **0.2 (current default)** | **2500 ms** | **2** |
+
+At 0.2 the same audio yields 2 identities instead of 8, and a two-speaker recording
+resolves to exactly 2 with 100% attribution purity.
+
+Three things follow, and they are worth internalising before changing anything:
+
+1. **The threshold belongs to the embedder.** Cosine scales differ per model — see
+   `recommendedThreshold` in `source/catalog.json`. Swapping the speaker model
+   without re-measuring will either fragment or merge speakers.
+2. **A same-speaker-only test is not evidence.** ResNet293 produced a perfect single
+   identity on one-speaker audio, which looked like the winner until the
+   different-speaker control showed it scoring 0.54 between two different people —
+   it would have merged participants.
+3. **`AsrRequireCorroboration` is off by default on purpose.** Withholding the first
+   unmatched embedding cut 8 identities to 2 at the *wrong* threshold, but with the
+   threshold right it dropped two-speaker purity to 80%, and at 0.5 it merged two
+   people into one label. Reach for it only when embeddings are known to be noisy.
+
+If a single person still fragments: lower `AsrSpeakerThreshold` toward 0.15, raise
+`AsrMinSegmentMs`, and only then consider `AsrMaxSpeakers` — a cap bounds the symptom
+but cannot fix a mis-set operating point. Sample sizes behind these numbers are small
+(11 utterances, one voice pair), so re-measure on your own audio before trusting them
+for a different language or microphone.
 
 **Too many speakers detected on genuinely multi-speaker audio.** Lower
 `AsrSpeakerThreshold`, or set `AsrMaxSpeakers` to the room size.

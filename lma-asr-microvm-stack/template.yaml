@@ -173,27 +173,30 @@ Parameters:
 
   AsrMaxSpeakers:
     Type: Number
-    Default: 4
+    Default: 0
     MinValue: 0
     MaxValue: 30
     Description: >-
-      Cap on distinct speakers per audio channel. Once reached, an utterance is
-      assigned to its closest match instead of minting another identity, which
-      bounds the damage when embeddings are noisy. 0 discovers as many as appear —
-      NOT recommended as a default: a live single-speaker meeting fragmented into
-      eight identities that way. Set 1 when a channel only ever carries one person.
+      Optional cap on distinct speakers per audio channel. 0 (the default)
+      discovers as many as appear. A cap is a safety net for noisy embeddings, not
+      a fix for over-splitting; set it only when the meeting size is known.
 
   AsrSpeakerThreshold:
     Type: String
-    Default: "0.5"
+    Default: "0.2"
     AllowedPattern: "^0?\\.[0-9]+$"
     Description: >-
       Cosine similarity above which two utterances are treated as the same
-      speaker. Higher splits voices more eagerly; lower merges more eagerly.
+      speaker. Higher splits voices more eagerly; lower merges more eagerly. This
+      value is SPECIFIC TO THE SPEAKER MODEL — see recommendedThreshold in
+      source/catalog.json. 0.2 is the measured operating point for the default
+      TitaNet embedder, where different speakers score at most ~0.11 and the same
+      speaker 0.25-0.5; the sherpa default of 0.5 fragmented one person into eight
+      identities in a live meeting.
 
   AsrMinSegmentMs:
     Type: Number
-    Default: 1200
+    Default: 2500
     MinValue: 0
     MaxValue: 5000
     Description: >-
