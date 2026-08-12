@@ -7,11 +7,11 @@ import Teams from './teams.js';
 import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting } from './details.js';
-import { installMicConstraintOverride } from './mic-constraints.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { videoRecorder } from './video-recorder.js';
+import { installAudioDiagnostics } from './audio-diagnostics.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -436,12 +436,12 @@ const main = async (): Promise<void> => {
     const page = await context.newPage();
     page.setDefaultTimeout(20000);
 
-    // Install BEFORE any navigation: addInitScript only runs in documents created
-    // after it is registered, which is why the Simli override (injected later,
-    // once the avatar is ready) never ran on Teams at all. The VP's mic is
-    // synthetic TTS, so Chromium's noise suppression / AGC only damages it
-    // (GitHub #543).
-    await installMicConstraintOverride(page);
+    // Observational audio diagnostics for GitHub #543. Installed BEFORE any
+    // navigation: addInitScript only runs in documents created afterwards, which
+    // is why the Simli getUserMedia override (injected once the avatar is ready)
+    // never ran on Teams at all. Read-only by design — the previous attempt at
+    // this path mutated constraints and silently killed transcription (#545).
+    await installAudioDiagnostics(page);
 
     // Renderer-crash latch. A renderer OOM crash leaves every page.evaluate
     // hanging on "Target crashed", so meeting.initialize() never returns and
@@ -476,10 +476,9 @@ const main = async (): Promise<void> => {
         if (
             text.includes('[LMA-Simli]') ||
             text.includes('[Simli]') ||
-            // Mic constraint decisions: previously invisible, which is why
-            // Chromium's audio processing went unsuspected while the voice
-            // assistant crackled on Teams (GitHub #543).
-            text.includes('[LMA-Mic]') ||
+            // Audio path diagnostics (#543): requested constraints, the settings
+            // actually applied, and outbound Opus packet cadence.
+            text.includes('[LMA-Audio]') ||
             type === 'error' ||
             type === 'warning'
         ) {

@@ -10,6 +10,7 @@ import {
     classifyJoinState,
 } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
+import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { humanClick, humanType } from './prejoin-actions.js';
 import {
     fetchZoomCredentials,
@@ -736,7 +737,15 @@ export default class Zoom {
         await prepareAvatar();
 
         console.log('Getting Zoom meeting link.');
-        await page.goto(`https://zoom.us/wc/${details.invite.meetingId}/join`);
+        // 60s + tolerate a late-but-successful arrival. A bare goto inherits
+        // waitUntil:'load' and the 20s page default, and a live join failed
+        // that way AFTER the page had already reached the meeting URL (#547).
+        await gotoMeetingPage(
+            page,
+            `https://zoom.us/wc/${details.invite.meetingId}/join`,
+            MEETING_HOST_PATTERNS.zoom,
+            'zoom-join',
+        );
 
         // After arriving at the meeting URL, Zoom may redirect to a
         // post-login binding/upsell page (passkey, phone, SMS, "stay
