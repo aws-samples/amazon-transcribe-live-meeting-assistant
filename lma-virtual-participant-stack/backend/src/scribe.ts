@@ -89,6 +89,12 @@ const isStaleSessionError = (error: any): boolean => {
 export class TranscriptionService {
     private process: ChildProcess | null = null;           // FFmpeg: combined_audio.monitor → Transcribe
     private novaAudioProcess: ChildProcess | null = null;  // FFmpeg: meeting_audio.monitor → Nova/recording
+    // pacat: meeting audio → combined_audio. This is the SOLE route for meeting
+    // audio into the sink Transcribe reads, and it must stay an ACTIVE stream:
+    // a module-loopback alone let the null sink idle/suspend and combined_audio
+    // went digitally silent (peak amplitude 0 over 50s) while meeting_audio still
+    // had audio (GitHub #569).
+    private meetingToCombinedPipe: ChildProcess | null = null;
     private startTime: number | null = null;
     // Cumulative timeline offset (seconds) applied to Transcribe timestamps.
     // Amazon Transcribe resets Item.StartTime/EndTime to 0 on every new
@@ -624,6 +630,15 @@ export class TranscriptionService {
             try { this.novaAudioProcess.kill(); } catch (_) { /* ignore */ }
             this.novaAudioProcess = null;
         }
+        if (this.meetingToCombinedPipe) {
+            try {
+                if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                    this.meetingToCombinedPipe.stdin.end();
+                }
+                this.meetingToCombinedPipe.kill();
+            } catch (_) { /* ignore */ }
+            this.meetingToCombinedPipe = null;
+        }
     }
 
     async stopTranscription(): Promise<void> {
@@ -722,8 +737,29 @@ export class TranscriptionService {
     // Channel separation (meeting vs combined) prevents Nova from hearing its own voice.
     private async writeAudio(transcribeResponse: any, recordingStream: any): Promise<void> {
         try {
-            // (Meeting audio reaches combined_audio via the module-loopback set up
-            // in entrypoint.sh — see the note in the stdout handler below.)
+            // Pipe meeting audio into combined_audio for Transcribe. This is the
+            // ONLY writer for meeting audio on that sink (entrypoint.sh
+            // deliberately has no loopback for it), so there is no duplication —
+            // and unlike a loopback, an active pacat stream keeps the null sink
+            // from suspending (#542, #569).
+            this.meetingToCombinedPipe = spawn('pacat', [
+                '--playback',
+                '--device=combined_audio',
+                '--format=s16le',
+                '--rate=16000',
+                '--channels=1',
+                '--raw',
+                '--latency-msec=80',
+            ]);
+
+            this.meetingToCombinedPipe.on('error', (error: any) => {
+                console.error(`pacat (meeting→combined) error: ${error.message}`);
+            });
+
+            this.meetingToCombinedPipe.stderr?.on('data', (data: any) => {
+                const msg = data.toString().trim();
+                if (msg) console.log(`pacat (meeting→combined): ${msg}`);
+            });
 
             // Capture meeting-only audio for Nova and recording
             this.novaAudioProcess = spawn('ffmpeg', [
@@ -761,15 +797,12 @@ export class TranscriptionService {
                     try {
                         recordingStream.write(chunk);
 
-                        // NOTE: meeting audio is deliberately NOT forwarded to
-                        // combined_audio here. entrypoint.sh already routes
-                        // meeting_audio.monitor -> combined_audio with a
-                        // module-loopback, so writing it again from this process
-                        // delivered every utterance to Transcribe TWICE, at two
-                        // different latencies. Transcribe duly transcribed both:
-                        // "Jack and Jill, Jack and Jill went up ..." (GitHub #542).
-                        // This process still feeds the recording and the voice
-                        // assistant, which have no other source.
+                        // Sole route for meeting audio into combined_audio (see
+                        // the pacat spawn above). entrypoint.sh has no loopback
+                        // for it, so this does not duplicate (#542).
+                        if (this.meetingToCombinedPipe?.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                            this.meetingToCombinedPipe.stdin.write(chunk);
+                        }
 
                         if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
                             voiceAssistant.sendAudioChunk(chunk);

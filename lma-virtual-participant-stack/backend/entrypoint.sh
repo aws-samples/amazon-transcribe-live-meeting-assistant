@@ -197,8 +197,14 @@ echo "Created combined_audio sink (module $COMBINED_SINK)"
 # Transcribe twice at two different latencies -- Transcribe then transcribed both
 # ("Jack and Jill, Jack and Jill went up ...", GitHub #542). Do not re-add a
 # second writer here or in the app.
-pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=80
-echo "Routed meeting audio to combined sink"
+# NOTE: meeting_audio is NOT loopback-routed to combined_audio. A module-loopback
+# into a null sink does not keep that sink out of PulseAudio's idle/suspend
+# state, so this route went digitally silent -- a live Zoom session recorded 50s
+# of combined_audio with peak amplitude 0 while meeting_audio itself had audio
+# (GitHub #569). The app instead holds an ACTIVE pacat playback stream on
+# combined_audio (scribe.ts), which both delivers the audio and keeps the sink
+# running. Exactly ONE writer -- adding this loopback back would duplicate every
+# utterance to Transcribe (#542).
 
 # Route agent_output.monitor to combined_audio sink
 pactl load-module module-loopback source=agent_output.monitor sink=combined_audio latency_msec=80
