@@ -94,6 +94,19 @@ RUN useradd -m -d /home/appuser -s /bin/bash appuser
 # resample-method: PulseAudio defaults to speex-float-1, tuned for speed. Any
 # residual conversion should favour quality; speex-float-5 is still cheap.
 # Written as the appuser's own config since the daemon runs as that user.
+#
+# NOTE: `avoid-resampling = yes` is deliberately NOT set. It makes PulseAudio
+# RECONFIGURE a device to a client's rate instead of resampling for it, which
+# does nothing here — every sink already carries an explicit
+# `rate=16000 channels=1 format=s16le` (entrypoint.sh), and that pinning is what
+# actually removed the triple resample. What it can do is harm: Teams opens the
+# agent_mic remap source TWICE with conflicting formats (one mono capture with
+# echoCancellation/AGC on, one stereo capture with them off — both observed live
+# via the audio diagnostics), so two clients demand incompatible formats from one
+# monitor source. Zoom opens it once, and Zoom is the platform that sounds fine.
+# Device re-negotiation glitches audio without dropping an RTP packet, which
+# matches every measurement taken for #543: the container-side recording is
+# clean, packet counters are clean, and only the meeting listener hears garble.
 RUN mkdir -p /home/appuser/.config/pulse && \
     printf '%s\n' \
       'default-sample-rate = 16000' \
@@ -101,7 +114,6 @@ RUN mkdir -p /home/appuser/.config/pulse && \
       'default-sample-channels = 1' \
       'default-sample-format = s16le' \
       'resample-method = speex-float-5' \
-      'avoid-resampling = yes' \
       'flat-volumes = no' \
       > /home/appuser/.config/pulse/daemon.conf
 

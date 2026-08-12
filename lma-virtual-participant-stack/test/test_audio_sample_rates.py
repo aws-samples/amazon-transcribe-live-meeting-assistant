@@ -106,9 +106,30 @@ def test_resampler_favours_quality_over_speed(dockerfile: str) -> None:
     assert int(method.rsplit("-", 1)[1]) >= 3, "quality level should be >= 3"
 
 
-def test_avoid_resampling_is_enabled(dockerfile: str) -> None:
-    """Makes PulseAudio follow the stream's rate instead of converting."""
-    assert "avoid-resampling = yes" in dockerfile
+def test_avoid_resampling_is_not_enabled(dockerfile: str) -> None:
+    """avoid-resampling must stay OFF; the explicit sink pinning replaces it.
+
+    It tells PulseAudio to RECONFIGURE a device to a client's rate rather than
+    resample for it. That buys nothing here -- every null sink already carries an
+    explicit ``rate=16000 channels=1 format=s16le`` (see the tests above), and
+    that pinning is what removed the triple resample of GitHub #538.
+
+    It can, however, do harm. Teams opens the agent_mic remap source TWICE with
+    conflicting formats (one mono capture with echoCancellation/AGC on, one stereo
+    capture with them off -- both observed on a live call via the audio
+    diagnostics), so two clients demand incompatible formats from a single monitor
+    source. Zoom opens it once, and Zoom is the platform that sounds fine. Device
+    re-negotiation glitches audio without dropping an RTP packet, which matches
+    every measurement taken for #543: the container-side recording is clean, the
+    packet counters are clean, and only the meeting listener hears garble.
+    """
+    # Match the printf form the config lines are actually written in, not any
+    # mention of the word -- the Dockerfile comment explains why it is absent, and
+    # a bare substring check would fail on that explanation.
+    setting = [
+        line for line in dockerfile.splitlines() if re.match(r"\s*'avoid-resampling", line)
+    ]
+    assert not setting, f"avoid-resampling must not be set: {setting}"
 
 
 def test_daemon_config_is_owned_by_the_running_user(dockerfile: str) -> None:

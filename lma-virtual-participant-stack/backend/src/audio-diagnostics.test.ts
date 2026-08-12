@@ -18,6 +18,8 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
     classifyAudioWindow,
+    formatDeviceSpecs,
+    parsePactlShort,
     EXPECTED_PACKETS_PER_SECOND,
     MIN_CAPTURE_RATIO,
     MIN_MEASURE_SECONDS,
@@ -180,4 +182,64 @@ test('the sampling interval can resolve a single utterance', () => {
     // silence around it landed in one window and the rate became meaningless.
     assert.ok(STATS_INTERVAL_MS <= 1000, 'must be <= 1s to separate speech from silence');
     assert.ok(STATS_INTERVAL_MS >= 1000, 'but not so often that polling adds load');
+});
+
+/**
+ * The PulseAudio device-format probe. Its job is to show whether the virtual mic's
+ * format flaps while Teams holds two captures on it with conflicting channel
+ * counts — the one mechanism that fits every measurement taken so far (clean
+ * container-side recording, clean packet counters, garbled listener audio).
+ */
+test('sink and source listings are parsed into name/format pairs', () => {
+    // Verbatim shape of `pactl list short sinks` after #538 pinned the sinks.
+    const out = parsePactlShort(
+        [
+            '0\tmeeting_audio\tmodule-null-sink.c\ts16le 1ch 16000Hz\tSUSPENDED',
+            '1\tagent_output\tmodule-null-sink.c\ts16le 1ch 16000Hz\tRUNNING',
+            '2\tcombined_audio\tmodule-null-sink.c\ts16le 1ch 16000Hz\tRUNNING',
+        ].join('\n'),
+    );
+    assert.deepEqual(
+        out.map((e) => e.name),
+        ['meeting_audio', 'agent_output', 'combined_audio'],
+    );
+    assert.ok(out.every((e) => e.spec === 's16le 1ch 16000Hz'));
+});
+
+test('a device running at a DIFFERENT format is reported as-is', () => {
+    // The failure being hunted: something on the capture leg pulling the pipeline
+    // off 16 kHz mono. If the parser normalised this away the probe would be blind.
+    const out = parsePactlShort('1\tagent_output\tmodule-null-sink.c\tfloat32le 2ch 48000Hz\tRUNNING');
+    assert.equal(out[0].spec, 'float32le 2ch 48000Hz');
+});
+
+test('source-outputs are labelled even though their second column is numeric', () => {
+    // This listing is the direct evidence of Teams holding two captures at once:
+    // a numeric source id sits where sinks put a name, so a naive index would
+    // label every client the same and the two would be indistinguishable.
+    const out = parsePactlShort(
+        ['0\t3\t12\tprotocol-native.c\ts16le 1ch 16000Hz', '1\t3\t12\tprotocol-native.c\ts16le 2ch 48000Hz'].join(
+            '\n',
+        ),
+    );
+    assert.equal(out.length, 2);
+    assert.notEqual(out[0].name, out[1].name, 'two concurrent captures must be distinguishable');
+    assert.equal(out[1].spec, 's16le 2ch 48000Hz');
+});
+
+test('blank lines and headers are ignored', () => {
+    assert.deepEqual(parsePactlShort('\n\n'), []);
+    assert.deepEqual(parsePactlShort('no sample spec here\n'), []);
+});
+
+test('formatting is stable so unchanged devices produce no log line', () => {
+    // The probe logs only on change; an unstable rendering would emit a line every
+    // tick and bury the flap it exists to catch.
+    const entries = [{ name: 'agent_output', spec: 's16le 1ch 16000Hz' }];
+    assert.equal(formatDeviceSpecs(entries), formatDeviceSpecs([...entries]));
+    assert.match(formatDeviceSpecs(entries), /agent_output=\[s16le 1ch 16000Hz\]/);
+});
+
+test('an empty listing formats to something falsy, not the string "undefined"', () => {
+    assert.equal(formatDeviceSpecs([]), '');
 });

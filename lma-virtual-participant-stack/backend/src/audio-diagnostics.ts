@@ -72,6 +72,7 @@
  * and Node drains it with its own console.log, which demonstrably reaches
  * CloudWatch.
  */
+import { exec } from 'node:child_process';
 import type { Page } from 'playwright-core';
 
 /**
@@ -203,6 +204,85 @@ export function classifyAudioWindow(w: AudioWindow): { state: AudioState; reason
     }
     return { state: 'ok', reason: `speaking, ${pps.toFixed(1)} pkt/s` };
 }
+
+/** How often the PulseAudio device formats are sampled. */
+export const DEVICE_SPEC_INTERVAL_MS = 5000;
+
+/**
+ * Parse `pactl list short <sinks|sources|source-outputs>` into name/format pairs.
+ *
+ * WHY THIS IS WORTH MEASURING
+ * ---------------------------
+ * The regression window for #543 contains exactly two changes, landed the same
+ * day: MicroVM/ARM64 became the host, and #538 pinned all three null sinks to
+ * 16 kHz mono and added a daemon.conf containing `avoid-resampling = yes`. That
+ * setting makes PulseAudio RECONFIGURE a device to match a client instead of
+ * resampling for it — and the live capture shows Teams opening the SAME virtual
+ * mic twice with conflicting formats (mono vs stereo). Two clients demanding
+ * incompatible formats from one monitor source is a recipe for repeated device
+ * re-negotiation, and each re-negotiation glitches audio without dropping a
+ * single RTP packet, which is precisely the signature measured: container-side
+ * recording clean, packet counters clean, listener hears garble.
+ *
+ * That is still only a hypothesis. Logging the formats, and every client
+ * recording from the mic, either shows the flapping or kills the idea outright —
+ * which is the point, given three fixes have already been shipped on mechanism
+ * alone.
+ *
+ * `pactl list short` is tab-separated; the sample-spec column is the one that
+ * matters and its position differs per object type, so match it by shape rather
+ * than by index.
+ */
+export function parsePactlShort(stdout: string): Array<{ name: string; spec: string }> {
+    const out: Array<{ name: string; spec: string }> = [];
+    for (const line of stdout.split('\n')) {
+        if (!line.trim()) continue;
+        const cols = line.split('\t');
+        // e.g. "s16le 1ch 16000Hz" / "float32le 2ch 48000Hz"
+        const spec = cols.find((c) => /^[a-z0-9]+le? \d+ch \d+Hz$/.test(c.trim()));
+        if (!spec) continue;
+        // Sinks/sources put the name second; source-outputs put a numeric device
+        // id there, so fall back to the module column for a usable label.
+        const name = cols[1] && !/^\d+$/.test(cols[1]) ? cols[1] : `${cols[0]}@${cols[1]}`;
+        out.push({ name, spec: spec.trim() });
+    }
+    return out;
+}
+
+/** Render a parsed listing as a single stable line, for change detection. */
+export function formatDeviceSpecs(entries: Array<{ name: string; spec: string }>): string {
+    return entries.map((e) => `${e.name}=[${e.spec}]`).join(' ');
+}
+
+/* c8 ignore start - needs a live PulseAudio; the parser above is what is tested */
+
+/**
+ * Poll the PulseAudio device formats and log ONLY when they change. A stable
+ * pipeline therefore costs three lines for the whole meeting, while format
+ * flapping is unmissable.
+ */
+export function startAudioDeviceSpecPolling(intervalMs = DEVICE_SPEC_INTERVAL_MS): () => void {
+    const last = new Map<string, string>();
+    const kinds = ['sinks', 'sources', 'source-outputs'];
+
+    const sample = () => {
+        for (const kind of kinds) {
+            exec(`pactl list short ${kind}`, { timeout: 4000 }, (err, stdout) => {
+                if (err) return; // pulse not up yet, or tearing down
+                const line = formatDeviceSpecs(parsePactlShort(stdout));
+                if (last.get(kind) === line) return;
+                last.set(kind, line);
+                console.log(`[LMA-Audio] pulse ${kind}: ${line || '(none)'}`);
+            });
+        }
+    };
+
+    sample();
+    const timer = setInterval(sample, intervalMs);
+    return () => clearInterval(timer);
+}
+
+/* c8 ignore stop */
 
 /**
  * Install the page-side collectors. Must run BEFORE navigation: addInitScript only
