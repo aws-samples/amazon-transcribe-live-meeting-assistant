@@ -91,8 +91,24 @@ export const EXPECTED_PACKETS_PER_SECOND = 50;
  */
 export const SPEECH_ENERGY_THRESHOLD = 1e-4;
 
-/** Seconds of captured audio per second of wall clock below which capture is losing frames. */
+/**
+ * Seconds of captured audio per second of wall clock below which capture is losing
+ * frames.
+ *
+ * Judged on the CUMULATIVE ratio, never a single window. The live capture showed
+ * the per-window value alternating 0.954-0.971 / 1.049-1.061 with a mean of ~1.008
+ * — quantisation between the stats timestamp and the samples-duration counter, not
+ * lost audio. A per-window threshold anywhere near 1.0 therefore fires on every
+ * other window, which is how this metric produced four bogus "capture starving"
+ * lines in its first session. Cumulatively the same quantisation averages out.
+ */
 export const MIN_CAPTURE_RATIO = 0.95;
+
+/**
+ * Cumulative capture is only judged after this long. Below it the ratio is still
+ * dominated by the same quantisation as a single window.
+ */
+export const MIN_MEASURE_SECONDS = 10;
 
 /**
  * Longest window over which packet cadence still means anything. Beyond this, a
@@ -108,8 +124,18 @@ export interface AudioWindow {
     seconds: number;
     /** Packets sent during the window. */
     packets: number;
-    /** ΔtotalSamplesDuration / seconds, if the media-source stat was available. */
+    /**
+     * ΔtotalSamplesDuration / seconds for THIS window. Reported for context only —
+     * too quantised to judge on its own (see MIN_CAPTURE_RATIO).
+     */
     captureRatio?: number;
+    /**
+     * Captured audio / wall clock since the first sample. This is what capture
+     * continuity is judged on.
+     */
+    cumulativeCaptureRatio?: number;
+    /** Wall-clock seconds since the first sample, for MIN_MEASURE_SECONDS. */
+    elapsedSeconds?: number;
     /** ΔtotalAudioEnergy, used to detect whether the agent was speaking. */
     energyDelta?: number;
     /** Mean added latency per packet, milliseconds. */
@@ -129,13 +155,20 @@ export function classifyAudioWindow(w: AudioWindow): { state: AudioState; reason
     const pps = w.seconds > 0 ? w.packets / w.seconds : 0;
 
     // Capture continuity first: it is independent of speech, of DTX and of the
-    // sampling window, so it is the only metric here that can stand alone.
-    if (w.captureRatio !== undefined && w.captureRatio < MIN_CAPTURE_RATIO) {
+    // sampling window, so it is the only metric here that can stand alone. Judged
+    // cumulatively -- a single window is too quantised to mean anything.
+    if (
+        w.cumulativeCaptureRatio !== undefined &&
+        (w.elapsedSeconds ?? 0) >= MIN_MEASURE_SECONDS &&
+        w.cumulativeCaptureRatio < MIN_CAPTURE_RATIO
+    ) {
+        const deficitMs = (1 - w.cumulativeCaptureRatio) * (w.elapsedSeconds ?? 0) * 1000;
         return {
             state: 'problem',
             reason:
-                `capture starving: ${w.captureRatio.toFixed(3)}s of audio captured per second of wall clock ` +
-                `(need >= ${MIN_CAPTURE_RATIO}) — frames lost before the encoder`,
+                `capture starving: ${w.cumulativeCaptureRatio.toFixed(3)}s of audio captured per second of ` +
+                `wall clock over ${(w.elapsedSeconds ?? 0).toFixed(0)}s (${deficitMs.toFixed(0)}ms of audio ` +
+                `never captured) — frames lost before the encoder`,
         };
     }
     if ((w.remotePacketsLost ?? 0) > 0) {
@@ -203,7 +236,17 @@ export async function installAudioDiagnostics(page: Page): Promise<void> {
                 const stream = await original(constraints);
                 try {
                     for (const t of stream.getAudioTracks()) {
-                        push(`track settings ${JSON.stringify(t.getSettings ? t.getSettings() : {})}`);
+                        // The track ID matters as much as the settings: Teams opens
+                        // the SAME device twice with CONFLICTING processing (one mono
+                        // with echoCancellation/AGC/noiseSuppression ON, one stereo
+                        // with all three OFF). Only the sender's media-source
+                        // trackIdentifier says which of the two it actually
+                        // transmits, and Chromium's APM damages samples without
+                        // touching any packet counter — so this is the one
+                        // difference from Zoom that the stats alone cannot resolve.
+                        push(
+                            `track id=${t.id} settings=${JSON.stringify(t.getSettings ? t.getSettings() : {})}`,
+                        );
                     }
                 } catch {
                     /* ignore */
@@ -246,6 +289,14 @@ interface SenderSnapshot {
     jitterMs?: number;
     targetBitrate?: number;
     codec?: string;
+    /** Which captured track this sender transmits — matched against the gUM log. */
+    trackId?: string;
+    /**
+     * Present on the media-source ONLY while Chromium's echo canceller is running
+     * on it. Its presence is therefore a direct test of whether the transmitted
+     * track goes through the audio processing module.
+     */
+    echoReturnLoss?: number;
 }
 
 /**
@@ -256,6 +307,8 @@ interface SenderSnapshot {
  */
 export function startAudioDiagnosticsPolling(page: Page): () => void {
     const prev = new Map<string, SenderSnapshot>();
+    /** First snapshot per sender, so capture continuity can be judged cumulatively. */
+    const first = new Map<string, SenderSnapshot>();
     /** Codecs already reported, so the negotiated parameters are logged once each. */
     const reportedCodecs = new Set<string>();
     /** Consecutive problem windows per sender, so a burst collapses into one line. */
@@ -311,6 +364,11 @@ export function startAudioDiagnosticsPolling(page: Page): () => void {
                                     remoteLost: remote ? Number(remote.packetsLost ?? NaN) : undefined,
                                     jitterMs: remote ? Number(remote.jitter ?? NaN) * 1000 : undefined,
                                     targetBitrate: Number(s.targetBitrate ?? NaN),
+                                    trackId: src ? String(src.trackIdentifier ?? '') : undefined,
+                                    echoReturnLoss:
+                                        src && src.echoReturnLoss !== undefined
+                                            ? Number(src.echoReturnLoss)
+                                            : undefined,
                                     codec: codec
                                         ? `${codec.mimeType} ${codec.clockRate}Hz/${codec.channels ?? 1}ch ` +
                                           `fmtp=${codec.sdpFmtpLine ?? '-'}`
@@ -331,9 +389,20 @@ export function startAudioDiagnosticsPolling(page: Page): () => void {
                         reportedCodecs.add(s.codec);
                         console.log(`[LMA-Audio] negotiated ${s.codec}`);
                     }
+                    // Which of the two capture streams is on the wire, and whether
+                    // Chromium's APM is running on it. Static per sender, so once.
+                    const sourceKey = `src:${s.id}:${s.trackId}`;
+                    if (s.trackId && !reportedCodecs.has(sourceKey)) {
+                        reportedCodecs.add(sourceKey);
+                        console.log(
+                            `[LMA-Audio] sending trackId=${s.trackId} ` +
+                                `echoCanceller=${s.echoReturnLoss !== undefined ? `ACTIVE (erl=${s.echoReturnLoss})` : 'not running'}`,
+                        );
+                    }
 
                     const last = prev.get(s.id);
                     prev.set(s.id, s);
+                    if (!first.has(s.id) && Number.isFinite(s.samplesDuration!)) first.set(s.id, s);
                     if (!last || s.ts <= last.ts) continue;
                     const seconds = (s.ts - last.ts) / 1000;
                     const dPackets = s.packets - last.packets;
@@ -342,10 +411,22 @@ export function startAudioDiagnosticsPolling(page: Page): () => void {
                         finite(s.samplesDuration) !== undefined && finite(last.samplesDuration) !== undefined
                             ? s.samplesDuration! - last.samplesDuration!
                             : undefined;
+                    // Cumulative capture, measured from the sender's first sample:
+                    // immune to the per-window quantisation that made the raw ratio
+                    // unusable as a verdict.
+                    const base = first.get(s.id);
+                    const elapsedSeconds =
+                        base && s.ts > base.ts ? (s.ts - base.ts) / 1000 : undefined;
+                    const cumulativeCaptureRatio =
+                        base && elapsedSeconds && Number.isFinite(s.samplesDuration!)
+                            ? (s.samplesDuration! - base.samplesDuration!) / elapsedSeconds
+                            : undefined;
                     const window: AudioWindow = {
                         seconds,
                         packets: dPackets,
                         captureRatio: dSamples !== undefined ? dSamples / seconds : undefined,
+                        cumulativeCaptureRatio,
+                        elapsedSeconds,
                         energyDelta:
                             finite(s.energy) !== undefined && finite(last.energy) !== undefined
                                 ? s.energy! - last.energy!
@@ -372,6 +453,7 @@ export function startAudioDiagnosticsPolling(page: Page): () => void {
                         console.log(
                             `[LMA-Audio] ${verdict.state.toUpperCase()} ${verdict.reason} | ` +
                                 `captureRatio=${window.captureRatio?.toFixed(3) ?? 'n/a'} ` +
+                                `cumCaptureRatio=${window.cumulativeCaptureRatio?.toFixed(4) ?? 'n/a'} ` +
                                 `energyDelta=${window.energyDelta?.toExponential(2) ?? 'n/a'} ` +
                                 `kbps=${kbps.toFixed(1)} ` +
                                 `targetKbps=${Number.isFinite(s.targetBitrate!) ? (s.targetBitrate! / 1000).toFixed(1) : 'n/a'} ` +

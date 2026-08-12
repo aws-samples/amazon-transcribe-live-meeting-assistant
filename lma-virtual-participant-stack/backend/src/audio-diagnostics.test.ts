@@ -20,14 +20,17 @@ import {
     classifyAudioWindow,
     EXPECTED_PACKETS_PER_SECOND,
     MIN_CAPTURE_RATIO,
+    MIN_MEASURE_SECONDS,
     SPEECH_ENERGY_THRESHOLD,
     STATS_INTERVAL_MS,
 } from './audio-diagnostics.js';
 
+/** Long enough that cumulative capture is judged rather than skipped. */
+const measured = { elapsedSeconds: 60, cumulativeCaptureRatio: 1.0 };
 /** A window with no audio energy: the sender is deliberately silent. */
-const silent = { seconds: 1, packets: 5, captureRatio: 1.0, energyDelta: 0 };
+const silent = { seconds: 1, packets: 5, captureRatio: 1.0, energyDelta: 0, ...measured };
 /** A window mid-utterance on a healthy sender. */
-const speaking = { seconds: 1, packets: 50, captureRatio: 1.0, energyDelta: 0.02 };
+const speaking = { seconds: 1, packets: 50, captureRatio: 1.0, energyDelta: 0.02, ...measured };
 
 test('the expected cadence matches Opus at a 20ms frame', () => {
     // 1000ms / 20ms = 50 packets per second.
@@ -55,10 +58,10 @@ test('a short utterance averaged over a long window is not misread as frame loss
     assert.notEqual(v.state, 'problem');
 });
 
-test('capture starvation is flagged from the capture ratio alone', () => {
+test('capture starvation is flagged from the cumulative ratio', () => {
     // The signature actually being hunted: Chromium losing audio before the encoder
     // sees it. Independent of speech, DTX and window alignment.
-    const v = classifyAudioWindow({ ...speaking, captureRatio: 0.6 });
+    const v = classifyAudioWindow({ ...speaking, cumulativeCaptureRatio: 0.6 });
     assert.equal(v.state, 'problem');
     assert.match(v.reason, /capture starving/);
 });
@@ -66,21 +69,55 @@ test('capture starvation is flagged from the capture ratio alone', () => {
 test('capture starvation is flagged even while silent', () => {
     // Capture runs whether or not the agent is speaking, so a gap during silence is
     // still a real fault — and it is the cheapest window in which to notice one.
-    const v = classifyAudioWindow({ ...silent, captureRatio: 0.5 });
+    const v = classifyAudioWindow({ ...silent, cumulativeCaptureRatio: 0.5 });
     assert.equal(v.state, 'problem');
     assert.match(v.reason, /capture starving/);
 });
 
-test('a healthy capture ratio is accepted with its normal jitter', () => {
-    // The stat is a float differenced across an unaligned window, so it will never
-    // read exactly 1.0; a tight bound here would recreate the false-alarm problem.
-    for (const ratio of [MIN_CAPTURE_RATIO, 0.99, 1.0, 1.01]) {
+test('the per-window ratio never produces a verdict on its own', () => {
+    // Verbatim from the live capture: the per-window ratio alternated between these
+    // two values on a sender whose cumulative ratio was 1.008. The first version
+    // flagged every low-phase window as "capture starving". Four bogus PROBLEM
+    // lines came from exactly these numbers.
+    for (const ratio of [0.954, 0.959, 0.947, 0.949, 1.049, 1.061]) {
         assert.notEqual(
             classifyAudioWindow({ ...speaking, captureRatio: ratio }).state,
+            'problem',
+            `per-window ${ratio} must not be a verdict`,
+        );
+    }
+});
+
+test('cumulative capture is not judged before there is enough of it', () => {
+    // Early on, the cumulative ratio carries the same quantisation as one window,
+    // so judging it would just move the false alarms to the start of the meeting.
+    const v = classifyAudioWindow({
+        ...speaking,
+        elapsedSeconds: MIN_MEASURE_SECONDS - 1,
+        cumulativeCaptureRatio: 0.5,
+    });
+    assert.notEqual(v.state, 'problem');
+});
+
+test('a healthy cumulative ratio is accepted at the threshold', () => {
+    for (const ratio of [MIN_CAPTURE_RATIO, 0.99, 1.0, 1.008, 1.01]) {
+        assert.notEqual(
+            classifyAudioWindow({ ...speaking, cumulativeCaptureRatio: ratio }).state,
             'problem',
             `${ratio} should be treated as healthy`,
         );
     }
+});
+
+test('the starvation message quantifies how much audio was lost', () => {
+    // "0.90 vs 0.95" is not actionable; "6000ms of audio never captured" is.
+    const v = classifyAudioWindow({
+        ...speaking,
+        elapsedSeconds: 60,
+        cumulativeCaptureRatio: 0.95 - 0.05,
+    });
+    assert.equal(v.state, 'problem');
+    assert.match(v.reason, /6000ms of audio never captured/);
 });
 
 test('far-end packet loss is reported as a wire fault, not a capture fault', () => {
@@ -94,7 +131,7 @@ test('far-end packet loss is reported as a wire fault, not a capture fault', () 
 test('capture starvation outranks far-end loss', () => {
     // If capture is already losing frames, the far end will also report loss; the
     // upstream cause is the actionable one.
-    const v = classifyAudioWindow({ ...speaking, captureRatio: 0.4, remotePacketsLost: 3 });
+    const v = classifyAudioWindow({ ...speaking, cumulativeCaptureRatio: 0.4, remotePacketsLost: 3 });
     assert.match(v.reason, /capture starving/);
 });
 
