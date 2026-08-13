@@ -45,6 +45,11 @@ type ItemObservation = {
     content: string;
     speaker: string | undefined;
     type: string | undefined;
+    // Needed to reason about a DURATION-based split threshold, not just a
+    // word-count one: a two-word interjection and a two-word start-of-turn look
+    // identical by count but not in time.
+    startTime: number;
+    endTime: number;
 };
 
 type ResultObservation = {
@@ -140,6 +145,8 @@ const runSession = async (
                 content: item.Content ?? '',
                 speaker: item.Speaker,
                 type: item.Type,
+                startTime: item.StartTime ?? 0,
+                endTime: item.EndTime ?? 0,
             }));
             observations.push({
                 seq: seq++,

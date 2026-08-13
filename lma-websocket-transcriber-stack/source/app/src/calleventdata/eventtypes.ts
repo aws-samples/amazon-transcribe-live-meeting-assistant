@@ -135,6 +135,16 @@ export type CallMetaData = {
     channels: {
         [channelId: string]: ChannelSpeakerData;
     };
+    /**
+     * Server-managed (never sent by a client): running count of final results and
+     * how many carried speaker labels, so a call where diarization was requested
+     * but Transcribe returned nothing can be warned about exactly once.
+     */
+    diarizationDiagnostics?: {
+        finals: number;
+        labelled: number;
+        warned: boolean;
+    };
     accessToken?: string,
     idToken?: string,
     refreshToken?: string,

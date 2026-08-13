@@ -75,6 +75,12 @@ deployment-wide default for clients that do not send their own choice.
 - Speakers are numbered **per channel**, each starting at `spk_0`, and the
   numbering restarts if the Transcribe session reconnects mid-meeting.
 - Labels appear when a segment finalizes, not while it is still partial.
+- Transcript segments are split where the speaker changes, since one Amazon
+  Transcribe result often spans several turns. Very short bursts of a different
+  label (a word or two) are treated as noise and merged into the surrounding
+  turn, so a brief interjection is attributed to the speaker around it. See
+  [WebSocket Streaming API](websocket-streaming-api.md#speaker-identification-diarization)
+  for the thresholds and the `[DIARIZATION]` log lines used to tune them.
 - Diarization support varies by language; on an unsupported language the speaker
   names are simply left unlabelled.
 - Labels are numbers, not names. To get real participant names, use the
