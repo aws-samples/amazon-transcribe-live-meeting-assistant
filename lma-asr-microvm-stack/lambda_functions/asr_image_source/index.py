@@ -121,12 +121,25 @@ def resolve(properties: dict, catalog: dict) -> dict:
             f"model {model.get('id')!r} must pin sherpaOnnx and onnxruntime versions"
         )
 
-    speaker = dict(_find(catalog.get("speakerModels", []), speaker_id))
+    if speaker_id == CUSTOM_MODEL_ID:
+        speaker = {
+            "id": "custom",
+            "url": "",
+            "sha256": "",
+            "license": _prop(properties, "SpeakerModelLicense") or "customer-supplied",
+        }
+    else:
+        speaker = dict(_find(catalog.get("speakerModels", []), speaker_id))
     catalog_speaker_url = speaker.get("url", "")
     for name, key in (("SpeakerModelUrl", "url"), ("SpeakerModelSha256", "sha256")):
         override = _prop(properties, name)
         if override:
             speaker[key] = override
+    if speaker_id == CUSTOM_MODEL_ID and not speaker.get("url"):
+        raise ResolutionError(
+            "AsrSpeakerModelId=Custom requires AsrSpeakerModelUrl (and its SHA256). "
+            "Use 'none' for a transcription-only image."
+        )
     if speaker.get("url") and not speaker.get("sha256"):
         raise ResolutionError(
             f"speaker model {speaker.get('id')!r} has no pinned SHA256"

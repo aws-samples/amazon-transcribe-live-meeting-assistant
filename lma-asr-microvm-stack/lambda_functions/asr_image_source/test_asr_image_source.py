@@ -194,6 +194,25 @@ def test_resolve_allows_a_transcription_only_image() -> None:
     assert selection["speaker"]["url"] == ""
 
 
+def test_a_custom_speaker_model_is_accepted_but_carries_no_measurement() -> None:
+    selection = index.resolve(
+        {
+            "SpeakerModelId": "Custom",
+            "SpeakerModelUrl": "https://example.invalid/mine.onnx",
+            "SpeakerModelSha256": "d" * 64,
+        },
+        CATALOG,
+    )
+
+    assert selection["speaker"]["url"] == "https://example.invalid/mine.onnx"
+    assert "measured" not in selection["speaker"]
+
+
+def test_a_custom_speaker_model_without_a_url_is_refused() -> None:
+    with pytest.raises(index.ResolutionError, match="requires AsrSpeakerModelUrl"):
+        index.resolve({"SpeakerModelId": "Custom"}, CATALOG)
+
+
 def test_a_supplied_speaker_url_drops_the_catalog_measurement() -> None:
     """A different model is a different operating point.
 

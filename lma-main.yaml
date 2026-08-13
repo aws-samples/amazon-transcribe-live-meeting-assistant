@@ -346,21 +346,34 @@ Parameters:
     Default: nemotron-streaming-en-0.6b-560ms-int8
     AllowedValues:
       - nemotron-streaming-en-0.6b-560ms-int8
+      - zipformer-streaming-en-2023-06-26-int8
       - Custom
     Description: >-
-      MicroVM ASR model. The default is English-only under the NVIDIA Open Model
-      License. Choose Custom and set AsrModelUrl / AsrModelSha256 / the file names
-      to bake a different model, e.g. for licensing reasons.
+      MicroVM ASR model, both English-only. The default is the more accurate of the
+      two but is licensed under the NVIDIA Open Model License; the Zipformer entry
+      is Apache-2.0, so pairing it with a WeSpeaker speaker model gives an
+      Apache-2.0-only stack, at the cost of accuracy on real meeting audio (it is
+      trained on read speech). Choose Custom and set AsrModelUrl / AsrModelSha256 /
+      the file names to bake something else.
 
   AsrSpeakerModelId:
     Type: String
     Default: titanet-small
     AllowedValues:
       - titanet-small
+      - wespeaker-en-cam++-lm
+      - wespeaker-en-resnet293-lm
+      - Custom
       - none
     Description: >-
-      Speaker-embedding model used for diarization (TitaNet-small, CC-BY-4.0).
-      "none" builds a transcription-only ASR image.
+      Speaker-embedding model used for diarization. titanet-small (CC-BY-4.0) is
+      the default and the only one measured to separate speakers well on real
+      meeting audio; the two WeSpeaker models (Apache-2.0) are offered for
+      licensing reasons and measured WORSE on that audio, so calibrate before
+      trusting them. Custom bakes your own via AsrSpeakerModelUrl +
+      AsrSpeakerModelSha256, and diarization is then withheld until this
+      deployment calibrates its own threshold. "none" builds a
+      transcription-only ASR image.
 
   AsrBaselineMemoryMiB:
     Type: Number
@@ -461,6 +474,22 @@ Parameters:
     Type: String
     Default: ""
     Description: (Custom model only) onnxruntime version to install.
+
+  AsrSpeakerModelUrl:
+    Type: String
+    Default: ""
+    Description: >-
+      (Custom speaker model only) URL of the speaker-embedding ONNX file. Supplying
+      one means the catalog's measured operating point no longer applies, so
+      speaker labels are withheld until a calibration is applied or a threshold is
+      set on the ASR Config page.
+
+  AsrSpeakerModelSha256:
+    Type: String
+    Default: ""
+    Description: >-
+      (Custom speaker model only) SHA256 of the speaker-embedding file. Required:
+      the image build fails rather than baking unverified weights.
 
   ModelValidation:
     Type: String
@@ -977,6 +1006,8 @@ Metadata:
           - AsrModelTokensFile
           - AsrSherpaOnnxVersion
           - AsrOnnxruntimeVersion
+          - AsrSpeakerModelUrl
+          - AsrSpeakerModelSha256
       - Label:
           default: Transcript Event Processing Configuration
         Parameters:
@@ -2769,6 +2800,8 @@ Resources:
         AsrModelTokensFile: !Ref AsrModelTokensFile
         AsrSherpaOnnxVersion: !Ref AsrSherpaOnnxVersion
         AsrOnnxruntimeVersion: !Ref AsrOnnxruntimeVersion
+        AsrSpeakerModelUrl: !Ref AsrSpeakerModelUrl
+        AsrSpeakerModelSha256: !Ref AsrSpeakerModelSha256
         AsrBaselineMemoryMiB: !Ref AsrBaselineMemoryMiB
         AsrMaxMeetingSeconds: !Ref AsrMaxMeetingSeconds
         AsrMaxSpeakers: !Ref AsrMaxSpeakers

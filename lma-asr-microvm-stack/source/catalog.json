@@ -27,6 +27,32 @@
       "onnxruntime": "1.27.0",
       "approxDownloadMb": 443,
       "provenanceVerified": "2026-07-31"
+    },
+    {
+      "id": "zipformer-streaming-en-2023-06-26-int8",
+      "name": "icefall streaming Zipformer English (int8, Apache-2.0)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
+      "sha256": "639e25b578e9e997131402199419c13a941f8e4e198e2da1ce57dbf5cf401282",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        "decoder": "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        "joiner": "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 296,
+      "provenanceVerified": "2026-08-13",
+      "note": "Fully permissive alternative to the NVIDIA-licensed default: Apache-2.0 weights from icefall, so an Apache-2.0-only deployment can pair it with a WeSpeaker embedder. Trained on LibriSpeech read speech, so expect worse accuracy on real meeting audio (noise, cross-talk, spontaneous speech) than the Nemotron default; unmeasured here."
     }
   ],
   "speakerModels": [

@@ -300,8 +300,110 @@ The model must be a **streaming transducer** that `sherpa-onnx`'s
 instead, follow the same shape and verify the checksum against the download before
 committing it.
 
-A custom speaker-embedding model works the same way via `AsrSpeakerModelUrl` and
-`AsrSpeakerModelSha256` on the ASR stack.
+**Choosing the ASR model.** `AsrModelId` on the main stack:
+
+| Value | Licence | Notes |
+|---|---|---|
+| `nemotron-streaming-en-0.6b-560ms-int8` (default) | NVIDIA Open Model License | Cache-aware FastConformer, the more accurate of the two |
+| `zipformer-streaming-en-2023-06-26-int8` | Apache-2.0 | Fully permissive; trained on LibriSpeech read speech, so expect worse accuracy on real meeting audio. Unmeasured here |
+| `Custom` | yours | `AsrModelUrl` + `AsrModelSha256` + file names + runtime pins |
+
+**A fully permissive stack** is `AsrModelId=zipformer-streaming-en-2023-06-26-int8`
+with `AsrSpeakerModelId=wespeaker-en-cam++-lm` or `wespeaker-en-resnet293-lm`:
+Apache-2.0 weights, Apache-2.0 `sherpa-onnx` runtime, no NVIDIA licence anywhere.
+Both halves are the *less accurate* choice on the audio measured so far, so treat it
+as a licensing option rather than the quality option, and calibrate — the WeSpeaker
+thresholds differ from TitaNet's and both measured worse.
+
+**Choosing the speaker (diarization) model.** `AsrSpeakerModelId` on the main stack:
+
+| Value | Licence | Measured on real meeting audio |
+|---|---|---|
+| `titanet-small` (default) | CC-BY-4.0 | Separates speakers well: different speakers ≤ 0.107, same speaker 0.25–0.5. Operating point 0.2 |
+| `wespeaker-en-cam++-lm` | Apache-2.0 | Distributions overlapped — worse than TitaNet here |
+| `wespeaker-en-resnet293-lm` | Apache-2.0 | Everything scores high; needs ~0.8 and the tails still overlap |
+| `Custom` | yours | Unmeasured by definition — set `AsrSpeakerModelUrl` + `AsrSpeakerModelSha256` |
+| `none` | — | Transcription only, no diarization |
+
+The two WeSpeaker models are offered for licensing reasons (Apache-2.0 rather than
+CC-BY-4.0) and each carries its measurement in `catalog.json`. Picking anything other
+than the default means the shipped threshold no longer describes your embedder, so
+[calibrate](#calibrating-the-operating-point) before trusting the labels; with
+`Custom`, speaker labels are withheld until you do.
+
+Changing either model parameter changes the source-zip key, so the stack update
+rebuilds the MicroVM image (a few minutes) — a longer update than a runtime setting,
+which is exactly why the threshold and the other diarization knobs are runtime
+config instead.
+
+```bash
+lma-cli deploy --stack-name <stack> --from-code . \
+  -p TranscriptionEngine=MicrovmAsr \
+  -p AsrSpeakerModelId=wespeaker-en-cam++-lm
+```
+
+### Not included: Whisper, Distil-Whisper, and the WhisperX hybrid
+
+Whisper-family models (Whisper large-v3-turbo, Distil-Whisper — both MIT) are not
+selectable, and the reason is architectural rather than licensing. This stack is
+**streaming-only by construction**: the image resolver refuses any catalog entry
+whose `engine` is not `streaming`, and the streaming path builds a `sherpa-onnx`
+`OnlineRecognizer` over an encoder/decoder/joiner transducer. Whisper is not a
+frame-synchronous transducer; `sherpa-onnx` loads it only through
+`OfflineRecognizer.from_whisper(encoder, decoder, tokens)` — no joiner — so it can
+only be "streamed" by segmenting on VAD and decoding each closed utterance.
+
+The runtime already contains that shape: `asr_server/vad.py` is a Silero VAD gate
+(MIT) and `asr_server/offline_recognizer.py` is a VAD-segmented offline engine that
+emits one `final` per utterance plus a synthetic `partial` at segment close. It is
+unprovisioned — no pinned offline model, the Silero weights are not fetched by
+`scripts/fetch_model.py`, and the resolver does not expose it. Adding Whisper
+therefore means: a `from_whisper` backend branch, a joiner-less file set in the
+catalog and in `fetch_model.py`, baking the Silero VAD weights, opening the offline
+engine in the resolver, and accepting that live meetings get no true partials. The
+real-time factor of large-v3-turbo for two concurrent channels on Graviton is also
+unmeasured; Distil-Whisper small/medium is the more plausible candidate.
+
+**Pyannote segmentation 3.0** is likewise absent (an earlier prototype branch used
+pyannote + diart alongside Amazon Transcribe). Its code is MIT, but the published
+weights are access-gated on Hugging Face, so a build-time download needs a token and
+an accepted agreement — which is why the ungated, MIT Silero VAD is the segmentation
+model this runtime integrates.
+
+**The WhisperX hybrid** (Whisper for text, a separate diarizer for speakers, merged
+by word-level forced alignment) is a good architecture — for **offline** audio. Its
+accuracy comes from seeing the whole file: batched VAD chunks, wav2vec2 forced
+alignment for word timestamps, and *global* speaker clustering, which decides how
+many speakers there were only at the end. On a live meeting that means labels would
+change retroactively for rows already displayed, and it reintroduces exactly the
+two-timeline drift this engine exists to avoid — the streaming engine emits the
+speaker label with the text it was derived from, so there is nothing to align.
+
+Where WhisperX fits is the **Upload Media / batch** path, which today uses Amazon
+Transcribe batch with `ShowSpeakerLabels`. There a second pass costs nothing, word
+alignment is available, and global clustering is correct rather than premature. That
+remains deferred (see the plan's *Deferred* section), and it is the natural home for
+Whisper-quality transcription and elite DER — a deliberate split, with one engine and
+one timeline live, two passes offline.
+
+### Validating a model against a public corpus
+
+Before adding a `measured` note to a catalog entry, measure the embedder on data
+other than one deployment's meetings. Usable corpora:
+
+| Corpus | Why it fits | Licence |
+|---|---|---|
+| [AMI Meeting Corpus](https://groups.inf.ed.ac.uk/ami/corpus/) | Real 3–5 person meetings with a **per-speaker headset mic**, which gives the same speaker-per-channel ground truth this calibration relies on, plus a far-field array for the harder case | CC BY 4.0 |
+| [VoxConverse](https://www.robots.ox.ac.uk/~vgg/data/voxconverse/) | In-the-wild multi-speaker audio with diarization labels; good for overlap and noise | CC BY 4.0 |
+| LibriSpeech-derived mixtures (LibriMix, Libri-CSS) | Synthetic, deterministic — useful as a regression test rather than a realism check | CC BY 4.0 |
+| DIHARD, CALLHOME, NIST RT | The classic DER benchmarks | LDC licence: not redistributable, so not usable in CI |
+
+Two cautions. **VoxCeleb is not a valid check for these models** — TitaNet and
+WeSpeaker are trained on it, so measuring their threshold there is circular and
+flattering. And a corpus result is a *prior*, not an operating point: microphone
+gain, codec, room acoustics and language all move the distributions, which is why
+per-deployment calibration stays the source of truth and why the guardrail asks for
+a local measurement rather than trusting the catalog for an unknown embedder.
 
 ## Cost and sizing
 

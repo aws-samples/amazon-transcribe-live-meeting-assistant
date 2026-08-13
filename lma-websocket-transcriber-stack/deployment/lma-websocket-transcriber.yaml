@@ -1632,15 +1632,13 @@ Resources:
           CachePolicyId: 4135ea2d-6df8-44a3-9df3-4b5a84be39ad
           Compress: false
 
-        CustomErrorResponses:
-          - ErrorCachingMinTTL: 300
-            ErrorCode: 403
-            ResponseCode: 200
-            ResponsePagePath: /index.html
-          - ErrorCachingMinTTL: 300
-            ErrorCode: 404
-            ResponseCode: 200
-            ResponsePagePath: /index.html
+        # No CustomErrorResponses. This distribution's only origin is the
+        # transcriber's API; there is no index.html to fall back to. The
+        # single-page-app mapping copied here (403/404 -> 200 /index.html) turned
+        # every API error into a 200 whose body came from a route that does not
+        # exist and which therefore carried no CORS header, so a browser reported
+        # "Failed to fetch" instead of the reason the API had already given —
+        # observed on a calibration run against a meeting with no recording yet.
         DefaultRootObject: index.html
         Enabled: true
         HttpVersion: http2

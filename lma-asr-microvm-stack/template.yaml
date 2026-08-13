@@ -67,6 +67,7 @@ Parameters:
     Default: nemotron-streaming-en-0.6b-560ms-int8
     AllowedValues:
       - nemotron-streaming-en-0.6b-560ms-int8
+      - zipformer-streaming-en-2023-06-26-int8
       - Custom
     Description: >-
       Streaming ASR model baked into the image, from source/catalog.json. The
@@ -80,9 +81,15 @@ Parameters:
     Default: titanet-small
     AllowedValues:
       - titanet-small
+      - wespeaker-en-cam++-lm
+      - wespeaker-en-resnet293-lm
+      - Custom
       - none
     Description: >-
-      Speaker-embedding model used for diarization. "none" builds a
+      Speaker-embedding model used for diarization; entries come from
+      source/catalog.json, where each carries the measurement it was chosen on.
+      Each model has its own cosine scale, so switching one without re-measuring
+      the threshold fragments or merges speakers. "none" builds a
       transcription-only image and diarization requests are then reported as
       unsupported rather than silently returning no speaker labels.
 

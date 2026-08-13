@@ -521,6 +521,19 @@ Defaults:
     CC-BY-4.0
     https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large
 
+Selectable alternatives, for a deployment that needs permissive licensing
+throughout (AsrModelId + AsrSpeakerModelId):
+
+  * icefall streaming Zipformer EN, int8 (streaming ASR)
+    Apache-2.0
+    https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26
+    (this archive ships no LICENSE file, so none is copied into the image; the
+    license is declared on the model page above)
+
+  * WeSpeaker CAM++_LM and ResNet293_LM speaker embedding (diarization)
+    Apache-2.0
+    https://github.com/wenet-e2e/wespeaker
+
 You are responsible for complying with the license of whichever model you select,
 including any model you supply yourself via the Custom model parameters. See
 docs/microvm-asr.md.

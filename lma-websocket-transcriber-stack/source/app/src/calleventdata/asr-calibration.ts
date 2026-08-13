@@ -5,25 +5,11 @@
  */
 
 /**
- * Derive the diarization operating point from a deployment's own audio.
+ * Derive the diarization operating point from a deployment's own audio, using
+ * audio channel as the same-speaker / different-speaker label.
  *
- * The similarity threshold that separates "same person" from "different people" is
- * a property of the speaker-embedding model, not a universal constant. Measured on
- * one recording: with TitaNet, different speakers never exceeded 0.107 while the
- * same speaker scored 0.25-0.5, so the inherited default of 0.5 fragmented one
- * person into eight identities. A different embedder scored 0.54 between two
- * DIFFERENT people, where the same 0.5 would have merged them instead.
- *
- * So a shipped default cannot be right for a model nobody measured — including any
- * model a user supplies. This module measures it instead, using the one label the
- * system already has for free: **audio channel**. A meeting's microphone channel is
- * the owner and the tab channel is the remote side, so pairs within a channel are
- * (usually) the same speaker and pairs across channels are definitely different
- * people. That is exactly the comparison a threshold has to get right.
- *
- * Everything here is pure: segmentation and statistics take arrays in and give
- * numbers out, so the logic that decides what a transcript looks like is testable
- * without model weights, AWS, or audio files.
+ * See docs/microvm-asr.md, "Calibrating the operating point", for why the
+ * threshold cannot be a shipped constant and how the placement rule was chosen.
  */
 
 export const CALIBRATION_SAMPLE_RATE = 16000;
@@ -69,19 +55,12 @@ export interface CalibrationResult extends CalibrationDistribution {
 
 const BYTES_PER_SAMPLE = 2;
 
-/** 20 ms analysis frame — short enough to catch word boundaries. */
 const FRAME_MS = 20;
-/**
- * Merge across gaps this long before applying the minimum duration. Without it,
- * normal speech never forms a one-second run: the sub-200 ms gaps between words
- * end it. (Learnt the hard way — the first version of this found zero segments.)
- */
+// Without a hangover this long, normal speech never forms a one-second run: the
+// sub-200 ms gaps between words end it.
 const HANGOVER_MS = 300;
-/** Ignore anything shorter; a fraction of a second embeds unreliably. */
 const MIN_SEGMENT_SEC = 1.0;
-/** Cap a segment so one long monologue cannot dominate the statistics. */
 const MAX_SEGMENT_SEC = 12.0;
-/** This channel must be this many times louder than the other to count as talking. */
 const DOMINANCE_RATIO = 3;
 
 const rms = (pcm: Buffer, from: number, to: number): number => {
@@ -128,11 +107,7 @@ export const cosineSimilarity = (a: number[], b: number[]): number => {
 };
 
 /**
- * Find stretches where one channel clearly dominates the other.
- *
- * Dominance rather than silence: both channels carry room noise at different
- * levels, so requiring the other channel to be silent finds nothing on a real
- * recording. Dominance also keeps cross-talk out, which matters because a segment
+ * Dominance rather than silence: both channels carry room noise, and a segment
  * containing both voices would corrupt both distributions.
  */
 export const findDominantSegments = (
@@ -155,8 +130,6 @@ export const findDominantSegments = (
         other.push(rms(otherPcm, from, from + frameBytes));
     }
 
-    // Speech floor from this channel's own level, so it adapts to gain rather than
-    // assuming an absolute amplitude.
     const speaking = own.filter((value) => value > 150);
     if (speaking.length === 0) {
         return [];
@@ -210,13 +183,7 @@ export const findDominantSegments = (
 export const segmentDurationSec = (segment: CalibrationSegment): number =>
     segment.endSec - segment.startSec;
 
-/**
- * At most `limit` items, taken evenly across the list rather than from the front.
- *
- * A meeting's first minutes are its least representative — people join, levels
- * settle, and one person does the talking — so sampling the whole recording gives
- * the statistics a fairer view of it.
- */
+/** At most `limit` items, taken evenly across the list rather than from the front. */
 export const selectSpread = <T>(items: T[], limit: number): T[] => {
     if (limit <= 0) {
         return [];

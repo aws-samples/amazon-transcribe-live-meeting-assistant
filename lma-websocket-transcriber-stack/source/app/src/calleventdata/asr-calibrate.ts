@@ -5,20 +5,11 @@
  */
 
 /**
- * Run a calibration against a meeting this deployment already recorded.
+ * The AWS half of calibration: read a recording from S3, embed the dominant
+ * stretches of each channel on an ASR MicroVM, derive the operating point.
  *
- * The pure half of calibration lives in asr-calibration.ts; this is the part that
- * touches the world: stream the recording out of S3, split it into stretches where
- * one channel clearly dominates, embed those on an ASR MicroVM in embed mode, and
- * hand the vectors to deriveOperatingPoint().
- *
- * It runs where the audio and the engine already are — the transcriber task — so
- * calibration reuses the recording bucket, the MicroVM launcher and the WebSocket
- * client rather than duplicating all three in a Lambda.
- *
- * Nothing is written anywhere: a run proposes an operating point and the admin
- * decides. That keeps a bad recording (one speaker, a phone bridge, heavy
- * cross-talk) from silently reconfiguring everyone's meetings.
+ * A run only reports; the admin applies it. See docs/microvm-asr.md,
+ * "Calibrating the operating point".
  */
 import { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
@@ -66,7 +57,6 @@ const MAX_HEADER_BYTES = 64 * 1024;
 
 const s3Client = new S3Client({ region: AWS_REGION });
 
-/** Carries the HTTP status the route should return, so the reason survives. */
 export class CalibrationError extends Error {
     constructor(
         message: string,
@@ -113,11 +103,8 @@ interface ChannelAudio {
 }
 
 /**
- * Decode a stereo recording into two 16 kHz mono channels.
- *
  * Streamed rather than buffered whole: a 48 kHz stereo hour is 690 MB on the wire
- * and this task has 1 GB for everything it does. Only the resampled channels are
- * kept, and only up to the time cap.
+ * and this task has 1 GB for everything it does.
  */
 export const readChannels = async (
     stream: AsyncIterable<Uint8Array>,
@@ -199,12 +186,8 @@ interface EmbedMessage {
 }
 
 /**
- * Embed each segment on the MicroVM, one at a time.
- *
  * One frame per utterance, and the next only after the previous vector comes back:
- * that keeps the mapping from vector to channel unambiguous (the engine answers in
- * order) and keeps a long meeting from pushing megabytes at an engine that decodes
- * them one at a time anyway.
+ * the engine answers in order, and that order is what maps a vector to its channel.
  */
 export const embedSegments = async (
     lease: AsrLease,
@@ -328,8 +311,6 @@ export const embedSegments = async (
         });
 
         socket.on('close', (code: number) => {
-            // Vectors already collected are usable; the statistics say so if there
-            // are too few. A close with nothing is a failure worth reporting.
             finish(
                 vectors.length > 0
                     ? undefined
@@ -364,8 +345,10 @@ const defaultDeps: CalibrationDeps = {
             const name = (error as { name?: string }).name;
             if (name === 'NoSuchKey' || name === 'NotFound') {
                 throw new CalibrationError(
-                    `no recording found at ${key}. Calibration needs a meeting that was recorded ` +
-                        '(Stream Audio with recording enabled).',
+                    `no recording found at ${key}. A recording is uploaded when the meeting ENDS, ` +
+                        'so a meeting that is still running has nothing to calibrate from yet — end ' +
+                        'it and try again. Otherwise the meeting was not recorded (recording must be ' +
+                        'enabled for the deployment and accepted in the browser).',
                     404
                 );
             }
@@ -381,10 +364,8 @@ const defaultDeps: CalibrationDeps = {
 };
 
 /**
- * The recording key for a request, restricted to the recordings prefix.
- *
- * The caller is an authenticated admin, but the task role can read the whole
- * bucket, so an arbitrary key would turn this route into a file reader.
+ * The task role can read the whole bucket, so an arbitrary key would turn this
+ * route into a file reader for anyone in the Admin group.
  */
 export const resolveRecordingKey = (request: CalibrationRequest): string => {
     const explicit = (request.recordingKey || '').trim();
@@ -408,10 +389,8 @@ export const resolveRecordingKey = (request: CalibrationRequest): string => {
 let running = false;
 
 /**
- * Measure this deployment's diarization operating point from one recorded meeting.
- *
  * Single-flight: a second concurrent run would launch a second MicroVM and compete
- * for the same task's CPU with the meetings being transcribed on it.
+ * for the CPU of the meetings this task is transcribing.
  */
 export const runCalibration = async (
     request: CalibrationRequest,
@@ -485,8 +464,6 @@ export const runCalibration = async (
             }
         }
 
-        // Sliced, not zipped blindly: a vector with no segment behind it has no
-        // channel, and guessing one would corrupt the ground truth this rests on.
         const embedded: EmbeddedSegment[] = vectors.slice(0, segments.length).map((vector, index) => ({
             channel: segments[index].channel,
             durationSec: segmentDurationSec(segments[index]),

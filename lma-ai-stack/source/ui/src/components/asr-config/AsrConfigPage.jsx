@@ -165,16 +165,26 @@ const AsrConfigPage = () => {
         `${calibrateEndpoint}?authorization=${encodeURIComponent(`Bearer ${token}`)}` +
         `&callId=${encodeURIComponent(calibrateCallId.trim())}`;
       const response = await fetch(url, { method: 'POST' });
-      const body = await response.json();
-      if (!response.ok) {
-        setCalibrationError(body?.message || `Calibration failed (HTTP ${response.status}).`);
+      // Parsed from text rather than response.json(): an error rewritten by
+      // something in front of the service is not JSON, and a parse exception there
+      // would hide the status code, which is the only clue left.
+      const raw = await response.text();
+      let body = null;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        body = null;
+      }
+      if (!response.ok || !body) {
+        setCalibrationError(body?.message || `Calibration failed (HTTP ${response.status}). ${raw.slice(0, 300)}`);
         return;
       }
       setCalibration(body);
     } catch (err) {
       setCalibrationError(
         `Could not reach the calibration service: ${err.message || err}. It runs on the ` +
-          'transcriber task, so this fails if no transcriber is running.',
+          'transcriber task, so this fails if no transcriber is running — check the ' +
+          'TranscriberWebsocket log group for a line starting [ASR CALIBRATE].',
       );
     } finally {
       setCalibrating(false);
