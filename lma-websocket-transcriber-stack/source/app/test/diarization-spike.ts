@@ -27,6 +27,7 @@
  * a single voice on ch_1 — otherwise question B is unanswerable.
  */
 import fs from 'fs';
+import path from 'path';
 import {
     TranscribeStreamingClient,
     StartStreamTranscriptionCommand,
@@ -292,11 +293,13 @@ const main = async (): Promise<void> => {
         }
     }
 
-    fs.writeFileSync(
-        '/tmp/lma-diarization-spike/results.json',
-        JSON.stringify({ diarized, control }, null, 2)
-    );
-    console.log('\nraw observations written to /tmp/lma-diarization-spike/results.json');
+    // Written next to the fixture rather than to a fixed path: a hardcoded
+    // directory that nothing creates made the script do all of its (billed)
+    // Transcribe work and then die with ENOENT on the very last line.
+    const resultsPath = path.join(path.dirname(path.resolve(wavPath)), 'diarization-results.json');
+    fs.mkdirSync(path.dirname(resultsPath), { recursive: true });
+    fs.writeFileSync(resultsPath, JSON.stringify({ diarized, control }, null, 2));
+    console.log(`\nraw observations written to ${resultsPath}`);
 };
 
 main().catch((err) => {
