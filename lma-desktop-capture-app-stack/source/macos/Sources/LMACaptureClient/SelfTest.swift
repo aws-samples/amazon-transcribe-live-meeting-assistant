@@ -190,6 +190,64 @@ enum SelfTest {
         check("redaction is a no-op on clean text",
               TranscriberSocket.redactingTokens("plain error, no tokens"), "plain error, no tokens")
 
+        // ── Session outcome from a state SEQUENCE ────────────────────────────
+        // Whether the UI announces "your meeting is being processed" (with a link
+        // to it). Announcing that for a session which uploaded nothing is a real
+        // user-facing lie, and it is decided by a SEQUENCE of states, not one
+        // state — so it is tested as a sequence. A per-state assertion would have
+        // passed while the bug was live, because every teardown (clean stop AND
+        // fatal auth) passes through `.stopping`.
+        print("\nRecording-session outcome (state sequences):")
+
+        func replay(_ states: [CaptureController.State]) -> String {
+            var tracker = CaptureController.SessionTracker()
+            var events: [String] = []
+            for s in states {
+                switch tracker.observe(s) {
+                case .none: continue
+                case .started: events.append("start")
+                case .ended(let ok): events.append(ok ? "end:success" : "end:failed")
+                }
+            }
+            return events.isEmpty ? "(none)" : events.joined(separator: ",")
+        }
+
+        // A clean Stop: END was sent, the meeting really is being processed.
+        check("clean stop announces success",
+              replay([.authenticated, .starting, .streaming, .stopping, .authenticated]),
+              "start,end:success")
+        // Fatal auth mid-recording: the token was rejected and nothing was
+        // uploaded, so this must NOT be announced as a completed meeting. This is
+        // the case that regressed.
+        check("fatal auth does NOT announce success",
+              replay([.authenticated, .starting, .streaming, .stopping, .error("session expired")]),
+              "start,end:failed")
+        // Same, if the error is set before teardown rather than after — the
+        // outcome must not depend on that ordering, and must fire only ONCE.
+        check("fatal auth, error set first, ends once",
+              replay([.streaming, .error("session expired"), .stopping, .error("session expired")]),
+              "start,end:failed")
+        // Sign-out mid-recording still sends END, so it did complete.
+        check("logout while streaming announces success",
+              replay([.streaming, .stopping, .idle]),
+              "start,end:success")
+        // A failure BEFORE streaming started never began a session, so it must
+        // produce no end event at all (nothing to announce, nothing to retract).
+        check("capture failure before streaming: no events",
+              replay([.authenticated, .starting, .error("capture failed")]),
+              "(none)")
+        check("sign-in failure: no events",
+              replay([.idle, .signingIn, .error("bad password")]),
+              "(none)")
+        // Pause/resume and repeated `.streaming` must not restart the timer.
+        check("repeated streaming does not re-start",
+              replay([.streaming, .streaming, .stopping, .authenticated]),
+              "start,end:success")
+        // Two sessions in one app run: two clean start/end pairs.
+        check("two sessions in one run",
+              replay([.streaming, .stopping, .authenticated, .starting, .streaming, .stopping, .authenticated]),
+              "start,end:success,start,end:success")
+
         // Cognito error classification: only a REJECTED credential is terminal.
         // Retrying a rejected refresh token is pointless; giving up on a 5xx or a
         // throttle would sign the user out for no reason.

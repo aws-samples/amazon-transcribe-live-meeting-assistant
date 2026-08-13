@@ -65,6 +65,9 @@ final class MenuBarAppState: ObservableObject {
     private var segmentStartedAt: Date?
     private var accumulatedSeconds = 0
     private var elapsedTimer: Timer?
+    /// Turns the state stream into begin/end recording events (see
+    /// CaptureController.SessionTracker).
+    private var sessionTracker = CaptureController.SessionTracker()
 
     /// Recently used meeting names (most recent first), for quick re-selection.
     @Published var recentMeetingNames: [String] = []
@@ -139,17 +142,19 @@ final class MenuBarAppState: ObservableObject {
         }
         controller.onStateChange = { [weak self] s in
             guard let self = self else { return }
-            let wasStreaming = self.isStreaming
             self.state = s
-            let nowStreaming = self.isStreaming
-            if nowStreaming && !wasStreaming {
+            // An error (rejected token, capture failure) means nothing was
+            // uploaded — don't tell the user a recording is on its way. The
+            // outcome is taken from the terminal state AFTER teardown, not from
+            // the `.stopping` that every teardown passes through; see
+            // CaptureController.SessionTracker for why that distinction matters.
+            switch self.sessionTracker.observe(s) {
+            case .none:
+                break
+            case .started:
                 self.beginElapsedTimer()
-            } else if !nowStreaming && wasStreaming {
-                // An error (bad token, capture failure) or sign-out means nothing
-                // was uploaded — don't tell the user a recording is on its way.
-                let failed: Bool
-                if case .error = s { failed = true } else { failed = false }
-                self.endElapsedTimer(succeeded: !failed)
+            case .ended(let succeeded):
+                self.endElapsedTimer(succeeded: succeeded)
             }
         }
         controller.onLevels = { [weak self] m, k, c, p in
