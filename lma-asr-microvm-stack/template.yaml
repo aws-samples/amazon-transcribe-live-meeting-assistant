@@ -14,21 +14,8 @@ Metadata:
         Parameters:
           - AsrModelId
           - AsrSpeakerModelId
+          - AsrSegmentationModelId
           - AsrEnableDiarization
-      - Label:
-          default: Custom model (only when AsrModelId or AsrSpeakerModelId is Custom)
-        Parameters:
-          - AsrModelUrl
-          - AsrModelSha256
-          - AsrModelArchive
-          - AsrModelEncoderFile
-          - AsrModelDecoderFile
-          - AsrModelJoinerFile
-          - AsrModelTokensFile
-          - AsrSherpaOnnxVersion
-          - AsrOnnxruntimeVersion
-          - AsrSpeakerModelUrl
-          - AsrSpeakerModelSha256
       - Label:
           default: Runtime sizing and tuning
         Parameters:
@@ -68,7 +55,6 @@ Parameters:
     AllowedValues:
       - nemotron-streaming-en-0.6b-560ms-int8
       - zipformer-streaming-en-2023-06-26-int8
-      - Custom
     Description: >-
       Streaming ASR model baked into the image, from source/catalog.json. The
       default is English-only and licensed under the NVIDIA Open Model License.
@@ -83,7 +69,6 @@ Parameters:
       - titanet-small
       - wespeaker-en-cam++-lm
       - wespeaker-en-resnet293-lm
-      - Custom
       - none
     Description: >-
       Speaker-embedding model used for diarization; entries come from
@@ -106,18 +91,6 @@ Parameters:
       AsrSpeakerModelId is "none", since there would be no embedder to identify the
       turns it finds.
 
-  AsrSegmentationModelUrl:
-    Type: String
-    Default: ""
-    Description: (Custom segmentation model only) URL of the archive or ONNX file.
-
-  AsrSegmentationModelSha256:
-    Type: String
-    Default: ""
-    Description: >-
-      (Custom segmentation model only) SHA256 of the download. Required: the build
-      fails rather than baking unverified weights.
-
   AsrEnableDiarization:
     Type: String
     Default: Auto
@@ -128,59 +101,6 @@ Parameters:
     Description: >-
       Auto enables diarization when a speaker model is present in the image. On
       fails at startup if it is missing. Off disables it regardless.
-
-  AsrModelUrl:
-    Type: String
-    Default: ""
-    Description: Model archive URL. Overrides the catalog entry when set.
-  AsrModelSha256:
-    Type: String
-    Default: ""
-    Description: >-
-      SHA256 of the model archive. Required for a custom model; the image build
-      fails if it is missing or does not match.
-  AsrModelArchive:
-    Type: String
-    Default: ""
-    AllowedValues:
-      - ""
-      - tar.bz2
-      - tar.gz
-    Description: Archive format of a custom model.
-  AsrModelEncoderFile:
-    Type: String
-    Default: ""
-    Description: Encoder filename inside a custom model archive.
-  AsrModelDecoderFile:
-    Type: String
-    Default: ""
-    Description: Decoder filename inside a custom model archive.
-  AsrModelJoinerFile:
-    Type: String
-    Default: ""
-    Description: Joiner filename inside a custom model archive.
-  AsrModelTokensFile:
-    Type: String
-    Default: ""
-    Description: Tokens filename inside a custom model archive.
-  AsrSherpaOnnxVersion:
-    Type: String
-    Default: ""
-    Description: >-
-      sherpa-onnx version to install for a custom model. Model exports and
-      runtime versions are coupled, so this must match the model.
-  AsrOnnxruntimeVersion:
-    Type: String
-    Default: ""
-    Description: onnxruntime version to install for a custom model.
-  AsrSpeakerModelUrl:
-    Type: String
-    Default: ""
-    Description: Speaker-embedding model URL. Overrides the catalog entry when set.
-  AsrSpeakerModelSha256:
-    Type: String
-    Default: ""
-    Description: SHA256 of a custom speaker-embedding model.
 
   AsrBaselineMemoryMiB:
     Type: Number
@@ -418,21 +338,8 @@ Resources:
       DestBucket: !Ref AsrImageSourceBucket
       DestPrefix: image-source
       ModelId: !Ref AsrModelId
-      ModelUrl: !Ref AsrModelUrl
-      ModelSha256: !Ref AsrModelSha256
-      ModelArchive: !Ref AsrModelArchive
-      ModelEncoderFile: !Ref AsrModelEncoderFile
-      ModelDecoderFile: !Ref AsrModelDecoderFile
-      ModelJoinerFile: !Ref AsrModelJoinerFile
-      ModelTokensFile: !Ref AsrModelTokensFile
-      SherpaOnnxVersion: !Ref AsrSherpaOnnxVersion
-      OnnxruntimeVersion: !Ref AsrOnnxruntimeVersion
       SpeakerModelId: !Ref AsrSpeakerModelId
-      SpeakerModelUrl: !Ref AsrSpeakerModelUrl
-      SpeakerModelSha256: !Ref AsrSpeakerModelSha256
       SegmentationModelId: !Ref AsrSegmentationModelId
-      SegmentationModelUrl: !Ref AsrSegmentationModelUrl
-      SegmentationModelSha256: !Ref AsrSegmentationModelSha256
 
   # Runtime overrides for the diarization operating point, edited from the web UI's
   # ASR Config page. Everything here is per-session in the WebSocket protocol, so a

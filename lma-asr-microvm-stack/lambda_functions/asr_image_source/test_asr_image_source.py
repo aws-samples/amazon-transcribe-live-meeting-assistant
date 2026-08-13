@@ -93,89 +93,39 @@ def test_resolve_uses_the_catalog_default_when_no_model_is_named() -> None:
     assert selection["speaker"]["id"] == "spk-a"
 
 
-def test_resolve_applies_overrides_on_top_of_a_catalog_entry() -> None:
-    selection = index.resolve(
-        {"ModelId": "model-a", "ModelSha256": "f" * 64, "ModelEncoderFile": "enc.onnx"},
-        CATALOG,
-    )
+def test_resolve_refuses_a_catalog_entry_with_no_pinned_checksum() -> None:
+    catalog = {
+        **CATALOG,
+        "defaultModelId": "unpinned",
+        "models": [{**CATALOG["models"][0], "id": "unpinned", "sha256": ""}],
+    }
 
-    assert selection["model"]["sha256"] == "f" * 64
-    assert selection["model"]["files"]["encoder"] == "enc.onnx"
-    # Untouched fields still come from the catalog.
-    assert selection["model"]["files"]["decoder"] == "decoder.int8.onnx"
-
-
-def test_resolve_accepts_a_fully_specified_custom_model() -> None:
-    selection = index.resolve(
-        {
-            "ModelId": "Custom",
-            "ModelUrl": "https://example.invalid/mine.tar.gz",
-            "ModelSha256": "d" * 64,
-            "ModelArchive": "tar.gz",
-            "ModelEncoderFile": "e.onnx",
-            "ModelDecoderFile": "d.onnx",
-            "ModelJoinerFile": "j.onnx",
-            "ModelTokensFile": "t.txt",
-            "SherpaOnnxVersion": "1.13.4",
-            "OnnxruntimeVersion": "1.27.0",
-        },
-        CATALOG,
-    )
-
-    assert selection["model"]["archive"] == "tar.gz"
-    assert selection["model"]["files"]["tokens"] == "t.txt"
-
-
-def test_resolve_refuses_a_model_with_no_pinned_checksum() -> None:
     with pytest.raises(index.ResolutionError, match="no pinned SHA256"):
-        index.resolve(
-            {
-                "ModelId": "Custom",
-                "ModelUrl": "https://example.invalid/mine.tar.bz2",
-                "ModelEncoderFile": "e.onnx",
-                "ModelDecoderFile": "d.onnx",
-                "ModelJoinerFile": "j.onnx",
-                "ModelTokensFile": "t.txt",
-                "SherpaOnnxVersion": "1.13.4",
-                "OnnxruntimeVersion": "1.27.0",
-            },
-            CATALOG,
-        )
+        index.resolve({}, catalog)
 
 
-def test_resolve_refuses_a_custom_model_with_no_url() -> None:
-    with pytest.raises(index.ResolutionError, match="no download URL"):
-        index.resolve({"ModelId": "Custom", "ModelSha256": "d" * 64}, CATALOG)
+def test_resolve_refuses_a_catalog_entry_without_pinned_runtime_versions() -> None:
+    catalog = {
+        **CATALOG,
+        "defaultModelId": "loose",
+        "models": [{**CATALOG["models"][0], "id": "loose", "onnxruntime": ""}],
+    }
 
-
-def test_resolve_refuses_a_custom_model_missing_file_names() -> None:
-    with pytest.raises(index.ResolutionError, match="missing file names"):
-        index.resolve(
-            {
-                "ModelId": "Custom",
-                "ModelUrl": "https://example.invalid/mine.tar.bz2",
-                "ModelSha256": "d" * 64,
-                "SherpaOnnxVersion": "1.13.4",
-                "OnnxruntimeVersion": "1.27.0",
-            },
-            CATALOG,
-        )
-
-
-def test_resolve_refuses_a_model_without_pinned_runtime_versions() -> None:
     with pytest.raises(index.ResolutionError, match="sherpaOnnx and onnxruntime"):
-        index.resolve(
-            {
-                "ModelId": "Custom",
-                "ModelUrl": "https://example.invalid/mine.tar.bz2",
-                "ModelSha256": "d" * 64,
-                "ModelEncoderFile": "e.onnx",
-                "ModelDecoderFile": "d.onnx",
-                "ModelJoinerFile": "j.onnx",
-                "ModelTokensFile": "t.txt",
-            },
-            CATALOG,
-        )
+        index.resolve({}, catalog)
+
+
+def test_resolve_refuses_a_catalog_entry_missing_file_names() -> None:
+    catalog = {
+        **CATALOG,
+        "defaultModelId": "partial",
+        "models": [
+            {**CATALOG["models"][0], "id": "partial", "files": {"encoder": "e.onnx"}},
+        ],
+    }
+
+    with pytest.raises(index.ResolutionError, match="missing file names"):
+        index.resolve({}, catalog)
 
 
 def test_resolve_rejects_a_non_streaming_engine() -> None:
@@ -238,59 +188,23 @@ def test_an_older_catalog_without_segmentation_models_still_resolves() -> None:
     assert selection["segmentation"]["url"] == ""
 
 
-def test_a_custom_speaker_model_is_accepted_but_carries_no_measurement() -> None:
-    selection = index.resolve(
-        {
-            "SpeakerModelId": "Custom",
-            "SpeakerModelUrl": "https://example.invalid/mine.onnx",
-            "SpeakerModelSha256": "d" * 64,
-        },
-        CATALOG,
-    )
-
-    assert selection["speaker"]["url"] == "https://example.invalid/mine.onnx"
-    assert "measured" not in selection["speaker"]
-
-
-def test_a_custom_speaker_model_without_a_url_is_refused() -> None:
-    with pytest.raises(index.ResolutionError, match="requires AsrSpeakerModelUrl"):
-        index.resolve({"SpeakerModelId": "Custom"}, CATALOG)
-
-
-def test_a_supplied_speaker_url_drops_the_catalog_measurement() -> None:
-    """A different model is a different operating point.
-
-    The catalog's ``measured`` note and ``recommendedThreshold`` describe the weights
-    that were tested. When a deployment points at its own URL, keeping them would
-    tell the transcriber a threshold had been measured for a model nobody measured,
-    which is how one speaker becomes eight.
-    """
-    catalog = json.loads(json.dumps(CATALOG))
-    catalog["speakerModels"][0]["measured"] = "2026-08-12: separates cleanly"
-    catalog["speakerModels"][0]["recommendedThreshold"] = 0.2
-
-    kept = index.resolve({}, catalog)
-    assert kept["speaker"]["measured"]
-    assert kept["speaker"]["recommendedThreshold"] == 0.2
-
-    supplied = index.resolve(
-        {"SpeakerModelUrl": "https://example.invalid/mine.onnx", "SpeakerModelSha256": "d" * 64},
-        catalog,
-    )
-    assert "measured" not in supplied["speaker"]
-    assert "recommendedThreshold" not in supplied["speaker"]
-
-    # Re-stating the same URL is the same model, so the measurement still applies.
-    same = index.resolve({"SpeakerModelUrl": catalog["speakerModels"][0]["url"]}, catalog)
-    assert same["speaker"]["measured"]
-
-
 def test_build_reports_whether_the_speaker_model_was_measured() -> None:
+    """A model with no measurement is what makes the transcriber withhold labels.
+
+    Every model is a catalog entry now, so "unmeasured" means an entry that carries
+    no ``measured`` note — a newly added model nobody has characterised yet.
+    """
     source = make_source_zip(
         catalog={
             **CATALOG,
             "speakerModels": [
                 {**CATALOG["speakerModels"][0], "measured": "2026-08-12", "recommendedThreshold": 0.2},
+                {
+                    "id": "spk-new",
+                    "url": "https://example.invalid/new.onnx",
+                    "sha256": "d" * 64,
+                    "license": "Apache-2.0",
+                },
                 CATALOG["speakerModels"][1],
             ],
         }
@@ -304,19 +218,12 @@ def test_build_reports_whether_the_speaker_model_was_measured() -> None:
             "DestBucket": "stack-bucket",
         }
         _, measured = index.build(properties)
-        _, supplied = index.build(
-            {
-                **properties,
-                "SpeakerModelUrl": "https://example.invalid/mine.onnx",
-                "SpeakerModelSha256": "d" * 64,
-            }
-        )
+        _, unmeasured = index.build({**properties, "SpeakerModelId": "spk-new"})
 
     assert measured["SpeakerModelMeasured"] == "true"
     assert measured["RecommendedThreshold"] == "0.2"
-    # This is what makes the transcriber withhold speaker labels until calibration.
-    assert supplied["SpeakerModelMeasured"] == "false"
-    assert supplied["RecommendedThreshold"] == ""
+    assert unmeasured["SpeakerModelMeasured"] == "false"
+    assert unmeasured["RecommendedThreshold"] == ""
 
 
 def test_render_model_env_carries_every_value_the_build_reads() -> None:

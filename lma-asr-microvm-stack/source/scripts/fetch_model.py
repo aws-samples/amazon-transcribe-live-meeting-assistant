@@ -119,7 +119,7 @@ def fetch_verified(url: str, expected_sha256: str, target: Path, label: str) -> 
     if not expected_sha256:
         raise ModelFetchError(
             f"{label}: no SHA256 pinned. Pin the checksum in models/catalog.json "
-            "(or pass AsrModelSha256) before building an image."
+            "before building an image."
         )
     log(f"{label}: downloading {url}")
     actual = download_with_retries(url, target, label)

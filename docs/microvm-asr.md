@@ -98,8 +98,9 @@ Relevant parameters (all under *On-demand ASR and Diarization* in the console):
 | Parameter | Default | Purpose |
 |---|---|---|
 | `TranscriptionEngine` | `AmazonTranscribe` | `MicrovmAsr` deploys this engine |
-| `AsrModelId` | `nemotron-streaming-en-0.6b-560ms-int8` | Model from the catalog, or `Custom` |
+| `AsrModelId` | `nemotron-streaming-en-0.6b-560ms-int8` | Streaming ASR model, from the catalog |
 | `AsrSpeakerModelId` | `titanet-small` | Speaker-embedding model, or `none` for transcription only |
+| `AsrSegmentationModelId` | `pyannote-segmentation-3-0` | Speaker-turn detection, so one utterance with two voices can be split |
 | `AsrBaselineMemoryMiB` | `8192` | Memory per MicroVM; CPU is 1 vCPU per 2 GiB, so this is 4 vCPU |
 | `AsrMaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
 | `AsrMaxSpeakers` | `0` | Optional cap per channel; 0 discovers as many as appear |
@@ -190,9 +191,9 @@ different-speaker comparison to make.
 
 **Unmeasured models are withheld, not guessed at.** Every speaker model in
 `catalog.json` carries a `measured` note recording what was actually observed. When a
-deployment supplies its own embedder (`AsrSpeakerModelUrl`), that note no longer
-applies, so the stack reports `SpeakerModelMeasured=false` and the transcriber
-transcribes with **channel labels instead of speaker labels** — logging why — until
+catalog entry carries no `measured` note — a model added but not yet
+characterised — the stack reports `SpeakerModelMeasured=false` and the transcriber
+transcribes with **channel labels instead of speaker labels**, logging why, until
 either a calibration is applied or an admin sets a threshold. A guessed threshold
 looks like working diarization while being wrong, which is worse than no diarization
 at all.
@@ -285,20 +286,27 @@ rewrites `model.env` in the published source zip, and republishes it under a key
 derived from the selection. Because the key changes, CloudFormation rebuilds the
 image whenever you change a model parameter.
 
-**To use a model that is not in the catalog** set `AsrModelId` to `Custom` and
-supply:
+**Every model is a curated catalog entry.** There is deliberately no parameter for
+supplying a URL at deploy time: a model needs its checksum pinned, its file names
+known, its runtime versions matched, and — for a speaker model — its operating point
+measured, and none of that is something to fill into a console text box while
+proving out an engine. Adding a model is a repo change:
 
-- `AsrModelUrl` and `AsrModelSha256` — the archive and its checksum. The checksum
-  is mandatory: the build fails rather than baking unverified weights.
-- `AsrModelEncoderFile`, `AsrModelDecoderFile`, `AsrModelJoinerFile`,
-  `AsrModelTokensFile` — the filenames inside the archive.
-- `AsrSherpaOnnxVersion` and `AsrOnnxruntimeVersion` — the runtime versions that
-  model needs.
+1. Download the archive and record its **SHA256** and the exact filenames inside it.
+2. Add an entry to
+   [`lma-asr-microvm-stack/source/catalog.json`](../lma-asr-microvm-stack/source/catalog.json)
+   with `url`, `sha256`, `files`, `sampleRate`, `license`, `licenseUrl`, and the
+   `sherpaOnnx` / `onnxruntime` versions that load it (exports and runtimes are
+   coupled, so they travel together per entry).
+3. Add the id to `AsrModelId`'s `AllowedValues` in `lma-main.yaml` and
+   `lma-asr-microvm-stack/template.yaml`.
+4. For a speaker model, [calibrate](#calibrating-the-operating-point) and record what
+   you measured in the entry's `measured` field. Until that field exists, the
+   deployment produces no speaker labels for it.
 
-The model must be a **streaming transducer** that `sherpa-onnx`'s
-`OnlineRecognizer` can load, exported at 16 kHz. To add an entry to the catalog
-instead, follow the same shape and verify the checksum against the download before
-committing it.
+An ASR model must be a **streaming transducer** that `sherpa-onnx`'s
+`OnlineRecognizer` can load, exported at 16 kHz; the resolver refuses anything else
+rather than failing later in the image build.
 
 **Choosing the ASR model.** `AsrModelId` on the main stack:
 
@@ -306,7 +314,6 @@ committing it.
 |---|---|---|
 | `nemotron-streaming-en-0.6b-560ms-int8` (default) | NVIDIA Open Model License | Cache-aware FastConformer, the more accurate of the two |
 | `zipformer-streaming-en-2023-06-26-int8` | Apache-2.0 | Fully permissive; trained on LibriSpeech read speech, so expect worse accuracy on real meeting audio. Unmeasured here |
-| `Custom` | yours | `AsrModelUrl` + `AsrModelSha256` + file names + runtime pins |
 
 **A fully permissive stack** is `AsrModelId=zipformer-streaming-en-2023-06-26-int8`
 with `AsrSpeakerModelId=wespeaker-en-cam++-lm` or `wespeaker-en-resnet293-lm`:
@@ -322,14 +329,12 @@ thresholds differ from TitaNet's and both measured worse.
 | `titanet-small` (default) | CC-BY-4.0 | Separates speakers well: different speakers ≤ 0.107, same speaker 0.25–0.5. Operating point 0.2 |
 | `wespeaker-en-cam++-lm` | Apache-2.0 | Distributions overlapped — worse than TitaNet here |
 | `wespeaker-en-resnet293-lm` | Apache-2.0 | Everything scores high; needs ~0.8 and the tails still overlap |
-| `Custom` | yours | Unmeasured by definition — set `AsrSpeakerModelUrl` + `AsrSpeakerModelSha256` |
 | `none` | — | Transcription only, no diarization |
 
 The two WeSpeaker models are offered for licensing reasons (Apache-2.0 rather than
 CC-BY-4.0) and each carries its measurement in `catalog.json`. Picking anything other
 than the default means the shipped threshold no longer describes your embedder, so
-[calibrate](#calibrating-the-operating-point) before trusting the labels; with
-`Custom`, speaker labels are withheld until you do.
+[calibrate](#calibrating-the-operating-point) before trusting the labels.
 
 Changing either model parameter changes the source-zip key, so the stack update
 rebuilds the MicroVM image (a few minutes) — a longer update than a runtime setting,

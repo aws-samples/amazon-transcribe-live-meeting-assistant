@@ -76,16 +76,19 @@ Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe unless a client opts in | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
-| AsrModelId | ASR model baked into the MicroVM image (English only by default, NVIDIA Open Model License) | nemotron-streaming-en-0.6b-560ms-int8 | nemotron-streaming-en-0.6b-560ms-int8, Custom |
-| AsrSpeakerModelId | Speaker-embedding model used for diarization (CC-BY-4.0); "none" builds a transcription-only image | titanet-small | titanet-small, none |
+| AsrModelId | ASR model baked into the MicroVM image, from the stack's catalog.json (English only) | nemotron-streaming-en-0.6b-560ms-int8 | nemotron-streaming-en-0.6b-560ms-int8 (NVIDIA Open Model License), zipformer-streaming-en-2023-06-26-int8 (Apache-2.0) |
+| AsrSpeakerModelId | Speaker-embedding model used for diarization; "none" builds a transcription-only image. Each has its own cosine scale, so calibrate after changing it | titanet-small | titanet-small (CC-BY-4.0), wespeaker-en-cam++-lm, wespeaker-en-resnet293-lm (Apache-2.0), none |
+| AsrSegmentationModelId | Speaker-turn detection, so one endpointed utterance containing two voices can be split (MIT, 6 MB) | pyannote-segmentation-3-0 | pyannote-segmentation-3-0, none |
 | AsrBaselineMemoryMiB | Memory per ASR MicroVM; CPU is 1 vCPU per 2 GiB, so 8192 gives 4 vCPU | 8192 | 4096, 8192, 16384 |
 | AsrMaxMeetingSeconds | Hard lifetime ceiling per MicroVM and the cost backstop if a transcriber task dies without releasing it | 14400 | 600–28800 |
 | AsrMaxSpeakers | Cap on distinct speakers per audio channel (0 discovers as many as appear) | 0 | 0–30 |
-| AsrSpeakerThreshold | Cosine similarity above which two utterances are the same speaker; higher splits more eagerly | 0.5 | 0.0–1.0 |
-| AsrModelUrl | (Custom model only) URL of the model archive | (none) | Any HTTPS URL |
-| AsrModelSha256 | (Custom model only) SHA256 of the archive; required, the build fails without a match | (none) | Hex digest |
-| AsrModelEncoderFile / AsrModelDecoderFile / AsrModelJoinerFile / AsrModelTokensFile | (Custom model only) filenames inside the archive | (none) | Filenames |
-| AsrSherpaOnnxVersion / AsrOnnxruntimeVersion | (Custom model only) runtime versions that can load the model | (none) | Published versions |
+| AsrSpeakerThreshold | Cosine similarity above which two utterances are the same speaker; higher splits more eagerly. Measured for TitaNet; specific to the speaker model | 0.2 | 0.0–1.0 |
+| AsrMinSegmentMs | Shortest utterance worth embedding for a speaker label; shorter ones inherit the current speaker | 2500 | 0–5000 |
+
+There are deliberately no parameters for supplying a model URL: every model is a
+curated entry in the ASR stack's `catalog.json`, with its checksum pinned and (for a
+speaker model) its operating point measured. See
+[On-demand ASR & Speaker Diarization](microvm-asr.md#changing-the-model).
 
 ## End-of-Call Summary
 

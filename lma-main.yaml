@@ -347,14 +347,13 @@ Parameters:
     AllowedValues:
       - nemotron-streaming-en-0.6b-560ms-int8
       - zipformer-streaming-en-2023-06-26-int8
-      - Custom
     Description: >-
       MicroVM ASR model, both English-only. The default is the more accurate of the
       two but is licensed under the NVIDIA Open Model License; the Zipformer entry
       is Apache-2.0, so pairing it with a WeSpeaker speaker model gives an
       Apache-2.0-only stack, at the cost of accuracy on real meeting audio (it is
-      trained on read speech). Choose Custom and set AsrModelUrl / AsrModelSha256 /
-      the file names to bake something else.
+      trained on read speech). Every option is a curated entry in the ASR stack's
+      catalog.json with a pinned checksum; to offer another model, add it there.
 
   AsrSpeakerModelId:
     Type: String
@@ -363,17 +362,15 @@ Parameters:
       - titanet-small
       - wespeaker-en-cam++-lm
       - wespeaker-en-resnet293-lm
-      - Custom
       - none
     Description: >-
       Speaker-embedding model used for diarization. titanet-small (CC-BY-4.0) is
       the default and the only one measured to separate speakers well on real
       meeting audio; the two WeSpeaker models (Apache-2.0) are offered for
       licensing reasons and measured WORSE on that audio, so calibrate before
-      trusting them. Custom bakes your own via AsrSpeakerModelUrl +
-      AsrSpeakerModelSha256, and diarization is then withheld until this
-      deployment calibrates its own threshold. "none" builds a
-      transcription-only ASR image.
+      trusting them. "none" builds a transcription-only ASR image. A model with no
+      measurement in catalog.json produces no speaker labels until this deployment
+      calibrates its own threshold.
 
   AsrSegmentationModelId:
     Type: String
@@ -444,66 +441,6 @@ Parameters:
       TitaNet embedder, where different speakers score at most ~0.11 and the same
       speaker 0.25-0.5; the sherpa default of 0.5 fragmented one person into eight
       identities in a live meeting.
-
-  AsrModelUrl:
-    Type: String
-    Default: ""
-    Description: (Custom model only) URL of the model archive.
-
-  AsrModelSha256:
-    Type: String
-    Default: ""
-    Description: >-
-      (Custom model only) SHA256 of the model archive. Required: the image build
-      fails rather than baking unverified weights.
-
-  AsrModelEncoderFile:
-    Type: String
-    Default: ""
-    Description: (Custom model only) Encoder filename inside the archive.
-
-  AsrModelDecoderFile:
-    Type: String
-    Default: ""
-    Description: (Custom model only) Decoder filename inside the archive.
-
-  AsrModelJoinerFile:
-    Type: String
-    Default: ""
-    Description: (Custom model only) Joiner filename inside the archive.
-
-  AsrModelTokensFile:
-    Type: String
-    Default: ""
-    Description: (Custom model only) Tokens filename inside the archive.
-
-  AsrSherpaOnnxVersion:
-    Type: String
-    Default: ""
-    Description: >-
-      (Custom model only) sherpa-onnx version to install. Model exports and runtime
-      versions are coupled, so this must match the model.
-
-  AsrOnnxruntimeVersion:
-    Type: String
-    Default: ""
-    Description: (Custom model only) onnxruntime version to install.
-
-  AsrSpeakerModelUrl:
-    Type: String
-    Default: ""
-    Description: >-
-      (Custom speaker model only) URL of the speaker-embedding ONNX file. Supplying
-      one means the catalog's measured operating point no longer applies, so
-      speaker labels are withheld until a calibration is applied or a threshold is
-      set on the ASR Config page.
-
-  AsrSpeakerModelSha256:
-    Type: String
-    Default: ""
-    Description: >-
-      (Custom speaker model only) SHA256 of the speaker-embedding file. Required:
-      the image build fails rather than baking unverified weights.
 
   ModelValidation:
     Type: String
@@ -1013,16 +950,6 @@ Metadata:
           - AsrMaxSpeakers
           - AsrSpeakerThreshold
           - AsrMinSegmentMs
-          - AsrModelUrl
-          - AsrModelSha256
-          - AsrModelEncoderFile
-          - AsrModelDecoderFile
-          - AsrModelJoinerFile
-          - AsrModelTokensFile
-          - AsrSherpaOnnxVersion
-          - AsrOnnxruntimeVersion
-          - AsrSpeakerModelUrl
-          - AsrSpeakerModelSha256
       - Label:
           default: Transcript Event Processing Configuration
         Parameters:
@@ -1161,22 +1088,8 @@ Metadata:
         default: ASR Speaker Similarity Threshold
       AsrMinSegmentMs:
         default: ASR Minimum Utterance For Speaker ID (ms)
-      AsrModelUrl:
-        default: Custom ASR Model URL
-      AsrModelSha256:
-        default: Custom ASR Model SHA256
-      AsrModelEncoderFile:
-        default: Custom ASR Model Encoder Filename
-      AsrModelDecoderFile:
-        default: Custom ASR Model Decoder Filename
-      AsrModelJoinerFile:
-        default: Custom ASR Model Joiner Filename
-      AsrModelTokensFile:
-        default: Custom ASR Model Tokens Filename
-      AsrSherpaOnnxVersion:
-        default: Custom ASR sherpa-onnx Version
-      AsrOnnxruntimeVersion:
-        default: Custom ASR onnxruntime Version
+      AsrSegmentationModelId:
+        default: Speaker Turn Detection Model (diarization)
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
@@ -2808,16 +2721,6 @@ Resources:
         AsrModelId: !Ref AsrModelId
         AsrSpeakerModelId: !Ref AsrSpeakerModelId
         AsrSegmentationModelId: !Ref AsrSegmentationModelId
-        AsrModelUrl: !Ref AsrModelUrl
-        AsrModelSha256: !Ref AsrModelSha256
-        AsrModelEncoderFile: !Ref AsrModelEncoderFile
-        AsrModelDecoderFile: !Ref AsrModelDecoderFile
-        AsrModelJoinerFile: !Ref AsrModelJoinerFile
-        AsrModelTokensFile: !Ref AsrModelTokensFile
-        AsrSherpaOnnxVersion: !Ref AsrSherpaOnnxVersion
-        AsrOnnxruntimeVersion: !Ref AsrOnnxruntimeVersion
-        AsrSpeakerModelUrl: !Ref AsrSpeakerModelUrl
-        AsrSpeakerModelSha256: !Ref AsrSpeakerModelSha256
         AsrBaselineMemoryMiB: !Ref AsrBaselineMemoryMiB
         AsrMaxMeetingSeconds: !Ref AsrMaxMeetingSeconds
         AsrMaxSpeakers: !Ref AsrMaxSpeakers

@@ -16,8 +16,15 @@ Returns:
     SourceLocation       bucket/key form
     ModelId              resolved model id
     SpeakerModelId       resolved speaker model id
+    SegmentationModelId  resolved speaker-turn detection model id
     DiarizationAvailable "true" when a speaker model is baked into the image
+    TurnDetectionAvailable "true" when a segmentation model is baked into the image
+    SpeakerModelMeasured "true" when the catalog records a measured operating point
     ModelLicense         licence of the resolved model, for the stack outputs
+
+Every model is a curated catalog entry: there is no parameter for supplying a URL,
+so a new model is added by editing catalog.json (with its checksum pinned and its
+operating point measured) rather than by a deploy-time override.
 """
 
 from __future__ import annotations
@@ -39,8 +46,6 @@ s3 = boto3.client("s3")
 
 CATALOG_MEMBER = "catalog.json"
 MODEL_ENV_MEMBER = "model.env"
-CUSTOM_MODEL_ID = "Custom"
-
 FILE_KEYS = ("encoder", "decoder", "joiner", "tokens")
 
 
@@ -67,39 +72,8 @@ def resolve(properties: dict, catalog: dict) -> dict:
         "defaultSpeakerModelId", "none"
     )
 
-    if model_id == CUSTOM_MODEL_ID:
-        model = {
-            "id": _prop(properties, "ModelName") or "custom",
-            "engine": "streaming",
-            "archive": _prop(properties, "ModelArchive") or "tar.bz2",
-            "stripComponents": int(_prop(properties, "ModelStripComponents") or "1"),
-            "files": {},
-            "license": _prop(properties, "ModelLicense") or "customer-supplied",
-            "sherpaOnnx": "",
-            "onnxruntime": "",
-            "url": "",
-            "sha256": "",
-        }
-    else:
-        model = dict(_find(catalog.get("models", []), model_id))
-
-    for name, key in (
-        ("ModelUrl", "url"),
-        ("ModelSha256", "sha256"),
-        ("ModelArchive", "archive"),
-        ("SherpaOnnxVersion", "sherpaOnnx"),
-        ("OnnxruntimeVersion", "onnxruntime"),
-    ):
-        override = _prop(properties, name)
-        if override:
-            model[key] = override
-
+    model = dict(_find(catalog.get("models", []), model_id))
     files = dict(model.get("files") or {})
-    for key in FILE_KEYS:
-        override = _prop(properties, f"Model{key.capitalize()}File")
-        if override:
-            files[key] = override
-    model["files"] = files
 
     if model.get("engine", "streaming") != "streaming":
         raise ResolutionError(
@@ -110,8 +84,8 @@ def resolve(properties: dict, catalog: dict) -> dict:
         raise ResolutionError(f"model {model.get('id')!r} has no download URL")
     if not model.get("sha256"):
         raise ResolutionError(
-            f"model {model.get('id')!r} has no pinned SHA256. Pin it in catalog.json or "
-            "supply AsrModelSha256; unverified weights are never baked into an image."
+            f"model {model.get('id')!r} has no pinned SHA256. Pin it in catalog.json; "
+            "unverified weights are never baked into an image."
         )
     missing = [key for key in FILE_KEYS if not files.get(key)]
     if missing:
@@ -121,52 +95,20 @@ def resolve(properties: dict, catalog: dict) -> dict:
             f"model {model.get('id')!r} must pin sherpaOnnx and onnxruntime versions"
         )
 
-    if speaker_id == CUSTOM_MODEL_ID:
-        speaker = {
-            "id": "custom",
-            "url": "",
-            "sha256": "",
-            "license": _prop(properties, "SpeakerModelLicense") or "customer-supplied",
-        }
-    else:
-        speaker = dict(_find(catalog.get("speakerModels", []), speaker_id))
-    catalog_speaker_url = speaker.get("url", "")
-    for name, key in (("SpeakerModelUrl", "url"), ("SpeakerModelSha256", "sha256")):
-        override = _prop(properties, name)
-        if override:
-            speaker[key] = override
-    if speaker_id == CUSTOM_MODEL_ID and not speaker.get("url"):
-        raise ResolutionError(
-            "AsrSpeakerModelId=Custom requires AsrSpeakerModelUrl (and its SHA256). "
-            "Use 'none' for a transcription-only image."
-        )
+    speaker = dict(_find(catalog.get("speakerModels", []), speaker_id))
     if speaker.get("url") and not speaker.get("sha256"):
         raise ResolutionError(
             f"speaker model {speaker.get('id')!r} has no pinned SHA256"
         )
-    # A supplied URL is a different model than the one that was measured, so the
-    # catalog's measurement and threshold no longer describe it. Dropping them is
-    # what makes the transcriber withhold diarization until this deployment has
-    # measured its own operating point (see docs/microvm-asr.md, Calibration).
-    if speaker.get("url") != catalog_speaker_url:
-        speaker.pop("measured", None)
-        speaker.pop("recommendedThreshold", None)
 
     segmentation_id = _prop(properties, "SegmentationModelId") or catalog.get(
         "defaultSegmentationModelId", "none"
     )
     entries = catalog.get("segmentationModels", [])
-    if segmentation_id in ("none", "", CUSTOM_MODEL_ID) or not entries:
+    if segmentation_id in ("none", "") or not entries:
         segmentation = {"id": segmentation_id or "none", "url": "", "sha256": "", "license": "n/a"}
     else:
         segmentation = dict(_find(entries, segmentation_id))
-    for name, key in (
-        ("SegmentationModelUrl", "url"),
-        ("SegmentationModelSha256", "sha256"),
-    ):
-        override = _prop(properties, name)
-        if override:
-            segmentation[key] = override
     if segmentation.get("url") and not segmentation.get("sha256"):
         raise ResolutionError(
             f"segmentation model {segmentation.get('id')!r} has no pinned SHA256"
