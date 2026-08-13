@@ -88,7 +88,13 @@ const isStaleSessionError = (error: any): boolean => {
 
 export class TranscriptionService {
     private process: ChildProcess | null = null;           // FFmpeg: combined_audio.monitor → Transcribe
-    private novaAudioProcess: ChildProcess | null = null;  // FFmpeg: meeting_audio.monitor → Nova/recording
+    private novaAudioProcess: ChildProcess | null = null;  // FFmpeg: meeting_audio.monitor → Nova (NOT the recording)
+    // pacat: meeting audio → combined_audio. This is the SOLE route for meeting
+    // audio into the sink Transcribe reads, and it must stay an ACTIVE stream:
+    // a module-loopback alone let the null sink idle/suspend and combined_audio
+    // went digitally silent (peak amplitude 0 over 50s) while meeting_audio still
+    // had audio (GitHub #569).
+    private meetingToCombinedPipe: ChildProcess | null = null;
     private startTime: number | null = null;
     // Cumulative timeline offset (seconds) applied to Transcribe timestamps.
     // Amazon Transcribe resets Item.StartTime/EndTime to 0 on every new
@@ -144,7 +150,15 @@ export class TranscriptionService {
         console.log('Wake phrases configured:', this.wakePhrases);
     }
 
-    private async *audioStream() {
+    /**
+     * @param recordingStream tee of the audio that goes to Transcribe, which is
+     *   what the meeting's S3 audio recording must contain. It used to be fed from
+     *   the meeting-ONLY ffmpeg in writeAudio, so the voice assistant's spoken
+     *   replies were structurally absent from every recording — while the video
+     *   recording, which captures combined_audio.monitor, had them. Teeing here
+     *   makes the audio recording match both the transcript and the video.
+     */
+    private async *audioStream(recordingStream?: NodeJS.WritableStream) {
 
         // Capture from combined_audio.monitor to get both meeting and agent audio for transcription
         this.process = spawn('ffmpeg', [
@@ -184,6 +198,14 @@ export class TranscriptionService {
 
         try {
             for await (const chunk of this.process.stdout!) {
+                // Record exactly what Transcribe hears, before framing: the frames
+                // below are subarrays of this chunk, so writing them instead would
+                // duplicate nothing but cost an extra write per frame. Gated on
+                // details.start for the same reason the silence branch below is —
+                // nothing before the meeting starts belongs in the recording.
+                if (details.start && recordingStream) {
+                    recordingStream.write(chunk);
+                }
                 // Cap the frame size (see MAX_AUDIO_CHUNK_BYTES). ffmpeg can hand
                 // over a buffer larger than Transcribe accepts, which used to
                 // abort transcription for the rest of the meeting (GitHub #536).
@@ -290,7 +312,7 @@ export class TranscriptionService {
             const sessionStartMs = Date.now();
             try {
                 const transcriptionParams: any = {
-                    AudioStream: this.audioStream(),
+                    AudioStream: this.audioStream(recordingStream),
                     MediaSampleRateHertz: this.sampleRate,
                     MediaEncoding: 'pcm',
                     ShowSpeakerLabel: true,
@@ -371,7 +393,7 @@ export class TranscriptionService {
                 if (isLocalTest) {
                     try {
                         await Promise.all([
-                            this.writeAudio(response, recordingStream).catch(err => {
+                            this.writeAudio(response).catch(err => {
                                 console.error('Audio write error (non-fatal in local test):', err.message);
                                 return Promise.resolve();
                             }),
@@ -386,7 +408,7 @@ export class TranscriptionService {
                 } else {
                     // Production mode - let errors crash the task
                     await Promise.all([
-                        this.writeAudio(response, recordingStream),
+                        this.writeAudio(response),
                         this.handleTranscriptEvents(response)
                     ]);
                 }
@@ -624,6 +646,15 @@ export class TranscriptionService {
             try { this.novaAudioProcess.kill(); } catch (_) { /* ignore */ }
             this.novaAudioProcess = null;
         }
+        if (this.meetingToCombinedPipe) {
+            try {
+                if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                    this.meetingToCombinedPipe.stdin.end();
+                }
+                this.meetingToCombinedPipe.kill();
+            } catch (_) { /* ignore */ }
+            this.meetingToCombinedPipe = null;
+        }
     }
 
     async stopTranscription(): Promise<void> {
@@ -717,13 +748,35 @@ export class TranscriptionService {
     }
 
     // Captures meeting-only audio (meeting_audio.monitor) via a separate FFmpeg process.
-    // Feeds audio to: (1) recording file, (2) combined_audio sink for Transcribe, (3) voice assistant.
+    // Feeds audio to: (1) combined_audio sink for Transcribe, (2) voice assistant.
+    // NOT the recording — see audioStream(), which tees it from combined_audio.
     // Uses separate process variables to avoid overwriting the transcription FFmpeg in audioStream().
     // Channel separation (meeting vs combined) prevents Nova from hearing its own voice.
-    private async writeAudio(transcribeResponse: any, recordingStream: any): Promise<void> {
+    private async writeAudio(transcribeResponse: any): Promise<void> {
         try {
-            // (Meeting audio reaches combined_audio via the module-loopback set up
-            // in entrypoint.sh — see the note in the stdout handler below.)
+            // Pipe meeting audio into combined_audio for Transcribe. This is the
+            // ONLY writer for meeting audio on that sink (entrypoint.sh
+            // deliberately has no loopback for it), so there is no duplication —
+            // and unlike a loopback, an active pacat stream keeps the null sink
+            // from suspending (#542, #569).
+            this.meetingToCombinedPipe = spawn('pacat', [
+                '--playback',
+                '--device=combined_audio',
+                '--format=s16le',
+                '--rate=16000',
+                '--channels=1',
+                '--raw',
+                '--latency-msec=80',
+            ]);
+
+            this.meetingToCombinedPipe.on('error', (error: any) => {
+                console.error(`pacat (meeting→combined) error: ${error.message}`);
+            });
+
+            this.meetingToCombinedPipe.stderr?.on('data', (data: any) => {
+                const msg = data.toString().trim();
+                if (msg) console.log(`pacat (meeting→combined): ${msg}`);
+            });
 
             // Capture meeting-only audio for Nova and recording
             this.novaAudioProcess = spawn('ffmpeg', [
@@ -759,17 +812,17 @@ export class TranscriptionService {
             this.novaAudioProcess.stdout?.on('data', async (chunk: Buffer) => {
                 if (details.start && this.isTranscribing) {
                     try {
-                        recordingStream.write(chunk);
-
-                        // NOTE: meeting audio is deliberately NOT forwarded to
-                        // combined_audio here. entrypoint.sh already routes
-                        // meeting_audio.monitor -> combined_audio with a
-                        // module-loopback, so writing it again from this process
-                        // delivered every utterance to Transcribe TWICE, at two
-                        // different latencies. Transcribe duly transcribed both:
-                        // "Jack and Jill, Jack and Jill went up ..." (GitHub #542).
-                        // This process still feeds the recording and the voice
-                        // assistant, which have no other source.
+                        // NOT written to the recording: this stream is meeting-only
+                        // by design (Nova must not hear itself), so recording it
+                        // silently dropped the assistant's replies. The recording is
+                        // teed from combined_audio.monitor in audioStream() instead.
+                        //
+                        // Sole route for meeting audio into combined_audio (see
+                        // the pacat spawn above). entrypoint.sh has no loopback
+                        // for it, so this does not duplicate (#542).
+                        if (this.meetingToCombinedPipe?.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                            this.meetingToCombinedPipe.stdin.write(chunk);
+                        }
 
                         if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
                             voiceAssistant.sendAudioChunk(chunk);

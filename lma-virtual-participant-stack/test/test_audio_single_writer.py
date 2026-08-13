@@ -66,9 +66,19 @@ def entrypoint_lines() -> list[str]:
     return _uncommented(ENTRYPOINT)
 
 
-def test_exactly_one_loopback_writes_meeting_audio_into_combined(
+def test_no_loopback_writes_meeting_audio_into_combined(
     entrypoint_lines: list[str],
 ) -> None:
+    """A module-loopback is NOT a reliable route into a null sink.
+
+    It does not keep the sink out of PulseAudio's idle/suspend state, so this
+    route went digitally silent: a live Zoom session recorded 50s of
+    combined_audio with peak amplitude 0 while meeting_audio itself had audio
+    (GitHub #569). The app's pacat stream is the route instead -- it delivers the
+    audio AND keeps the sink running.
+
+    This is the inverse of the original #542 fix, which removed the wrong writer.
+    """
     writers = [
         line
         for line in entrypoint_lines
@@ -76,26 +86,44 @@ def test_exactly_one_loopback_writes_meeting_audio_into_combined(
         and "source=meeting_audio.monitor" in line
         and "sink=combined_audio" in line
     ]
-    assert len(writers) == 1, (
-        f"expected exactly 1 loopback meeting_audio -> combined_audio, found "
-        f"{len(writers)}: {writers}"
+    assert not writers, (
+        "entrypoint.sh must NOT loopback meeting_audio into combined_audio; the "
+        f"pacat stream in scribe.ts is the sole route. Found: {writers}"
     )
 
 
-def test_the_app_does_not_also_write_meeting_audio_into_combined() -> None:
-    """This is the specific regression: a SECOND writer from the app.
+def test_the_app_is_the_sole_writer_of_meeting_audio_into_combined() -> None:
+    """scribe.ts holds exactly one ACTIVE pacat stream on combined_audio.
 
-    scribe.ts spawned `pacat --playback --device=combined_audio` and fed it the
-    same meeting audio the entrypoint loopback already routes.
+    "Active" is the load-bearing word: it is what keeps the null sink from
+    suspending. Exactly one, because two writers made Transcribe hear every
+    utterance twice ("Jack and Jill, Jack and Jill went up...", #542).
     """
     scribe = "\n".join(_uncommented(SCRIBE))
-    assert "--device=combined_audio" not in scribe, (
-        "scribe.ts must not write into combined_audio; entrypoint.sh's "
-        "module-loopback is the sole route for meeting audio"
+    assert scribe.count("--device=combined_audio") == 1, (
+        "expected exactly one pacat writer into combined_audio in scribe.ts"
     )
-    assert "meetingToCombinedPipe" not in scribe, (
-        "the duplicate pacat pipe should be fully removed, not just unused"
+    assert "meetingToCombinedPipe.stdin.write(chunk)" in scribe, (
+        "the pipe must actually be fed, not merely spawned"
     )
+
+
+def test_the_pacat_writer_uses_an_active_stream_not_a_oneshot() -> None:
+    """The stream must be long-lived, since keeping the sink awake is its job.
+
+    A short-lived writer would deliver its chunk and let combined_audio suspend
+    again, reproducing #569 intermittently — which is the worst version of this
+    bug, because it looks like it works.
+    """
+    scribe = SCRIBE.read_text()
+    spawn_idx = scribe.index("--device=combined_audio")
+    # The handle is retained on the instance and fed from the ffmpeg data handler,
+    # rather than spawned per chunk.
+    assert "this.meetingToCombinedPipe = spawn('pacat'" in scribe
+    assert scribe.count("spawn('pacat'") >= 1
+    # ...and torn down with the session, not leaked.
+    assert "this.meetingToCombinedPipe.kill()" in scribe
+    assert spawn_idx > 0
 
 
 def test_agent_audio_also_has_exactly_one_route_into_combined(
@@ -131,7 +159,11 @@ def test_only_nova_writes_into_agent_output() -> None:
 
 def test_pulse_loopback_latency_tolerates_cpu_jitter(entrypoint_lines: list[str]) -> None:
     for line in entrypoint_lines:
-        if "module-loopback" not in line:
+        # Only lines that CREATE a loopback. entrypoint.sh also greps the module
+        # list for an existing loopback to stay idempotent under /ready retries
+        # (see test_audio_graph_idempotency.py), and that detection pattern
+        # naturally mentions module-loopback without setting a latency.
+        if "load-module module-loopback" not in line:
             continue
         match = re.search(r"latency_msec=(\d+)", line)
         assert match, f"loopback should set latency_msec explicitly: {line.strip()}"

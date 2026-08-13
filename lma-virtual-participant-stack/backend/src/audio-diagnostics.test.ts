@@ -7,82 +7,375 @@
 /**
  * Tests for the outbound-audio classifier used to diagnose GitHub #543.
  *
- * These assert the thresholds that decide whether a live session's audio is
- * leaving cleanly. That matters because three previous fixes were shipped on
- * reasoning rather than measurement, and one of them broke transcription — so the
- * next change must be justified by what these numbers say.
+ * These pin the thresholds that decide whether a live session's audio is leaving
+ * cleanly. That matters twice over: three previous fixes were shipped on reasoning
+ * rather than measurement (one of them broke transcription), and then the FIRST
+ * version of this classifier produced false alarms that would have justified a
+ * fourth wrong fix. The numbers in these tests are taken verbatim from the live
+ * Teams capture so that specific misreading cannot come back.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import {
-    classifyOutboundAudio,
+    classifyAudioWindow,
+    formatDeviceSpecs,
+    formatCaptureStreams,
+    parsePactlDefaults,
+    parsePactlIndexToName,
+    parsePactlSourceOutputs,
+    parsePactlShort,
     EXPECTED_PACKETS_PER_SECOND,
+    MIN_CAPTURE_RATIO,
+    MIN_MEASURE_SECONDS,
+    SPEECH_ENERGY_THRESHOLD,
     STATS_INTERVAL_MS,
 } from './audio-diagnostics.js';
 
+/** Long enough that cumulative capture is judged rather than skipped. */
+const measured = { elapsedSeconds: 60, cumulativeCaptureRatio: 1.0 };
+/** A window with no audio energy: the sender is deliberately silent. */
+const silent = { seconds: 1, packets: 5, captureRatio: 1.0, energyDelta: 0, ...measured };
+/** A window mid-utterance on a healthy sender. */
+const speaking = { seconds: 1, packets: 50, captureRatio: 1.0, energyDelta: 0.02, ...measured };
+
 test('the expected cadence matches Opus at a 20ms frame', () => {
-    // 1000ms / 20ms = 50 packets per second. If the meeting client negotiates a
-    // different ptime this constant must change, or every sample reads IRREGULAR.
+    // 1000ms / 20ms = 50 packets per second.
     assert.equal(EXPECTED_PACKETS_PER_SECOND, 50);
 });
 
-test('a steady sender is reported healthy', () => {
-    const v = classifyOutboundAudio({ packetsPerSecond: 50, sendDelayPerPacketMs: 1 });
-    assert.equal(v.healthy, true);
-    assert.match(v.reason, /steady/);
+test('DTX comfort noise during silence is NOT a problem', () => {
+    // Regression for the false alarm that filled the first live capture: 4.8
+    // packets/s for ten minutes, every line reported "encoder or capture starving".
+    // A DTX sender that has nothing to say is healthy, and drowning the log in
+    // this hid whether anything real was happening.
+    for (const packets of [4, 5, 6]) {
+        const v = classifyAudioWindow({ ...silent, packets });
+        assert.equal(v.state, 'idle', `${packets} pkt/s of comfort noise should read idle`);
+        assert.match(v.reason, /silent/);
+    }
 });
 
-test('normal sampling drift is tolerated', () => {
-    // The sampling window is not frame-aligned, so a healthy sender still varies.
-    // Flagging that would bury the real signal in noise.
-    for (const pps of [41, 45, 50, 55, 59]) {
-        assert.equal(
-            classifyOutboundAudio({ packetsPerSecond: pps }).healthy,
-            true,
-            `${pps}/s should be treated as healthy drift`,
+test('a short utterance averaged over a long window is not misread as frame loss', () => {
+    // The other artefact: sampling every 5s, a ~2.5s utterance at a perfect 50/s
+    // reads as ~25/s. The old code called that "capture starving" — indistinguishable
+    // from genuinely dropping half the frames, which was the question being asked.
+    // At a 1s window the same sender is judged on capture continuity instead.
+    const v = classifyAudioWindow({ seconds: 5, packets: 125, captureRatio: 1.0, energyDelta: 0.02 });
+    assert.notEqual(v.state, 'problem');
+});
+
+test('capture starvation is flagged from the cumulative ratio', () => {
+    // The signature actually being hunted: Chromium losing audio before the encoder
+    // sees it. Independent of speech, DTX and window alignment.
+    const v = classifyAudioWindow({ ...speaking, cumulativeCaptureRatio: 0.6 });
+    assert.equal(v.state, 'problem');
+    assert.match(v.reason, /capture starving/);
+});
+
+test('capture starvation is flagged even while silent', () => {
+    // Capture runs whether or not the agent is speaking, so a gap during silence is
+    // still a real fault — and it is the cheapest window in which to notice one.
+    const v = classifyAudioWindow({ ...silent, cumulativeCaptureRatio: 0.5 });
+    assert.equal(v.state, 'problem');
+    assert.match(v.reason, /capture starving/);
+});
+
+test('the per-window ratio never produces a verdict on its own', () => {
+    // Verbatim from the live capture: the per-window ratio alternated between these
+    // two values on a sender whose cumulative ratio was 1.008. The first version
+    // flagged every low-phase window as "capture starving". Four bogus PROBLEM
+    // lines came from exactly these numbers.
+    for (const ratio of [0.954, 0.959, 0.947, 0.949, 1.049, 1.061]) {
+        assert.notEqual(
+            classifyAudioWindow({ ...speaking, captureRatio: ratio }).state,
+            'problem',
+            `per-window ${ratio} must not be a verdict`,
         );
     }
 });
 
-test('a starved encoder is flagged', () => {
-    // The signature we are hunting: audio being produced too slowly, which is
-    // what a CPU-starved capture or encode looks like from the sender side.
-    const v = classifyOutboundAudio({ packetsPerSecond: 30 });
-    assert.equal(v.healthy, false);
-    assert.match(v.reason, /below the expected/);
+test('cumulative capture is not judged before there is enough of it', () => {
+    // Early on, the cumulative ratio carries the same quantisation as one window,
+    // so judging it would just move the false alarms to the start of the meeting.
+    const v = classifyAudioWindow({
+        ...speaking,
+        elapsedSeconds: MIN_MEASURE_SECONDS - 1,
+        cumulativeCaptureRatio: 0.5,
+    });
+    assert.notEqual(v.state, 'problem');
 });
 
-test('bursting after a stall is flagged', () => {
-    // The other half of a stall: the queue drains faster than realtime once the
-    // CPU frees up. Crackle can come from either side of that.
-    const v = classifyOutboundAudio({ packetsPerSecond: 90 });
-    assert.equal(v.healthy, false);
-    assert.match(v.reason, /exceeds the expected/);
+test('a healthy cumulative ratio is accepted at the threshold', () => {
+    for (const ratio of [MIN_CAPTURE_RATIO, 0.99, 1.0, 1.008, 1.01]) {
+        assert.notEqual(
+            classifyAudioWindow({ ...speaking, cumulativeCaptureRatio: ratio }).state,
+            'problem',
+            `${ratio} should be treated as healthy`,
+        );
+    }
 });
 
-test('silence is distinguished from an irregular cadence', () => {
-    // "No audio at all" and "audio arriving unevenly" need different fixes, so
-    // they must not collapse into one message.
-    const v = classifyOutboundAudio({ packetsPerSecond: 0 });
-    assert.equal(v.healthy, false);
-    assert.match(v.reason, /no audio packets/);
+test('the starvation message quantifies how much audio was lost', () => {
+    // "0.90 vs 0.95" is not actionable; "6000ms of audio never captured" is.
+    const v = classifyAudioWindow({
+        ...speaking,
+        elapsedSeconds: 60,
+        cumulativeCaptureRatio: 0.95 - 0.05,
+    });
+    assert.equal(v.state, 'problem');
+    assert.match(v.reason, /6000ms of audio never captured/);
+});
+
+test('far-end packet loss is reported as a wire fault, not a capture fault', () => {
+    // Crackle from loss on the wire and crackle from a starved encoder need
+    // opposite fixes, so the two must never collapse into one message.
+    const v = classifyAudioWindow({ ...speaking, remotePacketsLost: 3 });
+    assert.equal(v.state, 'problem');
+    assert.match(v.reason, /wire/);
+});
+
+test('capture starvation outranks far-end loss', () => {
+    // If capture is already losing frames, the far end will also report loss; the
+    // upstream cause is the actionable one.
+    const v = classifyAudioWindow({ ...speaking, cumulativeCaptureRatio: 0.4, remotePacketsLost: 3 });
+    assert.match(v.reason, /capture starving/);
 });
 
 test('queueing is flagged even when the cadence looks right', () => {
-    // A sender can hit ~50/s while still adding latency per packet; that is a
-    // stall being absorbed by a buffer rather than a clean path.
-    const v = classifyOutboundAudio({ packetsPerSecond: 50, sendDelayPerPacketMs: 45 });
-    assert.equal(v.healthy, false);
+    const v = classifyAudioWindow({ ...speaking, sendDelayPerPacketMs: 45 });
+    assert.equal(v.state, 'problem');
     assert.match(v.reason, /send delay/);
 });
 
-test('a missing send-delay stat does not produce a false alarm', () => {
-    // Not every browser reports totalPacketSendDelay; absence must not read as 0
-    // problems OR as a failure.
-    assert.equal(classifyOutboundAudio({ packetsPerSecond: 50 }).healthy, true);
+test('a starved cadence during speech is flagged', () => {
+    const v = classifyAudioWindow({ ...speaking, packets: 20 });
+    assert.equal(v.state, 'problem');
+    assert.match(v.reason, /only 20\.0 pkt\/s/);
 });
 
-test('the sampling interval is frequent enough to catch a short meeting', () => {
-    assert.ok(STATS_INTERVAL_MS <= 10000, 'should sample at least every 10s');
-    assert.ok(STATS_INTERVAL_MS >= 1000, 'but not so often that it adds load');
+test('audio energy with no packets at all is flagged', () => {
+    // Distinct from silence: the agent is producing sound and none of it is leaving.
+    const v = classifyAudioWindow({ ...speaking, packets: 0 });
+    assert.equal(v.state, 'problem');
+    assert.match(v.reason, /no packets sent/);
+});
+
+test('a high cadence at the start of an utterance is not flagged', () => {
+    // A DTX sender resuming mid-window legitimately overshoots 50/s. The first
+    // version called this "bursting after a stall" and it was just speech onset.
+    assert.equal(classifyAudioWindow({ ...speaking, packets: 62 }).state, 'ok');
+});
+
+test('missing optional stats do not produce a false alarm', () => {
+    // Not every stat is present on every browser or before the first RTCP report.
+    // Absence must read as "unknown", never as a fault.
+    const v = classifyAudioWindow({ seconds: 1, packets: 50, energyDelta: 0.02 });
+    assert.equal(v.state, 'ok');
+});
+
+test('the speech threshold sits above a silent null sink and below real speech', () => {
+    // Energy is summed squared amplitude; the observed values differ by orders of
+    // magnitude, so this only has to land between them.
+    assert.ok(SPEECH_ENERGY_THRESHOLD > 0);
+    assert.equal(classifyAudioWindow({ ...silent, energyDelta: SPEECH_ENERGY_THRESHOLD }).state, 'idle');
+    assert.equal(classifyAudioWindow({ ...speaking, energyDelta: 0.01 }).state, 'ok');
+});
+
+test('the sampling interval can resolve a single utterance', () => {
+    // A typical assistant reply is a few seconds. At 5s the utterance and the
+    // silence around it landed in one window and the rate became meaningless.
+    assert.ok(STATS_INTERVAL_MS <= 1000, 'must be <= 1s to separate speech from silence');
+    assert.ok(STATS_INTERVAL_MS >= 1000, 'but not so often that polling adds load');
+});
+
+/**
+ * The PulseAudio device-format probe. Its job is to show whether the virtual mic's
+ * format flaps while Teams holds two captures on it with conflicting channel
+ * counts — the one mechanism that fits every measurement taken so far (clean
+ * container-side recording, clean packet counters, garbled listener audio).
+ */
+test('sink and source listings are parsed into name/format pairs', () => {
+    // Verbatim shape of `pactl list short sinks` after #538 pinned the sinks.
+    const out = parsePactlShort(
+        [
+            '0\tmeeting_audio\tmodule-null-sink.c\ts16le 1ch 16000Hz\tSUSPENDED',
+            '1\tagent_output\tmodule-null-sink.c\ts16le 1ch 16000Hz\tRUNNING',
+            '2\tcombined_audio\tmodule-null-sink.c\ts16le 1ch 16000Hz\tRUNNING',
+        ].join('\n'),
+    );
+    assert.deepEqual(
+        out.map((e) => e.name),
+        ['meeting_audio', 'agent_output', 'combined_audio'],
+    );
+    assert.ok(out.every((e) => e.spec === 's16le 1ch 16000Hz'));
+});
+
+test('a device running at a DIFFERENT format is reported as-is', () => {
+    // The failure being hunted: something on the capture leg pulling the pipeline
+    // off 16 kHz mono. If the parser normalised this away the probe would be blind.
+    const out = parsePactlShort('1\tagent_output\tmodule-null-sink.c\tfloat32le 2ch 48000Hz\tRUNNING');
+    assert.equal(out[0].spec, 'float32le 2ch 48000Hz');
+});
+
+test('source-outputs are labelled even though their second column is numeric', () => {
+    // This listing is the direct evidence of Teams holding two captures at once:
+    // a numeric source id sits where sinks put a name, so a naive index would
+    // label every client the same and the two would be indistinguishable.
+    const out = parsePactlShort(
+        ['0\t3\t12\tprotocol-native.c\ts16le 1ch 16000Hz', '1\t3\t12\tprotocol-native.c\ts16le 2ch 48000Hz'].join(
+            '\n',
+        ),
+    );
+    assert.equal(out.length, 2);
+    assert.notEqual(out[0].name, out[1].name, 'two concurrent captures must be distinguishable');
+    assert.equal(out[1].spec, 's16le 2ch 48000Hz');
+});
+
+test('blank lines and headers are ignored', () => {
+    assert.deepEqual(parsePactlShort('\n\n'), []);
+    assert.deepEqual(parsePactlShort('no sample spec here\n'), []);
+});
+
+test('formatting is stable so unchanged devices produce no log line', () => {
+    // The probe logs only on change; an unstable rendering would emit a line every
+    // tick and bury the flap it exists to catch.
+    const entries = [{ name: 'agent_output', spec: 's16le 1ch 16000Hz' }];
+    assert.equal(formatDeviceSpecs(entries), formatDeviceSpecs([...entries]));
+    assert.match(formatDeviceSpecs(entries), /agent_output=\[s16le 1ch 16000Hz\]/);
+});
+
+test('an empty listing formats to something falsy, not the string "undefined"', () => {
+    assert.equal(formatDeviceSpecs([]), '');
+});
+
+test('the default sink and source are extracted from pactl info', () => {
+    // A live Teams call captured with deviceId "default", so which source the
+    // meeting's microphone actually is was left to PulseAudio. entrypoint.sh now
+    // pins it; this is how the pin is confirmed to have held.
+    const info = [
+        'Server String: /run/user/1000/pulse/native',
+        'Default Sink: meeting_audio',
+        'Default Source: agent_mic',
+        'Cookie: 1234:5678',
+    ].join('\n');
+    assert.deepEqual(parsePactlDefaults(info), { sink: 'meeting_audio', source: 'agent_mic' });
+});
+
+test('a default that fell through to a duplicate or a monitor is visible', () => {
+    // The two outcomes worth catching: the ".2" copy of a duplicated graph, and
+    // combined_audio.monitor — which would feed the meeting its own mixed audio.
+    assert.equal(parsePactlDefaults('Default Source: agent_mic.2').source, 'agent_mic.2');
+    assert.equal(
+        parsePactlDefaults('Default Source: combined_audio.monitor').source,
+        'combined_audio.monitor',
+    );
+});
+
+test('missing pactl info fields read as undefined, not as a crash', () => {
+    assert.deepEqual(parsePactlDefaults(''), { sink: undefined, source: undefined });
+});
+
+/**
+ * Resolving capture streams to device NAMES and owning applications.
+ *
+ * The question these answer: is the meeting's microphone the device we intended?
+ * A live session logged four sources occupying indices 1-4 with capture streams on
+ * 1, 3 and 4 — and because the short listing identifies a device only by index,
+ * there was no way to tell whether Chromium was reading agent_mic or
+ * combined_audio.monitor. The latter would mean Teams is being fed the meeting's
+ * own audio mixed back in, which is a complete explanation of garbled playback
+ * that leaves every packet counter clean.
+ */
+const SOURCES_SHORT = [
+    '1\tmeeting_audio.monitor\tmodule-null-sink.c\ts16le 1ch 16000Hz\tIDLE',
+    '2\tagent_output.monitor\tmodule-null-sink.c\ts16le 1ch 16000Hz\tRUNNING',
+    '3\tcombined_audio.monitor\tmodule-null-sink.c\ts16le 1ch 16000Hz\tRUNNING',
+    '4\tagent_mic\tmodule-remap-source.c\ts16le 1ch 16000Hz\tRUNNING',
+].join('\n');
+
+test('device indices are mapped to names rather than to listing positions', () => {
+    // The indices in the live capture started at 1, so "the third line" is not
+    // source 3. Position-based mapping would silently mislabel every stream.
+    const map = parsePactlIndexToName(SOURCES_SHORT);
+    assert.equal(map.get('1'), 'meeting_audio.monitor');
+    assert.equal(map.get('4'), 'agent_mic');
+    assert.equal(map.size, 4);
+});
+
+test('a capture stream is resolved to its application and device name', () => {
+    const streams = parsePactlSourceOutputs(
+        [
+            'Source Output #3',
+            '\tDriver: protocol-native.c',
+            '\tClient: 12',
+            '\tSource: 4',
+            '\tSample Specification: s16le 2ch 48000Hz',
+            '\tProperties:',
+            '\t\tapplication.name = "Chromium"',
+        ].join('\n'),
+    );
+    assert.equal(streams.length, 1);
+    assert.deepEqual(streams[0], {
+        index: '3',
+        sourceIndex: '4',
+        spec: 's16le 2ch 48000Hz',
+        app: 'Chromium',
+    });
+    assert.equal(
+        formatCaptureStreams(streams, parsePactlIndexToName(SOURCES_SHORT)),
+        'Chromium<-agent_mic[s16le 2ch 48000Hz]',
+    );
+});
+
+test('the failure mode this exists to catch is legible in one line', () => {
+    // Chromium capturing combined_audio.monitor: the meeting would hear itself.
+    const streams = parsePactlSourceOutputs(
+        [
+            'Source Output #5',
+            '\tSource: 3',
+            '\tSample Specification: s16le 2ch 48000Hz',
+            '\tProperties:',
+            '\t\tapplication.name = "Chromium"',
+        ].join('\n'),
+    );
+    assert.equal(
+        formatCaptureStreams(streams, parsePactlIndexToName(SOURCES_SHORT)),
+        'Chromium<-combined_audio.monitor[s16le 2ch 48000Hz]',
+    );
+});
+
+test('several capture streams are parsed from one listing', () => {
+    const streams = parsePactlSourceOutputs(
+        [
+            'Source Output #0',
+            '\tSource: 2',
+            '\tSample Specification: s16le 1ch 16000Hz',
+            '\tProperties:',
+            '\t\tmedia.name = "Loopback to Combined_Audio"',
+            'Source Output #3',
+            '\tSource: 4',
+            '\tSample Specification: s16le 2ch 48000Hz',
+            '\tProperties:',
+            '\t\tapplication.name = "Chromium"',
+        ].join('\n'),
+    );
+    assert.equal(streams.length, 2);
+    // A loopback has no application.name; media.name keeps it identifiable rather
+    // than collapsing every anonymous stream into one indistinguishable label.
+    assert.equal(streams[0].app, 'Loopback to Combined_Audio');
+    assert.equal(streams[1].app, 'Chromium');
+});
+
+test('a stream on an unknown source index is labelled, not dropped', () => {
+    // If the map is stale, showing "source#9" is far better than hiding a capture.
+    const streams = parsePactlSourceOutputs(
+        ['Source Output #1', '\tSource: 9', '\tSample Specification: s16le 1ch 16000Hz'].join('\n'),
+    );
+    assert.match(formatCaptureStreams(streams, new Map()), /source#9/);
+    assert.equal(streams[0].app, 'unknown');
+});
+
+test('an empty listing yields no streams', () => {
+    assert.deepEqual(parsePactlSourceOutputs(''), []);
+    assert.equal(formatCaptureStreams([], new Map()), '');
 });

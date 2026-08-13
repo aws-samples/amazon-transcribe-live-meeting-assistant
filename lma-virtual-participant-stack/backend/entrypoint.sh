@@ -172,20 +172,58 @@ sleep 2
 
 echo "Creating PulseAudio audio routing for meeting and agent..."
 
+# EVERY load-module below must be idempotent.
+#
+# Under MICROVM this script is run by bootStack() from the /ready hook, and
+# Lambda RETRIES /ready whenever it returns 503 (observed ~3 retries on a cold
+# ARM boot, and bootStack reports failure if the VNC ports take longer than its
+# timeout). Each retry re-ran this section, and pactl silently renames a
+# colliding sink rather than failing -- so a live MicroVM was observed with the
+# entire graph duplicated:
+#
+#   sinks:   meeting_audio agent_output combined_audio
+#            meeting_audio.2 agent_output.2 combined_audio.2
+#   sources: ... agent_mic agent_mic.2
+#
+# The dangerous one is not the spare sinks, which nothing writes to. It is the
+# module-loopback below: a second copy mixes the agent's voice into
+# combined_audio TWICE at two independent latencies, which is precisely the
+# double-writer this file warns about for meeting audio (#542) -- every agent
+# utterance reaching Transcribe twice. And because /ready runs at IMAGE BUILD
+# time, the duplicate graph is captured in the snapshot and every launch inherits
+# it.
+pa_sink_exists() { pactl list short sinks | cut -f2 | grep -qx "$1"; }
+pa_source_exists() { pactl list short sources | cut -f2 | grep -qx "$1"; }
+pa_loopback_exists() {
+    pactl list short modules | grep -q "module-loopback.*source=$1.*sink=$2"
+}
+
 # Create a null sink for meeting audio (Chromium output)
 # rate/channels are pinned on every sink: a null sink otherwise adopts the
 # daemon default (48 kHz stereo), and each 16 kHz mono stream would then be
 # resampled on the way in AND on the way out (GitHub #538).
-MEETING_SINK=$(pactl load-module module-null-sink sink_name=meeting_audio rate=16000 channels=1 format=s16le sink_properties=device.description="Meeting_Audio")
-echo "Created meeting_audio sink (module $MEETING_SINK)"
+if pa_sink_exists meeting_audio; then
+    echo "meeting_audio sink already exists — not creating a duplicate"
+else
+    MEETING_SINK=$(pactl load-module module-null-sink sink_name=meeting_audio rate=16000 channels=1 format=s16le sink_properties=device.description="Meeting_Audio")
+    echo "Created meeting_audio sink (module $MEETING_SINK)"
+fi
 
 # Create a null sink for agent audio output (Nova/ElevenLabs)
-AGENT_SINK=$(pactl load-module module-null-sink sink_name=agent_output rate=16000 channels=1 format=s16le sink_properties=device.description="Agent_Audio_Output")
-echo "Created agent_output sink (module $AGENT_SINK)"
+if pa_sink_exists agent_output; then
+    echo "agent_output sink already exists — not creating a duplicate"
+else
+    AGENT_SINK=$(pactl load-module module-null-sink sink_name=agent_output rate=16000 channels=1 format=s16le sink_properties=device.description="Agent_Audio_Output")
+    echo "Created agent_output sink (module $AGENT_SINK)"
+fi
 
 # Create a combined sink that mixes meeting + agent audio for transcription
-COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio rate=16000 channels=1 format=s16le sink_properties=device.description="Combined_Audio_For_Transcription")
-echo "Created combined_audio sink (module $COMBINED_SINK)"
+if pa_sink_exists combined_audio; then
+    echo "combined_audio sink already exists — not creating a duplicate"
+else
+    COMBINED_SINK=$(pactl load-module module-null-sink sink_name=combined_audio rate=16000 channels=1 format=s16le sink_properties=device.description="Combined_Audio_For_Transcription")
+    echo "Created combined_audio sink (module $COMBINED_SINK)"
+fi
 
 # 80ms latency: 1ms caused underruns on smaller instances, and 20ms still
 # underran on a 2-vCPU MicroVM once Chromium, the avatar rescale, video recording
@@ -197,20 +235,44 @@ echo "Created combined_audio sink (module $COMBINED_SINK)"
 # Transcribe twice at two different latencies -- Transcribe then transcribed both
 # ("Jack and Jill, Jack and Jill went up ...", GitHub #542). Do not re-add a
 # second writer here or in the app.
-pactl load-module module-loopback source=meeting_audio.monitor sink=combined_audio latency_msec=80
-echo "Routed meeting audio to combined sink"
+# NOTE: meeting_audio is NOT loopback-routed to combined_audio. A module-loopback
+# into a null sink does not keep that sink out of PulseAudio's idle/suspend
+# state, so this route went digitally silent -- a live Zoom session recorded 50s
+# of combined_audio with peak amplitude 0 while meeting_audio itself had audio
+# (GitHub #569). The app instead holds an ACTIVE pacat playback stream on
+# combined_audio (scribe.ts), which both delivers the audio and keeps the sink
+# running. Exactly ONE writer -- adding this loopback back would duplicate every
+# utterance to Transcribe (#542).
 
 # Route agent_output.monitor to combined_audio sink
-pactl load-module module-loopback source=agent_output.monitor sink=combined_audio latency_msec=80
-echo "Routed agent audio to combined sink"
+if pa_loopback_exists agent_output.monitor combined_audio; then
+    echo "agent_output→combined_audio loopback already exists — not adding a second writer"
+else
+    pactl load-module module-loopback source=agent_output.monitor sink=combined_audio latency_msec=80
+    echo "Routed agent audio to combined sink"
+fi
 
 # Create a virtual microphone source from agent_output for Chromium
-pactl load-module module-remap-source source_name=agent_mic master=agent_output.monitor source_properties=device.description="Agent_Virtual_Microphone"
-echo "Created agent_mic source for Chromium"
+if pa_source_exists agent_mic; then
+    echo "agent_mic source already exists — not creating a duplicate"
+else
+    pactl load-module module-remap-source source_name=agent_mic master=agent_output.monitor source_properties=device.description="Agent_Virtual_Microphone"
+    echo "Created agent_mic source for Chromium"
+fi
 
 # Set meeting_audio as the default sink (Chromium will output here)
 pactl set-default-sink meeting_audio
 echo "Set meeting_audio as default sink"
+
+# ...and agent_mic as the default SOURCE. This was previously unset, which left
+# the choice of capture device entirely to PulseAudio: a live Teams call was
+# observed capturing with deviceId "default" rather than an explicit device, so
+# whatever PulseAudio happened to rank first became the meeting's microphone.
+# Every other reader in the app names its device explicitly (the ffmpegs, the
+# pacat streams, the speaking detector), so nothing depends on the previous
+# default and making this deterministic can only remove a variable.
+pactl set-default-source agent_mic
+echo "Set agent_mic as default source"
 
 echo "✓ Audio routing configured"
 
