@@ -114,6 +114,127 @@ public static class SelfTest
             Console.WriteLine($"  {FailMark} SRP signature threw: {e}");
         }
 
+        // ── Token-refresh logic (issue #535) ────────────────────────────────
+        // The decisions that determine whether an expiring token is renewed in
+        // time, or a failure is (mis)read as an auth problem. Pure functions, so
+        // they are checkable offline — unlike the refresh call itself, which
+        // needs a live Cognito pool.
+        Console.WriteLine("\nToken refresh + failure classification:");
+
+        // JWT `exp` extraction. Payload below is base64url of
+        //   {"sub":"selftest","username":"self@example.com","exp":1767225600}
+        // (1767225600 = 2026-01-01T00:00:00Z). Regenerate with:
+        //   python3 -c 'import base64,json;print(base64.urlsafe_b64encode(json.dumps({...},separators=(",",":")).encode()).decode().rstrip("="))'
+        var jwt = "eyJhbGciOiJSUzI1NiJ9."
+            + "eyJzdWIiOiJzZWxmdGVzdCIsInVzZXJuYW1lIjoic2VsZkBleGFtcGxlLmNvbSIsImV4cCI6MTc2NzIyNTYwMH0"
+            + ".not-a-real-signature";
+        Check("JWT exp decoded",
+            TokenStore.ExpiryOfJwt(jwt) is { } expiry ? expiry.ToUnixTimeSeconds().ToString() : "null",
+            "1767225600");
+        Check("JWT username claim decoded",
+            TokenStore.JwtPayload(jwt) is { } pl && pl.TryGetProperty("username", out var un)
+                ? un.GetString() ?? "null" : "null",
+            "self@example.com");
+        // Anything that isn't a 3-part JWT must yield null, NOT a crash and not a
+        // bogus date — an unreadable token means "don't schedule", not "expired".
+        Check("non-JWT token → no expiry",
+            TokenStore.ExpiryOfJwt("pasted-opaque-token")?.ToString() ?? "null", "null");
+        Check("JWT without exp → no expiry",
+            TokenStore.ExpiryOfJwt("a.eyJzdWIiOiJ4In0.c")?.ToString() ?? "null", "null");
+        Check("empty token → no expiry", TokenStore.ExpiryOfJwt("")?.ToString() ?? "null", "null");
+
+        // When to refresh: `RefreshLeadSeconds` (300s) BEFORE exp, never in the past.
+        var now = DateTimeOffset.FromUnixTimeSeconds(1_767_225_600);
+        string Until(double secondsToExp) =>
+            TokenStore.SecondsUntilRefresh(now, now.AddSeconds(secondsToExp)).ToString("F0");
+        Check("refresh delay, 1h token", Until(3600), "3300");   // 3600 - 300 lead
+        Check("refresh delay, 301s left", Until(301), "1");
+        Check("refresh delay, inside lead window", Until(299), "0");
+        Check("refresh delay, already expired", Until(-60), "0");
+
+        string Needs(double secondsToExp) =>
+            TokenStore.NeedsRefresh(now, now.AddSeconds(secondsToExp)).ToString();
+        Check("needsRefresh, fresh token", Needs(3600), "False");
+        Check("needsRefresh, 301s left", Needs(301), "False");
+        Check("needsRefresh, 299s left", Needs(299), "True");
+        Check("needsRefresh, expired", Needs(-1), "True");
+        // Unknown expiry must NOT trigger speculative refreshes — the reactive
+        // path covers opaque tokens instead.
+        Check("needsRefresh, unknown expiry", TokenStore.NeedsRefresh(now, null).ToString(), "False");
+
+        // Auth vs transient. A false positive spends refreshes on network
+        // outages; a false negative leaves an expired token unrefreshed.
+        // The message-fallback strings are ClientWebSocket's real wording
+        // ("The server returned status code '401' when status code '101' was
+        // expected."); the status-code path is what a live 401 exercises with
+        // CollectHttpResponseDetails on (measured against the real transcriber).
+        string Classify(int? status, string? msg) => TranscriberSocket.IsAuthFailure(status, msg).ToString();
+        Check("HTTP 401 → auth", Classify(401, null), "True");
+        Check("HTTP 403 → auth", Classify(403, null), "True");
+        Check("HTTP 502 → transient", Classify(502, null), "False");
+        Check("HTTP 101 upgrade → transient", Classify(101, null), "False");
+        Check("message '401' quoted → auth",
+            Classify(null, "The server returned status code '401' when status code '101' was expected."), "True");
+        Check("message '403' quoted → auth",
+            Classify(null, "The server returned status code '403' when status code '101' was expected."), "True");
+        Check("message '503' quoted → transient",
+            Classify(null, "The server returned status code '503' when status code '101' was expected."), "False");
+        Check("offline (no such host) → transient",
+            Classify(null, "No such host is known. (example.cloudfront.net:443)"), "False");
+        Check("timeout → transient", Classify(null, "The operation has timed out."), "False");
+        Check("bare 401 substring → transient (must be quoted-code shaped)",
+            Classify(null, "connection reset by peer after 401 bytes"), "False");
+        Check("no status, no message → transient", Classify(null, null), "False");
+        // A readable status must WIN over a scary-looking message: the server
+        // answered, so the message's number (if any) is secondary.
+        Check("status 502 beats message '401'",
+            Classify(502, "The server returned status code '401' when status code '101' was expected."), "False");
+
+        // Reconnect backoff curve: 0.5s doubling to the 10s cap.
+        string Backoff(int attempt) => TranscriberSocket.BackoffDelay(attempt).ToString("F1");
+        Check("backoff #1", Backoff(1), "0.5");
+        Check("backoff #2", Backoff(2), "1.0");
+        Check("backoff #3", Backoff(3), "2.0");
+        Check("backoff #4", Backoff(4), "4.0");
+        Check("backoff #5", Backoff(5), "8.0");
+        Check("backoff #6 (capped)", Backoff(6), "10.0");
+        Check("backoff #20 (capped)", Backoff(20), "10.0");
+
+        // Log redaction: handshake errors can embed the request URL, which
+        // carries the access token — a live credential must never reach stdout.
+        var leakyError = "WebSocketException: request to "
+            + "wss://x.cloudfront.net/api/v1/ws"
+            + "?authorization=Bearer%20eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.sig1"
+            + "&id_token=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ5In0.sig2 failed: "
+            + "The server returned status code '401' when status code '101' was expected.";
+        var scrubbed = TranscriberSocket.RedactTokens(leakyError);
+        Check("redaction removes access token", scrubbed.Contains("eyJzdWIiOiJ4In0").ToString(), "False");
+        Check("redaction removes id token", scrubbed.Contains("eyJzdWIiOiJ5In0").ToString(), "False");
+        Check("redaction leaves no 'eyJ' behind", scrubbed.Contains("eyJ").ToString(), "False");
+        // The rest of the diagnostic must survive, or we've traded a leak for
+        // an unusable error message.
+        Check("redaction keeps the status code", scrubbed.Contains("status code '401'").ToString(), "True");
+        Check("redaction keeps the host/path", scrubbed.Contains("wss://x.cloudfront.net/api/v1/ws").ToString(), "True");
+        Check("redaction marks the removal", scrubbed.Contains("<redacted-jwt>").ToString(), "True");
+        Check("redaction is a no-op on clean text",
+            TranscriberSocket.RedactTokens("plain error, no tokens"), "plain error, no tokens");
+
+        // Cognito error classification: only a REJECTED credential is terminal.
+        // Retrying a rejected refresh token is pointless; giving up on a 5xx or a
+        // throttle would sign the user out for no reason. Message shapes match
+        // what Srp.CallAsync throws ("Cognito HTTP <code>: <__type>: <message>").
+        string Rejected(string msg) => Srp.IsCredentialRejectedMessage(msg).ToString();
+        Check("NotAuthorizedException → terminal",
+            Rejected("Cognito HTTP 400: NotAuthorizedException: Refresh Token has expired"), "True");
+        Check("UserNotFoundException → terminal",
+            Rejected("Cognito HTTP 400: UserNotFoundException: User does not exist"), "True");
+        Check("TooManyRequestsException → retryable",
+            Rejected("Cognito HTTP 400: TooManyRequestsException: Rate exceeded"), "False");
+        Check("InternalErrorException → retryable",
+            Rejected("Cognito HTTP 500: InternalErrorException: try again"), "False");
+        Check("malformed response → retryable",
+            Rejected("no AuthenticationResult.AccessToken in REFRESH_TOKEN_AUTH response"), "False");
+
         Console.WriteLine(failures == 0 ? "\nAll self-tests PASSED" : $"\n{failures} self-test(s) FAILED");
         return failures == 0 ? 0 : 1;
     }

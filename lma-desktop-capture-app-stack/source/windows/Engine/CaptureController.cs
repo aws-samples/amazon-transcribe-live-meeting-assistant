@@ -28,6 +28,13 @@ public sealed class CaptureController
     }
 
     public Config Config { get; }
+    /// <summary>
+    /// Keeps the access token fresh while signed in (issue #535). Lives on the
+    /// CONTROLLER, not the socket, so it survives Stop/Start and keeps
+    /// refreshing while nothing is streaming — that is what makes a Start an
+    /// hour later succeed instead of 401ing.
+    /// </summary>
+    private TokenStore? _tokenStore;
     private TranscriberSocket? _socket;
     private StereoMixer? _mixer;
     private AudioCapture? _capture;
@@ -53,7 +60,13 @@ public sealed class CaptureController
     /// <summary>The callId of the active/most-recent stream (for "Open in LMA" deep link).</summary>
     public string ActiveCallId { get; private set; } = "";
 
-    public CaptureController(Config config) { Config = config; }
+    public CaptureController(Config config)
+    {
+        Config = config;
+        // A token supplied up front (LMA_ACCESS_TOKEN / --token, plus an optional
+        // refresh token) deserves the same upkeep as one we signed in for.
+        if (!string.IsNullOrEmpty(config.AccessToken)) InstallTokenStore();
+    }
 
     public State CurrentState { get { lock (_lock) { return _state; } } }
 
@@ -79,6 +92,11 @@ public sealed class CaptureController
             Config.Username = username;
             Config.AccessToken = tokens.AccessToken;
             Config.IdToken = tokens.IdToken;
+            // KEEP the refresh token. Discarding it here is the root cause of
+            // issue #535 — without it the ~1 h access token cannot be renewed
+            // and the meeting is lost to a forced re-sign-in.
+            Config.RefreshToken = tokens.RefreshToken;
+            InstallTokenStore();
             Log($"Signed in as {username}");
             SetState(State.Authenticated);
             return true;
@@ -89,6 +107,26 @@ public sealed class CaptureController
             SetState(State.Err(e.Message));
             return false;
         }
+    }
+
+    /// <summary>
+    /// Build the refresher for the tokens now on `Config` and start its
+    /// proactive schedule. Refreshed tokens are mirrored back onto `Config` so
+    /// everything that reads it (IsAuthenticated, VideoSocket) stays correct.
+    /// </summary>
+    private void InstallTokenStore()
+    {
+        _tokenStore?.Invalidate();
+        var store = new TokenStore(Config.AccessToken, Config.IdToken, Config.RefreshToken,
+                                   Config.ClientId, Config.EffectiveRegion);
+        store.OnRefresh = (access, id) =>
+        {
+            Config.AccessToken = access;
+            Config.IdToken = id;
+        };
+        store.OnLog = msg => Log(msg);
+        _tokenStore = store;
+        store.ArmProactiveRefresh();
     }
 
     /// <summary>True when we already have an access token (pasted or from a prior login).</summary>
@@ -109,10 +147,39 @@ public sealed class CaptureController
     public void Logout()
     {
         if (_socket != null) Stop();
+        _tokenStore?.Invalidate();   // stop refreshing on behalf of a signed-out user
+        _tokenStore = null;
         Config.AccessToken = "";
         Config.IdToken = "";
+        Config.RefreshToken = "";
         Log("Signed out");
         SetState(State.Idle);
+    }
+
+    /// <summary>
+    /// The access token was rejected AND could not be renewed (revoked refresh
+    /// token, changed password, deleted user). Stop the stream and fall back to
+    /// the signed-out state CARRYING the reason, so the panel re-shows the
+    /// sign-in form with the error. The process stays alive — only the session
+    /// is over, not the app.
+    /// </summary>
+    private void HandleFatalAuth(string message)
+    {
+        Log("Token rejected — sign in again.");
+        _tokenStore?.Invalidate();
+        _tokenStore = null;
+        // Clearing the tokens is what makes `IsAuthenticated` false, and that is
+        // what puts the sign-in form (and this error text) back on screen.
+        Config.AccessToken = "";
+        Config.IdToken = "";
+        Config.RefreshToken = "";
+        // Set the error BEFORE Stop(): the panel decides on the streaming→false
+        // transition whether the stop was clean (it must not announce "your
+        // meeting is being processed" for a dead session), and Stop()'s first
+        // act is a transition to Stopping. Passing it as the final state too
+        // keeps the async teardown from overwriting it with idle.
+        SetState(State.Err(message));
+        if (_socket != null) Stop(State.Err(message));
     }
 
     // MARK: - Streaming lifecycle
@@ -149,7 +216,7 @@ public sealed class CaptureController
         if (!string.IsNullOrEmpty(MicLabel)) Config.AgentId = MicLabel;
         if (!string.IsNullOrEmpty(SystemLabel)) Config.FromNumber = SystemLabel;
 
-        var sock = new TranscriberSocket(Config);
+        var sock = new TranscriberSocket(Config, _tokenStore);
         var mix = new StereoMixer(Config.SampleRate, chunk => sock.SendPcm(chunk));
         var cap = new AudioCapture(mix, Config.SampleRate, MicDeviceId);
 
@@ -163,7 +230,7 @@ public sealed class CaptureController
         }
 
         sock.OnStateChange = connected => mix.SetConnected(connected);
-        sock.OnFatalAuth = msg => { Log("Token rejected — sign in again."); SetState(State.Err(msg)); Stop(); };
+        sock.OnFatalAuth = HandleFatalAuth;
         mix.OnLevels = (m, k, connected, paused) => OnLevels?.Invoke(m, k, connected, paused);
 
         _socket = sock; _mixer = mix; _capture = cap;
@@ -258,8 +325,14 @@ public sealed class CaptureController
         });
     }
 
-    /// <summary>Stop: send END, tear down capture + socket, return to authenticated/idle.</summary>
-    public void Stop()
+    /// <summary>
+    /// Stop: send END, tear down capture + socket, return to authenticated/idle.
+    ///
+    /// `finalState` overrides where we land. The fatal-auth path needs it: this
+    /// teardown finishes asynchronously and would otherwise overwrite the error
+    /// state with idle, swallowing the reason the stream stopped.
+    /// </summary>
+    public void Stop(State? finalState = null)
     {
         SetState(State.Stopping);
         StopVideo(sendEnd: true);
@@ -273,7 +346,8 @@ public sealed class CaptureController
         {
             sock?.Close();
             _socket = null; _mixer = null; _capture = null; _tee = null;
-            SetState(string.IsNullOrEmpty(Config.AccessToken) ? State.Idle : State.Authenticated);
+            SetState(finalState
+                ?? (string.IsNullOrEmpty(Config.AccessToken) ? State.Idle : State.Authenticated));
         });
     }
 

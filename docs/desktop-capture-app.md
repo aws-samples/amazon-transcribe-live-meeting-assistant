@@ -641,9 +641,10 @@ voice assistant, or hands-off unattended recording.
   you out everywhere, or you have been signed in for longer than the
   deployment's refresh-token lifetime (30 days by default). Sign in again in
   the app and start a new recording. The app stays running; you should never
-  need to quit and relaunch it to recover. (Earlier versions did quit
-  themselves in this situation — if the app *disappears* instead of showing
-  this message, update to the current version. See
+  need to quit and relaunch it to recover. (Earlier versions never renewed the
+  session at all, so it always died after about an hour — the macOS app
+  *disappeared* outright and the Windows app demanded a fresh sign-in
+  mid-meeting. If you see either behaviour, update to the current version. See
   [issue #535](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/535).)
 - **Signing in again after quitting the app.** The session is held in memory
   only, so a fresh launch always asks for your password again — that is
