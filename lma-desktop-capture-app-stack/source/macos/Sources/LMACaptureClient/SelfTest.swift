@@ -88,6 +88,122 @@ enum SelfTest {
             print("  ✗ SRP signature threw: \(error)")
         }
 
+        // ── Token-refresh logic (issue #535) ────────────────────────────────
+        // The decisions that determine whether an expiring token is renewed in
+        // time, or a failure is (mis)read as an auth problem. Pure functions, so
+        // they are checkable offline — unlike the refresh call itself, which
+        // needs a live Cognito pool.
+        print("\nToken refresh + failure classification:")
+
+        // JWT `exp` extraction. Payload below is base64url of
+        //   {"sub":"selftest","username":"self@example.com","exp":1767225600}
+        // (1767225600 = 2026-01-01T00:00:00Z). Regenerate with:
+        //   python3 -c 'import base64,json;print(base64.urlsafe_b64encode(json.dumps({...},separators=(",",":")).encode()).decode().rstrip("="))'
+        let jwt = "eyJhbGciOiJSUzI1NiJ9."
+            + "eyJzdWIiOiJzZWxmdGVzdCIsInVzZXJuYW1lIjoic2VsZkBleGFtcGxlLmNvbSIsImV4cCI6MTc2NzIyNTYwMH0"
+            + ".not-a-real-signature"
+        check("JWT exp decoded",
+              TokenStore.expiry(ofJWT: jwt).map { "\(Int($0.timeIntervalSince1970))" } ?? "nil",
+              "1767225600")
+        check("JWT username claim decoded",
+              TokenStore.jwtPayload(jwt)?["username"] as? String ?? "nil",
+              "self@example.com")
+        // Anything that isn't a 3-part JWT must yield nil, NOT a crash and not a
+        // bogus date — an unreadable token means "don't schedule", not "expired".
+        check("non-JWT token → no expiry", TokenStore.expiry(ofJWT: "pasted-opaque-token").map { "\($0)" } ?? "nil", "nil")
+        check("JWT without exp → no expiry",
+              TokenStore.expiry(ofJWT: "a.eyJzdWIiOiJ4In0.c").map { "\($0)" } ?? "nil", "nil")
+
+        // When to refresh: `refreshLead` (300s) BEFORE exp, never in the past.
+        let now = Date(timeIntervalSince1970: 1_767_225_600)
+        func until(_ secondsToExp: TimeInterval) -> String {
+            String(format: "%.0f", TokenStore.secondsUntilRefresh(
+                now: now, exp: now.addingTimeInterval(secondsToExp)))
+        }
+        check("refresh delay, 1h token", until(3600), "3300")   // 3600 - 300 lead
+        check("refresh delay, 301s left", until(301), "1")
+        check("refresh delay, inside lead window", until(299), "0")
+        check("refresh delay, already expired", until(-60), "0")
+
+        func needs(_ secondsToExp: TimeInterval) -> String {
+            "\(TokenStore.needsRefresh(now: now, exp: now.addingTimeInterval(secondsToExp)))"
+        }
+        check("needsRefresh, fresh token", needs(3600), "false")
+        check("needsRefresh, 301s left", needs(301), "false")
+        check("needsRefresh, 299s left", needs(299), "true")
+        check("needsRefresh, expired", needs(-1), "true")
+        // Unknown expiry must NOT trigger speculative refreshes — the reactive
+        // path covers opaque tokens instead.
+        check("needsRefresh, unknown expiry", "\(TokenStore.needsRefresh(now: now, exp: nil))", "false")
+
+        // Auth vs transient. A false positive spends refreshes on network
+        // outages; a false negative leaves an expired token unrefreshed.
+        func classify(_ status: Int?, _ code: Int?) -> String {
+            let err = code.map { NSError(domain: NSURLErrorDomain, code: $0) }
+            return "\(TranscriberSocket.isAuthFailure(status: status, error: err))"
+        }
+        check("401 → auth", classify(401, nil), "true")
+        check("403 → auth", classify(403, nil), "true")
+        check("502 → transient", classify(502, nil), "false")
+        check("101 upgrade → transient", classify(101, nil), "false")
+        // -1011 badServerResponse is how URLSession reports a refused WS upgrade
+        // when there is no readable HTTP response.
+        check("-1011 (no response) → auth", classify(nil, NSURLErrorBadServerResponse), "true")
+        check("-1013 (auth required) → auth", classify(nil, NSURLErrorUserAuthenticationRequired), "true")
+        check("-1009 (offline) → transient", classify(nil, NSURLErrorNotConnectedToInternet), "false")
+        check("-1001 (timeout) → transient", classify(nil, NSURLErrorTimedOut), "false")
+        check("-1003 (bad host) → transient", classify(nil, NSURLErrorCannotFindHost), "false")
+        check("no status, no error → transient", classify(nil, nil), "false")
+        // A non-URL error (e.g. a POSIX errno) must not be read as auth.
+        check("non-URL error → transient",
+              "\(TranscriberSocket.isAuthFailure(status: nil, error: NSError(domain: NSPOSIXErrorDomain, code: 32)))",
+              "false")
+
+        // Reconnect backoff curve: 0.5s doubling to the 10s cap.
+        func backoff(_ attempt: Int) -> String {
+            String(format: "%.1f", TranscriberSocket.backoffDelay(attempt: attempt))
+        }
+        check("backoff #1", backoff(1), "0.5")
+        check("backoff #2", backoff(2), "1.0")
+        check("backoff #3", backoff(3), "2.0")
+        check("backoff #4", backoff(4), "4.0")
+        check("backoff #5", backoff(5), "8.0")
+        check("backoff #6 (capped)", backoff(6), "10.0")
+        check("backoff #20 (capped)", backoff(20), "10.0")
+
+        // Log redaction: URLSession errors embed the request URL, which carries
+        // the access token — a live credential must never reach stdout.
+        let leakyError = "Error Domain=NSURLErrorDomain Code=-1011 UserInfo={"
+            + "NSErrorFailingURLStringKey=wss://x.cloudfront.net/api/v1/ws"
+            + "?authorization=Bearer%20eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.sig1"
+            + "&id_token=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ5In0.sig2, "
+            + "NSLocalizedDescription=There was a bad response from the server.}"
+        let scrubbed = TranscriberSocket.redactingTokens(leakyError)
+        check("redaction removes access token", "\(scrubbed.contains("eyJzdWIiOiJ4In0"))", "false")
+        check("redaction removes id token", "\(scrubbed.contains("eyJzdWIiOiJ5In0"))", "false")
+        check("redaction leaves no 'eyJ' behind", "\(scrubbed.contains("eyJ"))", "false")
+        // The rest of the diagnostic must survive, or we've traded a leak for
+        // an unusable error message.
+        check("redaction keeps the error code", "\(scrubbed.contains("Code=-1011"))", "true")
+        check("redaction keeps the host/path", "\(scrubbed.contains("wss://x.cloudfront.net/api/v1/ws"))", "true")
+        check("redaction marks the removal", "\(scrubbed.contains("<redacted-jwt>"))", "true")
+        check("redaction is a no-op on clean text",
+              TranscriberSocket.redactingTokens("plain error, no tokens"), "plain error, no tokens")
+
+        // Cognito error classification: only a REJECTED credential is terminal.
+        // Retrying a rejected refresh token is pointless; giving up on a 5xx or a
+        // throttle would sign the user out for no reason.
+        func rejected(_ err: SRP.SRPError) -> String { "\(err.isCredentialRejected)" }
+        check("NotAuthorizedException → terminal",
+              rejected(.http(400, "NotAuthorizedException: Refresh Token has expired")), "true")
+        check("UserNotFoundException → terminal",
+              rejected(.http(400, "UserNotFoundException: User does not exist")), "true")
+        check("TooManyRequestsException → retryable",
+              rejected(.http(400, "TooManyRequestsException: Rate exceeded")), "false")
+        check("InternalErrorException → retryable",
+              rejected(.http(500, "InternalErrorException: try again")), "false")
+        check("malformed response → retryable", rejected(.malformed("no AuthenticationResult")), "false")
+
         print(failures == 0 ? "\nAll self-tests PASSED ✓" : "\n\(failures) self-test(s) FAILED ✗")
         return failures == 0 ? 0 : 1
     }

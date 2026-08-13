@@ -42,6 +42,10 @@ enum SRP {
 
     struct Tokens { let accessToken: String; let idToken: String; let refreshToken: String }
 
+    /// Result of a REFRESH_TOKEN_AUTH exchange. `refreshToken` is non-nil only
+    /// when the pool has refresh-token rotation enabled — see refresh().
+    struct RefreshedTokens { let accessToken: String; let idToken: String; let refreshToken: String? }
+
     enum SRPError: Error, CustomStringConvertible {
         case http(Int, String)
         case malformed(String)
@@ -52,6 +56,19 @@ enum SRP {
             case .malformed(let m): return "Malformed Cognito response: \(m)"
             case .challenge(let c): return "Unexpected auth challenge: \(c)"
             }
+        }
+
+        /// True when Cognito rejected the CREDENTIAL itself rather than failing
+        /// to answer. Cognito returns these as HTTP 400 with a `__type`, so the
+        /// status code alone can't distinguish "your refresh token is dead"
+        /// (only an interactive sign-in recovers) from "the request was bad or
+        /// the service hiccuped" (retrying is worthwhile).
+        var isCredentialRejected: Bool {
+            guard case .http(_, let body) = self else { return false }
+            return body.contains("NotAuthorizedException")      // revoked/expired/password changed
+                || body.contains("UserNotFoundException")       // user deleted
+                || body.contains("UserNotConfirmedException")
+                || body.contains("InvalidParameterException")   // malformed refresh token
         }
     }
 
@@ -118,6 +135,39 @@ enum SRP {
         }
         let refresh = auth["RefreshToken"] as? String ?? ""
         return Tokens(accessToken: access, idToken: id, refreshToken: refresh)
+    }
+
+    /// Redeem a refresh token for a NEW access + id token, via a single
+    /// unauthenticated InitiateAuth call with `AuthFlow=REFRESH_TOKEN_AUTH`.
+    ///
+    /// No SRP math and no password: the refresh token IS the credential. This is
+    /// the same exchange Amplify performs invisibly in the web UI, done here by
+    /// hand for the same reason login() is (see the note at the top of this file
+    /// — this client must stay SDK-free).
+    ///
+    /// Notes for anyone changing this:
+    ///   • Cognito does NOT return a new RefreshToken unless the app client has
+    ///     refresh-token rotation enabled, so callers must KEEP their existing
+    ///     one when `refreshToken` comes back nil. Dropping it would break every
+    ///     later refresh.
+    ///   • No SECRET_HASH is sent: the LMA user pool client is a public client
+    ///     with no secret (that is what lets the browser UI use it directly).
+    ///     A pool configured WITH a client secret would need SECRET_HASH here,
+    ///     and login() above would need it too — they fail or work together.
+    static func refresh(refreshToken: String, clientId: String, region: String) async throws -> RefreshedTokens {
+        let body: [String: Any] = [
+            "AuthFlow": "REFRESH_TOKEN_AUTH",
+            "ClientId": clientId,
+            "AuthParameters": ["REFRESH_TOKEN": refreshToken],
+        ]
+        let r = try await call(region: region, target: "InitiateAuth", body: body)
+        guard let auth = r["AuthenticationResult"] as? [String: Any],
+              let access = auth["AccessToken"] as? String, !access.isEmpty else {
+            throw SRPError.malformed("no AuthenticationResult.AccessToken in REFRESH_TOKEN_AUTH response")
+        }
+        return RefreshedTokens(accessToken: access,
+                               idToken: auth["IdToken"] as? String ?? "",
+                               refreshToken: auth["RefreshToken"] as? String)
     }
 
     // MARK: - Cognito JSON API transport

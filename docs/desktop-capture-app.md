@@ -633,6 +633,21 @@ voice assistant, or hands-off unattended recording.
 - **Sign-in fails.** Use the same email and password you use for the LMA web
   app. If your organization uses SSO, this app's username/password sign-in may
   not apply — use the [Chrome Extension](browser-extension.md) instead.
+- **"Your session expired and could not be renewed. Please sign in again."**
+  Your sign-in session is renewed automatically in the background, including
+  across sleep, so long meetings and a Start hours after signing in both work
+  without you doing anything. This message means the renewal itself was
+  refused — most often because your password changed, an administrator signed
+  you out everywhere, or you have been signed in for longer than the
+  deployment's refresh-token lifetime (30 days by default). Sign in again in
+  the app and start a new recording. The app stays running; you should never
+  need to quit and relaunch it to recover. (Earlier versions did quit
+  themselves in this situation — if the app *disappears* instead of showing
+  this message, update to the current version. See
+  [issue #535](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/535).)
+- **Signing in again after quitting the app.** The session is held in memory
+  only, so a fresh launch always asks for your password again — that is
+  expected, not a fault.
 
 ## See also
 
