@@ -66,6 +66,11 @@ public sealed class PanelView : Border
     private readonly ComboBox _micPicker = new() { FontSize = 11, Margin = new Thickness(0, 0, 0, 6) };
     // Optional desktop-video capture.
     private readonly CheckBox _videoEnabled = new() { Content = "Also record screen video", FontSize = 11 };
+    // Per-channel Amazon Transcribe speaker identification (diarization).
+    private readonly CheckBox _diarizeSystem = new()
+        { Content = "Identify separate speakers in meeting audio", FontSize = 11 };
+    private readonly CheckBox _diarizeMic = new()
+        { Content = "Identify separate speakers on my microphone", FontSize = 11 };
     private readonly ComboBox _videoPicker = new() { FontSize = 11, Margin = new Thickness(0, 0, 0, 6) };
     // Holds the source picker + help text so toggling "Also record screen video"
     // can show/hide them without rebuilding the whole settings window.
@@ -311,6 +316,16 @@ public sealed class PanelView : Border
             if (_micPicker.SelectedItem is ComboBoxItem it)
                 AppSettings.MicDeviceId = (it.Tag as string) ?? "";
         };
+        _diarizeSystem.Click += (_, _) =>
+        {
+            AppSettings.DiarizeSystemChannel = _diarizeSystem.IsChecked ?? false;
+            PushSettingsToController();
+        };
+        _diarizeMic.Click += (_, _) =>
+        {
+            AppSettings.DiarizeMicChannel = _diarizeMic.IsChecked ?? false;
+            PushSettingsToController();
+        };
         _videoEnabled.Click += (_, _) =>
         {
             AppSettings.VideoEnabled = _videoEnabled.IsChecked ?? false;
@@ -358,6 +373,8 @@ public sealed class PanelView : Border
         var sys = AppSettings.SystemLabel;
         _c.SystemLabel = string.IsNullOrEmpty(sys) ? AppSettings.DefaultSystemLabel : sys;
         _c.MicDeviceId = AppSettings.MicDeviceId;
+        _c.DiarizeSystemChannel = AppSettings.DiarizeSystemChannel;
+        _c.DiarizeMicChannel = AppSettings.DiarizeMicChannel;
         _c.VideoEnabled = AppSettings.VideoEnabled;
         _c.VideoSourceId = AppSettings.VideoSourceId;
     }
@@ -768,6 +785,8 @@ public sealed class PanelView : Border
             // must be detached from the closed window first, or adding it to the
             // new window throws.
             UpdateLabelHints();
+            _diarizeSystem.IsChecked = AppSettings.DiarizeSystemChannel;
+            _diarizeMic.IsChecked = AppSettings.DiarizeMicChannel;
             _videoEnabled.IsChecked = AppSettings.VideoEnabled;
             SyncVideoSourceHost();
             if (_settingsContent.Parent is ScrollViewer sv) sv.Content = null;
@@ -792,6 +811,25 @@ public sealed class PanelView : Border
             Text = "Greyed text is the default that will be used if you leave a label blank. " +
                    "System Default follows Windows' input device; if a chosen mic is unplugged, " +
                    "recording falls back to the default.",
+            Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        // Per-channel speaker identification: Amazon Transcribe tells apart
+        // individual voices within a channel and appends (spk_0), (spk_1), … to
+        // the labels above. Independent per channel — the meeting audio and the
+        // microphone have different reasons to need it.
+        v.Children.Add(Label("Speaker identification"));
+        _diarizeSystem.IsChecked = AppSettings.DiarizeSystemChannel;
+        _diarizeMic.IsChecked = AppSettings.DiarizeMicChannel;
+        v.Children.Add(_diarizeSystem);
+        v.Children.Add(_diarizeMic);
+        v.Children.Add(new TextBlock
+        {
+            Text = "Turn on meeting audio when the call has several remote participants, or the " +
+                   "microphone when several people share this mic (e.g. a meeting room). Each " +
+                   "distinct voice is labelled (spk_0), (spk_1), … Works best with five or fewer " +
+                   "voices per channel. Takes effect on the next recording.",
             Foreground = Secondary, FontSize = 10, TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 0, 0, 4),
         });

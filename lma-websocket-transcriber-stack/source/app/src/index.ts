@@ -415,7 +415,12 @@ const onTextMessage = async (
                 refreshToken: callMetaData.refreshToken,
                 shouldRecordCall: callMetaData.shouldRecordCall,
                 samplingRate: callMetaData.samplingRate,
-                channels: callMetaData.channels
+                channels: callMetaData.channels,
+                // Per-channel Transcribe diarization opt-in. This object is a
+                // WHITELIST copy, so a field omitted here is silently dropped and
+                // the feature would appear to do nothing.
+                diarizeSystemChannel: callMetaData.diarizeSystemChannel,
+                diarizeMicChannel: callMetaData.diarizeMicChannel
             },
             audioInputStream: audioInputStream,
             writeRecordingStream: writeRecordingStream,

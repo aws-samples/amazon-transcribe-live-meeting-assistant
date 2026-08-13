@@ -90,6 +90,10 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     }
 
     /// START handshake — must be the first frame; audio before this is dropped server-side.
+    ///
+    /// Sent afresh on EVERY (re)connect, so the diarization flags must be included
+    /// here rather than only on the first connect — otherwise speaker
+    /// identification would silently switch itself off after a network blip.
     func sendStart() {
         let meta: [String: Any] = [
             "callId": config.callId,
@@ -98,6 +102,8 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
             "toNumber": config.toNumber,
             "samplingRate": config.sampleRate,
             "callEvent": "START",
+            "diarizeSystemChannel": config.diarizeSystemChannel,
+            "diarizeMicChannel": config.diarizeMicChannel,
         ]
         sendJSON(meta, label: "START")
     }

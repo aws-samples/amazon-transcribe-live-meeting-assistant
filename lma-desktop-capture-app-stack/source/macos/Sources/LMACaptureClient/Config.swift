@@ -21,6 +21,8 @@ import CryptoKit
 ///   --from       "Other participants" (label for the meeting channel)
 ///   --sample-rate 48000
 ///   --debug-wav  /tmp/lma-debug.wav  (tee exact streamed PCM for verification)
+///   --diarize-system 1 (label individual voices in the meeting audio)
+///   --diarize-mic    1 (label individual voices on the microphone)
 ///   --config     /path/to/lma-config.json  (override config-file location)
 struct Config {
     var endpoint: String
@@ -52,6 +54,14 @@ struct Config {
     var videoEnabled: Bool
     /// CLI: video source id ("display:<id>" / "window:<id>"; "" = main display).
     var videoSourceID: String
+
+    /// Ask Amazon Transcribe to tell apart individual voices on the system /
+    /// meeting audio channel (ch_0), labelling each with (spk_0), (spk_1), …
+    /// Useful when the captured meeting has several remote participants.
+    /// The GUI overrides these from its persisted Settings toggles.
+    var diarizeSystemChannel: Bool
+    /// Same, for the microphone channel (ch_1) — for a shared conference-room mic.
+    var diarizeMicChannel: Bool
 
     /// Name of the LMA CloudFormation stack this download came from. Shown in
     /// the UI and — critically — used to namespace all per-machine identifiers
@@ -162,6 +172,10 @@ struct Config {
                                        Config.defaultDisclaimer),
             videoEnabled: ["1", "true", "yes"].contains(value("video", "LMA_VIDEO").lowercased()),
             videoSourceID: value("video-source", "LMA_VIDEO_SOURCE"),
+            diarizeSystemChannel: ["1", "true", "yes"].contains(
+                value("diarize-system", "LMA_DIARIZE_SYSTEM").lowercased()),
+            diarizeMicChannel: ["1", "true", "yes"].contains(
+                value("diarize-mic", "LMA_DIARIZE_MIC").lowercased()),
             stackName: value("stack-name", "LMA_STACK_NAME", "stackName"),
             appVersion: value("app-version", "LMA_APP_VERSION", "appVersion")
         )

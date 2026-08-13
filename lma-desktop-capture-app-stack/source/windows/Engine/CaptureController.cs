@@ -127,6 +127,19 @@ public sealed class CaptureController
     public string MicLabel = "";
     /// <summary>Speaker label for the system-audio channel (ch_0 → FromNumber).</summary>
     public string SystemLabel = "";
+    /// <summary>
+    /// Ask Transcribe to tell apart individual voices on the system/meeting
+    /// channel (ch_0), appending (spk_0), (spk_1), … to SystemLabel.
+    ///
+    /// Nullable because null means "not set by the GUI", so the config/CLI value
+    /// (--diarize-system / LMA_DIARIZE_SYSTEM) stands — the same convention the
+    /// empty-string labels above use. A plain bool would default to false and
+    /// silently override the CLI flag, since the headless path never pushes
+    /// settings to the controller.
+    /// </summary>
+    public bool? DiarizeSystemChannel;
+    /// <summary>Same for the mic channel (ch_1) — a shared conference-room microphone.</summary>
+    public bool? DiarizeMicChannel;
     /// <summary>MMDevice ID of the mic to capture from. Empty = system default.</summary>
     public string MicDeviceId = "";
     /// <summary>Also capture and stream desktop video (screen or window). Default off.</summary>
@@ -148,6 +161,10 @@ public sealed class CaptureController
         // AgentId (mic/ch_1) and FromNumber (system/ch_0).
         if (!string.IsNullOrEmpty(MicLabel)) Config.AgentId = MicLabel;
         if (!string.IsNullOrEmpty(SystemLabel)) Config.FromNumber = SystemLabel;
+        // Per-channel speaker identification: only the GUI sets these, so leave
+        // the CLI/env value alone when null.
+        if (DiarizeSystemChannel.HasValue) Config.DiarizeSystemChannel = DiarizeSystemChannel.Value;
+        if (DiarizeMicChannel.HasValue) Config.DiarizeMicChannel = DiarizeMicChannel.Value;
 
         var sock = new TranscriberSocket(Config);
         var mix = new StereoMixer(Config.SampleRate, chunk => sock.SendPcm(chunk));

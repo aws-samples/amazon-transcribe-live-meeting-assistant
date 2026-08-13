@@ -56,6 +56,16 @@ public sealed class Config
     public string VideoSourceId = "";
 
     /// <summary>
+    /// Ask Amazon Transcribe to tell apart individual voices on the system /
+    /// meeting audio channel (ch_0), labelling each with (spk_0), (spk_1), …
+    /// Useful when the captured meeting has several remote participants.
+    /// The GUI overrides these from its persisted Settings checkboxes.
+    /// </summary>
+    public bool DiarizeSystemChannel = false;
+    /// <summary>Same, for the microphone channel (ch_1) — for a shared conference-room mic.</summary>
+    public bool DiarizeMicChannel = false;
+
+    /// <summary>
     /// Name of the LMA CloudFormation stack this download came from. Shown in
     /// the UI and used to namespace every machine-scoped identifier (registry
     /// key, mutex, pipe, start-at-login entry) so the clients for multiple LMA
@@ -125,6 +135,10 @@ public sealed class Config
                                         DefaultDisclaimer),
             VideoEnabled = new[] { "1", "true", "yes" }.Contains(Value("video", "LMA_VIDEO").ToLowerInvariant()),
             VideoSourceId = Value("video-source", "LMA_VIDEO_SOURCE"),
+            DiarizeSystemChannel = new[] { "1", "true", "yes" }
+                .Contains(Value("diarize-system", "LMA_DIARIZE_SYSTEM").ToLowerInvariant()),
+            DiarizeMicChannel = new[] { "1", "true", "yes" }
+                .Contains(Value("diarize-mic", "LMA_DIARIZE_MIC").ToLowerInvariant()),
             StackName = Value("stack-name", "LMA_STACK_NAME", "stackName"),
             AppVersion = Value("app-version", "LMA_APP_VERSION", "appVersion"),
         };
