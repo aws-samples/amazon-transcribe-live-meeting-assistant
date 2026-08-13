@@ -14,6 +14,9 @@
     "lint": "eslint . --ext .ts --cache --max-warnings 0",
     "smoke": "ts-node test/fastify5-websocket.smoke.ts",
     "smoke-video": "ts-node test/video-recording.smoke.ts",
+    "diarization-fixture": "./test/make-diarization-fixture.sh",
+    "diarization-spike": "ts-node test/diarization-spike.ts",
+    "diarization-e2e": "ts-node test/diarization-e2e.ts",
     "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "update": "ncu -t minor -u && npm install",
     "clean": "rm -r dist/"

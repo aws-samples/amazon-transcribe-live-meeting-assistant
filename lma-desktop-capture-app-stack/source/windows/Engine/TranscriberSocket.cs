@@ -249,7 +249,14 @@ public sealed class TranscriberSocket
         _ = ReceiveLoop(ws, _cts.Token);
     }
 
-    /// <summary>START handshake — must be the first frame; audio before this is dropped server-side.</summary>
+    /// <summary>
+    /// START handshake — must be the first frame; audio before this is dropped
+    /// server-side.
+    ///
+    /// Sent afresh on EVERY (re)connect, so the diarization flags must be included
+    /// here rather than only on the first connect — otherwise speaker
+    /// identification would silently switch itself off after a network blip.
+    /// </summary>
     public void SendStart()
     {
         var meta = new Dictionary<string, object>
@@ -260,6 +267,8 @@ public sealed class TranscriberSocket
             ["toNumber"] = _config.ToNumber,
             ["samplingRate"] = _config.SampleRate,
             ["callEvent"] = "START",
+            ["diarizeSystemChannel"] = _config.DiarizeSystemChannel,
+            ["diarizeMicChannel"] = _config.DiarizeMicChannel,
         };
         SendJson(meta, "START");
     }

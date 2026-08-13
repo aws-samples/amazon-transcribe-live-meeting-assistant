@@ -105,6 +105,17 @@ final class CaptureController {
     var micLabel: String = ""
     /// Speaker label for the system-audio channel (ch_0 → fromNumber).
     var systemLabel: String = ""
+    /// Ask Transcribe to tell apart individual voices on the system/meeting
+    /// channel (ch_0), appending (spk_0), (spk_1), … to systemLabel.
+    ///
+    /// `nil` means "not set by the GUI", so the config/CLI value
+    /// (--diarize-system / LMA_DIARIZE_SYSTEM) stands — the same convention the
+    /// empty-string labels above use. A plain `Bool` would default to false and
+    /// silently override the CLI flag, since the headless path never pushes
+    /// settings to the controller.
+    var diarizeSystemChannel: Bool?
+    /// Same for the mic channel (ch_1) — a shared conference-room microphone.
+    var diarizeMicChannel: Bool?
     /// CoreAudio UID of the mic to capture from. Empty = system default.
     var micDeviceUID: String = ""
     /// Also capture and stream desktop video (screen or window). Default off.
@@ -241,6 +252,10 @@ final class CaptureController {
         // agentId (mic/ch_1) and fromNumber (system/ch_0).
         if !micLabel.isEmpty { config.agentId = micLabel }
         if !systemLabel.isEmpty { config.fromNumber = systemLabel }
+        // Per-channel speaker identification: only the GUI sets these, so leave
+        // the CLI/env value alone when nil.
+        if let d = diarizeSystemChannel { config.diarizeSystemChannel = d }
+        if let d = diarizeMicChannel { config.diarizeMicChannel = d }
 
         let sock = TranscriberSocket(config: config, tokens: tokenStore)
         let mix = StereoMixer(sampleRate: config.sampleRate) { [weak sock] chunk in sock?.sendPCM(chunk) }

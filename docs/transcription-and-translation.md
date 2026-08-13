@@ -8,6 +8,7 @@ title: "Transcription & Translation"
 
 - [How Transcription Works](#how-transcription-works)
 - [Speaker Attribution](#speaker-attribution)
+  - [Speaker Identification within a Channel](#speaker-identification-within-a-channel)
 - [Language Configuration](#language-configuration)
   - [Single Language](#single-language)
   - [Automatic Single Language Identification](#automatic-single-language-identification)
@@ -41,6 +42,46 @@ LMA uses two-channel stereo audio to separate speakers:
 - **Channel 2 (incoming audio)** -- Captures the audio from other meeting participants (the incoming audio source).
 
 This two-channel approach allows Amazon Transcribe to attribute speech to the correct speaker without relying solely on speaker diarization, providing more accurate and reliable speaker labels in the transcript.
+
+### Speaker Identification within a Channel
+
+Channel separation gives one speaker name per channel, which is not enough when
+several people share a channel -- a multi-participant call captured from a browser
+tab or desktop app, or a conference-room microphone shared by several people.
+
+For WebSocket streaming sessions (the [Stream Audio](stream-audio.md) tab and the
+[Desktop Capture App](desktop-capture-app.md)), Amazon Transcribe **speaker
+partitioning (diarization)** can be enabled **per channel** to tell those voices
+apart. Each distinct voice is appended to the channel's speaker name as `(spk_0)`,
+`(spk_1)`, and so on -- for example `Other Participant (spk_0)`. The labels flow
+through the transcript, the meeting summary, and the Meeting Assistant.
+
+Enable it in the client's own settings, independently for each channel:
+
+| Channel | Setting | Typical use |
+|---|---|---|
+| Incoming / system audio | Identify separate speakers in meeting audio | The call has several remote participants |
+| Microphone | Identify separate speakers on my microphone | Several people share one microphone |
+
+Both are off by default. The `ShowSpeakerLabel` CloudFormation parameter sets the
+deployment-wide default for clients that do not send their own choice.
+
+**Limitations:**
+
+- Accuracy is best with **five or fewer voices per channel**. Amazon Transcribe
+  can emit up to `spk_29`, but the streaming API offers no way to cap the count
+  (unlike batch transcription's `MaxSpeakerLabels` -- see
+  [Upload Audio](upload-audio.md)).
+- Speakers are numbered **per channel**, each starting at `spk_0`, and the
+  numbering restarts if the Transcribe session reconnects mid-meeting.
+- Labels appear when a segment finalizes, not while it is still partial.
+- Diarization support varies by language; on an unsupported language the speaker
+  names are simply left unlabelled.
+- Labels are numbers, not names. To get real participant names, use the
+  [Chrome Extension](browser-extension.md) or a
+  [Virtual Participant](virtual-participant.md), which read them from the meeting
+  itself.
+- There is no additional Amazon Transcribe charge for speaker partitioning.
 
 ## Language Configuration
 
@@ -148,6 +189,7 @@ Both types flow through the LMA pipeline. You can configure Lambda hook function
 |---|---|---|
 | Language for Transcription | Language or language identification mode for Amazon Transcribe | `en-US` |
 | Enable Content Redaction for Transcripts | Enable PII redaction in transcripts (supported languages only) | `false` |
+| Default for Speaker Identification on Streaming Sessions (`ShowSpeakerLabel`) | Deployment-wide default for per-channel speaker partitioning on WebSocket streaming sessions. Clients that send their own per-channel choice take precedence. | `false` |
 | Transcription Custom Vocabulary Name | Name of a custom vocabulary created in Amazon Transcribe | (empty) |
 | Transcription Custom Language Model Name | Name of a custom language model created in Amazon Transcribe | (empty) |
 | Record Expiration In Days | Number of days to retain audio recordings in S3 | `90` |

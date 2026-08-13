@@ -64,6 +64,7 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | IsContentRedactionEnabled | Enable automatic PII redaction in transcriptions | false | true, false |
 | TranscribeContentRedactionType | Type of content redaction | PII | PII |
 | ContentRedactionLanguages | Languages that support content redaction | en-US | en-US, en-AU, en-GB, es-US |
+| ShowSpeakerLabel | Default for per-channel speaker partitioning (diarization) on WebSocket streaming sessions -- the Stream Audio tab and the Desktop Capture App. Applies to both channels when used. Clients that send their own per-channel choice take precedence, so leave this false unless you want it on for clients that do not. See [Transcription & Translation](transcription-and-translation.md#speaker-identification-within-a-channel). | false | true, false |
 
 ## End-of-Call Summary
 

@@ -11,6 +11,8 @@
  *   participants  - Pre-fill participant label (stream audio)
  *   owner         - Pre-fill meeting owner (microphone label)
  *   autoStart     - Auto-start streaming on load (true/false)
+ *   diarizeSystem - Identify separate speakers in the shared tab audio (true/false)
+ *   diarizeMic    - Identify separate speakers on the microphone (true/false)
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import React, { useState, useRef, useCallback, useEffect } from 'react';
@@ -58,6 +60,12 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
   const initialTopic = params.meetingTopic || 'Stream Audio';
   const initialParticipants = params.participants || DEFAULT_OTHER_SPEAKER_NAME;
   const initialOwner = params.owner || userIdentifier;
+  // Per-channel Amazon Transcribe speaker partitioning. Configured by the
+  // embedding page via query params rather than with checkboxes: this variant is
+  // deliberately chrome-free and driven by its host. Both default off.
+  // EmbedPage has already coerced these to booleans (as it does for autoStart).
+  const initialDiarizeSystem = params.diarizeSystem === true;
+  const initialDiarizeMic = params.diarizeMic === true;
 
   const [meetingTopic, setMeetingTopic] = useState(initialTopic);
   const [callMetaData, setCallMetaData] = useState({
@@ -65,6 +73,8 @@ const EmbedStreamAudio = ({ params, sendToParent }) => {
     agentId: initialOwner,
     fromNumber: initialParticipants,
     toNumber: SYSTEM,
+    diarizeSystemChannel: initialDiarizeSystem,
+    diarizeMicChannel: initialDiarizeMic,
   });
 
   const [recording, setRecording] = useState(false);
@@ -432,6 +442,8 @@ EmbedStreamAudio.propTypes = {
     participants: PropTypes.string,
     owner: PropTypes.string,
     autoStart: PropTypes.bool,
+    diarizeSystem: PropTypes.bool,
+    diarizeMic: PropTypes.bool,
   }).isRequired,
   sendToParent: PropTypes.func.isRequired,
 };

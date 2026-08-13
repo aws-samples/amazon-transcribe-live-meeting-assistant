@@ -102,6 +102,12 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     agentId: userIdentifier || DEFAULT_LOCAL_SPEAKER_NAME,
     fromNumber: DEFAULT_OTHER_SPEAKER_NAME,
     toNumber: SYSTEM,
+    // Per-channel Amazon Transcribe speaker partitioning. Sent in the START
+    // frame; both default off so the transcript is unchanged unless asked for.
+    // Distinct from the upload mode's `enableDiarization` below, which drives a
+    // Transcribe *batch* job and is a different feature.
+    diarizeSystemChannel: false,
+    diarizeMicChannel: false,
   });
   // Track whether the user has manually edited the agentId field so we don't
   // overwrite their input when the authenticated user's identifier becomes
@@ -234,6 +240,20 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     });
   };
 
+  const handleDiarizeSystemChannelChange = (e) => {
+    setCallMetaData({
+      ...callMetaData,
+      diarizeSystemChannel: e.detail.checked,
+    });
+  };
+
+  const handleDiarizeMicChannelChange = (e) => {
+    setCallMetaData({
+      ...callMetaData,
+      diarizeMicChannel: e.detail.checked,
+    });
+  };
+
   const audioProcessor = useRef();
   const audioContext = useRef();
   const displayStream = useRef();
@@ -325,7 +345,9 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       recordingCallMetaData.callEvent = 'START';
 
       // eslint-disable-next-line prettier/prettier
-      console.log(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`);
+      console.log(
+        `DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`,
+      );
       sendMessage(JSON.stringify(recordingCallMetaData));
       setStreamingStarted(true);
 
@@ -690,6 +712,39 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                   </Grid>
                 </FormField>
               </ColumnLayout>
+
+              {mode === MODE_STREAM && (
+                <Box margin={{ top: 'l' }}>
+                  <FormField
+                    label="Speaker identification"
+                    description={
+                      'Optionally ask Amazon Transcribe to tell apart individual voices within a ' +
+                      'channel. Each distinct voice is labelled (spk_0), (spk_1), … alongside the ' +
+                      'names above. Works best with five or fewer speakers per channel.'
+                    }
+                    stretch
+                  >
+                    <SpaceBetween direction="vertical" size="xxs">
+                      <Checkbox
+                        checked={callMetaData.diarizeSystemChannel}
+                        onChange={handleDiarizeSystemChannelChange}
+                        disabled={recording}
+                        description="Use when the shared tab has several people on the call."
+                      >
+                        Identify separate speakers in the shared tab audio
+                      </Checkbox>
+                      <Checkbox
+                        checked={callMetaData.diarizeMicChannel}
+                        onChange={handleDiarizeMicChannelChange}
+                        disabled={recording}
+                        description="Use when several people share this microphone, e.g. in a meeting room."
+                      >
+                        Identify separate speakers on my microphone
+                      </Checkbox>
+                    </SpaceBetween>
+                  </FormField>
+                </Box>
+              )}
 
               {recording && mode === MODE_STREAM && (
                 <Box
