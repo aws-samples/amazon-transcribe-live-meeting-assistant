@@ -19,6 +19,53 @@ final class CaptureController {
         case error(String)
     }
 
+    /// Decides, from the STREAM of state changes, when a recording session began
+    /// and whether it ended well — so the UI announces "your meeting is being
+    /// processed" only when a meeting actually got uploaded.
+    ///
+    /// Why a tracker and not a test on the new state alone: teardown always
+    /// passes through `.stopping`, for a clean Stop AND for a fatal auth, so
+    /// `.stopping` carries no information about the outcome. Judging it in
+    /// isolation is what made a dead session (token rejected, nothing sent)
+    /// announce a successful upload with a link to a meeting that was never
+    /// created. Instead `.stopping` is treated as "still in flight" and the
+    /// outcome is taken from the TERMINAL state that follows it: `.error` failed,
+    /// `.authenticated`/`.idle` succeeded.
+    ///
+    /// This also removes any dependence on the order in which the fatal-auth path
+    /// happens to set its states, which is a fragile thing to rely on. Pure and
+    /// sequence-tested in SelfTest.
+    struct SessionTracker {
+        enum Event: Equatable {
+            case none
+            case started
+            case ended(succeeded: Bool)
+        }
+
+        /// True while a recording session is in flight (including during teardown).
+        private(set) var active = false
+
+        mutating func observe(_ state: State) -> Event {
+            switch state {
+            case .streaming:
+                if active { return .none }   // repeat/no-op
+                active = true
+                return .started
+            case .stopping, .starting, .signingIn:
+                // Transient: a session may still be in flight, so decide nothing.
+                return .none
+            case .error:
+                guard active else { return .none }   // e.g. a sign-in or pre-stream failure
+                active = false
+                return .ended(succeeded: false)
+            case .authenticated, .idle:
+                guard active else { return .none }
+                active = false
+                return .ended(succeeded: true)
+            }
+        }
+    }
+
     private(set) var config: Config
     /// Keeps the access token fresh while signed in. Lives on the CONTROLLER, not
     /// the socket, so it survives Stop/Start and keeps refreshing while nothing
@@ -117,6 +164,12 @@ final class CaptureController {
     /// schedule. Refreshed tokens are mirrored back onto `config` so everything
     /// that reads it (isAuthenticated, sockets created later) stays correct.
     private func installTokenStore() {
+        // Retire any previous refresher first. Nothing reachable installs a store
+        // while another is live (the sign-in form only appears once the tokens are
+        // cleared), but an in-flight refresh on an abandoned store would write its
+        // stale token onto `config` through onRefresh and clobber the new session.
+        // One line to make that unrepresentable rather than merely unreachable.
+        tokenStore?.invalidate()
         let store = TokenStore(accessToken: config.accessToken, idToken: config.idToken,
                                refreshToken: config.refreshToken,
                                clientId: config.clientId, region: config.effectiveRegion)
