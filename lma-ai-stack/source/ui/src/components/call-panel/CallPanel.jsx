@@ -35,6 +35,7 @@ import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
 import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
+import { splitDiarizationLabel } from '../common/utilities';
 
 import RecordingPlayer from '../recording-player';
 import VideoPlayer from '../video-player';
@@ -682,9 +683,13 @@ const CallInProgressTranscript = ({
         t.targetLanguage = targetLanguage;
         t.translateOn = translateOn;
         // In streaming audio the speaker will just be "Other participant", override this with the
-        // name the user chose if needed
-        if (t.speaker === DEFAULT_OTHER_SPEAKER_NAME || t.speaker === '') {
-          t.speaker = item.callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME;
+        // name the user chose if needed.
+        // Compare the BASE name: with per-channel speaker identification on the
+        // speaker arrives as 'Other Participant (spk_0)', which an exact match
+        // would miss. The label is re-attached so the substitution keeps it.
+        const { base: speakerBase, suffix: speakerLabel } = splitDiarizationLabel(t.speaker);
+        if (speakerBase === DEFAULT_OTHER_SPEAKER_NAME || speakerBase === '') {
+          t.speaker = `${item.callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME}${speakerLabel}`;
         }
 
         return t;

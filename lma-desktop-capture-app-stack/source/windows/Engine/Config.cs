@@ -22,6 +22,15 @@ public sealed class Config
     public string Endpoint = "";
     public string AccessToken = "";
     public string IdToken = "";
+    /// <summary>
+    /// Cognito REFRESH token. Retained (it used to be discarded at sign-in —
+    /// issue #535) so the ~1 h access token can be renewed without another
+    /// interactive sign-in. Redeemed by TokenStore, never sent to the server.
+    /// Pasted-token path: prefer LMA_REFRESH_TOKEN over --refresh-token — a
+    /// refresh token is a ~30-day credential and command lines are visible to
+    /// other local users (Task Manager, WMI Win32_Process).
+    /// </summary>
+    public string RefreshToken = "";
     public string CallId = "";
     public string AgentId = "";
     public string FromNumber = "";
@@ -54,6 +63,16 @@ public sealed class Config
     public bool VideoEnabled = false;
     /// <summary>CLI: video source id ("display:&lt;name&gt;" / "window:&lt;handle&gt;"; "" = primary display).</summary>
     public string VideoSourceId = "";
+
+    /// <summary>
+    /// Ask Amazon Transcribe to tell apart individual voices on the system /
+    /// meeting audio channel (ch_0), labelling each with (spk_0), (spk_1), …
+    /// Useful when the captured meeting has several remote participants.
+    /// The GUI overrides these from its persisted Settings checkboxes.
+    /// </summary>
+    public bool DiarizeSystemChannel = false;
+    /// <summary>Same, for the microphone channel (ch_1) — for a shared conference-room mic.</summary>
+    public bool DiarizeMicChannel = false;
 
     /// <summary>
     /// Name of the LMA CloudFormation stack this download came from. Shown in
@@ -109,6 +128,7 @@ public sealed class Config
             Endpoint = Value("endpoint", "LMA_WS_ENDPOINT", "wssEndpoint"),
             AccessToken = Value("token", "LMA_ACCESS_TOKEN"),
             IdToken = Value("id-token", "LMA_ID_TOKEN"),
+            RefreshToken = Value("refresh-token", "LMA_REFRESH_TOKEN"),
             CallId = Value("call-id", "LMA_CALL_ID", null, defaultCallId),
             AgentId = Value("agent-id", "LMA_AGENT_ID", null, "Me"),
             FromNumber = Value("from", "LMA_FROM", null, "Other participants"),
@@ -125,6 +145,10 @@ public sealed class Config
                                         DefaultDisclaimer),
             VideoEnabled = new[] { "1", "true", "yes" }.Contains(Value("video", "LMA_VIDEO").ToLowerInvariant()),
             VideoSourceId = Value("video-source", "LMA_VIDEO_SOURCE"),
+            DiarizeSystemChannel = new[] { "1", "true", "yes" }
+                .Contains(Value("diarize-system", "LMA_DIARIZE_SYSTEM").ToLowerInvariant()),
+            DiarizeMicChannel = new[] { "1", "true", "yes" }
+                .Contains(Value("diarize-mic", "LMA_DIARIZE_MIC").ToLowerInvariant()),
             StackName = Value("stack-name", "LMA_STACK_NAME", "stackName"),
             AppVersion = Value("app-version", "LMA_APP_VERSION", "appVersion"),
         };

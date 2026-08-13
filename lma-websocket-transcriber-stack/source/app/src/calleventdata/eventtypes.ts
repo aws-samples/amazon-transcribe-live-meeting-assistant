@@ -92,6 +92,29 @@ export interface ChannelSpeakerData {
     startTimes: number[];
 }
 
+/**
+ * Per-channel Amazon Transcribe speaker partitioning (diarization).
+ *
+ * Amazon Transcribe's `ShowSpeakerLabel` is a STREAM-level flag and we send one
+ * 2-channel stream, so these two booleans do not map 1:1 onto the API: the flag
+ * is enabled when EITHER channel opts in, and the resulting labels are applied
+ * only to the channel(s) that asked for them.
+ *
+ * Named by channel ROLE, not by ch_0/ch_1, so clients never need to know the
+ * interleave order — the server owns that mapping (see CHANNEL_* below).
+ */
+export type DiarizationSettings = {
+    /** Diarize the system / meeting audio channel (ch_0). */
+    diarizeSystemChannel?: boolean,
+    /** Diarize the microphone channel (ch_1). */
+    diarizeMicChannel?: boolean,
+};
+
+/** Transcribe's channel id for the system / meeting audio (shared tab, screen). */
+export const CHANNEL_SYSTEM = 'ch_0';
+/** Transcribe's channel id for the local microphone. */
+export const CHANNEL_MIC = 'ch_1';
+
 export type CallMetaData = {
     callId: Uuid,
     fromNumber?: string,
@@ -115,7 +138,7 @@ export type CallMetaData = {
     accessToken?: string,
     idToken?: string,
     refreshToken?: string,
-};
+} & DiarizationSettings;
 
 export type SocketCallData = {
     callMetadata: CallMetaData,

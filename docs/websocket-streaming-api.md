@@ -231,7 +231,9 @@ Sent once at the beginning of a session to initialize the transcription.
   "fromNumber": "Customer Name",
   "toNumber": "Meeting Name",
   "samplingRate": 16000,
-  "activeSpeaker": "Customer Name"
+  "activeSpeaker": "Customer Name",
+  "diarizeSystemChannel": true,
+  "diarizeMicChannel": false
 }
 ```
 
@@ -244,6 +246,14 @@ Sent once at the beginning of a session to initialize the transcription.
 | `toNumber` | `string` | No | `"System Phone"` | Label for the system / meeting. Free-form string. |
 | `samplingRate` | `number` | **Yes** | — | Audio sample rate in Hz. Must match the actual audio being sent. Supported values: `8000` or `16000`. |
 | `activeSpeaker` | `string` | No | Value of `fromNumber` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
+| `diarizeSystemChannel` | `boolean` | No | `ShowSpeakerLabel` CFN parameter | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
+| `diarizeMicChannel` | `boolean` | No | `ShowSpeakerLabel` CFN parameter | Same, for the microphone channel (channel 1). |
+
+> **Precedence:** if the client sends **either** diarization field, its values are
+> used verbatim (a field left out counts as `false`). Only when **neither** field
+> is present does the server fall back to the deployment-wide `ShowSpeakerLabel`
+> CloudFormation parameter, applied to both channels. Anything other than a JSON
+> `true` — including the string `"true"` — is treated as `false`.
 
 #### 6.1.2 SPEAKER_CHANGE Message
 
@@ -298,6 +308,8 @@ type CallMetaData = {
   samplingRate: number;     // 8000 or 16000
   activeSpeaker: string;    // Current speaker on meeting channel (ch_0)
   shouldRecordCall?: boolean;
+  diarizeSystemChannel?: boolean;  // START only: diarize ch_0 (system/meeting)
+  diarizeMicChannel?: boolean;     // START only: diarize ch_1 (microphone)
   channels?: {              // Server-managed; do not send from client
     [channelId: string]: {
       currentSpeakerName: string | null;
@@ -384,7 +396,7 @@ If your source is a WAV file, you must **strip the WAV header** (typically the f
 
 ## 8. Speaker Tracking
 
-The server supports two mechanisms for speaker attribution:
+The server supports three mechanisms for speaker attribution:
 
 ### Channel-Based Attribution (Stereo)
 
@@ -400,6 +412,47 @@ For scenarios where multiple participants share the meeting channel (channel 0),
 - `SPEAKER_CHANGE` only affects channel 0 (the meeting channel)
 - If `activeSpeaker` matches `agentId`, the change is ignored (channel 1 always belongs to the agent)
 - Speaker names are free-form strings
+
+### Speaker Identification (Diarization)
+
+Channel-based attribution gives one name per channel, which is not enough when
+several people share a channel — a multi-participant call captured from a browser
+tab, or a conference-room microphone. Amazon Transcribe speaker partitioning
+(diarization) tells those voices apart, and it can be enabled **per channel** with
+the `diarizeSystemChannel` / `diarizeMicChannel` fields on the START message.
+
+The label is **appended** to the channel's existing speaker name rather than
+replacing it, so client-supplied names still come through:
+
+| Base speaker name | With diarization |
+|---|---|
+| `Other Participant` | `Other Participant (spk_0)`, `Other Participant (spk_1)`, … |
+| `alice@example.com` | `alice@example.com (spk_0)` |
+| `Bob` (from `SPEAKER_CHANGE`) | `Bob (spk_0)` |
+
+Speakers are numbered **per channel**, each starting at `spk_0`. The same person
+speaking on both channels therefore gets a different number on each.
+
+**Behaviour worth knowing before you enable it:**
+
+- **Labels arrive only on final segments.** Amazon Transcribe does not label
+  partial results, so a segment appears with the bare base name while it is still
+  partial and gains its `(spk_N)` when it finalizes.
+- **Numbering restarts on reconnect.** Speaker numbers are scoped to one
+  Transcribe session. If the session reconnects mid-meeting (see
+  [Reconnection](#reconnection)), the same person may come back as a different
+  `spk_N`.
+- **Accuracy degrades above about five voices per channel.** Transcribe can emit
+  up to `spk_29`, but the streaming API has no equivalent of the batch API's
+  `MaxSpeakerLabels`, so the count cannot be capped.
+- **Language support varies.** Diarization is gated per language. On a language
+  that does not support it, no labels are produced and speaker names are simply
+  unchanged.
+- **One label per segment.** Individual word-level labels are noisy, so the
+  server takes the majority label across each segment. A segment that genuinely
+  contains two voices is attributed to the dominant one rather than being split.
+- **No extra Transcribe cost.** Diarization is included in the standard rate, and
+  the two channels are billed as a single stream.
 
 ---
 
@@ -734,6 +787,7 @@ These environment variables configure the server and are provided here for refer
 | `RECORDINGS_BUCKET_NAME` | — | S3 bucket for audio recordings |
 | `RECORDING_FILE_PREFIX` | `lma-audio-recordings/` | S3 key prefix for recordings |
 | `SHOULD_RECORD_CALL` | `false` | Whether to record and upload audio to S3 |
+| `SHOW_SPEAKER_LABEL` | `false` | Default for speaker partitioning (diarization), applied to both channels. Used **only** when a client sends neither `diarizeSystemChannel` nor `diarizeMicChannel`. Set from the `ShowSpeakerLabel` CloudFormation parameter. |
 | `CPU_HEALTH_THRESHOLD` | `50` | CPU usage % threshold for health check |
 | `LOCAL_TEMP_DIR` | `/tmp/` | Temporary directory for recording files |
 | `WS_LOG_LEVEL` | `debug` | Server log level |

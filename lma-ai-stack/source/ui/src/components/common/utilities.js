@@ -5,6 +5,24 @@
  */
 /* eslint-disable import/prefer-default-export */
 
+/**
+ * Split a transcript segment's Speaker string into its base name and its
+ * Amazon Transcribe diarization label, e.g.
+ *   'Other Participant (spk_0)' -> { base: 'Other Participant', suffix: ' (spk_0)' }
+ *   'Other Participant'         -> { base: 'Other Participant', suffix: '' }
+ *
+ * The websocket transcriber appends '(spk_N)' when per-channel speaker
+ * identification is enabled. Callers that compare a speaker name against a known
+ * default must compare the BASE — an exact match against the whole string
+ * silently stops working the moment a label is appended — and then re-attach the
+ * suffix so the label survives the substitution.
+ */
+export const splitDiarizationLabel = (speaker) => {
+  const value = speaker ?? '';
+  const match = /^(.*?)(\s*\(spk_\d+\))$/.exec(value);
+  return match ? { base: match[1], suffix: match[2] } : { base: value, suffix: '' };
+};
+
 export const getTimestampStr = () => {
   const now = new Date();
   const year = now.getFullYear();

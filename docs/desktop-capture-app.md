@@ -46,6 +46,35 @@ https://github.com/user-attachments/assets/9b323496-4eb9-4f22-aa45-0f2f05afaa2e
 > **no special permission** — there is no equivalent of the macOS Screen
 > Recording prompt. The only OS gate is the microphone privacy setting.
 
+## Optional: identify separate speakers
+
+By default each channel gets a single speaker name — everything from system audio
+is the **Meeting Audio** label, everything from your mic is the **My Mic** label.
+That is enough for a one-to-one call, but not when several people share a channel.
+
+**Settings (⚙) → Speaker identification** turns on Amazon Transcribe speaker
+partitioning (diarization), independently per channel:
+
+| Setting | Turn it on when |
+|---|---|
+| **Identify separate speakers in meeting audio** | The call has several remote participants |
+| **Identify separate speakers on my microphone** | Several people share this mic, e.g. a conference room |
+
+Distinct voices are appended to the channel's label as `(spk_0)`, `(spk_1)`, … —
+for example `Other participants (spk_0)`. The transcript shows each voice as its
+own turn, and the labels also reach the meeting summary and Meeting Assistant.
+
+Both are **off by default** and take effect on the **next** recording (they ride
+the session's opening message, so they cannot change mid-meeting; Settings is
+disabled while streaming for the same reason). Speakers are numbered **per
+channel**, each starting at `spk_0`, and accuracy is best with **five or fewer
+voices per channel**. Labels are numbers, not names: Transcribe distinguishes
+voices but does not identify whose they are. There is no additional Amazon
+Transcribe charge.
+
+For headless/CLI use, the same options are `--diarize-system` / `--diarize-mic`
+(or `LMA_DIARIZE_SYSTEM` / `LMA_DIARIZE_MIC`).
+
 ## Optional: record screen video
 
 In addition to audio, the app can **capture and stream desktop video** — a
@@ -301,6 +330,12 @@ Popover options:
     to follow your Sound settings. If a chosen mic is unplugged, recording
     falls back to the default. Changes are saved immediately and apply to the
     **next** recording (the gear is disabled while recording).
+  - **Speaker identification** — two independent toggles, both off by default:
+    **Identify separate speakers in meeting audio** and **Identify separate
+    speakers on my microphone**. When on, Amazon Transcribe tells apart the
+    individual voices in that channel and appends `(spk_0)`, `(spk_1)`, … to the
+    label above (see
+    [Optional: identify separate speakers](#optional-identify-separate-speakers)).
   - **Also record screen video** — off by default. When on, choose from a list of
     your **screens and windows**, each with a **thumbnail preview**, its name as
     macOS reports it (e.g. *DELL U2720Q*), and its **resolution** — so two
@@ -399,6 +434,12 @@ Panel options:
     to follow Windows' input device setting. If a chosen mic is unplugged,
     recording falls back to the default. Changes are saved immediately and
     apply to the **next** recording (the gear is disabled while recording).
+  - **Speaker identification** — two independent checkboxes, both off by default:
+    **Identify separate speakers in meeting audio** and **Identify separate
+    speakers on my microphone**. When on, Amazon Transcribe tells apart the
+    individual voices in that channel and appends `(spk_0)`, `(spk_1)`, … to the
+    label above (see
+    [Optional: identify separate speakers](#optional-identify-separate-speakers)).
   - **Also record screen video** — off by default. When on, choose from a list of
     your **screens and windows**, each with a **thumbnail preview**, the monitor's
     own name (e.g. *DELL U2720Q*), and its **resolution**, so two similar monitors
@@ -641,9 +682,10 @@ voice assistant, or hands-off unattended recording.
   you out everywhere, or you have been signed in for longer than the
   deployment's refresh-token lifetime (30 days by default). Sign in again in
   the app and start a new recording. The app stays running; you should never
-  need to quit and relaunch it to recover. (Earlier versions did quit
-  themselves in this situation — if the app *disappears* instead of showing
-  this message, update to the current version. See
+  need to quit and relaunch it to recover. (Earlier versions never renewed the
+  session at all, so it always died after about an hour — the macOS app
+  *disappeared* outright and the Windows app demanded a fresh sign-in
+  mid-meeting. If you see either behaviour, update to the current version. See
   [issue #535](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/535).)
 - **Signing in again after quitting the app.** The session is held in memory
   only, so a fresh launch always asks for your password again — that is
