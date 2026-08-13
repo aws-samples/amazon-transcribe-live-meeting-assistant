@@ -41,11 +41,17 @@ import {
 } from './eventtypes';
 
 import {
-    SpeakerLabelTally,
+    DEFAULT_MIN_RUN_SECONDS,
+    DEFAULT_MIN_RUN_WORDS,
+    RunThresholds,
     anyChannelDiarized,
+    appendSpeakerLabel,
+    buildSpeakerRuns,
+    describeRuns,
     diarizationEnabledFor,
-    resolveSpeakerLabel,
-    tallySpeakerLabel
+    formatSpeakerLabel,
+    runTranscript,
+    smoothSpeakerRuns
 } from './diarization';
 
 // Import from the concrete module (not the ../utils barrel): the barrel pulls
@@ -103,6 +109,20 @@ const kdsStreamName = process.env['KINESIS_STREAM_NAME'] || '';
 // deployment that never sets it behaves exactly as it did before the feature.
 const showSpeakerLabelDefault =
     (process.env['SHOW_SPEAKER_LABEL'] || 'false') === 'true';
+// Minimum size for a run of same-speaker words to be split out as its own
+// transcript segment. Both must be cleared. Empirically fitted to a real
+// two-speaker recording (spurious runs measured 1-2 words / 0.1-0.9s; real turns
+// 6-42 words / 1.2-13.4s) — overridable without a code change so the values can
+// be re-tuned from the [DIARIZATION] log lines these thresholds produce.
+const diarizationRunThresholds: RunThresholds = {
+    minWords: parseInt(
+        process.env['DIARIZATION_MIN_RUN_WORDS'] || String(DEFAULT_MIN_RUN_WORDS),
+        10
+    ),
+    minSeconds: parseFloat(
+        process.env['DIARIZATION_MIN_RUN_SECONDS'] || String(DEFAULT_MIN_RUN_SECONDS)
+    ),
+};
 const DEBUG = (process.env['DEBUG'] || 'false') === 'true';
 
 const tcaOutputLocation = `s3://${RECORDINGS_BUCKET_NAME}/${CALL_ANALYTICS_FILE_PREFIX}`;
@@ -268,9 +288,11 @@ export const startTranscribe = async (
     // the START frame and must survive every reconnect unchanged.
     const diarization = diarizationSettingsFor(callMetaData);
     server.log.info(
-        `[TRANSCRIBING]: [${callMetaData.callId}] - Speaker partitioning: system/meeting channel (${CHANNEL_SYSTEM})=${
+        `[DIARIZATION]: [${callMetaData.callId}] - Speaker partitioning: system/meeting channel (${CHANNEL_SYSTEM})=${
             diarization.diarizeSystemChannel === true
-        }, microphone channel=${diarization.diarizeMicChannel === true}`
+        }, microphone channel=${diarization.diarizeMicChannel === true}` +
+            `, split thresholds: minWords=${diarizationRunThresholds.minWords}` +
+            ` minSeconds=${diarizationRunThresholds.minSeconds}`
     );
     // MAX_RETRIES bounds *consecutive* failures, not cumulative ones over the
     // life of the meeting (see HEALTHY_SESSION_MS below). A session that has
@@ -596,17 +618,127 @@ export const startTranscribe = async (
 
 interface Segment {
     SegmentId: string;
+    /** Final speaker string, already carrying any `(spk_N)` suffix. */
     Speaker: string;
     StartTime: number;
     EndTime: number;
     Transcript: string;
-    /**
-     * Transcribe diarization labels seen across this segment's items, tallied so
-     * one winner can be picked by majority vote at emit time. Empty (and so
-     * without effect) when the channel has diarization disabled, and on partial
-     * results — Transcribe only labels FINAL results.
-     */
-    SpeakerLabels: SpeakerLabelTally;
+}
+
+/**
+ * Split one result into a segment per speaker turn, for a channel that has
+ * diarization enabled.
+ *
+ * A single Transcribe result routinely spans several turns in natural
+ * conversation (30s results with four turns are normal), and the turn structure
+ * only exists in the per-item labels — so it has to be recovered here. Runs
+ * shorter than the thresholds are absorbed into their neighbour first, because
+ * single-word label flips are common and splitting on them would fragment
+ * utterances. See the header of diarization.ts for the measurements behind this.
+ *
+ * Segment ids are keyed on Transcribe's own `ResultId` plus the run index, which
+ * is what keeps a partial and its final aligned: partials carry NO labels, so a
+ * partial is always a single run with index 0 and is cleanly replaced by the
+ * final's first piece, while later pieces arrive as new segments. Keying on
+ * anything derived from the label would orphan the partial.
+ */
+function buildDiarizedSegments(
+    speakerName: string,
+    result: Result,
+    channelId: string,
+    callMetadata: CallMetaData,
+    server: FastifyInstance,
+    timeOffsetSeconds: number
+): Record<string, Segment> {
+    const items = result.Alternatives?.[0]?.Items ?? [];
+    const rawRuns = buildSpeakerRuns(items);
+    const runs = smoothSpeakerRuns(rawRuns, diarizationRunThresholds);
+    const isPartial = result.IsPartial === true;
+    const resultId = result.ResultId ?? `${channelId}-${result.StartTime ?? 0}`;
+
+    const segments: Record<string, Segment> = {};
+    runs.forEach((run, index) => {
+        const segmentId = `${resultId}-${channelId}-${index}`;
+        segments[segmentId] = {
+            SegmentId: segmentId,
+            Speaker: appendSpeakerLabel(speakerName, run.label),
+            StartTime: run.startTime + timeOffsetSeconds,
+            EndTime: run.endTime + timeOffsetSeconds,
+            Transcript: runTranscript(run),
+        };
+    });
+
+    recordDiarizationDiagnostics(callMetadata, server, channelId, result, rawRuns.length, items);
+
+    // One line per FINAL result, at info: this is the record needed to re-tune
+    // the thresholds from a real meeting, and it is low volume (a handful per
+    // minute of audio). Transcript text is deliberately left to debug.
+    const summary =
+        `[DIARIZATION]: [${callMetadata.callId}] - ${channelId} result ${resultId.slice(0, 8)}` +
+        ` ${isPartial ? 'partial' : 'final'}: runs [${describeRuns(rawRuns)}]` +
+        ` -> ${runs.length} segment(s) [${runs.map((r) => r.label ?? 'unlabelled').join(', ')}]` +
+        (rawRuns.length !== runs.length ? ` (absorbed ${rawRuns.length - runs.length})` : '');
+    if (isPartial) {
+        server.log.debug(summary);
+    } else {
+        server.log.info(summary);
+    }
+    if (DEBUG) {
+        for (const run of runs) {
+            server.log.debug(
+                `[DIARIZATION]: [${callMetadata.callId}] - ${channelId} ${run.label ?? 'unlabelled'}` +
+                    ` [${run.startTime.toFixed(2)}-${run.endTime.toFixed(2)}] ${runTranscript(run)}`
+            );
+        }
+        server.log.debug(
+            `[DIARIZATION]: [${callMetadata.callId}] - ${channelId} item labels: ` +
+                items
+                    .map((i) => `${i.Content ?? ''}[${formatSpeakerLabel(i.Speaker) ?? '-'}]`)
+                    .join(' ')
+        );
+    }
+    return segments;
+}
+
+/**
+ * Track whether Transcribe is actually returning labels, and warn ONCE per call
+ * if it never does.
+ *
+ * Speaker partitioning is gated per language: on an unsupported language the API
+ * accepts `ShowSpeakerLabel` and simply returns no labels, so the feature
+ * silently does nothing. Without this the only symptom is an absence, which is
+ * exactly what nobody notices.
+ */
+function recordDiarizationDiagnostics(
+    callMetadata: CallMetaData,
+    server: FastifyInstance,
+    channelId: string,
+    result: Result,
+    runCount: number,
+    items: Item[]
+): void {
+    if (result.IsPartial === true) {
+        return; // only finals carry labels, so only finals are evidence
+    }
+    if (!callMetadata.diarizationDiagnostics) {
+        callMetadata.diarizationDiagnostics = { finals: 0, labelled: 0, warned: false };
+    }
+    const diag = callMetadata.diarizationDiagnostics;
+    diag.finals += 1;
+    if (items.some((i) => formatSpeakerLabel(i.Speaker) !== undefined)) {
+        diag.labelled += 1;
+    }
+    const NO_LABEL_WARN_AFTER_FINALS = 3;
+    if (!diag.warned && diag.labelled === 0 && diag.finals >= NO_LABEL_WARN_AFTER_FINALS) {
+        diag.warned = true;
+        server.log.warn(
+            `[DIARIZATION]: [${callMetadata.callId}] - Speaker partitioning is enabled for ${channelId}` +
+                ` but Amazon Transcribe has returned NO speaker labels across ${diag.finals} final` +
+                ' results. Speaker partitioning is not supported for every transcription language —' +
+                ' check TRANSCRIBE_LANGUAGE_CODE. Segments will carry unlabelled speaker names.' +
+                ` (runs seen: ${runCount})`
+        );
+    }
 }
 
 function processTranscriptionResults(
@@ -617,9 +749,19 @@ function processTranscriptionResults(
     timeOffsetSeconds = 0,
     diarization?: DiarizationSettings
 ): Record<string, Segment> {
-    const segments: Record<string, Segment> = {};
     const channelId = result.ChannelId ?? CHANNEL_SYSTEM;
-    const diarizeChannel = diarizationEnabledFor(channelId, diarization);
+    if (diarizationEnabledFor(channelId, diarization)) {
+        return buildDiarizedSegments(
+            speakerName,
+            result,
+            channelId,
+            callMetadata,
+            server,
+            timeOffsetSeconds
+        );
+    }
+
+    const segments: Record<string, Segment> = {};
 
     // Initialize channel data if it doesn't exist
     if (!callMetadata.channels) {
@@ -649,14 +791,7 @@ function processTranscriptionResults(
     const alternative = result.Alternatives?.[0];
     if (alternative?.Items) {
         for (const item of alternative.Items) {
-            addItemToSegment(
-                item,
-                segments,
-                channelData,
-                channelId,
-                timeOffsetSeconds,
-                diarizeChannel
-            );
+            addItemToSegment(item, segments, channelData, channelId, timeOffsetSeconds);
             if (DEBUG) {
                 server.log.debug(`[${callMetadata.callId}] Item ${item.StartTime}, ${item.EndTime}, ${item.Content}`);
                 server.log.debug(`[${callMetadata.callId}] Speakers ${JSON.stringify(channelData.speakers)}`);
@@ -676,13 +811,18 @@ function processTranscriptionResults(
     return segments;
 }
   
+/**
+ * Bin an item into a segment keyed by the CLIENT-reported speaker (activeSpeaker /
+ * agentId). Used only when diarization is off for the channel — a diarized
+ * channel is segmented by Transcribe's own speaker turns instead, in
+ * buildDiarizedSegments.
+ */
 function addItemToSegment(
     item: Item,
     segments: Record<string, Segment>,
     channelData: ChannelSpeakerData,
     channelId: string,
-    timeOffsetSeconds = 0,
-    diarizeChannel = false
+    timeOffsetSeconds = 0
 ): void {
     const { speakers, startTimes } = channelData;
     // startTimes are already absolute (offset-adjusted); compare against the
@@ -706,7 +846,6 @@ function addItemToSegment(
             StartTime: startTimes[index] ?? 0,
             EndTime: itemEnd,
             Transcript: '',
-            SpeakerLabels: new Map(),
         };
     } else if (item.Type === 'pronunciation') {
         segments[segmentId].Transcript += ' ';
@@ -714,13 +853,6 @@ function addItemToSegment(
 
     segments[segmentId].EndTime = itemEnd;
     segments[segmentId].Transcript += item.Content;
-    // Tally rather than split: per-item labels are noisy (a stray word can flip
-    // to another speaker, and punctuation is never labelled), so splitting the
-    // segment per item label would shatter utterances into fragments. One winner
-    // is chosen by majority vote when the segment is emitted.
-    if (diarizeChannel) {
-        tallySpeakerLabel(segments[segmentId].SpeakerLabels, item.Speaker);
-    }
 }
 
 // Returns the highest absolute segment EndTime (seconds) written by this call,
@@ -758,12 +890,6 @@ export const writeTranscriptionSegment = async function (
                     maxEndTime = segment.EndTime;
                 }
                 const now = new Date().toISOString();
-                // Append the diarization label to the channel's base speaker
-                // name, e.g. "Other Participant (spk_0)". A no-op — returning the
-                // base name unchanged — when the channel has diarization off or
-                // no labels were tallied (partial results are never labelled), so
-                // the pre-feature output is reproduced byte for byte.
-                const speaker = resolveSpeakerLabel(segment.Speaker, segment.SpeakerLabels);
                 const kdsObject: AddTranscriptSegmentEvent = {
                     EventType: 'ADD_TRANSCRIPT_SEGMENT',
                     CallId: callMetadata.callId,
@@ -778,7 +904,10 @@ export const writeTranscriptionSegment = async function (
                     Sentiment: undefined,
                     TranscriptEvent: undefined,
                     UtteranceEvent: undefined,
-                    Speaker: speaker,
+                    // Already carries any `(spk_N)` suffix — see
+                    // buildDiarizedSegments. Identical to the pre-feature value
+                    // when the channel has diarization off.
+                    Speaker: segment.Speaker,
                     AccessToken: callMetadata.accessToken,
                     IdToken: callMetadata.idToken,
                     RefreshToken: callMetadata.refreshToken,

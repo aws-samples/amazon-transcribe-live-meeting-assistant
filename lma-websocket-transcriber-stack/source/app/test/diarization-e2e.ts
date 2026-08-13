@@ -11,9 +11,9 @@
  *
  * Complements src/calleventdata/diarization.test.ts, which unit-tests the pure
  * helpers offline. This script exercises the parts the unit tests cannot: the
- * per-segment tallying inside `addItemToSegment`, the ch_0 -> CALLER / ch_1 ->
- * AGENT channel mapping, and the interaction with the existing
- * activeSpeaker/agentId base labels.
+ * turn splitting against labels Transcribe actually returned for real audio, the
+ * ch_0 -> CALLER / ch_1 -> AGENT channel mapping, the interaction with the
+ * existing activeSpeaker/agentId base labels, and the [DIARIZATION] diagnostics.
  *
  * Transcribe is called ONCE with ShowSpeakerLabel on; the captured events are
  * then replayed through the segment logic with each of the four per-channel
@@ -161,7 +161,8 @@ const capture = async (
 /** Replay captured events through the real segment logic. */
 const replay = async (
     events: TranscriptEvent[],
-    diarization: DiarizationSettings
+    diarization: DiarizationSettings,
+    showDiag = false
 ): Promise<EmittedSegment[]> => {
     const { server, lines } = makeCapturingServer();
     // Fresh metadata per replay: writeTranscriptionSegment accumulates
@@ -178,7 +179,23 @@ const replay = async (
     for (const event of events) {
         await writeTranscriptionSegment(event, callMetadata, server, 0, diarization);
     }
+    if (showDiag) {
+        showDiagnostics(lines);
+    }
     return parseEmitted(lines);
+};
+
+/**
+ * Print the [DIARIZATION] diagnostics the server emitted. These are the lines an
+ * operator uses to re-tune the split thresholds from a real meeting, so it is
+ * worth being able to eyeball them here rather than only in CloudWatch.
+ */
+const showDiagnostics = (lines: string[]): void => {
+    const diag = lines.filter((l) => l.includes('[DIARIZATION]'));
+    console.log(`\n--- [DIARIZATION] diagnostics (${diag.length} line(s))`);
+    for (const line of diag) {
+        console.log(`    ${line.replace(/^.*\[DIARIZATION\]: /, '')}`);
+    }
 };
 
 const summarize = (label: string, emitted: EmittedSegment[]): void => {
@@ -223,7 +240,7 @@ const main = async (): Promise<void> => {
 
     summarize(
         'both channels diarized',
-        await replay(labelled, { diarizeSystemChannel: true, diarizeMicChannel: true })
+        await replay(labelled, { diarizeSystemChannel: true, diarizeMicChannel: true }, true)
     );
     summarize(
         'system channel only (mic must stay bare)',

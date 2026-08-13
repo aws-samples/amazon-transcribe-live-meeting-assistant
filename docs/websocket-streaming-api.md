@@ -448,9 +448,25 @@ speaking on both channels therefore gets a different number on each.
 - **Language support varies.** Diarization is gated per language. On a language
   that does not support it, no labels are produced and speaker names are simply
   unchanged.
-- **One label per segment.** Individual word-level labels are noisy, so the
-  server takes the majority label across each segment. A segment that genuinely
-  contains two voices is attributed to the dominant one rather than being split.
+- **Segments are split at speaker turns.** A single Transcribe result routinely
+  spans several turns — in natural conversation there is no pause to break on, so
+  30-second results containing four turns are normal. The server recovers the turn
+  structure from the per-item labels and emits one transcript segment per turn.
+- **Short label runs are absorbed, not split.** Word-level labels are noisy: a
+  single word flips to another speaker mid-utterance, and punctuation carries no
+  label at all. A run of same-speaker words must reach both
+  `DIARIZATION_MIN_RUN_WORDS` (default 3) and `DIARIZATION_MIN_RUN_SECONDS`
+  (default 1.0) to become its own segment; anything shorter is merged into its
+  neighbour. No transcript text is ever moved or dropped by this — only the
+  speaker attribution changes. The defaults were fitted to a real two-speaker
+  recording in which spurious runs measured 1-2 words / 0.1-0.9 s and real turns
+  6-42 words / 1.2-13.4 s. A consequence worth knowing: a genuine one- or two-word
+  interjection ("Yeah.") is attributed to the surrounding speaker.
+- **Tuning.** Every final result on a diarized channel logs a `[DIARIZATION]` line
+  at INFO giving the raw runs (label, words, seconds), the resulting segments, and
+  how many runs were absorbed — for example
+  `runs [spk_0x23w/7.3s, spk_2x19w/6.2s, spk_1x1w/0.1s] -> 2 segment(s) [spk_0, spk_2] (absorbed 1)`.
+  Use these to re-derive the thresholds for your own audio.
 - **No extra Transcribe cost.** Diarization is included in the standard rate, and
   the two channels are billed as a single stream.
 
@@ -788,6 +804,8 @@ These environment variables configure the server and are provided here for refer
 | `RECORDING_FILE_PREFIX` | `lma-audio-recordings/` | S3 key prefix for recordings |
 | `SHOULD_RECORD_CALL` | `false` | Whether to record and upload audio to S3 |
 | `SHOW_SPEAKER_LABEL` | `false` | Default for speaker partitioning (diarization), applied to both channels. Used **only** when a client sends neither `diarizeSystemChannel` nor `diarizeMicChannel`. Set from the `ShowSpeakerLabel` CloudFormation parameter. |
+| `DIARIZATION_MIN_RUN_WORDS` | `3` | Minimum same-speaker words for a run to become its own transcript segment. Shorter runs are absorbed into the neighbouring turn. Not set by the CloudFormation template — override on the task definition to re-tune. |
+| `DIARIZATION_MIN_RUN_SECONDS` | `1.0` | Minimum duration, in seconds, for the same. A run must clear **both** thresholds. |
 | `CPU_HEALTH_THRESHOLD` | `50` | CPU usage % threshold for health check |
 | `LOCAL_TEMP_DIR` | `/tmp/` | Temporary directory for recording files |
 | `WS_LOG_LEVEL` | `debug` | Server log level |
