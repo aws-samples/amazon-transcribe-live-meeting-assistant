@@ -14,7 +14,7 @@
     "lint": "eslint . --ext .ts --cache --max-warnings 0",
     "smoke": "ts-node test/fastify5-websocket.smoke.ts",
     "smoke-video": "ts-node test/video-recording.smoke.ts",
-    "test": "jest",
+    "test": "npm run build && node --test \"dist/**/*.test.js\"",
     "update": "ncu -t minor -u && npm install",
     "clean": "rm -r dist/"
   },
