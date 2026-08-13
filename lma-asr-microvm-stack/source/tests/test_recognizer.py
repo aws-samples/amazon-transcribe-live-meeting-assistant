@@ -118,6 +118,14 @@ def _write_wav(path: Path, pcm: bytes) -> None:
         wav.writeframes(pcm)
 
 
+def feed(recognizer, chunks: int = 1, amplitude: int = 8000):  # noqa: ANN001, ANN202
+    """Push ``chunks`` of audio and return every event emitted."""
+    events = []
+    for _ in range(chunks):
+        events.extend(recognizer.accept_pcm(_tone_chunk(amplitude)))
+    return events
+
+
 # --- Tests ------------------------------------------------------------------
 
 
@@ -670,3 +678,56 @@ def test_module_import_is_dependency_free() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "OK"
+
+# --- Word timings (streaming path) ------------------------------------------
+
+
+class WordScriptedBackend(ScriptedBackend):
+    """Scripted backend that also reports per-token tokens and timestamps."""
+
+    def __init__(self, script, tokens, timestamps) -> None:  # noqa: ANN001
+        super().__init__(script)
+        self._tokens = list(tokens)
+        self._timestamps = list(timestamps)
+
+    def current_words(self):  # noqa: ANN202
+        from asr_server.recognizer import words_from_tokens
+
+        return words_from_tokens(self._tokens, self._timestamps)
+
+
+def test_a_final_carries_word_timings_when_the_backend_reports_tokens() -> None:
+    backend = WordScriptedBackend(
+        [("hello world", False), ("hello world", True)],
+        ["\u2581hello", "\u2581wor", "ld"],
+        [0.10, 0.60, 0.75],
+    )
+    recognizer = SherpaOnlineRecognizer(backend, sample_rate=SAMPLE_RATE)
+
+    events = feed(recognizer, chunks=2)
+    final = [event for event in events if event.kind == "final"][-1]
+
+    assert final.words is not None
+    assert [word.w for word in final.words] == ["hello", "world"]
+    # Anchored to the segment's own start: a streaming decoder's timestamps restart
+    # per segment, so they are used for spacing, not as absolute session times.
+    assert final.words[0].s == final.start
+    assert final.words[1].s > final.words[0].s
+
+
+def test_a_backend_without_word_timings_still_finalizes() -> None:
+    backend = ScriptedBackend([("hi", True)])
+    recognizer = SherpaOnlineRecognizer(backend, sample_rate=SAMPLE_RATE)
+
+    events = feed(recognizer, chunks=1)
+    final = [event for event in events if event.kind == "final"][-1]
+
+    assert final.words is None
+    assert final.text == "hi"
+
+
+def test_word_reconstruction_refuses_mismatched_arrays() -> None:
+    from asr_server.recognizer import words_from_tokens
+
+    assert words_from_tokens(["\u2581a", "\u2581b"], [0.1]) == []
+    assert words_from_tokens([], []) == []

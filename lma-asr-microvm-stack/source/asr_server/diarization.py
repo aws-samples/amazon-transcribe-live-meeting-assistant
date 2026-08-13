@@ -57,6 +57,7 @@ real extractor is actually constructed (fail-closed until provisioned).
 from __future__ import annotations
 
 import contextlib
+import logging
 import math
 import os
 import sys
@@ -73,7 +74,15 @@ from asr_server.recognizer import (
     Recognizer,
     RecognizerEngine,
     SessionConfig,
+    WordTiming,
 )
+from asr_server.segmentation import (
+    TurnDetector,
+    build_segmentation_config,
+    create_onnx_backend,
+)
+
+_LOG = logging.getLogger(__name__)
 
 __all__ = [
     "SpeakerEmbedder",
@@ -386,6 +395,10 @@ class DiarizationConfig:
     # threshold is wrong for the embedder, and at a too-high threshold it merged
     # two different speakers into one. See SpeakerRegistry.assign.
     require_corroboration: bool = False
+    # Split one endpointed utterance into a row per speaker turn, using the baked
+    # segmentation model. Inert when that model is absent.
+    split_on_speaker_change: bool = True
+    min_turn_ms: int = 700
 
 
 def diarization_enabled(speaker_model: str | Path | None = None) -> bool:
@@ -431,6 +444,7 @@ def build_diarization_config(
     max_speakers: int | None = None,
     min_segment_ms: int | None = None,
     require_corroboration: bool | None = None,
+    split_on_speaker_change: bool | None = None,
     num_threads: int | None = None,
 ) -> DiarizationConfig:
     """Resolve a :class:`DiarizationConfig` from env + optional overrides (NFR5).
@@ -468,6 +482,10 @@ def build_diarization_config(
         require_corroboration = (
             os.environ.get("ASR_REQUIRE_CORROBORATION", "0").strip().lower() in _TRUTHY
         )
+    if split_on_speaker_change is None:
+        split_on_speaker_change = (
+            os.environ.get("ASR_SPLIT_ON_SPEAKER_CHANGE", "1").strip().lower() in _TRUTHY
+        )
 
     return DiarizationConfig(
         embedder=SpeakerEmbedderConfig(
@@ -480,6 +498,17 @@ def build_diarization_config(
         min_segment_ms=min_segment_ms,
         require_corroboration=require_corroboration,
     )
+
+
+@dataclass(frozen=True)
+class _SegmentPart:
+    """One speaker turn carved out of a finalized segment."""
+
+    start: float | None
+    end: float | None
+    text: str
+    words: list[WordTiming]
+    samples: list[float]
 
 
 # --- Diarizing recogniser (decorator) ---------------------------------------
@@ -523,6 +552,8 @@ class DiarizingRecognizer(Recognizer):
         min_segment_ms: int = 400,
         max_buffer_ms: int = 30000,
         require_corroboration: bool = False,
+        turn_detector: TurnDetector | None = None,
+        split_on_speaker_change: bool = True,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
@@ -553,6 +584,12 @@ class DiarizingRecognizer(Recognizer):
         # Most recently identified speaker: labels provisional partials and covers
         # segments too short to embed.
         self._current_speaker: str | None = None
+        self._turn_detector = turn_detector if split_on_speaker_change else None
+        # Splitting one inner segment into several finals consumes extra wire
+        # segment numbers, so outbound numbering runs ahead of the inner
+        # recogniser's by this much. Partials are renumbered with it too, which is
+        # what keeps a partial and the first final of its segment on the same row.
+        self._segment_offset = 0
 
     @property
     def registry(self) -> SpeakerRegistry:
@@ -571,36 +608,149 @@ class DiarizingRecognizer(Recognizer):
         events = self._inner.accept_pcm(pcm)
         self._buffer.extend(samples)
         self._trim_buffer()
-        return [self._label(event) for event in events]
+        return self._label_all(events)
 
     def flush(self) -> list[Event]:
-        return [self._label(event) for event in self._inner.flush()]
+        return self._label_all(self._inner.flush())
 
-    def _label(self, event: Event) -> Event:
-        """Stamp a speaker onto one inner event (see the class docstring)."""
+    def _label_all(self, events: Sequence[Event]) -> list[Event]:
+        labelled: list[Event] = []
+        for event in events:
+            labelled.extend(self._label(event))
+        return labelled
+
+    def _label(self, event: Event) -> list[Event]:
+        """Stamp speakers onto one inner event, splitting it on a speaker change."""
         if event.kind != "final":
             # Segment still open: provisional label only, no embedding.
-            return replace(event, speaker=self._current_speaker)
+            return [
+                replace(
+                    event,
+                    segment=event.segment + self._segment_offset,
+                    speaker=self._current_speaker,
+                )
+            ]
 
-        speaker = self._identify(event)
-        if speaker is not None:
-            self._current_speaker = speaker
-        return replace(event, speaker=speaker)
-
-    def _identify(self, event: Event) -> str | None:
-        """Embed a finalized segment's audio and resolve it to a speaker label."""
         segment = self._slice(event.start, event.end)
         # Consume the segment's audio: segments are monotonic and non-overlapping,
         # so nothing at or before this end can be needed again (bounds memory).
         if event.end is not None:
             self._prune_before(event.end)
 
-        if len(segment) < self._min_segment_samples:
+        parts = self._parts(event, segment)
+        labelled: list[Event] = []
+        for index, part in enumerate(parts):
+            speaker = self._identify(part.samples)
+            if speaker is not None:
+                self._current_speaker = speaker
+            labelled.append(
+                replace(
+                    event,
+                    segment=event.segment + self._segment_offset + index,
+                    start=part.start,
+                    end=part.end,
+                    text=part.text,
+                    words=part.words or None,
+                    speaker=speaker,
+                )
+            )
+        self._segment_offset += len(parts) - 1
+        return labelled
+
+    def _parts(self, event: Event, segment: list[float]) -> list[_SegmentPart]:
+        """One part per speaker turn in the closed segment.
+
+        Cuts snap to word boundaries, so no word is split across two rows, and a
+        cut that would leave a part too short to embed is dropped rather than
+        producing a row nobody can attribute.
+        """
+        whole = _SegmentPart(
+            start=event.start,
+            end=event.end,
+            text=event.text,
+            words=list(event.words or []),
+            samples=segment,
+        )
+        words = event.words or []
+        if (
+            self._turn_detector is None
+            or len(words) < 2
+            or event.start is None
+            or event.end is None
+            or len(segment) < 2 * self._min_segment_samples
+        ):
+            return [whole]
+
+        try:
+            detected = self._turn_detector.detect_samples(segment)
+        except Exception:  # noqa: BLE001 - detection must never break transcription
+            return [whole]
+        if not detected.boundaries:
+            return [whole]
+
+        cuts: list[int] = []
+        for boundary in detected.boundaries:
+            absolute = event.start + boundary
+            index = min(
+                range(1, len(words)),
+                key=lambda position: abs(words[position].s - absolute),
+            )
+            if index not in cuts:
+                cuts.append(index)
+        cuts.sort()
+
+        groups: list[list[WordTiming]] = []
+        previous = 0
+        for cut in cuts:
+            groups.append(words[previous:cut])
+            previous = cut
+        groups.append(words[previous:])
+
+        parts: list[_SegmentPart] = []
+        for index, group in enumerate(groups):
+            if not group:
+                continue
+            start = event.start if index == 0 else group[0].s
+            end = event.end if index == len(groups) - 1 else group[-1].e
+            samples = self._sub_samples(segment, event.start, start, end)
+            too_short = len(samples) < self._min_segment_samples and len(groups) > 1
+            if too_short and parts:
+                merged = parts[-1]
+                parts[-1] = _SegmentPart(
+                    start=merged.start,
+                    end=end,
+                    text=f"{merged.text} {' '.join(word.w for word in group)}".strip(),
+                    words=merged.words + group,
+                    samples=self._sub_samples(segment, event.start, merged.start, end),
+                )
+                continue
+            parts.append(
+                _SegmentPart(
+                    start=start,
+                    end=end,
+                    text=" ".join(word.w for word in group),
+                    words=group,
+                    samples=samples,
+                )
+            )
+        return parts or [whole]
+
+    def _sub_samples(
+        self, segment: list[float], segment_start: float | None, start: float, end: float
+    ) -> list[float]:
+        base = segment_start or 0.0
+        first = max(0, round((start - base) * self._sample_rate))
+        last = min(len(segment), round((end - base) * self._sample_rate))
+        return segment[first:max(first, last)]
+
+    def _identify(self, samples: list[float]) -> str | None:
+        """Embed one span's audio and resolve it to a speaker label."""
+        if len(samples) < self._min_segment_samples:
             # Too short for a trustworthy embedding: keep the conversation's
             # current speaker rather than inventing one from noise.
             return self._current_speaker
         try:
-            embedding = self._embedder.embed(self._sample_rate, segment)
+            embedding = self._embedder.embed(self._sample_rate, samples)
         except Exception:  # noqa: BLE001 - diarization must never break transcription
             return None
         if not embedding:
@@ -666,10 +816,12 @@ class DiarizingEngine(RecognizerEngine):
         inner: RecognizerEngine,
         embedder: SpeakerEmbedder,
         config: DiarizationConfig,
+        turn_detector: TurnDetector | None = None,
     ) -> None:
         self._inner = inner
         self._embedder = embedder
         self._config = config
+        self._turn_detector = turn_detector
 
     @property
     def inner(self) -> RecognizerEngine:
@@ -687,6 +839,11 @@ class DiarizingEngine(RecognizerEngine):
         """
         return self._embedder
 
+    @property
+    def turn_detector(self) -> TurnDetector | None:
+        """The shared speaker-turn detector, when one was baked into the image."""
+        return self._turn_detector
+
     def new_session(self, config: SessionConfig | None = None) -> Recognizer:
         # Delegate first: the inner engine owns sample-rate/endpointing validation
         # and raises SessionConfigError, which must surface unchanged.
@@ -695,6 +852,7 @@ class DiarizingEngine(RecognizerEngine):
         max_speakers = self._config.max_speakers
         min_segment_ms = self._config.min_segment_ms
         require_corroboration = self._config.require_corroboration
+        split_on_speaker_change = self._config.split_on_speaker_change
         sample_rate = self._config.embedder.sample_rate
         if config is not None:
             sample_rate = config.sample_rate
@@ -706,6 +864,8 @@ class DiarizingEngine(RecognizerEngine):
                 min_segment_ms = config.min_segment_ms
             if config.require_corroboration is not None:
                 require_corroboration = config.require_corroboration
+            if config.split_on_speaker_change is not None:
+                split_on_speaker_change = config.split_on_speaker_change
         return DiarizingRecognizer(
             inner_session,
             self._embedder,
@@ -714,6 +874,8 @@ class DiarizingEngine(RecognizerEngine):
             max_speakers=max_speakers,
             min_segment_ms=min_segment_ms,
             require_corroboration=require_corroboration,
+            turn_detector=self._turn_detector,
+            split_on_speaker_change=split_on_speaker_change,
         )
 
 
@@ -818,4 +980,39 @@ def create_diarizing_engine(
     than a session dying silently mid-connection.
     """
     embedder = create_sherpa_embedder(config.embedder, lock=threading.Lock())
-    return DiarizingEngine(inner, embedder, config)
+    return DiarizingEngine(inner, embedder, config, turn_detector=create_turn_detector(config))
+
+
+def create_turn_detector(config: DiarizationConfig) -> TurnDetector | None:
+    """Build the shared speaker-turn detector, or ``None`` when it is unavailable.
+
+    Absent weights are not an error: turn detection is an image-build decision, and
+    without it the engine keeps its previous behaviour of one speaker per endpointed
+    utterance. A load failure is logged and degraded for the same reason.
+    """
+    if not config.split_on_speaker_change:
+        return None
+    segmentation = replace(
+        build_segmentation_config(),
+        sample_rate=config.embedder.sample_rate,
+        min_turn_ms=config.min_turn_ms,
+        num_threads=config.embedder.num_threads,
+    )
+    if not segmentation.model_path.is_file():
+        _LOG.info(
+            "speaker-turn detection disabled: no segmentation model at %s",
+            segmentation.model_path,
+        )
+        return None
+    try:
+        detector = TurnDetector(create_onnx_backend(segmentation), segmentation)
+    except Exception:  # noqa: BLE001 - degrade to one speaker per utterance
+        _LOG.warning("speaker-turn detection unavailable; continuing without it", exc_info=True)
+        return None
+    _LOG.info(
+        "speaker-turn detection enabled: %s (window %.1fs, min turn %dms)",
+        segmentation.model_path,
+        segmentation.window_sec,
+        segmentation.min_turn_ms,
+    )
+    return detector

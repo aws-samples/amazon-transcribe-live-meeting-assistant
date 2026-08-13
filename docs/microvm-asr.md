@@ -126,6 +126,7 @@ There is no default record to keep in sync.
 | Diarize by default | Whether meetings request speaker labels when the client is silent on it |
 | Use this engine for every meeting | Routes all streaming meetings here, with the Transcribe feature losses above |
 | Require corroboration | Off by default; see the troubleshooting section |
+| Split rows on a speaker change | Splits one utterance into a row per speaker turn when the segmentation model is baked in |
 
 Stream Audio also asks **Speakers on this side** when diarization is ticked. Only the
 person in the meeting knows how many people share their microphone, which is why it is
@@ -377,20 +378,39 @@ Validated against the real model: k2-fsa's own `1-two-speakers-en.wav` (16 s, tw
 speakers) yields exactly one boundary, at 7.89 s, with a measured frame rate of
 16.98 ms.
 
-**How a split reaches the transcript.** The engine emits one `final` per turn with
-consecutive segment numbers, which the transcriber already maps to distinct
-`SegmentId`s, so a split needs no transcriber change. Because
-`addTranscriptSegment` is a `PutItem` keyed on `PK=trs#<callId>` / `SK=s#<segmentId>`
-whose guard only stops a *partial* from overwriting a final, re-emitting a final for
-the same segment number **updates that row in place**. That is what makes the two-way
-design safe: cut forward as soon as a change is detected so live partials appear
-under the right speaker, then reconcile at segment close, when the whole utterance is
-available and the embeddings are longer and more reliable. A false forward split
-degrades to two adjacent rows carrying the *same* speaker, never a wrong attribution,
-so no row ever has to be deleted.
+**How a split reaches the transcript.** At segment close the engine runs the detector
+over the closed utterance, cuts the word list at the nearest word boundary to each
+turn, embeds each part separately, and emits **one `final` per turn** with
+consecutive segment numbers. Outbound numbering therefore runs ahead of the
+recogniser's own by however many extra rows have been emitted, and partials are
+renumbered with it, which is what keeps a partial and the first final of its
+utterance on the same row. The transcriber needs no change: it already maps each
+segment number to its own `SegmentId`.
 
-Turn splitting is off when `AsrSegmentationModelId=none` or when no speaker model is
-baked in (there would be no embedder to identify the turns it finds).
+Cutting the text requires word timings, so the streaming recogniser now reconstructs
+them from sherpa's per-token `tokens` + `timestamps` (grouped on the SentencePiece
+`▁` marker) and anchors them to the segment's own start. A segment with no word
+timings is never split — guessing where the words divide would garble both rows — and
+a cut that would leave a part too short to embed is merged back into its neighbour.
+
+Measured end to end on k2-fsa's `1-two-speakers-en.wav`: the real model finds the turn
+at 7.89 s, the split snaps it to 7.90 s, and the two rows come back as `spk_0`
+(0.00–7.90) and `spk_1` (8.00–16.00) with the words divided 16/16.
+
+**Still to come: the forward cut.** Today the split happens at segment close, so live
+partials can briefly show the second speaker under the first speaker's label until
+the utterance ends. Cutting forward the moment a change is detected is safe to add
+because a correction *can* be applied afterwards — `addTranscriptSegment` is a
+`PutItem` keyed on `PK=trs#<callId>` / `SK=s#<segmentId>` whose guard only stops a
+*partial* from overwriting a final, so re-emitting a final for the same segment number
+updates that row in place. A false forward split then degrades to two adjacent rows
+carrying the *same* speaker rather than a wrong attribution, and no row ever needs
+deleting.
+
+Turn splitting is off when `AsrSegmentationModelId=none`, when no speaker model is
+baked in (there would be no embedder to identify the turns it finds), or when
+**Split rows on a speaker change** is unticked on the ASR Config page — that last one
+takes effect on the next meeting, with no rebuild.
 
 ### Not included: Whisper, Distil-Whisper, and the WhisperX hybrid
 

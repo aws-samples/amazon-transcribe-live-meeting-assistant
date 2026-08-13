@@ -56,6 +56,7 @@ class Config(BaseModel):
     # Withhold the first embedding that matches nobody until a second one agrees
     # with it. ``None`` means "use the server's configured value".
     require_corroboration: bool | None = None
+    split_on_speaker_change: bool | None = None
 
 
 class Eos(BaseModel):

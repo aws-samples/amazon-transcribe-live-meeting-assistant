@@ -53,6 +53,7 @@ from asr_server.recognizer import (
     SessionConfig,
     SessionConfigError,
     WordTiming,
+    words_from_tokens,
 )
 from asr_server.vad import (
     SileroVadConfig,
@@ -436,38 +437,7 @@ def _load_numpy() -> Any:
     return numpy
 
 
-# SentencePiece word-boundary marker: sherpa-onnx transducer tokens use '▁' to
-# mark the start of a new word. Reconstructing words from tokens + per-token
-# timestamps below keys off it. # verify against the exported tokens.txt.
-_WORD_BOUNDARY = "▁"
-
-
-def _words_from_tokens(tokens: Sequence[str], timestamps: Sequence[float]) -> list[WordTiming]:
-    """Reconstruct word timings from sherpa per-token tokens + timestamps. # verify.
-
-    sherpa-onnx transducer results expose per-token ``tokens`` and ``timestamps``
-    but not always word-level spans; group tokens on the ``▁`` boundary marker to
-    rebuild words. Best-effort — returns ``[]`` if the arrays don't line up.
-    """
-    if not tokens or len(tokens) != len(timestamps):
-        return []
-    words: list[WordTiming] = []
-    cur = ""
-    cur_start = 0.0
-    cur_end = 0.0
-    for tok, ts in zip(tokens, timestamps, strict=False):
-        piece = tok.replace(_WORD_BOUNDARY, " ")
-        starts_word = tok.startswith(_WORD_BOUNDARY)
-        if starts_word and cur.strip():
-            words.append(WordTiming(w=cur.strip(), s=cur_start, e=cur_end))
-            cur = ""
-        if not cur.strip():
-            cur_start = ts
-        cur += piece
-        cur_end = ts
-    if cur.strip():
-        words.append(WordTiming(w=cur.strip(), s=cur_start, e=cur_end))
-    return words
+_words_from_tokens = words_from_tokens
 
 
 class _SherpaOfflineBackend(OfflineDecoderBackend):

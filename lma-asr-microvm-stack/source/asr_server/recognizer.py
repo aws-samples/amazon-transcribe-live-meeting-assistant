@@ -152,6 +152,7 @@ class SessionConfig:
     max_speakers: int | None = None
     min_segment_ms: int | None = None
     require_corroboration: bool | None = None
+    split_on_speaker_change: bool | None = None
 
 
 class SessionConfigError(ValueError):
@@ -238,6 +239,62 @@ class DecoderBackend(Protocol):
 
     def input_finished(self) -> None:
         """Mark the audio stream complete so the tail can be decoded."""
+
+    def current_words(self) -> list[WordTiming]:
+        """Per-word timings for the active segment, when the backend has them.
+
+        Optional: a backend without this method yields finals with no word timings,
+        which disables features that need to cut a segment at a time (see
+        :mod:`asr_server.segmentation`).
+        """
+
+
+# SentencePiece word-boundary marker: sherpa-onnx transducer tokens use '▁' to mark
+# the start of a new word.
+WORD_BOUNDARY = "▁"
+
+
+def words_from_tokens(
+    tokens: Sequence[str], timestamps: Sequence[float]
+) -> list[WordTiming]:
+    """Reconstruct word timings from sherpa per-token tokens + timestamps.
+
+    Best-effort: returns ``[]`` when the arrays do not line up, so a backend that
+    reports tokens without timings degrades to no word timings rather than to wrong
+    ones.
+    """
+    if not tokens or len(tokens) != len(timestamps):
+        return []
+    words: list[WordTiming] = []
+    cur = ""
+    cur_start = 0.0
+    cur_end = 0.0
+    for tok, ts in zip(tokens, timestamps, strict=False):
+        piece = tok.replace(WORD_BOUNDARY, " ")
+        starts_word = tok.startswith(WORD_BOUNDARY)
+        if starts_word and cur.strip():
+            words.append(WordTiming(w=cur.strip(), s=cur_start, e=cur_end))
+            cur = ""
+        if not cur.strip():
+            cur_start = ts
+        cur += piece
+        cur_end = ts
+    if cur.strip():
+        words.append(WordTiming(w=cur.strip(), s=cur_start, e=cur_end))
+    return words
+
+
+def anchor_words(words: Sequence[WordTiming], start: float) -> list[WordTiming]:
+    """Re-base word timings so the first word starts at ``start``.
+
+    A streaming decoder's timestamps are relative to its own stream, which is reset
+    per segment, so they are used for spacing within the segment and anchored to the
+    segment's own start rather than trusted as absolute session times.
+    """
+    if not words:
+        return []
+    offset = start - words[0].s
+    return [WordTiming(w=word.w, s=word.s + offset, e=word.e + offset) for word in words]
 
 
 # --- PCM helpers ------------------------------------------------------------
@@ -345,18 +402,29 @@ class SherpaOnlineRecognizer(Recognizer):
         if not self._pending:
             self._reset_segment()
             return []
+        start = self._seg_start if self._seg_start is not None else 0.0
         event = Event(
             kind="final",
             segment=self._segment,
             text=self._last_text,
             # Guaranteed non-None for a pending segment; fall back to 0.0 rather
             # than ``end`` so a non-empty final never collapses to start == end.
-            start=self._seg_start if self._seg_start is not None else 0.0,
+            start=start,
             end=end,
+            words=self._words(start) or None,
         )
         self._segment += 1
         self._reset_segment()
         return [event]
+
+    def _words(self, start: float) -> list[WordTiming]:
+        reader = getattr(self._backend, "current_words", None)
+        if reader is None:
+            return []
+        try:
+            return anchor_words(reader(), start)
+        except Exception:  # noqa: BLE001 - word timings are optional detail
+            return []
 
     def _reset_segment(self) -> None:
         self._seg_start = None
@@ -511,6 +579,15 @@ class _SherpaBackend:
     def is_endpoint(self) -> bool:
         with self._lock:
             return bool(self._rec.is_endpoint(self._stream))
+
+    def current_words(self) -> list[WordTiming]:
+        with self._lock:
+            result = self._rec.get_result(self._stream)
+        tokens = getattr(result, "tokens", None)
+        timestamps = getattr(result, "timestamps", None)
+        if not tokens or not timestamps:
+            return []
+        return words_from_tokens(list(tokens), [float(value) for value in timestamps])
 
     def reset(self) -> None:
         with self._lock:

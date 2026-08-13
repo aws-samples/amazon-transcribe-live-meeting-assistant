@@ -80,6 +80,7 @@ interface AsrSessionOptions {
     endpointingMs: number;
     minSegmentMs?: number;
     requireCorroboration?: boolean;
+    splitOnSpeakerChange?: boolean;
 }
 
 export interface AsrSessionSet {
@@ -495,6 +496,9 @@ export class AsrChannelSession {
                 ...(this.options.requireCorroboration === undefined
                     ? {}
                     : { require_corroboration: this.options.requireCorroboration }),
+                ...(this.options.splitOnSpeakerChange === undefined
+                    ? {}
+                    : { split_on_speaker_change: this.options.splitOnSpeakerChange }),
             };
             try {
                 socket.send(JSON.stringify(config));
@@ -704,6 +708,7 @@ export const startMicrovmAsr = async (
         endpointingMs: runtime.endpointingMs,
         minSegmentMs: runtime.minSegmentMs,
         requireCorroboration: runtime.requireCorroboration,
+        splitOnSpeakerChange: runtime.splitOnSpeakerChange,
     };
     const registry = new SpeakerNameRegistry();
     const sessions = new Map<AsrChannelId, AsrChannelSession>();

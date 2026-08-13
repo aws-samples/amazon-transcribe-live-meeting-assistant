@@ -478,6 +478,7 @@ class AsrSession:
                     max_speakers=config.max_speakers,
                     min_segment_ms=config.min_segment_ms,
                     require_corroboration=config.require_corroboration,
+                    split_on_speaker_change=config.split_on_speaker_change,
                 )
                 self._recognizer = await asyncio.to_thread(
                     self._engine.new_session, session_config

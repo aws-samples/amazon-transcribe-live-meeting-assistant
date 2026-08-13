@@ -115,3 +115,12 @@ def test_the_threshold_range_covers_the_measured_operating_points() -> None:
     low, high, _ = index.NUMERIC_FIELDS["speakerThreshold"]
 
     assert low <= 0.2 and high >= 0.8
+
+
+def test_the_speaker_change_split_is_stored_as_a_boolean() -> None:
+    """The knob that turns intra-utterance splitting off without an image rebuild."""
+    response, stored = invoke({"splitOnSpeakerChange": False, "requireCorroboration": True})
+
+    assert response["Success"] is True
+    assert stored["splitOnSpeakerChange"] is False
+    assert stored["requireCorroboration"] is True

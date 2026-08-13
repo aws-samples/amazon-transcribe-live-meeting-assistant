@@ -38,6 +38,7 @@ export interface AsrRuntimeConfig {
     endpointingMs: number;
     minSegmentMs?: number;
     requireCorroboration?: boolean;
+    splitOnSpeakerChange?: boolean;
     diarizeByDefault: boolean;
     engineDefaultMicrovm: boolean;
     /**
@@ -60,6 +61,9 @@ const envDefaults = (): AsrRuntimeConfig => ({
         : undefined,
     requireCorroboration: process.env['ASR_REQUIRE_CORROBORATION']
         ? process.env['ASR_REQUIRE_CORROBORATION'] === 'true'
+        : undefined,
+    splitOnSpeakerChange: process.env['ASR_SPLIT_ON_SPEAKER_CHANGE']
+        ? process.env['ASR_SPLIT_ON_SPEAKER_CHANGE'] === 'true'
         : undefined,
     diarizeByDefault: (process.env['ASR_DIARIZE_DEFAULT'] || 'true') === 'true',
     engineDefaultMicrovm: (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase() === 'microvm',
@@ -128,6 +132,8 @@ export const getAsrRuntimeConfig = async (
                         : defaults.minSegmentMs,
                 requireCorroboration:
                     item['requireCorroboration']?.BOOL ?? defaults.requireCorroboration,
+                splitOnSpeakerChange:
+                    item['splitOnSpeakerChange']?.BOOL ?? defaults.splitOnSpeakerChange,
                 diarizeByDefault: item['diarizeByDefault']?.BOOL ?? defaults.diarizeByDefault,
                 engineDefaultMicrovm:
                     item['engineDefaultMicrovm']?.BOOL ?? defaults.engineDefaultMicrovm,

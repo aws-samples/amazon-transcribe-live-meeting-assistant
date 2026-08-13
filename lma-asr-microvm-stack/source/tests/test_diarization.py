@@ -37,7 +37,9 @@ from asr_server.recognizer import (
     RecognizerEngine,
     SessionConfig,
     SessionConfigError,
+    WordTiming,
 )
+from asr_server.segmentation import SegmentationResult
 
 SAMPLE_RATE = 16000
 
@@ -850,3 +852,168 @@ def test_new_session_falls_back_to_the_engine_defaults() -> None:
     assert session.registry._threshold == pytest.approx(0.31)  # noqa: SLF001
     assert session.registry._require_corroboration is True  # noqa: SLF001
     assert session._min_segment_samples == SAMPLE_RATE * 1234 // 1000  # noqa: SLF001
+
+# --- Splitting a segment on a speaker change --------------------------------
+
+
+class ScriptedTurnDetector:
+    """Stands in for the pyannote detector: returns fixed boundary times."""
+
+    def __init__(self, boundaries: Sequence[float], *, fail: bool = False) -> None:
+        self._boundaries = tuple(boundaries)
+        self._fail = fail
+        self.calls = 0
+
+    def detect_samples(self, samples: Sequence[float]):  # noqa: ANN202
+        self.calls += 1
+        if self._fail:
+            raise RuntimeError("scripted detector failure")
+        return SegmentationResult(boundaries=self._boundaries, overlaps=(), frame_sec=0.017)
+
+
+def _words(*spans: tuple[str, float, float]) -> list[WordTiming]:
+    return [WordTiming(w=word, s=start, e=end) for word, start, end in spans]
+
+
+def _final_with_words(segment: int, start: float, end: float, words) -> Event:  # noqa: ANN001
+    return Event(
+        kind="final",
+        segment=segment,
+        text=" ".join(word.w for word in words),
+        start=start,
+        end=end,
+        words=list(words),
+    )
+
+
+ALICE = [1.0, 0.0]
+BOB = [0.0, 1.0]
+
+
+def test_two_speakers_in_one_utterance_become_two_rows() -> None:
+    words = _words(("hello", 0.0, 0.5), ("there", 0.6, 1.2), ("hi", 2.0, 2.4), ("back", 2.5, 3.0))
+    inner = ScriptedRecognizer([[_final_with_words(0, 0.0, 3.0, words)]])
+    embedder = ScriptedEmbedder([ALICE, BOB])
+    recognizer = _recognizer(
+        inner,
+        embedder,
+        threshold=0.5,
+        min_segment_ms=100,
+        turn_detector=ScriptedTurnDetector([1.6]),
+    )
+
+    events = recognizer.accept_pcm(_pcm(3.0))
+
+    assert [event.kind for event in events] == ["final", "final"]
+    assert [event.text for event in events] == ["hello there", "hi back"]
+    # Distinct wire segment numbers, so the transcriber writes two rows rather than
+    # overwriting one.
+    assert [event.segment for event in events] == [0, 1]
+    assert events[0].speaker != events[1].speaker
+    # The cut snapped to a word boundary: no word appears in both rows.
+    assert events[0].words is not None and events[1].words is not None
+    assert [word.w for word in events[0].words] == ["hello", "there"]
+
+
+def test_a_split_shifts_later_segment_numbers_so_none_collide() -> None:
+    words = _words(("a", 0.0, 0.4), ("b", 0.5, 0.9), ("c", 2.0, 2.4), ("d", 2.5, 2.9))
+    inner = ScriptedRecognizer(
+        [
+            [_final_with_words(0, 0.0, 3.0, words)],
+            [_partial(1, "next", 3.0)],
+            [_final_with_words(1, 3.0, 4.0, _words(("later", 3.0, 3.8)))],
+        ]
+    )
+    embedder = ScriptedEmbedder([ALICE, BOB, ALICE])
+    recognizer = _recognizer(
+        inner, embedder, min_segment_ms=100, turn_detector=ScriptedTurnDetector([1.5])
+    )
+
+    first = recognizer.accept_pcm(_pcm(3.0))
+    partial = recognizer.accept_pcm(_pcm(0.1))
+    second = recognizer.accept_pcm(_pcm(1.0))
+
+    assert [event.segment for event in first] == [0, 1]
+    # The partial for inner segment 1 must land on the same row as its final.
+    assert [event.segment for event in partial] == [2]
+    assert [event.segment for event in second] == [2]
+
+
+def test_no_detected_change_leaves_one_row() -> None:
+    words = _words(("one", 0.0, 0.5), ("speaker", 0.6, 1.2))
+    inner = ScriptedRecognizer([[_final_with_words(0, 0.0, 2.0, words)]])
+    embedder = ScriptedEmbedder([ALICE])
+    detector = ScriptedTurnDetector([])
+    recognizer = _recognizer(inner, embedder, min_segment_ms=100, turn_detector=detector)
+
+    events = recognizer.accept_pcm(_pcm(2.0))
+
+    assert len(events) == 1
+    assert events[0].text == "one speaker"
+    assert detector.calls == 1
+
+
+def test_a_segment_without_word_timings_is_never_split() -> None:
+    # Cutting text without word timings would garble both rows, so the detector is
+    # not even consulted.
+    inner = ScriptedRecognizer([[_final(0, "no word timings here", 0.0, 3.0)]])
+    embedder = ScriptedEmbedder([ALICE])
+    detector = ScriptedTurnDetector([1.5])
+    recognizer = _recognizer(inner, embedder, min_segment_ms=100, turn_detector=detector)
+
+    events = recognizer.accept_pcm(_pcm(3.0))
+
+    assert len(events) == 1
+    assert detector.calls == 0
+
+
+def test_a_detector_failure_degrades_to_one_row() -> None:
+    words = _words(("still", 0.0, 0.5), ("transcribed", 0.6, 1.2))
+    inner = ScriptedRecognizer([[_final_with_words(0, 0.0, 2.0, words)]])
+    recognizer = _recognizer(
+        ScriptedRecognizer([[_final_with_words(0, 0.0, 2.0, words)]]),
+        ScriptedEmbedder([ALICE]),
+        min_segment_ms=100,
+        turn_detector=ScriptedTurnDetector([1.0], fail=True),
+    )
+    del inner
+
+    events = recognizer.accept_pcm(_pcm(2.0))
+
+    assert len(events) == 1
+    assert events[0].text == "still transcribed"
+
+
+def test_splitting_can_be_turned_off_per_session() -> None:
+    words = _words(("a", 0.0, 0.4), ("b", 2.0, 2.4))
+    detector = ScriptedTurnDetector([1.2])
+    recognizer = _recognizer(
+        ScriptedRecognizer([[_final_with_words(0, 0.0, 3.0, words)]]),
+        ScriptedEmbedder([ALICE]),
+        min_segment_ms=100,
+        turn_detector=detector,
+        split_on_speaker_change=False,
+    )
+
+    events = recognizer.accept_pcm(_pcm(3.0))
+
+    assert len(events) == 1
+    assert detector.calls == 0
+
+
+def test_a_cut_that_would_leave_an_unembeddable_sliver_is_merged_back() -> None:
+    # The boundary sits just before the last short word: splitting there would make
+    # a row too short to attribute, so it stays with the row before it.
+    words = _words(("long", 0.0, 1.0), ("enough", 1.1, 2.0), ("ok", 2.05, 2.10))
+    recognizer = _recognizer(
+        ScriptedRecognizer([[_final_with_words(0, 0.0, 2.1, words)]]),
+        ScriptedEmbedder([ALICE]),
+        min_segment_ms=500,
+        turn_detector=ScriptedTurnDetector([2.03]),
+    )
+
+    events = recognizer.accept_pcm(_pcm(2.1))
+
+    assert len(events) == 1
+    assert events[0].text == "long enough ok"
+

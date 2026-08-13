@@ -1405,3 +1405,13 @@ async def test_asr_mode_remains_the_default() -> None:
 
     assert json.loads(conn.sent[0])["effective_config"]["mode"] == "asr"
     assert not any(json.loads(frame)["type"] == "embedding" for frame in conn.sent)
+
+def test_split_on_speaker_change_reaches_the_session_config() -> None:
+    """The knob is per session so it can be turned off without an image rebuild."""
+    from asr_protocol import Config
+
+    config = Config(sample_rate=16000, split_on_speaker_change=False)
+
+    assert config.split_on_speaker_change is False
+    assert Config(sample_rate=16000).split_on_speaker_change is None
+

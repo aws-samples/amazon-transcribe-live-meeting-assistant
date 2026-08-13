@@ -37,6 +37,7 @@ const getAsrConfigQuery = `
       maxSpeakers
       endpointingMs
       requireCorroboration
+      splitOnSpeakerChange
       diarizeByDefault
       engineDefaultMicrovm
     }
@@ -67,6 +68,7 @@ const EMPTY = {
   maxSpeakers: '',
   endpointingMs: '',
   requireCorroboration: false,
+  splitOnSpeakerChange: true,
   diarizeByDefault: true,
   engineDefaultMicrovm: false,
 };
@@ -100,6 +102,7 @@ const AsrConfigPage = () => {
         maxSpeakers: stored.maxSpeakers ?? '',
         endpointingMs: stored.endpointingMs ?? '',
         requireCorroboration: stored.requireCorroboration ?? false,
+        splitOnSpeakerChange: stored.splitOnSpeakerChange ?? true,
         diarizeByDefault: stored.diarizeByDefault ?? true,
         engineDefaultMicrovm: stored.engineDefaultMicrovm ?? false,
       });
@@ -327,6 +330,25 @@ const AsrConfigPage = () => {
 
             <ExpandableSection headerText="Advanced">
               <SpaceBetween size="l">
+                <FormField
+                  label="Split a row when the speaker changes mid-utterance"
+                  description={
+                    'Endpointing closes an utterance on silence, so two people speaking without a ' +
+                    'gap share one row and one label. With the pyannote segmentation model baked ' +
+                    'in, the engine finds the turn inside that utterance and emits a row per ' +
+                    'speaker, cut at a word boundary. Has no effect if the image was built with ' +
+                    'AsrSegmentationModelId=none.'
+                  }
+                >
+                  <Checkbox
+                    checked={config.splitOnSpeakerChange}
+                    onChange={({ detail }) => setConfig({ ...config, splitOnSpeakerChange: detail.checked })}
+                    disabled={saving}
+                  >
+                    Split rows on a speaker change
+                  </Checkbox>
+                </FormField>
+
                 <FormField
                   label="Use this engine for every streaming meeting"
                   description={

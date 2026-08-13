@@ -42,6 +42,9 @@ BOOLEAN_FIELDS = {
     # Off by default: measured to cost attribution purity when the threshold is
     # already correct, and to merge speakers when it is too high.
     "requireCorroboration",
+    # Split one endpointed utterance into a row per speaker turn, using the baked
+    # pyannote segmentation model. On by default when that model is present.
+    "splitOnSpeakerChange",
     # Route every streaming meeting to the MicroVM engine, not just those that ask
     # for diarization.
     "engineDefaultMicrovm",

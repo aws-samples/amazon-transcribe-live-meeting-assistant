@@ -762,6 +762,7 @@ type AsrConfig @aws_cognito_user_pools @aws_iam {
 	maxSpeakers: String
 	endpointingMs: String
 	requireCorroboration: Boolean
+	splitOnSpeakerChange: Boolean
 	diarizeByDefault: Boolean
 	engineDefaultMicrovm: Boolean
 }
