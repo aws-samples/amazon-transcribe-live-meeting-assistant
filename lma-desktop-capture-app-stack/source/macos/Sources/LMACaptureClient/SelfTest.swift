@@ -171,6 +171,25 @@ enum SelfTest {
         check("backoff #6 (capped)", backoff(6), "10.0")
         check("backoff #20 (capped)", backoff(20), "10.0")
 
+        // Log redaction: URLSession errors embed the request URL, which carries
+        // the access token — a live credential must never reach stdout.
+        let leakyError = "Error Domain=NSURLErrorDomain Code=-1011 UserInfo={"
+            + "NSErrorFailingURLStringKey=wss://x.cloudfront.net/api/v1/ws"
+            + "?authorization=Bearer%20eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.sig1"
+            + "&id_token=eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ5In0.sig2, "
+            + "NSLocalizedDescription=There was a bad response from the server.}"
+        let scrubbed = TranscriberSocket.redactingTokens(leakyError)
+        check("redaction removes access token", "\(scrubbed.contains("eyJzdWIiOiJ4In0"))", "false")
+        check("redaction removes id token", "\(scrubbed.contains("eyJzdWIiOiJ5In0"))", "false")
+        check("redaction leaves no 'eyJ' behind", "\(scrubbed.contains("eyJ"))", "false")
+        // The rest of the diagnostic must survive, or we've traded a leak for
+        // an unusable error message.
+        check("redaction keeps the error code", "\(scrubbed.contains("Code=-1011"))", "true")
+        check("redaction keeps the host/path", "\(scrubbed.contains("wss://x.cloudfront.net/api/v1/ws"))", "true")
+        check("redaction marks the removal", "\(scrubbed.contains("<redacted-jwt>"))", "true")
+        check("redaction is a no-op on clean text",
+              TranscriberSocket.redactingTokens("plain error, no tokens"), "plain error, no tokens")
+
         // Cognito error classification: only a REJECTED credential is terminal.
         // Retrying a rejected refresh token is pointless; giving up on a 5xx or a
         // throttle would sign the user out for no reason.

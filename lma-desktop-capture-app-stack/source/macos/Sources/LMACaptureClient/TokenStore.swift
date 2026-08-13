@@ -33,6 +33,14 @@ final class TokenStore {
     /// Floor on the gap between refresh ATTEMPTS. A backstop: without it, a
     /// reconnect storm — or a 401 caused by something other than expiry — could
     /// hammer Cognito's InitiateAuth.
+    ///
+    /// Deliberate consequence: if a token is rejected within this window of a
+    /// SUCCESSFUL refresh, the reactive attempt is refused and the socket
+    /// escalates to fatal instead of refreshing again. That is the right
+    /// outcome — a token minted seconds ago being rejected means the session was
+    /// revoked server-side, not that it expired, and re-minting cannot fix it.
+    /// Note the socket only reaches here when it already presented the CURRENT
+    /// token; if it presented an older one it just reconnects (no refresh spent).
     static let minRefreshInterval: TimeInterval = 20
 
     /// Wait between retries after a TRANSIENT refresh failure (e.g. offline),

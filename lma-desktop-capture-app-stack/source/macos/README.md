@@ -205,7 +205,9 @@ Session/Local Storage, and copy the Cognito **access token** and **id token**
 (keys under `CognitoIdentityServiceProvider.<clientId>.<user>.accessToken` /
 `.idToken`). Paste into `--token` / `--id-token`. Access tokens expire in ~1 hour;
 to let a pasted-token session renew itself, also copy the **refresh token**
-(`.refreshToken`) into `--refresh-token` / `LMA_REFRESH_TOKEN` — with it the
+(`.refreshToken`) into `LMA_REFRESH_TOKEN` (preferred — a refresh token is a
+long-lived credential, ~30 days, and anything on the command line is visible to
+other local users via `ps`; `--refresh-token` exists for parity) — with it the
 client refreshes proactively before `exp` and retries once after a 401 (see
 "Token refresh" below). The in-app `--username` login captures the refresh token
 automatically, so it never needs this flag.

@@ -48,6 +48,12 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     private var handshakeFailures = 0
     private let maxHandshakeFailures = 4
 
+    // --- Connect state ------------------------------------------------------
+    // Guarded by `stateLock`: these are touched from the URLSession delegate
+    // queue, `reconnectQueue`, the caller's queue, AND Swift-concurrency threads
+    // (the refresh Task), so unsynchronised access is a genuine data race — for
+    // `presentedAccessToken`, a non-atomic String, it is undefined behaviour.
+    private let stateLock = NSLock()
     // The access token this socket actually presented on the current attempt.
     // Compared against the store's token to spot "someone else already
     // refreshed while I was failing" — then a plain retry is enough and we
@@ -56,6 +62,15 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     // One reactive refresh per connection cycle (reset on a successful open), so
     // a server 401ing for a NON-expiry reason can't turn into a refresh loop.
     private var refreshAttemptedThisCycle = false
+    /// True from the moment a connect attempt begins until it resolves (open or
+    /// error). Without this, two attempts can overlap and the loser is ORPHANED:
+    /// `task`/`session` get overwritten while the abandoned socket is still
+    /// resumed with `self` as its delegate, so it can send a SECOND START for
+    /// the same callId (duplicating the meeting server-side) and its later
+    /// callbacks keep mutating the failure counters. Two callers make this
+    /// reachable: `connect()` finishes inside a Task when a refresh is needed,
+    /// and a reconnect timer can fire during that window.
+    private var connectInFlight = false
 
     // --- Reconnect buffering ------------------------------------------------
     // Briefly hold PCM produced while the socket is down so a short reconnect
@@ -94,7 +109,27 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     private var accessToken: String { tokens?.accessToken ?? config.accessToken }
     private var idToken: String { tokens?.idToken ?? config.idToken }
 
+    // MARK: Connect-state helpers (all lock-guarded — see `stateLock`)
+
+    /// Claim the right to open a socket. Returns false when an attempt is
+    /// already in flight (or we're shutting down), in which case the caller
+    /// simply DROPS its retry: whoever holds the attempt will either succeed or
+    /// fail into `didCompleteWithError`, which schedules the next one.
+    private func beginConnectAttempt() -> Bool {
+        stateLock.lock(); defer { stateLock.unlock() }
+        if connectInFlight || intentionalClose { return false }
+        connectInFlight = true
+        return true
+    }
+
+    /// Mark the current attempt resolved (opened, or failed). Idempotent.
+    private func endConnectAttempt() {
+        stateLock.lock(); connectInFlight = false; stateLock.unlock()
+    }
+
     func connect() {
+        // Single-flight: never let two attempts overlap (see `connectInFlight`).
+        guard beginConnectAttempt() else { return }
         // Renew FIRST when the token we are about to present is at/near expiry.
         // Without this, a Start after the Mac woke from sleep — or after an hour
         // idle in the menu bar — opens a socket we already know will 401, and
@@ -105,7 +140,8 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
         }
         Task { [weak self] in
             await tokens.refreshIfNeeded()
-            guard let self = self, !self.intentionalClose else { return }
+            guard let self = self else { return }
+            guard !self.intentionalClose else { self.endConnectAttempt(); return }
             // Open regardless of the refresh outcome: if it failed transiently
             // the old token may still work, and if it failed for good the
             // handshake's own error path produces the right message.
@@ -121,7 +157,7 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
             fatalError("Bad endpoint URL: \(config.endpoint)")
         }
         let access = accessToken
-        presentedAccessToken = access
+        stateLock.lock(); presentedAccessToken = access; stateLock.unlock()
         var items = comps.queryItems ?? []
         items.append(URLQueryItem(name: "authorization", value: "Bearer \(access)"))
         if !idToken.isEmpty {
@@ -145,6 +181,14 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
         if !idToken.isEmpty {
             req.setValue(idToken, forHTTPHeaderField: "id_token")
         }
+
+        // Release the PREVIOUS session before replacing it. A URLSession retains
+        // its delegate (us) until invalidated, so reconnecting without this
+        // leaks a session per attempt. `finishTasksAndInvalidate` rather than
+        // `invalidateAndCancel`: the old task has already finished by now, and
+        // cancelling would fire a spurious error callback into our reconnect
+        // logic.
+        session?.finishTasksAndInvalidate()
 
         session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         task = session.webSocketTask(with: req)
@@ -254,19 +298,6 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
         min(cap, pow(2.0, Double(max(1, attempt) - 1)) * 0.5)
     }
 
-    /// Retry the handshake NOW, skipping backoff: we changed something material
-    /// (a freshly minted access token), so waiting buys nothing.
-    private func reconnectImmediately(_ why: String) {
-        reconnectQueue.async { [weak self] in
-            guard let self = self, !self.intentionalClose else { return }
-            // If a backoff reconnect is already pending it will pick up the new
-            // token when it fires — don't open a second socket alongside it.
-            guard !self.reconnectScheduled else { return }
-            print("⟳ WS retrying immediately (\(why))")
-            self.connect()
-        }
-    }
-
     private func sendJSON(_ obj: [String: Any], label: String) {
         guard let json = try? JSONSerialization.data(withJSONObject: obj),
               let str = String(data: json, encoding: .utf8) else { return }
@@ -287,7 +318,10 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
                 // Expected during an intentional Stop/close — stay silent (the
                 // pending receive always errors when we cancel the task).
                 if self.intentionalClose { return }
-                FileHandle.standardError.write("WS receive/closed: \(err)\n".data(using: .utf8)!)
+                // Redacted: this error embeds the request URL, which carries the
+                // access token in its query string.
+                FileHandle.standardError.write(
+                    "WS receive/closed: \(Self.redactingTokens("\(err)"))\n".data(using: .utf8)!)
                 self.scheduleReconnect("receive error")
             case .success(let msg):
                 // The transcriber doesn't send app-level frames back; log anything unexpected.
@@ -302,10 +336,13 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask,
                     didOpenWithProtocol protocol: String?) {
         isOpen = true
-        everOpened = true
+        endConnectAttempt()      // this attempt resolved — a later drop may retry
         reconnectAttempt = 0     // healthy connection resets backoff
+        stateLock.lock()
+        everOpened = true
         handshakeFailures = 0
         refreshAttemptedThisCycle = false
+        stateLock.unlock()
         print("✓ WebSocket open → \(config.endpoint)")
         onStateChange?(true)
         sendStart()              // fresh START every (re)connect; server has no resume
@@ -327,6 +364,7 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     didCompleteWithError error: Error?) {
         isOpen = false
+        endConnectAttempt()      // this attempt resolved (in failure)
         onStateChange?(false)
         guard !intentionalClose else { return }
         let status = (task.response as? HTTPURLResponse)?.statusCode
@@ -336,20 +374,33 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
         // fatal threshold, so the user never sees it. Only when refreshing
         // genuinely fails does it become an error worth surfacing.
         if Self.isAuthFailure(status: status, error: error), let tokens = tokens, tokens.canRefresh {
-            if presentedAccessToken != tokens.accessToken {
-                // Something already refreshed while this socket was failing
-                // (the proactive timer, or a sibling socket): just retry with
-                // the newer token rather than spending another refresh.
-                reconnectImmediately("newer access token available")
+            stateLock.lock()
+            let presented = presentedAccessToken
+            let alreadyTried = refreshAttemptedThisCycle
+            if !alreadyTried { refreshAttemptedThisCycle = true }
+            stateLock.unlock()
+
+            if presented != tokens.accessToken {
+                // Something already refreshed while this socket was failing (the
+                // proactive timer, or a sibling socket): reconnecting is enough,
+                // don't spend another refresh. The pending reconnect reads the
+                // token through `tokens` at connect time, so it picks up the new
+                // one automatically.
+                scheduleReconnect("newer access token available")
                 return
             }
-            if !refreshAttemptedThisCycle {
-                refreshAttemptedThisCycle = true
+            if !alreadyTried {
                 Task { [weak self] in
                     let ok = await tokens.refreshNow(reason: "WebSocket upgrade rejected the access token")
                     guard let self = self, !self.intentionalClose else { return }
                     if ok {
-                        self.reconnectImmediately("refreshed access token")
+                        // Reconnect through the SAME guarded path as every other
+                        // retry. An earlier version retried immediately here to
+                        // skip the backoff; that could open a second socket
+                        // alongside a reconnect whose timer had already fired,
+                        // orphaning one of them mid-call. The ≤backoff delay is
+                        // not worth that risk.
+                        self.scheduleReconnect("refreshed access token")
                     } else {
                         self.countHandshakeFailure(status: status, error: error)
                     }
@@ -370,16 +421,20 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     /// forever against a dead token instead of saying so (issue #535).
     private func countHandshakeFailure(status: Int?, error: Error?) {
         let authLooking = Self.isAuthFailure(status: status, error: error)
-        if !everOpened || authLooking {
-            handshakeFailures += 1
-            if handshakeFailures >= maxHandshakeFailures {
+        stateLock.lock()
+        let countIt = !everOpened || authLooking
+        if countIt { handshakeFailures += 1 }
+        let failures = handshakeFailures
+        stateLock.unlock()
+        if countIt {
+            if failures >= maxHandshakeFailures {
                 FileHandle.standardError.write("""
-                ✗ WebSocket handshake keeps failing (\(handshakeFailures) attempts).
+                ✗ WebSocket handshake keeps failing (\(failures) attempts).
                   This is almost always an EXPIRED or INVALID access token (the server
                   returns 401, seen here as HTTP \(status.map(String.init) ?? "-") /
                   NSURLError -1011). Cognito access tokens last ~1 hour and this client
                   could not renew it — sign in again.
-                  Underlying error: \(error.map { "\($0)" } ?? "none")\n
+                  Underlying error: \(Self.redactingTokens(error.map { "\($0)" } ?? "none"))\n
                 """.data(using: .utf8)!)
                 intentionalClose = true
                 onFatalAuth?(Self.fatalAuthMessage)
@@ -400,6 +455,26 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     /// Everything else (offline, DNS, timeout, TLS, 5xx) is transient. Getting
     /// this wrong in the permissive direction would spend refreshes on outages;
     /// in the strict direction it would leave expired tokens unrefreshed.
+    /// Strip JWT-shaped substrings out of text destined for a log.
+    ///
+    /// URLSession's error descriptions embed the failing URL
+    /// (`NSErrorFailingURLStringKey`), and ours carries the access token in the
+    /// query string (see the AUTH NOTE) — so printing one verbatim writes a LIVE
+    /// credential to stdout/stderr, where it can be captured by a launcher,
+    /// pasted into a bug report, or shipped to a log collector. Redacting only
+    /// the token keeps the rest of the diagnostic (host, path, error code)
+    /// intact, and catches the percent-encoded `Bearer%20eyJ…` form too.
+    ///
+    /// Cognito access/id tokens are always JWTs, hence matching on that shape.
+    static func redactingTokens(_ text: String) -> String {
+        // header.payload.signature — base64url segments, header always "eyJ…".
+        let pattern = "eyJ[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+"
+        guard let re = try? NSRegularExpression(pattern: pattern) else { return text }
+        return re.stringByReplacingMatches(
+            in: text, range: NSRange(text.startIndex..., in: text),
+            withTemplate: "<redacted-jwt>")
+    }
+
     static func isAuthFailure(status: Int?, error: Error?) -> Bool {
         if let status = status { return status == 401 || status == 403 }
         guard let error = error else { return false }

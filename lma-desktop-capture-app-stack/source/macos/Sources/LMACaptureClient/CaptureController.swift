@@ -30,6 +30,9 @@ final class CaptureController {
     private var capture: AudioCapture?
     private var videoSocket: VideoSocket?
     private var videoCapture: VideoCapture?
+    /// The in-flight `start()` continuation (capture bring-up). Held so stop()
+    /// can cancel it — see the comment at its creation site.
+    private var startTask: Task<Void, Never>?
     /// When the audio stream started — baseline for videoTimeOffsetMs.
     private var audioStartDate: Date?
     private let lock = NSLock()
@@ -203,13 +206,20 @@ final class CaptureController {
         sock.connect()
         mix.start()
         audioStartDate = Date()
-        Task { [weak self] in
+        // Retained + cancelled by stop(): mic/screen capture can take seconds to
+        // come up (a Screen Recording prompt blocks it), and without the
+        // cancellation checks a stop that lands first — notably the fatal-auth
+        // path — would have its final state overwritten by `.streaming` and
+        // would start a video lane after teardown.
+        startTask = Task { [weak self] in
             do {
                 try await cap.start()
+                guard !Task.isCancelled else { return }
                 self?.log("Streaming \(self?.activeCallId ?? "")")
                 self?.setState(.streaming)
                 self?.startVideoIfEnabled()
             } catch {
+                guard !Task.isCancelled else { return }
                 self?.log("Capture failed: \(error)")
                 self?.setState(.error("\(error)"))
             }
@@ -288,6 +298,8 @@ final class CaptureController {
     /// state with `.idle`, swallowing the reason the stream stopped.
     func stop(then finalState: State? = nil) {
         setState(.stopping)
+        startTask?.cancel()      // don't let a late capture bring-up undo this
+        startTask = nil
         stopVideo(sendEnd: true)
         capture?.stop()
         mixer?.stop()
