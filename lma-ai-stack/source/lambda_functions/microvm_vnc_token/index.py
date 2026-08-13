@@ -40,12 +40,7 @@ def lambda_handler(event, context):
     # it must include identity.username: a live call failed "Unauthenticated"
     # because only the claims were checked and this deployment populates
     # identity.username instead.
-    caller = (
-        claims.get("email")
-        or claims.get("cognito:username")
-        or identity.get("username")
-        or ""
-    )
+    caller = claims.get("email") or claims.get("cognito:username") or identity.get("username") or ""
 
     if not vp_id:
         raise Exception("vpId is required")
