@@ -16,6 +16,10 @@ import CryptoKit
 ///   --endpoint   wss://<cloudfront-domain>/api/v1/ws   (or LMA_WS_ENDPOINT)
 ///   --token      <Cognito ACCESS token, no "Bearer " prefix>   (or LMA_ACCESS_TOKEN)
 ///   --id-token   <Cognito ID token>                            (or LMA_ID_TOKEN)
+///   --refresh-token <Cognito REFRESH token>   (or LMA_REFRESH_TOKEN) — lets the
+///                pasted-token path renew itself instead of dying at the ~1h
+///                access-token TTL. Not needed with --username (SRP login
+///                captures it automatically).
 ///   --call-id    "My meeting - 2026-07-04"                     (or LMA_CALL_ID)
 ///   --agent-id   "alice@example.com"  (label for the mic channel)
 ///   --from       "Other participants" (label for the meeting channel)
@@ -26,6 +30,10 @@ struct Config {
     var endpoint: String
     var accessToken: String
     var idToken: String
+    /// Cognito REFRESH token. Retained (it used to be discarded at sign-in —
+    /// issue #535) so the ~1 h access token can be renewed without another
+    /// interactive sign-in. Redeemed by TokenStore, never sent to the server.
+    var refreshToken: String
     var callId: String
     var agentId: String
     var fromNumber: String
@@ -146,6 +154,7 @@ struct Config {
             endpoint: value("endpoint", "LMA_WS_ENDPOINT", "wssEndpoint"),
             accessToken: value("token", "LMA_ACCESS_TOKEN"),
             idToken: value("id-token", "LMA_ID_TOKEN"),
+            refreshToken: value("refresh-token", "LMA_REFRESH_TOKEN"),
             callId: value("call-id", "LMA_CALL_ID", nil, defaultCallId),
             agentId: value("agent-id", "LMA_AGENT_ID", nil, "Me"),
             fromNumber: value("from", "LMA_FROM", nil, "Other participants"),
