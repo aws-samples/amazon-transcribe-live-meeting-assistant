@@ -327,6 +327,19 @@ Parameters:
       to the web UI so the Stream Audio page only offers diarization when it can
       actually be served.
 
+  AsrSpeakerModelMeasured:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Whether the deployed speaker model's operating point has been measured. When
+      "false" (a customer-supplied embedder, or a catalog entry with no measurement)
+      the transcriber withholds speaker labels until an admin has calibrated the
+      deployment or set a threshold on the ASR Config page, because a guessed
+      threshold splits one person into several or merges several into one.
+
   AsrMaxSpeakers:
     Type: Number
     Default: 0
@@ -1342,6 +1355,8 @@ Resources:
               Value: !Ref AsrEndpointingMs
             - Name: ASR_MIN_SEGMENT_MS
               Value: !Ref AsrMinSegmentMs
+            - Name: ASR_SPEAKER_MODEL_MEASURED
+              Value: !Ref AsrSpeakerModelMeasured
             - Name: ASR_CONFIG_TABLE_NAME
               Value: !Ref AsrConfigTableName
             - Name: WS_LOG_LEVEL
@@ -1658,7 +1673,20 @@ Resources:
           - ShouldEnableMicrovmAsr
           - !Ref AsrDiarizationAvailable
           - "false"
+        # Read by the ASR Config page: an unmeasured speaker model is told to
+        # calibrate rather than left to discover that speaker labels never appear.
+        AsrSpeakerModelMeasured: !Ref AsrSpeakerModelMeasured
         AsrEngineDefault: !Ref AsrEngineDefault
+        # The ASR Config page posts calibration runs here (the UI is on its own
+        # CloudFront domain, so it needs the absolute URL).
+        AsrCalibrateEndpoint: !If
+          - ShouldEnableMicrovmAsr
+          - !Join
+            - ""
+            - - "https://"
+              - !GetAtt WebSocketCloudFrontDistribution.DomainName
+              - "/api/v1/asr/calibrate"
+          - ""
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

@@ -671,6 +671,17 @@ Outputs:
     Description: Whether the image can produce speaker labels.
     Value: !GetAtt AsrImageSource.DiarizationAvailable
 
+  SpeakerModelMeasured:
+    Description: >-
+      Whether this speaker model's same-speaker vs different-speaker distributions
+      have been measured (catalog "measured" field). "false" for a customer-supplied
+      embedder, which is why diarization is withheld until the deployment calibrates.
+    Value: !GetAtt AsrImageSource.SpeakerModelMeasured
+
+  RecommendedThreshold:
+    Description: Measured cosine similarity operating point for this speaker model, if any.
+    Value: !GetAtt AsrImageSource.RecommendedThreshold
+
   AsrConfigTableName:
     Description: Runtime ASR configuration table, edited from the ASR Config admin page.
     Value: !Ref AsrConfigTable

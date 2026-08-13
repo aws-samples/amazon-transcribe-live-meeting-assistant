@@ -52,6 +52,7 @@ from uuid import uuid4
 
 from asr_protocol import (
     Config,
+    Embedding,
     Error,
     Partial,
     Ready,
@@ -67,6 +68,7 @@ from asr_server.diarization import (
     build_diarization_config,
     create_diarizing_engine,
     diarization_enabled,
+    pcm16_to_float32,
 )
 from asr_server.offline_recognizer import (
     build_offline_model_config,
@@ -431,6 +433,10 @@ class AsrSession:
             self._sample_rate = config.sample_rate
             self._interim_results = config.interim_results
             self._adapter = ProtocolAdapter(word_timestamps=config.word_timestamps)
+
+            if config.mode == "embed":
+                ending = await self._run_embed_session(first_pcm, ended)
+                return
             # Session start (INFO): the negotiated config every downstream diagnostic is
             # read against. ``$ASR_ENGINE`` selects which engine's model is baked per image
             # (streaming default / accurate) — logging it disambiguates recognizer behaviour.
@@ -533,6 +539,71 @@ class AsrSession:
                 await self._drain_for_bookkeeping()
         finally:
             self._log_session_summary(ending)
+
+    # --- embed mode (calibration) -------------------------------------------
+
+    async def _run_embed_session(self, first_pcm: bytes | None, ended: bool) -> str:
+        """Reply to each binary frame with its speaker embedding.
+
+        Calibration needs embeddings of audio whose speakers are already known, so
+        that a threshold can be derived from the same-speaker and different-speaker
+        distributions instead of inherited from another model. Each frame is one
+        complete utterance; no recogniser is built and no transcript is produced.
+        """
+        embedder = getattr(self._engine, "embedder", None)
+        if embedder is None:
+            await self._send_error(
+                _CODE_BAD_CONFIG,
+                "embed mode requires an image built with a speaker-embedding model",
+            )
+            await self._safe_close()
+            return "embed_unsupported"
+
+        _LOG.info(
+            "session %s start: mode=embed sample_rate=%d", self._session_id, self._sample_rate
+        )
+        index = 0
+        pending = first_pcm
+        while True:
+            if pending is None:
+                if ended:
+                    break
+                try:
+                    frame = await self._conn.recv()
+                except ConnectionClosed:
+                    return "disconnect"
+                if isinstance(frame, str):
+                    try:
+                        _, is_eos = _classify_first_text(frame)
+                    except _ConfigError as exc:
+                        await self._send_error(exc.code, exc.message)
+                        await self._safe_close()
+                        return "fatal"
+                    if is_eos:
+                        break
+                    continue
+                pending = frame
+
+            samples = pcm16_to_float32(pending)
+            pending = None
+            self._audio_bytes += len(samples) * _BYTES_PER_SAMPLE
+            try:
+                # Embedding is native, CPU-bound work: keep it off the event loop for
+                # the same reason the decode path does.
+                vector = await asyncio.to_thread(embedder.embed, self._sample_rate, samples)
+            except Exception as exc:  # noqa: BLE001 - report and keep the session usable
+                await self._send_error(_CODE_INTERNAL, f"embedding failed: {exc}")
+                await self._safe_close()
+                return "embed_failed"
+            await self._send(Embedding(index=index, dim=len(vector), vector=list(vector)))
+            self._messages_emitted += 1
+            index += 1
+
+        await self._send(
+            Termination(audio_seconds=self.audio_seconds, segments=index)
+        )
+        await self._safe_close()
+        return "graceful"
 
     # --- handshake ----------------------------------------------------------
 

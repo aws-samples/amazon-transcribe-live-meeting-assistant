@@ -2812,6 +2812,12 @@ Resources:
         # still get Amazon Transcribe unless they ask for diarization.
         AsrEngineDefault: transcribe
         AsrDiarizationAvailable: !If [ShouldEnableAsrDiarization, "true", "false"]
+        # A model nobody has measured gets no speaker labels until this deployment
+        # has calibrated its own operating point (or an admin sets a threshold).
+        AsrSpeakerModelMeasured: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerModelMeasured
+          - "true"
         AsrConfigTableName: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName

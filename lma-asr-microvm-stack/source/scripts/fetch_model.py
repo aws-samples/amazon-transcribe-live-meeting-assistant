@@ -16,10 +16,14 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import http.client
+import os
 import shutil
 import sys
 import tarfile
 import tempfile
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -32,6 +36,14 @@ CANONICAL_NAMES = {
 
 SPEAKER_MODEL_NAME = "speaker_embedding.onnx"
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
+
+# Model weights come from a public release host, and a single 503 from it used to
+# fail the whole image build — which surfaces as a CloudFormation rollback minutes
+# into a deployment. Retry the transient classes; a 404 or a checksum mismatch is
+# still fatal, because those mean the selection is wrong rather than unlucky.
+DOWNLOAD_ATTEMPTS = int(os.environ.get("ASR_DOWNLOAD_ATTEMPTS", "5"))
+RETRY_BACKOFF_S = float(os.environ.get("ASR_DOWNLOAD_BACKOFF_S", "5"))
+RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 
 class ModelFetchError(RuntimeError):
@@ -65,6 +77,41 @@ def download(url: str, target: Path) -> str:
     return digest.hexdigest()
 
 
+def download_with_retries(
+    url: str,
+    target: Path,
+    label: str,
+    attempts: int = DOWNLOAD_ATTEMPTS,
+    sleep=time.sleep,
+) -> str:
+    """Download with backoff, returning the SHA256 of what arrived.
+
+    Each attempt rewrites ``target`` from scratch and re-digests it, so a partial
+    body from a failed attempt cannot contribute to the checksum.
+    """
+    last_reason = "unknown"
+    for attempt in range(1, max(1, attempts) + 1):
+        try:
+            return download(url, target)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in RETRYABLE_STATUS:
+                raise ModelFetchError(f"{label}: HTTP {exc.code} for {url}") from exc
+            last_reason = f"HTTP {exc.code}"
+        except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
+            last_reason = f"{type(exc).__name__}: {exc}"
+
+        if attempt >= max(1, attempts):
+            break
+        delay = RETRY_BACKOFF_S * attempt
+        log(f"{label}: {last_reason}; retrying in {delay:.0f}s ({attempt} of {attempts})")
+        sleep(delay)
+
+    raise ModelFetchError(
+        f"{label}: download failed after {attempts} attempt(s): {last_reason}. The host "
+        "may be rate limiting or temporarily unavailable; retry the deployment."
+    )
+
+
 def fetch_verified(url: str, expected_sha256: str, target: Path, label: str) -> None:
     if not url:
         raise ModelFetchError(f"{label}: no URL configured")
@@ -74,7 +121,7 @@ def fetch_verified(url: str, expected_sha256: str, target: Path, label: str) -> 
             "(or pass AsrModelSha256) before building an image."
         )
     log(f"{label}: downloading {url}")
-    actual = download(url, target)
+    actual = download_with_retries(url, target, label)
     if actual.lower() != expected_sha256.lower():
         raise ModelFetchError(
             f"{label}: SHA256 mismatch. expected={expected_sha256} actual={actual}"

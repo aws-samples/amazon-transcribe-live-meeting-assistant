@@ -16,7 +16,7 @@ import { FastifyInstance } from 'fastify';
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 
-import { getAsrRuntimeConfig, resetAsrConfigCache } from './asr-config';
+import { getAsrRuntimeConfig, isSpeakerModelMeasured, resetAsrConfigCache } from './asr-config';
 
 const warnings: string[] = [];
 const fakeServer = {
@@ -113,6 +113,34 @@ test('a failed read degrades to the deployment defaults instead of throwing', as
     assert.equal(config.speakerThreshold, 0.2);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /using deployment defaults/);
+});
+
+test('an admin-set threshold is distinguished from the stack default', async () => {
+    // For a speaker model nobody has measured, this flag is the only evidence the
+    // operating point was ever checked, so it decides whether labels are produced.
+    resetAsrConfigCache();
+    let restore = stubDynamo(async () => ({ Item: { speakerThreshold: { S: '0.35' } } }));
+    assert.equal((await getAsrRuntimeConfig(fakeServer)).speakerThresholdOverridden, true);
+    restore();
+
+    resetAsrConfigCache();
+    restore = stubDynamo(async () => ({ Item: { speakerThreshold: { S: '' } } }));
+    assert.equal((await getAsrRuntimeConfig(fakeServer)).speakerThresholdOverridden, false);
+    restore();
+
+    resetAsrConfigCache();
+    restore = stubDynamo(async () => ({}));
+    assert.equal((await getAsrRuntimeConfig(fakeServer)).speakerThresholdOverridden, false);
+    restore();
+});
+
+test('an unmeasured speaker model is reported as such', () => {
+    delete process.env['ASR_SPEAKER_MODEL_MEASURED'];
+    assert.equal(isSpeakerModelMeasured(), true, 'unset must not degrade an existing deployment');
+
+    process.env['ASR_SPEAKER_MODEL_MEASURED'] = 'false';
+    assert.equal(isSpeakerModelMeasured(), false);
+    delete process.env['ASR_SPEAKER_MODEL_MEASURED'];
 });
 
 test('the record is cached, so concurrent meetings do not each read it', async () => {

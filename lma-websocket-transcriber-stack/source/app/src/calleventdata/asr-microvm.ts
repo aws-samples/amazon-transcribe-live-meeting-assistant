@@ -20,7 +20,7 @@ import { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
-import { AsrRuntimeConfig, getAsrRuntimeConfig } from './asr-config';
+import { AsrRuntimeConfig, getAsrRuntimeConfig, isSpeakerModelMeasured } from './asr-config';
 import { CallMetaData, SocketCallData } from './eventtypes';
 import { TranscriptSegmentRecord, writeSegmentToKds } from './transcribe';
 import { normalizeErrorForLogging } from '../utils/common';
@@ -67,7 +67,7 @@ const lambdaClient = new LambdaClient({ region: AWS_REGION });
 
 export type AsrEngineName = 'transcribe' | 'microvm';
 
-interface AsrLease {
+export interface AsrLease {
     endpointUrl: string;
     microvmId?: string;
     authToken?: string;
@@ -187,7 +187,7 @@ const invokeLauncher = async (
     }
 };
 
-const acquireLease = async (
+export const acquireLease = async (
     callId: string,
     server: FastifyInstance
 ): Promise<AsrLease | undefined> => {
@@ -215,7 +215,14 @@ const acquireLease = async (
     };
 };
 
-const subprotocols = (authToken?: string): string[] =>
+export const releaseLease = async (
+    microvmId: string,
+    server: FastifyInstance
+): Promise<void> => {
+    await invokeLauncher({ action: 'release', microvmId }, server);
+};
+
+export const subprotocols = (authToken?: string): string[] =>
     authToken
         ? [
             'lambda-microvms',
@@ -675,8 +682,20 @@ export const startMicrovmAsr = async (
     const callMetadata = socketData.callMetadata;
 
     const runtime = await getAsrRuntimeConfig(server);
+    // A threshold that was never measured against this embedder is not a default,
+    // it is a guess — and a wrong guess fragments one speaker into many or merges
+    // several into one, which is worse than the channel labels this falls back to.
+    // An admin-set threshold (typed, or applied from a calibration run) counts as
+    // the measurement.
+    const diarizeRequested = callMetadata.enableDiarization ?? runtime.diarizeByDefault;
+    const thresholdTrusted = isSpeakerModelMeasured() || runtime.speakerThresholdOverridden;
+    if (diarizeRequested && !thresholdTrusted) {
+        server.log.warn(
+            `[ASR]: [${callMetadata.callId}] - speaker labels withheld: this deployment's speaker model has no measured operating point. Run a calibration from the ASR Config page, or set a speaker threshold there. Transcribing with channel labels instead.`
+        );
+    }
     const options: AsrSessionOptions = {
-        diarize: callMetadata.enableDiarization ?? runtime.diarizeByDefault,
+        diarize: diarizeRequested && thresholdTrusted,
         // A client-supplied count wins: only the person in the meeting knows how
         // many people share their microphone (the Upload Audio page asks the same
         // question). 0 still means "discover as many as appear".

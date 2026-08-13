@@ -122,6 +122,7 @@ def resolve(properties: dict, catalog: dict) -> dict:
         )
 
     speaker = dict(_find(catalog.get("speakerModels", []), speaker_id))
+    catalog_speaker_url = speaker.get("url", "")
     for name, key in (("SpeakerModelUrl", "url"), ("SpeakerModelSha256", "sha256")):
         override = _prop(properties, name)
         if override:
@@ -130,6 +131,13 @@ def resolve(properties: dict, catalog: dict) -> dict:
         raise ResolutionError(
             f"speaker model {speaker.get('id')!r} has no pinned SHA256"
         )
+    # A supplied URL is a different model than the one that was measured, so the
+    # catalog's measurement and threshold no longer describe it. Dropping them is
+    # what makes the transcriber withhold diarization until this deployment has
+    # measured its own operating point (see docs/microvm-asr.md, Calibration).
+    if speaker.get("url") != catalog_speaker_url:
+        speaker.pop("measured", None)
+        speaker.pop("recommendedThreshold", None)
 
     return {"model": model, "speaker": speaker}
 
@@ -214,6 +222,11 @@ def build(properties: dict) -> tuple[str, dict]:
         "ModelLicense": selection["model"].get("license", "unknown"),
         "SpeakerModelId": selection["speaker"].get("id", "none"),
         "DiarizationAvailable": "true" if speaker_url else "false",
+        # Whether anyone has measured this embedder's same-speaker vs
+        # different-speaker distributions. "false" means the shipped threshold is a
+        # guess for it, and a guessed threshold fragments or merges speakers.
+        "SpeakerModelMeasured": "true" if selection["speaker"].get("measured") else "false",
+        "RecommendedThreshold": str(selection["speaker"].get("recommendedThreshold", "")),
     }
 
 

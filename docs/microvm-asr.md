@@ -18,6 +18,7 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 - [What it does](#what-it-does)
 - [Feature trade-offs versus Amazon Transcribe](#feature-trade-offs-versus-amazon-transcribe)
 - [Deploying it](#deploying-it)
+- [Calibrating the operating point](#calibrating-the-operating-point)
 - [Using it](#using-it)
 - [How it works](#how-it-works)
 - [Changing the model](#changing-the-model)
@@ -117,7 +118,7 @@ There is no default record to keep in sync.
 
 | Field | Effect |
 |---|---|
-| Speaker similarity threshold | The usual fix when one person fragments. Model-specific |
+| Speaker similarity threshold | The usual fix when one person fragments. Model-specific — [measure it](#calibrating-the-operating-point) rather than guessing |
 | Minimum utterance for speaker ID | Raise it to stop short utterances minting speakers |
 | Maximum speakers per channel | Hard cap; a client that knows its own meeting size overrides it |
 | Endpointing silence | Trailing silence that closes an utterance |
@@ -129,6 +130,72 @@ Stream Audio also asks **Speakers on this side** when diarization is ticked. Onl
 person in the meeting knows how many people share their microphone, which is why it is
 asked for rather than inferred; blank means discover as many as appear, and a value
 there overrides the deployment-wide cap for that meeting.
+
+## Calibrating the operating point
+
+The speaker threshold is a property of the speaker-embedding model, not a universal
+constant, and getting it wrong is the single most visible failure this engine has.
+Measured on real meeting audio with TitaNet, two *different* speakers never scored
+above 0.107 while the *same* speaker scored 0.25–0.5 — so the value inherited from
+the upstream prototype (0.5) split one person into eight identities, then twenty-two.
+On the same audio, WeSpeaker ResNet293 scored **0.54 between two different people**,
+where that same 0.5 would have merged them instead. There is no number that is right
+for both.
+
+So the deployment measures it. **Configuration ▸ ASR Config ▸ Calibrate from a
+recorded meeting** takes a Meeting ID and derives the threshold from that meeting's
+own audio.
+
+**How it works, and why it needs no labelled data.** LMA already records two separate
+channels: the microphone is the local participant and the tab is the remote side.
+Utterances within one channel are (usually) the same person and utterances across
+channels are definitely different people — which is exactly the comparison a threshold
+has to get right. The transcriber streams the recording out of S3, finds stretches
+where one channel clearly dominates the other (dominance rather than silence, so
+cross-talk is excluded), embeds up to 12 per channel on a MicroVM in embed mode, and
+compares every pair.
+
+The threshold is then placed **inside the gap** between the two distributions, nearer
+the different-speaker side, and additionally above the highest different-speaker score
+actually observed — so the guarantee is concrete: no pair the calibration saw would
+have been merged. Leaning towards splitting is deliberate. Both errors are real, but
+fragmentation is the one that makes a transcript unreadable, and merging is partly
+contained because channels are diarized separately (it can only ever merge people who
+share one microphone).
+
+**Reading the result.**
+
+| Verdict | Meaning |
+|---|---|
+| Clear separation | Gap of 0.1 or more. Use the values |
+| Narrow separation | A usable threshold, but sensitive to the audio it was measured on. Re-run on another meeting before trusting it |
+| No usable threshold | The distributions overlap: no threshold separates them on this audio. That is what a mismatched embedder looks like; it can also mean narrowband audio or heavy cross-talk |
+
+Calibration also reports a **minimum utterance length** when pairs involving a short
+segment score materially worse than long-only pairs — the measured cause of phantom
+speakers, every one of which came from a 1.2–2.4 s utterance.
+
+**Nothing is applied automatically.** A run reports; **Use these values** fills the
+fields, and **Save** applies them to the next meeting that starts. A recording where
+only one side spoke is refused before a MicroVM is even launched, since it contains no
+different-speaker comparison to make.
+
+**Requirements**
+
+- A meeting that was **recorded** (`EnableAudioRecording`), with both sides speaking
+  and not talking over each other. Fifteen minutes is plenty; only the first 20 are read.
+- Admin group membership. The route launches a MicroVM, so it is admin-only and
+  single-flight.
+- The engine deployed with a speaker model (`AsrSpeakerModelId` ≠ `none`).
+
+**Unmeasured models are withheld, not guessed at.** Every speaker model in
+`catalog.json` carries a `measured` note recording what was actually observed. When a
+deployment supplies its own embedder (`AsrSpeakerModelUrl`), that note no longer
+applies, so the stack reports `SpeakerModelMeasured=false` and the transcriber
+transcribes with **channel labels instead of speaker labels** — logging why — until
+either a calibration is applied or an admin sets a threshold. A guessed threshold
+looks like working diarization while being wrong, which is worse than no diarization
+at all.
 
 ## Using it
 
@@ -280,8 +347,11 @@ Honest state of validation, so nobody deploys this expecting known numbers:
 
 - **Word error rate has not been benchmarked** against Amazon Transcribe on real
   meeting audio.
-- **Diarization error rate has not been measured**, so `AsrSpeakerThreshold` is a
-  reasonable default rather than a tuned one.
+- **Diarization error rate has not been measured** end to end. The *operating point*
+  for the shipped speaker models has been measured on real meeting audio (see
+  `measured` in `catalog.json`, and
+  [Calibrating the operating point](#calibrating-the-operating-point) to measure it on
+  your own), but that is the threshold, not a DER figure.
 - **MicroVM launch time and the real-time factor** of two concurrent channel
   sessions on one MicroVM have not been measured on Graviton. If a meeting's first
   transcript is slow to appear, or transcripts lag live audio, raise
@@ -325,7 +395,15 @@ no transcript when the engine is unavailable.
 
 **The image build fails.** Check `/aws/lambda-microvms/<stack>-asr`. A `SHA256
 mismatch` means the pinned checksum does not match the download; `model file ... is
-not in the archive` means the file names in the catalog entry are wrong.
+not in the archive` means the file names in the catalog entry are wrong; `HTTP 404`
+means the URL is wrong.
+
+A transient failure from the model host (`503`, `429`, a cut connection) is retried
+five times with backoff before the build gives up — the log line reads
+`retrying in 5s (1 of 5)`. If it still reports `download failed after 5 attempt(s)`,
+the host is having a bad day: re-run the deployment. Nothing else needs undoing,
+because a failed image build rolls the nested stack back to the previous image and
+meetings keep using it.
 
 **One person appears as several speakers.** This was the first real failure, and it
 is now measured rather than guessed. A live single-speaker meeting produced **eight**
@@ -369,11 +447,27 @@ Three things follow, and they are worth internalising before changing anything:
    threshold right it dropped two-speaker purity to 80%, and at 0.5 it merged two
    people into one label. Reach for it only when embeddings are known to be noisy.
 
-If a single person still fragments: lower `AsrSpeakerThreshold` toward 0.15, raise
-`AsrMinSegmentMs`, and only then consider `AsrMaxSpeakers` — a cap bounds the symptom
-but cannot fix a mis-set operating point. Sample sizes behind these numbers are small
-(11 utterances, one voice pair), so re-measure on your own audio before trusting them
-for a different language or microphone.
+If a single person still fragments: run
+[Calibrate](#calibrating-the-operating-point) against one of your own recorded
+meetings — it performs exactly the measurement above, automatically. Failing that,
+lower `AsrSpeakerThreshold` toward 0.15, raise `AsrMinSegmentMs`, and only then
+consider `AsrMaxSpeakers` — a cap bounds the symptom but cannot fix a mis-set
+operating point. Sample sizes behind the numbers above are small (11 utterances, one
+voice pair), which is the reason calibration exists rather than a bigger table of
+defaults.
+
+**Calibration says "No usable threshold".** The same-speaker and different-speaker
+scores overlap on that recording, so no threshold separates them. In order of
+likelihood: heavy cross-talk (both sides talking at once, so segments contain both
+voices), narrowband or heavily processed audio, a recording where one channel is a
+conference bridge carrying several people, or a speaker model that does not suit this
+audio. Try another meeting first; if two clean meetings both overlap, the model is the
+problem — the shipped `measured` notes in `catalog.json` show what a good and a bad
+embedder look like on the same audio.
+
+**Calibration says "give either a callId or a recordingKey" or 404s.** The Meeting ID
+must be one that was *recorded*; the key is derived from it the same way the recorder
+wrote it. Copy the ID from the Meetings list rather than retyping it.
 
 **Too many speakers detected on genuinely multi-speaker audio.** Lower
 `AsrSpeakerThreshold`, or set `AsrMaxSpeakers` to the room size.

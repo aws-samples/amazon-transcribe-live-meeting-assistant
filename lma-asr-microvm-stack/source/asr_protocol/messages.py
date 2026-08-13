@@ -19,6 +19,11 @@ class Config(BaseModel):
     """Session config: query params AND/OR the optional first text frame (R2)."""
 
     type: Literal["config"] = "config"
+    # "asr" streams transcripts. "embed" is a calibration mode: each binary frame
+    # is one complete utterance and the reply is its speaker embedding, nothing
+    # else. It exists because only this process has the embedding model, while the
+    # statistics that turn embeddings into an operating point belong outside it.
+    mode: Literal["asr", "embed"] = "asr"
     sample_rate: PositiveInt = 16000
     # Only 16-bit signed LE PCM is supported (R2.2); reject everything else.
     encoding: Literal["pcm_s16le"] = "pcm_s16le"
@@ -113,6 +118,19 @@ class Final(BaseModel):
     speaker: str | None = None
 
 
+class Embedding(BaseModel):
+    """One speaker embedding, in reply to a binary frame in ``embed`` mode.
+
+    ``index`` counts frames in arrival order so a caller can match embeddings to
+    the segments it sent without a request id.
+    """
+
+    type: Literal["embedding"] = "embedding"
+    index: int
+    dim: int
+    vector: list[float]
+
+
 class Termination(BaseModel):
     """End-of-session summary sent just before close (R6.3)."""
 
@@ -142,7 +160,7 @@ class Warning(BaseModel):
 
 ClientMessage = Annotated[Config | Eos, Field(discriminator="type")]
 ServerMessage = Annotated[
-    Ready | Partial | Final | Termination | Error | Warning,
+    Ready | Partial | Final | Embedding | Termination | Error | Warning,
     Field(discriminator="type"),
 ]
 
@@ -167,6 +185,7 @@ __all__ = [
     "Partial",
     "Word",
     "Final",
+    "Embedding",
     "Termination",
     "Error",
     "Warning",

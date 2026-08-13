@@ -30,6 +30,9 @@ import {
     stopMicrovmAsr,
     shouldFallbackToTranscribe,
     getAsrRuntimeConfig,
+    runCalibration,
+    CalibrationError,
+    CalibrationRequest,
 } from './calleventdata';
 
 import {
@@ -118,7 +121,9 @@ server.register(websocket);
 
 // Setup preHandler hook to authenticate
 server.addHook('preHandler', async (request, reply) => {
-    if (!request.url.includes('health')) {
+    // A CORS preflight carries no credentials by design, so authenticating it
+    // would 401 every cross-origin call before the real request is ever made.
+    if (!request.url.includes('health') && request.method !== 'OPTIONS') {
         const clientIP = getClientIP(request.headers);
         server.log.debug(
             `[AUTH]: [${clientIP}] - Received preHandler hook for authentication. URI: <${
@@ -157,6 +162,67 @@ server.after(() => {
             registerHandlers(clientIP, socket, request); // setup the handler functions for websocket events
         }
     );
+});
+
+// The ASR Config admin page lives on the UI's CloudFront domain, not this one, so
+// its calls are cross-origin. No cookies are involved (the bearer token travels in
+// the query string, as the WebSocket route's does), so echoing the origin grants
+// nothing a request without that token could not already do.
+const ASR_CALIBRATE_PATH = '/api/v1/asr/calibrate';
+const ADMIN_GROUP = 'Admin';
+
+const allowCrossOrigin = (
+    request: FastifyRequest,
+    reply: { header: (name: string, value: string) => unknown }
+): void => {
+    reply.header('Access-Control-Allow-Origin', request.headers.origin || '*');
+    reply.header('Vary', 'Origin');
+    reply.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'authorization, content-type');
+    reply.header('Access-Control-Max-Age', '600');
+};
+
+server.options(ASR_CALIBRATE_PATH, { logLevel: 'warn' }, (request, reply) => {
+    allowCrossOrigin(request, reply);
+    reply.code(204).send();
+});
+
+/**
+ * Measure the diarization operating point from a meeting this deployment recorded.
+ *
+ * Admin-only: it launches an ASR MicroVM and reads a recording. The route only
+ * measures and reports — the admin decides whether to save the result — so a run
+ * on unrepresentative audio cannot quietly change how meetings are transcribed.
+ */
+server.post(ASR_CALIBRATE_PATH, { logLevel: 'info' }, async (request, reply) => {
+    allowCrossOrigin(request, reply);
+    const caller = getAuthenticatedCaller(request);
+    if (!caller?.groups.includes(ADMIN_GROUP)) {
+        server.log.warn(
+            `[ASR CALIBRATE]: refused for non-admin caller ${caller?.username || caller?.sub || 'unknown'}`
+        );
+        return reply
+            .code(403)
+            .send({ message: 'Calibration is limited to users in the Admin group.' });
+    }
+    // Accepted on the query string as well as in a JSON body: a query-only request
+    // needs no Content-Type, which keeps the browser from having to preflight it.
+    const params = {
+        ...(typeof request.body === 'object' && request.body ? request.body : {}),
+        ...(request.query as Record<string, unknown>),
+    } as CalibrationRequest;
+    try {
+        const run = await runCalibration(params, server);
+        return reply.code(200).send(run);
+    } catch (error) {
+        const status = error instanceof CalibrationError ? error.status : 500;
+        const message =
+            error instanceof CalibrationError
+                ? error.message
+                : `calibration failed: ${normalizeErrorForLogging(error)}`;
+        server.log.error(`[ASR CALIBRATE]: ${status} - ${message}`);
+        return reply.code(status).send({ message });
+    }
 });
 
 type HealthCheckRemoteInfo = {

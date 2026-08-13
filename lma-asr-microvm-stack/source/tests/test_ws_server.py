@@ -1292,3 +1292,116 @@ async def test_transcripts_have_null_speaker_without_diarization() -> None:
     finals = [m for m in conn.messages() if m["type"] == "final"]
     assert finals
     assert all(m["speaker"] is None for m in finals)
+
+
+# --- embed mode (calibration) ------------------------------------------------
+
+
+class _EmbeddingEngine(ScriptedEngine):
+    """An engine that also exposes an embedder, as DiarizingEngine does."""
+
+    def __init__(self, vectors: Sequence[Sequence[float]]) -> None:
+        super().__init__(ScriptedRecognizer())
+        self._vectors = [list(v) for v in vectors]
+        self.embedded: list[int] = []
+
+    @property
+    def embedder(self) -> object:
+        engine = self
+
+        class _Embedder:
+            dim = 2
+
+            def embed(self, sample_rate: int, samples: Sequence[float]) -> list[float]:
+                engine.embedded.append(len(samples))
+                return engine._vectors.pop(0)  # noqa: SLF001 - test double
+
+        return _Embedder()
+
+
+def _embed_config(**extra: object) -> str:
+    return json.dumps({"type": "config", "mode": "embed", **extra})
+
+
+async def test_embed_mode_returns_one_embedding_per_binary_frame() -> None:
+    """Calibration needs embeddings of known-speaker audio, nothing else.
+
+    The statistics that turn them into an operating point live outside the MicroVM,
+    so this mode is deliberately dumb: one frame in, one vector out.
+    """
+    engine = _EmbeddingEngine([[1.0, 0.0], [0.0, 1.0]])
+    session, conn = _session(
+        [_embed_config(), CHUNK, CHUNK, json.dumps({"type": "eos"})],
+        engine=engine,
+    )
+
+    await session.run()
+
+    kinds = [json.loads(frame)["type"] for frame in conn.sent]
+    assert kinds == ["ready", "embedding", "embedding", "termination"]
+    first = json.loads(conn.sent[1])
+    assert first["index"] == 0
+    assert first["dim"] == 2
+    assert first["vector"] == [1.0, 0.0]
+    assert json.loads(conn.sent[2])["index"] == 1
+    assert json.loads(conn.sent[3])["segments"] == 2
+
+
+async def test_embed_mode_never_produces_transcripts() -> None:
+    engine = _EmbeddingEngine([[1.0, 0.0]])
+    session, conn = _session(
+        [_embed_config(), CHUNK, json.dumps({"type": "eos"})], engine=engine
+    )
+
+    await session.run()
+
+    kinds = {json.loads(frame)["type"] for frame in conn.sent}
+    assert "partial" not in kinds
+    assert "final" not in kinds
+
+
+async def test_embed_mode_is_refused_without_a_speaker_model() -> None:
+    """Better a clear error than embeddings that silently cannot exist."""
+    session, conn = _session([_embed_config(), CHUNK])
+
+    await session.run()
+
+    error = json.loads(conn.sent[-1])
+    assert error["type"] == "error"
+    assert error["code"] == "BAD_CONFIG"
+    assert "speaker-embedding model" in error["message"]
+    assert conn.closed
+
+
+async def test_embed_mode_reports_an_embedding_failure_and_closes() -> None:
+    engine = _EmbeddingEngine([])  # pops from an empty list -> IndexError
+    session, conn = _session([_embed_config(), CHUNK], engine=engine)
+
+    await session.run()
+
+    error = json.loads(conn.sent[-1])
+    assert error["type"] == "error"
+    assert error["code"] == "INTERNAL"
+    assert "embedding failed" in error["message"]
+
+
+async def test_embed_mode_with_no_audio_terminates_cleanly() -> None:
+    engine = _EmbeddingEngine([])
+    session, conn = _session([_embed_config(), json.dumps({"type": "eos"})], engine=engine)
+
+    await session.run()
+
+    kinds = [json.loads(frame)["type"] for frame in conn.sent]
+    assert kinds == ["ready", "termination"]
+    assert json.loads(conn.sent[-1])["segments"] == 0
+
+
+async def test_asr_mode_remains_the_default() -> None:
+    session, conn = _session(
+        [json.dumps({"type": "config"}), CHUNK, json.dumps({"type": "eos"})]
+    )
+
+    await session.run()
+
+    assert json.loads(conn.sent[0])["effective_config"]["mode"] == "asr"
+    assert not any(json.loads(frame)["type"] == "embedding" for frame in conn.sent)

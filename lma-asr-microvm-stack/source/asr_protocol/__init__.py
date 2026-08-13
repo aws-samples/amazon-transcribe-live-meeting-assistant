@@ -2,8 +2,9 @@
 
 This package holds the pydantic (v2) models for every WebSocket message defined
 in ``design.md`` §5 (config, ready, partial, final, termination, error,
-warning, eos). Both the ASR server (inside the MicroVM) and the control-plane
-router import these models so the wire contract cannot drift between them.
+warning, eos), plus the ``embedding`` reply used by calibration's embed mode.
+Both the ASR server (inside the MicroVM) and the control-plane router import
+these models so the wire contract cannot drift between them.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 from asr_protocol.messages import (
     ClientMessage,
     Config,
+    Embedding,
     Eos,
     Error,
     Final,
@@ -27,6 +29,7 @@ from asr_protocol.messages import (
 __all__ = [
     "Config",
     "Eos",
+    "Embedding",
     "Ready",
     "Partial",
     "Word",

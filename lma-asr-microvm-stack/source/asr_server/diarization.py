@@ -78,6 +78,7 @@ from asr_server.recognizer import (
 __all__ = [
     "SpeakerEmbedder",
     "SpeakerRegistry",
+    "pcm16_to_float32",
     "SpeakerEmbedderConfig",
     "DiarizationConfig",
     "DiarizingRecognizer",
@@ -137,11 +138,13 @@ class SpeakerEmbedder(Protocol):
 # --- PCM helpers ------------------------------------------------------------
 
 
-def _pcm16_to_float32(pcm: bytes) -> list[float]:
+def pcm16_to_float32(pcm: bytes) -> list[float]:
     """Decode little-endian 16-bit signed PCM bytes to floats in [-1, 1).
 
     Pure stdlib (no numpy) so the diariser stays importable and testable without
-    the ARM inference wheels installed.
+    the ARM inference wheels installed. Public because ``embed`` mode in
+    :mod:`asr_server.ws_server` decodes calibration segments the same way, and
+    reaching into another module's private helper is worse than naming this one.
     """
     if len(pcm) % 2 != 0:
         raise ValueError("PCM byte length must be even for 16-bit samples")
@@ -151,6 +154,10 @@ def _pcm16_to_float32(pcm: bytes) -> list[float]:
     if sys.byteorder != "little":
         samples.byteswap()
     return [s / _INT16_FULL_SCALE for s in samples]
+
+
+# Retained for the module's own historical callers and tests.
+_pcm16_to_float32 = pcm16_to_float32
 
 
 # --- Speaker registry (pure stdlib) -----------------------------------------
@@ -560,7 +567,7 @@ class DiarizingRecognizer(Recognizer):
     def accept_pcm(self, pcm: bytes) -> list[Event]:
         # Decode first so a malformed frame raises before any state is touched
         # (the server maps ValueError to a BAD_ENCODING wire error).
-        samples = _pcm16_to_float32(pcm)
+        samples = pcm16_to_float32(pcm)
         events = self._inner.accept_pcm(pcm)
         self._buffer.extend(samples)
         self._trim_buffer()
@@ -668,6 +675,17 @@ class DiarizingEngine(RecognizerEngine):
     def inner(self) -> RecognizerEngine:
         """The wrapped recogniser engine (streaming or ``accurate``)."""
         return self._inner
+
+    @property
+    def embedder(self) -> SpeakerEmbedder:
+        """The shared speaker embedder, for calibration (``embed`` mode).
+
+        Deriving an operating point requires embeddings of known-speaker audio, and
+        this process is the only place the embedding model exists. Exposing it keeps
+        the statistics — which decide what a client sees — outside the MicroVM where
+        they are testable without weights.
+        """
+        return self._embedder
 
     def new_session(self, config: SessionConfig | None = None) -> Recognizer:
         # Delegate first: the inner engine owns sample-rate/endpointing validation

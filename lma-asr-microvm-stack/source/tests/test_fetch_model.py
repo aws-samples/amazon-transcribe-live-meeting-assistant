@@ -13,8 +13,10 @@ per-model environment variables out of the image.
 from __future__ import annotations
 
 import hashlib
+import http.client
 import importlib.util
 import tarfile
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -102,6 +104,69 @@ def test_fetch_verified_refuses_a_mismatched_checksum(tmp_path: Path) -> None:
     ):
         fetch_model.fetch_verified(
             "https://example.invalid/x.tar.bz2", "a" * 64, target, "asr model"
+        )
+
+
+def test_a_transient_http_error_is_retried_rather_than_failing_the_build(tmp_path: Path) -> None:
+    """A 503 from the release host used to cost a CloudFormation rollback.
+
+    The download runs inside `docker build`, so one unlucky response failed the
+    image, the nested stack, and the whole stack update — several minutes in.
+    """
+    attempts: list[int] = []
+    delays: list[float] = []
+
+    def flaky(url: str, target: Path) -> str:
+        attempts.append(len(attempts) + 1)
+        if len(attempts) < 3:
+            raise urllib.error.HTTPError(url, 503, "Service Unavailable", {}, None)  # type: ignore[arg-type]
+        return "a" * 64
+
+    with mock.patch.object(fetch_model, "download", side_effect=flaky):
+        digest = fetch_model.download_with_retries(
+            "https://example.invalid/m.tar.bz2", tmp_path / "out", "asr model", sleep=delays.append
+        )
+
+    assert digest == "a" * 64
+    assert len(attempts) == 3
+    # Backing off rather than hammering a host that is already saying "not now".
+    assert delays == [5.0, 10.0]
+
+
+def test_a_404_is_not_retried_because_the_url_is_simply_wrong(tmp_path: Path) -> None:
+    calls: list[int] = []
+
+    def missing(url: str, target: Path) -> str:
+        calls.append(1)
+        raise urllib.error.HTTPError(url, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+
+    with mock.patch.object(fetch_model, "download", side_effect=missing), pytest.raises(
+        fetch_model.ModelFetchError, match="HTTP 404"
+    ):
+        fetch_model.download_with_retries(
+            "https://example.invalid/m.tar.bz2", tmp_path / "out", "asr model", sleep=lambda _: None
+        )
+
+    assert len(calls) == 1
+
+
+def test_a_truncated_download_is_retried_and_reported_if_it_never_completes(
+    tmp_path: Path,
+) -> None:
+    # A cut connection raises IncompleteRead, which is not an OSError, so without
+    # this it escaped as a traceback instead of a readable build failure.
+    def truncated(url: str, target: Path) -> str:
+        raise http.client.IncompleteRead(b"partial")
+
+    with mock.patch.object(fetch_model, "download", side_effect=truncated), pytest.raises(
+        fetch_model.ModelFetchError, match="download failed after 2 attempt"
+    ):
+        fetch_model.download_with_retries(
+            "https://example.invalid/m.tar.bz2",
+            tmp_path / "out",
+            "asr model",
+            attempts=2,
+            sleep=lambda _: None,
         )
 
 

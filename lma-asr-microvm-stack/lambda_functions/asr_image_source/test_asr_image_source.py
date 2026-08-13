@@ -194,6 +194,68 @@ def test_resolve_allows_a_transcription_only_image() -> None:
     assert selection["speaker"]["url"] == ""
 
 
+def test_a_supplied_speaker_url_drops_the_catalog_measurement() -> None:
+    """A different model is a different operating point.
+
+    The catalog's ``measured`` note and ``recommendedThreshold`` describe the weights
+    that were tested. When a deployment points at its own URL, keeping them would
+    tell the transcriber a threshold had been measured for a model nobody measured,
+    which is how one speaker becomes eight.
+    """
+    catalog = json.loads(json.dumps(CATALOG))
+    catalog["speakerModels"][0]["measured"] = "2026-08-12: separates cleanly"
+    catalog["speakerModels"][0]["recommendedThreshold"] = 0.2
+
+    kept = index.resolve({}, catalog)
+    assert kept["speaker"]["measured"]
+    assert kept["speaker"]["recommendedThreshold"] == 0.2
+
+    supplied = index.resolve(
+        {"SpeakerModelUrl": "https://example.invalid/mine.onnx", "SpeakerModelSha256": "d" * 64},
+        catalog,
+    )
+    assert "measured" not in supplied["speaker"]
+    assert "recommendedThreshold" not in supplied["speaker"]
+
+    # Re-stating the same URL is the same model, so the measurement still applies.
+    same = index.resolve({"SpeakerModelUrl": catalog["speakerModels"][0]["url"]}, catalog)
+    assert same["speaker"]["measured"]
+
+
+def test_build_reports_whether_the_speaker_model_was_measured() -> None:
+    source = make_source_zip(
+        catalog={
+            **CATALOG,
+            "speakerModels": [
+                {**CATALOG["speakerModels"][0], "measured": "2026-08-12", "recommendedThreshold": 0.2},
+                CATALOG["speakerModels"][1],
+            ],
+        }
+    )
+
+    with mock.patch.object(
+        index.s3, "get_object", side_effect=lambda **kw: {"Body": io.BytesIO(source)}
+    ), mock.patch.object(index.s3, "put_object"):
+        properties = {
+            "SourceLocation": "artifacts-bucket/prefix/src.zip",
+            "DestBucket": "stack-bucket",
+        }
+        _, measured = index.build(properties)
+        _, supplied = index.build(
+            {
+                **properties,
+                "SpeakerModelUrl": "https://example.invalid/mine.onnx",
+                "SpeakerModelSha256": "d" * 64,
+            }
+        )
+
+    assert measured["SpeakerModelMeasured"] == "true"
+    assert measured["RecommendedThreshold"] == "0.2"
+    # This is what makes the transcriber withhold speaker labels until calibration.
+    assert supplied["SpeakerModelMeasured"] == "false"
+    assert supplied["RecommendedThreshold"] == ""
+
+
 def test_render_model_env_carries_every_value_the_build_reads() -> None:
     rendered = index.render_model_env(index.resolve({}, CATALOG))
     values = dict(

@@ -8,3 +8,5 @@ export * from './transcribe';
 export * from './asr-audio';
 export * from './asr-config';
 export * from './asr-microvm';
+export * from './asr-calibration';
+export * from './asr-calibrate';

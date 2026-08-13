@@ -4,6 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import { generateClient } from 'aws-amplify/api';
+import { fetchAuthSession } from 'aws-amplify/auth';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Container,
@@ -18,6 +19,8 @@ import {
   ColumnLayout,
   Box,
   ExpandableSection,
+  StatusIndicator,
+  KeyValuePairs,
 } from '@cloudscape-design/components';
 
 import useSettingsContext from '../../contexts/settings';
@@ -71,11 +74,17 @@ const EMPTY = {
 const AsrConfigPage = () => {
   const { settings } = useSettingsContext();
   const engineDeployed = `${settings?.AsrDiarizationAvailable}` === 'true';
+  const calibrateEndpoint = settings?.AsrCalibrateEndpoint || '';
+  const speakerModelMeasured = `${settings?.AsrSpeakerModelMeasured}` !== 'false';
 
   const [config, setConfig] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
+  const [calibrateCallId, setCalibrateCallId] = useState('');
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibration, setCalibration] = useState(null);
+  const [calibrationError, setCalibrationError] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -133,6 +142,62 @@ const AsrConfigPage = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  /**
+   * Measure the operating point from a meeting this deployment already recorded.
+   *
+   * The transcriber task does the work (that is where the audio, the launcher and
+   * the engine already are), so this posts to the WebSocket domain rather than
+   * AppSync. Minutes, not seconds: a MicroVM has to start and embed the audio.
+   */
+  const calibrate = async () => {
+    setCalibrating(true);
+    setCalibration(null);
+    setCalibrationError(null);
+    try {
+      const session = await fetchAuthSession();
+      const token = session?.tokens?.accessToken?.toString() || '';
+      // Token and parameters go on the query string: the WebSocket route
+      // authenticates the same way, and a request with no custom headers and no
+      // body content type needs no CORS preflight.
+      const url =
+        `${calibrateEndpoint}?authorization=${encodeURIComponent(`Bearer ${token}`)}` +
+        `&callId=${encodeURIComponent(calibrateCallId.trim())}`;
+      const response = await fetch(url, { method: 'POST' });
+      const body = await response.json();
+      if (!response.ok) {
+        setCalibrationError(body?.message || `Calibration failed (HTTP ${response.status}).`);
+        return;
+      }
+      setCalibration(body);
+    } catch (err) {
+      setCalibrationError(
+        `Could not reach the calibration service: ${err.message || err}. It runs on the ` +
+          'transcriber task, so this fails if no transcriber is running.',
+      );
+    } finally {
+      setCalibrating(false);
+    }
+  };
+
+  const applyCalibration = () => {
+    const measured = calibration?.result || {};
+    setConfig({
+      ...config,
+      speakerThreshold: measured.speakerThreshold ?? config.speakerThreshold,
+      minSegmentMs: measured.minSegmentMs ?? config.minSegmentMs,
+    });
+    setStatus({
+      type: 'info',
+      text: 'Measured values filled in above. Review them, then choose Save to apply.',
+    });
+  };
+
+  const CONFIDENCE = {
+    good: { type: 'success', text: 'Clear separation' },
+    weak: { type: 'warning', text: 'Narrow separation' },
+    unusable: { type: 'error', text: 'No usable threshold' },
   };
 
   if (!engineDeployed) {
@@ -198,6 +263,14 @@ const AsrConfigPage = () => {
             {status && (
               <Alert type={status.type} dismissible onDismiss={() => setStatus(null)}>
                 {status.text}
+              </Alert>
+            )}
+
+            {!speakerModelMeasured && (
+              <Alert type="warning" header="This speaker model has no measured operating point">
+                Speaker labels are being withheld: nobody has measured what cosine similarity means for this embedder,
+                and a guessed threshold splits one person into several or merges several into one. Calibrate below, or
+                set <b>Speaker similarity threshold</b> yourself, and diarization starts on the next meeting.
               </Alert>
             )}
 
@@ -289,6 +362,134 @@ const AsrConfigPage = () => {
           </SpaceBetween>
         )}
       </Container>
+
+      {calibrateEndpoint && (
+        <Container
+          header={
+            <Header
+              variant="h2"
+              description={
+                'Measure the threshold from one of your own recorded meetings instead of inheriting ' +
+                'a number from another model. The two audio channels are the ground truth: utterances ' +
+                'on the microphone are one person and utterances on the meeting audio are someone ' +
+                'else, which is exactly the comparison a threshold has to get right.'
+              }
+            >
+              Calibrate from a recorded meeting
+            </Header>
+          }
+        >
+          <SpaceBetween size="l">
+            <FormField
+              label="Meeting ID"
+              description={
+                'A meeting that was recorded, where both sides spoke and were not talking over each ' +
+                'other. Copy the Meeting ID from the Meetings list.'
+              }
+              constraintText="Takes a few minutes: a MicroVM starts, the audio is embedded, then the VM is released."
+            >
+              <Input
+                value={calibrateCallId}
+                placeholder="Stream Audio - 2026-08-12-10:17:29.439"
+                onChange={({ detail }) => setCalibrateCallId(detail.value)}
+                disabled={calibrating}
+              />
+            </FormField>
+
+            <Button onClick={calibrate} loading={calibrating} disabled={calibrating || calibrateCallId.trim() === ''}>
+              {calibrating ? 'Measuring…' : 'Calibrate'}
+            </Button>
+
+            {calibrationError && (
+              <Alert
+                type="error"
+                header="Calibration did not run"
+                dismissible
+                onDismiss={() => setCalibrationError(null)}
+              >
+                {calibrationError}
+              </Alert>
+            )}
+
+            {calibration && (
+              <SpaceBetween size="m">
+                <KeyValuePairs
+                  columns={4}
+                  items={[
+                    {
+                      label: 'Result',
+                      value: (
+                        <StatusIndicator type={CONFIDENCE[calibration.result.confidence]?.type || 'info'}>
+                          {CONFIDENCE[calibration.result.confidence]?.text || calibration.result.confidence}
+                        </StatusIndicator>
+                      ),
+                    },
+                    {
+                      label: 'Measured threshold',
+                      value: calibration.result.speakerThreshold ?? '—',
+                    },
+                    {
+                      label: 'Minimum utterance',
+                      value: calibration.result.minSegmentMs ? `${calibration.result.minSegmentMs} ms` : 'unchanged',
+                    },
+                    {
+                      label: 'Separation',
+                      value: Number.isFinite(calibration.result.separation)
+                        ? calibration.result.separation.toFixed(3)
+                        : '—',
+                    },
+                    {
+                      label: 'Same speaker (p5 / median)',
+                      value: `${(calibration.result.sameSpeakerP5 ?? 0).toFixed(3)} / ${(
+                        calibration.result.sameSpeakerMedian ?? 0
+                      ).toFixed(3)}`,
+                    },
+                    {
+                      label: 'Different speakers (median / p95 / max)',
+                      value: `${(calibration.result.differentSpeakerMedian ?? 0).toFixed(3)} / ${(
+                        calibration.result.differentSpeakerP95 ?? 0
+                      ).toFixed(3)} / ${(calibration.result.differentSpeakerMax ?? 0).toFixed(3)}`,
+                    },
+                    {
+                      label: 'Utterances embedded',
+                      value: `${calibration.segmentsEmbedded} of ${calibration.segmentsFound}`,
+                    },
+                    {
+                      label: 'Audio analysed',
+                      value: `${calibration.audioSecondsAnalysed}s at ${calibration.sourceSampleRate} Hz`,
+                    },
+                  ]}
+                />
+
+                {calibration.result.notes?.length > 0 && (
+                  <Alert
+                    type={calibration.result.confidence === 'unusable' ? 'warning' : 'info'}
+                    header="What the measurement means"
+                  >
+                    <ul>
+                      {calibration.result.notes.map((note) => (
+                        <li key={note}>{note}</li>
+                      ))}
+                    </ul>
+                  </Alert>
+                )}
+
+                <Button
+                  variant="primary"
+                  onClick={applyCalibration}
+                  disabled={calibration.result.speakerThreshold === undefined}
+                >
+                  Use these values
+                </Button>
+                <Box variant="small">
+                  Nothing has changed yet. Choosing this fills the fields above, and Save applies them to the next
+                  meeting that starts.
+                </Box>
+              </SpaceBetween>
+            )}
+          </SpaceBetween>
+        </Container>
+      )}
     </SpaceBetween>
   );
 };

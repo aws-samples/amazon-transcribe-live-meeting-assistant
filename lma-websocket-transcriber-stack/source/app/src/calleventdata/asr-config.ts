@@ -40,6 +40,13 @@ export interface AsrRuntimeConfig {
     requireCorroboration?: boolean;
     diarizeByDefault: boolean;
     engineDefaultMicrovm: boolean;
+    /**
+     * Whether an admin set the threshold for this deployment, rather than it coming
+     * from the stack parameter. For an unmeasured speaker model that is the only
+     * evidence the operating point was ever checked against real audio, so it is
+     * what lets diarization run at all.
+     */
+    speakerThresholdOverridden: boolean;
 }
 
 const envDefaults = (): AsrRuntimeConfig => ({
@@ -56,7 +63,18 @@ const envDefaults = (): AsrRuntimeConfig => ({
         : undefined,
     diarizeByDefault: (process.env['ASR_DIARIZE_DEFAULT'] || 'true') === 'true',
     engineDefaultMicrovm: (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase() === 'microvm',
+    speakerThresholdOverridden: false,
 });
+
+/**
+ * Whether anyone has measured this speaker model's operating point.
+ *
+ * Set to "false" by the stack when the embedder is customer-supplied or has no
+ * measurement in the catalog. Defaults to true when unset so a local run or an
+ * older deployment behaves as before.
+ */
+export const isSpeakerModelMeasured = (): boolean =>
+    (process.env['ASR_SPEAKER_MODEL_MEASURED'] || 'true') !== 'false';
 
 let cached: { config: AsrRuntimeConfig; at: number } | undefined;
 
@@ -113,6 +131,7 @@ export const getAsrRuntimeConfig = async (
                 diarizeByDefault: item['diarizeByDefault']?.BOOL ?? defaults.diarizeByDefault,
                 engineDefaultMicrovm:
                     item['engineDefaultMicrovm']?.BOOL ?? defaults.engineDefaultMicrovm,
+                speakerThresholdOverridden: (item['speakerThreshold']?.S || '').trim() !== '',
             }
             : defaults;
         cached = { config, at: Date.now() };
