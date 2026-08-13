@@ -190,6 +190,9 @@ public static class Program
                     config.UserPoolId, config.ClientId, config.EffectiveRegion).GetAwaiter().GetResult();
                 config.AccessToken = tokens.AccessToken;
                 config.IdToken = tokens.IdToken;
+                // KEEP the refresh token — discarding it here is the root cause
+                // of issue #535 (nothing could renew the ~1 h access token).
+                config.RefreshToken = tokens.RefreshToken;
                 Console.WriteLine($"✓ Signed in — got Cognito tokens (access/id{(string.IsNullOrEmpty(tokens.RefreshToken) ? "" : "/refresh")})");
                 if (loginOnly)
                 {
@@ -216,7 +219,15 @@ public static class Program
         Console.WriteLine("  channels : ch0=meeting(system audio)  ch1=mic");
         Console.WriteLine();
 
-        var socket = new TranscriberSocket(config);
+        // Keeps the ~1h access token alive for the life of the run: proactively
+        // renewed before `exp`, and renewed-then-retried if the server rejects
+        // it anyway. Inert when there's nothing to redeem (a pasted --token with
+        // no refresh token), in which case the old give-up behaviour stands.
+        using var tokenStore = new TokenStore(config.AccessToken, config.IdToken,
+            config.RefreshToken, config.ClientId, config.EffectiveRegion);
+        tokenStore.ArmProactiveRefresh();
+
+        var socket = new TranscriberSocket(config, tokenStore);
         var mixer = new StereoMixer(config.SampleRate, chunk => socket.SendPcm(chunk));
         var capture = new AudioCapture(mixer, config.SampleRate);
 
@@ -224,8 +235,12 @@ public static class Program
         // while the socket is down (during reconnect audio is buffered, not sent).
         socket.OnStateChange = connected => mixer.SetConnected(connected);
 
+        // An unrecoverable auth failure ends the run with a non-zero exit so
+        // scripts and launchers see it (matching the macOS CLI's exit(1)). Only
+        // the tray app needs to survive this — see CaptureController.HandleFatalAuth.
         var done = new ManualResetEventSlim(false);
-        socket.OnFatalAuth = _ => done.Set();
+        bool fatalAuth = false;
+        socket.OnFatalAuth = _ => { fatalAuth = true; done.Set(); };
 
         // Optional: tee the exact streamed PCM to a local stereo WAV for offline
         // verification (per-channel RMS proves ch0=system / ch1=mic, not swapped).
@@ -295,7 +310,7 @@ public static class Program
 
         done.Wait();
         Shutdown();
-        return 0;
+        return fatalAuth ? 1 : 0;
     }
 
     private static string PromptPassword(string prompt)

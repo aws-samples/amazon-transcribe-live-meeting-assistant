@@ -22,6 +22,15 @@ public sealed class Config
     public string Endpoint = "";
     public string AccessToken = "";
     public string IdToken = "";
+    /// <summary>
+    /// Cognito REFRESH token. Retained (it used to be discarded at sign-in —
+    /// issue #535) so the ~1 h access token can be renewed without another
+    /// interactive sign-in. Redeemed by TokenStore, never sent to the server.
+    /// Pasted-token path: prefer LMA_REFRESH_TOKEN over --refresh-token — a
+    /// refresh token is a ~30-day credential and command lines are visible to
+    /// other local users (Task Manager, WMI Win32_Process).
+    /// </summary>
+    public string RefreshToken = "";
     public string CallId = "";
     public string AgentId = "";
     public string FromNumber = "";
@@ -109,6 +118,7 @@ public sealed class Config
             Endpoint = Value("endpoint", "LMA_WS_ENDPOINT", "wssEndpoint"),
             AccessToken = Value("token", "LMA_ACCESS_TOKEN"),
             IdToken = Value("id-token", "LMA_ID_TOKEN"),
+            RefreshToken = Value("refresh-token", "LMA_REFRESH_TOKEN"),
             CallId = Value("call-id", "LMA_CALL_ID", null, defaultCallId),
             AgentId = Value("agent-id", "LMA_AGENT_ID", null, "Me"),
             FromNumber = Value("from", "LMA_FROM", null, "Other participants"),

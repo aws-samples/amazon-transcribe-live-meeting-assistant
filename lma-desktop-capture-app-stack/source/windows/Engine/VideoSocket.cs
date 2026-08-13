@@ -87,7 +87,8 @@ public sealed class VideoSocket
         }
         AddParam("authorization", $"Bearer {_config.AccessToken}");
         if (!string.IsNullOrEmpty(_config.IdToken)) AddParam("id_token", _config.IdToken);
-        AddParam("refresh_token", "");
+        // `refresh_token` deliberately not sent — see the note in
+        // TranscriberSocket.ConnectAsync (the server has no consumer for it).
         builder.Query = query.ToString();
         var url = builder.Uri;
 
@@ -96,7 +97,6 @@ public sealed class VideoSocket
         {
             ws.Options.SetRequestHeader("authorization", $"Bearer {_config.AccessToken}");
             if (!string.IsNullOrEmpty(_config.IdToken)) ws.Options.SetRequestHeader("id_token", _config.IdToken);
-            ws.Options.SetRequestHeader("refresh_token", "");
         }
         catch { /* some headers are restricted; query params carry the auth anyway */ }
 
@@ -278,7 +278,7 @@ public sealed class VideoSocket
         catch (Exception err)
         {
             if (_intentionalClose) return;
-            Console.Error.WriteLine($"video WS receive/closed: {err.Message}");
+            Console.Error.WriteLine($"video WS receive/closed: {TranscriberSocket.RedactTokens(err.Message)}");
             lock (_sendLock) { _isOpen = false; }
             ScheduleReconnect("receive error");
         }
@@ -297,7 +297,7 @@ public sealed class VideoSocket
                 // to the app: give up on video only (auth failures also hit the
                 // audio socket, which owns the loud failure path).
                 Console.Error.WriteLine(
-                    $"✗ video WebSocket handshake keeps failing — video disabled for this call: {error.Message}");
+                    $"✗ video WebSocket handshake keeps failing — video disabled for this call: {TranscriberSocket.RedactTokens(error.Message)}");
                 _intentionalClose = true;
                 OnOverflow?.Invoke();
                 return;
