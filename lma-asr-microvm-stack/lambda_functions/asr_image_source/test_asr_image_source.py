@@ -194,6 +194,50 @@ def test_resolve_allows_a_transcription_only_image() -> None:
     assert selection["speaker"]["url"] == ""
 
 
+SEGMENTATION_CATALOG = {
+    **CATALOG,
+    "defaultSegmentationModelId": "seg-a",
+    "segmentationModels": [
+        {
+            "id": "seg-a",
+            "url": "https://example.invalid/seg.tar.bz2",
+            "sha256": "e" * 64,
+            "archive": "tar.bz2",
+            "stripComponents": 1,
+            "file": "model.onnx",
+            "windowSec": 10.0,
+            "license": "MIT",
+        },
+        {"id": "none", "url": "", "sha256": "", "archive": "none", "license": "n/a"},
+    ],
+}
+
+
+def test_the_segmentation_model_is_resolved_and_rendered() -> None:
+    rendered = index.render_model_env(index.resolve({}, SEGMENTATION_CATALOG))
+    values = dict(
+        line.split("=", 1) for line in rendered.splitlines() if "=" in line and not line.startswith("#")
+    )
+
+    assert values["ASR_SEGMENTATION_MODEL_ID"] == "seg-a"
+    assert values["ASR_SEGMENTATION_MODEL_URL"] == "https://example.invalid/seg.tar.bz2"
+    assert values["ASR_SEGMENTATION_MODEL_FILE"] == "model.onnx"
+    assert values["ASR_SEGMENTATION_MODEL_WINDOW_SEC"] == "10.0"
+
+
+def test_turn_detection_is_dropped_when_there_is_no_embedder_to_identify_turns() -> None:
+    selection = index.resolve({"SpeakerModelId": "none"}, SEGMENTATION_CATALOG)
+
+    assert selection["segmentation"]["url"] == ""
+
+
+def test_an_older_catalog_without_segmentation_models_still_resolves() -> None:
+    selection = index.resolve({}, CATALOG)
+
+    assert selection["segmentation"]["id"] == "none"
+    assert selection["segmentation"]["url"] == ""
+
+
 def test_a_custom_speaker_model_is_accepted_but_carries_no_measurement() -> None:
     selection = index.resolve(
         {

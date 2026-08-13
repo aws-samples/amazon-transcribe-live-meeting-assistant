@@ -342,6 +342,51 @@ lma-cli deploy --stack-name <stack> --from-code . \
   -p AsrSpeakerModelId=wespeaker-en-cam++-lm
 ```
 
+### Splitting a segment on a speaker change
+
+Endpointing closes an utterance on trailing silence, so when two people speak
+without a gap between them they land in one segment and share one speaker label.
+Comparing short embedding windows is the obvious fix and the wrong one: we measured
+sub-2.5 s utterances embedding unreliably (that is why `AsrMinSegmentMs` exists), so
+an embedding-only detector false-splits exactly where turns are shortest.
+
+The detector is therefore **pyannote segmentation 3.0**, baked as a 6 MB ONNX model
+(`AsrSegmentationModelId`, MIT, redistributed by k2-fsa so no Hugging Face token is
+needed). It is a specialist: 10-second windows, powerset output giving per-frame
+speaker activity *and* overlap, at ~17 ms resolution — finer than the word timings a
+`final` already carries, so a cut can snap to a word edge.
+
+Three rules keep it from making transcripts worse:
+
+- **It returns boundaries, not identities.** Its per-window speaker numbering is
+  arbitrary and not comparable across windows; identity stays with the embedder and
+  the per-session registry, so nothing has to stitch labels together.
+- **A change must persist for `ASR_MIN_TURN_MS` (700 ms default)** to count, so a
+  back-channel "mhm" does not turn one sentence into three rows.
+- **Windows overlap by half and only the middle half of each is trusted** (the
+  leading/trailing quarter for the first/last), so every instant is judged once, by
+  the window with the most context around it, and a window seam is never mistaken
+  for a turn.
+
+Validated against the real model: k2-fsa's own `1-two-speakers-en.wav` (16 s, two
+speakers) yields exactly one boundary, at 7.89 s, with a measured frame rate of
+16.98 ms.
+
+**How a split reaches the transcript.** The engine emits one `final` per turn with
+consecutive segment numbers, which the transcriber already maps to distinct
+`SegmentId`s, so a split needs no transcriber change. Because
+`addTranscriptSegment` is a `PutItem` keyed on `PK=trs#<callId>` / `SK=s#<segmentId>`
+whose guard only stops a *partial* from overwriting a final, re-emitting a final for
+the same segment number **updates that row in place**. That is what makes the two-way
+design safe: cut forward as soon as a change is detected so live partials appear
+under the right speaker, then reconcile at segment close, when the whole utterance is
+available and the embeddings are longer and more reliable. A false forward split
+degrades to two adjacent rows carrying the *same* speaker, never a wrong attribution,
+so no row ever has to be deleted.
+
+Turn splitting is off when `AsrSegmentationModelId=none` or when no speaker model is
+baked in (there would be no embedder to identify the turns it finds).
+
 ### Not included: Whisper, Distil-Whisper, and the WhisperX hybrid
 
 Whisper-family models (Whisper large-v3-turbo, Distil-Whisper — both MIT) are not

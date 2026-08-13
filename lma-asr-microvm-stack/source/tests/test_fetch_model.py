@@ -230,6 +230,98 @@ def test_run_downloads_the_speaker_model_when_one_is_selected(tmp_path: Path) ->
     assert (dest / "speaker_embedding.onnx").read_bytes() == speaker_bytes
 
 
+def make_segmentation_archive(tmp_path: Path) -> Path:
+    staging = tmp_path / "sherpa-onnx-pyannote-segmentation-3-0"
+    staging.mkdir(parents=True)
+    (staging / "model.onnx").write_bytes(b"segmentation weights")
+    (staging / "model.int8.onnx").write_bytes(b"quantized twin")
+    (staging / "LICENSE").write_text("MIT License\n")
+
+    archive = tmp_path / "segmentation.tar.bz2"
+    with tarfile.open(archive, "w:bz2") as tar:
+        tar.add(staging, arcname=staging.name)
+    return archive
+
+
+def test_run_lays_out_the_segmentation_model_and_its_licence(tmp_path: Path) -> None:
+    model_archive = make_archive(tmp_path)
+    model_digest = hashlib.sha256(model_archive.read_bytes()).hexdigest()
+    speaker_bytes = b"speaker weights"
+    speaker_digest = hashlib.sha256(speaker_bytes).hexdigest()
+    seg_archive = make_segmentation_archive(tmp_path)
+    seg_digest = hashlib.sha256(seg_archive.read_bytes()).hexdigest()
+    env_path = write_env(
+        tmp_path / "model.env",
+        {
+            **ENV_TEMPLATE,
+            "ASR_MODEL_SHA256": model_digest,
+            "ASR_SPEAKER_MODEL_ID": "spk",
+            "ASR_SPEAKER_MODEL_URL": "https://example.invalid/spk.onnx",
+            "ASR_SPEAKER_MODEL_SHA256": speaker_digest,
+            "ASR_SEGMENTATION_MODEL_ID": "pyannote-segmentation-3-0",
+            "ASR_SEGMENTATION_MODEL_URL": "https://example.invalid/seg.tar.bz2",
+            "ASR_SEGMENTATION_MODEL_SHA256": seg_digest,
+            "ASR_SEGMENTATION_MODEL_ARCHIVE": "tar.bz2",
+            "ASR_SEGMENTATION_MODEL_FILE": "model.onnx",
+        },
+    )
+    dest = tmp_path / "opt-models"
+
+    def fake_download(url: str, target: Path) -> str:
+        if url.endswith("spk.onnx"):
+            target.write_bytes(speaker_bytes)
+            return speaker_digest
+        if url.endswith("seg.tar.bz2"):
+            target.write_bytes(seg_archive.read_bytes())
+            return seg_digest
+        target.write_bytes(model_archive.read_bytes())
+        return model_digest
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    assert (dest / "segmentation.onnx").read_bytes() == b"segmentation weights"
+    # pyannote's weights are MIT but access-gated upstream; the mirror ships the
+    # licence, so it has to land in the image next to them.
+    assert (dest / "LICENSE.segmentation").read_text() == "MIT License\n"
+    # The ASR model's own files are untouched by the second extraction.
+    assert (dest / "encoder.onnx").read_bytes() == b"encoder"
+    assert not (dest / "_staging").exists()
+    assert not (dest / "model.int8.onnx").exists()
+
+
+def test_run_reports_a_segmentation_archive_missing_its_model(tmp_path: Path) -> None:
+    model_archive = make_archive(tmp_path)
+    model_digest = hashlib.sha256(model_archive.read_bytes()).hexdigest()
+    seg_archive = make_segmentation_archive(tmp_path)
+    seg_digest = hashlib.sha256(seg_archive.read_bytes()).hexdigest()
+    env_path = write_env(
+        tmp_path / "model.env",
+        {
+            **ENV_TEMPLATE,
+            "ASR_MODEL_SHA256": model_digest,
+            "ASR_SPEAKER_MODEL_URL": "https://example.invalid/spk.onnx",
+            "ASR_SPEAKER_MODEL_SHA256": "f" * 64,
+            "ASR_SEGMENTATION_MODEL_URL": "https://example.invalid/seg.tar.bz2",
+            "ASR_SEGMENTATION_MODEL_SHA256": seg_digest,
+            "ASR_SEGMENTATION_MODEL_FILE": "not-there.onnx",
+        },
+    )
+
+    def fake_download(url: str, target: Path) -> str:
+        if url.endswith("spk.onnx"):
+            target.write_bytes(b"speaker weights")
+            return "f" * 64
+        if url.endswith("seg.tar.bz2"):
+            target.write_bytes(seg_archive.read_bytes())
+            return seg_digest
+        target.write_bytes(model_archive.read_bytes())
+        return model_digest
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(tmp_path / "out")]) == 1
+
+
 def test_run_builds_a_transcription_only_image_without_a_speaker_model(tmp_path: Path) -> None:
     archive = make_archive(tmp_path)
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()

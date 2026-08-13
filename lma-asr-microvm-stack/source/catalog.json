@@ -111,5 +111,34 @@
       "approxDownloadMb": 0
     }
   ],
-  "thresholdNote": "recommendedThreshold is per model and NOT interchangeable: cosine similarity scales differ between embedders. Changing the speaker model without re-measuring its operating point will either fragment one speaker into many or merge several into one."
+  "thresholdNote": "recommendedThreshold is per model and NOT interchangeable: cosine similarity scales differ between embedders. Changing the speaker model without re-measuring its operating point will either fragment one speaker into many or merge several into one.",
+  "defaultSegmentationModelId": "pyannote-segmentation-3-0",
+  "segmentationModels": [
+    {
+      "id": "pyannote-segmentation-3-0",
+      "name": "pyannote segmentation 3.0 (speaker turn and overlap detection)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+      "sha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "file": "model.onnx",
+      "sampleRate": 16000,
+      "windowSec": 10.0,
+      "classes": 7,
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/pyannote/segmentation-3.0",
+      "approxDownloadMb": 6,
+      "provenanceVerified": "2026-08-13",
+      "note": "Converted to ONNX by k2-fsa from the gated pyannote/segmentation-3.0 weights and redistributed ungated with the upstream MIT licence file, so no Hugging Face token is needed. Detects speaker turns and overlap inside one endpointed utterance, which raw embeddings cannot do reliably at short durations."
+    },
+    {
+      "id": "none",
+      "name": "No turn detection (one speaker per endpointed utterance)",
+      "url": "",
+      "sha256": "",
+      "archive": "none",
+      "license": "n/a",
+      "approxDownloadMb": 0
+    }
+  ]
 }

@@ -35,6 +35,7 @@ CANONICAL_NAMES = {
 }
 
 SPEAKER_MODEL_NAME = "speaker_embedding.onnx"
+SEGMENTATION_MODEL_NAME = "segmentation.onnx"
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 # Model weights come from a public release host, and a single 503 from it used to
@@ -223,6 +224,50 @@ def run(argv: list[str]) -> int:
                 log(f"placed speaker embedding model -> {SPEAKER_MODEL_NAME}")
             else:
                 log("no speaker model selected: diarization will be unavailable")
+
+            segmentation_url = env.get("ASR_SEGMENTATION_MODEL_URL", "")
+            if segmentation_url:
+                label = f"segmentation model {env.get('ASR_SEGMENTATION_MODEL_ID', '?')}"
+                kind = env.get("ASR_SEGMENTATION_MODEL_ARCHIVE", "tar.bz2")
+                member = env.get("ASR_SEGMENTATION_MODEL_FILE", "model.onnx")
+                if kind == "onnx":
+                    target = tmpdir / SEGMENTATION_MODEL_NAME
+                    fetch_verified(
+                        segmentation_url,
+                        env.get("ASR_SEGMENTATION_MODEL_SHA256", ""),
+                        target,
+                        label,
+                    )
+                    shutil.move(str(target), str(dest / SEGMENTATION_MODEL_NAME))
+                else:
+                    archive = tmpdir / f"segmentation.{kind}"
+                    fetch_verified(
+                        segmentation_url,
+                        env.get("ASR_SEGMENTATION_MODEL_SHA256", ""),
+                        archive,
+                        label,
+                    )
+                    extracted = extract(
+                        archive,
+                        kind,
+                        int(env.get("ASR_SEGMENTATION_MODEL_STRIP_COMPONENTS", "1")),
+                        tmpdir,
+                    )
+                    source = extracted / member
+                    if not source.is_file():
+                        available = sorted(child.name for child in extracted.iterdir())
+                        raise ModelFetchError(
+                            f"{label}: {member!r} is not in the archive. Present: {available}"
+                        )
+                    shutil.move(str(source), str(dest / SEGMENTATION_MODEL_NAME))
+                    for license_file in sorted(extracted.glob("LICENSE*")):
+                        suffix = license_file.suffix
+                        shutil.move(
+                            str(license_file), str(dest / f"LICENSE.segmentation{suffix}")
+                        )
+                log(f"placed segmentation model -> {SEGMENTATION_MODEL_NAME}")
+            else:
+                log("no segmentation model selected: one speaker per endpointed utterance")
         except (ModelFetchError, OSError, tarfile.TarError) as exc:
             log(f"ERROR: {exc}")
             return 1

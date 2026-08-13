@@ -93,6 +93,31 @@ Parameters:
       transcription-only image and diarization requests are then reported as
       unsupported rather than silently returning no speaker labels.
 
+  AsrSegmentationModelId:
+    Type: String
+    Default: pyannote-segmentation-3-0
+    AllowedValues:
+      - pyannote-segmentation-3-0
+      - none
+    Description: >-
+      Speaker-turn detection model, used to split one endpointed utterance when two
+      people speak inside it. pyannote segmentation 3.0 (MIT, 6 MB) is redistributed
+      as ONNX by k2-fsa, so no Hugging Face token is needed. Ignored when
+      AsrSpeakerModelId is "none", since there would be no embedder to identify the
+      turns it finds.
+
+  AsrSegmentationModelUrl:
+    Type: String
+    Default: ""
+    Description: (Custom segmentation model only) URL of the archive or ONNX file.
+
+  AsrSegmentationModelSha256:
+    Type: String
+    Default: ""
+    Description: >-
+      (Custom segmentation model only) SHA256 of the download. Required: the build
+      fails rather than baking unverified weights.
+
   AsrEnableDiarization:
     Type: String
     Default: Auto
@@ -405,6 +430,9 @@ Resources:
       SpeakerModelId: !Ref AsrSpeakerModelId
       SpeakerModelUrl: !Ref AsrSpeakerModelUrl
       SpeakerModelSha256: !Ref AsrSpeakerModelSha256
+      SegmentationModelId: !Ref AsrSegmentationModelId
+      SegmentationModelUrl: !Ref AsrSegmentationModelUrl
+      SegmentationModelSha256: !Ref AsrSegmentationModelSha256
 
   # Runtime overrides for the diarization operating point, edited from the web UI's
   # ASR Config page. Everything here is per-session in the WebSocket protocol, so a
@@ -677,6 +705,12 @@ Outputs:
   DiarizationAvailable:
     Description: Whether the image can produce speaker labels.
     Value: !GetAtt AsrImageSource.DiarizationAvailable
+
+  TurnDetectionAvailable:
+    Description: >-
+      Whether a speaker-turn detection model is baked in, so one endpointed
+      utterance containing two voices can be split rather than labelled once.
+    Value: !GetAtt AsrImageSource.TurnDetectionAvailable
 
   SpeakerModelMeasured:
     Description: >-

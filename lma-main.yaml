@@ -375,6 +375,20 @@ Parameters:
       deployment calibrates its own threshold. "none" builds a
       transcription-only ASR image.
 
+  AsrSegmentationModelId:
+    Type: String
+    Default: pyannote-segmentation-3-0
+    AllowedValues:
+      - pyannote-segmentation-3-0
+      - none
+    Description: >-
+      Speaker-turn detection for diarization: pyannote segmentation 3.0 (MIT, 6 MB,
+      redistributed as ONNX by k2-fsa so no Hugging Face token is needed) lets the
+      engine split one endpointed utterance when two people speak inside it, instead
+      of attributing the whole thing to one speaker. "none" keeps the previous
+      behaviour of one speaker per utterance. Ignored when AsrSpeakerModelId is
+      "none".
+
   AsrBaselineMemoryMiB:
     Type: Number
     Default: 8192
@@ -993,6 +1007,7 @@ Metadata:
           - TranscriptionEngine
           - AsrModelId
           - AsrSpeakerModelId
+          - AsrSegmentationModelId
           - AsrBaselineMemoryMiB
           - AsrMaxMeetingSeconds
           - AsrMaxSpeakers
@@ -2792,6 +2807,7 @@ Resources:
         AsrImageSourceS3Key: <ASR_MICROVM_IMAGE_SOURCE_S3_KEY_TOKEN>
         AsrModelId: !Ref AsrModelId
         AsrSpeakerModelId: !Ref AsrSpeakerModelId
+        AsrSegmentationModelId: !Ref AsrSegmentationModelId
         AsrModelUrl: !Ref AsrModelUrl
         AsrModelSha256: !Ref AsrModelSha256
         AsrModelEncoderFile: !Ref AsrModelEncoderFile
