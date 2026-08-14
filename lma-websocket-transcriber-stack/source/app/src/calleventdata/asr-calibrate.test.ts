@@ -16,7 +16,6 @@ import {
     CalibrationError,
     embedSegments,
     readChannels,
-    resolveRecordingKey,
     runCalibration,
 } from './asr-calibrate';
 import { CalibrationSegment, parseWavHeader, selectSpread } from './asr-calibration';
@@ -176,34 +175,6 @@ test('a long recording is truncated at the time cap and says so', async () => {
     assert.ok(audio.secondsRead < 3, `read ${audio.secondsRead}s`);
 });
 
-test('a recording key is derived from the callId and confined to the prefix', () => {
-    // Same posixify() the recording writer used, so the key matches the object it
-    // actually wrote — any other spelling of it just 404s.
-    assert.equal(
-        resolveRecordingKey({ callId: 'Stream Audio - 2026-08-12' }),
-        'lma-audio-recordings/Stream_Audio___2026_08_12.wav'
-    );
-    assert.equal(
-        resolveRecordingKey({ recordingKey: 'lma-audio-recordings/meeting.wav' }),
-        'lma-audio-recordings/meeting.wav'
-    );
-    assert.throws(() => resolveRecordingKey({}), /callId or a recordingKey/);
-    // The task role can read the whole bucket, so an arbitrary key would make this
-    // route a file reader for anyone in the Admin group.
-    assert.throws(
-        () => resolveRecordingKey({ recordingKey: '../../secrets.wav' }),
-        /must be an object under/
-    );
-    assert.throws(
-        () => resolveRecordingKey({ recordingKey: 'lma-audio-recordings/../x.wav' }),
-        /must be an object under/
-    );
-    assert.throws(
-        () => resolveRecordingKey({ recordingKey: 'lma-audio-recordings/meeting.raw' }),
-        /reads the .wav recording/
-    );
-});
-
 interface FakeEmbedder {
     url: string;
     configs: Array<Record<string, unknown>>;
@@ -303,13 +274,11 @@ test('vectors already collected survive a dropped connection', async () => {
 });
 
 const depsFor = (
-    recording: Buffer,
     overrides: Partial<CalibrationDeps> = {}
 ): CalibrationDeps & { released: string[]; acquired: number } => {
     const state = {
         released: [] as string[],
         acquired: 0,
-        fetchRecording: async () => streamOf(recording),
         acquire: async () => {
             state.acquired += 1;
             return { endpointUrl: 'ws://unused', microvmId: 'mv-1' };
@@ -328,12 +297,15 @@ const depsFor = (
     return state as unknown as CalibrationDeps & { released: string[]; acquired: number };
 };
 
-test('a two-sided recording yields an operating point and frees the MicroVM', async () => {
-    const deps = depsFor(wav(48000, conversation(48000, 17, TWO_SIDED_TURNS)));
+test('a two-channel upload yields an operating point and frees the MicroVM', async () => {
+    const deps = depsFor();
 
-    const run = await runCalibration({ callId: 'meeting-1' }, fakeServer, deps);
+    const run = await runCalibration(
+        { wav: wav(48000, conversation(48000, 17, TWO_SIDED_TURNS)) },
+        fakeServer,
+        deps
+    );
 
-    assert.equal(run.recordingKey, 'lma-audio-recordings/meeting_1.wav');
     assert.equal(run.sourceSampleRate, 48000);
     assert.ok(run.segmentsFound >= 6, `found ${run.segmentsFound} segments`);
     assert.equal(run.segmentsEmbedded, run.segmentsFound);
@@ -342,19 +314,18 @@ test('a two-sided recording yields an operating point and frees the MicroVM', as
     assert.deepEqual(deps.released, ['mv-1']);
 });
 
-test('a one-sided recording is refused before a MicroVM is launched', async () => {
-    // Only the microphone side spoke: there is no different-speaker comparison to
+test('a one-sided upload is refused before a MicroVM is launched', async () => {
+    // Only one channel carries speech: there is no different-speaker comparison to
     // make, so launching an engine to embed it would cost money for nothing.
-    const deps = depsFor(
-        wav(48000, conversation(48000, 12, [
-            { channel: 1, from: 0, to: 2 },
-            { channel: 1, from: 3, to: 5 },
-            { channel: 1, from: 6, to: 8 },
-            { channel: 1, from: 9, to: 11 },
-        ]))
-    );
+    const deps = depsFor();
+    const oneSided = wav(48000, conversation(48000, 12, [
+        { channel: 1, from: 0, to: 2 },
+        { channel: 1, from: 3, to: 5 },
+        { channel: 1, from: 6, to: 8 },
+        { channel: 1, from: 9, to: 11 },
+    ]));
 
-    const run = await runCalibration({ callId: 'one-sided' }, fakeServer, deps);
+    const run = await runCalibration({ wav: oneSided }, fakeServer, deps);
 
     assert.equal(deps.acquired, 0);
     assert.equal(run.segmentsEmbedded, 0);
@@ -363,19 +334,26 @@ test('a one-sided recording is refused before a MicroVM is launched', async () =
 });
 
 test('the MicroVM is released even when embedding fails', async () => {
-    const deps = depsFor(wav(48000, conversation(48000, 17, TWO_SIDED_TURNS)), {
+    const deps = depsFor({
         embed: async () => {
             throw new CalibrationError('engine exploded', 502);
         },
     });
 
-    await assert.rejects(runCalibration({ callId: 'meeting-2' }, fakeServer, deps), /engine exploded/);
+    await assert.rejects(
+        runCalibration(
+            { wav: wav(48000, conversation(48000, 17, TWO_SIDED_TURNS)) },
+            fakeServer,
+            deps
+        ),
+        /engine exploded/
+    );
     assert.deepEqual(deps.released, ['mv-1']);
 });
 
 test('a second concurrent run is refused rather than launching another MicroVM', async () => {
     let releaseEmbed: (() => void) | undefined;
-    const deps = depsFor(wav(48000, conversation(48000, 17, TWO_SIDED_TURNS)), {
+    const deps = depsFor({
         embed: async (_lease: unknown, segments: CalibrationSegment[]) => {
             await new Promise<void>((resolve) => {
                 releaseEmbed = resolve;
@@ -383,19 +361,27 @@ test('a second concurrent run is refused rather than launching another MicroVM',
             return segments.map(() => [1, 0]);
         },
     });
+    const sample = wav(48000, conversation(48000, 17, TWO_SIDED_TURNS));
 
-    const first = runCalibration({ callId: 'meeting-3' }, fakeServer, deps);
+    const first = runCalibration({ wav: sample }, fakeServer, deps);
     // Let the first run reach the embed step.
     while (!releaseEmbed) {
         await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     await assert.rejects(
-        runCalibration({ callId: 'meeting-4' }, fakeServer, deps),
+        runCalibration({ wav: sample }, fakeServer, deps),
         (error: CalibrationError) => error.status === 409
     );
 
     releaseEmbed();
     await first;
     assert.equal(deps.acquired, 1);
+});
+
+test('an empty upload is refused with an instruction rather than a stack trace', async () => {
+    await assert.rejects(
+        runCalibration({ wav: Buffer.alloc(0) }, fakeServer, depsFor()),
+        (error: CalibrationError) => error.status === 400 && /no audio was uploaded/.test(error.message)
+    );
 });

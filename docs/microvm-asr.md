@@ -145,17 +145,54 @@ where that same 0.5 would have merged them instead. There is no number that is r
 for both.
 
 So the deployment measures it. **Configuration ▸ ASR Config ▸ Calibrate from a
-recorded meeting** takes a Meeting ID and derives the threshold from that meeting's
-own audio.
+two-channel recording** takes a WAV you upload and derives the threshold from it.
 
-**How it works, and why it needs no labelled data.** LMA already records two separate
-channels: the microphone is the local participant and the tab is the remote side.
-Utterances within one channel are (usually) the same person and utterances across
-channels are definitely different people — which is exactly the comparison a threshold
-has to get right. The transcriber streams the recording out of S3, finds stretches
-where one channel clearly dominates the other (dominance rather than silence, so
-cross-talk is excluded), embeds up to 12 per channel on a MicroVM in embed mode, and
-compares every pair.
+**Why an upload rather than a meeting ID.** The ground truth is *channel
+separation*: one speaker per channel, so pairs within a channel are the same person
+and pairs across channels are definitely different people — exactly the comparison a
+threshold has to get right. That property belongs to the *file*, not to the meeting,
+so calibration takes the file directly. A sample can then come from a rehearsed
+recording, a meeting you downloaded, or a public corpus, and the same page works
+whether or not the deployment happens to have a suitable recorded meeting. The upload
+is embedded in memory and discarded — it is never written to S3 or into a transcript.
+
+**Requirements**
+
+- **WAV, 16-bit PCM, two channels**, one speaker per channel. Any sample rate (it is
+  resampled to 16 kHz); up to 64 MB, of which the first 20 minutes are read.
+- Two to five minutes is plenty. Both speakers should talk several times and avoid
+  talking over each other; cross-talk is excluded from the statistics, so heavy
+  overlap just leaves less to measure.
+- A mono file, or a stereo file with both voices in both channels, is **refused**
+  rather than measured: it carries no ground truth, and a number derived from it
+  would be confidently wrong.
+
+**Making a sample on your own.** Play a recording of someone else through your laptop
+speakers while you talk into the microphone, and capture it with **Stream Audio** —
+its two channels are exactly system audio and microphone, so the two voices land on
+separate channels without a second person in the room. Alternate: let the recording
+talk for ~20 s, then you talk for ~20 s, four or five times each. End the meeting,
+download the WAV, and upload it here.
+
+**Making a sample from a public corpus.** Any dataset that ships **one file per
+speaker** works — merge two speakers into the two channels:
+
+```bash
+ffmpeg -i speakerA.wav -i speakerB.wav \
+  -filter_complex "[0:a][1:a]amerge=inputs=2" \
+  -ac 2 -ar 16000 -sample_fmt s16 calib.wav
+```
+
+Note that this is the opposite of what most diarization pipelines do with a stereo
+file: pyannote and friends **downmix to mono** before segmenting. This engine never
+downmixes — it splits the channels and processes each independently, both for
+calibration and for live meetings (one ASR session per channel) — which is what makes
+channel identity usable as a label.
+
+**How it works.** The transcriber de-interleaves the upload, resamples each channel to
+16 kHz, finds stretches where one channel clearly dominates the other (dominance
+rather than silence, so cross-talk is excluded), embeds up to 12 per channel on a
+MicroVM in embed mode, and compares every pair.
 
 The threshold is then placed **inside the gap** between the two distributions, nearer
 the different-speaker side, and additionally above the highest different-speaker score
@@ -170,25 +207,20 @@ share one microphone).
 | Verdict | Meaning |
 |---|---|
 | Clear separation | Gap of 0.1 or more. Use the values |
-| Narrow separation | A usable threshold, but sensitive to the audio it was measured on. Re-run on another meeting before trusting it |
-| No usable threshold | The distributions overlap: no threshold separates them on this audio. That is what a mismatched embedder looks like; it can also mean narrowband audio or heavy cross-talk |
+| Narrow separation | A usable threshold, but sensitive to the audio it was measured on. Re-run on another sample before trusting it |
+| No usable threshold | The distributions overlap: no threshold separates them on this audio. That is what a mismatched embedder looks like; it can also mean narrowband audio, heavy cross-talk, or a file whose channels are not actually speaker-separated |
 
 Calibration also reports a **minimum utterance length** when pairs involving a short
 segment score materially worse than long-only pairs — the measured cause of phantom
 speakers, every one of which came from a 1.2–2.4 s utterance.
 
 **Nothing is applied automatically.** A run reports; **Use these values** fills the
-fields, and **Save** applies them to the next meeting that starts. A recording where
-only one side spoke is refused before a MicroVM is even launched, since it contains no
-different-speaker comparison to make.
+fields, and **Save** applies them to the next meeting that starts. A sample where only
+one channel carries speech is refused before a MicroVM is even launched, since it
+contains no different-speaker comparison to make.
 
-**Requirements**
-
-- A meeting that was **recorded** (`EnableAudioRecording`), with both sides speaking
-  and not talking over each other. Fifteen minutes is plenty; only the first 20 are read.
-- Admin group membership. The route launches a MicroVM, so it is admin-only and
-  single-flight.
-- The engine deployed with a speaker model (`AsrSpeakerModelId` ≠ `none`).
+**Who can run it.** Admin group only (it launches a MicroVM), and single-flight per
+transcriber task.
 
 **Unmeasured models are withheld, not guessed at.** Every speaker model in
 `catalog.json` carries a `measured` note recording what was actually observed. When a
@@ -198,155 +230,6 @@ transcribes with **channel labels instead of speaker labels**, logging why, unti
 either a calibration is applied or an admin sets a threshold. A guessed threshold
 looks like working diarization while being wrong, which is worse than no diarization
 at all.
-
-## Using it
-
-**Web UI.** On the **Stream Audio** page, tick **Enable speaker diarization**
-before starting the meeting. The checkbox only appears when an ASR image with a
-speaker model is deployed. Enabling it also makes the browser capture at 16 kHz —
-the models' native rate — so no resampling happens anywhere in the chain.
-
-**Desktop Capture App.** Pass `--diarization 1`, set
-`LMA_ENABLE_DIARIZATION=1`, or set `"enableDiarization": "true"` in
-`lma-config.json`. Add `--sample-rate 16000` to avoid a resample; other rates work
-unchanged.
-
-**Any custom client** of the [WebSocket Streaming API](websocket-streaming-api.md)
-can send `"enableDiarization": true` (or `"asrEngine": "microvm"`) in its `START`
-frame.
-
-To route *every* streaming meeting to this engine regardless of what clients ask
-for, set the transcriber stack's `AsrEngineDefault` to `microvm`.
-
-### Reading the transcript
-
-Speaker labels follow the names LMA already has. The first voice heard on a channel
-keeps that channel's name — the meeting owner for the microphone, the announced
-active speaker for the tab. Additional voices on the same channel become
-`Speaker 1 (mic)`, `Speaker 2 (tab)`, and so on, numbered from a counter shared by
-both channels so the two can never render the same number.
-
-Labels are per meeting and are not identities: mapping them to participant names is
-not implemented.
-
-## How it works
-
-```
-Browser / Desktop app (mic + tab, 2-channel PCM)
-      │
-      ▼
-WebSocket transcriber (Fargate)
-      │  de-interleave + resample to 16 kHz mono
-      ├──── ch_0 (tab) ──► ASR session A ─┐
-      └──── ch_1 (mic) ──► ASR session B ─┤   one MicroVM per meeting
-      │                                   │   (ASR + diarization in one process)
-      │◄──── partial / final + speaker ───┘
-      ▼
-ADD_TRANSCRIPT_SEGMENT ──► Kinesis ──► DynamoDB ──► AppSync ──► UI
-```
-
-1. On `START`, the transcriber asks the launcher Lambda for a MicroVM, which runs
-   one, waits for `RUNNING`, and mints an auth token scoped to port 8080.
-2. The transcriber de-interleaves the stereo stream and opens **one WebSocket
-   session per channel**. Channel identity stays authoritative: a voice on the
-   microphone can never be labelled as a tab speaker, so each session only has to
-   separate the voices *within* its channel.
-3. Each session negotiates its config (`sample_rate`, `diarize`, `max_speakers`,
-   `speaker_threshold`, `endpointing_ms`) and the server echoes what it will
-   actually do. If the image has no speaker model, it reports `diarize: false`
-   rather than silently returning empty labels, and the transcriber logs that.
-4. On each endpointed utterance the engine embeds that segment's audio, assigns it
-   to the closest speaker centroid in a per-session registry (or mints a new
-   speaker), and emits the transcript with the label attached.
-5. On `END` the transcriber flushes each channel (`eos`), then terminates the
-   MicroVM.
-
-Launch performance comes from the image's lifecycle hooks. `/ready` only returns
-200 once the model is loaded **and** a decode has run through the real WebSocket
-path — that is the instant Lambda takes the Firecracker snapshot, so the snapshot
-contains a warm model. `/validate` replays the same decode from the snapshot,
-which is how Lambda learns which pages to prefetch on later launches.
-
-Reconnects are handled the way the Amazon Transcribe path handles them: the engine
-restarts its segment numbering and its clock on a new connection, so the
-transcriber carries a cumulative time offset and a generation counter in the
-segment id, keeping the meeting timeline monotonic and segment ids unique.
-
-## Changing the model
-
-Models live in a catalog at
-[`lma-asr-microvm-stack/source/catalog.json`](../lma-asr-microvm-stack/source/catalog.json).
-Each entry pins a download URL, a SHA256, the filenames inside the archive, and the
-`sherpa-onnx` / `onnxruntime` versions that can load it — model exports and runtime
-versions are coupled, so they travel together.
-
-`CreateMicrovmImage` accepts only a code artifact and has no build-argument
-passthrough, so the selection has to live *inside* the artifact. At deploy time the
-`AsrImageSource` custom resource resolves your parameters against the catalog,
-rewrites `model.env` in the published source zip, and republishes it under a key
-derived from the selection. Because the key changes, CloudFormation rebuilds the
-image whenever you change a model parameter.
-
-**Every model is a curated catalog entry.** There is deliberately no parameter for
-supplying a URL at deploy time: a model needs its checksum pinned, its file names
-known, its runtime versions matched, and — for a speaker model — its operating point
-measured, and none of that is something to fill into a console text box while
-proving out an engine. Adding a model is a repo change:
-
-1. Download the archive and record its **SHA256** and the exact filenames inside it.
-2. Add an entry to
-   [`lma-asr-microvm-stack/source/catalog.json`](../lma-asr-microvm-stack/source/catalog.json)
-   with `url`, `sha256`, `files`, `sampleRate`, `license`, `licenseUrl`, and the
-   `sherpaOnnx` / `onnxruntime` versions that load it (exports and runtimes are
-   coupled, so they travel together per entry).
-3. Add the id to `AsrModelId`'s `AllowedValues` in `lma-main.yaml` and
-   `lma-asr-microvm-stack/template.yaml`.
-4. For a speaker model, [calibrate](#calibrating-the-operating-point) and record what
-   you measured in the entry's `measured` field. Until that field exists, the
-   deployment produces no speaker labels for it.
-
-An ASR model must be a **streaming transducer** that `sherpa-onnx`'s
-`OnlineRecognizer` can load, exported at 16 kHz; the resolver refuses anything else
-rather than failing later in the image build.
-
-**Choosing the ASR model.** `AsrModelId` on the main stack:
-
-| Value | Licence | Notes |
-|---|---|---|
-| `nemotron-streaming-en-0.6b-560ms-int8` (default) | NVIDIA Open Model License | Cache-aware FastConformer, the more accurate of the two |
-| `zipformer-streaming-en-2023-06-26-int8` | Apache-2.0 | Fully permissive; trained on LibriSpeech read speech, so expect worse accuracy on real meeting audio. Unmeasured here |
-
-**A fully permissive stack** is `AsrModelId=zipformer-streaming-en-2023-06-26-int8`
-with `AsrSpeakerModelId=wespeaker-en-cam++-lm` or `wespeaker-en-resnet293-lm`:
-Apache-2.0 weights, Apache-2.0 `sherpa-onnx` runtime, no NVIDIA licence anywhere.
-Both halves are the *less accurate* choice on the audio measured so far, so treat it
-as a licensing option rather than the quality option, and calibrate — the WeSpeaker
-thresholds differ from TitaNet's and both measured worse.
-
-**Choosing the speaker (diarization) model.** `AsrSpeakerModelId` on the main stack:
-
-| Value | Licence | Measured on real meeting audio |
-|---|---|---|
-| `titanet-small` (default) | CC-BY-4.0 | Separates speakers well: different speakers ≤ 0.107, same speaker 0.25–0.5. Operating point 0.2 |
-| `wespeaker-en-cam++-lm` | Apache-2.0 | Distributions overlapped — worse than TitaNet here |
-| `wespeaker-en-resnet293-lm` | Apache-2.0 | Everything scores high; needs ~0.8 and the tails still overlap |
-| `none` | — | Transcription only, no diarization |
-
-The two WeSpeaker models are offered for licensing reasons (Apache-2.0 rather than
-CC-BY-4.0) and each carries its measurement in `catalog.json`. Picking anything other
-than the default means the shipped threshold no longer describes your embedder, so
-[calibrate](#calibrating-the-operating-point) before trusting the labels.
-
-Changing either model parameter changes the source-zip key, so the stack update
-rebuilds the MicroVM image (a few minutes) — a longer update than a runtime setting,
-which is exactly why the threshold and the other diarization knobs are runtime
-config instead.
-
-```bash
-lma-cli deploy --stack-name <stack> --from-code . \
-  -p TranscriptionEngine=MicrovmAsr \
-  -p AsrSpeakerModelId=wespeaker-en-cam++-lm
-```
 
 ### Splitting a segment on a speaker change
 
@@ -637,9 +520,13 @@ audio. Try another meeting first; if two clean meetings both overlap, the model 
 problem — the shipped `measured` notes in `catalog.json` show what a good and a bad
 embedder look like on the same audio.
 
-**Calibration says "give either a callId or a recordingKey" or 404s.** The Meeting ID
-must be one that was *recorded*; the key is derived from it the same way the recorder
-wrote it. Copy the ID from the Meetings list rather than retyping it.
+**Calibration refuses the file.** "needs the two-channel recording" means the WAV is
+mono or the header says one channel — remember the requirement is one speaker per
+channel, not just a stereo file. "unsupported recording encoding" means it is not
+16-bit PCM (an MP3, M4A or float WAV): convert it first with
+`ffmpeg -i in.m4a -ac 2 -ar 16000 -sample_fmt s16 out.wav`, which will *not* create
+channel separation on its own — the two channels have to have come from two separate
+sources.
 
 **Too many speakers detected on genuinely multi-speaker audio.** Lower
 `AsrSpeakerThreshold`, or set `AsrMaxSpeakers` to the room size.

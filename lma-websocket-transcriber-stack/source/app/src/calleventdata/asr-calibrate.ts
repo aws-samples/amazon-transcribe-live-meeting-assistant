@@ -5,7 +5,7 @@
  */
 
 /**
- * The AWS half of calibration: read a recording from S3, embed the dominant
+ * The AWS half of calibration: take an uploaded two-channel WAV, embed the dominant
  * stretches of each channel on an ASR MicroVM, derive the operating point.
  *
  * A run only reports; the admin applies it. See docs/microvm-asr.md,
@@ -14,9 +14,6 @@
 import { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
 import { randomUUID } from 'crypto';
-import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
-import { Readable } from 'stream';
-
 import { AsrLease, acquireLease, releaseLease, subprotocols } from './asr-microvm';
 import {
     CALIBRATION_SAMPLE_RATE,
@@ -30,14 +27,8 @@ import {
     segmentDurationSec,
 } from './asr-calibration';
 import { ChannelResampler, StereoDeinterleaver } from './asr-audio';
-import { normalizeErrorForLogging, posixifyFilename } from '../utils/common';
+import { normalizeErrorForLogging } from '../utils/common';
 
-const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
-const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || '';
-const RECORDING_FILE_PREFIX =
-    process.env['RECORDINGS_KEY_PREFIX'] ||
-    process.env['RECORDING_FILE_PREFIX'] ||
-    'lma-audio-recordings/';
 // How much of a recording to read. Twenty minutes is far more speech than the
 // statistics need, and it bounds the memory this holds (16 kHz mono per channel,
 // so ~38 MB each) on a 1 GB task that is also transcribing live meetings.
@@ -55,8 +46,6 @@ const EMBED_TIMEOUT_MS = parseInt(process.env['ASR_CALIBRATION_TIMEOUT_MS'] || '
 // A header this long means the object is not a WAV we can read.
 const MAX_HEADER_BYTES = 64 * 1024;
 
-const s3Client = new S3Client({ region: AWS_REGION });
-
 export class CalibrationError extends Error {
     constructor(
         message: string,
@@ -68,13 +57,12 @@ export class CalibrationError extends Error {
 }
 
 export interface CalibrationRequest {
-    callId?: string;
-    recordingKey?: string;
+    /** The uploaded WAV: 16-bit PCM, two channels, one speaker per channel. */
+    wav: Buffer;
     maxSegmentsPerChannel?: number;
 }
 
 export interface CalibrationRun {
-    recordingKey: string;
     sourceSampleRate: number;
     audioSecondsAnalysed: number;
     segmentsFound: number;
@@ -84,7 +72,6 @@ export interface CalibrationRun {
 }
 
 export interface CalibrationDeps {
-    fetchRecording: (key: string) => Promise<AsyncIterable<Uint8Array>>;
     acquire: (id: string, server: FastifyInstance) => Promise<AsrLease | undefined>;
     release: (microvmId: string, server: FastifyInstance) => Promise<void>;
     embed: (
@@ -323,68 +310,17 @@ export const embedSegments = async (
     });
 
 const defaultDeps: CalibrationDeps = {
-    fetchRecording: async (key: string) => {
-        if (!RECORDINGS_BUCKET_NAME) {
-            throw new CalibrationError(
-                'this deployment has no recordings bucket, so there is no audio to calibrate from',
-                503
-            );
-        }
-        try {
-            const response = await s3Client.send(
-                new GetObjectCommand({ Bucket: RECORDINGS_BUCKET_NAME, Key: key })
-            );
-            if (!response.Body) {
-                throw new CalibrationError(`recording ${key} is empty`, 404);
-            }
-            return response.Body as Readable;
-        } catch (error) {
-            if (error instanceof CalibrationError) {
-                throw error;
-            }
-            const name = (error as { name?: string }).name;
-            if (name === 'NoSuchKey' || name === 'NotFound') {
-                throw new CalibrationError(
-                    `no recording found at ${key}. A recording is uploaded when the meeting ENDS, ` +
-                        'so a meeting that is still running has nothing to calibrate from yet — end ' +
-                        'it and try again. Otherwise the meeting was not recorded (recording must be ' +
-                        'enabled for the deployment and accepted in the browser).',
-                    404
-                );
-            }
-            throw new CalibrationError(
-                `could not read ${key}: ${normalizeErrorForLogging(error)}`,
-                502
-            );
-        }
-    },
     acquire: acquireLease,
     release: releaseLease,
     embed: embedSegments,
 };
 
-/**
- * The task role can read the whole bucket, so an arbitrary key would turn this
- * route into a file reader for anyone in the Admin group.
- */
-export const resolveRecordingKey = (request: CalibrationRequest): string => {
-    const explicit = (request.recordingKey || '').trim();
-    const callId = (request.callId || '').trim();
-    if (!explicit && !callId) {
-        throw new CalibrationError('give either a callId or a recordingKey', 400);
-    }
-    const key = explicit || `${RECORDING_FILE_PREFIX}${posixifyFilename(callId)}.wav`;
-    if (key.includes('..') || !key.startsWith(RECORDING_FILE_PREFIX)) {
-        throw new CalibrationError(
-            `recordingKey must be an object under ${RECORDING_FILE_PREFIX}`,
-            400
-        );
-    }
-    if (!key.toLowerCase().endsWith('.wav')) {
-        throw new CalibrationError('calibration reads the .wav recording, not the raw stream', 400);
-    }
-    return key;
-};
+/** One chunk, so readChannels() can stream an uploaded buffer as it does a file. */
+const asStream = (wav: Buffer): AsyncIterable<Uint8Array> => ({
+    async *[Symbol.asyncIterator]() {
+        yield wav;
+    },
+});
 
 let running = false;
 
@@ -403,10 +339,17 @@ export const runCalibration = async (
     running = true;
     const started = Date.now();
     try {
-        const recordingKey = resolveRecordingKey(request);
-        server.log.info(`[ASR CALIBRATE]: reading ${recordingKey}`);
+        if (!request.wav || request.wav.length === 0) {
+            throw new CalibrationError(
+                'no audio was uploaded. Post a two-channel 16-bit PCM WAV as the request body.',
+                400
+            );
+        }
+        server.log.info(
+            `[ASR CALIBRATE]: reading ${(request.wav.length / 1048576).toFixed(1)} MiB of uploaded audio`
+        );
 
-        const audio = await readChannels(await deps.fetchRecording(recordingKey), MAX_MINUTES * 60);
+        const audio = await readChannels(asStream(request.wav), MAX_MINUTES * 60);
         const perChannel = Math.max(
             1,
             Math.min(request.maxSegmentsPerChannel || MAX_SEGMENTS_PER_CHANNEL, 40)
@@ -416,15 +359,12 @@ export const runCalibration = async (
             segments.filter((segment) => segment.channel === channel).length;
 
         server.log.info(
-            `[ASR CALIBRATE]: ${recordingKey} - ${audio.secondsRead.toFixed(0)}s of ${
-                audio.format.sampleRate
-            }Hz audio${audio.truncated ? ' (truncated)' : ''}, ${onChannel('ch_1')} microphone and ${onChannel(
-                'ch_0'
-            )} meeting-audio utterances`
+            `[ASR CALIBRATE]: ${audio.secondsRead.toFixed(0)}s of ${audio.format.sampleRate}Hz audio${
+                audio.truncated ? ' (truncated)' : ''
+            }, ${onChannel('ch_1')} right-channel and ${onChannel('ch_0')} left-channel utterances`
         );
 
         const base = {
-            recordingKey,
             sourceSampleRate: audio.format.sampleRate,
             audioSecondsAnalysed: Number(audio.secondsRead.toFixed(1)),
             segmentsFound: segments.length,
@@ -435,10 +375,11 @@ export const runCalibration = async (
         if (onChannel('ch_0') < MIN_SEGMENTS_PER_CHANNEL || onChannel('ch_1') < MIN_SEGMENTS_PER_CHANNEL) {
             const result = deriveOperatingPoint([]);
             result.notes.push(
-                `This recording gave ${onChannel('ch_1')} clear utterance(s) on the microphone and ` +
-                    `${onChannel('ch_0')} on the meeting audio; calibration needs at least ` +
-                    `${MIN_SEGMENTS_PER_CHANNEL} of each. Use a meeting where both sides spoke ` +
-                    'and the two were not talking over each other.'
+                `This file gave ${onChannel('ch_0')} clear utterance(s) on the left channel and ` +
+                    `${onChannel('ch_1')} on the right; calibration needs at least ` +
+                    `${MIN_SEGMENTS_PER_CHANNEL} of each. Use a recording where each channel ` +
+                    'carries one speaker, both speak several times, and they are not talking over ' +
+                    'each other.'
             );
             return { ...base, segmentsEmbedded: 0, embeddingDim: 0, result };
         }
@@ -477,7 +418,7 @@ export const runCalibration = async (
         }
 
         server.log.info(
-            `[ASR CALIBRATE]: ${recordingKey} - ${embedded.length} embeddings in ${(
+            `[ASR CALIBRATE]: ${embedded.length} embeddings in ${(
                 (Date.now() - started) /
                 1000
             ).toFixed(1)}s: threshold=${result.speakerThreshold ?? 'none'} separation=${

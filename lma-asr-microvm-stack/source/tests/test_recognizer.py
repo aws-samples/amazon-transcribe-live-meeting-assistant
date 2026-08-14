@@ -31,6 +31,7 @@ from asr_server.recognizer import (
     SherpaOnlineRecognizer,
     WordTiming,
     _require_model_files,
+    _SherpaBackend,
     create_sherpa_backend,
     create_sherpa_engine,
 )
@@ -731,3 +732,73 @@ def test_word_reconstruction_refuses_mismatched_arrays() -> None:
 
     assert words_from_tokens(["\u2581a", "\u2581b"], [0.1]) == []
     assert words_from_tokens([], []) == []
+
+
+def test_the_sherpa_backend_reads_tokens_from_the_detailed_result() -> None:
+    """get_result() is a plain string; the timings are on get_result_all().
+
+    Asking the string for .tokens returned nothing and silently disabled word
+    timings — and with them every feature that needs to cut a segment at a time.
+    """
+    from asr_server.recognizer import _SherpaBackend
+
+    class DetailedResult:
+        text = "hello world"
+        tokens = ["\u2581hello", "\u2581world"]
+        timestamps = [0.2, 0.8]
+
+    class FakeRecognizer:
+        def get_result(self, stream):  # noqa: ANN001, ANN202 - mirrors sherpa's API
+            return DetailedResult.text
+
+        def get_result_all(self, stream):  # noqa: ANN001, ANN202
+            return DetailedResult()
+
+    words = _SherpaBackend(FakeRecognizer(), object()).current_words()
+
+    assert [word.w for word in words] == ["hello", "world"]
+    assert words[0].s == 0.2
+
+
+def test_the_sherpa_backend_falls_back_to_the_token_accessors() -> None:
+    class OlderRecognizer:
+        def get_result(self, stream):  # noqa: ANN001, ANN202
+            return "hi there"
+
+        def tokens(self, stream):  # noqa: ANN001, ANN202
+            return ["\u2581hi", "\u2581there"]
+
+        def timestamps(self, stream):  # noqa: ANN001, ANN202
+            return [0.1, 0.5]
+
+    words = _SherpaBackend(OlderRecognizer(), object()).current_words()
+
+    assert [word.w for word in words] == ["hi", "there"]
+
+
+def test_a_recognizer_without_timings_yields_no_words() -> None:
+    class TextOnly:
+        def get_result(self, stream):  # noqa: ANN001, ANN202
+            return "just text"
+
+    assert _SherpaBackend(TextOnly(), object()).current_words() == []
+
+
+def test_word_reconstruction_handles_the_space_prefixed_tokens_sherpa_returns() -> None:
+    """Observed from a real decode: the marker arrives as a leading space.
+
+    tokens come back as [' THE', ' YE', 'LL', 'OW', ...], so keying only off the
+    SentencePiece marker glued a whole utterance into one word - and a single word
+    can never be cut at a speaker turn.
+    """
+    from asr_server.recognizer import words_from_tokens
+
+    words = words_from_tokens(
+        [" THE", " YE", "LL", "OW", " LA", "M", "P", "S"],
+        [2.04, 2.20, 2.28, 2.36, 2.52, 2.64, 2.68, 2.76],
+    )
+
+    assert [word.w for word in words] == ["THE", "YELLOW", "LAMPS"]
+    assert words[1].s == 2.20
+    assert words[1].e == 2.36
+    assert words[2].s == 2.52

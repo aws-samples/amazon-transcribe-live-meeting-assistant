@@ -271,7 +271,10 @@ def words_from_tokens(
     cur_end = 0.0
     for tok, ts in zip(tokens, timestamps, strict=False):
         piece = tok.replace(WORD_BOUNDARY, " ")
-        starts_word = tok.startswith(WORD_BOUNDARY)
+        # sherpa returns the SentencePiece marker already converted to a space
+        # (' THE', ' YE', 'LL', ...), so a leading space marks a word start too.
+        # Keying only off the marker glued every utterance into a single "word".
+        starts_word = tok.startswith(WORD_BOUNDARY) or tok.startswith(" ")
         if starts_word and cur.strip():
             words.append(WordTiming(w=cur.strip(), s=cur_start, e=cur_end))
             cur = ""
@@ -581,13 +584,29 @@ class _SherpaBackend:
             return bool(self._rec.is_endpoint(self._stream))
 
     def current_words(self) -> list[WordTiming]:
+        # get_result() returns a plain string; the tokens and per-token timestamps
+        # live on the object from get_result_all(), with tokens()/timestamps() as the
+        # older accessors. Asking the string for .tokens yields nothing, which
+        # silently disabled every feature that needs word timings.
         with self._lock:
-            result = self._rec.get_result(self._stream)
-        tokens = getattr(result, "tokens", None)
-        timestamps = getattr(result, "timestamps", None)
+            tokens, timestamps = self._token_timings()
         if not tokens or not timestamps:
             return []
         return words_from_tokens(list(tokens), [float(value) for value in timestamps])
+
+    def _token_timings(self) -> tuple[list[str], list[float]]:
+        detailed = getattr(self._rec, "get_result_all", None)
+        if detailed is not None:
+            result = detailed(self._stream)
+            return (
+                list(getattr(result, "tokens", []) or []),
+                list(getattr(result, "timestamps", []) or []),
+            )
+        tokens_of = getattr(self._rec, "tokens", None)
+        times_of = getattr(self._rec, "timestamps", None)
+        if callable(tokens_of) and callable(times_of):
+            return list(tokens_of(self._stream) or []), list(times_of(self._stream) or [])
+        return [], []
 
     def reset(self) -> None:
         with self._lock:

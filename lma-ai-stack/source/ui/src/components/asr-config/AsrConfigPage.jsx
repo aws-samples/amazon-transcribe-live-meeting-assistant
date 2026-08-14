@@ -21,6 +21,8 @@ import {
   ExpandableSection,
   StatusIndicator,
   KeyValuePairs,
+  FileUpload,
+  ExpandableSection as Section,
 } from '@cloudscape-design/components';
 
 import useSettingsContext from '../../contexts/settings';
@@ -83,7 +85,7 @@ const AsrConfigPage = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
-  const [calibrateCallId, setCalibrateCallId] = useState('');
+  const [calibrateFiles, setCalibrateFiles] = useState([]);
   const [calibrating, setCalibrating] = useState(false);
   const [calibration, setCalibration] = useState(null);
   const [calibrationError, setCalibrationError] = useState(null);
@@ -147,13 +149,8 @@ const AsrConfigPage = () => {
     }
   };
 
-  /**
-   * Measure the operating point from a meeting this deployment already recorded.
-   *
-   * The transcriber task does the work (that is where the audio, the launcher and
-   * the engine already are), so this posts to the WebSocket domain rather than
-   * AppSync. Minutes, not seconds: a MicroVM has to start and embed the audio.
-   */
+  // Posted to the transcriber (where the launcher and the engine already are)
+  // rather than AppSync, which has no route for a multi-megabyte body.
   const calibrate = async () => {
     setCalibrating(true);
     setCalibration(null);
@@ -161,16 +158,14 @@ const AsrConfigPage = () => {
     try {
       const session = await fetchAuthSession();
       const token = session?.tokens?.accessToken?.toString() || '';
-      // Token and parameters go on the query string: the WebSocket route
-      // authenticates the same way, and a request with no custom headers and no
-      // body content type needs no CORS preflight.
-      const url =
-        `${calibrateEndpoint}?authorization=${encodeURIComponent(`Bearer ${token}`)}` +
-        `&callId=${encodeURIComponent(calibrateCallId.trim())}`;
-      const response = await fetch(url, { method: 'POST' });
-      // Parsed from text rather than response.json(): an error rewritten by
-      // something in front of the service is not JSON, and a parse exception there
-      // would hide the status code, which is the only clue left.
+      // Token on the query string, as the WebSocket route does; the WAV itself is
+      // the request body and is never stored anywhere.
+      const url = `${calibrateEndpoint}?authorization=${encodeURIComponent(`Bearer ${token}`)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'audio/wav' },
+        body: calibrateFiles[0],
+      });
       const raw = await response.text();
       let body = null;
       try {
@@ -401,34 +396,78 @@ const AsrConfigPage = () => {
             <Header
               variant="h2"
               description={
-                'Measure the threshold from one of your own recorded meetings instead of inheriting ' +
-                'a number from another model. The two audio channels are the ground truth: utterances ' +
-                'on the microphone are one person and utterances on the meeting audio are someone ' +
-                'else, which is exactly the comparison a threshold has to get right.'
+                "Measure this deployment's speaker threshold from a two-channel recording instead " +
+                'of inheriting a number measured on another model. One speaker per channel is the ' +
+                'ground truth, so the sample can come from a rehearsed recording, a meeting you ' +
+                'downloaded, or a public corpus.'
               }
             >
-              Calibrate from a recorded meeting
+              Calibrate from a two-channel recording
             </Header>
           }
         >
           <SpaceBetween size="l">
+            <Section headerText="How to make a calibration file" defaultExpanded={!calibration}>
+              <SpaceBetween size="s">
+                <Box variant="p">
+                  The file must be a <b>WAV, 16-bit PCM, with two channels</b>, where{' '}
+                  <b>each channel carries one speaker</b>. That channel separation is the ground truth: pairs within a
+                  channel are the same person, pairs across channels are definitely different people. Two to five
+                  minutes is plenty, both speakers should talk several times, and they should avoid talking over each
+                  other. Any sample rate works (it is resampled to 16 kHz); only the first 20 minutes are read.
+                </Box>
+                <Box variant="p">
+                  <b>Easiest, on your own:</b> play a recording of someone else through your laptop speakers while you
+                  talk into the microphone, captured with <b>Stream Audio</b> — its two channels are exactly system
+                  audio and microphone. Alternate: let the recording talk for ~20s, then you talk for ~20s, four or five
+                  times each. End the meeting, download the WAV from the meeting, and upload it here.
+                </Box>
+                <Box variant="p">
+                  <b>From a public corpus:</b> any dataset with one file per speaker works — merge two speakers into the
+                  two channels:
+                </Box>
+                <Box variant="code">
+                  ffmpeg -i speakerA.wav -i speakerB.wav -filter_complex &quot;[0:a][1:a]amerge=inputs=2&quot; -ac 2 -ar
+                  16000 -sample_fmt s16 calib.wav
+                </Box>
+                <Box variant="small">
+                  The audio is embedded in memory and discarded — nothing is written to S3 or the transcript. A mono
+                  file, or a stereo file with both voices in both channels, is refused rather than measured, because it
+                  carries no ground truth.
+                </Box>
+              </SpaceBetween>
+            </Section>
+
             <FormField
-              label="Meeting ID"
-              description={
-                'A meeting that was recorded, where both sides spoke and were not talking over each ' +
-                'other. Copy the Meeting ID from the Meetings list.'
-              }
+              label="Calibration audio"
+              description="Two-channel 16-bit PCM WAV, one speaker per channel."
               constraintText="Takes a few minutes: a MicroVM starts, the audio is embedded, then the VM is released."
             >
-              <Input
-                value={calibrateCallId}
-                placeholder="Stream Audio - 2026-08-12-10:17:29.439"
-                onChange={({ detail }) => setCalibrateCallId(detail.value)}
+              <FileUpload
+                onChange={({ detail }) => {
+                  setCalibrateFiles(detail.value);
+                  setCalibration(null);
+                  setCalibrationError(null);
+                }}
+                value={calibrateFiles}
+                accept="audio/wav,.wav"
+                constraintText="WAV only, up to 64 MB"
+                i18nStrings={{
+                  uploadButtonText: () => 'Choose file',
+                  dropzoneText: () => 'Drop a WAV file here',
+                  removeFileAriaLabel: (index) => `Remove file ${index + 1}`,
+                  limitShowFewer: 'Show fewer',
+                  limitShowMore: 'Show more',
+                  errorIconAriaLabel: 'Error',
+                }}
+                showFileSize
+                showFileLastModified
+                tokenLimit={1}
                 disabled={calibrating}
               />
             </FormField>
 
-            <Button onClick={calibrate} loading={calibrating} disabled={calibrating || calibrateCallId.trim() === ''}>
+            <Button onClick={calibrate} loading={calibrating} disabled={calibrating || calibrateFiles.length === 0}>
               {calibrating ? 'Measuring…' : 'Calibrate'}
             </Button>
 

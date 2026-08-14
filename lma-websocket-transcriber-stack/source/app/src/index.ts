@@ -182,6 +182,20 @@ const allowCrossOrigin = (
     reply.header('Access-Control-Max-Age', '600');
 };
 
+// The calibration sample is posted as raw WAV bytes. It is never stored: the audio
+// is embedded in memory and only the resulting statistics come back, so a sample can
+// be a rehearsed recording or a clip from a public corpus without leaving a copy.
+const ASR_CALIBRATION_MAX_UPLOAD_BYTES = parseInt(
+    process.env['ASR_CALIBRATION_MAX_UPLOAD_BYTES'] || String(64 * 1024 * 1024),
+    10
+);
+
+server.addContentTypeParser(
+    ['application/octet-stream', 'audio/wav', 'audio/wave', 'audio/x-wav'],
+    { parseAs: 'buffer', bodyLimit: ASR_CALIBRATION_MAX_UPLOAD_BYTES },
+    (_request, body, done) => done(null, body)
+);
+
 server.options(ASR_CALIBRATE_PATH, { logLevel: 'warn' }, (request, reply) => {
     allowCrossOrigin(request, reply);
     reply.code(204).send();
@@ -194,36 +208,43 @@ server.options(ASR_CALIBRATE_PATH, { logLevel: 'warn' }, (request, reply) => {
  * measures and reports — the admin decides whether to save the result — so a run
  * on unrepresentative audio cannot quietly change how meetings are transcribed.
  */
-server.post(ASR_CALIBRATE_PATH, { logLevel: 'info' }, async (request, reply) => {
-    allowCrossOrigin(request, reply);
-    const caller = getAuthenticatedCaller(request);
-    if (!caller?.groups.includes(ADMIN_GROUP)) {
-        server.log.warn(
-            `[ASR CALIBRATE]: refused for non-admin caller ${caller?.username || caller?.sub || 'unknown'}`
-        );
-        return reply
-            .code(403)
-            .send({ message: 'Calibration is limited to users in the Admin group.' });
+server.post(
+    ASR_CALIBRATE_PATH,
+    { logLevel: 'info', bodyLimit: ASR_CALIBRATION_MAX_UPLOAD_BYTES },
+    async (request, reply) => {
+        allowCrossOrigin(request, reply);
+        const caller = getAuthenticatedCaller(request);
+        if (!caller?.groups.includes(ADMIN_GROUP)) {
+            server.log.warn(
+                `[ASR CALIBRATE]: refused for non-admin caller ${caller?.username || caller?.sub || 'unknown'}`
+            );
+            return reply
+                .code(403)
+                .send({ message: 'Calibration is limited to users in the Admin group.' });
+        }
+        const wav = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+        const query = request.query as Record<string, string | undefined>;
+        const perChannel = query['maxSegmentsPerChannel'];
+        try {
+            const run = await runCalibration(
+                {
+                    wav,
+                    ...(perChannel ? { maxSegmentsPerChannel: Number(perChannel) } : {}),
+                } as CalibrationRequest,
+                server
+            );
+            return reply.code(200).send(run);
+        } catch (error) {
+            const status = error instanceof CalibrationError ? error.status : 500;
+            const message =
+                error instanceof CalibrationError
+                    ? error.message
+                    : `calibration failed: ${normalizeErrorForLogging(error)}`;
+            server.log.error(`[ASR CALIBRATE]: ${status} - ${message}`);
+            return reply.code(status).send({ message });
+        }
     }
-    // Accepted on the query string as well as in a JSON body: a query-only request
-    // needs no Content-Type, which keeps the browser from having to preflight it.
-    const params = {
-        ...(typeof request.body === 'object' && request.body ? request.body : {}),
-        ...(request.query as Record<string, unknown>),
-    } as CalibrationRequest;
-    try {
-        const run = await runCalibration(params, server);
-        return reply.code(200).send(run);
-    } catch (error) {
-        const status = error instanceof CalibrationError ? error.status : 500;
-        const message =
-            error instanceof CalibrationError
-                ? error.message
-                : `calibration failed: ${normalizeErrorForLogging(error)}`;
-        server.log.error(`[ASR CALIBRATE]: ${status} - ${message}`);
-        return reply.code(status).send({ message });
-    }
-});
+);
 
 type HealthCheckRemoteInfo = {
     addr: string;
