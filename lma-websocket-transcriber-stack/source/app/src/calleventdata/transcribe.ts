@@ -52,7 +52,9 @@ import {
     describeRuns,
     diarizationEnabledFor,
     formatSpeakerLabel,
-    runTranscript
+    runTranscript,
+    selectEmittableWindows,
+    speakerWindowOrigin
 } from './diarization';
 
 // Import from the concrete module (not the ../utils barrel): the barrel pulls
@@ -671,23 +673,28 @@ function buildDiarizedSegments(
     const rawRuns = buildSpeakerRuns(items);
     const isPartial = result.IsPartial === true;
     const resultId = result.ResultId ?? `${channelId}-${result.StartTime ?? 0}`;
+    const progress = windowProgressFor(callMetadata, channelId, resultId);
+    // Pin the window anchor the first time this result carries any words, and
+    // reuse it for every later event. Deriving it per event would let the anchor
+    // drift if Transcribe revises the first item's timestamp, moving a
+    // boundary-adjacent item into another window, changing its segment id, and
+    // orphaning the previous id — which stays marked partial and is therefore
+    // dropped from summaries by fetch_transcript while still showing in the UI.
+    if (progress.origin === undefined && items.some((i) => i.Type === 'pronunciation')) {
+        progress.origin = speakerWindowOrigin(items);
+    }
     const windows = buildSpeakerWindows(
         items,
         !isPartial,
         diarizationRunThresholds,
-        diarizationMaxSegmentSeconds
+        diarizationMaxSegmentSeconds,
+        progress.origin
     );
 
-    const progress = windowProgressFor(callMetadata, channelId, resultId);
+    const selection = selectEmittableWindows(windows, isPartial, progress.settledEmitted);
+    progress.settledEmitted = selection.settledEmitted;
     const segments: Record<string, Segment> = {};
-    for (const window of windows) {
-        // A window settled on an earlier partial has already been written and
-        // cannot change until the final arrives (which re-writes it, once, with
-        // its now-known speaker label). Skipping it here is what keeps a long
-        // result from re-writing the same segment on every partial.
-        if (isPartial && window.settled && window.index < progress.settledEmitted) {
-            continue;
-        }
+    for (const window of selection.emit) {
         window.runs.forEach((run, runIndex) => {
             // Window and run index both derive from item timestamps, so a given
             // item keeps the same id from partial to final.
@@ -701,12 +708,6 @@ function buildDiarizedSegments(
                 IsPartial: !window.settled,
             };
         });
-    }
-    if (isPartial) {
-        progress.settledEmitted = Math.max(
-            progress.settledEmitted,
-            windows.filter((w) => w.settled).length
-        );
     }
 
     recordDiarizationDiagnostics(callMetadata, server, channelId, result, rawRuns.length, items);
@@ -770,7 +771,7 @@ function windowProgressFor(
     callMetadata: CallMetaData,
     channelId: string,
     resultId: string
-): { resultId: string; settledEmitted: number; logged: number } {
+): { resultId: string; settledEmitted: number; logged: number; origin?: number } {
     if (!callMetadata.diarizationDiagnostics) {
         callMetadata.diarizationDiagnostics = { finals: 0, labelled: 0, warned: false };
     }
@@ -784,7 +785,8 @@ function windowProgressFor(
     }
     // logged starts at 1: a result that has not yet crossed a window boundary is
     // ordinary, so only the SECOND window onwards is an info-level event.
-    const fresh = { resultId, settledEmitted: 0, logged: 1 };
+    const fresh: { resultId: string; settledEmitted: number; logged: number; origin?: number } =
+        { resultId, settledEmitted: 0, logged: 1 };
     diag.windowMarks[channelId] = fresh;
     return fresh;
 }

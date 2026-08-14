@@ -151,7 +151,13 @@ export type CallMetaData = {
          * cannot grow with the length of the meeting.
          */
         windowMarks?: {
-            [channelId: string]: { resultId: string; settledEmitted: number; logged: number };
+            [channelId: string]: {
+                resultId: string;
+                settledEmitted: number;
+                logged: number;
+                /** Window anchor, pinned on first sight so it cannot drift. */
+                origin?: number;
+            };
         };
     };
     accessToken?: string,

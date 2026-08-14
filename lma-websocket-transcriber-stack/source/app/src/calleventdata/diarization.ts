@@ -282,13 +282,40 @@ export type SpeakerWindow = {
 };
 
 /**
+ * Earliest pronunciation start time in a result — the anchor windows are measured
+ * from.
+ *
+ * Callers should compute this ONCE per result and pass it back into
+ * `buildSpeakerWindows` for every subsequent event of the same result. Recomputing
+ * it per event risks the anchor drifting if Transcribe revises the first item's
+ * timestamp between partials, which would move a boundary-adjacent item into a
+ * different window, change its segment id, and leave the previous id orphaned in
+ * the transcript (visible in the live view, but filtered out of summaries because
+ * it stays marked partial).
+ */
+export const speakerWindowOrigin = (items: Item[]): number => {
+    let origin = Number.POSITIVE_INFINITY;
+    for (const item of items) {
+        if (item.Type === 'pronunciation') {
+            origin = Math.min(origin, item.StartTime ?? 0);
+        }
+    }
+    if (Number.isFinite(origin)) {
+        return origin;
+    }
+    return items.length > 0 ? items[0].StartTime ?? 0 : 0;
+};
+
+/**
  * Chunk a result's items into windows of at most `maxSeconds`, then split each
  * window into smoothed speaker runs.
  *
- * The windows are derived purely from item timestamps relative to the start of
- * the result, so the same item always lands in the same window whether it is
- * seen on a partial or on the final — which is what keeps segment ids stable as
- * a result is refined. `maxSeconds <= 0` disables chunking (one window).
+ * Windows are derived purely from item timestamps relative to `origin`, so the
+ * same item always lands in the same window whether it is seen on a partial or on
+ * the final — which is what keeps segment ids stable as a result is refined. Pass
+ * the origin pinned on first sight of the result (see `speakerWindowOrigin`);
+ * omitting it falls back to deriving one from these items alone.
+ * `maxSeconds <= 0` disables chunking (one window).
  */
 export const buildSpeakerWindows = (
     items: Item[],
@@ -297,7 +324,8 @@ export const buildSpeakerWindows = (
         minWords: DEFAULT_MIN_RUN_WORDS,
         minSeconds: DEFAULT_MIN_RUN_SECONDS,
     },
-    maxSeconds: number = DEFAULT_MAX_SEGMENT_SECONDS
+    maxSeconds: number = DEFAULT_MAX_SEGMENT_SECONDS,
+    origin?: number
 ): SpeakerWindow[] => {
     if (items.length === 0) {
         return [];
@@ -306,28 +334,22 @@ export const buildSpeakerWindows = (
     if (maxSeconds <= 0) {
         grouped.set(0, [...items]);
     } else {
-        // Anchor on the earliest item rather than result.StartTime: on a partial
-        // the two can differ, and drifting the anchor would move items between
-        // windows and so change segment ids mid-utterance.
-        let origin = Number.POSITIVE_INFINITY;
-        for (const item of items) {
-            if (item.Type === 'pronunciation') {
-                origin = Math.min(origin, item.StartTime ?? 0);
-            }
-        }
-        if (!Number.isFinite(origin)) {
-            origin = items[0].StartTime ?? 0;
-        }
+        const anchor = origin ?? speakerWindowOrigin(items);
         let lastIndex = 0;
         for (const item of items) {
             // Punctuation timing is unreliable, so it stays with the window of
             // the word it follows instead of being placed on its own.
             const index =
                 item.Type === 'pronunciation'
-                    ? Math.max(0, Math.floor(((item.StartTime ?? 0) - origin) / maxSeconds))
+                    ? Math.max(0, Math.floor(((item.StartTime ?? 0) - anchor) / maxSeconds))
                     : lastIndex;
             lastIndex = index;
-            grouped.set(index, [...(grouped.get(index) ?? []), item]);
+            const bucket = grouped.get(index);
+            if (bucket) {
+                bucket.push(item);
+            } else {
+                grouped.set(index, [item]);
+            }
         }
     }
     const indices = [...grouped.keys()].sort((a, b) => a - b);
@@ -343,6 +365,37 @@ export const buildSpeakerWindows = (
             settled: isFinalResult || index < highest,
         };
     });
+};
+
+/**
+ * Decide which windows to actually emit, given how many have already been written
+ * as settled for this result.
+ *
+ * A window that settled on an earlier partial has been written and cannot change
+ * until the final arrives (which re-writes it once, with its now-known speaker
+ * label). Re-emitting it on every subsequent partial would put a couple of Kinesis
+ * records per second per segment on the wire for the rest of the result.
+ *
+ * Returns the windows to emit plus the updated high-water mark. Pure so the rule
+ * is testable on its own — an earlier revision of this logic did re-emit on every
+ * partial and nothing but reading raw output caught it.
+ */
+export const selectEmittableWindows = (
+    windows: SpeakerWindow[],
+    isPartialResult: boolean,
+    settledEmitted: number
+): { emit: SpeakerWindow[]; settledEmitted: number } => {
+    if (!isPartialResult) {
+        // The final re-writes everything: the labels are only known now.
+        return { emit: windows, settledEmitted };
+    }
+    const emit = windows.filter((w) => !(w.settled && w.index < settledEmitted));
+    return {
+        emit,
+        // Monotonic: a result whose text is revised shorter must not "un-settle"
+        // windows and start re-emitting them.
+        settledEmitted: Math.max(settledEmitted, windows.filter((w) => w.settled).length),
+    };
 };
 
 /** Compact `spk_0x42w/13.4s` description of a run, for diagnostic logging. */

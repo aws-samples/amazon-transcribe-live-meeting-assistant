@@ -37,7 +37,9 @@ import {
     diarizationEnabledFor,
     formatSpeakerLabel,
     runTranscript,
+    selectEmittableWindows,
     smoothSpeakerRuns,
+    speakerWindowOrigin,
 } from './diarization';
 import { CHANNEL_MIC, CHANNEL_SYSTEM } from './eventtypes';
 
@@ -396,4 +398,86 @@ test('the real 30s-capped results are bounded to 20s windows', () => {
     const windows = buildSpeakerWindows(resultItems([[1, 101, 29.9]]), false);
     assert.equal(windows.length, 2);
     assert.deepEqual(windows.map((w) => w.settled), [true, false]);
+});
+
+// --- window anchor stability -----------------------------------------------
+// Windows are measured from an anchor. If that anchor moves between partials, a
+// boundary-adjacent item lands in a different window, its segment id changes, and
+// the previous id is never written again — leaving an orphan that still shows in
+// the live transcript but is dropped from summaries, because
+// fetch_transcript filters on IsPartial == false.
+
+test('the anchor is the earliest pronunciation start time', () => {
+    assert.equal(speakerWindowOrigin([word('a', '0', 4.5, 5.0), word('b', '0', 1.5, 2.0)]), 1.5);
+});
+
+test('the anchor ignores punctuation, whose timing is unreliable', () => {
+    assert.equal(speakerWindowOrigin([punct('.'), word('a', '0', 3.0, 3.5)]), 3.0);
+});
+
+test('an all-punctuation result still yields a usable anchor', () => {
+    assert.equal(speakerWindowOrigin([punct('.')]), 0);
+    assert.equal(speakerWindowOrigin([]), 0);
+});
+
+test('a drifting anchor WOULD move a boundary-adjacent item between windows', () => {
+    // Demonstrates the hazard the pinning exists to prevent: the same item, with
+    // only the anchor differing, lands in a different window.
+    const boundaryWord = [word('start', '0', 0.0, 0.1), word('edge', '0', 20.1, 20.6)];
+    const withZeroAnchor = buildSpeakerWindows(boundaryWord, false, undefined, 20, 0.0);
+    const withDriftedAnchor = buildSpeakerWindows(boundaryWord, false, undefined, 20, 0.3);
+    assert.equal(withZeroAnchor.length, 2, 'anchor 0.0 puts the edge word in window 1');
+    assert.equal(withDriftedAnchor.length, 1, 'anchor 0.3 pulls it back into window 0');
+});
+
+test('passing a pinned anchor keeps window assignment identical across events', () => {
+    // The real protection: the caller pins the anchor once, so a later event that
+    // would have derived a different one still groups items the same way.
+    const pinned = 0.0;
+    const firstSighting = [word('start', '0', 0.0, 0.1), word('edge', '0', 20.1, 20.6)];
+    // Same audio, but Transcribe has revised the first word's start time later.
+    const revised = [word('start', '0', 0.3, 0.4), word('edge', '0', 20.1, 20.6)];
+    const a = buildSpeakerWindows(firstSighting, false, undefined, 20, pinned);
+    const b = buildSpeakerWindows(revised, false, undefined, 20, pinned);
+    assert.deepEqual(
+        a.map((w) => w.index),
+        b.map((w) => w.index),
+        'a pinned anchor must survive a revised first timestamp'
+    );
+});
+
+// --- emitting settled windows exactly once ---------------------------------
+// An earlier revision of this logic re-emitted every settled window on every
+// subsequent partial — roughly twenty Kinesis records per segment per result.
+
+test('a settled window is emitted once, not on every later partial', () => {
+    const windows = buildSpeakerWindows(resultItems([[0, 90, 45.0]]), false);
+    assert.deepEqual(windows.map((w) => w.settled), [true, true, false]);
+
+    // First partial that crosses into window 2: everything is new.
+    const first = selectEmittableWindows(windows, true, 0);
+    assert.deepEqual(first.emit.map((w) => w.index), [0, 1, 2]);
+    assert.equal(first.settledEmitted, 2);
+
+    // Next partial for the same result: the two settled windows are already
+    // written and must not go out again.
+    const second = selectEmittableWindows(windows, true, first.settledEmitted);
+    assert.deepEqual(second.emit.map((w) => w.index), [2], 'only the in-progress window');
+});
+
+test('the final result re-emits every window so labels can be applied', () => {
+    // Labels only exist on the final, so the settled windows have to be written
+    // once more to gain their (spk_N) suffix.
+    const windows = buildSpeakerWindows(resultItems([[0, 90, 45.0]]), true);
+    const selection = selectEmittableWindows(windows, false, 2);
+    assert.deepEqual(selection.emit.map((w) => w.index), [0, 1, 2]);
+});
+
+test('the settled high-water mark never goes backwards', () => {
+    // If Transcribe revises a result's text shorter, a previously settled window
+    // must not be re-emitted (which would flip an already-final segment back to
+    // partial, and fetch_transcript drops partials from summaries).
+    const shrunk = buildSpeakerWindows(resultItems([[0, 10, 5.0]]), false);
+    const selection = selectEmittableWindows(shrunk, true, 2);
+    assert.equal(selection.settledEmitted, 2, 'mark must not decrease');
 });
