@@ -60,11 +60,21 @@ type EmittedSegment = {
  */
 const makeCapturingServer = (): { server: FastifyInstance; lines: string[] } => {
     const lines: string[] = [];
-    const sink = (message: string) => {
-        lines.push(message);
+    // Tag with the level: the diagnostics deliberately keep high-volume partial
+    // lines at debug and only promote state changes to info, and that split is
+    // only checkable if the harness preserves it.
+    const sink = (level: string) => (message: string) => {
+        lines.push(`${level}|${message}`);
     };
     const server = {
-        log: { debug: sink, info: sink, warn: sink, error: sink, fatal: sink, trace: sink },
+        log: {
+            debug: sink('DEBUG'),
+            info: sink('INFO'),
+            warn: sink('WARN'),
+            error: sink('ERROR'),
+            fatal: sink('FATAL'),
+            trace: sink('TRACE'),
+        },
     } as unknown as FastifyInstance;
     return { server, lines };
 };
@@ -192,9 +202,15 @@ const replay = async (
  */
 const showDiagnostics = (lines: string[]): void => {
     const diag = lines.filter((l) => l.includes('[DIARIZATION]'));
-    console.log(`\n--- [DIARIZATION] diagnostics (${diag.length} line(s))`);
-    for (const line of diag) {
-        console.log(`    ${line.replace(/^.*\[DIARIZATION\]: /, '')}`);
+    const info = diag.filter((l) => l.startsWith('INFO|') || l.startsWith('WARN|'));
+    console.log(
+        `\n--- [DIARIZATION] diagnostics: ${info.length} at info/warn` +
+            ` (of ${diag.length} total; the rest are debug)`
+    );
+    // Only the operator-facing levels: debug is the per-partial detail and would
+    // drown this out, which is exactly why it is not at info in production.
+    for (const line of info) {
+        console.log(`    ${line.replace(/^[A-Z]+\|.*\[DIARIZATION\]: /, '')}`);
     }
 };
 
