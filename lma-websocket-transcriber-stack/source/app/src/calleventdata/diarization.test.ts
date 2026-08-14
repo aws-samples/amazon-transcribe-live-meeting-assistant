@@ -26,16 +26,20 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { Item } from '@aws-sdk/client-transcribe-streaming';
 import {
+    DEFAULT_MAX_SEGMENT_SECONDS,
     DEFAULT_MIN_RUN_SECONDS,
     DEFAULT_MIN_RUN_WORDS,
     SpeakerRun,
     anyChannelDiarized,
     appendSpeakerLabel,
     buildSpeakerRuns,
+    buildSpeakerWindows,
     diarizationEnabledFor,
     formatSpeakerLabel,
     runTranscript,
+    selectEmittableWindows,
     smoothSpeakerRuns,
+    speakerWindowOrigin,
 } from './diarization';
 import { CHANNEL_MIC, CHANNEL_SYSTEM } from './eventtypes';
 
@@ -247,7 +251,7 @@ test('when every run is weak the result stays a single segment', () => {
 
 test('a run must clear BOTH thresholds to stand alone', () => {
     // Enough words but too fast -> absorbed.
-    const fast = buildSpeakerRuns(resultItems([[0, 20, 6.0], [1, 5, 0.4], [0, 20, 6.0]]));
+    const fast = buildSpeakerRuns(resultItems([[0, 20, 6.0], [1, 5, 0.2], [0, 20, 6.0]]));
     assert.deepEqual(labelsOf(smoothSpeakerRuns(fast)), ['spk_0']);
     // Long enough but too few words -> absorbed.
     const sparse = buildSpeakerRuns(resultItems([[0, 20, 6.0], [1, 1, 3.0], [0, 20, 6.0]]));
@@ -267,10 +271,14 @@ test('thresholds are configurable', () => {
 });
 
 test('the defaults are the measured ones', () => {
-    // Spurious runs measured at 1-2 words / 0.1-0.9s, real turns at 6-42 words /
-    // 1.2-13.4s. If these move, re-derive them from the [DIARIZATION] log lines.
+    // Spurious runs measured at 1-2 words, so the WORD threshold does the
+    // filtering; 0.5s only guards against very fast fragments. If these move,
+    // re-derive them from the [DIARIZATION] log lines.
     assert.equal(DEFAULT_MIN_RUN_WORDS, 3);
-    assert.equal(DEFAULT_MIN_RUN_SECONDS, 1.0);
+    assert.equal(DEFAULT_MIN_RUN_SECONDS, 0.5);
+    // Transcribe caps a result near 30s and never labels a partial, so windows
+    // bound how long the live view can hold one unlabelled block.
+    assert.equal(DEFAULT_MAX_SEGMENT_SECONDS, 20);
 });
 
 // --- regression against the real recording ---------------------------------
@@ -312,4 +320,164 @@ test('a single-speaker microphone channel does not get split', () => {
     const raw = buildSpeakerRuns(resultItems(observedCh1));
     assert.equal(raw.length, 3, 'precondition: Transcribe really did return three runs');
     assert.equal(smoothSpeakerRuns(raw).length, 1, 'a lone speaker must stay one segment');
+});
+
+// --- windowing: bounding how long a live segment stays unlabelled ----------
+// Amazon Transcribe caps a result near 30s (three of five results in a measured
+// call ended at exactly 29.9s) and never labels a partial, so without windows the
+// live transcript holds one unlabelled block for that long.
+
+test('a short result is a single window', () => {
+    const windows = buildSpeakerWindows(resultItems([[0, 10, 5.0]]), true);
+    assert.equal(windows.length, 1);
+    assert.equal(windows[0].index, 0);
+    assert.equal(windows[0].settled, true);
+});
+
+test('a result longer than the bound is chunked', () => {
+    // 45s of one speaker -> three 20s windows.
+    const windows = buildSpeakerWindows(resultItems([[0, 90, 45.0]]), true);
+    assert.equal(windows.length, 3);
+    assert.deepEqual(windows.map((w) => w.index), [0, 1, 2]);
+});
+
+test('on a partial, past windows settle and the last stays in progress', () => {
+    // This is the whole point: the live view can close out everything except the
+    // window still receiving audio, instead of waiting up to 30s for the final.
+    const windows = buildSpeakerWindows(resultItems([[0, 90, 45.0]]), false);
+    assert.deepEqual(windows.map((w) => w.settled), [true, true, false]);
+});
+
+test('on a final result every window is settled', () => {
+    const windows = buildSpeakerWindows(resultItems([[0, 90, 45.0]]), true);
+    assert.ok(windows.every((w) => w.settled));
+});
+
+test('windowing preserves every word', () => {
+    const items = resultItems([[0, 90, 45.0]]);
+    const windows = buildSpeakerWindows(items, true);
+    const emitted = windows.flatMap((w) => w.runs).reduce((n, r) => n + r.items.length, 0);
+    assert.equal(emitted, items.length);
+});
+
+test('a window is still split by speaker turns inside it', () => {
+    // Windowing bounds latency; it does not replace turn splitting.
+    const windows = buildSpeakerWindows(resultItems([[0, 20, 6.0], [1, 20, 6.0]]), true);
+    assert.equal(windows.length, 1);
+    assert.deepEqual(labelsOf(windows[0].runs), ['spk_0', 'spk_1']);
+});
+
+test('punctuation stays in the window of the word it follows', () => {
+    // Punctuation timing is unreliable, so placing it by its own timestamp could
+    // strand a full stop in the next window.
+    const items = [...resultItems([[0, 40, 19.5]]), punct('.')];
+    const windows = buildSpeakerWindows(items, true);
+    const last = windows[windows.length - 1];
+    assert.equal(last.runs[last.runs.length - 1].items.slice(-1)[0].Type, 'punctuation');
+});
+
+test('setting the bound to zero disables windowing', () => {
+    // Escape hatch: follow Transcribe's own result boundaries exactly.
+    const windows = buildSpeakerWindows(
+        resultItems([[0, 200, 90.0]]),
+        true,
+        { minWords: DEFAULT_MIN_RUN_WORDS, minSeconds: DEFAULT_MIN_RUN_SECONDS },
+        0
+    );
+    assert.equal(windows.length, 1);
+});
+
+test('an empty result yields no windows', () => {
+    assert.deepEqual(buildSpeakerWindows([], true), []);
+});
+
+test('the real 30s-capped results are bounded to 20s windows', () => {
+    // Verbatim from the [DIARIZATION] logs of a real call: Transcribe returned a
+    // 101-word run spanning 29.9s, which is what made the live view sit on one
+    // unlabelled block. It must now break into two windows.
+    const windows = buildSpeakerWindows(resultItems([[1, 101, 29.9]]), false);
+    assert.equal(windows.length, 2);
+    assert.deepEqual(windows.map((w) => w.settled), [true, false]);
+});
+
+// --- window anchor stability -----------------------------------------------
+// Windows are measured from an anchor. If that anchor moves between partials, a
+// boundary-adjacent item lands in a different window, its segment id changes, and
+// the previous id is never written again — leaving an orphan that still shows in
+// the live transcript but is dropped from summaries, because
+// fetch_transcript filters on IsPartial == false.
+
+test('the anchor is the earliest pronunciation start time', () => {
+    assert.equal(speakerWindowOrigin([word('a', '0', 4.5, 5.0), word('b', '0', 1.5, 2.0)]), 1.5);
+});
+
+test('the anchor ignores punctuation, whose timing is unreliable', () => {
+    assert.equal(speakerWindowOrigin([punct('.'), word('a', '0', 3.0, 3.5)]), 3.0);
+});
+
+test('an all-punctuation result still yields a usable anchor', () => {
+    assert.equal(speakerWindowOrigin([punct('.')]), 0);
+    assert.equal(speakerWindowOrigin([]), 0);
+});
+
+test('a drifting anchor WOULD move a boundary-adjacent item between windows', () => {
+    // Demonstrates the hazard the pinning exists to prevent: the same item, with
+    // only the anchor differing, lands in a different window.
+    const boundaryWord = [word('start', '0', 0.0, 0.1), word('edge', '0', 20.1, 20.6)];
+    const withZeroAnchor = buildSpeakerWindows(boundaryWord, false, undefined, 20, 0.0);
+    const withDriftedAnchor = buildSpeakerWindows(boundaryWord, false, undefined, 20, 0.3);
+    assert.equal(withZeroAnchor.length, 2, 'anchor 0.0 puts the edge word in window 1');
+    assert.equal(withDriftedAnchor.length, 1, 'anchor 0.3 pulls it back into window 0');
+});
+
+test('passing a pinned anchor keeps window assignment identical across events', () => {
+    // The real protection: the caller pins the anchor once, so a later event that
+    // would have derived a different one still groups items the same way.
+    const pinned = 0.0;
+    const firstSighting = [word('start', '0', 0.0, 0.1), word('edge', '0', 20.1, 20.6)];
+    // Same audio, but Transcribe has revised the first word's start time later.
+    const revised = [word('start', '0', 0.3, 0.4), word('edge', '0', 20.1, 20.6)];
+    const a = buildSpeakerWindows(firstSighting, false, undefined, 20, pinned);
+    const b = buildSpeakerWindows(revised, false, undefined, 20, pinned);
+    assert.deepEqual(
+        a.map((w) => w.index),
+        b.map((w) => w.index),
+        'a pinned anchor must survive a revised first timestamp'
+    );
+});
+
+// --- emitting settled windows exactly once ---------------------------------
+// An earlier revision of this logic re-emitted every settled window on every
+// subsequent partial — roughly twenty Kinesis records per segment per result.
+
+test('a settled window is emitted once, not on every later partial', () => {
+    const windows = buildSpeakerWindows(resultItems([[0, 90, 45.0]]), false);
+    assert.deepEqual(windows.map((w) => w.settled), [true, true, false]);
+
+    // First partial that crosses into window 2: everything is new.
+    const first = selectEmittableWindows(windows, true, 0);
+    assert.deepEqual(first.emit.map((w) => w.index), [0, 1, 2]);
+    assert.equal(first.settledEmitted, 2);
+
+    // Next partial for the same result: the two settled windows are already
+    // written and must not go out again.
+    const second = selectEmittableWindows(windows, true, first.settledEmitted);
+    assert.deepEqual(second.emit.map((w) => w.index), [2], 'only the in-progress window');
+});
+
+test('the final result re-emits every window so labels can be applied', () => {
+    // Labels only exist on the final, so the settled windows have to be written
+    // once more to gain their (spk_N) suffix.
+    const windows = buildSpeakerWindows(resultItems([[0, 90, 45.0]]), true);
+    const selection = selectEmittableWindows(windows, false, 2);
+    assert.deepEqual(selection.emit.map((w) => w.index), [0, 1, 2]);
+});
+
+test('the settled high-water mark never goes backwards', () => {
+    // If Transcribe revises a result's text shorter, a previously settled window
+    // must not be re-emitted (which would flip an already-final segment back to
+    // partial, and fetch_transcript drops partials from summaries).
+    const shrunk = buildSpeakerWindows(resultItems([[0, 10, 5.0]]), false);
+    const selection = selectEmittableWindows(shrunk, true, 2);
+    assert.equal(selection.settledEmitted, 2, 'mark must not decrease');
 });

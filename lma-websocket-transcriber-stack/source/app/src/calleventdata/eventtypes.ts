@@ -144,6 +144,21 @@ export type CallMetaData = {
         finals: number;
         labelled: number;
         warned: boolean;
+        /**
+         * Highest window count already logged for the in-progress result, per
+         * channel, so the info-level diagnostic fires once per window boundary
+         * rather than once per partial. Reset when the result changes, so it
+         * cannot grow with the length of the meeting.
+         */
+        windowMarks?: {
+            [channelId: string]: {
+                resultId: string;
+                settledEmitted: number;
+                logged: number;
+                /** Window anchor, pinned on first sight so it cannot drift. */
+                origin?: number;
+            };
+        };
     };
     accessToken?: string,
     idToken?: string,

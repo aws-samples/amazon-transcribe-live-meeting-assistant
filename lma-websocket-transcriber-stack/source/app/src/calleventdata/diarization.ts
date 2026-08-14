@@ -52,8 +52,30 @@ import { CHANNEL_MIC, CHANNEL_SYSTEM, DiarizationSettings } from './eventtypes';
 
 /** Default minimum words for a speaker run to be treated as a real turn. */
 export const DEFAULT_MIN_RUN_WORDS = 3;
-/** Default minimum seconds for a speaker run to be treated as a real turn. */
-export const DEFAULT_MIN_RUN_SECONDS = 1.0;
+/**
+ * Default minimum seconds for a speaker run to be treated as a real turn.
+ *
+ * Measured against a real recording: 0.5 keeps two extra genuine-looking turns
+ * per call versus 1.0 while introducing no single-word fragments (the noise runs
+ * observed were all 1-2 words, so the WORD threshold is what filters them).
+ */
+export const DEFAULT_MIN_RUN_SECONDS = 0.5;
+
+/**
+ * Longest stretch of audio that may sit in one in-progress (partial) segment.
+ *
+ * Amazon Transcribe caps a result at ~30s — three of five results in a measured
+ * call ended at exactly 29.9s — and NO partial result carries speaker labels. So
+ * deferring entirely to Transcribe's result boundary means the live transcript
+ * shows one unlabelled block for up to 30 seconds before it splits.
+ *
+ * Instead each result is chunked into windows of at most this many seconds. A
+ * window whose audio is already in the past (i.e. a later window has started)
+ * is emitted as FINAL even though Transcribe still calls the result partial, so
+ * the live view settles and splits within this bound. Set to 0 to disable and
+ * follow Transcribe's boundaries exactly.
+ */
+export const DEFAULT_MAX_SEGMENT_SECONDS = 20;
 
 /** A contiguous stretch of items attributed to one Transcribe speaker label. */
 export type SpeakerRun = {
@@ -241,6 +263,139 @@ export const runTranscript = (run: SpeakerRun): string => {
         transcript += item.Content ?? '';
     }
     return transcript;
+};
+
+/** One bounded slice of a result: the items in it, and its window index. */
+export type SpeakerWindow = {
+    /** 0-based index of this window within the result. */
+    index: number;
+    /** Speaker runs inside the window, already smoothed. */
+    runs: SpeakerRun[];
+    /** Runs in this window BEFORE smoothing, so "how many were absorbed" is reportable. */
+    rawRunCount: number;
+    /**
+     * True when the window's audio is complete — either the whole result is
+     * final, or a LATER window has already started, which means no more audio
+     * will land in this one. Drives IsPartial per segment.
+     */
+    settled: boolean;
+};
+
+/**
+ * Earliest pronunciation start time in a result — the anchor windows are measured
+ * from.
+ *
+ * Callers should compute this ONCE per result and pass it back into
+ * `buildSpeakerWindows` for every subsequent event of the same result. Recomputing
+ * it per event risks the anchor drifting if Transcribe revises the first item's
+ * timestamp between partials, which would move a boundary-adjacent item into a
+ * different window, change its segment id, and leave the previous id orphaned in
+ * the transcript (visible in the live view, but filtered out of summaries because
+ * it stays marked partial).
+ */
+export const speakerWindowOrigin = (items: Item[]): number => {
+    let origin = Number.POSITIVE_INFINITY;
+    for (const item of items) {
+        if (item.Type === 'pronunciation') {
+            origin = Math.min(origin, item.StartTime ?? 0);
+        }
+    }
+    if (Number.isFinite(origin)) {
+        return origin;
+    }
+    return items.length > 0 ? items[0].StartTime ?? 0 : 0;
+};
+
+/**
+ * Chunk a result's items into windows of at most `maxSeconds`, then split each
+ * window into smoothed speaker runs.
+ *
+ * Windows are derived purely from item timestamps relative to `origin`, so the
+ * same item always lands in the same window whether it is seen on a partial or on
+ * the final — which is what keeps segment ids stable as a result is refined. Pass
+ * the origin pinned on first sight of the result (see `speakerWindowOrigin`);
+ * omitting it falls back to deriving one from these items alone.
+ * `maxSeconds <= 0` disables chunking (one window).
+ */
+export const buildSpeakerWindows = (
+    items: Item[],
+    isFinalResult: boolean,
+    thresholds: RunThresholds = {
+        minWords: DEFAULT_MIN_RUN_WORDS,
+        minSeconds: DEFAULT_MIN_RUN_SECONDS,
+    },
+    maxSeconds: number = DEFAULT_MAX_SEGMENT_SECONDS,
+    origin?: number
+): SpeakerWindow[] => {
+    if (items.length === 0) {
+        return [];
+    }
+    const grouped = new Map<number, Item[]>();
+    if (maxSeconds <= 0) {
+        grouped.set(0, [...items]);
+    } else {
+        const anchor = origin ?? speakerWindowOrigin(items);
+        let lastIndex = 0;
+        for (const item of items) {
+            // Punctuation timing is unreliable, so it stays with the window of
+            // the word it follows instead of being placed on its own.
+            const index =
+                item.Type === 'pronunciation'
+                    ? Math.max(0, Math.floor(((item.StartTime ?? 0) - anchor) / maxSeconds))
+                    : lastIndex;
+            lastIndex = index;
+            const bucket = grouped.get(index);
+            if (bucket) {
+                bucket.push(item);
+            } else {
+                grouped.set(index, [item]);
+            }
+        }
+    }
+    const indices = [...grouped.keys()].sort((a, b) => a - b);
+    const highest = indices[indices.length - 1];
+    return indices.map((index) => {
+        const rawRuns = buildSpeakerRuns(grouped.get(index) ?? []);
+        return {
+            index,
+            rawRunCount: rawRuns.length,
+            runs: smoothSpeakerRuns(rawRuns, thresholds),
+            // The last window of a partial result is still accumulating audio;
+            // everything before it cannot grow any further.
+            settled: isFinalResult || index < highest,
+        };
+    });
+};
+
+/**
+ * Decide which windows to actually emit, given how many have already been written
+ * as settled for this result.
+ *
+ * A window that settled on an earlier partial has been written and cannot change
+ * until the final arrives (which re-writes it once, with its now-known speaker
+ * label). Re-emitting it on every subsequent partial would put a couple of Kinesis
+ * records per second per segment on the wire for the rest of the result.
+ *
+ * Returns the windows to emit plus the updated high-water mark. Pure so the rule
+ * is testable on its own — an earlier revision of this logic did re-emit on every
+ * partial and nothing but reading raw output caught it.
+ */
+export const selectEmittableWindows = (
+    windows: SpeakerWindow[],
+    isPartialResult: boolean,
+    settledEmitted: number
+): { emit: SpeakerWindow[]; settledEmitted: number } => {
+    if (!isPartialResult) {
+        // The final re-writes everything: the labels are only known now.
+        return { emit: windows, settledEmitted };
+    }
+    const emit = windows.filter((w) => !(w.settled && w.index < settledEmitted));
+    return {
+        emit,
+        // Monotonic: a result whose text is revised shorter must not "un-settle"
+        // windows and start re-emitting them.
+        settledEmitted: Math.max(settledEmitted, windows.filter((w) => w.settled).length),
+    };
 };
 
 /** Compact `spk_0x42w/13.4s` description of a run, for diagnostic logging. */

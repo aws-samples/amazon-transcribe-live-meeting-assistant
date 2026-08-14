@@ -41,17 +41,20 @@ import {
 } from './eventtypes';
 
 import {
+    DEFAULT_MAX_SEGMENT_SECONDS,
     DEFAULT_MIN_RUN_SECONDS,
     DEFAULT_MIN_RUN_WORDS,
     RunThresholds,
     anyChannelDiarized,
     appendSpeakerLabel,
     buildSpeakerRuns,
+    buildSpeakerWindows,
     describeRuns,
     diarizationEnabledFor,
     formatSpeakerLabel,
     runTranscript,
-    smoothSpeakerRuns
+    selectEmittableWindows,
+    speakerWindowOrigin
 } from './diarization';
 
 // Import from the concrete module (not the ../utils barrel): the barrel pulls
@@ -110,10 +113,11 @@ const kdsStreamName = process.env['KINESIS_STREAM_NAME'] || '';
 const showSpeakerLabelDefault =
     (process.env['SHOW_SPEAKER_LABEL'] || 'false') === 'true';
 // Minimum size for a run of same-speaker words to be split out as its own
-// transcript segment. Both must be cleared. Empirically fitted to a real
-// two-speaker recording (spurious runs measured 1-2 words / 0.1-0.9s; real turns
-// 6-42 words / 1.2-13.4s) — overridable without a code change so the values can
-// be re-tuned from the [DIARIZATION] log lines these thresholds produce.
+// transcript segment; both must be cleared. Fitted to real recordings, where the
+// spurious runs were consistently 1-2 words — so the WORD threshold does the
+// filtering and the duration one only guards against very fast fragments.
+// Overridable without a code change, so they can be re-tuned from the
+// [DIARIZATION] log lines these thresholds produce.
 const diarizationRunThresholds: RunThresholds = {
     minWords: parseInt(
         process.env['DIARIZATION_MIN_RUN_WORDS'] || String(DEFAULT_MIN_RUN_WORDS),
@@ -123,6 +127,13 @@ const diarizationRunThresholds: RunThresholds = {
         process.env['DIARIZATION_MIN_RUN_SECONDS'] || String(DEFAULT_MIN_RUN_SECONDS)
     ),
 };
+// Upper bound on how long the live transcript may hold one in-progress segment
+// on a diarized channel. Transcribe caps results near 30s and never labels a
+// partial, so without this the live view shows an unlabelled block for that long.
+// 0 disables it and follows Transcribe's own result boundaries.
+const diarizationMaxSegmentSeconds = parseFloat(
+    process.env['DIARIZATION_MAX_SEGMENT_SECONDS'] || String(DEFAULT_MAX_SEGMENT_SECONDS)
+);
 const DEBUG = (process.env['DEBUG'] || 'false') === 'true';
 
 const tcaOutputLocation = `s3://${RECORDINGS_BUCKET_NAME}/${CALL_ANALYTICS_FILE_PREFIX}`;
@@ -292,7 +303,8 @@ export const startTranscribe = async (
             diarization.diarizeSystemChannel === true
         }, microphone channel=${diarization.diarizeMicChannel === true}` +
             `, split thresholds: minWords=${diarizationRunThresholds.minWords}` +
-            ` minSeconds=${diarizationRunThresholds.minSeconds}`
+            ` minSeconds=${diarizationRunThresholds.minSeconds}` +
+            ` maxSegmentSeconds=${diarizationMaxSegmentSeconds}`
     );
     // MAX_RETRIES bounds *consecutive* failures, not cumulative ones over the
     // life of the meeting (see HEALTHY_SESSION_MS below). A session that has
@@ -623,6 +635,13 @@ interface Segment {
     StartTime: number;
     EndTime: number;
     Transcript: string;
+    /**
+     * Per-segment partial flag. Usually just the result's own IsPartial, but a
+     * diarized channel can settle an EARLY window of a still-partial result (see
+     * buildSpeakerWindows), which bounds how long the live view can hold one
+     * unlabelled block.
+     */
+    IsPartial?: boolean;
 }
 
 /**
@@ -652,42 +671,78 @@ function buildDiarizedSegments(
 ): Record<string, Segment> {
     const items = result.Alternatives?.[0]?.Items ?? [];
     const rawRuns = buildSpeakerRuns(items);
-    const runs = smoothSpeakerRuns(rawRuns, diarizationRunThresholds);
     const isPartial = result.IsPartial === true;
     const resultId = result.ResultId ?? `${channelId}-${result.StartTime ?? 0}`;
+    const progress = windowProgressFor(callMetadata, channelId, resultId);
+    // Pin the window anchor the first time this result carries any words, and
+    // reuse it for every later event. Deriving it per event would let the anchor
+    // drift if Transcribe revises the first item's timestamp, moving a
+    // boundary-adjacent item into another window, changing its segment id, and
+    // orphaning the previous id — which stays marked partial and is therefore
+    // dropped from summaries by fetch_transcript while still showing in the UI.
+    if (progress.origin === undefined && items.some((i) => i.Type === 'pronunciation')) {
+        progress.origin = speakerWindowOrigin(items);
+    }
+    const windows = buildSpeakerWindows(
+        items,
+        !isPartial,
+        diarizationRunThresholds,
+        diarizationMaxSegmentSeconds,
+        progress.origin
+    );
 
+    const selection = selectEmittableWindows(windows, isPartial, progress.settledEmitted);
+    progress.settledEmitted = selection.settledEmitted;
     const segments: Record<string, Segment> = {};
-    runs.forEach((run, index) => {
-        const segmentId = `${resultId}-${channelId}-${index}`;
-        segments[segmentId] = {
-            SegmentId: segmentId,
-            Speaker: appendSpeakerLabel(speakerName, run.label),
-            StartTime: run.startTime + timeOffsetSeconds,
-            EndTime: run.endTime + timeOffsetSeconds,
-            Transcript: runTranscript(run),
-        };
-    });
+    for (const window of selection.emit) {
+        window.runs.forEach((run, runIndex) => {
+            // Window and run index both derive from item timestamps, so a given
+            // item keeps the same id from partial to final.
+            const segmentId = `${resultId}-${channelId}-w${window.index}-r${runIndex}`;
+            segments[segmentId] = {
+                SegmentId: segmentId,
+                Speaker: appendSpeakerLabel(speakerName, run.label),
+                StartTime: run.startTime + timeOffsetSeconds,
+                EndTime: run.endTime + timeOffsetSeconds,
+                Transcript: runTranscript(run),
+                IsPartial: !window.settled,
+            };
+        });
+    }
 
     recordDiarizationDiagnostics(callMetadata, server, channelId, result, rawRuns.length, items);
 
     // One line per FINAL result, at info: this is the record needed to re-tune
     // the thresholds from a real meeting, and it is low volume (a handful per
     // minute of audio). Transcript text is deliberately left to debug.
+    const emitted = Object.values(segments);
+    const settledCount = emitted.filter((s) => s.IsPartial !== true).length;
+    const runCount = windows.reduce((n, w) => n + w.runs.length, 0);
+    const rawRunCount = windows.reduce((n, w) => n + w.rawRunCount, 0);
     const summary =
         `[DIARIZATION]: [${callMetadata.callId}] - ${channelId} result ${resultId.slice(0, 8)}` +
         ` ${isPartial ? 'partial' : 'final'}: runs [${describeRuns(rawRuns)}]` +
-        ` -> ${runs.length} segment(s) [${runs.map((r) => r.label ?? 'unlabelled').join(', ')}]` +
-        (rawRuns.length !== runs.length ? ` (absorbed ${rawRuns.length - runs.length})` : '');
-    if (isPartial) {
-        server.log.debug(summary);
-    } else {
+        ` -> ${windows.length} window(s), ${runCount} segment(s)` +
+        ` [${windows.map((w) => w.runs.map((r) => r.label ?? 'unlabelled').join(', ')).join(' | ')}]` +
+        (rawRunCount > runCount ? ` (absorbed ${rawRunCount - runCount})` : '') +
+        (isPartial && settledCount > 0 ? `, ${settledCount} settled early` : '');
+    if (!isPartial) {
         server.log.info(summary);
+    } else if (windows.length > progress.logged) {
+        // A partial only reaches info the FIRST time it crosses into a new window
+        // — that is the state change worth seeing. Logging every partial would be
+        // a couple of lines per second for the rest of the result.
+        progress.logged = windows.length;
+        server.log.info(summary);
+    } else {
+        server.log.debug(summary);
     }
     if (DEBUG) {
-        for (const run of runs) {
+        for (const segment of emitted) {
             server.log.debug(
-                `[DIARIZATION]: [${callMetadata.callId}] - ${channelId} ${run.label ?? 'unlabelled'}` +
-                    ` [${run.startTime.toFixed(2)}-${run.endTime.toFixed(2)}] ${runTranscript(run)}`
+                `[DIARIZATION]: [${callMetadata.callId}] - ${channelId} ${segment.SegmentId}` +
+                    ` partial=${segment.IsPartial === true} ${segment.Speaker}` +
+                    ` [${segment.StartTime.toFixed(2)}-${segment.EndTime.toFixed(2)}] ${segment.Transcript}`
             );
         }
         server.log.debug(
@@ -698,6 +753,42 @@ function buildDiarizedSegments(
         );
     }
     return segments;
+}
+
+/**
+ * Per-channel progress through the CURRENT result's windows.
+ *
+ * Two jobs, both about not repeating ourselves while a result is still partial:
+ *  - `settledEmitted` is a high-water mark of settled windows already written, so
+ *    an early window is written ONCE rather than re-written on every subsequent
+ *    partial (which is a couple of Kinesis records per second per segment);
+ *  - `logged` throttles the info-level diagnostic to one line per window boundary.
+ *
+ * Keyed by channel and reset whenever the result id changes, so it cannot grow
+ * with the length of the meeting.
+ */
+function windowProgressFor(
+    callMetadata: CallMetaData,
+    channelId: string,
+    resultId: string
+): { resultId: string; settledEmitted: number; logged: number; origin?: number } {
+    if (!callMetadata.diarizationDiagnostics) {
+        callMetadata.diarizationDiagnostics = { finals: 0, labelled: 0, warned: false };
+    }
+    const diag = callMetadata.diarizationDiagnostics;
+    if (!diag.windowMarks) {
+        diag.windowMarks = {};
+    }
+    const existing = diag.windowMarks[channelId];
+    if (existing && existing.resultId === resultId) {
+        return existing;
+    }
+    // logged starts at 1: a result that has not yet crossed a window boundary is
+    // ordinary, so only the SECOND window onwards is an info-level event.
+    const fresh: { resultId: string; settledEmitted: number; logged: number; origin?: number } =
+        { resultId, settledEmitted: 0, logged: 1 };
+    diag.windowMarks[channelId] = fresh;
+    return fresh;
 }
 
 /**
@@ -898,7 +989,9 @@ export const writeTranscriptionSegment = async function (
                     StartTime: segment.StartTime,
                     EndTime: segment.EndTime,
                     Transcript: segment.Transcript,
-                    IsPartial: result.IsPartial,
+                    // Per-segment: a diarized channel can settle an early
+                    // window while Transcribe still calls the result partial.
+                    IsPartial: segment.IsPartial ?? result.IsPartial,
                     CreatedAt: now,
                     UpdatedAt: now,
                     Sentiment: undefined,

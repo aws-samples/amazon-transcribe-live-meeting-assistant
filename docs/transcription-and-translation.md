@@ -74,7 +74,10 @@ deployment-wide default for clients that do not send their own choice.
   [Upload Audio](upload-audio.md)).
 - Speakers are numbered **per channel**, each starting at `spk_0`, and the
   numbering restarts if the Transcribe session reconnects mid-meeting.
-- Labels appear when a segment finalizes, not while it is still partial.
+- Labels appear when a segment finalizes, not while it is still partial. An
+  in-progress segment is bounded at 20 seconds, so the live transcript settles and
+  splits within that window rather than waiting for Amazon Transcribe's own
+  ~30-second result boundary.
 - Transcript segments are split where the speaker changes, since one Amazon
   Transcribe result often spans several turns. Very short bursts of a different
   label (a word or two) are treated as noise and merged into the surrounding
