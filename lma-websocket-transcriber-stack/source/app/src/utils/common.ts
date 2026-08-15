@@ -24,3 +24,17 @@ export const normalizeErrorForLogging = (arg: unknown): string => {
         return `Object not extending Error raised. Type: ${typeof arg}`;
     }
 };
+
+/**
+ * Whether this call's audio should be uploaded when it ends.
+ *
+ * The web UI never sends the flag, so the deployment parameter has to decide. It
+ * must be resolved at START and stored on the session: resolving it only when an
+ * END message arrives loses the recording for every call that ends by the socket
+ * closing (tab closed, network drop), which is silent because nothing else in the
+ * meeting is affected.
+ */
+export const resolveShouldRecordCall = (
+    clientValue: boolean | undefined | null,
+    deploymentDefault: boolean
+): boolean => (clientValue === undefined || clientValue === null ? deploymentDefault : clientValue);

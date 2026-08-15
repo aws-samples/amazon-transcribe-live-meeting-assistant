@@ -40,6 +40,7 @@ import {
     posixifyFilename,
     normalizeErrorForLogging,
     getClientIP,
+    resolveShouldRecordCall,
 } from './utils';
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
@@ -504,13 +505,10 @@ const onTextMessage = async (
         callMetaData.activeSpeaker =
             callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
 
-        // if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
-        //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
-
-        //     callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
-        // } else {
-        //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
-        // }
+        callMetaData.shouldRecordCall = resolveShouldRecordCall(
+            callMetaData.shouldRecordCall,
+            SHOULD_RECORD_CALL
+        );
 
         callMetaData.agentId = callMetaData.agentId || randomUUID();
 
@@ -658,20 +656,10 @@ const onTextMessage = async (
             )}`
         );
 
-        if (
-            typeof callMetaData.shouldRecordCall === 'undefined' ||
-      callMetaData.shouldRecordCall === null
-        ) {
-            server.log.debug(
-                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`
-            );
-
-            callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
-        } else {
-            server.log.debug(
-                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`
-            );
-        }
+        callMetaData.shouldRecordCall = resolveShouldRecordCall(
+            callMetaData.shouldRecordCall,
+            socketData.callMetadata.shouldRecordCall ?? SHOULD_RECORD_CALL
+        );
         await endCall(ws, socketData, callMetaData);
     }
 };
@@ -780,12 +768,18 @@ const endCall = async (
                     }
 
                     const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${RECORDING_FILE_PREFIX}${wavRecordingFilename}`;
+                    server.log.info(
+                        `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording uploaded: ${RECORDING_FILE_PREFIX}${wavRecordingFilename} (${socketData.recordingFileSize} bytes)`
+                    );
 
                     await writeCallRecordingEvent(callMetaData, recordingUrl, server);
                 } else {
                     // No audio WAV to mux; let any video session finalize
                     // video-only.
                     notifyAudioRecordingDone(callMetaData.callId, undefined, server);
+                    server.log.info(
+                        `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: shouldRecordCall=${callMetaData.shouldRecordCall} (deployment default ${SHOULD_RECORD_CALL}).`
+                    );
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${
                             callMetaData.callId
@@ -798,6 +792,9 @@ const endCall = async (
                 // No audio recording was produced (e.g. no audio bytes ever
                 // arrived); let any video session finalize video-only.
                 notifyAudioRecordingDone(callMetaData.callId, undefined, server);
+                server.log.info(
+                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: no audio was written (${socketData.recordingFileSize ?? 0} bytes).`
+                );
             }
 
             if (socketData.audioInputStream) {

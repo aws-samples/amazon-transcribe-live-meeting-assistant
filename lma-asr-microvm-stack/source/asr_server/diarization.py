@@ -672,20 +672,39 @@ class DiarizingRecognizer(Recognizer):
             samples=segment,
         )
         words = event.words or []
-        if (
-            self._turn_detector is None
-            or len(words) < 2
-            or event.start is None
-            or event.end is None
-            or len(segment) < 2 * self._min_segment_samples
-        ):
+        if self._turn_detector is None:
+            return [whole]
+        span = f"{event.start or 0.0:.2f}-{event.end or 0.0:.2f}"
+        if len(words) < 2 or event.start is None or event.end is None:
+            _LOG.info(
+                "turn detection skipped: segment %s has %d word timing(s); text cannot "
+                "be cut without them",
+                span,
+                len(words),
+            )
+            return [whole]
+        if len(segment) < 2 * self._min_segment_samples:
+            _LOG.info(
+                "turn detection skipped: segment %s is %.2fs, under 2x min_segment (%.2fs)",
+                span,
+                len(segment) / self._sample_rate,
+                2 * self._min_segment_samples / self._sample_rate,
+            )
             return [whole]
 
         try:
             detected = self._turn_detector.detect_samples(segment)
         except Exception:  # noqa: BLE001 - detection must never break transcription
+            _LOG.warning("turn detection failed for segment %s", span, exc_info=True)
             return [whole]
         if not detected.boundaries:
+            _LOG.info(
+                "turn detection: segment %s (%.2fs, %d words) - one speaker, %d overlap span(s)",
+                span,
+                len(segment) / self._sample_rate,
+                len(words),
+                len(detected.overlaps),
+            )
             return [whole]
 
         cuts: list[int] = []
@@ -733,6 +752,17 @@ class DiarizingRecognizer(Recognizer):
                     samples=samples,
                 )
             )
+        _LOG.info(
+            "turn detection: segment %s (%.2fs, %d words) - %d boundary(ies) at %s, "
+            "%d overlap span(s), emitting %d row(s)",
+            span,
+            len(segment) / self._sample_rate,
+            len(words),
+            len(detected.boundaries),
+            [round(value, 2) for value in detected.boundaries],
+            len(detected.overlaps),
+            len(parts) or 1,
+        )
         return parts or [whole]
 
     def _sub_samples(
