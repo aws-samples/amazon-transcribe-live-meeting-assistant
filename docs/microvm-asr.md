@@ -104,7 +104,7 @@ Relevant parameters (all under *On-demand ASR and Diarization* in the console):
 | `AsrBaselineMemoryMiB` | `8192` | Memory per MicroVM; CPU is 1 vCPU per 2 GiB, so this is 4 vCPU |
 | `AsrMaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
 | `AsrMaxSpeakers` | `0` | Optional cap per channel; 0 discovers as many as appear |
-| `AsrSpeakerThreshold` | `0.2` | Measured operating point for TitaNet; **specific to the speaker model** |
+| `AsrSpeakerThreshold` | `0.2` | Starting point for TitaNet; **specific to the speaker model and to the voices** - measured evidence spans 0.2 to 0.4, so calibrate |
 | `AsrMinSegmentMs` | `2500` | Shortest utterance worth embedding; shorter ones inherit the current speaker |
 
 ## Tuning it without a redeploy
@@ -213,6 +213,15 @@ share one microphone).
 Calibration also reports a **minimum utterance length** when pairs involving a short
 segment score materially worse than long-only pairs — the measured cause of phantom
 speakers, every one of which came from a 1.2–2.4 s utterance.
+
+**Choose the two voices deliberately: the threshold can only be as demanding as the
+hardest pair in your sample.** Measured on one real meeting, a man and a woman scored
+-0.07 to 0.10 against each other while two similar-sounding women scored 0.246-0.307 -
+and the same-speaker floor was 0.740. Calibrating on the easy pair returns about 0.36;
+calibrating on a pair that is *further* apart than your real participants returns a
+number too low to separate them. So use voices that resemble the meetings you actually
+run - ideally the participants themselves, and at least two people of the same gender
+and accent if that is what your meetings contain.
 
 **Nothing is applied automatically.** A run reports; **Use these values** fills the
 fields, and **Save** applies them to the next meeting that starts. A sample where only

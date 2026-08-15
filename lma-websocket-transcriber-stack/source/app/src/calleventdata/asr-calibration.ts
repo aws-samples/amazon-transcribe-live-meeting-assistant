@@ -334,13 +334,14 @@ export const deriveOperatingPoint = (segments: EmbeddedSegment[]): CalibrationRe
         return { ...distribution, separation, confidence: 'unusable', notes };
     }
 
-    // Place it inside the gap, nearer the different-speaker side. Both errors are
-    // real — too low merges two people, too high fragments one — but fragmentation
-    // is the failure that actually happened here (one speaker became eight, then
-    // twenty-two), and it makes a transcript unreadable rather than merely
-    // incomplete. Merging is also partly contained: channels are diarized
-    // separately, so it can only ever merge people who share one microphone.
-    let threshold = Number((differentCeiling + separation * 0.4).toFixed(3));
+    // Midpoint of the gap. An earlier version sat at 40% of it, on the theory that
+    // fragmentation is the more visible failure; measuring a real meeting showed
+    // that costs more than it buys. There, different speakers scored -0.02 and the
+    // same speaker 0.74, so the 40% rule returned 0.286 - while two similar voices
+    // NOT in that sample scored 0.25-0.31 and merged. The threshold has to survive
+    // pairs the sample never contained, and the midpoint maximises the margin to
+    // both measured distributions. With a narrow gap the two rules barely differ.
+    let threshold = Number((differentCeiling + separation * 0.5).toFixed(3));
 
     // p95 leaves a tail. With a small sample that tail is one or two pairs, so
     // clear the highest OBSERVED different-speaker score too: then the guarantee is

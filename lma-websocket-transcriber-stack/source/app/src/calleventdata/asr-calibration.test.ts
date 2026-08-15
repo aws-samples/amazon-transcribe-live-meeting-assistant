@@ -213,7 +213,7 @@ test('short utterances scoring worse produce a minimum-length recommendation', (
     assert.ok(result.notes.some((note) => note.includes('under 2.5s')));
 });
 
-test('the threshold leans towards splitting rather than merging', () => {
+test('the threshold sits at the middle of the measured gap', () => {
     const segments = [
         embedded('ch_1', [1, 0.0]),
         embedded('ch_1', [1, 0.0]),
@@ -226,24 +226,44 @@ test('the threshold leans towards splitting rather than merging', () => {
     const result = deriveOperatingPoint(segments);
     const midpoint = (result.sameSpeakerP5 + result.differentSpeakerP95) / 2;
 
-    // Merging two people is harder to notice than splitting one, so the threshold
-    // sits below the midpoint of the gap.
-    assert.ok(result.speakerThreshold! < midpoint);
+    // A threshold hugging the different-speaker edge merged two similar voices that
+    // a real sample did not contain; the midpoint keeps margin on both sides.
+    assert.ok(Math.abs(result.speakerThreshold! - midpoint) <= 0.001);
+});
+
+test('a wide gap is not wasted by hugging the different-speaker edge', () => {
+    // The shape measured on a real meeting: different speakers near zero, the same
+    // speaker high. A pair of similar voices scoring 0.31 must not merge.
+    const segments = [
+        embedded('ch_1', [1, 0.02]),
+        embedded('ch_1', [1, 0.05]),
+        embedded('ch_0', [0.02, 1]),
+        embedded('ch_0', [0.0, 1]),
+        embedded('ch_0', [0.05, 1]),
+    ];
+
+    const result = deriveOperatingPoint(segments);
+
+    assert.ok(result.separation > 0.7, `separation ${result.separation}`);
+    assert.ok(
+        result.speakerThreshold! > 0.35,
+        `threshold ${result.speakerThreshold} must clear similar-voice pairs around 0.31`
+    );
 });
 
 test('the threshold clears the highest observed different-speaker score', () => {
     // p95 leaves a tail, and with a small sample the tail is a single pair. A
     // threshold inside that tail would merge a pair the calibration itself saw.
-    // Channel centres 0.80 apart: the closest cross pair scores 0.800 while p95
-    // sits at 0.744, so the gap rule alone would land at 0.792 — inside the tail.
+    // Channel centres 0.83 apart: the closest cross pair scores 0.830 while p95
+    // sits at 0.772, so the midpoint of the gap lands at 0.818 — inside the tail.
     const segments = [
-        clustered('ch_1', 1, 0, 0.8),
-        clustered('ch_1', 0.93, 1, 0.8),
-        clustered('ch_1', 0.93, 2, 0.8),
-        clustered('ch_0', 1, 3, 0.8),
-        clustered('ch_0', 0.93, 4, 0.8),
-        clustered('ch_0', 0.93, 5, 0.8),
-        clustered('ch_0', 0.93, 6, 0.8),
+        clustered('ch_1', 1, 0, 0.83),
+        clustered('ch_1', 0.93, 1, 0.83),
+        clustered('ch_1', 0.93, 2, 0.83),
+        clustered('ch_0', 1, 3, 0.83),
+        clustered('ch_0', 0.93, 4, 0.83),
+        clustered('ch_0', 0.93, 5, 0.83),
+        clustered('ch_0', 0.93, 6, 0.83),
     ];
 
     const result = deriveOperatingPoint(segments);
