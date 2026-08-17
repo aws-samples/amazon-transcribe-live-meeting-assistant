@@ -1,4 +1,5 @@
 import { Page } from 'playwright-core';
+import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
@@ -50,7 +51,12 @@ export default class Chime {
         startDialogWatchdog(page, { platform: 'CHIME' });
 
         console.log('Getting Chime meeting link.');
-        await page.goto(`https://app.chime.aws/meetings/${details.invite.meetingId}`);
+        await gotoMeetingPage(
+            page,
+            `https://app.chime.aws/meetings/${details.invite.meetingId}`,
+            MEETING_HOST_PATTERNS.chime,
+            'chime-join',
+        );
 
         console.log('Entering name.');
         const nameRes = await findElementWithFallback(

@@ -129,6 +129,30 @@ Parameters:
     Type: String
     Description: S3 location of the browser extension source code zipfile
 
+  ArtifactBucket:
+    Type: String
+    Default: ""
+    Description: >-
+      S3 bucket holding published artifacts. Used for the MicroVM launcher
+      Lambda's deployment package (Code.S3Bucket needs the bucket alone, and
+      SourceCodeLocation is a combined "bucket/key" string).
+
+  MicrovmLauncherS3Key:
+    Type: String
+    Default: ""
+    Description: >-
+      S3 key of the MicroVM launcher Lambda deployment package. Only used when
+      VPLaunchType=MICROVM.
+
+  MicrovmSourceCodeLocation:
+    Type: String
+    Default: ""
+    Description: >-
+      S3 location of the VP source packaged with the Dockerfile at the ZIP ROOT,
+      as CreateMicrovmImage requires (its codeArtifact takes a bare URI, so it
+      cannot be pointed at a subdirectory of the main source zip). Only used when
+      VPLaunchType=MICROVM.
+
   # transcibe parameters
 
   EnableAudioRecording:
@@ -304,23 +328,11 @@ Parameters:
       The Amazon S3 prefix for in-progress video segment uploads. Cleaned up after
       each meeting's video is assembled; a lifecycle rule reaps any leftovers (must end in "/")
 
-  CallAnalyticsPrefix:
-    Type: String
-    Default: lca-call-analytics/
-    Description: The Amazon S3 prefix where the post-call analytics files will be saved, when using analytics api mode (must end in "/")
-
   CallDataStreamName:
     Type: String
     Description: >-
       The Name of Kinesis Data Stream to write the call data to.
 
-  TranscribeApiMode:
-    Type: String
-    Default: standard
-    AllowedValues:
-      - standard
-      - analytics
-    Description: Set the default operational mode for Transcribe
 
   IsContentRedactionEnabled:
     Type: String
@@ -400,37 +412,12 @@ Parameters:
       - hi-IN
       - th-TH
 
-  TranscribePiiEntityTypes:
-    Type: String
-    # yamllint disable rule:line-length
-    Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
-    # yamllint enable rule:line-length
-    Description: >-
-      Select the PII entity types you want to identify or redact. Remove the values that you don't
-      want to redact from the default.  DO NOT ADD CUSTOM VALUES HERE.
-
   CustomVocabularyName:
     Type: String
     Default: ""
     Description: >-
       The name of the vocabulary to use when processing the transcription job. Leave blank if no
       custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account.
-
-  CustomLanguageModelName:
-    Type: String
-    Default: ""
-    Description: >-
-      The name of the custom language model to use when processing the transcription job. Leave blank if no
-      custom language model is to be used. If yes, the custom language model must pre-exist in your account.
-
-  ShowSpeakerLabel:
-    Type: String
-    Default: "false"
-    Description: >-
-      Enable diarization on Transcribe streaming
-    AllowedValues:
-      - "true"
-      - "false"
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -452,11 +439,23 @@ Parameters:
   # Startup Optimization Parameters
   VPLaunchType:
     Type: String
-    Default: EC2
+    Default: MICROVM
     AllowedValues:
       - FARGATE
       - EC2
-    Description: Launch type for Virtual Participant containers (FARGATE with SOCI or EC2 with caching)
+      - MICROVM
+    Description: >-
+      Compute platform for Virtual Participant containers. MICROVM (default) uses
+      AWS Lambda MicroVMs — no load balancer, no autoscaling, no host patching,
+      per-meeting billing, and a fast start from a Firecracker snapshot (live view
+      ready in ~20-25s); meetings are capped at 8 hours. EC2 uses an ECS cluster
+      with a warm-instance capacity provider and image caching. FARGATE uses
+      serverless ECS tasks with SOCI lazy loading.
+      IMPORTANT: MICROVM requires a region where Lambda MicroVMs is available
+      (us-east-1, us-east-2, us-west-2, ap-northeast-1, eu-west-1) and is not
+      available in GovCloud. Deploying MICROVM in an unsupported region fails
+      with "Unrecognized resource types: [AWS::Lambda::MicrovmImage]" — set
+      EC2 or FARGATE in those regions.
 
   VPInstanceType:
     Type: String
@@ -518,6 +517,14 @@ Conditions:
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
   UseEC2LaunchType: !Equals [!Ref VPLaunchType, "EC2"]
   UseFargateLaunchType: !Equals [!Ref VPLaunchType, "FARGATE"]
+  UseMicrovmLaunchType: !Equals [!Ref VPLaunchType, "MICROVM"]
+  # Everything ECS-shaped: the cluster, task definition, ECS service, ALB target
+  # group / listener rules, and the RunTask dispatch paths. Gating on this (rather
+  # than adding a third branch at each of the ~20 existing launch-type sites)
+  # keeps MICROVM additive — under MICROVM none of that infrastructure is created.
+  UseECSLaunchType: !Or
+    - !Condition UseEC2LaunchType
+    - !Condition UseFargateLaunchType
 
 Resources:
   LogsPolicy:
@@ -657,6 +664,17 @@ Resources:
                 # the 1-hour custom-resource timeout with no diagnostic.
                 on-failure: CONTINUE
                 commands:
+                  # Under VPLaunchType=MICROVM the image is built by
+                  # CreateMicrovmImage from the S3 source zip, not by this
+                  # project: there is no ECR image, no SOCI index and no ECS
+                  # service to redeploy. Skip straight to reporting success so
+                  # the custom resource completes.
+                  - |
+                    if [ "$VP_LAUNCH_TYPE" = "MICROVM" ]; then
+                      echo "MICROVM launch type: skipping ECR/SOCI container build."
+                      echo "The MicroVM image is built by Lambda from the S3 source artifact."
+                      exit 0
+                    fi
                   - echo Logging in to Amazon ECR...
                   - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
                   - echo Installing SOCI CLI for image optimization...
@@ -669,6 +687,12 @@ Resources:
               build:
                 on-failure: CONTINUE
                 commands:
+                  # MICROVM: nothing to build here (see pre_build).
+                  - |
+                    if [ "$VP_LAUNCH_TYPE" = "MICROVM" ]; then
+                      echo "MICROVM launch type: no container build required."
+                      exit 0
+                    fi
                   - echo Build started on `date`
                   - echo `pwd`
                   - echo `ls -altr`
@@ -692,6 +716,14 @@ Resources:
                     if [ "$CODEBUILD_BUILD_SUCCEEDING" != "1" ]; then
                       echo "Earlier phase failed — skipping SOCI index and ECS deploy."
                       exit 1
+                    fi
+                  # MICROVM: no ECR image to index and no ECS service to
+                  # redeploy. Fall through to the `finally` block below, which
+                  # is what posts SUCCESS to CloudFormation.
+                  - |
+                    if [ "$VP_LAUNCH_TYPE" = "MICROVM" ]; then
+                      echo "MICROVM launch type: skipping SOCI index and ECS deploy."
+                      exit 0
                     fi
                   - echo Generating SOCI index for faster startup...
                   - soci create ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest
@@ -780,6 +812,10 @@ Resources:
             Value: !Sub "${SourceCodeLocation}"
           - Name: CONTAINERD_ADDRESS
             Value: "/var/run/docker/containerd/containerd.sock"
+          # Read by the buildspec to skip the ECR/SOCI/ECS pipeline entirely
+          # under MICROVM, where Lambda builds the image from the S3 artifact.
+          - Name: VP_LAUNCH_TYPE
+            Value: !Ref VPLaunchType
       ServiceRole: !GetAtt BuildRole.Arn
       Artifacts:
         Type: NO_ARTIFACTS
@@ -1006,7 +1042,16 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: ecs-tasks.amazonaws.com
+              # ecs-tasks for the EC2/FARGATE launch types; lambda for MICROVM,
+              # where this same role is the MicroVM execution role. Sharing one
+              # role is deliberate: a separate hand-written MicroVM role drifted
+              # from this one and the VP failed at run time on missing
+              # appsync:EventConnect, the VP profiles bucket, Bedrock, Secrets
+              # Manager and more. One role means the MicroVM path automatically
+              # inherits every permission the VP application needs.
+              Service:
+                - ecs-tasks.amazonaws.com
+                - lambda.amazonaws.com
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - !GetAtt LogsPolicy.PolicyArn
@@ -1267,6 +1312,13 @@ Resources:
     # below (when UseEC2LaunchType is true) instead of inline here, because
     # both can't be set simultaneously. For Fargate-only deployments the
     # association resource is skipped and Fargate is implicitly available.
+    #
+    # Under VPLaunchType=MICROVM the cluster is created but stays empty. It is
+    # kept (rather than made conditional) deliberately: ~14 places reference
+    # Cluster/TaskDefinition — IAM policies, the CodeBuild redeploy buildspec,
+    # stack outputs — and an empty ECS cluster with an unused task definition
+    # costs nothing. Making them conditional would mean conditionalising all of
+    # those references for no operational gain.
     Properties:
       ClusterSettings:
         - Name: containerInsights
@@ -1708,6 +1760,385 @@ Resources:
         - CapacityProvider: !Ref VPCapacityProvider
           Weight: 1
 
+  ##########################################################################
+  # MICROVM Launch Type (conditional)
+  #
+  # AWS Lambda MicroVMs run the same container image inside a Firecracker
+  # microVM, booted from a memory+disk snapshot. Compared to the ECS launch
+  # types this removes the ALB + target groups, the ASG/capacity provider, and
+  # SSM host patching, and bills per meeting rather than per warm instance.
+  #
+  # Two roles, per the service model:
+  #   BuildRole     - assumed while Lambda builds the image from the Dockerfile
+  #   ExecutionRole - assumed by the running MicroVM (what the VP itself can do)
+  ##########################################################################
+
+  # Routes MicroVM outbound traffic through the same private subnets the ECS
+  # launch types use, so it leaves via the VPC's NAT gateway and the meeting
+  # platforms see the same stable Elastic IP.
+  #
+  # The Lambda-managed INTERNET_EGRESS connector was the default, but it exits
+  # from an AWS-owned shared address pool. Zoom scores source-IP reputation and
+  # redirected anonymous joins to a sign-in page with reCAPTCHA -- the container
+  # image, fingerprint and code being byte-identical to the ECS path. Making
+  # egress match ECS removes that as a variable.
+  #
+  # Costs no hourly charge (unlike an ALB); NAT data processing applies, which
+  # the ECS launch types already pay.
+  VPMicrovmEgressOperatorRole:
+    Type: AWS::IAM::Role
+    Condition: UseMicrovmLaunchType
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: >-
+              EC2 network-interface actions do not support resource-level
+              permissions; this is the AWS-managed policy for the purpose.
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            # No aws:SourceAccount condition. CreateNetworkConnector does NOT
+            # populate that context key, so the condition evaluates to a deny
+            # and the create fails with "The service is unable to assume the
+            # provided NetworkConnectorOperatorRole." Same trap as the
+            # iam:PassedToService condition on the launcher role below.
+            # Verified: a role with no condition assumes fine.
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      # Lambda assumes this to create/delete the ENIs that carry MicroVM egress.
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+
+  VPMicrovmEgressConnector:
+    Type: AWS::Lambda::NetworkConnector
+    Condition: UseMicrovmLaunchType
+    # cfn-lint 1.51 ships no schema for this resource type yet (service launched
+    # 2026-04), so E3006 would otherwise fail `make lint-cfn`.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3006
+    Properties:
+      Name: !Sub "${LMAStackName}-vp-egress"
+      # REQUIRED despite the CloudFormation schema listing only Configuration:
+      # the service rejects the create with "NetworkConnectorOperatorRole is
+      # required for VPC_EGRESS connector type". Verified against a live create.
+      OperatorRole: !GetAtt VPMicrovmEgressOperatorRole.Arn
+      Configuration:
+        VpcEgressConfiguration:
+          # Private subnets only -- these are the ones with a NAT route.
+          SubnetIds:
+            - !Ref PrivateSubnet1
+            - !Ref PrivateSubnet2
+          # Reuse the VP task security group (all egress allowed), so MicroVM and
+          # ECS traffic are governed by exactly one rule set.
+          SecurityGroupIds:
+            - !Ref VPSecurityGroupId
+          NetworkProtocol: IPv4
+          # "MicroVm" is the only permitted value today.
+          AssociatedComputeResourceTypes:
+            - MicroVm
+
+  VPMicrovmBuildRole:
+    Type: AWS::IAM::Role
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            # Confused-deputy guard: only this account's Lambda can assume it.
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: MicrovmImageBuild
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Read the zipped Dockerfile + app source that the image is built from.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${MicrovmSourceCodeLocation}"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
+
+  # The MicroVM image: a versioned Firecracker snapshot built from the same
+  # Dockerfile the ECS launch types use.
+  #
+  # Snapshot semantics drive the hook config: /ready must return 200 only once
+  # Xvfb/x11vnc/websockify/PulseAudio are serving, because that is the instant
+  # the snapshot is taken. /validate additionally lets Lambda sample which
+  # snapshot pages are touched so it can prefetch them on later launches.
+  VPMicrovmImage:
+    Type: AWS::Lambda::MicrovmImage
+    Condition: UseMicrovmLaunchType
+    # cfn-lint 1.51 ships no schema for this resource type yet (service launched
+    # 2026-06), so E3006 would otherwise fail `make lint-cfn` in CI. Scoped to
+    # this resource rather than disabling the rule globally.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3006
+    Properties:
+      Name: !Sub "${LMAStackName}-vp"
+      Description: !Sub "LMA Virtual Participant (${LMAStackName})"
+      BaseImageArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:microvm-image:al2023-1"
+      # NOTE: the CloudFormation resource marks EVERY property required, even
+      # those the underlying API treats as optional (verified against
+      # `describe-type AWS::Lambda::MicrovmImage`). So BaseImageVersion,
+      # CpuConfigurations, Logging and EgressNetworkConnectors must all be set
+      # explicitly rather than relying on service defaults.
+      # Major version only. "1.0" is rejected at create time with
+      # "Expected a single major version number (e.g., 1)". Valid values come
+      # from `list-managed-microvm-image-versions` (currently "0" and "1").
+      BaseImageVersion: "1"
+      BuildRoleArn: !GetAtt VPMicrovmBuildRole.Arn
+      # MicroVMs are ARM64-only; ARM_64 is the sole permitted value.
+      CpuConfigurations:
+        - Architecture: ARM_64
+      Logging:
+        CloudWatch:
+          LogGroup: !Sub "/aws/lambda-microvms/${LMAStackName}-vp"
+      # Egress via the VPC connector (see VPMicrovmEgressConnector) rather than
+      # the Lambda-managed INTERNET_EGRESS pool, so the VP reaches
+      # Zoom/Teams/Webex/Chime and the AWS public APIs from the VPC's NAT
+      # Elastic IP -- the same source address the ECS launch types use.
+      EgressNetworkConnectors:
+        - !GetAtt VPMicrovmEgressConnector.Arn
+      CodeArtifact:
+        Uri: !Sub "s3://${MicrovmSourceCodeLocation}"
+      Resources:
+        # 4 GB baseline => 2 vCPU (CPU is allocated at a 2:1 memory:vCPU ratio),
+        # bursting to 16 GB / 8 vCPU. Observed peak is ~1650 MB for Chromium +
+        # Simli + Nova Sonic, so memory is not the constraint.
+        #
+        # An 8 GB baseline (4 vCPU) was tried to speed up browser launch and made
+        # no difference — 135s at 4 GB vs 149s at 8 GB — so the launch delay is
+        # not CPU-bound and the larger baseline was pure extra cost. Reverted.
+        - MinimumMemoryInMiB: 4096
+      # Chromium's sandbox needs namespace/capability access beyond the default
+      # restricted set.
+      AdditionalOsCapabilities:
+        - ALL
+      # BOOTSTRAP values only. Everything else is staged per launch in the VP task
+      # registry (runHookPayload caps at 4096 bytes — see the launcher), but the
+      # container needs these three to find that config in the first place:
+      # without the table name it cannot read the registry, which is where the
+      # table name would otherwise live. Keeping the set this small also means a
+      # stack parameter change does not force an image rebuild.
+      EnvironmentVariables:
+        - Key: VP_LAUNCH_TYPE
+          Value: MICROVM
+        # NOT "AWS_REGION": that key is reserved by the service and rejected at
+        # image-build time ("Environment variable key 'AWS_REGION' is reserved").
+        # The MicroVM runtime may not populate it either, and the container's
+        # fallback is us-east-1 — wrong for any other region — so pass the region
+        # under our own name and prefer it in the container.
+        - Key: VP_AWS_REGION
+          Value: !Ref AWS::Region
+        - Key: VP_TASK_REGISTRY_TABLE_NAME
+          Value: !Ref VPTaskRegistryTableName
+      Hooks:
+        Port: 9000
+        MicrovmImageHooks:
+          Ready: ENABLED
+          # Generous: a cold first boot pulls CloakBrowser Chromium into memory
+          # and starts X + audio. Returning 503 until healthy is the contract.
+          ReadyTimeoutInSeconds: 600
+          Validate: ENABLED
+          # Generous: /validate now launches a real Chromium so Lambda samples
+          # (and can prefetch) its snapshot pages. That first launch is the slow
+          # one — the very cost this is here to move off the hot path — so it
+          # needs room to complete. Max allowed is 3600.
+          ValidateTimeoutInSeconds: 900
+        MicrovmHooks:
+          Run: ENABLED
+          RunTimeoutInSeconds: 30
+          Suspend: ENABLED
+          SuspendTimeoutInSeconds: 30
+          Resume: ENABLED
+          ResumeTimeoutInSeconds: 30
+          Terminate: ENABLED
+          TerminateTimeoutInSeconds: 30
+
+  # EventBridge Scheduler assumes this to invoke the launcher for meetings booked
+  # in advance (the MICROVM equivalent of TargetECSRole, which Scheduler uses to
+  # call ecs:RunTask on the ECS launch types).
+  VPScheduleInvokeLauncherRole:
+    Type: AWS::IAM::Role
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: InvokeLauncher
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt VPMicrovmLauncherFunction.Arn
+
+  VPMicrovmLauncherRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "RunMicrovm/CreateMicrovmAuthToken do not support resource-level permissions on the image"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: 'lambda-microvms actions are scoped by region/account; the service does not support resource-level permissions for RunMicrovm'
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Ref LogsPolicy
+      Policies:
+        - PolicyName: MicrovmLaunch
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # cfn-lint's IAM action list predates Lambda MicroVMs (2026-06),
+              # so these raise W3037 "not one of [...]". Left unsuppressed to
+              # match how the equally-new bedrock:InvokeModelWithBidirectionalStream
+              # is handled above: the warning clears when cfn-lint's spec catches
+              # up, and `make lint-cfn` only fails on E-level findings.
+              - Effect: Allow
+                Action:
+                  - lambda:RunMicrovm
+                  - lambda:GetMicrovm
+                  - lambda:TerminateMicrovm
+                  - lambda:CreateMicrovmAuthToken
+                Resource: "*"
+              # Attaching ingress/egress connectors to a MicroVM is a separate,
+              # explicitly-authorized action on the connector resource itself —
+              # RunMicrovm permission alone is not sufficient.
+              - Effect: Allow
+                Action: lambda:PassNetworkConnector
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:ALL_INGRESS"
+                  # The customer-owned VPC egress connector, not the
+                  # Lambda-managed INTERNET_EGRESS one.
+                  - !GetAtt VPMicrovmEgressConnector.Arn
+              # Hand the MicroVM its runtime role.
+              #
+              # No iam:PassedToService condition: RunMicrovm does NOT populate
+              # that context key, so any condition on it evaluates to a deny.
+              # Confirmed with `aws iam simulate-principal-policy` — with the
+              # key absent the request is implicitDeny, and the live call failed
+              # with "no identity-based policy allows the iam:PassRole action".
+              # Least privilege is preserved by Resource: this one role only.
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt TaskRole.Arn
+              # Read the resolved static config (see TASK_DEFINITION_ARN above).
+              - Effect: Allow
+                Action: ecs:DescribeTaskDefinition
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VPTaskRegistryTableName}"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+              # Both tables are encrypted with the customer-managed key, so
+              # DynamoDB access alone is not enough — writes fail with a KMS
+              # AccessDeniedException. Same pattern as TaskRole above.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  # Launches one MicroVM per meeting. Called by the scheduler state machine
+  # (MICROVM dispatch path) and by EventBridge Scheduler for scheduled meetings,
+  # since neither has a native lambda-microvms integration.
+  VPMicrovmLauncherFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS'
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; the state machine handles retries and failure states"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive ARNs and table names"
+    Condition: UseMicrovmLaunchType
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-VPMicrovmLauncher"
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      # RunMicrovm plus the wait for RUNNING; observed ~5s, but allow for
+      # throttling backoff and a cold image.
+      Timeout: 300
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Role: !GetAtt VPMicrovmLauncherRole.Arn
+      Environment:
+        Variables:
+          MICROVM_IMAGE_ARN: !GetAtt VPMicrovmImage.ImageArn
+          # Source of the ~60 static per-stack config values forwarded to the
+          # container in runHookPayload. Read from the task definition so there
+          # is one source of truth (see _static_config in the launcher).
+          TASK_DEFINITION_ARN: !Ref TaskDefinition
+          EXECUTION_ROLE_ARN: !GetAtt TaskRole.Arn
+          # The ARN embeds a service-generated id, so it cannot be constructed
+          # from the connector's Name.
+          EGRESS_CONNECTOR_ARN: !GetAtt VPMicrovmEgressConnector.Arn
+          VP_TABLE_NAME: !Ref VirtualParticipantTableName
+          VP_TASK_REGISTRY_TABLE_NAME: !Ref VPTaskRegistryTableName
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        # A real deployment package, not inline ZipFile: the handler imports
+        # microvm_client.py, and inline code is a single file capped at 4 KB.
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref MicrovmLauncherS3Key
+
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
     Metadata:
@@ -1722,35 +2153,12 @@ Resources:
           Environment:
             - Name: AWS_REGION
               Value: !Ref AWS::Region
-            - Name: SHOULD_RECORD_CALL
-              Value: !Ref EnableAudioRecording
             - Name: RECORDINGS_BUCKET_NAME
               Value: !Ref S3BucketName
             - Name: RECORDINGS_KEY_PREFIX
               Value: !Ref AudioFilePrefix
-            - Name: CALL_ANALYTICS_FILE_PREFIX
-              Value: !Ref CallAnalyticsPrefix
-            - Name: POST_CALL_CONTENT_REDACTION_OUTPUT
-              Value: "redacted"
-            - Name: SERVERHOST
-              Value: "0.0.0.0"
-            - Name: SERVERPORT
-              Value: "8080"
-            - Name: KINESIS_STREAM_NAME
-              Value: !Ref CallDataStreamName
             - Name: CALL_DATA_STREAM_NAME
               Value: !Ref CallDataStreamName
-            - Name: SAVE_PARTIAL_TRANSCRIPTS
-              Value: "true"
-            - Name: SHOW_SPEAKER_LABEL
-              Value: !Ref ShowSpeakerLabel
-            - Name: TRANSCRIBE_API_MODE
-              Value: !Ref TranscribeApiMode
-            - Name: IS_CONTENT_REDACTION_ENABLED
-              Value: !If
-                - ShouldEnableContentRedaction
-                - "true"
-                - "false"
             - Name: ENABLE_CONTENT_REDACTION
               Value: !If
                 - ShouldEnableContentRedaction
@@ -1760,8 +2168,6 @@ Resources:
               Value: !Ref TranscribeContentRedactionType
             - Name: TRANSCRIBE_CONTENT_REDACTION_TYPE
               Value: !Ref TranscribeContentRedactionType
-            - Name: TRANSCRIBE_PII_ENTITY_TYPES
-              Value: !Ref TranscribePiiEntityTypes
             - Name: TRANSCRIBE_LANGUAGE_CODE
               Value: !Ref TranscribeLanguageCode
             - Name: TRANSCRIBE_LANGUAGE_OPTIONS
@@ -1770,8 +2176,6 @@ Resources:
               Value: !Ref TranscribePreferredLanguage
             - Name: CUSTOM_VOCABULARY_NAME
               Value: !Ref CustomVocabularyName
-            - Name: CUSTOM_LANGUAGE_MODEL_NAME
-              Value: !Ref CustomLanguageModelName
             - Name: LMA_IDENTITY
               Value: !Ref LMAIdentity
             - Name: INTRO_MESSAGE
@@ -1821,8 +2225,6 @@ Resources:
               Value: !Ref VideoChunksPrefix
             - Name: CLOUDFRONT_DOMAIN
               Value: !Ref CloudFrontDomainName
-            - Name: VNC_TARGET_GROUP_ARN
-              Value: !Ref VNCTargetGroupArn
             - Name: VPC_ID
               Value: !Ref VPC
             - Name: ALB_LISTENER_ARN
@@ -1853,8 +2255,6 @@ Resources:
               Value: !Ref NovaSonicConfigTableName
             - Name: STRANDS_LAMBDA_ARN
               Value: !Ref StrandsLambdaArn
-            - Name: LOG_LEVEL
-              Value: !Ref LogLevel
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:
@@ -1878,8 +2278,13 @@ Resources:
         - UseEC2LaunchType
         - - EC2
         - - FARGATE
-      Cpu: !If [UseFargateLaunchType, "2 vCPU", !Ref AWS::NoValue]
-      Memory: !If [UseFargateLaunchType, "4 GB", !Ref AWS::NoValue]
+      # Fargate requires task-level Cpu/Memory; EC2 sets them per container
+      # instead (see ContainerDefinitions above). Keyed on "not EC2" rather than
+      # UseFargateLaunchType so that under MICROVM — where this task definition
+      # is created but never used, and RequiresCompatibilities falls back to
+      # FARGATE — the template still describes a valid Fargate task.
+      Cpu: !If [UseEC2LaunchType, !Ref AWS::NoValue, "2 vCPU"]
+      Memory: !If [UseEC2LaunchType, !Ref AWS::NoValue, "4 GB"]
     DependsOn:
       - Cluster
       - BuildCustomResource
@@ -1887,6 +2292,11 @@ Resources:
   # ECS Service to register tasks with target group
   VirtualParticipantService:
     Type: AWS::ECS::Service
+    # Not created under MICROVM: `LaunchType` only accepts EC2/FARGATE, and the
+    # service exists solely to keep an ALB target-group association (DesiredCount
+    # is 0 — tasks are started per meeting by RunTask, not by this service).
+    # MicroVMs have neither an ALB nor a task definition.
+    Condition: UseECSLaunchType
     Properties:
       ServiceName: !Sub "${LMAStackName}-vp-service-${VPLaunchType}"
       Cluster: !Ref Cluster
@@ -2064,6 +2474,19 @@ Resources:
                   - xray:GetSamplingRules
                   - xray:GetSamplingTargets
                 Resource: "*"
+        # Only needed for the MICROVM dispatch path, where the state machine
+        # invokes the launcher Lambda instead of using the optimized ECS
+        # runTask integration.
+        - !If
+          - UseMicrovmLaunchType
+          - PolicyName: InvokeMicrovmLauncher
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: lambda:InvokeFunction
+                  Resource: !GetAtt VPMicrovmLauncherFunction.Arn
+          - !Ref AWS::NoValue
         - PolicyName: SchedulePolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -2211,152 +2634,9 @@ Resources:
                   "apiInfo.$": "$.apiInfo",
                   "data.$": "States.JsonMerge($.computed, $.data, false)"
                 },
-                "Next": "RunTask"
+                "Next": "${DispatchStateName}"
               },
-              "RunTask": {
-                "Type": "Task",
-                "Resource": "arn:${AWS::Partition}:states:::ecs:runTask",
-                "Parameters": {
-                  "Cluster": "${ClusterArn}",
-                  "TaskDefinition": "${TaskDefinition}",
-                  ${RunTaskDispatch},
-                  "NetworkConfiguration": {
-                    "AwsvpcConfiguration": {
-                      "AssignPublicIp": "DISABLED",
-                      "SecurityGroups": [
-                        "${VPSecurityGroupId}"
-                      ],
-                      "Subnets": [
-                        "${PrivateSubnet1}",
-                        "${PrivateSubnet2}"
-                      ]
-                    }
-                  },
-                  "Overrides": {
-                    "ContainerOverrides": [
-                      {
-                        "Name": "scribe",
-                        "Environment": [
-                          {
-                            "Name": "MEETING_PLATFORM",
-                            "Value.$": "$.data.meetingPlatform"
-                          },
-                          {
-                            "Name": "MEETING_ID",
-                            "Value.$": "$.data.meetingID"
-                          },
-                          {
-                            "Name": "MEETING_PASSWORD",
-                            "Value.$": "$.data.meetingPassword"
-                          },
-                          {
-                            "Name": "MEETING_NAME",
-                            "Value.$": "$.data.meetingName"
-                          },
-                          {
-                            "Name": "LMA_USER",
-                            "Value.$": "$.data.userName"
-                          },
-                          {
-                            "Name": "USER_ACCESS_TOKEN",
-                            "Value.$": "$.data.accessToken"
-                          },
-                          {
-                            "Name": "USER_ID_TOKEN",
-                            "Value.$": "$.data.idToken"
-                          },
-                          {
-                            "Name": "USER_REFRESH_TOKEN",
-                            "Value.$": "$.data.rereshToken"
-                          },
-                          {
-                            "Name": "VIRTUAL_PARTICIPANT_ID",
-                            "Value.$": "$.data.virtualParticipantId"
-                          },
-                          {
-                            "Name": "ZOOM_CREDENTIALS_SECRET_NAME",
-                            "Value.$": "$.data.zoomCredentialsSecretName"
-                          },
-                          {
-                            "Name": "LMA_USER_SUB",
-                            "Value.$": "$.data.userSub"
-                          },
-                          {
-                            "Name": "ENABLE_VIDEO_RECORDING",
-                            "Value.$": "$.data.enableVideoRecording"
-                          }
-                        ]
-                      }
-                    ]
-                  }
-                },
-                "Next": "CheckRunTaskFailures",
-                "ResultPath": "$.runTaskResult",
-                "ResultSelector": {
-                  "failures.$": "$.Failures",
-                  "tasks.$": "$.Tasks"
-                },
-                "Catch": [
-                  {
-                    "ErrorEquals": ["States.ALL"],
-                    "Next": "MarkVPFailed",
-                    "ResultPath": "$.runTaskError"
-                  }
-                ]
-              },
-              "CheckRunTaskFailures": {
-                "Comment": "ECS RunTask returns HTTP 200 with a non-empty `failures` array when capacity/agent/etc. issues prevent the task from being placed. The Catch above only catches thrown exceptions, not these soft failures — so we have to inspect the result and route to MarkVPFailed explicitly. Also detect `PROVISIONING` (task queued waiting for the capacity provider to launch a new EC2 host) and surface that to the user as WAITING_FOR_CAPACITY.",
-                "Type": "Choice",
-                "Choices": [
-                  {
-                    "Variable": "$.runTaskResult.failures[0]",
-                    "IsPresent": true,
-                    "Next": "MarkRunTaskSoftFailure"
-                  },
-                  {
-                    "Variable": "$.runTaskResult.tasks[0].LastStatus",
-                    "StringEquals": "PROVISIONING",
-                    "Next": "MarkWaitingForCapacity"
-                  }
-                ],
-                "Default": "End"
-              },
-              "MarkRunTaskSoftFailure": {
-                "Type": "Pass",
-                "Parameters": {
-                  "Cause.$": "States.Format('ECS RunTask returned without scheduling the task. Reason: {}, Detail: {}', $.runTaskResult.failures[0].Reason, $.runTaskResult.failures[0].Detail)"
-                },
-                "ResultPath": "$.runTaskError",
-                "Next": "MarkVPFailed"
-              },
-              "MarkWaitingForCapacity": {
-                "Type": "Task",
-                "Comment": "Task is queued (lastStatus=PROVISIONING) waiting for the capacity provider to launch a new EC2 host. Write WAITING_FOR_CAPACITY to the VP record so the UI shows progress instead of sitting silently at INITIALIZING for 60-90s. The container's entrypoint.sh writes BOOTING as soon as the container starts, which overwrites this.",
-                "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
-                "Parameters": {
-                  "TableName": "${VirtualParticipantTableName}",
-                  "Key": {
-                    "id": { "S.$": "$.data.virtualParticipantId" }
-                  },
-                  "UpdateExpression": "SET #s = :status, #ea = :now",
-                  "ExpressionAttributeNames": {
-                    "#s": "status",
-                    "#ea": "updatedAt"
-                  },
-                  "ExpressionAttributeValues": {
-                    ":status": { "S": "WAITING_FOR_CAPACITY" },
-                    ":now": { "S.$": "$$.State.EnteredTime" }
-                  }
-                },
-                "ResultPath": null,
-                "End": true,
-                "Catch": [
-                  {
-                    "ErrorEquals": ["States.ALL"],
-                    "Next": "End"
-                  }
-                ]
-              },
+              ${DispatchStates}
               "End": {
                 "Type": "Pass",
                 "End": true
@@ -2409,58 +2689,7 @@ Resources:
                   "ScheduleExpression.$": "States.Format('at({})', $.data.meetingTime)",
                   "ScheduleExpressionTimezone": "UTC",
                   "State": "ENABLED",
-                  "Target": {
-                    "Arn": "${ClusterArn}",
-                    "RoleArn": "${TargetECSRoleArn}",
-                    "EcsParameters": {
-                      "EnableECSManagedTags": false,
-                      "EnableExecuteCommand": false,
-                      "LaunchType": "${VPLaunchType}",
-                      "NetworkConfiguration": {
-                        "AwsvpcConfiguration": {
-                          "AssignPublicIp": "DISABLED",
-                          "SecurityGroups": [
-                            "${VPSecurityGroupId}"
-                          ],
-                          "Subnets": [
-                            "${PrivateSubnet1}",
-                            "${PrivateSubnet2}"
-                          ]
-                        }
-                      },
-                      "TaskCount": 1,
-                      "TaskDefinitionArn": "${TaskDefinition}"
-                    },
-                    "Input": {
-                      "containerOverrides": [
-                        {
-                          "name": "scribe",
-                          "environment": [
-                            {
-                              "name": "MEETING_PLATFORM",
-                              "value.$": "$.data.meetingPlatform"
-                            },
-                            {
-                              "name": "MEETING_ID",
-                              "value.$": "$.data.meetingID"
-                            },
-                            {
-                              "name": "MEETING_PASSWORD",
-                              "value.$": "$.data.meetingPassword"
-                            },
-                            {
-                              "name": "MEETING_NAME",
-                              "value.$": "$.data.meetingName"
-                            },
-                            {
-                              "Name": "LMA_USER",
-                              "Value.$": "$.data.userName"
-                            }
-                          ]
-                        }
-                      ]
-                    }
-                  }
+                  ${ScheduledMeetingTarget}
                 },
                 "Resource": "arn:${AWS::Partition}:states:::aws-sdk:scheduler:createSchedule",
                 "End": true
@@ -2526,10 +2755,268 @@ Resources:
           # JSON fragment used in the RunTask state. For EC2, drive RunTask
           # via the capacity provider so ECS auto-scales the ASG when the
           # cluster is full. For Fargate, fall back to plain LaunchType.
-          RunTaskDispatch: !If
-            - UseEC2LaunchType
-            - !Sub '"CapacityProviderStrategy": [{ "CapacityProvider": "${VPCapacityProvider}", "Weight": 1 }]'
-            - '"LaunchType": "FARGATE"'
+          # Under MICROVM the RunTask state is never entered (see
+          # DispatchStateName), but the fragment must still be valid JSON for
+          # the state machine definition to parse.
+          # Which dispatch state MergeZoomSecret hands off to. Both states exist
+          # in every deployment (the definition is static); only the entry point
+          # differs, which keeps this a one-line switch instead of two variants
+          # of the whole state machine.
+          DispatchStateName: !If [UseMicrovmLaunchType, "RunMicrovm", "RunTask"]
+          # The dispatch states themselves.
+          #
+          # These cannot BOTH be present: Step Functions rejects a definition
+          # containing unreachable states ("MISSING_TRANSITION_TARGET: State
+          # \"RunTask\" is not reachable"), so only the active launch type's
+          # states may be emitted. A block scalar is used rather than a quoted
+          # string because the JSON contains both quote characters.
+          # Plain block scalars, NOT !Sub: these fragments are spliced into the
+          # OUTER !Sub, which is where ${ClusterArn} etc. are in scope. A nested
+          # !Sub would try to resolve them against its own (empty) variable map
+          # and fail cfn-lint E1019 / CloudFormation validation.
+          DispatchStates: !If
+            - UseMicrovmLaunchType
+            - !Sub >-
+              "RunMicrovm": {
+              "Comment": "MICROVM launch type. Step Functions has no optimized integration for lambda-microvms, so this invokes the launcher Lambda, which calls RunMicrovm, waits for RUNNING, and writes the endpoint to the VP registry. Reuses MarkVPFailed for error handling exactly as RunTask does.",
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+              "Parameters": {
+              "FunctionName": "${VPMicrovmLauncherFunction.Arn}",
+              "Payload.$": "$"
+              },
+              "Next": "MicrovmLaunched",
+              "ResultPath": "$.microvmResult",
+              "ResultSelector": {
+              "payload.$": "$.Payload"
+              },
+              "Retry": [
+              {
+              "Comment": "RunMicrovm is rate-limited to 5 TPS per account; back off rather than failing the meeting.",
+              "ErrorEquals": ["Lambda.TooManyRequestsException", "States.TaskFailed"],
+              "IntervalSeconds": 3,
+              "MaxAttempts": 4,
+              "BackoffRate": 2.0
+              }
+              ],
+              "Catch": [
+              {
+              "ErrorEquals": ["States.ALL"],
+              "Next": "MarkVPFailed",
+              "ResultPath": "$.runTaskError"
+              }
+              ]
+              },
+              "MicrovmLaunched": {
+              "Comment": "The launcher reports ok=false for soft failures (quota exhausted, image not ready) that do not throw. Mirror CheckRunTaskFailures and route those to MarkVPFailed.",
+              "Type": "Choice",
+              "Choices": [
+              {
+              "Variable": "$.microvmResult.payload.ok",
+              "BooleanEquals": false,
+              "Next": "MarkMicrovmSoftFailure"
+              }
+              ],
+              "Default": "End"
+              },
+              "MarkMicrovmSoftFailure": {
+              "Type": "Pass",
+              "Parameters": {
+              "Error": "MicrovmLaunchFailed",
+              "Cause.$": "States.Format('RunMicrovm did not start the VP. Reason: {}', $.microvmResult.payload.reason)"
+              },
+              "ResultPath": "$.runTaskError",
+              "Next": "MarkVPFailed"
+              },
+            - !Sub >-
+              "RunTask": {
+              "Type": "Task",
+              "Resource": "arn:${AWS::Partition}:states:::ecs:runTask",
+              "Parameters": {
+              "Cluster": "${Cluster.Arn}",
+              "TaskDefinition": "${TaskDefinition}",
+              "LaunchType": "${VPLaunchType}",
+              "NetworkConfiguration": {
+              "AwsvpcConfiguration": {
+              "AssignPublicIp": "DISABLED",
+              "SecurityGroups": [
+              "${VPSecurityGroupId}"
+              ],
+              "Subnets": [
+              "${PrivateSubnet1}",
+              "${PrivateSubnet2}"
+              ]
+              }
+              },
+              "Overrides": {
+              "ContainerOverrides": [
+              {
+              "Name": "scribe",
+              "Environment": [
+              {
+              "Name": "MEETING_PLATFORM",
+              "Value.$": "$.data.meetingPlatform"
+              },
+              {
+              "Name": "MEETING_ID",
+              "Value.$": "$.data.meetingID"
+              },
+              {
+              "Name": "MEETING_PASSWORD",
+              "Value.$": "$.data.meetingPassword"
+              },
+              {
+              "Name": "MEETING_NAME",
+              "Value.$": "$.data.meetingName"
+              },
+              {
+              "Name": "LMA_USER",
+              "Value.$": "$.data.userName"
+              },
+              {
+              "Name": "USER_ACCESS_TOKEN",
+              "Value.$": "$.data.accessToken"
+              },
+              {
+              "Name": "USER_ID_TOKEN",
+              "Value.$": "$.data.idToken"
+              },
+              {
+              "Name": "USER_REFRESH_TOKEN",
+              "Value.$": "$.data.rereshToken"
+              },
+              {
+              "Name": "VIRTUAL_PARTICIPANT_ID",
+              "Value.$": "$.data.virtualParticipantId"
+              },
+              {
+              "Name": "ZOOM_CREDENTIALS_SECRET_NAME",
+              "Value.$": "$.data.zoomCredentialsSecretName"
+              },
+              {
+              "Name": "LMA_USER_SUB",
+              "Value.$": "$.data.userSub"
+              },
+              {
+              "Name": "ENABLE_VIDEO_RECORDING",
+              "Value.$": "$.data.enableVideoRecording"
+              }
+              ]
+              }
+              ]
+              }
+              },
+              "Next": "CheckRunTaskFailures",
+              "ResultPath": "$.runTaskResult",
+              "ResultSelector": {
+              "failures.$": "$.Failures",
+              "tasks.$": "$.Tasks"
+              },
+              "Catch": [
+              {
+              "ErrorEquals": ["States.ALL"],
+              "Next": "MarkVPFailed",
+              "ResultPath": "$.runTaskError"
+              }
+              ]
+              },
+              "CheckRunTaskFailures": {
+              "Comment": "ECS RunTask returns HTTP 200 with a non-empty `failures` array when capacity/agent/etc. issues prevent the task from being placed. The Catch above only catches thrown exceptions, not these soft failures — so we have to inspect the result and route to MarkVPFailed explicitly. Also detect `PROVISIONING` (task queued waiting for the capacity provider to launch a new EC2 host) and surface that to the user as WAITING_FOR_CAPACITY.",
+              "Type": "Choice",
+              "Choices": [
+              {
+              "Variable": "$.runTaskResult.failures[0]",
+              "IsPresent": true,
+              "Next": "MarkRunTaskSoftFailure"
+              },
+              {
+              "Variable": "$.runTaskResult.tasks[0].LastStatus",
+              "StringEquals": "PROVISIONING",
+              "Next": "MarkWaitingForCapacity"
+              }
+              ],
+              "Default": "End"
+              },
+              "MarkRunTaskSoftFailure": {
+              "Type": "Pass",
+              "Parameters": {
+              "Cause.$": "States.Format('ECS RunTask returned without scheduling the task. Reason: {}, Detail: {}', $.runTaskResult.failures[0].Reason, $.runTaskResult.failures[0].Detail)"
+              },
+              "ResultPath": "$.runTaskError",
+              "Next": "MarkVPFailed"
+              },
+              "MarkWaitingForCapacity": {
+              "Type": "Task",
+              "Comment": "Task is queued (lastStatus=PROVISIONING) waiting for the capacity provider to launch a new EC2 host. Write WAITING_FOR_CAPACITY to the VP record so the UI shows progress instead of sitting silently at INITIALIZING for 60-90s. The container's entrypoint.sh writes BOOTING as soon as the container starts, which overwrites this.",
+              "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
+              "Parameters": {
+              "TableName": "${VirtualParticipantTableName}",
+              "Key": {
+              "id": { "S.$": "$.data.virtualParticipantId" }
+              },
+              "UpdateExpression": "SET #s = :status, #ea = :now",
+              "ExpressionAttributeNames": {
+              "#s": "status",
+              "#ea": "updatedAt"
+              },
+              "ExpressionAttributeValues": {
+              ":status": { "S": "WAITING_FOR_CAPACITY" },
+              ":now": { "S.$": "$$.State.EnteredTime" }
+              }
+              },
+              "ResultPath": null,
+              "End": true,
+              "Catch": [
+              {
+              "ErrorEquals": ["States.ALL"],
+              "Next": "End"
+              }
+              ]
+              },
+          # EventBridge Scheduler target for meetings booked in advance.
+          # Scheduler has a native ECS runTask target but none for
+          # lambda-microvms, so MICROVM schedules invoke the launcher Lambda
+          # instead. Both variants are single-line JSON fragments spliced into
+          # the CreateSchedule state; keeping them here (rather than two copies
+          # of the state) means the scheduled and immediate paths stay in step.
+          ScheduledMeetingTarget: !If
+            - UseMicrovmLaunchType
+            - !Sub >-
+              "Target": {"Arn": "${VPMicrovmLauncherFunction.Arn}",
+              "RoleArn": "${VPScheduleInvokeLauncherRole.Arn}",
+              "Input": {"data": {"meetingPlatform.$": "$.data.meetingPlatform",
+              "meetingId.$": "$.data.meetingID",
+              "meetingPassword.$": "$.data.meetingPassword",
+              "meetingName.$": "$.data.meetingName",
+              "meetingTime.$": "$.data.meetingTime",
+              "userName.$": "$.data.userName",
+              "virtualParticipantId.$": "$.data.virtualParticipantId",
+              "accessToken.$": "$.data.accessToken",
+              "idToken.$": "$.data.idToken",
+              "rereshToken.$": "$.data.rereshToken"}}}
+            - !Sub >-
+              "Target": {"Arn": "${Cluster.Arn}",
+              "RoleArn": "${TargetECSRole.Arn}",
+              "EcsParameters": {"EnableECSManagedTags": false,
+              "EnableExecuteCommand": false, "LaunchType": "${VPLaunchType}",
+              "NetworkConfiguration": {"AwsvpcConfiguration":
+              {"AssignPublicIp": "DISABLED",
+              "SecurityGroups": ["${VPSecurityGroupId}"],
+              "Subnets": ["${PrivateSubnet1}", "${PrivateSubnet2}"]}},
+              "TaskCount": 1, "TaskDefinitionArn": "${TaskDefinition}"},
+              "Input": {"containerOverrides": [{"name": "scribe",
+              "environment": [{"name": "MEETING_PLATFORM",
+              "value.$": "$.data.meetingPlatform"},
+              {"name": "MEETING_ID", "value.$": "$.data.meetingID"},
+              {"name": "MEETING_PASSWORD", "value.$": "$.data.meetingPassword"},
+              {"name": "MEETING_NAME", "value.$": "$.data.meetingName"},
+              {"Name": "LMA_USER", "Value.$": "$.data.userName"}]}]}}
+          # Only invoked under MICROVM. A placeholder ARN keeps the definition
+          # parseable for ECS deployments, where the launcher is not created.
+          MicrovmLauncherFunctionArn: !If
+            - UseMicrovmLaunchType
+            - !GetAtt VPMicrovmLauncherFunction.Arn
+            - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:unused-microvm-launcher"
 
   UpdateLMASettingsWithStateMachine:
     Type: AWS::CloudFormation::CustomResource

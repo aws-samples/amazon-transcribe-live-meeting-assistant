@@ -418,7 +418,7 @@ Resources:
     Condition: ShouldAllowSignUpEmailDomain
     Properties:
       Handler: index.lambda_handler
-      Runtime: python3.11
+      Runtime: python3.12
       Timeout: 10
       Environment:
         Variables:

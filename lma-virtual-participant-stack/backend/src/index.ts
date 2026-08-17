@@ -11,6 +11,11 @@ import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { videoRecorder } from './video-recorder.js';
+import {
+    installAudioDiagnostics,
+    startAudioDeviceSpecPolling,
+    startAudioDiagnosticsPolling,
+} from './audio-diagnostics.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -18,6 +23,7 @@ import { simliAvatar } from './simli-avatar.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { acquireProfile, persistProfile, releaseProfile } from './profile-store.js';
+import { requiresAlbSelfRegistration } from './launch-mode.js';
 import {
     patchPreferencesFor3pCookies,
     patchPreferencesForExternalProtocols,
@@ -130,6 +136,12 @@ const closeAndPersistProfile = async (): Promise<void> => {
 // Local testing mode - skip ALB registration and AppSync updates
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+// Launch mode. Under MICROVM there is no ALB in front of noVNC: RunMicrovm
+// returns a dedicated HTTPS endpoint that the launcher publishes, so the
+// container must not attempt to discover its own IP or self-register (there is
+// no ECS task metadata endpoint either). See launch-mode.ts.
+const needsAlbRegistration = requiresAlbSelfRegistration(process.env.VP_LAUNCH_TYPE);
+
 // Read the build stamp baked into the image at build time (see Dockerfile).
 // Logged at startup so it's trivial to confirm which image a task runs.
 const readBuildInfo = (): { buildDate: string; gitCommit: string; buildSource: string } => {
@@ -232,8 +244,9 @@ const main = async (): Promise<void> => {
         throw new Error('VNC server initialization failed');
     }
 
-    // Register with ALB target group and wait for healthy (skip in local test mode)
-    if (statusManager && !isLocalTest) {
+    // Register with ALB target group and wait for healthy (skip in local test mode
+    // and under MICROVM, which has no ALB — the MicroVM endpoint replaces it).
+    if (statusManager && !isLocalTest && needsAlbRegistration) {
         try {
             await statusManager.setRegisteringNetwork();
             console.log('Registering task with ALB target group...');
@@ -251,6 +264,8 @@ const main = async (): Promise<void> => {
         }
     } else if (isLocalTest) {
         console.log('✓ Skipping ALB registration (local test mode)');
+    } else if (!needsAlbRegistration) {
+        console.log('✓ Skipping ALB registration (MICROVM launch: endpoint published by launcher)');
     }
 
     // VNC ready signal is deferred until AFTER fresh-profile warmup so the
@@ -346,6 +361,11 @@ const main = async (): Promise<void> => {
     console.log(`[browser]   fingerprint seed  = ${fingerprintSeed}`);
     console.log(`[browser]   profile freshness = ${isFresh ? 'FRESH (warmup will run)' : 'EXISTING (skipping warmup)'}`);
 
+    // Timing instrumentation: browser launch dominated VP startup on MicroVMs
+    // (~142s vs ~1-3s for the identical image and args locally), and the launch
+    // is a single opaque await. Logging the elapsed time makes any regression
+    // visible in CloudWatch instead of requiring a log-timestamp reconstruction.
+    const browserLaunchStart = Date.now();
     const context = await launchPersistentContext({
         headless: false,
         humanize: true,
@@ -361,6 +381,9 @@ const main = async (): Promise<void> => {
             ignoreDefaultArgs: ['--mute-audio', '--enable-automation'],
         },
     } as any);
+    console.log(
+        `[browser] launchPersistentContext took ${((Date.now() - browserLaunchStart) / 1000).toFixed(1)}s`,
+    );
     browserContext = context;
     // Sane default for actions; the one meeting-length wait (end-of-meeting
     // watcher) passes its own explicit { timeout }. Do NOT set a multi-hour
@@ -417,6 +440,22 @@ const main = async (): Promise<void> => {
     const page = await context.newPage();
     page.setDefaultTimeout(20000);
 
+    // Observational audio diagnostics for GitHub #543. Installed BEFORE any
+    // navigation: addInitScript only runs in documents created afterwards, which
+    // is why the Simli getUserMedia override (injected once the avatar is ready)
+    // never ran on Teams at all. Read-only by design — the previous attempt at
+    // this path mutated constraints and silently killed transcription (#545).
+    await installAudioDiagnostics(page);
+    // Node-side draining: page console.log does NOT reach CloudWatch under
+    // cloakbrowser (only warnings/errors do), which is why the first version of
+    // these diagnostics produced nothing across three live sessions.
+    const stopAudioDiagnostics = startAudioDiagnosticsPolling(page);
+    // PulseAudio device formats, logged only when they change. Teams opens the
+    // virtual mic twice with conflicting formats (mono vs stereo); with
+    // avoid-resampling that can make PulseAudio re-negotiate the device
+    // repeatedly, which glitches audio without dropping any RTP packet (#543).
+    const stopDeviceSpecs = startAudioDeviceSpecPolling();
+
     // Renderer-crash latch. A renderer OOM crash leaves every page.evaluate
     // hanging on "Target crashed", so meeting.initialize() never returns and
     // the UI stays stuck on JOINING. We race initialize() against this latch
@@ -450,6 +489,9 @@ const main = async (): Promise<void> => {
         if (
             text.includes('[LMA-Simli]') ||
             text.includes('[Simli]') ||
+            // Audio path diagnostics (#543): requested constraints, the settings
+            // actually applied, and outbound Opus packet cadence.
+            text.includes('[LMA-Audio]') ||
             type === 'error' ||
             type === 'warning'
         ) {
@@ -690,7 +732,14 @@ const main = async (): Promise<void> => {
         // Cleanup - set flag to prevent uncaughtException from killing process mid-cleanup
         cleanupInProgress = true;
         console.log('Cleaning up...');
-        
+
+        // Stop the diagnostics timer first: an un-cleared interval holding a page
+        // reference would keep the Node process alive past teardown.
+        try {
+            stopAudioDiagnostics();
+            stopDeviceSpecs();
+        } catch { /* never block cleanup */ }
+
         try {
             // Stop transcription service
             await transcriptionService.stopTranscription();

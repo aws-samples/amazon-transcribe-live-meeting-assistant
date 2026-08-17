@@ -30,6 +30,24 @@ describe('resolveStatusDescription', () => {
     expect(resolveStatusDescription('INITIALIZING', 'EC2')).toMatch(/EC2 host/i);
   });
 
+  it('uses MicroVM-specific copy — the default launch type', () => {
+    // MICROVM was initially missing from DESCRIPTION_BY_LAUNCH_TYPE, so the
+    // DEFAULT launch type silently fell back to ECS-flavoured copy that told
+    // users a container was being scheduled and to expect a ~60-90s capacity
+    // wait. Neither is true for a MicroVM (snapshot resume, ~20-25s).
+    const waiting = resolveStatusDescription('WAITING_FOR_CAPACITY', 'MICROVM');
+    expect(waiting).toMatch(/MicroVM/i);
+    expect(waiting).not.toMatch(/60|90|host slot|auto-scaler|Fargate/i);
+
+    const init = resolveStatusDescription('INITIALIZING', 'MICROVM');
+    expect(init).toMatch(/MicroVM/i);
+    expect(init).not.toMatch(/EC2 host|Fargate task/i);
+  });
+
+  it('normalizes MicroVM launch type casing too', () => {
+    expect(resolveStatusDescription('INITIALIZING', 'microvm')).toMatch(/MicroVM/i);
+  });
+
   it('normalizes launch type casing', () => {
     expect(resolveStatusDescription('WAITING_FOR_CAPACITY', 'fargate')).toMatch(/Fargate/i);
     expect(resolveStatusDescription('WAITING_FOR_CAPACITY', 'ec2')).toMatch(/EC2/i);

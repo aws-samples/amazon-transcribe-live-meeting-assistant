@@ -23,13 +23,6 @@ import AVFoundation
 // exit. Force unbuffered so logs appear live when redirected.
 setvbuf(stdout, nil, _IONBF, 0)
 
-// Decode a base64url segment (JWT payload) — for --login-only diagnostics.
-func base64urlDecode(_ s: String) -> Data? {
-    var b = s.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
-    while b.count % 4 != 0 { b += "=" }
-    return Data(base64Encoded: b)
-}
-
 // `--selftest`: validate BigUInt + the Cognito SRP signature against baked-in
 // known-answers (offline), then exit. Run this after any change to the crypto.
 if CommandLine.arguments.contains("--selftest") {
@@ -85,18 +78,19 @@ if config.wantsLogin {
                 region: config.effectiveRegion)
             config.accessToken = tokens.accessToken
             config.idToken = tokens.idToken
+            // KEEP the refresh token — discarding it here is the root cause of
+            // issue #535 (nothing could renew the ~1 h access token).
+            config.refreshToken = tokens.refreshToken
             print("✓ Signed in — got Cognito tokens (access/id\(tokens.refreshToken.isEmpty ? "" : "/refresh"))")
             if CommandLine.arguments.contains("--login-only") {
                 // Print token metadata (not the token) so we can verify the login
                 // worked in isolation, without opening audio/socket.
-                let parts = tokens.accessToken.split(separator: ".")
-                if parts.count == 3,
-                   let payload = base64urlDecode(String(parts[1])),
-                   let obj = try? JSONSerialization.jsonObject(with: payload) as? [String: Any] {
+                if let obj = TokenStore.jwtPayload(tokens.accessToken) {
                     let user = obj["username"] ?? obj["sub"] ?? "?"
-                    let exp = (obj["exp"] as? Double).map { Date(timeIntervalSince1970: $0) }
                     print("  token user: \(user)")
-                    if let exp = exp { print("  expires:    \(exp)") }
+                    if let exp = TokenStore.expiry(ofJWT: tokens.accessToken) {
+                        print("  expires:    \(exp)")
+                    }
                 }
                 print("  access token length: \(tokens.accessToken.count) chars")
                 exit(0)
@@ -125,7 +119,21 @@ print("  rate     : \(config.sampleRate) Hz, 2ch interleaved 16-bit PCM")
 print("  channels : ch0=meeting(system audio)  ch1=mic")
 print("")
 
-let socket = TranscriberSocket(config: config)
+// Keeps the ~1h access token alive for the life of the run: proactively renewed
+// before `exp`, and renewed-then-retried if the server rejects it anyway. Inert
+// when there's nothing to redeem (a pasted --token with no --refresh-token), in
+// which case the old give-up-and-exit behaviour stands.
+let tokenStore = TokenStore(accessToken: config.accessToken, idToken: config.idToken,
+                            refreshToken: config.refreshToken,
+                            clientId: config.clientId, region: config.effectiveRegion)
+tokenStore.armProactiveRefresh()
+
+let socket = TranscriberSocket(config: config, tokens: tokenStore)
+// The CLI keeps its old contract: an unrecoverable auth failure exits non-zero so
+// scripts and launchers see it. Only the GUI needs to survive this (the socket no
+// longer calls exit() itself — see TranscriberSocket.onFatalAuth). Matches the
+// Windows headless CLI, windows/App/Program.cs.
+socket.onFatalAuth = { _ in exit(1) }
 let mixer = StereoMixer(sampleRate: config.sampleRate) { chunk in
     socket.sendPCM(chunk)
 }

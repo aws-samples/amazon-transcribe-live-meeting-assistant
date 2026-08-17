@@ -298,6 +298,23 @@ Parameters:
       - hi-IN
       - th-TH
 
+  ShowSpeakerLabel:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Default for Amazon Transcribe speaker partitioning (diarization) on
+      WebSocket streaming sessions - the desktop capture app and the Stream Audio
+      browser tab. When enabled, Transcribe tells apart individual voices within
+      an audio channel and each distinct voice is appended to the channel's
+      speaker name as "(spk_0)", "(spk_1)", and so on. Works best with five or
+      fewer voices per channel. This is only the DEFAULT: clients that offer
+      per-channel speaker identification settings (the desktop capture app and
+      the Stream Audio tab) send their own choice per meeting, which takes
+      precedence. Leave "false" unless you want it on for clients that do not.
+
   TranscribePiiEntityTypes:
     Type: String
     Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
@@ -674,14 +691,24 @@ Parameters:
   # Virtual Participant Startup Optimization Parameters
   VPLaunchType:
     Type: String
-    Default: EC2
+    Default: MICROVM
     AllowedValues:
       - FARGATE
       - EC2
+      - MICROVM
     Description: >-
-      Launch type for Virtual Participant containers.
-      FARGATE: Serverless with SOCI for 40-60% faster startup (~$2/month).
-      EC2 (default): Warm instances with cached images for 85-90% faster startup (~$33/month).
+      Compute platform for Virtual Participant containers.
+      MICROVM (default): AWS Lambda MicroVMs — each meeting runs in its own
+      Firecracker microVM resumed from a snapshot. Live view ready in ~20-25s,
+      billed per meeting rather than per warm instance, and needs no load
+      balancer, no autoscaling and no OS patching. Requires a region where
+      Lambda MicroVMs are available (us-east-1, us-east-2, us-west-2,
+      ap-northeast-1, eu-west-1 — not GovCloud); meetings are capped at 8 hours.
+      EC2: Warm instances with cached images; ~$33/month per always-on instance,
+      plus autoscaling and OS patching to manage. Use where MicroVMs are
+      unavailable and startup latency matters.
+      FARGATE: Serverless, ~$2/month base, but 1-2 minute startup. Use where
+      MicroVMs are unavailable and cost matters more than latency.
 
   VPInstanceType:
     Type: String
@@ -806,6 +833,7 @@ Metadata:
           - TranscribeLanguageOptions
           - TranscribePreferredLanguage
           - TranscribeContentRedactionType
+          - ShowSpeakerLabel
           - TranscribePiiEntityTypes
           - CustomVocabularyName
           - CustomLanguageModelName
@@ -925,6 +953,8 @@ Metadata:
         default: Transcribe Preferred Language
       TranscribeContentRedactionType:
         default: Content Redaction Type for Transcription
+      ShowSpeakerLabel:
+        default: Default for Speaker Identification on Streaming Sessions
       TranscribePiiEntityTypes:
         default: Transcription PII Redaction Entity Types
       CustomVocabularyName:
@@ -978,7 +1008,7 @@ Metadata:
       PrivateSubnet2:
         default: Existing Private Subnet 2
       VPLaunchType:
-        default: VP Launch Type (FARGATE or EC2)
+        default: VP Launch Type (LAMBDA MICROVM, FARGATE or EC2)
       VPInstanceType:
         default: VP EC2 Instance Type
       VPMinInstances:
@@ -2419,6 +2449,11 @@ Resources:
           - ShouldCreateVPC
           - !GetAtt VPCSTACK.Outputs.PublicSubnet2
           - !Ref PublicSubnet2
+        # Lets AISTACK skip the VNC ALB (plus its target group, listener,
+        # security groups, CloudFront origin and Lambda@Edge auth function) when
+        # Virtual Participants run on MicroVMs, which reach the viewer through
+        # their own HTTPS endpoints instead.
+        VPLaunchType: !Ref VPLaunchType
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         BedrockKnowledgeBaseID: !If
           - ShouldUseTranscriptKnowledgeBase
@@ -2543,6 +2578,7 @@ Resources:
         TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
         TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
+        ShowSpeakerLabel: !Ref ShowSpeakerLabel
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
         PcaS3BucketName: ""
@@ -2616,16 +2652,21 @@ Resources:
           - ""
         AudioFilePrefix: "lma-audio-recordings/"
         CallDataStreamName: !Ref CallDataStream
-        TranscribeApiMode: "standard"
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
         TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         TranscribeLanguageCode: !Ref TranscribeLanguageCode
         TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
         TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
-        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
-        CustomLanguageModelName: !Ref CustomLanguageModelName
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
+        # Same source, packaged with the Dockerfile at the zip ROOT, which is
+        # what CreateMicrovmImage requires (codeArtifact takes only a URI, so a
+        # subdirectory cannot be pointed at). Only used when VPLaunchType=MICROVM.
+        MicrovmSourceCodeLocation: <VIRTUAL_PARTICIPANT_MICROVM_SRC_S3_LOCATION_TOKEN>
+        # Bucket + key for the MicroVM launcher Lambda's deployment package.
+        # Passed separately because Code.S3Bucket needs the bucket alone.
+        ArtifactBucket: <ARTIFACT_BUCKET_NAME_TOKEN>
+        MicrovmLauncherS3Key: <VIRTUAL_PARTICIPANT_LAUNCHER_S3_KEY_TOKEN>
         LMASettingsParameterName: !Ref LMASettingsParameter
         UpdateLMASettingsFunctionArn: !GetAtt UpdateLMASettingsFunction.Arn
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
@@ -2666,7 +2707,6 @@ Resources:
         VPMinInstances: !Ref VPMinInstances
         VPMaxInstances: !Ref VPMaxInstances
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
-        ShowSpeakerLabel: "false"
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LogLevel: !Ref LogLevel
 

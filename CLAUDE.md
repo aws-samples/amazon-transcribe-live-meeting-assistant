@@ -36,12 +36,17 @@ npm test                    # vitest tests
 **WebSocket server** (in `lma-websocket-transcriber-stack/source/app/`):
 ```bash
 npm install && npm run build   # TypeScript build
-npm test                       # jest tests
+npm test                       # node:test unit tests
 ```
 
 **Virtual Participant** (in `lma-virtual-participant-stack/backend/`):
 ```bash
 npm install && npm run build   # TypeScript build
+npm test                       # node:test unit tests
+```
+Its CloudFormation/entrypoint tests are Python:
+```bash
+python3 -m pytest lma-virtual-participant-stack/test/
 ```
 
 ## Linting

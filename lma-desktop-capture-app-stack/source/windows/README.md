@@ -56,7 +56,10 @@ alongside the browser and the Node CLI.
    `Authorization` header. The transcriber sits behind CloudFront whose
    `OriginRequestPolicy` header whitelist does **not** include `Authorization`,
    so a header is stripped → 401. We authenticate the browser's way:
-   `?authorization=Bearer%20<ACCESS_TOKEN>&id_token=<ID_TOKEN>&refresh_token=`.
+   `?authorization=Bearer%20<ACCESS_TOKEN>&id_token=<ID_TOKEN>`. (`refresh_token`
+   is deliberately **not** sent: the server has no consumer for it, and a real
+   one in the query string would persist a long-lived credential into
+   CloudFront/ALB access logs. The param is optional server-side.)
    (The same values are also set as headers — harmless, and lets the client work
    against the origin/ALB directly in future. **Do not "fix" back to header-only
    auth.**)
@@ -74,17 +77,32 @@ alongside the browser and the Node CLI.
 **Reconnect:** the server has no session resume. On any drop we reopen a new
 socket and send a **fresh START** (same callId), with capped exponential backoff
 (0.5 s → 10 s). PCM produced while down is buffered (bounded to ~3 s of stereo)
-and flushed on reconnect; overflow drops oldest and is counted. If the socket
-never opens and the handshake keeps failing (~4 tries), we treat it as an
-expired/invalid token, warn, and stop.
+and flushed on reconnect; overflow drops oldest and is counted. If the handshake
+keeps failing with an auth-looking rejection (~4 tries) and the token cannot be
+refreshed, we warn and stop.
+
+**Token refresh (issue #535):** Cognito access tokens last ~1 h; the server
+401s an expired one. `TokenStore` keeps the token alive for the life of the
+session — a proactive timer renews it ~5 min before `exp` (re-checked on
+`SystemEvents.PowerModeChanged` Resume, so a sleep or hibernate that outlasts
+the deadline is caught at wake), `Connect()` renews on demand when a token is
+already past that window (covers a Start an hour later), and a rejected
+handshake triggers one refresh-and-retry before it counts toward the fatal
+threshold. Only when the refresh token itself is rejected is auth fatal: the
+**tray app stays alive**, clears the session, and re-shows the sign-in form
+with the reason; the headless CLI exits non-zero. A single-flight connect gate
+ensures a reconnect timer and a refresh-then-retry can never open two sockets
+(and send two STARTs) for the same call. The pure scheduling/classification
+logic is pinned by `--selftest`.
 
 ## Source layout
 
 | File | Responsibility |
 |---|---|
 | `Engine/Config.cs` | Config layering: CLI flag → env var → `lma-config.json` → default |
-| `Engine/Srp.cs` | Cognito `USER_SRP_AUTH` login, dependency-free (`System.Numerics.BigInteger` + BCL crypto) |
-| `Engine/SelfTest.cs` | Offline known-answer test for the SRP crypto (`--selftest`) |
+| `Engine/Srp.cs` | Cognito `USER_SRP_AUTH` login + `REFRESH_TOKEN_AUTH` renewal, dependency-free (`System.Numerics.BigInteger` + BCL crypto) |
+| `Engine/TokenStore.cs` | Keeps the access token fresh: proactive refresh before `exp`, on-demand at connect, reactive after a 401; single-flight, resume-from-sleep aware (issue #535) |
+| `Engine/SelfTest.cs` | Offline known-answer tests: SRP crypto + token-refresh scheduling/classification (`--selftest`) |
 | `Engine/StereoMixer.cs` | Buffer 2 mono streams, drain `min(count)` on a 100 ms cadence → interleaved int16, mute/pause, VU meters, debug tee |
 | `Engine/TranscriberSocket.cs` | WebSocket START/PCM/END framing, reconnect + fresh START, PCM buffering, handshake-failure detection (`ClientWebSocket`) |
 | `Engine/WavTee.cs` | Debug: tee exact streamed PCM to a local WAV |
@@ -286,6 +304,15 @@ $env:LMA_CALL_ID="Native Windows test $(Get-Date -f HH:mm)"
 LMACaptureClient.exe --cli
 ```
 
+Access tokens expire in ~1 hour; to let a pasted-token session renew itself,
+also paste the Cognito **refresh token** into `LMA_REFRESH_TOKEN` (preferred —
+a refresh token is a long-lived credential, ~30 days, and anything on the
+command line is visible to other local users via Task Manager or
+`Get-CimInstance Win32_Process`; `--refresh-token` exists for parity) — with it
+the client refreshes proactively before `exp` and retries once after a 401 (see
+"Token refresh" below). The in-app `--username` login captures the refresh
+token automatically, so it never needs this variable.
+
 Interactive controls on a TTY: press **m** to toggle mic mute, **q** (or
 Ctrl-C) to stop.
 
@@ -376,6 +403,7 @@ bakes the deployment's real values into it; the checked-in copy is a placeholder
 | `samplingRate` | `--sample-rate` | `LMA_SAMPLE_RATE` | default **48000** |
 | — | `--token` | `LMA_ACCESS_TOKEN` | pasted access token (alt to login) |
 | — | `--id-token` | `LMA_ID_TOKEN` | pasted id token |
+| — | `--refresh-token` | `LMA_REFRESH_TOKEN` | pasted refresh token, lets the session renew itself (prefer the env var — argv is visible to other local users) |
 | — | `--call-id` | `LMA_CALL_ID` | default `"LMA native prototype - <ISO8601 now>"` |
 | — | `--agent-id` | `LMA_AGENT_ID` | mic-channel label, default `"Me"` |
 | — | `--from` | `LMA_FROM` | meeting-channel label, default `"Other participants"` |

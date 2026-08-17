@@ -163,7 +163,7 @@ Show the VNC live view and transcript for a virtual participant session:
 
 | Component Value | Description | Key Parameters |
 |----------------|-------------|----------------|
-| `stream-audio` | Stream-only: live meeting form + recording controls (mic / screen audio) | `meetingTopic`, `participants`, `owner`, `autoStart` |
+| `stream-audio` | Stream-only: live meeting form + recording controls (mic / screen audio) | `meetingTopic`, `participants`, `owner`, `autoStart`, `diarizeSystem`, `diarizeMic` |
 | `upload-audio` | Upload-only: file-picker form for pre-recorded audio / video + diarization toggle | `meetingTopic`, `participants`, `owner` |
 | `select-audio` | Combined page with a top-of-page Stream / Upload mode switcher | `meetingTopic`, `participants`, `owner` |
 | `call-details` | Complete call details view (transcript + summary + chat) | `callId`, `show`, `layout` |
@@ -195,6 +195,8 @@ Show the VNC live view and transcript for a virtual participant session:
 | `participants` | string | — | Pre-fill the participant label |
 | `owner` | string | (user email) | Pre-fill the meeting owner field |
 | `autoStart` | boolean | `false` | Automatically start streaming when the page loads |
+| `diarizeSystem` | boolean | `false` | Ask Amazon Transcribe to identify separate speakers in the shared tab audio. Each distinct voice is appended to the participant label as `(spk_0)`, `(spk_1)`, … See [Speaker Identification](stream-audio.md#speaker-identification). |
+| `diarizeMic` | boolean | `false` | Same, for the microphone channel |
 
 ### Authentication
 

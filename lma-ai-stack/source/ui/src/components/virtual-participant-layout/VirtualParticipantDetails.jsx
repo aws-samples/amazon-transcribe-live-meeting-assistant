@@ -251,6 +251,17 @@ const DESCRIPTION_BY_LAUNCH_TYPE = {
       'Task is queued waiting for an EC2 host slot. If the cluster is full, the auto-scaler will ' +
       'launch a new host (~60–90s); otherwise the task is just waiting briefly for placement.',
   },
+  // MICROVM is the default launch type, so leaving it out meant the common case
+  // fell back to launch-neutral ECS copy: "Starting the container…" (there is no
+  // container being scheduled) and a "~60–90 seconds" capacity wait (there is no
+  // capacity to wait for, and real startup is ~20–25s).
+  MICROVM: {
+    INITIALIZING: 'Starting a MicroVM from its snapshot and waiting for the headless browser stack to come up',
+    // A MicroVM resumes from a snapshot rather than queuing for a host slot, so
+    // this status should be brief; it appears only while Lambda allocates.
+    WAITING_FOR_CAPACITY: 'Waiting for Lambda to allocate a MicroVM. This normally clears within a few seconds.',
+    REGISTERING_NETWORK: 'Preparing the MicroVM endpoint for the live view',
+  },
 };
 
 // Resolve the best status description for a given deployment launch type.

@@ -231,7 +231,9 @@ Sent once at the beginning of a session to initialize the transcription.
   "fromNumber": "Customer Name",
   "toNumber": "Meeting Name",
   "samplingRate": 16000,
-  "activeSpeaker": "Customer Name"
+  "activeSpeaker": "Customer Name",
+  "diarizeSystemChannel": true,
+  "diarizeMicChannel": false
 }
 ```
 
@@ -244,6 +246,14 @@ Sent once at the beginning of a session to initialize the transcription.
 | `toNumber` | `string` | No | `"System Phone"` | Label for the system / meeting. Free-form string. |
 | `samplingRate` | `number` | **Yes** | — | Audio sample rate in Hz. Must match the actual audio being sent. Supported values: `8000` or `16000`. |
 | `activeSpeaker` | `string` | No | Value of `fromNumber` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
+| `diarizeSystemChannel` | `boolean` | No | `ShowSpeakerLabel` CFN parameter | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
+| `diarizeMicChannel` | `boolean` | No | `ShowSpeakerLabel` CFN parameter | Same, for the microphone channel (channel 1). |
+
+> **Precedence:** if the client sends **either** diarization field, its values are
+> used verbatim (a field left out counts as `false`). Only when **neither** field
+> is present does the server fall back to the deployment-wide `ShowSpeakerLabel`
+> CloudFormation parameter, applied to both channels. Anything other than a JSON
+> `true` — including the string `"true"` — is treated as `false`.
 
 #### 6.1.2 SPEAKER_CHANGE Message
 
@@ -298,6 +308,8 @@ type CallMetaData = {
   samplingRate: number;     // 8000 or 16000
   activeSpeaker: string;    // Current speaker on meeting channel (ch_0)
   shouldRecordCall?: boolean;
+  diarizeSystemChannel?: boolean;  // START only: diarize ch_0 (system/meeting)
+  diarizeMicChannel?: boolean;     // START only: diarize ch_1 (microphone)
   channels?: {              // Server-managed; do not send from client
     [channelId: string]: {
       currentSpeakerName: string | null;
@@ -384,7 +396,7 @@ If your source is a WAV file, you must **strip the WAV header** (typically the f
 
 ## 8. Speaker Tracking
 
-The server supports two mechanisms for speaker attribution:
+The server supports three mechanisms for speaker attribution:
 
 ### Channel-Based Attribution (Stereo)
 
@@ -400,6 +412,77 @@ For scenarios where multiple participants share the meeting channel (channel 0),
 - `SPEAKER_CHANGE` only affects channel 0 (the meeting channel)
 - If `activeSpeaker` matches `agentId`, the change is ignored (channel 1 always belongs to the agent)
 - Speaker names are free-form strings
+
+### Speaker Identification (Diarization)
+
+Channel-based attribution gives one name per channel, which is not enough when
+several people share a channel — a multi-participant call captured from a browser
+tab, or a conference-room microphone. Amazon Transcribe speaker partitioning
+(diarization) tells those voices apart, and it can be enabled **per channel** with
+the `diarizeSystemChannel` / `diarizeMicChannel` fields on the START message.
+
+The label is **appended** to the channel's existing speaker name rather than
+replacing it, so client-supplied names still come through:
+
+| Base speaker name | With diarization |
+|---|---|
+| `Other Participant` | `Other Participant (spk_0)`, `Other Participant (spk_1)`, … |
+| `alice@example.com` | `alice@example.com (spk_0)` |
+| `Bob` (from `SPEAKER_CHANGE`) | `Bob (spk_0)` |
+
+Speakers are numbered **per channel**, each starting at `spk_0`. The same person
+speaking on both channels therefore gets a different number on each.
+
+**Behaviour worth knowing before you enable it:**
+
+- **Labels arrive only on final segments.** Amazon Transcribe does not label
+  partial results, so a segment appears with the bare base name while it is still
+  partial and gains its `(spk_N)` when it finalizes.
+- **Numbering restarts on reconnect.** Speaker numbers are scoped to one
+  Transcribe session. If the session reconnects mid-meeting (see
+  [Reconnection](#reconnection)), the same person may come back as a different
+  `spk_N`.
+- **Accuracy degrades above about five voices per channel.** Transcribe can emit
+  up to `spk_29`, but the streaming API has no equivalent of the batch API's
+  `MaxSpeakerLabels`, so the count cannot be capped.
+- **Language support varies.** Diarization is gated per language. On a language
+  that does not support it, no labels are produced and speaker names are simply
+  unchanged.
+- **Segments are split at speaker turns.** A single Transcribe result routinely
+  spans several turns — in natural conversation there is no pause to break on, so
+  30-second results containing four turns are normal. The server recovers the turn
+  structure from the per-item labels and emits one transcript segment per turn.
+- **A live segment is bounded at 20 seconds.** Amazon Transcribe caps a result near
+  30 seconds and never labels a partial, so deferring entirely to its result
+  boundary would leave the live transcript showing one unlabelled block for that
+  long. Each result is therefore chunked into windows of at most
+  `DIARIZATION_MAX_SEGMENT_SECONDS` (default 20); a window whose audio is already in
+  the past is emitted as final even while Transcribe still calls the result partial,
+  so the live view settles and splits within that bound. Set the value to `0` to
+  disable chunking and follow Transcribe's boundaries exactly.
+
+  Two consequences worth knowing. A window boundary can fall in the middle of one
+  speaker's turn, producing two adjacent segments for the same speaker — the UI
+  merges those back together on display. And an early window is written twice: once
+  without a label when it settles, then once more with its `(spk_N)` label when the
+  final arrives (same segment id, so it updates in place rather than duplicating).
+- **Short label runs are absorbed, not split.** Word-level labels are noisy: a
+  single word flips to another speaker mid-utterance, and punctuation carries no
+  label at all. A run of same-speaker words must reach both
+  `DIARIZATION_MIN_RUN_WORDS` (default 3) and `DIARIZATION_MIN_RUN_SECONDS`
+  (default 0.5) to become its own segment; anything shorter is merged into its
+  neighbour. No transcript text is ever moved or dropped by this — only the
+  speaker attribution changes. The defaults were fitted to a real two-speaker
+  recording in which spurious runs measured 1-2 words / 0.1-0.9 s and real turns
+  6-42 words / 1.2-13.4 s. A consequence worth knowing: a genuine one- or two-word
+  interjection ("Yeah.") is attributed to the surrounding speaker.
+- **Tuning.** Every final result on a diarized channel logs a `[DIARIZATION]` line
+  at INFO giving the raw runs (label, words, seconds), the resulting segments, and
+  how many runs were absorbed — for example
+  `runs [spk_0x23w/7.3s, spk_2x19w/6.2s, spk_1x1w/0.1s] -> 2 segment(s) [spk_0, spk_2] (absorbed 1)`.
+  Use these to re-derive the thresholds for your own audio.
+- **No extra Transcribe cost.** Diarization is included in the standard rate, and
+  the two channels are billed as a single stream.
 
 ---
 
@@ -734,6 +817,10 @@ These environment variables configure the server and are provided here for refer
 | `RECORDINGS_BUCKET_NAME` | — | S3 bucket for audio recordings |
 | `RECORDING_FILE_PREFIX` | `lma-audio-recordings/` | S3 key prefix for recordings |
 | `SHOULD_RECORD_CALL` | `false` | Whether to record and upload audio to S3 |
+| `SHOW_SPEAKER_LABEL` | `false` | Default for speaker partitioning (diarization), applied to both channels. Used **only** when a client sends neither `diarizeSystemChannel` nor `diarizeMicChannel`. Set from the `ShowSpeakerLabel` CloudFormation parameter. |
+| `DIARIZATION_MIN_RUN_WORDS` | `3` | Minimum same-speaker words for a run to become its own transcript segment. Shorter runs are absorbed into the neighbouring turn. Not set by the CloudFormation template — override on the task definition to re-tune. |
+| `DIARIZATION_MIN_RUN_SECONDS` | `0.5` | Minimum duration, in seconds, for the same. A run must clear **both** thresholds. |
+| `DIARIZATION_MAX_SEGMENT_SECONDS` | `20` | Longest stretch of audio allowed in one in-progress segment. Bounds how long the live transcript can hold an unlabelled block, since Transcribe caps results near 30s and never labels a partial. `0` disables chunking. |
 | `CPU_HEALTH_THRESHOLD` | `50` | CPU usage % threshold for health check |
 | `LOCAL_TEMP_DIR` | `/tmp/` | Temporary directory for recording files |
 | `WS_LOG_LEVEL` | `debug` | Server log level |

@@ -6,6 +6,7 @@ import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
+import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick } from './prejoin-actions.js';
 
@@ -150,12 +151,12 @@ export default class Webex {
 
         if (isJoinUrl) {
             console.log('Navigating directly to Webex join URL.');
-            await page.goto(meetingIdValue);
+            await gotoMeetingPage(page, meetingIdValue, MEETING_HOST_PATTERNS.webex, 'webex-join');
             // Give the launch link time to redirect to the meeting join page.
             await new Promise(resolve => setTimeout(resolve, 3000));
         } else {
             console.log('Getting Webex meeting link.');
-            await page.goto('https://signin.webex.com/join');
+            await gotoMeetingPage(page, 'https://signin.webex.com/join', MEETING_HOST_PATTERNS.webex, 'webex-join');
             console.log('Entering meeting ID.');
             const meetingIdRes = await findElementWithFallback(
                 page,
