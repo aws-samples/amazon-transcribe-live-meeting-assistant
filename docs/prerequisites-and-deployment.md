@@ -103,7 +103,8 @@ Launch the LMA stack in one of the supported AWS regions using the buttons below
 |--------|-------------|
 | **US East (N. Virginia)** | [Launch Stack](https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/create/review?templateURL=https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
 | **US West (Oregon)** | [Launch Stack](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks/create/review?templateURL=https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
-| **AP Southeast (Sydney)** | [Launch Stack](https://ap-southeast-2.console.aws.amazon.com/cloudformation/home?region=ap-southeast-2#/stacks/create/review?templateURL=https://s3.ap-southeast-2.amazonaws.com/aws-bigdata-blog-replica-ap-southeast-2/artifacts/lma/lma-main.yaml&stackName=LMA) |
+| **Asia Pacific (Tokyo)** | [Launch Stack](https://ap-northeast-1.console.aws.amazon.com/cloudformation/home?region=ap-northeast-1#/stacks/create/review?templateURL=https://s3.ap-northeast-1.amazonaws.com/aws-bigdata-blog-replica-ap-northeast-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
+| **Europe (Ireland)** | [Launch Stack](https://eu-west-1.console.aws.amazon.com/cloudformation/home?region=eu-west-1#/stacks/create/review?templateURL=https://s3.eu-west-1.amazonaws.com/aws-bigdata-blog-replica-eu-west-1/artifacts/lma/lma-main.yaml&stackName=LMA) |
 
 Clicking the link opens the CloudFormation console with the LMA template pre-loaded. Review the parameters, acknowledge the IAM capabilities checkbox, and click **Create stack**.
 
