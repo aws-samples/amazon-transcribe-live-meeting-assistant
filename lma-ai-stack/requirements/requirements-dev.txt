@@ -13,6 +13,6 @@ yamllint~=1.38.0
 boto3~=1.43.67
 boto3-stubs[comprehend,codebuild,dynamodb,lambda,lexv2-runtime,s3,sqs,sns]~=1.43.67
 gql[botocore,aiohttp,requests]~=3.5.3
-aws-lambda-powertools~=3.31.1
+aws-lambda-powertools~=3.34.0
 phonenumbers~=9.0.36
 crhelper~=2.0.12
