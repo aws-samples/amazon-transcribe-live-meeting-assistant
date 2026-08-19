@@ -1,5 +1,5 @@
 # keep in sync with local dev dependencies in requirements-dev.txt
-boto3~=1.43.67
+boto3~=1.43.72
 gql[botocore,aiohttp,requests]~=3.5.3
 aws-lambda-powertools~=3.31.1
 phonenumbers~=9.0.36
