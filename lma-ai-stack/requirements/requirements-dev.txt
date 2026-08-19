@@ -5,7 +5,7 @@ cfn-lint~=1.54.0
 cfn-policy-validator~=0.0.31
 flake8~=7.3.0
 mypy~=2.3
-pylint~=4.0.6
+pylint~=4.0.7
 toml>=0.10.2
 yamllint~=1.38.0
 
