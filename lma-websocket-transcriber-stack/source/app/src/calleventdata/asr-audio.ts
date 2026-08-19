@@ -194,12 +194,11 @@ export class ChannelResampler {
 /**
  * Per-meeting speaker display names.
  *
- * The engine reports per-channel, per-session ids (spk_0, spk_1, ...). The first
- * voice heard on a channel is almost always the participant LMA already has a
- * name for (the local user on the microphone, the announced active speaker on the
- * tab), so it keeps that name; additional voices on the same channel get a number
- * from a counter shared by both channels, so two channels can never render the
- * same "Speaker N".
+ * The engine reports per-channel, per-session ids (spk_0, spk_1, ...). The voice on
+ * the microphone keeps the name LMA already has for the signed-in user; every voice
+ * on the tab is numbered, because the name LMA has for that side is a placeholder
+ * rather than a person. Numbers come from a counter shared by both channels, so two
+ * channels can never render the same "Speaker N".
  */
 export class SpeakerNameRegistry {
     private readonly labels = new Map<string, string>();
@@ -221,12 +220,17 @@ export class SpeakerNameRegistry {
         if (!speakerId) {
             return channelName;
         }
+
+        // The microphone's name is the signed-in user - a real identity, and the one
+        // name worth keeping. The tab's is a placeholder like "Other Participant",
+        // and handing that to the first voice heard there makes a correctly
+        // identified person read as the leftover bucket: a reviewer given a
+        // transcript of "Other Participant" beside "Speaker 1 (tab)" concluded the
+        // two had been merged when they had not. Placeholders are never identities.
+        const isMicrophone = channelId === 'ch_1';
         const primary = this.primaryByChannel.get(channelId);
-        if (primary === undefined) {
+        if (isMicrophone && (primary === undefined || primary === speakerId)) {
             this.primaryByChannel.set(channelId, speakerId);
-            return channelName;
-        }
-        if (primary === speakerId) {
             return channelName;
         }
 

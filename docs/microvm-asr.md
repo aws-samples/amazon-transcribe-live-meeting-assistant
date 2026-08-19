@@ -25,6 +25,7 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 - [Cost and sizing](#cost-and-sizing)
 - [Local development](#local-development)
 - [What is not yet measured](#what-is-not-yet-measured)
+- [Speaker names](#speaker-names)
 - [Known limitations](#known-limitations)
 - [Troubleshooting](#troubleshooting)
 - [Licences](#licences)
@@ -424,6 +425,27 @@ Honest state of validation, so nobody deploys this expecting known numbers:
 Measure these in a dev stack before offering the engine to users. Every number
 needed is in the MicroVM log group: per-session summaries carry audio seconds,
 segment counts and resident memory.
+
+## Speaker names
+
+The voice on the **microphone** keeps the name LMA already has for the signed-in
+user. Every voice on the **tab** is numbered — `Speaker 1 (tab)`, `Speaker 2 (tab)` —
+because the name LMA has for that side is a placeholder ("Other Participant"), not a
+person. Numbering is shared across channels, so no two identities render the same
+`Speaker N`.
+
+This is deliberate, and was learnt the hard way. Handing the placeholder to the first
+voice heard on the tab produced transcripts reading `Other Participant` beside
+`Speaker 1 (tab)`, and a reviewer given such a transcript concluded the two tab
+speakers had been merged into a leftover bucket — when they had in fact been separated
+correctly and one had simply spoken seven times as much. Clustering that meeting's
+embeddings independently of the labels found two voices 0.34 apart, with the labels
+matching the clusters one-for-one. A placeholder that looks like a bucket gets read as
+one, by people and by any model summarising the transcript.
+
+Labels are per meeting and per channel, and they are not identities. Mapping them onto
+real names — from the participant list, or by asking a model — is a separate step, and
+it works far better when every label is distinct.
 
 ## Known limitations
 

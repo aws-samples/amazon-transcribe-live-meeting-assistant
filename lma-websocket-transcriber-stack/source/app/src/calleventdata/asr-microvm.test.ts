@@ -189,9 +189,11 @@ test('a second voice on a channel becomes a numbered speaker', async () => {
     await session.finish();
     await asr.close();
 
+    // Both voices on the tab are numbered: giving the first one the channel's
+    // placeholder name made a correctly separated speaker read as a leftover bucket.
     assert.deepEqual(
         rows.map((row) => row.Speaker),
-        ['Meeting audio', 'Speaker 1 (tab)', 'Meeting audio']
+        ['Speaker 1 (tab)', 'Speaker 2 (tab)', 'Speaker 1 (tab)']
     );
     assert.deepEqual(
         rows.map((row) => row.SegmentId),

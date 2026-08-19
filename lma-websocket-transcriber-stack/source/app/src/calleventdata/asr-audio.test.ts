@@ -136,23 +136,43 @@ test('speaker registry keeps the known name for each channel first voice', () =>
     const registry = new SpeakerNameRegistry();
     assert.equal(registry.nameFor('ch_1', 'spk_0', 'Alex'), 'Alex');
     assert.equal(registry.nameFor('ch_1', 'spk_0', 'Alex'), 'Alex');
-    assert.equal(registry.nameFor('ch_0', 'spk_0', 'Meeting audio'), 'Meeting audio');
+    // The tab's name is a placeholder, not a person, so the voice there is numbered:
+    // a transcript of "Other Participant" beside "Speaker 1 (tab)" reads as one
+    // identified speaker plus an unlabelled bucket, and was reviewed as a merge.
+    assert.equal(registry.nameFor('ch_0', 'spk_0', 'Other Participant'), 'Speaker 1 (tab)');
+    assert.equal(registry.nameFor('ch_0', 'spk_0', 'Other Participant'), 'Speaker 1 (tab)');
+});
+
+test('every voice on the tab is numbered, in the order heard', () => {
+    const registry = new SpeakerNameRegistry();
+
+    assert.equal(registry.nameFor('ch_0', 'spk_0', 'Other Participant'), 'Speaker 1 (tab)');
+    assert.equal(registry.nameFor('ch_0', 'spk_1', 'Other Participant'), 'Speaker 2 (tab)');
+    assert.equal(registry.nameFor('ch_0', 'spk_0', 'Other Participant'), 'Speaker 1 (tab)');
+});
+
+test('diarization off still shows the channel name', () => {
+    const registry = new SpeakerNameRegistry();
+
+    assert.equal(registry.nameFor('ch_0', undefined, 'Other Participant'), 'Other Participant');
+    assert.equal(registry.nameFor('ch_1', null, 'Alex'), 'Alex');
 });
 
 test('speaker registry numbers extra voices uniquely across both channels', () => {
     const registry = new SpeakerNameRegistry();
     registry.nameFor('ch_1', 'spk_0', 'Alex');
-    registry.nameFor('ch_0', 'spk_0', 'Meeting audio');
+    const firstOnTab = registry.nameFor('ch_0', 'spk_0', 'Meeting audio');
 
     const secondOnMic = registry.nameFor('ch_1', 'spk_1', 'Alex');
     const secondOnTab = registry.nameFor('ch_0', 'spk_1', 'Meeting audio');
     const thirdOnTab = registry.nameFor('ch_0', 'spk_2', 'Meeting audio');
 
-    assert.equal(secondOnMic, 'Speaker 1 (mic)');
-    assert.equal(secondOnTab, 'Speaker 2 (tab)');
-    assert.equal(thirdOnTab, 'Speaker 3 (tab)');
+    assert.equal(firstOnTab, 'Speaker 1 (tab)');
+    assert.equal(secondOnMic, 'Speaker 2 (mic)');
+    assert.equal(secondOnTab, 'Speaker 3 (tab)');
+    assert.equal(thirdOnTab, 'Speaker 4 (tab)');
     // Stable once assigned.
-    assert.equal(registry.nameFor('ch_0', 'spk_1', 'Meeting audio'), 'Speaker 2 (tab)');
+    assert.equal(registry.nameFor('ch_0', 'spk_1', 'Meeting audio'), 'Speaker 3 (tab)');
 });
 
 test('speaker registry falls back to the channel name when diarization is off', () => {
@@ -161,8 +181,10 @@ test('speaker registry falls back to the channel name when diarization is off', 
     assert.equal(registry.nameFor('ch_1', undefined, 'Alex'), 'Alex');
 });
 
-test('speaker registry tracks the current channel name, not the one first seen', () => {
+test('the microphone follows the current channel name, not the one first seen', () => {
+    // The signed-in user's identifier arrives asynchronously, so it can change from
+    // a placeholder to the real one part-way through a meeting.
     const registry = new SpeakerNameRegistry();
-    assert.equal(registry.nameFor('ch_0', 'spk_0', 'Unknown'), 'Unknown');
-    assert.equal(registry.nameFor('ch_0', 'spk_0', 'Jordan'), 'Jordan');
+    assert.equal(registry.nameFor('ch_1', 'spk_0', 'Unknown'), 'Unknown');
+    assert.equal(registry.nameFor('ch_1', 'spk_0', 'Jordan'), 'Jordan');
 });

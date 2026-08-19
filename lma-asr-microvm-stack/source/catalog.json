@@ -83,8 +83,8 @@
       "approxDownloadMb": 28,
       "provenanceVerified": "2026-08-12",
       "embeddingDim": 512,
-      "recommendedThreshold": 0.3,
-      "measured": "2026-08-12: same-speaker median 0.27, different-speaker median 0.30 (p95 0.53) on the same audio \u2014 the two distributions overlap, so it separated speakers WORSE than TitaNet here. Not recommended without your own measurement."
+      "recommendedThreshold": 0.68,
+      "measured": "2026-08-12, utterances of 1-2s: same-speaker median 0.27, different-speaker median 0.30 (p95 0.53) - overlapping. 2026-08-19, the same voices with 5-20s utterances: same-speaker 0.763-0.872, different-speaker 0.407-0.621 within a channel, a gap of 0.143, so 0.68 works. Segment length moves this model's operating point as much as the model choice does. Caveat: across channels a different speaker reached 0.761, which nearly touches the same-speaker floor, so the margin is thinner than TitaNet's 0.43 on identical audio."
     },
     {
       "id": "wespeaker-en-resnet293-lm",
@@ -98,8 +98,7 @@
       "approxDownloadMb": 109,
       "provenanceVerified": "2026-08-12",
       "embeddingDim": 256,
-      "recommendedThreshold": 0.8,
-      "measured": "2026-08-12: every similarity runs high \u2014 same-speaker median 0.84-0.93 but different-speaker median 0.54 (p95 0.74). Needs a much higher threshold than the others and the tails still overlap; it looked perfect on single-speaker audio alone, which is why a same-speaker-only test is not sufficient evidence."
+      "measured": "NOT RECOMMENDED. 2026-08-19, real meeting audio: same-speaker 0.962-0.986 but different speakers 0.886-0.921, so the distributions overlap and no threshold separates them - 0.8 merged every voice on a channel into one. Everything recorded through the same path scores 0.88+ regardless of who is speaking while cross-channel pairs sit at 0.55-0.63, which suggests it encodes the recording condition more than the voice. Earlier note (2026-08-12) already showed overlapping tails; this quantifies it. No recommendedThreshold is shipped because there is no honest value."
     },
     {
       "id": "none",
