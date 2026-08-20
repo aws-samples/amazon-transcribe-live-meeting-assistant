@@ -96,6 +96,32 @@
       "redistributable": true,
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
       "notes": "Highest expected text accuracy and fully redistributable, at the cost of live latency: Parakeet TDT is OFFLINE, so the accurate engine segments audio with Silero VAD and decodes each utterance only once it closes. There is no interim text during an utterance, which changes the live meeting experience materially - live cutting cannot apply either, because a mid-utterance word list does not exist. Sized at 16384 MiB (8 vCPU) because a 0.6B offline decode has to catch up in bursts rather than keeping pace frame by frame. NOT YET CALIBRATED, and the latency has not been measured on a real meeting."
+    },
+    {
+      "id": "parakeet-streaming-titanet-small",
+      "name": "Parakeet unified streaming 560ms + TitaNet-small (ASR quality trial)",
+      "status": "uncalibrated",
+      "modelId": "parakeet-unified-streaming-en-0.6b-560ms-int8",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "A/B against nemotron-titanet-small: identical embedder, identical turn detection, identical 560ms lookahead, so any difference in a side-by-side meeting is the ASR model. That is the comparison worth running, because text quality - not diarization - is what a reviewer ranked below Amazon Transcribe. Uncalibrated only because TitaNet-small's 0.4 was measured against Nemotron's segmentation of the same audio; if the text is better, calibrate and this replaces the default."
+    },
+    {
+      "id": "parakeet-streaming-low-latency",
+      "name": "Parakeet unified streaming 240ms + TitaNet-small (low latency)",
+      "status": "uncalibrated",
+      "modelId": "parakeet-unified-streaming-en-0.6b-240ms-int8",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "Half the lookahead of every other streaming bundle, so partials appear sooner. Worth trying only after the 560ms variant, since it changes two things at once relative to the current default (model AND lookahead) and a shorter lookahead costs accuracy on a cache-aware model."
     }
   ],
   "models": [
@@ -202,6 +228,58 @@
       "provenanceVerified": "2026-08-20",
       "requiresVad": true,
       "note": "OFFLINE, not streaming: it is driven by the accurate engine, which segments audio with Silero VAD and decodes each closed utterance. That trades latency for accuracy - there is no interim text DURING an utterance, only when it ends - so it suits accuracy-first use more than a live meeting view. Chosen over Whisper (also permissive) because TDT is a transducer and reports token timestamps: turn splitting and live cutting both need word timings, and sherpa's Whisper export provides none, which would silently reduce diarization to one speaker per VAD segment."
+    },
+    {
+      "id": "parakeet-unified-streaming-en-0.6b-560ms-int8",
+      "name": "NVIDIA Parakeet unified streaming English 0.6B (560ms, int8)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms.tar.bz2",
+      "sha256": "dd2c2698f102eafbf0ee54bdfd7cd842ec00fa6cf2475cbbb048887f794ff52e",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "NVIDIA Open Model License",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-unified-en-0.6b",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 501,
+      "provenanceVerified": "2026-08-20",
+      "note": "Newer sibling of the Nemotron default: same cache-aware streaming transducer family and the SAME NVIDIA Open Model License, so no licensing gain - the reason to try it is ASR TEXT QUALITY, which is the weaker half of this engine (a reviewer ranked its text below Amazon Transcribe, and a real meeting produced a ten-token repetition loop). Trained on Granary / YTC / Yodas2 rather than Nemotron's data. NOT the same model as parakeet-tdt-0.6b-v3: that one is CC-BY-4.0 but offline, while this streaming 'unified' export is NVIDIA-licensed. Like-for-like against the Nemotron default's 560ms lookahead, so the two are directly comparable on the same meeting."
+    },
+    {
+      "id": "parakeet-unified-streaming-en-0.6b-240ms-int8",
+      "name": "NVIDIA Parakeet unified streaming English 0.6B (240ms, int8)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms.tar.bz2",
+      "sha256": "dead05a9149f6f02d373f3eb4553c74af4f189ff74889b5e210b35ca102655da",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "NVIDIA Open Model License",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-unified-en-0.6b",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 501,
+      "provenanceVerified": "2026-08-20",
+      "note": "Newer sibling of the Nemotron default: same cache-aware streaming transducer family and the SAME NVIDIA Open Model License, so no licensing gain - the reason to try it is ASR TEXT QUALITY, which is the weaker half of this engine (a reviewer ranked its text below Amazon Transcribe, and a real meeting produced a ten-token repetition loop). Trained on Granary / YTC / Yodas2 rather than Nemotron's data. NOT the same model as parakeet-tdt-0.6b-v3: that one is CC-BY-4.0 but offline, while this streaming 'unified' export is NVIDIA-licensed. Half the lookahead of the default, for a more responsive live transcript. Expect somewhat worse accuracy than 560ms: a cache-aware model sees less right-context per chunk."
     }
   ],
   "speakerModels": [

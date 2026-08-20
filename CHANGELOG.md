@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Streaming Parakeet bundles, to test whether a different ASR model fixes the text quality.** `parakeet-streaming-titanet-small` (560 ms) and `parakeet-streaming-low-latency` (240 ms). Diarization is not this engine's weak half — text is: a reviewer ranked its transcript below Amazon Transcribe's, and a real meeting produced a ten-token repetition loop plus "diarization" rendered six different wrong ways. The 560 ms bundle is a clean A/B against the default: identical embedder, identical turn detection, identical lookahead, so any difference on a side-by-side meeting is the ASR model alone.
+
+  Parakeet unified is the newer sibling of Nemotron (Granary / YTC / Yodas2 training data), the same cache-aware streaming transducer family, and the **same NVIDIA Open Model License** — no licensing gain, no licensing regression. Not to be confused with `parakeet-tdt-0.6b-v3`, which is CC-BY-4.0 but offline: there is no permissive *streaming* Parakeet.
+
+- **`scripts/sync_bundles.py` generates the CloudFormation bundle lists from `catalog.json`.** Adding a bundle previously meant hand-editing the same two facts into two templates. Both duplications were already covered by tests, but a guard that fails after the fact is worse than not editing by hand: an earlier character-offset edit to those blocks silently deleted four unrelated parameters, and only cfn-lint caught it. `--check` reports drift for CI, and the script refuses to write if the rewrite would change the template's top-level key count.
+
+### Fixed
+
+- **`docs/microvm-asr.md` table of contents listed three sections that no longer existed** (`Using it`, `How it works`, `Changing the model`) and omitted `Tuning it without a redeploy`. Regenerated from the actual headings.
+
+
 - **Four more model bundles, three of them redistributable.** Every checksum verified by downloading and hashing; the speaker models also match the publisher's own `checksum.txt`.
 
   - `permissive-fastconformer-titanet-large` — **the redistributable bundle worth trying first.** Its ASR model (`nemo-streaming-fast-conformer-transducer-en-480ms-int8`, CC-BY-4.0) is the same cache-aware streaming FastConformer-RNNT architecture as the Nemotron default, but trained on NeMo ASRSET — LibriSpeech, Fisher, Switchboard, WSJ, MLS-EN, Common Voice — so unlike the Apache-2.0 Zipformer it has seen thousands of hours of *spontaneous conversational* speech rather than read speech. It is also a quarter of the download (106 MB against 464 MB). Paired with TitaNet-large (CC-BY-4.0).

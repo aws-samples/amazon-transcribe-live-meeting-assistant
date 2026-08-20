@@ -55,6 +55,8 @@ Parameters:
       - nemotron-titanet-large
       - apache-only-zipformer-3dspeaker
       - accurate-parakeet-titanet-large
+      - parakeet-streaming-titanet-small
+      - parakeet-streaming-low-latency
     Description: >-
       Which pre-vetted model pairing the MicroVM ASR engine uses. Each bundle names an
       ASR model, a speaker-embedding model and a turn-detection model TOGETHER WITH the
@@ -176,6 +178,10 @@ Mappings:
       MiB: 8192
     accurate-parakeet-titanet-large:
       MiB: 16384
+    parakeet-streaming-titanet-small:
+      MiB: 8192
+    parakeet-streaming-low-latency:
+      MiB: 8192
 
 Resources:
   ##########################################################################

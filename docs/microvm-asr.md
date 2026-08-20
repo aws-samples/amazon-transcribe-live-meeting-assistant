@@ -18,10 +18,8 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 - [What it does](#what-it-does)
 - [Feature trade-offs versus Amazon Transcribe](#feature-trade-offs-versus-amazon-transcribe)
 - [Deploying it](#deploying-it)
+- [Tuning it without a redeploy](#tuning-it-without-a-redeploy)
 - [Calibrating the operating point](#calibrating-the-operating-point)
-- [Using it](#using-it)
-- [How it works](#how-it-works)
-- [Changing the model](#changing-the-model)
 - [Cost and sizing](#cost-and-sizing)
 - [Local development](#local-development)
 - [What is not yet measured](#what-is-not-yet-measured)
@@ -29,6 +27,8 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 - [Known limitations](#known-limitations)
 - [Troubleshooting](#troubleshooting)
 - [Licences](#licences)
+- [See Also](#see-also)
+
 
 ## Why this exists
 
@@ -120,6 +120,8 @@ numbers.
 | `nemotron-titanet-large` | Nemotron 560 ms | TitaNet-large | *uncalibrated* | No (NVIDIA OML) |
 | `apache-only-zipformer-3dspeaker` | Zipformer | 3D-Speaker CAM++ | *uncalibrated* | Yes (Apache-2.0 + MIT) |
 | `accurate-parakeet-titanet-large` | Parakeet TDT v3 **(offline)** | TitaNet-large | *uncalibrated* | **Yes** (CC-BY-4.0 + MIT) |
+| `parakeet-streaming-titanet-small` | Parakeet unified 560 ms | TitaNet-small | *uncalibrated* | No (NVIDIA OML) |
+| `parakeet-streaming-low-latency` | Parakeet unified 240 ms | TitaNet-small | *uncalibrated* | No (NVIDIA OML) |
 
 A bundle marked *uncalibrated* ships **no threshold**, so it produces no speaker labels
 until this deployment runs a calibration. That is the guardrail working, not a bug: a
@@ -138,6 +140,42 @@ One correction worth recording, because it is easy to assume otherwise: Parakeet
 permissive **offline**. `parakeet-tdt-0.6b-v2` and `-v3` are CC-BY-4.0, but the
 *streaming* "unified" Parakeet export is under the NVIDIA Open Model License, exactly
 like Nemotron. There is no permissive streaming Parakeet.
+
+### Adding a bundle
+
+Edit `source/catalog.json`, then run:
+
+```bash
+python3 lma-asr-microvm-stack/scripts/sync_bundles.py
+```
+
+That regenerates the `AsrModelBundle` allowed values in **both** `lma-main.yaml` and this
+stack's `template.yaml`, plus the `BundleMemory` mapping. The memory duplication cannot be
+removed — `MinimumMemoryInMiB` needs a CloudFormation-typed number and a Mapping cannot be
+keyed on a value a custom resource resolved — so it is generated instead. `--check` reports
+drift without writing, and unit tests assert the same thing, so a hand-edit that updates one
+file and forgets the other fails at commit time rather than 20 minutes into a deploy.
+
+### Trying to improve the ASR text
+
+Diarization is not this engine's weak half — text is. A reviewer ranked its transcript
+below Amazon Transcribe's, and a real meeting produced a ten-token repetition loop
+(`if if if if ...`) plus "diarization" rendered six different wrong ways. So there are two
+bundles whose only purpose is to test a different ASR model against the current default:
+
+`parakeet-streaming-titanet-small` is the A/B worth running. Identical embedder, identical
+turn detection, identical 560 ms lookahead — so any difference on a side-by-side meeting is
+the ASR model and nothing else. Parakeet unified is the newer sibling of Nemotron (Granary /
+YTC / Yodas2 training data), same cache-aware streaming transducer family, and the **same
+NVIDIA Open Model License**, so there is no licensing gain and no licensing regression.
+
+`parakeet-streaming-low-latency` drops the lookahead to 240 ms so partials appear sooner.
+Try it only after the 560 ms variant: it changes two things at once relative to the default,
+and a shorter lookahead costs a cache-aware model accuracy.
+
+Do not confuse the two Parakeets. `parakeet-tdt-0.6b-v3` is CC-BY-4.0 but **offline**;
+`parakeet-unified-...-streaming-*` streams but is **NVIDIA-licensed**. There is no
+permissive streaming Parakeet.
 
 ### The offline (`accurate`) bundle
 
