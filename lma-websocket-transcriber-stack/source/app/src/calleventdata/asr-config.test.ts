@@ -115,23 +115,34 @@ test('a failed read degrades to the deployment defaults instead of throwing', as
     assert.match(warnings[0], /using deployment defaults/);
 });
 
-test('an admin-set threshold is distinguished from the stack default', async () => {
-    // For a speaker model nobody has measured, this flag is the only evidence the
+test('a deliberately named threshold is distinguished from the bundle default', async () => {
+    // For a pairing nobody has calibrated, this flag is the only evidence the
     // operating point was ever checked, so it decides whether labels are produced.
+    // Either an admin typing one or an operator setting the stack parameter counts.
     resetAsrConfigCache();
     let restore = stubDynamo(async () => ({ Item: { speakerThreshold: { S: '0.35' } } }));
     assert.equal((await getAsrRuntimeConfig(fakeServer)).speakerThresholdOverridden, true);
     restore();
 
+    // The stack parameter alone (set at the top of this file) is also deliberate.
     resetAsrConfigCache();
     restore = stubDynamo(async () => ({ Item: { speakerThreshold: { S: '' } } }));
-    assert.equal((await getAsrRuntimeConfig(fakeServer)).speakerThresholdOverridden, false);
+    assert.equal((await getAsrRuntimeConfig(fakeServer)).speakerThresholdOverridden, true);
     restore();
 
+    // With neither, the bundle's baked value is in force and nobody has named one.
+    const stackValue = process.env['ASR_SPEAKER_THRESHOLD'];
+    delete process.env['ASR_SPEAKER_THRESHOLD'];
     resetAsrConfigCache();
     restore = stubDynamo(async () => ({}));
-    assert.equal((await getAsrRuntimeConfig(fakeServer)).speakerThresholdOverridden, false);
+    const config = await getAsrRuntimeConfig(fakeServer);
     restore();
+    process.env['ASR_SPEAKER_THRESHOLD'] = stackValue;
+
+    assert.equal(config.speakerThresholdOverridden, false);
+    // Undefined, not a constant: the engine then uses the value calibrated for the
+    // deployed bundle rather than a number that was right for one other pairing.
+    assert.equal(config.speakerThreshold, undefined);
 });
 
 test('an unmeasured speaker model is reported as such', () => {

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -26,9 +27,48 @@ with mock.patch("boto3.client"):
     import index  # noqa: E402
 
 CATALOG = {
-    "version": 1,
-    "defaultModelId": "model-a",
-    "defaultSpeakerModelId": "spk-a",
+    "version": 2,
+    "defaultBundleId": "bundle-a",
+    "bundles": [
+        {
+            "id": "bundle-a",
+            "status": "vetted",
+            "modelId": "model-a",
+            "speakerModelId": "spk-a",
+            "segmentationModelId": "none",
+            "speakerThreshold": 0.4,
+            "minSegmentMs": 2500,
+            "baselineMemoryMiB": 8192,
+            "redistributable": False,
+            "licenceSummary": "Example License + CC-BY-4.0",
+        },
+        {
+            "id": "bundle-no-speaker",
+            "status": "vetted",
+            "modelId": "model-a",
+            "speakerModelId": "none",
+            "segmentationModelId": "none",
+            "minSegmentMs": 2500,
+            "baselineMemoryMiB": 8192,
+        },
+        {
+            "id": "bundle-uncalibrated",
+            "status": "uncalibrated",
+            "modelId": "model-a",
+            "speakerModelId": "spk-a",
+            "segmentationModelId": "none",
+            "minSegmentMs": 2500,
+            "baselineMemoryMiB": 8192,
+        },
+        {
+            "id": "bundle-offline",
+            "status": "experimental",
+            "modelId": "offline-model",
+            "speakerModelId": "spk-a",
+            "segmentationModelId": "none",
+            "baselineMemoryMiB": 8192,
+        },
+    ],
     "models": [
         {
             "id": "model-a",
@@ -86,17 +126,19 @@ def members(zip_bytes: bytes) -> dict[str, str]:
         return {name: zf.read(name).decode() for name in zf.namelist()}
 
 
-def test_resolve_uses_the_catalog_default_when_no_model_is_named() -> None:
+def test_resolve_uses_the_catalog_default_when_no_bundle_is_named() -> None:
     selection = index.resolve({}, CATALOG)
 
+    assert selection["bundle"]["id"] == "bundle-a"
     assert selection["model"]["id"] == "model-a"
     assert selection["speaker"]["id"] == "spk-a"
+    assert selection["numThreads"] == 4
 
 
 def test_resolve_refuses_a_catalog_entry_with_no_pinned_checksum() -> None:
     catalog = {
         **CATALOG,
-        "defaultModelId": "unpinned",
+        "bundles": [{**CATALOG["bundles"][0], "modelId": "unpinned"}],
         "models": [{**CATALOG["models"][0], "id": "unpinned", "sha256": ""}],
     }
 
@@ -107,7 +149,7 @@ def test_resolve_refuses_a_catalog_entry_with_no_pinned_checksum() -> None:
 def test_resolve_refuses_a_catalog_entry_without_pinned_runtime_versions() -> None:
     catalog = {
         **CATALOG,
-        "defaultModelId": "loose",
+        "bundles": [{**CATALOG["bundles"][0], "modelId": "loose"}],
         "models": [{**CATALOG["models"][0], "id": "loose", "onnxruntime": ""}],
     }
 
@@ -118,7 +160,7 @@ def test_resolve_refuses_a_catalog_entry_without_pinned_runtime_versions() -> No
 def test_resolve_refuses_a_catalog_entry_missing_file_names() -> None:
     catalog = {
         **CATALOG,
-        "defaultModelId": "partial",
+        "bundles": [{**CATALOG["bundles"][0], "modelId": "partial"}],
         "models": [
             {**CATALOG["models"][0], "id": "partial", "files": {"encoder": "e.onnx"}},
         ],
@@ -130,23 +172,25 @@ def test_resolve_refuses_a_catalog_entry_missing_file_names() -> None:
 
 def test_resolve_rejects_a_non_streaming_engine() -> None:
     with pytest.raises(index.ResolutionError, match="only 'streaming' is supported"):
-        index.resolve({"ModelId": "offline-model"}, CATALOG)
+        index.resolve({"BundleId": "bundle-offline"}, CATALOG)
 
 
-def test_resolve_rejects_an_unknown_model_id() -> None:
+def test_resolve_rejects_an_unknown_bundle_id() -> None:
     with pytest.raises(index.ResolutionError, match="not in the catalog"):
-        index.resolve({"ModelId": "nope"}, CATALOG)
+        index.resolve({"BundleId": "nope"}, CATALOG)
 
 
 def test_resolve_allows_a_transcription_only_image() -> None:
-    selection = index.resolve({"SpeakerModelId": "none"}, CATALOG)
+    selection = index.resolve({"BundleId": "bundle-no-speaker"}, CATALOG)
 
     assert selection["speaker"]["url"] == ""
 
 
 SEGMENTATION_CATALOG = {
     **CATALOG,
-    "defaultSegmentationModelId": "seg-a",
+    "bundles": [
+        {**bundle, "segmentationModelId": "seg-a"} for bundle in CATALOG["bundles"]
+    ],
     "segmentationModels": [
         {
             "id": "seg-a",
@@ -176,7 +220,7 @@ def test_the_segmentation_model_is_resolved_and_rendered() -> None:
 
 
 def test_turn_detection_is_dropped_when_there_is_no_embedder_to_identify_turns() -> None:
-    selection = index.resolve({"SpeakerModelId": "none"}, SEGMENTATION_CATALOG)
+    selection = index.resolve({"BundleId": "bundle-no-speaker"}, SEGMENTATION_CATALOG)
 
     assert selection["segmentation"]["url"] == ""
 
@@ -189,26 +233,13 @@ def test_an_older_catalog_without_segmentation_models_still_resolves() -> None:
 
 
 def test_build_reports_whether_the_speaker_model_was_measured() -> None:
-    """A model with no measurement is what makes the transcriber withhold labels.
+    """An uncalibrated pairing is what makes the transcriber withhold labels.
 
-    Every model is a catalog entry now, so "unmeasured" means an entry that carries
-    no ``measured`` note — a newly added model nobody has characterised yet.
+    Calibration is a property of the BUNDLE, not of the embedder alone: utterance
+    length moves the threshold as much as the model does, so the same embedder can
+    be calibrated in one pairing and not in another.
     """
-    source = make_source_zip(
-        catalog={
-            **CATALOG,
-            "speakerModels": [
-                {**CATALOG["speakerModels"][0], "measured": "2026-08-12", "recommendedThreshold": 0.2},
-                {
-                    "id": "spk-new",
-                    "url": "https://example.invalid/new.onnx",
-                    "sha256": "d" * 64,
-                    "license": "Apache-2.0",
-                },
-                CATALOG["speakerModels"][1],
-            ],
-        }
-    )
+    source = make_source_zip()
 
     with mock.patch.object(
         index.s3, "get_object", side_effect=lambda **kw: {"Body": io.BytesIO(source)}
@@ -218,12 +249,14 @@ def test_build_reports_whether_the_speaker_model_was_measured() -> None:
             "DestBucket": "stack-bucket",
         }
         _, measured = index.build(properties)
-        _, unmeasured = index.build({**properties, "SpeakerModelId": "spk-new"})
+        _, unmeasured = index.build({**properties, "BundleId": "bundle-uncalibrated"})
 
     assert measured["SpeakerModelMeasured"] == "true"
-    assert measured["RecommendedThreshold"] == "0.2"
+    assert measured["SpeakerThreshold"] == "0.4"
     assert unmeasured["SpeakerModelMeasured"] == "false"
-    assert unmeasured["RecommendedThreshold"] == ""
+    # Blank, not a guess: a wrong threshold fragments or merges speakers, which is
+    # worse than the channel labels the transcriber falls back to.
+    assert unmeasured["SpeakerThreshold"] == ""
 
 
 def test_render_model_env_carries_every_value_the_build_reads() -> None:
@@ -274,7 +307,9 @@ def test_build_publishes_a_key_derived_from_the_selection() -> None:
         }
         first_key, data = index.build(properties)
         second_key, _ = index.build(properties)
-        changed_key, changed_data = index.build({**properties, "SpeakerModelId": "none"})
+        changed_key, changed_data = index.build(
+            {**properties, "BundleId": "bundle-no-speaker"}
+        )
 
     assert first_key.startswith("image-source/asr-microvm-src-")
     assert first_key.endswith(".zip")
@@ -291,6 +326,55 @@ def test_build_publishes_a_key_derived_from_the_selection() -> None:
     assert changed_data["DiarizationAvailable"] == "false"
     assert uploads[0]["Bucket"] == "stack-bucket"
     assert "model.env" in members(uploads[0]["Body"])
+
+
+def test_a_memory_disagreement_with_the_stack_fails_loudly() -> None:
+    """The template carries its own copy of the bundle's memory.
+
+    MinimumMemoryInMiB needs a CloudFormation-typed number and a Mapping cannot be
+    keyed on a value a custom resource resolved, so the figure is duplicated. If the
+    two ever drift the MicroVM would be sized for one bundle and its inference
+    threaded for another, which is exactly the kind of mismatch that shows up as
+    unexplained slowness rather than an error.
+    """
+    with pytest.raises(index.ResolutionError, match="template.yaml"):
+        index.resolve({"BundleId": "bundle-a", "BaselineMemoryMiB": "16384"}, CATALOG)
+
+
+def test_a_matching_memory_is_accepted() -> None:
+    selection = index.resolve({"BundleId": "bundle-a", "BaselineMemoryMiB": "8192"}, CATALOG)
+
+    assert selection["memoryMiB"] == 8192
+
+
+@pytest.mark.parametrize(("memory", "threads"), [(4096, 2), (8192, 4), (16384, 8)])
+def test_threads_track_the_two_gib_per_vcpu_ratio(memory: int, threads: int) -> None:
+    assert index._threads_for(memory) == threads
+
+
+def test_a_calibrated_bundle_bakes_its_operating_point() -> None:
+    """The whole point of bundles: no stack parameter needed to get it right.
+
+    The CloudFormation default used to be 0.2 while the catalog's measured value for
+    the default embedder was 0.4, and nothing reconciled them — the deployment ran
+    at 0.2 and merged two speakers on a live meeting.
+    """
+    env = index.render_model_env(index.resolve({"BundleId": "bundle-a"}, CATALOG))
+
+    assert "ASR_SPEAKER_THRESHOLD=0.4" in env
+    assert "ASR_MIN_SEGMENT_MS=2500" in env
+    assert "ASR_BUNDLE_ID=bundle-a" in env
+
+
+def test_an_uncalibrated_bundle_bakes_a_blank_threshold() -> None:
+    env = index.render_model_env(index.resolve({"BundleId": "bundle-uncalibrated"}, CATALOG))
+    values = dict(
+        line.split("=", 1)
+        for line in env.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+
+    assert values["ASR_SPEAKER_THRESHOLD"] == ""
 
 
 def test_build_rejects_a_malformed_source_location() -> None:
@@ -328,8 +412,9 @@ def test_the_shipped_catalog_resolves_with_the_stack_defaults() -> None:
     catalog = json.loads((Path(__file__).parents[2] / "source" / "catalog.json").read_text())
 
     default = index.resolve({}, catalog)
-    assert default["model"]["id"] == catalog["defaultModelId"]
-    assert default["speaker"]["id"] == catalog["defaultSpeakerModelId"]
+    assert default["bundle"]["id"] == catalog["defaultBundleId"]
+    assert default["model"]["id"] == default["bundle"]["modelId"]
+    assert default["speaker"]["id"] == default["bundle"]["speakerModelId"]
 
     rendered = index.render_model_env(default)
     for key in (
@@ -345,12 +430,53 @@ def test_the_shipped_catalog_resolves_with_the_stack_defaults() -> None:
         line = next(one for one in rendered.splitlines() if one.startswith(f"{key}="))
         assert line.split("=", 1)[1], f"{key} is empty in the shipped catalog"
 
-    # Every catalog entry, not just the default, must be resolvable.
-    for entry in catalog["models"]:
-        if entry.get("engine") == "streaming":
-            index.resolve({"ModelId": entry["id"]}, catalog)
-    for entry in catalog["speakerModels"]:
-        index.resolve({"SpeakerModelId": entry["id"]}, catalog)
+    # Every shipped bundle, not just the default, must resolve and render. A bundle
+    # naming a model id that does not exist would only surface as a failed image
+    # build minutes into a deployment.
+    for bundle in catalog["bundles"]:
+        index.render_model_env(index.resolve({"BundleId": bundle["id"]}, catalog))
+
+
+def test_every_shipped_bundle_is_selectable_from_the_template() -> None:
+    """The catalog and the template's AllowedValues must agree.
+
+    A bundle present in one but not the other is either unselectable or a deploy-time
+    parameter-validation failure, and neither shows up until someone tries it.
+    """
+    catalog = json.loads(
+        (Path(__file__).resolve().parents[2] / "source" / "catalog.json").read_text()
+    )
+    template = (Path(__file__).resolve().parents[2] / "template.yaml").read_text()
+
+    block = template.split("  AsrModelBundle:", 1)[1].split("Description:", 1)[0]
+    allowed = {
+        line.strip().removeprefix("- ")
+        for line in block.splitlines()
+        if line.strip().startswith("- ")
+    }
+
+    assert allowed == {bundle["id"] for bundle in catalog["bundles"]}
+    assert catalog["defaultBundleId"] in allowed
+
+
+def test_the_template_memory_mapping_matches_every_bundle() -> None:
+    """Guards the duplication that MinimumMemoryInMiB forces.
+
+    The resolver refuses a mismatch at deploy time; this catches it at commit time.
+    """
+    root = Path(__file__).resolve().parents[2]
+    catalog = json.loads((root / "source" / "catalog.json").read_text())
+    template = (root / "template.yaml").read_text()
+
+    mapping = template.split("  BundleMemory:", 1)[1].split("\nResources:", 1)[0]
+    mapped = {
+        name: int(mib)
+        for name, mib in re.findall(r"^\s{4}([\w.+-]+):\n\s{6}MiB:\s*(\d+)", mapping, re.M)
+    }
+
+    assert mapped == {
+        bundle["id"]: bundle.get("baselineMemoryMiB", 8192) for bundle in catalog["bundles"]
+    }
 
 
 def test_the_shipped_source_zip_layout_survives_the_rewrite() -> None:

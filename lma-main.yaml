@@ -358,61 +358,32 @@ Parameters:
       existing behaviour on its own: meetings still use Amazon Transcribe unless a
       client asks for diarization.
 
-  AsrModelId:
+  AsrModelBundle:
     Type: String
-    Default: nemotron-streaming-en-0.6b-560ms-int8
+    Default: nemotron-titanet-small
     AllowedValues:
-      - nemotron-streaming-en-0.6b-560ms-int8
-      - zipformer-streaming-en-2023-06-26-int8
+      - nemotron-titanet-small
+      - permissive-zipformer-campplus
+      - transcription-only
     Description: >-
-      MicroVM ASR model, both English-only. The default is the more accurate of the
-      two but is licensed under the NVIDIA Open Model License; the Zipformer entry
-      is Apache-2.0, so pairing it with a WeSpeaker speaker model gives an
-      Apache-2.0-only stack, at the cost of accuracy on real meeting audio (it is
-      trained on read speech). Every option is a curated entry in the ASR stack's
-      catalog.json with a pinned checksum; to offer another model, add it there.
-
-  AsrSpeakerModelId:
-    Type: String
-    Default: titanet-small
-    AllowedValues:
-      - titanet-small
-      - wespeaker-en-cam++-lm
-      - wespeaker-en-resnet293-lm
-      - none
-    Description: >-
-      Speaker-embedding model used for diarization. titanet-small (CC-BY-4.0) is
-      the default and the only one measured to separate speakers well on real
-      meeting audio; the two WeSpeaker models (Apache-2.0) are offered for
-      licensing reasons and measured WORSE on that audio, so calibrate before
-      trusting them. "none" builds a transcription-only ASR image. A model with no
-      measurement in catalog.json produces no speaker labels until this deployment
-      calibrates its own threshold.
-
-  AsrSegmentationModelId:
-    Type: String
-    Default: pyannote-segmentation-3-0
-    AllowedValues:
-      - pyannote-segmentation-3-0
-      - none
-    Description: >-
-      Speaker-turn detection for diarization: pyannote segmentation 3.0 (MIT, 6 MB,
-      redistributed as ONNX by k2-fsa so no Hugging Face token is needed) lets the
-      engine split one endpointed utterance when two people speak inside it, instead
-      of attributing the whole thing to one speaker. "none" keeps the previous
-      behaviour of one speaker per utterance. Ignored when AsrSpeakerModelId is
-      "none".
-
-  AsrBaselineMemoryMiB:
-    Type: Number
-    Default: 8192
-    AllowedValues:
-      - 4096
-      - 8192
-      - 16384
-    Description: >-
-      Baseline memory per ASR MicroVM; CPU is allocated at 2 GiB per vCPU, so 8192
-      gives 4 vCPU. Both audio channels of a meeting decode on one MicroVM.
+      Which pre-vetted model pairing the MicroVM ASR engine uses. Each bundle names
+      an ASR model, a speaker-embedding model and a turn-detection model TOGETHER
+      WITH the diarization operating point measured for that combination, so a
+      deployment gets a working configuration without tuning anything. Picking the
+      three models separately is deliberately not offered: the similarity threshold
+      is not a property of the embedder alone (utterance length moves it as much as
+      the model does), so it is only meaningful for a stated pairing.
+      * nemotron-titanet-small - accuracy-first default, validated on real meetings.
+        Its ASR weights are under the NVIDIA Open Model License and are NOT
+        redistributable.
+      * permissive-zipformer-campplus - Apache-2.0 and MIT throughout, so the image
+        may be redistributed, but measurably worse on spontaneous meeting audio (the
+        ASR model is trained on read speech).
+      * transcription-only - no diarization; smallest image, transcripts labelled by
+        audio channel as they are with Amazon Transcribe.
+      Every value is a curated entry in the ASR stack's catalog.json with pinned
+      checksums. Runtime tuning stays available on the ASR Config admin page without
+      a stack update; changing the bundle rebuilds the MicroVM image (~20 minutes).
 
   AsrMaxMeetingSeconds:
     Type: Number
@@ -434,30 +405,6 @@ Parameters:
       share a microphone or a browser tab is not knowable in advance. A cap is a
       safety net, not a fix for over-splitting — set it only when the meeting size
       is genuinely known, the way the Upload Audio page asks for it.
-
-  AsrMinSegmentMs:
-    Type: Number
-    Default: 2500
-    MinValue: 0
-    MaxValue: 5000
-    Description: >-
-      Shortest utterance worth computing a speaker embedding for. Anything shorter
-      inherits the current speaker instead of minting a new identity, because an
-      embedding from a fraction of a second is unreliable. Raise it if short
-      utterances keep appearing as new speakers.
-
-  AsrSpeakerThreshold:
-    Type: String
-    Default: "0.2"
-    AllowedPattern: "^0?\\.[0-9]+$"
-    Description: >-
-      Cosine similarity above which two utterances are treated as the same
-      speaker. Higher splits voices more eagerly; lower merges more eagerly. This
-      value is SPECIFIC TO THE SPEAKER MODEL — see recommendedThreshold in
-      source/catalog.json. 0.2 is the measured operating point for the default
-      TitaNet embedder, where different speakers score at most ~0.11 and the same
-      speaker 0.25-0.5; the sherpa default of 0.5 fragmented one person into eight
-      identities in a live meeting.
 
   ModelValidation:
     Type: String
@@ -960,14 +907,9 @@ Metadata:
           default: On-demand ASR and Diarization (MicroVM, alternative to Amazon Transcribe)
         Parameters:
           - TranscriptionEngine
-          - AsrModelId
-          - AsrSpeakerModelId
-          - AsrSegmentationModelId
-          - AsrBaselineMemoryMiB
+          - AsrModelBundle
           - AsrMaxMeetingSeconds
           - AsrMaxSpeakers
-          - AsrSpeakerThreshold
-          - AsrMinSegmentMs
       - Label:
           default: Transcript Event Processing Configuration
         Parameters:
@@ -1094,22 +1036,12 @@ Metadata:
         default: Transcription Custom Language Model Name
       TranscriptionEngine:
         default: Streaming Transcription Engine
-      AsrModelId:
-        default: ASR Model
-      AsrSpeakerModelId:
-        default: Speaker Embedding Model (diarization)
-      AsrBaselineMemoryMiB:
-        default: ASR MicroVM Baseline Memory (MiB)
+      AsrModelBundle:
+        default: ASR Model Bundle (pre-vetted pairing)
       AsrMaxMeetingSeconds:
         default: ASR MicroVM Maximum Lifetime (seconds)
       AsrMaxSpeakers:
         default: ASR Maximum Speakers Per Channel
-      AsrSpeakerThreshold:
-        default: ASR Speaker Similarity Threshold
-      AsrMinSegmentMs:
-        default: ASR Minimum Utterance For Speaker ID (ms)
-      AsrSegmentationModelId:
-        default: Speaker Turn Detection Model (diarization)
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
@@ -1216,7 +1148,7 @@ Conditions:
   ShouldDeployMicrovmAsr: !Equals [!Ref TranscriptionEngine, "MicrovmAsr"]
   ShouldEnableAsrDiarization: !And
     - !Condition ShouldDeployMicrovmAsr
-    - !Not [!Equals [!Ref AsrSpeakerModelId, "none"]]
+    - !Not [!Equals [!Ref AsrModelBundle, "transcription-only"]]
 
 Resources:
   ##########################################################################
@@ -2738,14 +2670,9 @@ Resources:
         LambdaArtifactBucket: <ARTIFACT_BUCKET_NAME_TOKEN>
         AsrLauncherS3Key: <ASR_MICROVM_LAUNCHER_S3_KEY_TOKEN>
         AsrImageSourceS3Key: <ASR_MICROVM_IMAGE_SOURCE_S3_KEY_TOKEN>
-        AsrModelId: !Ref AsrModelId
-        AsrSpeakerModelId: !Ref AsrSpeakerModelId
-        AsrSegmentationModelId: !Ref AsrSegmentationModelId
-        AsrBaselineMemoryMiB: !Ref AsrBaselineMemoryMiB
+        AsrModelBundle: !Ref AsrModelBundle
         AsrMaxMeetingSeconds: !Ref AsrMaxMeetingSeconds
         AsrMaxSpeakers: !Ref AsrMaxSpeakers
-        AsrSpeakerThreshold: !Ref AsrSpeakerThreshold
-        AsrMinSegmentMs: !Ref AsrMinSegmentMs
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
@@ -2791,13 +2718,31 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerModelMeasured
           - "true"
+        AsrModelBundleId: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleId
+          - ""
+        AsrBundleThreshold: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerThreshold
+          - ""
         AsrConfigTableName: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
           - ""
         AsrMaxSpeakers: !Ref AsrMaxSpeakers
-        AsrSpeakerThreshold: !Ref AsrSpeakerThreshold
-        AsrMinSegmentMs: !Ref AsrMinSegmentMs
+        # The calibrated operating point for the deployed bundle, resolved from
+        # catalog.json by the ASR stack. Previously a top-level parameter defaulting
+        # to 0.2 while the catalog's measured value for the default embedder was
+        # 0.4 - the disagreement merged two speakers into one on a live meeting.
+        AsrSpeakerThreshold: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerThreshold
+          - ""
+        AsrMinSegmentMs: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.MinSegmentMs
+          - ""
         PcaS3BucketName: ""
         PcaTranscriptsPrefix: ""
         PcaPlaybackAudioFilePrefix: ""

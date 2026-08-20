@@ -11,16 +11,31 @@ zip, rewrites ``model.env``, and republishes the zip under a key derived from th
 selection. Because the key changes with the selection, changing the model
 parameter changes CodeArtifact.Uri and CloudFormation rebuilds the image.
 
+Selection is by BUNDLE, not by individual model. A bundle names the ASR model, the
+speaker embedder and the turn-detection model *together with the operating point
+measured for that combination*, because the threshold is not a property of the
+embedder alone: utterance length moves it as much as the model does. Picking the
+three models separately let a deployment assemble a combination nobody had ever
+measured, and the CloudFormation default threshold (0.2) then silently disagreed
+with the catalog's own measured value for the default embedder (0.4).
+
 Returns:
     SourceUri            s3:// URI for AWS::Lambda::MicrovmImage CodeArtifact
     SourceLocation       bucket/key form
+    BundleId             resolved bundle id
     ModelId              resolved model id
     SpeakerModelId       resolved speaker model id
     SegmentationModelId  resolved speaker-turn detection model id
     DiarizationAvailable "true" when a speaker model is baked into the image
     TurnDetectionAvailable "true" when a segmentation model is baked into the image
-    SpeakerModelMeasured "true" when the catalog records a measured operating point
+    SpeakerModelMeasured "true" when the bundle carries a calibrated threshold
+    SpeakerThreshold     the bundle's calibrated threshold, or "" when uncalibrated
+    MinSegmentMs         shortest utterance worth embedding, for this bundle
+    BaselineMemoryMiB    memory the bundle was sized for
+    NumThreads           inference threads implied by that memory
+    Redistributable      "true" when every weight in the bundle may be redistributed
     ModelLicense         licence of the resolved model, for the stack outputs
+    LicenceSummary       one-line licence summary for the whole bundle
 
 Every model is a curated catalog entry: there is no parameter for supplying a URL,
 so a new model is added by editing catalog.json (with its checksum pinned and its
@@ -66,11 +81,38 @@ def _find(entries: list, entry_id: str) -> dict:
     raise ResolutionError(f"{entry_id!r} is not in the catalog. Available: {available}")
 
 
+# Memory is allocated at 2 GiB per vCPU, and inference threads are matched to the
+# vCPU count. Kept here rather than as a CloudFormation Mapping because the memory
+# now comes from the bundle, and a Mapping cannot be keyed on a resolved value.
+_THREADS_BY_MEMORY_MIB = {4096: 2, 8192: 4, 16384: 8}
+
+
+def _threads_for(memory_mib: int) -> int:
+    return _THREADS_BY_MEMORY_MIB.get(memory_mib, max(1, memory_mib // 2048))
+
+
 def resolve(properties: dict, catalog: dict) -> dict:
-    model_id = _prop(properties, "ModelId") or catalog.get("defaultModelId", "")
-    speaker_id = _prop(properties, "SpeakerModelId") or catalog.get(
-        "defaultSpeakerModelId", "none"
-    )
+    bundle_id = _prop(properties, "BundleId") or catalog.get("defaultBundleId", "")
+    bundles = catalog.get("bundles", [])
+    if not bundles:
+        raise ResolutionError("catalog.json defines no bundles")
+    bundle = dict(_find(bundles, bundle_id))
+
+    model_id = bundle.get("modelId", "")
+    speaker_id = bundle.get("speakerModelId", "none")
+
+    memory_mib = int(bundle.get("baselineMemoryMiB", 8192))
+    # The template needs the memory as a CloudFormation-typed number for
+    # MinimumMemoryInMiB, so it carries its own copy. Cross-check them: a silent
+    # disagreement would size the MicroVM for one bundle and thread the inference
+    # for another.
+    declared = _prop(properties, "BaselineMemoryMiB")
+    if declared and int(declared) != memory_mib:
+        raise ResolutionError(
+            f"bundle {bundle_id!r} is sized for {memory_mib} MiB but the stack passed "
+            f"{declared} MiB. Update the BundleMemory mapping in template.yaml to match "
+            "catalog.json."
+        )
 
     model = dict(_find(catalog.get("models", []), model_id))
     files = dict(model.get("files") or {})
@@ -101,9 +143,7 @@ def resolve(properties: dict, catalog: dict) -> dict:
             f"speaker model {speaker.get('id')!r} has no pinned SHA256"
         )
 
-    segmentation_id = _prop(properties, "SegmentationModelId") or catalog.get(
-        "defaultSegmentationModelId", "none"
-    )
+    segmentation_id = bundle.get("segmentationModelId", "none")
     entries = catalog.get("segmentationModels", [])
     if segmentation_id in ("none", "") or not entries:
         segmentation = {"id": segmentation_id or "none", "url": "", "sha256": "", "license": "n/a"}
@@ -118,16 +158,31 @@ def resolve(properties: dict, catalog: dict) -> dict:
     if not speaker.get("url"):
         segmentation = {"id": "none", "url": "", "sha256": "", "license": "n/a"}
 
-    return {"model": model, "speaker": speaker, "segmentation": segmentation}
+    return {
+        "bundle": bundle,
+        "model": model,
+        "speaker": speaker,
+        "segmentation": segmentation,
+        "memoryMiB": memory_mib,
+        "numThreads": _threads_for(memory_mib),
+    }
 
 
 def render_model_env(selection: dict) -> str:
     model = selection["model"]
     speaker = selection["speaker"]
     segmentation = selection.get("segmentation") or {"id": "none"}
+    bundle = selection.get("bundle") or {}
     files = model["files"]
     lines = [
         "# Generated by the LMA AsrImageSource custom resource. Do not edit.",
+        f"ASR_BUNDLE_ID={bundle.get('id', '')}",
+        # The bundle's own calibrated operating point, baked in so the image has a
+        # working default without any stack parameter or DynamoDB override. Blank
+        # when this pairing has never been calibrated, which the engine treats as
+        # "withhold speaker labels" rather than "guess".
+        f"ASR_SPEAKER_THRESHOLD={bundle.get('speakerThreshold', '')}",
+        f"ASR_MIN_SEGMENT_MS={bundle.get('minSegmentMs', '')}",
         f"ASR_MODEL_ID={model['id']}",
         f"ASR_MODEL_URL={model['url']}",
         f"ASR_MODEL_SHA256={model['sha256']}",
@@ -203,20 +258,31 @@ def build(properties: dict) -> tuple[str, dict]:
     logger.info("Published ASR image source to s3://%s/%s", dest_bucket, key)
 
     speaker_url = selection["speaker"].get("url", "")
+    bundle = selection["bundle"]
+    threshold = bundle.get("speakerThreshold")
     return key, {
         "SourceUri": f"s3://{dest_bucket}/{key}",
         "SourceLocation": f"{dest_bucket}/{key}",
+        "BundleId": bundle.get("id", ""),
+        "BundleStatus": bundle.get("status", "uncalibrated"),
+        "LicenceSummary": bundle.get("licenceSummary", "unknown"),
+        "Redistributable": "true" if bundle.get("redistributable") else "false",
         "ModelId": selection["model"]["id"],
         "ModelLicense": selection["model"].get("license", "unknown"),
         "SpeakerModelId": selection["speaker"].get("id", "none"),
         "DiarizationAvailable": "true" if speaker_url else "false",
-        # Whether anyone has measured this embedder's same-speaker vs
-        # different-speaker distributions. "false" means the shipped threshold is a
-        # guess for it, and a guessed threshold fragments or merges speakers.
-        "SpeakerModelMeasured": "true" if selection["speaker"].get("measured") else "false",
+        # Whether THIS PAIRING has a calibrated operating point. Not a property of
+        # the embedder alone: utterance length moves the threshold as much as the
+        # model does, so a threshold is only meaningful for a stated pairing.
+        # "false" means any threshold would be a guess, and a guessed threshold
+        # fragments one speaker into many or merges several into one.
+        "SpeakerModelMeasured": "true" if threshold is not None else "false",
+        "SpeakerThreshold": "" if threshold is None else str(threshold),
+        "MinSegmentMs": str(bundle.get("minSegmentMs", "")),
+        "BaselineMemoryMiB": str(selection["memoryMiB"]),
+        "NumThreads": str(selection["numThreads"]),
         "SegmentationModelId": selection["segmentation"].get("id", "none"),
         "TurnDetectionAvailable": "true" if selection["segmentation"].get("url") else "false",
-        "RecommendedThreshold": str(selection["speaker"].get("recommendedThreshold", "")),
     }
 
 

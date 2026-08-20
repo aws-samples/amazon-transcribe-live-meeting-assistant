@@ -12,18 +12,13 @@ Metadata:
       - Label:
           default: Model selection
         Parameters:
-          - AsrModelId
-          - AsrSpeakerModelId
-          - AsrSegmentationModelId
+          - AsrModelBundle
           - AsrEnableDiarization
       - Label:
           default: Runtime sizing and tuning
         Parameters:
-          - AsrBaselineMemoryMiB
           - AsrMaxMeetingSeconds
           - AsrMaxSpeakers
-          - AsrSpeakerThreshold
-          - AsrMinSegmentMs
           - AsrLogLevel
 
 Parameters:
@@ -49,47 +44,25 @@ Parameters:
     Type: String
     Description: S3 key of the ASR image-source packager Lambda deployment package.
 
-  AsrModelId:
+  AsrModelBundle:
     Type: String
-    Default: nemotron-streaming-en-0.6b-560ms-int8
+    Default: nemotron-titanet-small
     AllowedValues:
-      - nemotron-streaming-en-0.6b-560ms-int8
-      - zipformer-streaming-en-2023-06-26-int8
+      - nemotron-titanet-small
+      - permissive-zipformer-campplus
+      - transcription-only
     Description: >-
-      Streaming ASR model baked into the image, from source/catalog.json. The
-      default is English-only and licensed under the NVIDIA Open Model License.
-      Choose Custom to supply your own model URL, checksum and file names, for
-      example to satisfy a licensing requirement. Changing this rebuilds the
-      MicroVM image (several minutes).
-
-  AsrSpeakerModelId:
-    Type: String
-    Default: titanet-small
-    AllowedValues:
-      - titanet-small
-      - wespeaker-en-cam++-lm
-      - wespeaker-en-resnet293-lm
-      - none
-    Description: >-
-      Speaker-embedding model used for diarization; entries come from
-      source/catalog.json, where each carries the measurement it was chosen on.
-      Each model has its own cosine scale, so switching one without re-measuring
-      the threshold fragments or merges speakers. "none" builds a
-      transcription-only image and diarization requests are then reported as
-      unsupported rather than silently returning no speaker labels.
-
-  AsrSegmentationModelId:
-    Type: String
-    Default: pyannote-segmentation-3-0
-    AllowedValues:
-      - pyannote-segmentation-3-0
-      - none
-    Description: >-
-      Speaker-turn detection model, used to split one endpointed utterance when two
-      people speak inside it. pyannote segmentation 3.0 (MIT, 6 MB) is redistributed
-      as ONNX by k2-fsa, so no Hugging Face token is needed. Ignored when
-      AsrSpeakerModelId is "none", since there would be no embedder to identify the
-      turns it finds.
+      A pre-vetted pairing of ASR model, speaker-embedding model and turn-detection
+      model, together with the diarization operating point measured for that
+      combination (source/catalog.json). Selecting a bundle rather than three models
+      separately is deliberate: the similarity threshold is not a property of the
+      embedder alone - utterance length moves it as much as the model does - so a
+      threshold is only meaningful for a stated pairing. nemotron-titanet-small is
+      the accuracy-first default but its ASR weights are under the NVIDIA Open Model
+      License and are NOT redistributable; permissive-zipformer-campplus is
+      Apache-2.0/MIT throughout and measurably worse on real meeting audio;
+      transcription-only builds the smallest image and labels transcripts by audio
+      channel. Changing this rebuilds the MicroVM image (several minutes).
 
   AsrEnableDiarization:
     Type: String
@@ -101,17 +74,6 @@ Parameters:
     Description: >-
       Auto enables diarization when a speaker model is present in the image. On
       fails at startup if it is missing. Off disables it regardless.
-
-  AsrBaselineMemoryMiB:
-    Type: Number
-    Default: 8192
-    AllowedValues:
-      - 4096
-      - 8192
-      - 16384
-    Description: >-
-      Baseline memory per ASR MicroVM. CPU is allocated at 2 GiB per vCPU, so
-      8192 gives 4 vCPU. Both audio channels of a meeting decode on one MicroVM.
 
   AsrMaxMeetingSeconds:
     Type: Number
@@ -132,31 +94,6 @@ Parameters:
       Optional cap on distinct speakers per audio channel. 0 (the default)
       discovers as many as appear. A cap is a safety net for noisy embeddings, not
       a fix for over-splitting; set it only when the meeting size is known.
-
-  AsrSpeakerThreshold:
-    Type: String
-    Default: "0.2"
-    AllowedPattern: "^0?\\.[0-9]+$"
-    Description: >-
-      Cosine similarity above which two utterances are treated as the same
-      speaker. Higher splits voices more eagerly; lower merges more eagerly. This
-      value is SPECIFIC TO THE SPEAKER MODEL — see recommendedThreshold in
-      source/catalog.json. 0.2 is the measured operating point for the default
-      TitaNet embedder, where different speakers score at most ~0.11 and the same
-      speaker 0.25-0.5; the sherpa default of 0.5 fragmented one person into eight
-      identities in a live meeting.
-
-  AsrMinSegmentMs:
-    Type: Number
-    Default: 2500
-    MinValue: 0
-    MaxValue: 5000
-    Description: >-
-      Shortest utterance worth computing a speaker embedding for. A shorter one
-      inherits the current speaker instead of minting a new identity, because an
-      embedding from a fraction of a second is unreliable: a live single-speaker
-      meeting produced eight identities at the 400 ms engine default, mostly from
-      one- and two-word utterances.
 
   AsrLogLevel:
     Type: String
@@ -200,13 +137,18 @@ Conditions:
 
 Mappings:
   # ONNX Runtime threads should match the baseline vCPU count (2 GiB per vCPU).
-  MemoryToThreads:
-    "4096":
-      Threads: "2"
-    "8192":
-      Threads: "4"
-    "16384":
-      Threads: "8"
+  # Baseline memory per bundle. Duplicated from catalog.json because
+  # MinimumMemoryInMiB needs a CloudFormation-typed number and a Mapping cannot be
+  # keyed on a value resolved by a custom resource. AsrImageSource is passed this
+  # figure and FAILS the stack if it disagrees with the bundle, so the two cannot
+  # drift silently. Threads are derived by the resolver (2 GiB per vCPU).
+  BundleMemory:
+    nemotron-titanet-small:
+      MiB: 8192
+    permissive-zipformer-campplus:
+      MiB: 8192
+    transcription-only:
+      MiB: 8192
 
 Resources:
   ##########################################################################
@@ -337,9 +279,8 @@ Resources:
       SourceLocation: !Ref SourceCodeLocation
       DestBucket: !Ref AsrImageSourceBucket
       DestPrefix: image-source
-      ModelId: !Ref AsrModelId
-      SpeakerModelId: !Ref AsrSpeakerModelId
-      SegmentationModelId: !Ref AsrSegmentationModelId
+      BundleId: !Ref AsrModelBundle
+      BaselineMemoryMiB: !FindInMap [BundleMemory, !Ref AsrModelBundle, MiB]
 
   # Runtime overrides for the diarization operating point, edited from the web UI's
   # ASR Config page. Everything here is per-session in the WebSocket protocol, so a
@@ -453,22 +394,18 @@ Resources:
       CodeArtifact:
         Uri: !GetAtt AsrImageSource.SourceUri
       Resources:
-        - MinimumMemoryInMiB: !Ref AsrBaselineMemoryMiB
+        - MinimumMemoryInMiB: !FindInMap [BundleMemory, !Ref AsrModelBundle, MiB]
       # Required by the CloudFormation resource even though the ASR server needs
       # no extra Linux capabilities (unlike the Virtual Participant's Chromium
       # sandbox, which needs ALL). Empty is the least-privilege value.
       AdditionalOsCapabilities: []
       EnvironmentVariables:
         - Key: ASR_NUM_THREADS
-          Value: !FindInMap [MemoryToThreads, !Ref AsrBaselineMemoryMiB, Threads]
+          Value: !GetAtt AsrImageSource.NumThreads
         - Key: ASR_LOG_LEVEL
           Value: !Ref AsrLogLevel
         - Key: ASR_MAX_SPEAKERS
           Value: !Ref AsrMaxSpeakers
-        - Key: ASR_SPEAKER_THRESHOLD
-          Value: !Ref AsrSpeakerThreshold
-        - Key: ASR_MIN_SEGMENT_MS
-          Value: !Ref AsrMinSegmentMs
         - !If
           - SetDiarizationExplicitly
           - Key: ASR_DIARIZE
@@ -597,6 +534,26 @@ Outputs:
     Description: ARN of the ASR MicroVM image.
     Value: !GetAtt AsrMicrovmImage.ImageArn
 
+  AsrModelBundleId:
+    Description: Pre-vetted model pairing baked into the image.
+    Value: !GetAtt AsrImageSource.BundleId
+
+  AsrModelBundleStatus:
+    Description: >-
+      "vetted" when this pairing has been validated on real meeting audio,
+      "experimental" when it is offered for licensing reasons but measured worse.
+    Value: !GetAtt AsrImageSource.BundleStatus
+
+  AsrLicenceSummary:
+    Description: Licences of every weight in the bundle.
+    Value: !GetAtt AsrImageSource.LicenceSummary
+
+  AsrRedistributable:
+    Description: >-
+      Whether every weight in this bundle may be redistributed. "false" means the
+      image must not be copied outside this account.
+    Value: !GetAtt AsrImageSource.Redistributable
+
   AsrModelId:
     Description: Model baked into the image.
     Value: !GetAtt AsrImageSource.ModelId
@@ -621,14 +578,22 @@ Outputs:
 
   SpeakerModelMeasured:
     Description: >-
-      Whether this speaker model's same-speaker vs different-speaker distributions
-      have been measured (catalog "measured" field). "false" for a customer-supplied
-      embedder, which is why diarization is withheld until the deployment calibrates.
+      Whether THIS PAIRING has a calibrated operating point. "false" means any
+      threshold would be a guess, which is why diarization is withheld until the
+      deployment calibrates its own.
     Value: !GetAtt AsrImageSource.SpeakerModelMeasured
 
-  RecommendedThreshold:
-    Description: Measured cosine similarity operating point for this speaker model, if any.
-    Value: !GetAtt AsrImageSource.RecommendedThreshold
+  SpeakerThreshold:
+    Description: >-
+      Calibrated cosine similarity operating point for this bundle, empty when the
+      pairing has never been measured. Passed to the transcriber as its default.
+    Value: !GetAtt AsrImageSource.SpeakerThreshold
+
+  MinSegmentMs:
+    Description: >-
+      Shortest utterance worth embedding for this bundle. A shorter one inherits the
+      current speaker rather than minting an identity from an unreliable vector.
+    Value: !GetAtt AsrImageSource.MinSegmentMs
 
   AsrConfigTableName:
     Description: Runtime ASR configuration table, edited from the ASR Config admin page.

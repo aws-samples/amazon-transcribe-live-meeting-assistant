@@ -80,6 +80,8 @@ const AsrConfigPage = () => {
   const engineDeployed = `${settings?.AsrDiarizationAvailable}` === 'true';
   const calibrateEndpoint = settings?.AsrCalibrateEndpoint || '';
   const speakerModelMeasured = `${settings?.AsrSpeakerModelMeasured}` !== 'false';
+  const bundleId = settings?.AsrModelBundleId || '';
+  const bundleThreshold = settings?.AsrBundleThreshold || '';
 
   const [config, setConfig] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -282,19 +284,27 @@ const AsrConfigPage = () => {
               </Alert>
             )}
 
-            <Alert type="info" header="The threshold belongs to the speaker model">
-              These values were measured against the default TitaNet embedder, where two different speakers scored at
-              most 0.107 and the same speaker 0.25–0.5. A different speaker model has a different scale — check{' '}
-              <code>recommendedThreshold</code> in the ASR stack&apos;s
-              <code> catalog.json</code> before changing models, or one person will fragment into several and several
-              will merge into one.
+            <Alert type="info" header="Every field here is an optional override">
+              Leave a field blank and the value calibrated for the deployed model bundle is used.
+              {bundleId && (
+                <>
+                  {' '}
+                  This deployment runs <b>{bundleId}</b>
+                  {bundleThreshold
+                    ? `, calibrated at a similarity threshold of ${bundleThreshold}.`
+                    : ', which has no calibrated threshold — hence the warning above.'}
+                </>
+              )}{' '}
+              The threshold is specific to the <i>pairing</i>, not to the embedder alone: utterance length moves it as
+              much as the model does (one embedder measured 0.30 on 1–2 s utterances and 0.68 on 5–20 s ones). So a
+              number copied from another bundle will fragment one person into several or merge several into one.
             </Alert>
 
             <ColumnLayout columns={2}>
               {numberField(
                 'speakerThreshold',
                 'Cosine similarity above which two utterances are the same speaker. Lower merges ' +
-                  'more eagerly. Measured default: 0.2.',
+                  "more eagerly. Blank uses the deployed bundle's calibrated value.",
               )}
               {numberField(
                 'minSegmentMs',
@@ -332,7 +342,7 @@ const AsrConfigPage = () => {
                     'gap share one row and one label. With the pyannote segmentation model baked ' +
                     'in, the engine finds the turn inside that utterance and emits a row per ' +
                     'speaker, cut at a word boundary. Has no effect if the image was built with ' +
-                    'AsrSegmentationModelId=none.'
+                    'a bundle without a segmentation model.'
                   }
                 >
                   <Checkbox

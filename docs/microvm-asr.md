@@ -99,14 +99,41 @@ Relevant parameters (all under *On-demand ASR and Diarization* in the console):
 | Parameter | Default | Purpose |
 |---|---|---|
 | `TranscriptionEngine` | `AmazonTranscribe` | `MicrovmAsr` deploys this engine |
-| `AsrModelId` | `nemotron-streaming-en-0.6b-560ms-int8` | Streaming ASR model, from the catalog |
-| `AsrSpeakerModelId` | `titanet-small` | Speaker-embedding model, or `none` for transcription only |
-| `AsrSegmentationModelId` | `pyannote-segmentation-3-0` | Speaker-turn detection, so one utterance with two voices can be split |
-| `AsrBaselineMemoryMiB` | `8192` | Memory per MicroVM; CPU is 1 vCPU per 2 GiB, so this is 4 vCPU |
+| `AsrModelBundle` | `nemotron-titanet-small` | A pre-vetted pairing of all three models plus its calibrated operating point |
 | `AsrMaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
 | `AsrMaxSpeakers` | `0` | Optional cap per channel; 0 discovers as many as appear |
-| `AsrSpeakerThreshold` | `0.2` | Starting point for TitaNet; **specific to the speaker model and to the voices** - measured evidence spans 0.2 to 0.4, so calibrate |
-| `AsrMinSegmentMs` | `2500` | Shortest utterance worth embedding; shorter ones inherit the current speaker |
+
+### Model bundles
+
+One selection carries the whole configuration: the ASR model, the speaker embedder,
+the turn-detection model, **and the diarization operating point measured for that
+combination** — the similarity threshold and the minimum utterance length. Those two
+are baked into the image, so a deployment gets a working setup without knowing any
+numbers.
+
+| Bundle | ASR | Embedder | Threshold | Redistributable |
+|---|---|---|---|---|
+| `nemotron-titanet-small` | Nemotron 560 ms | TitaNet-small | 0.4 | **No** (NVIDIA OML) |
+| `permissive-zipformer-campplus` | Zipformer | WeSpeaker CAM++ | 0.68 | Yes (Apache-2.0 + MIT) |
+| `transcription-only` | Nemotron 560 ms | — | — | No (NVIDIA OML) |
+
+Bundles exist because a threshold is **not** a property of the embedder alone.
+Utterance length moves it as much as the model does: CAM++ measured 0.30 on 1–2 s
+utterances and 0.68 on 5–20 s ones, on the same voices. Choosing three models
+separately therefore let a deployment assemble a pairing nobody had ever measured —
+and it produced a real failure, where the threshold parameter defaulted to 0.2 while
+the catalog's measured value for the default embedder was 0.4, nothing reconciled the
+two, and two speakers were merged into one label on a live meeting.
+
+A bundle with no calibrated threshold ships without one, and the engine then withholds
+speaker labels until that deployment calibrates its own. That is deliberate: a guessed
+threshold fragments one speaker into many or merges several into one, which is worse
+than the channel labels it falls back to.
+
+`AsrSpeakerThreshold` and `AsrMinSegmentMs` still exist on the transcriber stack as
+**optional overrides**. Blank — the default — means "use the value calibrated for the
+deployed bundle". Set one only to override a bundle deliberately; the ASR Config admin
+page does the same thing without a 20-minute stack update.
 
 ## Tuning it without a redeploy
 
@@ -250,7 +277,7 @@ sub-2.5 s utterances embedding unreliably (that is why `AsrMinSegmentMs` exists)
 an embedding-only detector false-splits exactly where turns are shortest.
 
 The detector is therefore **pyannote segmentation 3.0**, baked as a 6 MB ONNX model
-(`AsrSegmentationModelId`, MIT, redistributed by k2-fsa so no Hugging Face token is
+(pyannote segmentation 3.0, MIT, redistributed by k2-fsa so no Hugging Face token is
 needed). It is a specialist: 10-second windows, powerset output giving per-frame
 speaker activity *and* overlap, at ~17 ms resolution — finer than the word timings a
 `final` already carries, so a cut can snap to a word edge.
@@ -300,7 +327,7 @@ updates that row in place. A false forward split then degrades to two adjacent r
 carrying the *same* speaker rather than a wrong attribution, and no row ever needs
 deleting.
 
-Turn splitting is off when `AsrSegmentationModelId=none`, when no speaker model is
+Turn splitting is off for a bundle with no segmentation model, when no speaker model is
 baked in (there would be no embedder to identify the turns it finds), or when
 **Split rows on a speaker change** is unticked on the ASR Config page — that last one
 takes effect on the next meeting, with no rebuild.
@@ -420,7 +447,8 @@ Honest state of validation, so nobody deploys this expecting known numbers:
 - **MicroVM launch time and the real-time factor** of two concurrent channel
   sessions on one MicroVM have not been measured on Graviton. If a meeting's first
   transcript is slow to appear, or transcripts lag live audio, raise
-  `AsrBaselineMemoryMiB` to `16384` (8 vCPU) and compare.
+  the bundle's `baselineMemoryMiB` in `catalog.json` (and the matching `BundleMemory`
+  entry in `template.yaml`) to `16384` (8 vCPU) and compare.
 
 Measure these in a dev stack before offering the engine to users. Every number
 needed is in the MicroVM log group: per-session summaries carry audio seconds,
@@ -466,7 +494,7 @@ it works far better when every label is distinct.
 
 **The diarization checkbox is missing from Stream Audio.** The deployment either
 does not have `TranscriptionEngine=MicrovmAsr` or built the image with
-`AsrSpeakerModelId=none`. The UI reads `AsrDiarizationAvailable` from the LMA
+the `transcription-only` bundle. The UI reads `AsrDiarizationAvailable` from the LMA
 settings parameter.
 
 **Transcripts appear but are labelled by channel.** The image has no speaker model.
@@ -536,7 +564,7 @@ Three things follow, and they are worth internalising before changing anything:
 If a single person still fragments: run
 [Calibrate](#calibrating-the-operating-point) against one of your own recorded
 meetings — it performs exactly the measurement above, automatically. Failing that,
-lower `AsrSpeakerThreshold` toward 0.15, raise `AsrMinSegmentMs`, and only then
+lower the threshold on the ASR Config page, raise the minimum utterance length, and only then
 consider `AsrMaxSpeakers` — a cap bounds the symptom but cannot fix a mis-set
 operating point. Sample sizes behind the numbers above are small (11 utterances, one
 voice pair), which is the reason calibration exists rather than a bigger table of

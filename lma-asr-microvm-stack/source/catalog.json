@@ -1,7 +1,50 @@
 {
-  "version": 1,
-  "defaultModelId": "nemotron-streaming-en-0.6b-560ms-int8",
-  "defaultSpeakerModelId": "titanet-small",
+  "version": 2,
+  "defaultBundleId": "nemotron-titanet-small",
+  "bundleNote": "A bundle is a whole pre-vetted pairing: the three models AND the operating point measured for that combination. The threshold is not a property of the embedder alone - segment length moves it as much as the model does (CAM++ measured 0.30 on 1-2s utterances and 0.68 on 5-20s ones), so an operating point is only meaningful for a stated pairing and utterance-length floor. A bundle with no speakerThreshold has never been calibrated here; the engine then withholds speaker labels until a deployment calibrates its own, which is the honest failure rather than guessing.",
+  "bundles": [
+    {
+      "id": "nemotron-titanet-small",
+      "name": "Nemotron streaming + TitaNet-small (accuracy-first, NVIDIA licence)",
+      "status": "vetted",
+      "modelId": "nemotron-streaming-en-0.6b-560ms-int8",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.4,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "The pairing validated on real meetings, and the only one demonstrated end to end on a live multi-speaker call. NOT redistributable: the ASR weights are under the NVIDIA Open Model License. Threshold measured across two meetings; different speakers scored at most 0.107 in one and 0.307 in another, so 0.4 clears the harder pair rather than the easier one. Known weakness: under-splits a channel dominated by one talker - on a 31-minute three-person call the quieter tab voice took 13 rows against roughly 41 expected."
+    },
+    {
+      "id": "permissive-zipformer-campplus",
+      "name": "Zipformer + WeSpeaker CAM++ (Apache-2.0 and MIT only)",
+      "status": "experimental",
+      "modelId": "zipformer-streaming-en-2023-06-26-int8",
+      "speakerModelId": "wespeaker-en-cam++-lm",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.68,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "Apache-2.0 (ASR) + Apache-2.0 (speaker) + MIT (segmentation)",
+      "notes": "Redistributable, and worse. The ASR model is trained on LibriSpeech read speech, so expect degraded text on spontaneous meeting audio; the embedder's measured margin is 0.143 against TitaNet's 0.43 on identical audio, and a different speaker once reached 0.761 against a same-speaker floor of 0.763. 0.68 holds only for utterances of roughly 5s and up, which is why minSegmentMs matters more here than elsewhere."
+    },
+    {
+      "id": "transcription-only",
+      "name": "Nemotron streaming, no diarization",
+      "status": "vetted",
+      "modelId": "nemotron-streaming-en-0.6b-560ms-int8",
+      "speakerModelId": "none",
+      "segmentationModelId": "none",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR)",
+      "notes": "Smallest image and lowest latency for a deployment that wants an alternative to Amazon Transcribe but labels transcripts by audio channel. Diarization requests are reported as unsupported rather than silently returning no labels."
+    }
+  ],
   "models": [
     {
       "id": "nemotron-streaming-en-0.6b-560ms-int8",

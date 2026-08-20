@@ -77,18 +77,33 @@ Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe unless a client opts in | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
-| AsrModelId | ASR model baked into the MicroVM image, from the stack's catalog.json (English only) | nemotron-streaming-en-0.6b-560ms-int8 | nemotron-streaming-en-0.6b-560ms-int8 (NVIDIA Open Model License), zipformer-streaming-en-2023-06-26-int8 (Apache-2.0) |
-| AsrSpeakerModelId | Speaker-embedding model used for diarization; "none" builds a transcription-only image. Each has its own cosine scale, so calibrate after changing it | titanet-small | titanet-small (CC-BY-4.0), wespeaker-en-cam++-lm, wespeaker-en-resnet293-lm (Apache-2.0), none |
-| AsrSegmentationModelId | Speaker-turn detection, so one endpointed utterance containing two voices can be split (MIT, 6 MB) | pyannote-segmentation-3-0 | pyannote-segmentation-3-0, none |
-| AsrBaselineMemoryMiB | Memory per ASR MicroVM; CPU is 1 vCPU per 2 GiB, so 8192 gives 4 vCPU | 8192 | 4096, 8192, 16384 |
+| AsrModelBundle | A pre-vetted pairing of ASR model, speaker embedder and turn-detection model, **together with the diarization operating point measured for that combination** | nemotron-titanet-small | nemotron-titanet-small, permissive-zipformer-campplus, transcription-only |
 | AsrMaxMeetingSeconds | Hard lifetime ceiling per MicroVM and the cost backstop if a transcriber task dies without releasing it | 14400 | 600–28800 |
 | AsrMaxSpeakers | Cap on distinct speakers per audio channel (0 discovers as many as appear) | 0 | 0–30 |
-| AsrSpeakerThreshold | Cosine similarity above which two utterances are the same speaker; higher splits more eagerly. Measured for TitaNet; specific to the speaker model | 0.2 | 0.0–1.0 |
-| AsrMinSegmentMs | Shortest utterance worth embedding for a speaker label; shorter ones inherit the current speaker | 2500 | 0–5000 |
+
+### Why a bundle instead of three model parameters
+
+The similarity threshold is not a property of the embedder alone — utterance length
+moves it as much as the model does (CAM++ measured 0.30 on 1–2 s utterances and 0.68
+on 5–20 s ones). So an operating point is only meaningful for a stated *pairing*, and
+choosing the three models separately let a deployment assemble a combination nobody
+had measured. It also produced a concrete bug: the threshold parameter defaulted to
+`0.2` while the catalog's measured value for the default embedder was `0.4`, nothing
+reconciled them, and the deployment merged two speakers into one.
+
+A bundle now carries its own calibrated threshold and utterance floor, baked into the
+ASR image, so a deployment gets a working configuration without knowing any numbers.
+
+| Bundle | Redistributable | Notes |
+|--------|-----------------|-------|
+| `nemotron-titanet-small` | **No** — NVIDIA Open Model License | Accuracy-first default, validated on real meetings |
+| `permissive-zipformer-campplus` | Yes — Apache-2.0 + MIT | Measurably worse on spontaneous speech (ASR trained on read speech) |
+| `transcription-only` | No — NVIDIA Open Model License | No diarization; transcripts labelled by audio channel |
 
 There are deliberately no parameters for supplying a model URL: every model is a
 curated entry in the ASR stack's `catalog.json`, with its checksum pinned and (for a
-speaker model) its operating point measured. See
+speaker model) its operating point measured. Runtime tuning stays available on the ASR
+Config admin page without a stack update. See
 [On-demand ASR & Speaker Diarization](microvm-asr.md#changing-the-model).
 
 ## End-of-Call Summary

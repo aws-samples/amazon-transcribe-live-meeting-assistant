@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **MicroVM ASR model selection is now one pre-vetted bundle instead of six independent parameters.** `AsrModelBundle` replaces `AsrModelId`, `AsrSpeakerModelId`, `AsrSegmentationModelId`, `AsrBaselineMemoryMiB`, `AsrSpeakerThreshold` and `AsrMinSegmentMs`. A bundle names the three models *together with the diarization operating point measured for that combination*, baked into the image, so a deployment gets a working configuration without knowing any numbers.
+
+  This fixes a real defect rather than just reducing clutter. The similarity threshold is not a property of the embedder alone — utterance length moves it as much as the model does (one embedder measured 0.30 on 1–2 s utterances and 0.68 on 5–20 s ones, on the same voices) — so picking three models separately let a deployment assemble a pairing nobody had ever measured. Concretely: the threshold parameter defaulted to `0.2` while the catalog's measured value for the *default* embedder was `0.4`, nothing reconciled the two, and the shipped default merged two speakers into one label on a live meeting. The ASR stack already published a `RecommendedThreshold` output and it was wired nowhere.
+
+  Three bundles ship: `nemotron-titanet-small` (accuracy-first default, validated on real meetings, **not** redistributable — NVIDIA Open Model License), `permissive-zipformer-campplus` (Apache-2.0 and MIT throughout, measurably worse on spontaneous speech), and `transcription-only` (no diarization, smallest image). A bundle with no calibrated threshold ships without one and the engine withholds speaker labels until that deployment calibrates its own, because a guessed threshold is worse than the channel labels it falls back to.
+
+  `AsrSpeakerThreshold` and `AsrMinSegmentMs` remain on the transcriber stack as **optional** overrides; blank now means "use the deployed bundle's calibrated value" rather than falling back to a constant. The ASR Config admin page is unchanged as the runtime override layer and now names the deployed bundle and its calibrated threshold, so a blank field is self-explanatory. Two tests guard the one unavoidable duplication (the template needs the memory as a CloudFormation-typed number): the resolver fails the stack on a mismatch, and a unit test catches it at commit time.
+
+  **Upgrading:** the removed parameters no longer exist, so a stack update must supply `AsrModelBundle`. `nemotron-titanet-small` reproduces the previously-recommended configuration. Changing bundle rebuilds the MicroVM image (~20 minutes).
+
+
 ## [0.3.7] - 2026-08-17
 
 ### Added

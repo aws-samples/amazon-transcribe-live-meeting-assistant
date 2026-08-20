@@ -77,7 +77,8 @@ export interface AsrLease {
 interface AsrSessionOptions {
     diarize: boolean;
     maxSpeakers: number;
-    speakerThreshold: number;
+    /** Undefined leaves the bundle's calibrated value baked into the image in force. */
+    speakerThreshold?: number;
     endpointingMs: number;
     minSegmentMs?: number;
     requireCorroboration?: boolean;
@@ -486,7 +487,9 @@ export class AsrChannelSession {
                 endpointing_ms: this.options.endpointingMs,
                 diarize: this.options.diarize,
                 max_speakers: this.options.maxSpeakers,
-                speaker_threshold: this.options.speakerThreshold,
+                ...(this.options.speakerThreshold === undefined
+                    ? {}
+                    : { speaker_threshold: this.options.speakerThreshold }),
                 // Omitted rather than nulled when unset, so the engine keeps
                 // whatever the image was built with.
                 ...(this.options.minSegmentMs === undefined

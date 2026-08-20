@@ -33,7 +33,16 @@ const ASR_CONFIG_TTL_MS = parseInt(process.env['ASR_CONFIG_TTL_MS'] || '30000', 
 const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
 
 export interface AsrRuntimeConfig {
-    speakerThreshold: number;
+    /**
+     * Undefined means "use the operating point calibrated for the deployed model
+     * bundle", which is baked into the ASR image. A number here is a deliberate
+     * override. It must NOT default to a constant: the right threshold depends on
+     * the embedder AND the utterance-length floor, so one shipped number was wrong
+     * for every bundle but the one it was measured on — 0.2 was carried while the
+     * catalog's measured value for the default embedder was 0.4, and the
+     * disagreement merged two speakers.
+     */
+    speakerThreshold?: number;
     maxSpeakers: number;
     endpointingMs: number;
     minSegmentMs?: number;
@@ -45,17 +54,21 @@ export interface AsrRuntimeConfig {
      * Whether an admin set the threshold for this deployment, rather than it coming
      * from the stack parameter. For an unmeasured speaker model that is the only
      * evidence the operating point was ever checked against real audio, so it is
-     * what lets diarization run at all.
+     * what lets diarization run at all. An explicit stack parameter counts too:
+     * both are somebody deliberately naming a number for this deployment.
      */
     speakerThresholdOverridden: boolean;
 }
 
 const envDefaults = (): AsrRuntimeConfig => ({
-    speakerThreshold: parseFloat(process.env['ASR_SPEAKER_THRESHOLD'] || '0.2'),
+    // Blank/absent means "whatever the image was built with" — for the threshold and
+    // the utterance floor that is the bundle's calibrated operating point, which is
+    // the correct default and the one nobody has to know a number for.
+    speakerThreshold: process.env['ASR_SPEAKER_THRESHOLD']
+        ? parseFloat(process.env['ASR_SPEAKER_THRESHOLD'])
+        : undefined,
     maxSpeakers: parseInt(process.env['ASR_MAX_SPEAKERS'] || '0', 10),
     endpointingMs: parseInt(process.env['ASR_ENDPOINTING_MS'] || '1200', 10),
-    // Undefined means "whatever the image was built with" — these two only reached
-    // the wire protocol recently, so not sending them is a valid state.
     minSegmentMs: process.env['ASR_MIN_SEGMENT_MS']
         ? parseInt(process.env['ASR_MIN_SEGMENT_MS'], 10)
         : undefined,
@@ -67,7 +80,7 @@ const envDefaults = (): AsrRuntimeConfig => ({
         : undefined,
     diarizeByDefault: (process.env['ASR_DIARIZE_DEFAULT'] || 'true') === 'true',
     engineDefaultMicrovm: (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase() === 'microvm',
-    speakerThresholdOverridden: false,
+    speakerThresholdOverridden: (process.env['ASR_SPEAKER_THRESHOLD'] || '').trim() !== '',
 });
 
 /**
@@ -92,6 +105,20 @@ const numberOverride = (raw: string | undefined, fallback: number): number => {
         return fallback;
     }
     const value = Number(raw);
+    return Number.isFinite(value) ? value : fallback;
+};
+
+/** As numberOverride, but the fallback may itself be "unset". */
+const optionalNumberOverride = (
+    raw: string | undefined,
+    fallback: number | undefined
+): number | undefined => {
+    if (raw === undefined || raw.trim() === '') {
+        return fallback;
+    }
+    const value = Number(raw);
+    // A typo in the admin page must not become NaN: NaN compares false against every
+    // threshold, which would mint a new speaker for every single utterance.
     return Number.isFinite(value) ? value : fallback;
 };
 
@@ -123,13 +150,16 @@ export const getAsrRuntimeConfig = async (
         const item = result.Item;
         const config: AsrRuntimeConfig = item
             ? {
-                speakerThreshold: numberOverride(item['speakerThreshold']?.S, defaults.speakerThreshold),
+                speakerThreshold: optionalNumberOverride(
+                    item['speakerThreshold']?.S,
+                    defaults.speakerThreshold
+                ),
                 maxSpeakers: numberOverride(item['maxSpeakers']?.S, defaults.maxSpeakers),
                 endpointingMs: numberOverride(item['endpointingMs']?.S, defaults.endpointingMs),
-                minSegmentMs:
-                    item['minSegmentMs']?.S && item['minSegmentMs'].S.trim() !== ''
-                        ? Number(item['minSegmentMs'].S)
-                        : defaults.minSegmentMs,
+                minSegmentMs: optionalNumberOverride(
+                    item['minSegmentMs']?.S,
+                    defaults.minSegmentMs
+                ),
                 requireCorroboration:
                     item['requireCorroboration']?.BOOL ?? defaults.requireCorroboration,
                 splitOnSpeakerChange:
@@ -137,7 +167,9 @@ export const getAsrRuntimeConfig = async (
                 diarizeByDefault: item['diarizeByDefault']?.BOOL ?? defaults.diarizeByDefault,
                 engineDefaultMicrovm:
                     item['engineDefaultMicrovm']?.BOOL ?? defaults.engineDefaultMicrovm,
-                speakerThresholdOverridden: (item['speakerThreshold']?.S || '').trim() !== '',
+                speakerThresholdOverridden:
+                    (item['speakerThreshold']?.S || '').trim() !== ''
+                    || defaults.speakerThresholdOverridden,
             }
             : defaults;
         cached = { config, at: Date.now() };
