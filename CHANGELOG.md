@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two new ASR Config fields rendered the literal string "undefined" in their input boxes.** *Speaker-change check interval* and *Maximum open row duration* were added to the form's state shape and its GraphQL query but not to its loader, which rebuilt the config object field by field — so they came back `undefined`, and a controlled Cloudscape `Input` renders that as text. The loader now derives its shape from the defaults object, so a field added in one place cannot be missed in the other, and a test asserts that every field held in state is also requested in the query (a field missing there loads as its default forever and silently discards the saved value).
+
+
 - **`docs/microvm-asr.md` table of contents listed three sections that no longer existed** (`Using it`, `How it works`, `Changing the model`) and omitted `Tuning it without a redeploy`. Regenerated from the actual headings.
 
 

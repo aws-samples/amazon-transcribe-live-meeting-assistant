@@ -30,7 +30,7 @@ import useSettingsContext from '../../contexts/settings';
 const client = generateClient();
 const CONFIG_ID = 'CustomAsrConfig';
 
-const getAsrConfigQuery = `
+export const getAsrConfigQuery = `
   query GetAsrConfig($AsrConfigId: ID!) {
     getAsrConfig(AsrConfigId: $AsrConfigId) {
       AsrConfigId
@@ -60,7 +60,7 @@ const updateAsrConfigMutation = `
 
 // Ranges mirror the resolver's validation, so a bad value is caught before the
 // round trip rather than being silently dropped server-side.
-const NUMERIC_LIMITS = {
+export const NUMERIC_LIMITS = {
   speakerThreshold: { min: 0, max: 1, label: 'Speaker similarity threshold' },
   minSegmentMs: { min: 0, max: 5000, label: 'Minimum utterance for speaker ID (ms)' },
   maxSpeakers: { min: 0, max: 30, label: 'Maximum speakers per channel' },
@@ -69,7 +69,7 @@ const NUMERIC_LIMITS = {
   maxOpenSegmentMs: { min: 0, max: 60000, label: 'Maximum open row duration (ms)' },
 };
 
-const EMPTY = {
+export const EMPTY = {
   speakerThreshold: '',
   minSegmentMs: '',
   maxSpeakers: '',
@@ -108,17 +108,13 @@ const AsrConfigPage = () => {
         variables: { AsrConfigId: CONFIG_ID },
       });
       const stored = result.data?.getAsrConfig || {};
-      setConfig({
-        speakerThreshold: stored.speakerThreshold ?? '',
-        minSegmentMs: stored.minSegmentMs ?? '',
-        maxSpeakers: stored.maxSpeakers ?? '',
-        endpointingMs: stored.endpointingMs ?? '',
-        requireCorroboration: stored.requireCorroboration ?? false,
-        splitOnSpeakerChange: stored.splitOnSpeakerChange ?? true,
-        liveTurnCut: stored.liveTurnCut ?? true,
-        diarizeByDefault: stored.diarizeByDefault ?? true,
-        engineDefaultMicrovm: stored.engineDefaultMicrovm ?? false,
-      });
+      // Derived from EMPTY rather than listed again, so EMPTY is the single place a
+      // field's default lives. Listing them twice meant a field added to EMPTY but
+      // missed here loaded as `undefined`, which a controlled Input renders as the
+      // literal string "undefined" in the box.
+      setConfig(
+        Object.fromEntries(Object.entries(EMPTY).map(([field, fallback]) => [field, stored[field] ?? fallback])),
+      );
       setStatus(null);
     } catch (err) {
       setStatus({ type: 'error', text: `Could not load the ASR configuration: ${err.message || err}` });
