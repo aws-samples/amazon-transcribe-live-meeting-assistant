@@ -170,9 +170,51 @@ def test_resolve_refuses_a_catalog_entry_missing_file_names() -> None:
         index.resolve({}, catalog)
 
 
-def test_resolve_rejects_a_non_streaming_engine() -> None:
-    with pytest.raises(index.ResolutionError, match="only 'streaming' is supported"):
+def test_the_offline_engine_needs_a_vad_to_cut_utterances() -> None:
+    """An offline model cannot stream, so without a VAD it cannot decide when an
+    utterance ended - an image that could not transcribe at all."""
+    with pytest.raises(index.ResolutionError, match="vadModelId"):
         index.resolve({"BundleId": "bundle-offline"}, CATALOG)
+
+
+def test_a_streaming_bundle_must_not_name_a_vad() -> None:
+    """The streaming engine endpoints internally and never loads one, so naming a VAD
+    means the bundle was authored against the wrong engine."""
+    catalog = {
+        **CATALOG,
+        "bundles": [{**CATALOG["bundles"][0], "vadModelId": "silero"}],
+        "vadModels": [{"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}],
+    }
+
+    with pytest.raises(index.ResolutionError, match="streaming engine endpoints internally"):
+        index.resolve({"BundleId": CATALOG["bundles"][0]["id"]}, catalog)
+
+
+def test_an_unknown_engine_is_refused() -> None:
+    broken = json.loads(json.dumps(CATALOG))
+    broken["models"][0]["engine"] = "quantum"
+
+    with pytest.raises(index.ResolutionError, match="quantum"):
+        index.resolve({"BundleId": "bundle-a"}, broken)
+
+
+def test_an_offline_bundle_with_a_vad_resolves_and_bakes_it() -> None:
+    catalog = {
+        **CATALOG,
+        "bundles": [{**b, "vadModelId": "silero"} if b["id"] == "bundle-offline" else b
+                    for b in CATALOG["bundles"]],
+        "vadModels": [
+            {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64,
+             "archive": "onnx", "license": "MIT"}
+        ],
+    }
+
+    selection = index.resolve({"BundleId": "bundle-offline"}, catalog)
+    env = index.render_model_env(selection)
+
+    assert selection["model"]["engine"] == "accurate"
+    assert "ASR_VAD_MODEL_URL=https://x.invalid/v.onnx" in env
+    assert f"ASR_VAD_MODEL_SHA256={'f' * 64}" in env
 
 
 def test_resolve_rejects_an_unknown_bundle_id() -> None:

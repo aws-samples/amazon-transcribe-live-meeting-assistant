@@ -51,18 +51,37 @@ Parameters:
       - nemotron-titanet-small
       - permissive-zipformer-campplus
       - transcription-only
+      - permissive-fastconformer-titanet-large
+      - nemotron-titanet-large
+      - apache-only-zipformer-3dspeaker
+      - accurate-parakeet-titanet-large
     Description: >-
-      A pre-vetted pairing of ASR model, speaker-embedding model and turn-detection
-      model, together with the diarization operating point measured for that
-      combination (source/catalog.json). Selecting a bundle rather than three models
-      separately is deliberate: the similarity threshold is not a property of the
-      embedder alone - utterance length moves it as much as the model does - so a
-      threshold is only meaningful for a stated pairing. nemotron-titanet-small is
-      the accuracy-first default but its ASR weights are under the NVIDIA Open Model
-      License and are NOT redistributable; permissive-zipformer-campplus is
-      Apache-2.0/MIT throughout and measurably worse on real meeting audio;
-      transcription-only builds the smallest image and labels transcripts by audio
-      channel. Changing this rebuilds the MicroVM image (several minutes).
+      Which pre-vetted model pairing the MicroVM ASR engine uses. Each bundle names an
+      ASR model, a speaker-embedding model and a turn-detection model TOGETHER WITH the
+      diarization operating point measured for that combination, so a deployment gets a
+      working configuration without tuning anything. Picking the models separately is
+      deliberately not offered: the similarity threshold is not a property of the
+      embedder alone (utterance length moves it as much as the model does), so it is
+      only meaningful for a stated pairing.
+      CALIBRATED, so speaker labels work immediately - nemotron-titanet-small is the
+      default and validated on real meetings, but its ASR weights are under the NVIDIA
+      Open Model License and are NOT redistributable; permissive-zipformer-campplus is
+      Apache-2.0 and MIT throughout and measurably worse, its ASR model being trained on
+      read speech; transcription-only has no diarization and labels by audio channel.
+      NOT YET CALIBRATED, so they produce NO speaker labels until this deployment runs a
+      calibration from the ASR Config page, because a threshold borrowed from another
+      pairing fragments or merges speakers - permissive-fastconformer-titanet-large is
+      CC-BY-4.0 and MIT throughout and so redistributable, its ASR model sharing the
+      default's architecture but trained on conversational speech at a quarter the size,
+      which makes it the one to try if you need to redistribute the image;
+      nemotron-titanet-large is the validated default with a larger embedder, aimed at
+      under-splitting on a channel dominated by one talker;
+      apache-only-zipformer-3dspeaker is for a deployment that cannot accept CC-BY-4.0
+      attribution, both halves being the weaker choice; accurate-parakeet-titanet-large
+      has the highest expected accuracy and is redistributable but is OFFLINE, meaning
+      audio is segmented by VAD and decoded per utterance so there is NO interim text
+      while somebody is still speaking, and it needs 16 GiB.
+      Changing the bundle rebuilds the MicroVM image (~20 minutes).
 
   AsrEnableDiarization:
     Type: String
@@ -149,6 +168,14 @@ Mappings:
       MiB: 8192
     transcription-only:
       MiB: 8192
+    permissive-fastconformer-titanet-large:
+      MiB: 8192
+    nemotron-titanet-large:
+      MiB: 8192
+    apache-only-zipformer-3dspeaker:
+      MiB: 8192
+    accurate-parakeet-titanet-large:
+      MiB: 16384
 
 Resources:
   ##########################################################################

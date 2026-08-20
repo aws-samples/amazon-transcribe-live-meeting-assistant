@@ -7,7 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Four more model bundles, three of them redistributable.** Every checksum verified by downloading and hashing; the speaker models also match the publisher's own `checksum.txt`.
+
+  - `permissive-fastconformer-titanet-large` — **the redistributable bundle worth trying first.** Its ASR model (`nemo-streaming-fast-conformer-transducer-en-480ms-int8`, CC-BY-4.0) is the same cache-aware streaming FastConformer-RNNT architecture as the Nemotron default, but trained on NeMo ASRSET — LibriSpeech, Fisher, Switchboard, WSJ, MLS-EN, Common Voice — so unlike the Apache-2.0 Zipformer it has seen thousands of hours of *spontaneous conversational* speech rather than read speech. It is also a quarter of the download (106 MB against 464 MB). Paired with TitaNet-large (CC-BY-4.0).
+  - `nemotron-titanet-large` — the validated default with the larger embedder, aimed at the under-splitting measured on a 31-minute three-person call where the quieter voice on a channel dominated by one talker took 13 rows against roughly 41 expected.
+  - `apache-only-zipformer-3dspeaker` — for a deployment that cannot accept CC-BY-4.0's attribution requirement. Adds the 3D-Speaker CAM++ and ERes2Net English exports (Apache-2.0), because both WeSpeaker options measured badly here.
+  - `accurate-parakeet-titanet-large` — highest expected text accuracy and redistributable (Parakeet TDT 0.6B v3, CC-BY-4.0), using the previously unwired **offline engine**: audio is segmented by Silero VAD (MIT) and each closed utterance decoded in one pass. The trade is real — **no interim text while somebody is still speaking**, and live cutting cannot apply because a mid-utterance word list does not exist. Needs 16 GiB. Latency on a real meeting is unmeasured.
+
+  All four ship **without** a calibrated threshold, so they produce no speaker labels until the deployment calibrates. That is the guardrail working: a threshold borrowed from another pairing fragments or merges speakers.
+
+  Correction worth recording: Parakeet is only permissive **offline**. `parakeet-tdt-0.6b-v2`/`v3` are CC-BY-4.0, but the *streaming* "unified" Parakeet export is under the NVIDIA Open Model License, exactly like Nemotron — there is no permissive streaming Parakeet.
+
 ### Changed
+
+- **A row committed by a live cut is now corrected if the decoder revises its text.** Previously the revision was simply lost. Each committed row is re-emitted when its utterance closes and the word list is authoritative — and only when the text actually changed, so a meeting with no revisions costs no extra writes. Safe because `addTranscriptSegment` is an unconditional `PutItem` for a final, so re-emitting the same segment number updates that row in place; the row keeps its span (the UI sorts by end time, so nothing reorders) and its original speaker (the audio did not change, and re-assigning would fold the same embedding into a centroid twice). A revision that would leave a row empty is ignored rather than blanking it.
+
+  This also fixed a duplication bug: the remainder after a cut was derived by stripping the committed text off the front of the closing hypothesis. A real recogniser's `text` is punctuated and capitalised while its word timings are bare tokens, so the committed text is *never* a literal prefix — the match failed and every settled word was re-emitted onto the remainder's row. The remainder is now partitioned by time on the word list.
+
 
 - **Speaker labels are now right when the text first appears, and a speaker change closes a row without waiting for a pause.** Three changes to the MicroVM ASR engine, all on by default:
 

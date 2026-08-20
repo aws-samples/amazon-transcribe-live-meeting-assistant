@@ -117,10 +117,11 @@ def resolve(properties: dict, catalog: dict) -> dict:
     model = dict(_find(catalog.get("models", []), model_id))
     files = dict(model.get("files") or {})
 
-    if model.get("engine", "streaming") != "streaming":
+    engine = model.get("engine", "streaming")
+    if engine not in ("streaming", "accurate"):
         raise ResolutionError(
-            f"model {model.get('id')!r} uses the {model.get('engine')!r} engine; only "
-            "'streaming' is supported by this stack"
+            f"model {model.get('id')!r} uses the {engine!r} engine; this stack supports "
+            "'streaming' (frame-synchronous) and 'accurate' (offline, VAD-segmented)"
         )
     if not model.get("url"):
         raise ResolutionError(f"model {model.get('id')!r} has no download URL")
@@ -136,6 +137,28 @@ def resolve(properties: dict, catalog: dict) -> dict:
         raise ResolutionError(
             f"model {model.get('id')!r} must pin sherpaOnnx and onnxruntime versions"
         )
+
+    # An offline model cannot stream: audio has to be cut into utterances by a VAD and
+    # each closed utterance decoded. Without one the engine would have no way to
+    # decide when an utterance ended, so refuse rather than build an image that
+    # cannot transcribe.
+    vad_id = bundle.get("vadModelId", "none")
+    if engine == "accurate":
+        if vad_id in ("none", ""):
+            raise ResolutionError(
+                f"bundle {bundle_id!r} uses the offline 'accurate' engine, which needs a "
+                "vadModelId to segment audio into utterances"
+            )
+        vad = dict(_find(catalog.get("vadModels", []), vad_id))
+        if not vad.get("sha256"):
+            raise ResolutionError(f"VAD model {vad.get('id')!r} has no pinned SHA256")
+    else:
+        if vad_id not in ("none", ""):
+            raise ResolutionError(
+                f"bundle {bundle_id!r} names a VAD model but its ASR model is streaming; "
+                "the streaming engine endpoints internally and never loads one"
+            )
+        vad = {"id": "none", "url": "", "sha256": "", "license": "n/a"}
 
     speaker = dict(_find(catalog.get("speakerModels", []), speaker_id))
     if speaker.get("url") and not speaker.get("sha256"):
@@ -163,6 +186,7 @@ def resolve(properties: dict, catalog: dict) -> dict:
         "model": model,
         "speaker": speaker,
         "segmentation": segmentation,
+        "vad": vad,
         "memoryMiB": memory_mib,
         "numThreads": _threads_for(memory_mib),
     }
@@ -172,6 +196,7 @@ def render_model_env(selection: dict) -> str:
     model = selection["model"]
     speaker = selection["speaker"]
     segmentation = selection.get("segmentation") or {"id": "none"}
+    vad = selection.get("vad") or {"id": "none"}
     bundle = selection.get("bundle") or {}
     files = model["files"]
     lines = [
@@ -206,6 +231,10 @@ def render_model_env(selection: dict) -> str:
         f"ASR_SEGMENTATION_MODEL_STRIP_COMPONENTS={segmentation.get('stripComponents', 1)}",
         f"ASR_SEGMENTATION_MODEL_WINDOW_SEC={segmentation.get('windowSec', 10.0)}",
         f"ASR_SEGMENTATION_MODEL_LICENSE={segmentation.get('license', 'n/a')}",
+        f"ASR_VAD_MODEL_ID={vad.get('id', 'none')}",
+        f"ASR_VAD_MODEL_URL={vad.get('url', '')}",
+        f"ASR_VAD_MODEL_SHA256={vad.get('sha256', '')}",
+        f"ASR_VAD_MODEL_LICENSE={vad.get('license', 'n/a')}",
         f"SHERPA_ONNX_VERSION={model['sherpaOnnx']}",
         f"ONNXRUNTIME_VERSION={model['onnxruntime']}",
         "",
@@ -283,6 +312,8 @@ def build(properties: dict) -> tuple[str, dict]:
         "NumThreads": str(selection["numThreads"]),
         "SegmentationModelId": selection["segmentation"].get("id", "none"),
         "TurnDetectionAvailable": "true" if selection["segmentation"].get("url") else "false",
+        "AsrEngine": selection["model"].get("engine", "streaming"),
+        "VadModelId": selection["vad"].get("id", "none"),
     }
 
 

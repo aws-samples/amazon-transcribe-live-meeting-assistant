@@ -17,6 +17,7 @@ on vectors with no audio at all.
 from __future__ import annotations
 
 import struct
+from collections import Counter
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -1268,3 +1269,151 @@ def test_segment_numbers_stay_unique_across_a_cut_and_the_next_utterance() -> No
     numbers = [event.segment for event in finals]
     assert len(numbers) == len(set(numbers)), f"colliding segment numbers: {numbers}"
     assert numbers == sorted(numbers)
+
+
+# --- Correcting a row the decoder revised after it was committed --------------
+
+
+def _cut_then_close(
+    heard: list[WordTiming],
+    revised: list[WordTiming],
+    partial_text: str,
+    embedder: ScriptedEmbedder | None = None,
+) -> tuple[list[Event], list[Event], ScriptedEmbedder]:
+    """Drive a live cut, then close the segment with a revised word list.
+
+    The cut needs a chunk in which the boundary is already ``min_turn_ms`` in the
+    past, so the sequence is: grow the utterance, cut, then finalize.
+    """
+    inner = ScriptedRecognizer(
+        [
+            [_partial(0, partial_text, 0.1)],
+            [_partial(0, f"{partial_text} more", 0.1)],
+            [_final_with_words(0, 0.1, revised[-1].e, revised)],
+        ],
+        open_words=[heard[:2], heard, revised],
+    )
+    used = embedder if embedder is not None else ScriptedEmbedder([VOICE_A, VOICE_B])
+    rec = _live(inner, used, ScriptedTurnDetector([1.6]))
+
+    rec.accept_pcm(_pcm(1.5))
+    cutting = rec.accept_pcm(_pcm(1.5))
+    closing = rec.accept_pcm(_pcm(0.5))
+    return cutting, closing, used
+
+
+def test_a_revised_committed_row_is_corrected_in_place() -> None:
+    """A live cut writes a row the decoder is still free to change.
+
+    Waiting long enough to be certain would give back the latency the cut exists to
+    save, so the row is corrected once the word list is authoritative. Safe because
+    addTranscriptSegment is an unconditional PutItem for a final: re-emitting the
+    same segment number updates that row rather than adding one.
+    """
+    heard = _words(("their", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+    revised = _words(("there", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+
+    cutting, closing, _ = _cut_then_close(heard, revised, "their two")
+
+    (cut,) = (event for event in cutting if event.kind == "final")
+    assert cut.text == "their two"
+
+    finals = [event for event in closing if event.kind == "final"]
+    correction = next(event for event in finals if event.segment == cut.segment)
+    assert correction.text == "there two", "the revision must reach the settled row"
+    # Same row, same span, so nothing reorders in a view sorted by end time.
+    assert correction.start == cut.start
+    assert correction.end == cut.end
+    # And the remainder still lands on its own row.
+    assert [event.text for event in finals if event.segment != cut.segment] == ["three"]
+
+
+def test_a_corrected_row_keeps_its_original_speaker() -> None:
+    """The audio behind the row did not change, so neither does who spoke it.
+
+    Re-assigning would also fold the same embedding into a centroid a second time.
+    """
+    heard = _words(("aaa", 0.1, 0.5), ("bbb", 0.6, 1.0), ("ccc", 2.2, 2.6))
+    revised = _words(("aaa", 0.1, 0.5), ("BBB", 0.6, 1.0), ("ccc", 2.2, 2.6))
+
+    cutting, closing, embedder = _cut_then_close(heard, revised, "aaa bbb")
+
+    (cut,) = (event for event in cutting if event.kind == "final")
+    correction = next(
+        event for event in closing if event.kind == "final" and event.segment == cut.segment
+    )
+    assert correction.speaker == cut.speaker == "spk_0"
+    # One embedding per distinct row, none for the correction.
+    assert embedder.calls == 2
+
+
+def test_an_unrevised_committed_row_costs_no_extra_write() -> None:
+    """The common case must be free, or every meeting pays for a rare failure."""
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+
+    cutting, closing, _ = _cut_then_close(words, words, "one two")
+
+    (cut,) = (event for event in cutting if event.kind == "final")
+    # Only the remainder, no re-emission of the settled row.
+    assert [event.segment for event in closing if event.kind == "final"] == [cut.segment + 1]
+
+
+def test_a_revision_that_empties_a_row_leaves_it_alone() -> None:
+    """Blanking a transcript row would lose text rather than correct it."""
+    heard = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+    revised = _words(("three", 2.2, 2.6))
+
+    cutting, closing, _ = _cut_then_close(heard, revised, "one two")
+
+    (cut,) = (event for event in cutting if event.kind == "final")
+    corrections = [
+        event for event in closing if event.kind == "final" and event.segment == cut.segment
+    ]
+    assert corrections == [], "an empty correction must not blank the row"
+
+
+def test_the_remainder_is_partitioned_by_time_not_by_a_string_prefix() -> None:
+    """The remainder is taken from the word list, not by string-matching the prefix.
+
+    A real recogniser's ``text`` is its punctuated, capitalised hypothesis, while its
+    word timings carry bare tokens - so the committed text is never a literal prefix
+    of the closing text even when nothing was revised. Stripping a prefix therefore
+    failed to match and re-emitted the whole utterance, duplicating every settled
+    word onto the remainder's row.
+    """
+    words = _words(("there", 0.1, 0.5), ("too", 0.6, 1.0), ("three", 2.2, 2.6))
+    inner = ScriptedRecognizer(
+        [
+            [_partial(0, "there too", 0.1)],
+            [_partial(0, "there too three", 0.1)],
+            # Punctuated and capitalised, the way the real decoder reports it.
+            [
+                Event(
+                    kind="final",
+                    segment=0,
+                    text="There, too. Three.",
+                    start=0.1,
+                    end=2.6,
+                    words=words,
+                )
+            ],
+        ],
+        open_words=[words[:2], words, words],
+    )
+    rec = _live(inner, ScriptedEmbedder([VOICE_A, VOICE_B]), ScriptedTurnDetector([1.6]))
+
+    rec.accept_pcm(_pcm(1.5))
+    cutting = rec.accept_pcm(_pcm(1.5))
+    closing = rec.accept_pcm(_pcm(0.5))
+
+    finals = [event for event in cutting + closing if event.kind == "final"]
+    # The invariant: every word lands on exactly one row. Re-emitting text that has
+    # already settled shows it twice in the transcript, and twice to any model
+    # summarising it.
+    counted = Counter(
+        word
+        for event in finals
+        for word in event.text.lower().replace(",", "").replace(".", "").split()
+    )
+    duplicated = {word: n for word, n in counted.items() if n > 1}
+    assert not duplicated, f"words emitted on more than one row: {duplicated}"

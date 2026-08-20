@@ -529,6 +529,23 @@ def build_diarization_config(
     )
 
 
+@dataclass
+class _CommittedRow:
+    """A row already emitted as a final by a live cut, before its utterance ended.
+
+    Kept so the authoritative word list at segment close can correct it: the row was
+    written from a hypothesis the decoder was still free to revise. Mutable because
+    ``text`` is updated in place when a correction is issued, so the state stays
+    truthful about what the client has actually been told.
+    """
+
+    segment: int
+    start: float
+    end: float
+    text: str
+    speaker: str | None
+
+
 @dataclass(frozen=True)
 class _SegmentPart:
     """One speaker turn carved out of a finalized segment."""
@@ -635,8 +652,7 @@ class DiarizingRecognizer(Recognizer):
         # live cut: the absolute time cut to, and the text sent. The inner recogniser
         # keeps reporting the whole segment, so both are needed to emit only what is
         # new — the time to slice audio and words, the text to shorten partials.
-        self._committed_end: float | None = None
-        self._committed_text = ""
+        self._committed: list[_CommittedRow] = []
         # Audio time of the last boundary search, so the segmentation model runs about
         # once per turn_cut_interval_ms rather than on every hypothesis change.
         self._last_cut_check = 0.0
@@ -694,10 +710,11 @@ class DiarizingRecognizer(Recognizer):
                 )
             ]
 
+        corrections = self._corrections(event.words or [])
         event = self._uncommitted_final(event)
         if event is None:
             self._reset_commit()
-            return []
+            return corrections
 
         segment = self._slice(event.start, event.end)
         # Consume the segment's audio: segments are monotonic and non-overlapping,
@@ -724,7 +741,7 @@ class DiarizingRecognizer(Recognizer):
             )
         self._segment_offset += len(parts) - 1
         self._reset_commit()
-        return labelled
+        return corrections + labelled
 
     # --- Cutting a row before the utterance ends ----------------------------
 
@@ -733,9 +750,16 @@ class DiarizingRecognizer(Recognizer):
         return (self._buffer_base + len(self._buffer)) / self._sample_rate
 
     def _reset_commit(self) -> None:
-        self._committed_end = None
-        self._committed_text = ""
+        self._committed = []
         self._last_cut_check = 0.0
+
+    @property
+    def _committed_end(self) -> float | None:
+        return self._committed[-1].end if self._committed else None
+
+    @property
+    def _committed_text(self) -> str:
+        return " ".join(row.text for row in self._committed)
 
     def _uncommitted_text(self, text: str) -> str:
         """``text`` with any already-emitted prefix removed.
@@ -754,18 +778,69 @@ class DiarizingRecognizer(Recognizer):
 
     def _uncommitted_final(self, event: Event) -> Event | None:
         """The part of a closed segment not already emitted by a live cut."""
-        if self._committed_end is None:
+        committed_end = self._committed_end
+        if committed_end is None:
             return event
-        words = [word for word in (event.words or []) if word.s >= self._committed_end]
-        text = self._uncommitted_text(event.text)
+        if event.words:
+            # Exact: partition by time on the authoritative word list rather than by
+            # matching a string prefix that the decoder may have revised.
+            words = [word for word in event.words if word.s >= committed_end]
+            text = " ".join(word.w for word in words)
+        else:
+            words = []
+            text = self._uncommitted_text(event.text)
         if not text and not words:
             return None
-        return replace(
-            event,
-            start=self._committed_end,
-            text=text or " ".join(word.w for word in words),
-            words=words or None,
-        )
+        return replace(event, start=committed_end, text=text, words=words or None)
+
+    def _corrections(self, words: Sequence[WordTiming]) -> list[Event]:
+        """Re-emit any committed row whose text the decoder has since revised.
+
+        A live cut writes a row from a hypothesis the streaming decoder is still free
+        to change. Waiting long enough to be certain would give back the latency the
+        cut exists to save, so instead the row is corrected once the segment closes and
+        the word list is authoritative.
+
+        This is safe because ``addTranscriptSegment`` is an unconditional ``PutItem``
+        for a final, keyed on ``PK=trs#<callId>`` / ``SK=s#<segmentId>``: re-emitting a
+        final for the same segment number updates that row in place. The row keeps its
+        span, so nothing reorders (the UI sorts transcript rows by end time), and it
+        keeps its ORIGINAL speaker - the audio behind it did not change, and
+        re-assigning would fold the same embedding into a centroid twice.
+
+        Nothing is emitted when the text is unchanged, which is the common case, so a
+        meeting with no revisions costs no extra writes at all.
+        """
+        if not self._committed or not words:
+            return []
+        corrections: list[Event] = []
+        for row in self._committed:
+            spanned = [word for word in words if word.s >= row.start and word.e <= row.end]
+            text = " ".join(word.w for word in spanned)
+            # An empty result means the revision dropped the row's words entirely;
+            # there is nothing better to show than what was already sent, and blanking
+            # a transcript row would lose text rather than correct it.
+            if not text or text == row.text:
+                continue
+            _LOG.info(
+                "correcting committed segment %d: %r -> %r",
+                row.segment,
+                row.text,
+                text,
+            )
+            row.text = text
+            corrections.append(
+                Event(
+                    kind="final",
+                    segment=row.segment,
+                    text=text,
+                    start=row.start,
+                    end=row.end,
+                    words=list(spanned),
+                    speaker=row.speaker,
+                )
+            )
+        return corrections
 
     def _maybe_cut_open_segment(self) -> list[Event]:
         """Close a row now if the speaker has changed inside the open utterance.
@@ -849,8 +924,9 @@ class DiarizingRecognizer(Recognizer):
         text = " ".join(word.w for word in prefix)
         segment = self._inner.current_segment() + self._segment_offset
 
-        self._committed_end = end
-        self._committed_text = f"{self._committed_text} {text}".strip()
+        self._committed.append(
+            _CommittedRow(segment=segment, start=start, end=end, text=text, speaker=speaker)
+        )
         self._segment_offset += 1
         _LOG.info(
             "live turn cut at %.2fs: emitting %d word(s) as segment %d (speaker %s)",

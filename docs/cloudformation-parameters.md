@@ -94,11 +94,19 @@ reconciled them, and the deployment merged two speakers into one.
 A bundle now carries its own calibrated threshold and utterance floor, baked into the
 ASR image, so a deployment gets a working configuration without knowing any numbers.
 
-| Bundle | Redistributable | Notes |
-|--------|-----------------|-------|
-| `nemotron-titanet-small` | **No** — NVIDIA Open Model License | Accuracy-first default, validated on real meetings |
-| `permissive-zipformer-campplus` | Yes — Apache-2.0 + MIT | Measurably worse on spontaneous speech (ASR trained on read speech) |
-| `transcription-only` | No — NVIDIA Open Model License | No diarization; transcripts labelled by audio channel |
+| Bundle | Calibrated | Redistributable | Notes |
+|--------|-----------|-----------------|-------|
+| `nemotron-titanet-small` | Yes (0.4) | No — NVIDIA OML | Default, validated on real meetings |
+| `permissive-zipformer-campplus` | Yes (0.68) | Yes — Apache-2.0 + MIT | Worse on spontaneous speech (ASR trained on read speech) |
+| `transcription-only` | n/a | No — NVIDIA OML | No diarization; labelled by audio channel |
+| `permissive-fastconformer-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Best redistributable option: same architecture as the default, trained on conversational speech, quarter the size |
+| `nemotron-titanet-large` | No | No — NVIDIA OML | The default with a larger embedder, aimed at under-splitting |
+| `apache-only-zipformer-3dspeaker` | No | Yes — Apache-2.0 + MIT | For deployments that cannot accept CC-BY-4.0 attribution |
+| `accurate-parakeet-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Offline: highest accuracy, but **no interim text** while speaking. Needs 16 GiB |
+
+An uncalibrated bundle produces **no speaker labels** until the deployment runs a
+calibration from the ASR Config page — a threshold borrowed from another pairing
+fragments or merges speakers, so no number is shipped rather than a wrong one.
 
 There are deliberately no parameters for supplying a model URL: every model is a
 curated entry in the ASR stack's `catalog.json`, with its checksum pinned and (for a

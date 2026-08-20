@@ -373,3 +373,88 @@ def test_run_fails_on_a_missing_env_file(tmp_path: Path) -> None:
 def test_extract_rejects_an_unsupported_archive_type(tmp_path: Path) -> None:
     with pytest.raises(fetch_model.ModelFetchError, match="unsupported archive type"):
         fetch_model.extract(tmp_path / "x", "zip", 1, tmp_path)
+
+
+def test_run_places_the_vad_model_for_the_offline_engine(tmp_path: Path) -> None:
+    """The offline engine cannot stream, so it needs the VAD baked in beside the model.
+
+    The streaming engine endpoints internally and must NOT carry the extra weights,
+    which is the other half of this (see the test below).
+    """
+    model_archive = make_archive(tmp_path)
+    model_digest = hashlib.sha256(model_archive.read_bytes()).hexdigest()
+    vad_bytes = b"silero weights"
+    vad_digest = hashlib.sha256(vad_bytes).hexdigest()
+    env_path = write_env(
+        tmp_path / "model.env",
+        {
+            **ENV_TEMPLATE,
+            "ASR_MODEL_SHA256": model_digest,
+            "ASR_MODEL_ENGINE": "accurate",
+            "ASR_VAD_MODEL_ID": "silero-vad-v5",
+            "ASR_VAD_MODEL_URL": "https://example.invalid/silero_vad.onnx",
+            "ASR_VAD_MODEL_SHA256": vad_digest,
+        },
+    )
+    dest = tmp_path / "opt-models"
+
+    def fake_download(url: str, target: Path) -> str:
+        if url.endswith("silero_vad.onnx"):
+            target.write_bytes(vad_bytes)
+            return vad_digest
+        target.write_bytes(model_archive.read_bytes())
+        return model_digest
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    # The filename the offline recognizer resolves by default.
+    assert (dest / "silero_vad.onnx").read_bytes() == vad_bytes
+    assert (dest / "encoder.onnx").read_bytes() == b"encoder"
+
+
+def test_run_omits_the_vad_model_when_none_is_selected(tmp_path: Path) -> None:
+    model_archive = make_archive(tmp_path)
+    model_digest = hashlib.sha256(model_archive.read_bytes()).hexdigest()
+    env_path = write_env(
+        tmp_path / "model.env", {**ENV_TEMPLATE, "ASR_MODEL_SHA256": model_digest}
+    )
+    dest = tmp_path / "opt-models"
+
+    with mock.patch.object(
+        fetch_model,
+        "download",
+        side_effect=lambda url, target: (
+            target.write_bytes(model_archive.read_bytes()),
+            model_digest,
+        )[1],
+    ):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    assert not (dest / "silero_vad.onnx").exists()
+
+
+def test_a_corrupt_vad_download_fails_the_build(tmp_path: Path) -> None:
+    """Unverified weights are never baked into an image, VAD included."""
+    model_archive = make_archive(tmp_path)
+    model_digest = hashlib.sha256(model_archive.read_bytes()).hexdigest()
+    env_path = write_env(
+        tmp_path / "model.env",
+        {
+            **ENV_TEMPLATE,
+            "ASR_MODEL_SHA256": model_digest,
+            "ASR_MODEL_ENGINE": "accurate",
+            "ASR_VAD_MODEL_ID": "silero-vad-v5",
+            "ASR_VAD_MODEL_URL": "https://example.invalid/silero_vad.onnx",
+            "ASR_VAD_MODEL_SHA256": "0" * 64,
+        },
+    )
+    dest = tmp_path / "opt-models"
+
+    def fake_download(url: str, target: Path) -> str:
+        payload = b"tampered" if url.endswith("silero_vad.onnx") else model_archive.read_bytes()
+        target.write_bytes(payload)
+        return hashlib.sha256(payload).hexdigest()
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 1

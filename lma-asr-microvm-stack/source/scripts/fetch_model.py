@@ -36,6 +36,10 @@ CANONICAL_NAMES = {
 
 SPEAKER_MODEL_NAME = "speaker_embedding.onnx"
 SEGMENTATION_MODEL_NAME = "segmentation.onnx"
+# Only the offline ("accurate") engine loads this: an offline model cannot stream, so
+# audio is cut into utterances by VAD and each closed utterance is decoded. The name
+# matches asr_server.offline_recognizer's default.
+VAD_MODEL_NAME = "silero_vad.onnx"
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 # Model weights come from a public release host, and a single 503 from it used to
@@ -268,6 +272,20 @@ def run(argv: list[str]) -> int:
                 log(f"placed segmentation model -> {SEGMENTATION_MODEL_NAME}")
             else:
                 log("no segmentation model selected: one speaker per endpointed utterance")
+
+            vad_url = env.get("ASR_VAD_MODEL_URL", "")
+            if vad_url:
+                vad_tmp = tmpdir / VAD_MODEL_NAME
+                fetch_verified(
+                    vad_url,
+                    env.get("ASR_VAD_MODEL_SHA256", ""),
+                    vad_tmp,
+                    f"VAD model {env.get('ASR_VAD_MODEL_ID', '?')}",
+                )
+                shutil.move(str(vad_tmp), str(dest / VAD_MODEL_NAME))
+                log(f"placed VAD model -> {VAD_MODEL_NAME}")
+            else:
+                log("no VAD model selected: the streaming engine endpoints internally")
         except (ModelFetchError, OSError, tarfile.TarError) as exc:
             log(f"ERROR: {exc}")
             return 1

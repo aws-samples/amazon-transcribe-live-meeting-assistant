@@ -113,9 +113,47 @@ numbers.
 
 | Bundle | ASR | Embedder | Threshold | Redistributable |
 |---|---|---|---|---|
-| `nemotron-titanet-small` | Nemotron 560 ms | TitaNet-small | 0.4 | **No** (NVIDIA OML) |
-| `permissive-zipformer-campplus` | Zipformer | WeSpeaker CAM++ | 0.68 | Yes (Apache-2.0 + MIT) |
+| `nemotron-titanet-small` | Nemotron 560 ms | TitaNet-small | **0.4** | No (NVIDIA OML) |
+| `permissive-zipformer-campplus` | Zipformer | WeSpeaker CAM++ | **0.68** | Yes (Apache-2.0 + MIT) |
 | `transcription-only` | Nemotron 560 ms | — | — | No (NVIDIA OML) |
+| `permissive-fastconformer-titanet-large` | FastConformer 480 ms | TitaNet-large | *uncalibrated* | **Yes** (CC-BY-4.0 + MIT) |
+| `nemotron-titanet-large` | Nemotron 560 ms | TitaNet-large | *uncalibrated* | No (NVIDIA OML) |
+| `apache-only-zipformer-3dspeaker` | Zipformer | 3D-Speaker CAM++ | *uncalibrated* | Yes (Apache-2.0 + MIT) |
+| `accurate-parakeet-titanet-large` | Parakeet TDT v3 **(offline)** | TitaNet-large | *uncalibrated* | **Yes** (CC-BY-4.0 + MIT) |
+
+A bundle marked *uncalibrated* ships **no threshold**, so it produces no speaker labels
+until this deployment runs a calibration. That is the guardrail working, not a bug: a
+threshold borrowed from another pairing fragments one speaker into many or merges
+several into one.
+
+**Which redistributable bundle to reach for.** `permissive-fastconformer-titanet-large`.
+Its ASR model is the same cache-aware streaming FastConformer-RNNT architecture as the
+Nemotron default, but CC-BY-4.0 rather than the NVIDIA Open Model License, and trained on
+NeMo ASRSET — LibriSpeech, **Fisher**, **Switchboard**, WSJ, MLS-EN and Common Voice.
+That matters: those are thousands of hours of *spontaneous conversational* speech, which
+is what a meeting is, whereas the Apache-2.0 Zipformer is LibriSpeech read speech. It is
+also a quarter of the download (106 MB against 464 MB).
+
+One correction worth recording, because it is easy to assume otherwise: Parakeet is only
+permissive **offline**. `parakeet-tdt-0.6b-v2` and `-v3` are CC-BY-4.0, but the
+*streaming* "unified" Parakeet export is under the NVIDIA Open Model License, exactly
+like Nemotron. There is no permissive streaming Parakeet.
+
+### The offline (`accurate`) bundle
+
+`accurate-parakeet-titanet-large` uses the offline engine: Parakeet TDT cannot stream, so
+audio is cut into utterances by **Silero VAD** (MIT) and each closed utterance is decoded
+in one pass. The trade is stark and worth stating plainly — **there is no interim text
+while somebody is still speaking**, only when they stop, and live cutting cannot apply
+either because a mid-utterance word list does not exist. It suits an accuracy-first
+deployment more than a live meeting view. Sized at 16 GiB (8 vCPU) because a 0.6B offline
+decode catches up in bursts rather than keeping pace frame by frame. Its latency on a real
+meeting is **unmeasured**.
+
+Parakeet was chosen over Whisper — also permissive, also offline — because TDT is a
+transducer and reports token timestamps. Turn splitting and live cutting both need word
+timings, and sherpa's Whisper export provides none, so Whisper would silently reduce
+diarization to one speaker per VAD segment. See *Not included: Whisper* below.
 
 Bundles exist because a threshold is **not** a property of the embedder alone.
 Utterance length moves it as much as the model does: CAM++ measured 0.30 on 1–2 s
@@ -361,11 +399,27 @@ Transcribe path, which exists there because Transcribe caps a result near 30 s a
 labels a partial; this engine has no such cap of its own, so without the bound a row
 could stay open for as long as somebody kept talking.
 
-**Known limitation.** A streaming decoder can revise earlier text as more audio
-arrives, and a committed row is not rewritten. Only audio at least `ASR_MIN_TURN_MS` in
-the past is ever committed, by which point the decoder has enough right-context that
-revisions to it are rare — but a late revision to a settled row is lost rather than
-corrected.
+**Revisions are corrected, not lost.** A streaming decoder can revise earlier text as
+more audio arrives, so a row committed early was written from a hypothesis the decoder
+was still free to change. Waiting long enough to be certain would hand back the latency
+the cut exists to save, so instead each committed row is **re-emitted when the utterance
+closes**, once the word list is authoritative — and only if its text actually changed, so
+a meeting with no revisions costs no extra writes at all.
+
+This is safe because of how the write already works: `addTranscriptSegment` is an
+unconditional `PutItem` keyed on `PK=trs#<callId>` / `SK=s#<segmentId>`, with a condition
+that only stops a *partial* overwriting a final. Re-emitting a final for the same segment
+number therefore updates that row in place rather than adding one. The corrected row keeps
+its span, so nothing reorders (the UI sorts transcript rows by end time), and it keeps its
+**original speaker** — the audio behind it did not change, and re-assigning would fold the
+same embedding into a centroid twice.
+
+Two edges are handled deliberately: a revision that would leave a row *empty* is ignored,
+because blanking a transcript row loses text rather than correcting it; and the remainder
+after a cut is partitioned by **time** on the word list, not by stripping a text prefix,
+because a real recogniser's `text` is punctuated and capitalised while its word timings are
+bare tokens — so the committed text is never a literal prefix of the closing text, and
+prefix-matching duplicated every settled word onto the remainder's row.
 
 ### Partials name nobody
 
@@ -536,8 +590,8 @@ it works far better when every label is distinct.
 - **Overlapping speech resolves to one speaker.** The engine detects overlap but
   attributes the span to a single voice rather than emitting both.
 - **A live cut lands slightly late**, because a speaker change is only acted on once
-  `ASR_MIN_TURN_MS` of audio has confirmed it, and a committed row is not rewritten if
-  the decoder later revises its text.
+  `ASR_MIN_TURN_MS` of audio has confirmed it. Its text is corrected when the utterance
+  closes, but the boundary itself is never moved.
 - **The first minute is the least accurate**, while the model is still learning
   each voice. There is no end-of-meeting correction pass.
 - **Speaker identities are per session and per channel.** A reconnect mid-meeting
@@ -654,11 +708,26 @@ complying with their licences.**
 | Component | Licence |
 |---|---|
 | `sherpa-onnx` runtime | Apache-2.0 |
-| NVIDIA Nemotron streaming EN 0.6B (default ASR model) | NVIDIA Open Model License |
-| NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
+| NVIDIA Nemotron streaming EN 0.6B (default ASR model) | **NVIDIA Open Model License** |
+| NVIDIA FastConformer streaming EN 480 ms | CC-BY-4.0 |
+| NVIDIA Parakeet TDT 0.6B v3 (offline) | CC-BY-4.0 |
+| icefall streaming Zipformer EN | Apache-2.0 |
+| NVIDIA TitaNet-small / TitaNet-large (speaker embedding) | CC-BY-4.0 |
+| WeSpeaker CAM++ / ResNet293 (speaker embedding) | Apache-2.0 |
+| 3D-Speaker CAM++ / ERes2Net (speaker embedding) | Apache-2.0 |
+| pyannote segmentation 3.0 (turn detection) | MIT |
+| Silero VAD (offline engine only) | MIT |
 
 Each model's licence file is copied into the image alongside its weights, and the
-resolved licence is reported in the ASR stack's `AsrModelLicense` output.
+resolved licences are reported in the ASR stack's `AsrModelLicense`, `AsrLicenceSummary`
+and `AsrRedistributable` outputs. **`AsrRedistributable` is the one to check** before
+copying an image anywhere: it is `false` whenever any weight in the bundle carries a
+licence that does not permit redistribution, which today means any bundle using the
+Nemotron default.
+
+Every checksum in `catalog.json` was verified by downloading the artifact and hashing it;
+the three speaker models added on 2026-08-20 additionally match the publisher's own
+`checksum.txt`.
 
 ## See Also
 
