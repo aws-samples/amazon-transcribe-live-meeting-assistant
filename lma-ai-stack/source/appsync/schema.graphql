@@ -763,6 +763,9 @@ type AsrConfig @aws_cognito_user_pools @aws_iam {
 	endpointingMs: String
 	requireCorroboration: Boolean
 	splitOnSpeakerChange: Boolean
+	liveTurnCut: Boolean
+	turnCutIntervalMs: String
+	maxOpenSegmentMs: String
 	diarizeByDefault: Boolean
 	engineDefaultMicrovm: Boolean
 }

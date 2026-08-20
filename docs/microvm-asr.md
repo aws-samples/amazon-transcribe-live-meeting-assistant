@@ -317,20 +317,68 @@ Measured end to end on k2-fsa's `1-two-speakers-en.wav`: the real model finds th
 at 7.89 s, the split snaps it to 7.90 s, and the two rows come back as `spk_0`
 (0.00–7.90) and `spk_1` (8.00–16.00) with the words divided 16/16.
 
-**Still to come: the forward cut.** Today the split happens at segment close, so live
-partials can briefly show the second speaker under the first speaker's label until
-the utterance ends. Cutting forward the moment a change is detected is safe to add
-because a correction *can* be applied afterwards — `addTranscriptSegment` is a
-`PutItem` keyed on `PK=trs#<callId>` / `SK=s#<segmentId>` whose guard only stops a
-*partial* from overwriting a final, so re-emitting a final for the same segment number
-updates that row in place. A false forward split then degrades to two adjacent rows
-carrying the *same* speaker rather than a wrong attribution, and no row ever needs
-deleting.
-
 Turn splitting is off for a bundle with no segmentation model, when no speaker model is
 baked in (there would be no embedder to identify the turns it finds), or when
 **Split rows on a speaker change** is unticked on the ASR Config page — that last one
 takes effect on the next meeting, with no rebuild.
+
+### Cutting a row before the utterance ends
+
+The split above is retroactive: it happens when the utterance closes, so until then a
+live row holds both speakers. With **Close a row on a confirmed speaker change**
+(`AsrLiveTurnCut`, on by default) the speaker change becomes the *primary* boundary and
+endpointing silence is only a backstop — which is the right way round, because a pause
+is not what separates people, taking turns is.
+
+While a segment is open the engine re-runs the detector over the audio since the last
+cut, about once per `turnCutIntervalMs` (1 s default) in audio time, and closes a row as
+soon as a boundary is **confirmed**: at least `minSegmentMs` of audio before it, and at
+least `ASR_MIN_TURN_MS` (700 ms) after it. That second condition is what stops a
+back-channel or a model flicker from producing one-word rows, and it is also why the cut
+lands a fraction of a second late — a change cannot be confirmed until some audio has
+followed it.
+
+**Why this is done in the diarization layer, not by endpointing the recogniser early.**
+Forcing the recogniser to finalize would reset its decoder mid-utterance and cost it the
+left context it is using to decode. Text quality is already the weaker half of this
+engine, so cutting here leaves the decode completely untouched: the recogniser keeps
+running and never knows a row was closed underneath it.
+
+Three pieces of bookkeeping make that work, and each has a test that fails without it:
+
+- The recogniser keeps reporting the **whole** open segment, so the committed prefix is
+  subtracted from every later partial. Without it the settled words appear twice, once
+  on a finished row and once in the live one.
+- A cut consumes a wire segment number, so outbound numbering shifts by one. Without it
+  two rows collide on a number and the later silently overwrites the earlier in
+  DynamoDB, losing a labelled turn.
+- The eventual real `final` emits only the words after the last cut.
+
+**Bounded rows.** With no speaker change at all, a row still closes after
+`maxOpenSegmentMs` (20 s default, 0 disables) so a monologue does not sit in the live
+transcript as one unlabelled block. This mirrors the equivalent bound on the Amazon
+Transcribe path, which exists there because Transcribe caps a result near 30 s and never
+labels a partial; this engine has no such cap of its own, so without the bound a row
+could stay open for as long as somebody kept talking.
+
+**Known limitation.** A streaming decoder can revise earlier text as more audio
+arrives, and a committed row is not rewritten. Only audio at least `ASR_MIN_TURN_MS` in
+the past is ever committed, by which point the decoder has enough right-context that
+revisions to it are rare — but a late revision to a settled row is lost rather than
+corrected.
+
+### Partials name nobody
+
+A partial used to carry the last identified speaker as a provisional label. On a real
+call that meant the person who had just *stopped* talking was named against the words of
+whoever started, until the final corrected it a second or two later — reviewers watching
+the live transcript reported that the label "transforms" mid-sentence, and read it as
+the diarization being unstable when the final labels were in fact correct.
+
+Partials now carry no speaker at all, so the row shows the plain channel name until the
+label is actually known, and the `(spk_N)` suffix appears when there is something true
+to put in it. This matches the Amazon Transcribe path, which never had speaker labels on
+partials to begin with (they only arrive on final results).
 
 ### Not included: Whisper, Distil-Whisper, and the WhisperX hybrid
 
@@ -456,20 +504,26 @@ segment counts and resident memory.
 
 ## Speaker names
 
-The voice on the **microphone** keeps the name LMA already has for the signed-in
-user. Every voice on the **tab** is numbered — `Speaker 1 (tab)`, `Speaker 2 (tab)` —
-because the name LMA has for that side is a placeholder ("Other Participant"), not a
-person. Numbering is shared across channels, so no two identities render the same
-`Speaker N`.
+A row's speaker is the channel's own name plus the engine's voice id:
+`Other Participant (spk_0)`, `Other Participant (spk_1)`, `alex@example.com (spk_0)`.
+Both engines format it the same way (`appendSpeakerLabel` in
+`calleventdata/diarization.ts`), so a transcript reads identically whichever one
+produced it.
 
-This is deliberate, and was learnt the hard way. Handing the placeholder to the first
-voice heard on the tab produced transcripts reading `Other Participant` beside
-`Speaker 1 (tab)`, and a reviewer given such a transcript concluded the two tab
-speakers had been merged into a leftover bucket — when they had in fact been separated
-correctly and one had simply spoken seven times as much. Clustering that meeting's
-embeddings independently of the labels found two voices 0.34 apart, with the labels
-matching the clusters one-for-one. A placeholder that looks like a bucket gets read as
-one, by people and by any model summarising the transcript.
+**The suffix is not cosmetic.** Each channel runs its own session and both restart
+numbering at `spk_0` for different people, so the base name is what keeps them apart —
+and the suffix is what keeps two people on the *same* channel apart. Without it the
+first voice heard on the tab took that channel's placeholder name ("Other Participant")
+on its own, and a reviewer given such a transcript concluded the two tab speakers had
+been merged into a leftover bucket. They had in fact been separated correctly; one had
+simply spoken seven times as much. Clustering that meeting's embeddings independently of
+the labels found two voices 0.34 apart, matching the labels one-for-one. A placeholder
+that looks like a bucket gets read as one, by people and by any model summarising the
+transcript.
+
+It also degrades well: a partial has no known speaker yet, so it shows the bare channel
+name and gains the suffix when the label arrives, rather than displaying somebody else's
+name in the meantime.
 
 Labels are per meeting and per channel, and they are not identities. Mapping them onto
 real names — from the participant list, or by asking a model — is a separate step, and
@@ -479,9 +533,11 @@ it works far better when every label is distinct.
 
 - **English only** with the default model; `language`, `punctuate` and
   `latency_mode` are accepted by the protocol but do not change behaviour.
-- **One speaker per utterance.** The engine labels each endpointed segment, so it
-  does not split a single utterance mid-sentence, and overlapping speech resolves
-  to the dominant speaker.
+- **Overlapping speech resolves to one speaker.** The engine detects overlap but
+  attributes the span to a single voice rather than emitting both.
+- **A live cut lands slightly late**, because a speaker change is only acted on once
+  `ASR_MIN_TURN_MS` of audio has confirmed it, and a committed row is not rewritten if
+  the decoder later revises its text.
 - **The first minute is the least accurate**, while the model is still learning
   each voice. There is no end-of-meeting correction pass.
 - **Speaker identities are per session and per channel.** A reconnect mid-meeting

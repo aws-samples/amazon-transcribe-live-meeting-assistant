@@ -399,6 +399,18 @@ class DiarizationConfig:
     # segmentation model. Inert when that model is absent.
     split_on_speaker_change: bool = True
     min_turn_ms: int = 700
+    # Close a row as soon as a speaker change is confirmed, instead of waiting for
+    # endpointing silence. Endpointing is what previously separated speakers, so two
+    # people talking without a gap shared one row until somebody stopped for
+    # ``endpointing_ms``; with this on, the speaker change is the primary boundary
+    # and the pause is only a backstop.
+    live_turn_cut: bool = True
+    # How often to look for a boundary in the open utterance, in audio time. Each
+    # check is one segmentation-model window, so this bounds the added inference.
+    turn_cut_interval_ms: int = 1000
+    # Close a row after this much unbroken speech even with no boundary found, so a
+    # monologue does not sit as one unlabelled block. 0 disables it.
+    max_open_segment_ms: int = 20000
 
 
 def diarization_enabled(speaker_model: str | Path | None = None) -> bool:
@@ -445,6 +457,9 @@ def build_diarization_config(
     min_segment_ms: int | None = None,
     require_corroboration: bool | None = None,
     split_on_speaker_change: bool | None = None,
+    live_turn_cut: bool | None = None,
+    turn_cut_interval_ms: int | None = None,
+    max_open_segment_ms: int | None = None,
     num_threads: int | None = None,
 ) -> DiarizationConfig:
     """Resolve a :class:`DiarizationConfig` from env + optional overrides (NFR5).
@@ -486,6 +501,16 @@ def build_diarization_config(
         split_on_speaker_change = (
             os.environ.get("ASR_SPLIT_ON_SPEAKER_CHANGE", "1").strip().lower() in _TRUTHY
         )
+    if live_turn_cut is None:
+        live_turn_cut = os.environ.get("ASR_LIVE_TURN_CUT", "1").strip().lower() in _TRUTHY
+    if turn_cut_interval_ms is None:
+        turn_cut_interval_ms = int(
+            os.environ.get("ASR_TURN_CUT_INTERVAL_MS", str(DiarizationConfig.turn_cut_interval_ms))
+        )
+    if max_open_segment_ms is None:
+        max_open_segment_ms = int(
+            os.environ.get("ASR_MAX_OPEN_SEGMENT_MS", str(DiarizationConfig.max_open_segment_ms))
+        )
 
     return DiarizationConfig(
         embedder=SpeakerEmbedderConfig(
@@ -497,6 +522,10 @@ def build_diarization_config(
         max_speakers=max_speakers,
         min_segment_ms=min_segment_ms,
         require_corroboration=require_corroboration,
+        split_on_speaker_change=split_on_speaker_change,
+        live_turn_cut=live_turn_cut,
+        turn_cut_interval_ms=turn_cut_interval_ms,
+        max_open_segment_ms=max_open_segment_ms,
     )
 
 
@@ -554,6 +583,10 @@ class DiarizingRecognizer(Recognizer):
         require_corroboration: bool = False,
         turn_detector: TurnDetector | None = None,
         split_on_speaker_change: bool = True,
+        live_turn_cut: bool = True,
+        turn_cut_interval_ms: int = 1000,
+        max_open_segment_ms: int = 20000,
+        min_turn_ms: int = 700,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
@@ -591,6 +624,23 @@ class DiarizingRecognizer(Recognizer):
         # what keeps a partial and the first final of its segment on the same row.
         self._segment_offset = 0
 
+        self._live_turn_cut = live_turn_cut
+        self._turn_cut_interval = turn_cut_interval_ms / 1000.0
+        self._max_open_segment = max_open_segment_ms / 1000.0
+        # How long a change must persist before it counts. Shorter than this is a
+        # back-channel ("mhm") or a model flicker, and cutting on one produces
+        # unreadable one-word rows.
+        self._min_turn = min_turn_ms / 1000.0
+        # How much of the OPEN inner segment has already been emitted as finals by a
+        # live cut: the absolute time cut to, and the text sent. The inner recogniser
+        # keeps reporting the whole segment, so both are needed to emit only what is
+        # new — the time to slice audio and words, the text to shorten partials.
+        self._committed_end: float | None = None
+        self._committed_text = ""
+        # Audio time of the last boundary search, so the segmentation model runs about
+        # once per turn_cut_interval_ms rather than on every hypothesis change.
+        self._last_cut_check = 0.0
+
     @property
     def registry(self) -> SpeakerRegistry:
         """The per-session speaker registry (identities heard so far)."""
@@ -608,7 +658,12 @@ class DiarizingRecognizer(Recognizer):
         events = self._inner.accept_pcm(pcm)
         self._buffer.extend(samples)
         self._trim_buffer()
-        return self._label_all(events)
+        # Look for a cut BEFORE labelling this chunk's events: a cut consumes a wire
+        # segment number, and doing it first means the partial that follows already
+        # carries the new number and the shortened text, instead of being written to
+        # the old row and then shrinking when the cut lands on top of it.
+        cuts = self._maybe_cut_open_segment()
+        return cuts + self._label_all(events)
 
     def flush(self) -> list[Event]:
         return self._label_all(self._inner.flush())
@@ -622,14 +677,27 @@ class DiarizingRecognizer(Recognizer):
     def _label(self, event: Event) -> list[Event]:
         """Stamp speakers onto one inner event, splitting it on a speaker change."""
         if event.kind != "final":
-            # Segment still open: provisional label only, no embedding.
+            text = self._uncommitted_text(event.text)
+            if not text:
+                # Everything in this hypothesis has already been emitted by a cut.
+                return []
+            # Segment still open, so no embedding and NO speaker: a partial used to
+            # carry the last identified speaker, which named the previous person
+            # until the final corrected it. Leaving it unset shows the plain channel
+            # name instead, which is honest about not knowing yet.
             return [
                 replace(
                     event,
                     segment=event.segment + self._segment_offset,
-                    speaker=self._current_speaker,
+                    text=text,
+                    speaker=None,
                 )
             ]
+
+        event = self._uncommitted_final(event)
+        if event is None:
+            self._reset_commit()
+            return []
 
         segment = self._slice(event.start, event.end)
         # Consume the segment's audio: segments are monotonic and non-overlapping,
@@ -655,7 +723,155 @@ class DiarizingRecognizer(Recognizer):
                 )
             )
         self._segment_offset += len(parts) - 1
+        self._reset_commit()
         return labelled
+
+    # --- Cutting a row before the utterance ends ----------------------------
+
+    def _now(self) -> float:
+        """Absolute audio time of the end of the buffer, in seconds."""
+        return (self._buffer_base + len(self._buffer)) / self._sample_rate
+
+    def _reset_commit(self) -> None:
+        self._committed_end = None
+        self._committed_text = ""
+        self._last_cut_check = 0.0
+
+    def _uncommitted_text(self, text: str) -> str:
+        """``text`` with any already-emitted prefix removed.
+
+        The inner recogniser reports the whole open segment every time, so after a
+        cut its hypothesis still starts with text that is already on a settled row.
+        A prefix match is enough and costs nothing; when the decoder revises the
+        prefix the match fails and the whole hypothesis is shown, which is better
+        than dropping words on the assumption it did not.
+        """
+        if not self._committed_text:
+            return text
+        if text.startswith(self._committed_text):
+            return text[len(self._committed_text) :].strip()
+        return text
+
+    def _uncommitted_final(self, event: Event) -> Event | None:
+        """The part of a closed segment not already emitted by a live cut."""
+        if self._committed_end is None:
+            return event
+        words = [word for word in (event.words or []) if word.s >= self._committed_end]
+        text = self._uncommitted_text(event.text)
+        if not text and not words:
+            return None
+        return replace(
+            event,
+            start=self._committed_end,
+            text=text or " ".join(word.w for word in words),
+            words=words or None,
+        )
+
+    def _maybe_cut_open_segment(self) -> list[Event]:
+        """Close a row now if the speaker has changed inside the open utterance.
+
+        Endpointing is what used to separate speakers, so two people talking without
+        a gap shared one row until somebody paused for ``endpointing_ms``. Here the
+        speaker change is the boundary and the pause is only a backstop.
+
+        Deliberately done in this layer rather than by forcing the recogniser to
+        endpoint early: resetting the decoder mid-utterance costs it the left context
+        it is using to decode, and text quality is already the weaker half of this
+        engine. Cutting here leaves the decode untouched.
+        """
+        if not self._live_turn_cut or self._turn_detector is None:
+            return []
+        words = self._inner.current_words()
+        if len(words) < 2:
+            return []
+
+        start = self._committed_end if self._committed_end is not None else words[0].s
+        now = self._now()
+        open_sec = now - start
+        min_segment_sec = self._min_segment_samples / self._sample_rate
+        # Both sides of a cut have to be long enough to embed, or the cut produces a
+        # row nobody can attribute.
+        if open_sec < 2 * min_segment_sec:
+            return []
+        if now - self._last_cut_check < self._turn_cut_interval:
+            return []
+        self._last_cut_check = now
+
+        cut = self._find_live_cut(start, now, open_sec, min_segment_sec)
+        if cut is None:
+            return []
+        return self._commit(words, start, cut)
+
+    def _find_live_cut(
+        self, start: float, now: float, open_sec: float, min_segment_sec: float
+    ) -> float | None:
+        """Absolute time to cut the open segment at, or None to keep waiting."""
+        samples = self._slice(start, now)
+        if not samples:
+            return None
+        assert self._turn_detector is not None  # guarded by the caller
+        try:
+            detected = self._turn_detector.detect_samples(samples)
+        except Exception:  # noqa: BLE001 - detection must never break transcription
+            _LOG.warning("live turn detection failed at %.2fs", now, exc_info=True)
+            return None
+
+        # A boundary is only actionable once enough audio has followed it to show the
+        # change persisted, and once enough precedes it to embed. Take the LATEST such
+        # boundary so as much as possible settles in one row.
+        usable = [
+            boundary
+            for boundary in detected.boundaries
+            if boundary >= min_segment_sec and (open_sec - boundary) >= self._min_turn
+        ]
+        if usable:
+            return start + max(usable)
+
+        # No boundary, but the row cannot stay open forever: a long monologue would
+        # sit as one unlabelled block. Settle what is already in the past.
+        if self._max_open_segment > 0 and open_sec >= self._max_open_segment:
+            return start + self._max_open_segment
+        return None
+
+    def _commit(self, words: list[WordTiming], start: float, cut: float) -> list[Event]:
+        """Emit the open segment up to ``cut`` as a final, and record it as sent."""
+        prefix = [word for word in words if word.s >= start and word.e <= cut]
+        if not prefix:
+            return []
+        end = prefix[-1].e
+        samples = self._slice(start, end)
+        if len(samples) < self._min_segment_samples:
+            return []
+
+        speaker = self._identify(samples)
+        if speaker is not None:
+            self._current_speaker = speaker
+        text = " ".join(word.w for word in prefix)
+        segment = self._inner.current_segment() + self._segment_offset
+
+        self._committed_end = end
+        self._committed_text = f"{self._committed_text} {text}".strip()
+        self._segment_offset += 1
+        _LOG.info(
+            "live turn cut at %.2fs: emitting %d word(s) as segment %d (speaker %s)",
+            end,
+            len(prefix),
+            segment,
+            speaker,
+        )
+        return [
+            Event(
+                kind="final",
+                segment=segment,
+                text=text,
+                start=start,
+                end=end,
+                words=prefix,
+                speaker=speaker,
+            )
+        ]
+
+
 
     def _parts(self, event: Event, segment: list[float]) -> list[_SegmentPart]:
         """One part per speaker turn in the closed segment.
@@ -883,6 +1099,9 @@ class DiarizingEngine(RecognizerEngine):
         min_segment_ms = self._config.min_segment_ms
         require_corroboration = self._config.require_corroboration
         split_on_speaker_change = self._config.split_on_speaker_change
+        live_turn_cut = self._config.live_turn_cut
+        turn_cut_interval_ms = self._config.turn_cut_interval_ms
+        max_open_segment_ms = self._config.max_open_segment_ms
         sample_rate = self._config.embedder.sample_rate
         if config is not None:
             sample_rate = config.sample_rate
@@ -896,6 +1115,12 @@ class DiarizingEngine(RecognizerEngine):
                 require_corroboration = config.require_corroboration
             if config.split_on_speaker_change is not None:
                 split_on_speaker_change = config.split_on_speaker_change
+            if config.live_turn_cut is not None:
+                live_turn_cut = config.live_turn_cut
+            if config.turn_cut_interval_ms is not None:
+                turn_cut_interval_ms = config.turn_cut_interval_ms
+            if config.max_open_segment_ms is not None:
+                max_open_segment_ms = config.max_open_segment_ms
         return DiarizingRecognizer(
             inner_session,
             self._embedder,
@@ -906,6 +1131,10 @@ class DiarizingEngine(RecognizerEngine):
             require_corroboration=require_corroboration,
             turn_detector=self._turn_detector,
             split_on_speaker_change=split_on_speaker_change,
+            live_turn_cut=live_turn_cut,
+            turn_cut_interval_ms=turn_cut_interval_ms,
+            max_open_segment_ms=max_open_segment_ms,
+            min_turn_ms=self._config.min_turn_ms,
         )
 
 

@@ -479,6 +479,9 @@ class AsrSession:
                     min_segment_ms=config.min_segment_ms,
                     require_corroboration=config.require_corroboration,
                     split_on_speaker_change=config.split_on_speaker_change,
+                    live_turn_cut=config.live_turn_cut,
+                    turn_cut_interval_ms=config.turn_cut_interval_ms,
+                    max_open_segment_ms=config.max_open_segment_ms,
                 )
                 self._recognizer = await asyncio.to_thread(
                     self._engine.new_session, session_config

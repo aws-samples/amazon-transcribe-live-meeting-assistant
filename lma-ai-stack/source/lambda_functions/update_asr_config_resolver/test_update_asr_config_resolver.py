@@ -124,3 +124,53 @@ def test_the_speaker_change_split_is_stored_as_a_boolean() -> None:
     assert response["Success"] is True
     assert stored["splitOnSpeakerChange"] is False
     assert stored["requireCorroboration"] is True
+
+
+def test_the_live_speaker_change_cut_is_stored_as_a_boolean() -> None:
+    """Distinct from splitOnSpeakerChange: that splits retroactively, this one live."""
+    _, stored = invoke({"liveTurnCut": False, "splitOnSpeakerChange": True})
+
+    assert stored["liveTurnCut"] is False
+    assert stored["splitOnSpeakerChange"] is True
+
+
+def test_the_live_cut_timings_are_stored_as_strings() -> None:
+    _, stored = invoke({"turnCutIntervalMs": 1500, "maxOpenSegmentMs": 20000})
+
+    assert stored["turnCutIntervalMs"] == "1500"
+    assert stored["maxOpenSegmentMs"] == "20000"
+
+
+def test_disabling_the_open_row_bound_is_allowed() -> None:
+    """0 means "follow the engine's own utterance boundaries", so it must survive.
+
+    The minimum for the other durations is non-zero, so treating them alike would
+    silently drop the one value that turns this bound off.
+    """
+    _, stored = invoke({"maxOpenSegmentMs": 0})
+
+    assert stored["maxOpenSegmentMs"] == "0"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("turnCutIntervalMs", 100),  # too frequent: a segmentation window per 100ms
+        ("turnCutIntervalMs", 20000),
+        ("maxOpenSegmentMs", -1),
+        ("maxOpenSegmentMs", 120000),
+    ],
+)
+def test_live_cut_timings_out_of_range_are_dropped(field: str, value: object) -> None:
+    _, stored = invoke({field: value, "liveTurnCut": True})
+
+    assert field not in stored
+    assert stored["liveTurnCut"] is True
+
+
+def test_the_open_row_bound_covers_the_transcribe_path_default() -> None:
+    """Both engines should be comparable, so 20s must be a legal value here too."""
+    low, high, _ = index.NUMERIC_FIELDS["maxOpenSegmentMs"]
+
+    assert low == 0
+    assert high >= 20000

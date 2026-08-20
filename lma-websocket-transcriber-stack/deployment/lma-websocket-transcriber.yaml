@@ -331,6 +331,29 @@ Parameters:
       to the web UI so the Stream Audio page only offers diarization when it can
       actually be served.
 
+  AsrLiveTurnCut:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Close a transcript row as soon as a speaker change is confirmed inside an
+      utterance, instead of waiting for endpointing silence. Endpointing is what
+      previously separated speakers, so two people talking without a gap shared one
+      row and one label until somebody paused. Requires a bundle with a
+      turn-detection model. Adds roughly one segmentation-model window per second per
+      channel of CPU on the MicroVM.
+
+  AsrMaxOpenSegmentMs:
+    Type: Number
+    Default: 20000
+    MinValue: 0
+    MaxValue: 60000
+    Description: >-
+      Close a row after this much unbroken speech even when no speaker change is
+      found, so a monologue does not sit in the live transcript as one unlabelled
+      block. 0 disables the bound and follows the engine's own utterance boundaries.
+      Mirrors the equivalent bound on the Amazon Transcribe path.
+
   AsrModelBundleId:
     Type: String
     Default: ""
@@ -1378,6 +1401,10 @@ Resources:
               Value: !Ref AsrEndpointingMs
             - Name: ASR_MIN_SEGMENT_MS
               Value: !Ref AsrMinSegmentMs
+            - Name: ASR_LIVE_TURN_CUT
+              Value: !Ref AsrLiveTurnCut
+            - Name: ASR_MAX_OPEN_SEGMENT_MS
+              Value: !Ref AsrMaxOpenSegmentMs
             - Name: ASR_SPEAKER_MODEL_MEASURED
               Value: !Ref AsrSpeakerModelMeasured
             - Name: ASR_CONFIG_TABLE_NAME

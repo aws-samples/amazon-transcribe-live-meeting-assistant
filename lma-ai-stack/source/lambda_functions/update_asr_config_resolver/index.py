@@ -35,6 +35,12 @@ NUMERIC_FIELDS = {
     "maxSpeakers": (0, 30, int),
     # Trailing silence that closes an utterance.
     "endpointingMs": (200, 5000, int),
+    # How often to look for a speaker change inside an open utterance. Each search
+    # is one segmentation-model window, so this bounds the added inference.
+    "turnCutIntervalMs": (200, 10000, int),
+    # Close a row after this much unbroken speech even with no speaker change found.
+    # 0 follows the engine's own utterance boundaries.
+    "maxOpenSegmentMs": (0, 60000, int),
 }
 
 BOOLEAN_FIELDS = {
@@ -45,6 +51,10 @@ BOOLEAN_FIELDS = {
     # Split one endpointed utterance into a row per speaker turn, using the baked
     # pyannote segmentation model. On by default when that model is present.
     "splitOnSpeakerChange",
+    # Close a row as soon as a speaker change is confirmed, rather than waiting for
+    # endpointing silence. Endpointing is what used to separate speakers, so two
+    # people talking without a gap shared one row until somebody paused.
+    "liveTurnCut",
     # Route every streaming meeting to the MicroVM engine, not just those that ask
     # for diarization.
     "engineDefaultMicrovm",

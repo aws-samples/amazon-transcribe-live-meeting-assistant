@@ -107,12 +107,19 @@ class ScriptedRecognizer(Recognizer):
         per_chunk: Sequence[Sequence[Event]] = (),
         *,
         on_flush: Sequence[Event] = (),
+        open_words: Sequence[Sequence[WordTiming]] = (),
+        open_segment: int = 0,
     ) -> None:
         self._per_chunk = [list(e) for e in per_chunk]
         self._on_flush = list(on_flush)
         self._idx = -1
         self.chunks: list[bytes] = []
         self.flushed = False
+        # Word timings the still-open segment would report, one entry per
+        # accept_pcm call, so a test can grow an utterance the way a real decoder
+        # does. The last entry sticks once exhausted.
+        self._open_words = [list(w) for w in open_words]
+        self._open_segment = open_segment
 
     def accept_pcm(self, pcm: bytes) -> list[Event]:
         self.chunks.append(pcm)
@@ -124,6 +131,15 @@ class ScriptedRecognizer(Recognizer):
     def flush(self) -> list[Event]:
         self.flushed = True
         return list(self._on_flush)
+
+    def current_segment(self) -> int:
+        return self._open_segment
+
+    def current_words(self) -> list[WordTiming]:
+        if not self._open_words:
+            return []
+        index = min(self._idx, len(self._open_words) - 1)
+        return list(self._open_words[max(index, 0)])
 
 
 class ScriptedEngine(RecognizerEngine):
@@ -353,8 +369,15 @@ def test_speaker_is_derived_from_the_segment_own_audio() -> None:
     assert embedder.sample_counts == [SAMPLE_RATE]
 
 
-def test_partial_carries_provisional_speaker_and_is_not_embedded() -> None:
-    """Partials reuse the current speaker; only finals trigger an embedding."""
+def test_a_partial_names_nobody_rather_than_the_previous_speaker() -> None:
+    """A partial must not guess, and must not cost an embedding.
+
+    Partials used to carry the last identified speaker as a provisional label. On a
+    real call that meant the person who just STOPPED talking was named against the
+    words of whoever started, until the final corrected it a second or two later -
+    reviewers reported the label "transforms" mid-sentence. No speaker at all lets
+    the transcript show the plain channel name until the label is actually known.
+    """
     inner = ScriptedRecognizer(
         [
             [_final(0, "hi", 0.0, 1.0)],
@@ -364,11 +387,12 @@ def test_partial_carries_provisional_speaker_and_is_not_embedded() -> None:
     embedder = ScriptedEmbedder([VOICE_A])
     rec = _recognizer(inner, embedder)
 
-    rec.accept_pcm(_pcm(1.0))
+    (final,) = rec.accept_pcm(_pcm(1.0))
     (partial,) = rec.accept_pcm(_pcm(1.0))
 
+    assert final.speaker == "spk_0"
     assert partial.kind == "partial"
-    assert partial.speaker == "spk_0"  # provisional, from the last known speaker
+    assert partial.speaker is None
     assert embedder.calls == 1  # the partial did NOT cost an embedding
 
 
@@ -1017,3 +1041,230 @@ def test_a_cut_that_would_leave_an_unembeddable_sliver_is_merged_back() -> None:
     assert len(events) == 1
     assert events[0].text == "long enough ok"
 
+
+
+# --- Cutting a row before the utterance ends ---------------------------------
+#
+# Endpointing is what used to separate speakers, so two people talking without a
+# gap shared one row and one label until somebody paused. These tests pin the
+# other half: a confirmed speaker change closes a row on its own, and a long
+# monologue settles rather than sitting open indefinitely.
+
+
+def _live(
+    inner: ScriptedRecognizer,
+    embedder: ScriptedEmbedder,
+    detector: ScriptedTurnDetector,
+    **kwargs: object,
+) -> DiarizingRecognizer:
+    defaults: dict[str, object] = {
+        "min_segment_ms": 500,
+        "turn_detector": detector,
+        "live_turn_cut": True,
+        "turn_cut_interval_ms": 0,
+        "max_open_segment_ms": 0,
+    }
+    defaults.update(kwargs)
+    return _recognizer(inner, embedder, **defaults)
+
+
+def test_a_confirmed_speaker_change_closes_a_row_without_waiting_for_silence() -> None:
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+    inner = ScriptedRecognizer(
+        [[_partial(0, "one two", 0.1)], [_partial(0, "one two three", 0.1)]],
+        open_words=[words[:2], words],
+    )
+    embedder = ScriptedEmbedder([VOICE_A, VOICE_B])
+    # Boundary at 1.6s into the open span, with 1.4s of audio after it.
+    rec = _live(inner, embedder, ScriptedTurnDetector([1.6]))
+
+    rec.accept_pcm(_pcm(1.5))
+    events = rec.accept_pcm(_pcm(1.5))
+
+    finals = [event for event in events if event.kind == "final"]
+    assert len(finals) == 1, "the speaker change alone should have closed a row"
+    assert finals[0].text == "one two"
+    assert finals[0].speaker == "spk_0"
+    # The row is closed and labelled while the utterance is still being decoded.
+    assert finals[0].end == pytest.approx(1.0)
+
+
+def test_the_partial_after_a_cut_shows_only_what_is_new() -> None:
+    """Otherwise the committed words appear twice: once settled, once live."""
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+    inner = ScriptedRecognizer(
+        [
+            [_partial(0, "one two", 0.1)],
+            [_partial(0, "one two three", 0.1)],
+        ],
+        open_words=[words[:2], words],
+    )
+    rec = _live(inner, ScriptedEmbedder([VOICE_A, VOICE_B]), ScriptedTurnDetector([1.6]))
+
+    rec.accept_pcm(_pcm(1.5))
+    events = rec.accept_pcm(_pcm(1.5))
+
+    partials = [event for event in events if event.kind == "partial"]
+    assert [event.text for event in partials] == ["three"]
+    # And on a NEW row, so it cannot overwrite the settled one.
+    finals = [event for event in events if event.kind == "final"]
+    assert partials[0].segment == finals[0].segment + 1
+
+
+def test_the_final_after_a_cut_emits_only_the_remainder() -> None:
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+    inner = ScriptedRecognizer(
+        [
+            [_partial(0, "one two", 0.1)],
+            [_final_with_words(0, 0.1, 2.6, words)],
+        ],
+        open_words=[words[:2], words],
+    )
+    rec = _live(inner, ScriptedEmbedder([VOICE_A, VOICE_B]), ScriptedTurnDetector([1.6]))
+
+    first = rec.accept_pcm(_pcm(1.5))
+    second = rec.accept_pcm(_pcm(1.5))
+
+    cut = [event for event in first + second if event.kind == "final"]
+    assert [event.text for event in cut] == ["one two", "three"]
+    # Distinct rows, and the words are partitioned rather than duplicated.
+    assert cut[0].segment != cut[1].segment
+    assert [word.w for word in cut[1].words or []] == ["three"]
+
+
+def test_a_long_monologue_settles_instead_of_staying_open() -> None:
+    """With no boundary found, a row still closes so the live view is not blank.
+
+    Amazon Transcribe caps a result near 30s and never labels a partial, which is
+    why the Transcribe path bounds its windows at 20s; this engine has no such cap
+    at all, so without a bound a monologue could hold one unlabelled row for as
+    long as somebody kept talking.
+    """
+    words = _words(("aaa", 0.0, 1.0), ("bbb", 1.5, 2.5), ("ccc", 3.0, 3.5))
+    inner = ScriptedRecognizer(
+        [[_partial(0, "aaa bbb ccc", 0.0)]], open_words=[words]
+    )
+    detector = ScriptedTurnDetector([])  # no speaker change anywhere
+    rec = _live(inner, ScriptedEmbedder([VOICE_A]), detector, max_open_segment_ms=3000)
+
+    events = rec.accept_pcm(_pcm(4.0))
+
+    finals = [event for event in events if event.kind == "final"]
+    assert len(finals) == 1
+    # Cut at the last word boundary at or before the 3s bound.
+    assert [word.w for word in finals[0].words or []] == ["aaa", "bbb"]
+    assert finals[0].speaker == "spk_0"
+
+
+def test_no_bound_means_a_row_stays_open_when_nobody_changes() -> None:
+    words = _words(("aaa", 0.0, 1.0), ("bbb", 1.5, 2.5))
+    inner = ScriptedRecognizer([[_partial(0, "aaa bbb", 0.0)]], open_words=[words])
+    rec = _live(inner, ScriptedEmbedder([VOICE_A]), ScriptedTurnDetector([]))
+
+    events = rec.accept_pcm(_pcm(4.0))
+
+    assert [event.kind for event in events] == ["partial"]
+
+
+def test_a_boundary_too_recent_to_be_confirmed_is_not_acted_on() -> None:
+    """A change needs min_turn_ms of audio after it before it means anything.
+
+    Cutting on a boundary at the very edge of what has been heard would split on a
+    back-channel or a model flicker, which produces unreadable one-word rows.
+    """
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0))
+    inner = ScriptedRecognizer([[_partial(0, "one two", 0.1)]], open_words=[words])
+    detector = ScriptedTurnDetector([1.45])  # only 50ms of audio after it
+    rec = _live(inner, ScriptedEmbedder([VOICE_A]), detector)
+
+    events = rec.accept_pcm(_pcm(1.5))
+
+    assert [event.kind for event in events] == ["partial"]
+
+
+def test_live_cutting_is_skipped_until_both_sides_could_be_embedded() -> None:
+    words = _words(("one", 0.05, 0.2), ("two", 0.25, 0.4))
+    inner = ScriptedRecognizer([[_partial(0, "one two", 0.05)]], open_words=[words])
+    detector = ScriptedTurnDetector([0.25])
+    # 0.6s of audio against a 500ms floor: under 2x, so no cut is even attempted.
+    rec = _live(inner, ScriptedEmbedder([VOICE_A]), detector)
+
+    rec.accept_pcm(_pcm(0.6))
+
+    assert detector.calls == 0
+
+
+def test_live_cutting_can_be_turned_off() -> None:
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+    inner = ScriptedRecognizer([[_partial(0, "one two three", 0.1)]], open_words=[words])
+    detector = ScriptedTurnDetector([1.6])
+    rec = _live(inner, ScriptedEmbedder([VOICE_A]), detector, live_turn_cut=False)
+
+    events = rec.accept_pcm(_pcm(3.0))
+
+    assert [event.kind for event in events] == ["partial"]
+    assert detector.calls == 0
+
+
+def test_the_boundary_search_is_throttled_in_audio_time() -> None:
+    """Each search is a segmentation-model window, so it must not run per partial."""
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0))
+    inner = ScriptedRecognizer(
+        [[_partial(0, "one two", 0.1)]] * 4, open_words=[words] * 4
+    )
+    detector = ScriptedTurnDetector([])
+    rec = _live(inner, ScriptedEmbedder([VOICE_A]), detector, turn_cut_interval_ms=1000)
+
+    for _ in range(4):
+        rec.accept_pcm(_pcm(0.4))  # 1.6s total, so one interval elapses
+
+    assert detector.calls == 1
+
+
+def test_an_engine_without_mid_utterance_word_timings_never_cuts() -> None:
+    """The offline path decodes only at silence, so it reports no open words."""
+    inner = ScriptedRecognizer([[_partial(0, "something long", 0.0)]])
+    detector = ScriptedTurnDetector([1.6])
+    rec = _live(inner, ScriptedEmbedder([VOICE_A]), detector)
+
+    events = rec.accept_pcm(_pcm(3.0))
+
+    assert [event.kind for event in events] == ["partial"]
+    assert detector.calls == 0
+
+
+def test_a_failing_detector_never_breaks_the_transcript() -> None:
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0))
+    inner = ScriptedRecognizer([[_partial(0, "one two", 0.1)]], open_words=[words])
+    rec = _live(inner, ScriptedEmbedder([VOICE_A]), ScriptedTurnDetector([1.6], fail=True))
+
+    events = rec.accept_pcm(_pcm(1.5))
+
+    assert [event.kind for event in events] == ["partial"]
+
+
+def test_segment_numbers_stay_unique_across_a_cut_and_the_next_utterance() -> None:
+    """A cut consumes a wire number, so everything after it has to shift.
+
+    Two rows sharing a number would have the later one overwrite the earlier in
+    DynamoDB, silently losing a labelled turn.
+    """
+    words = _words(("one", 0.1, 0.5), ("two", 0.6, 1.0), ("three", 2.2, 2.6))
+    inner = ScriptedRecognizer(
+        [
+            [_partial(0, "one two", 0.1)],
+            [_final_with_words(0, 0.1, 2.6, words)],
+            [_final(1, "next utterance", 3.0, 4.0)],
+        ],
+        open_words=[words[:2], words, []],
+    )
+    rec = _live(inner, ScriptedEmbedder([VOICE_A, VOICE_B, VOICE_A]), ScriptedTurnDetector([1.6]))
+
+    emitted = (
+        rec.accept_pcm(_pcm(1.5)) + rec.accept_pcm(_pcm(1.5)) + rec.accept_pcm(_pcm(1.0))
+    )
+
+    finals = [event for event in emitted if event.kind == "final"]
+    numbers = [event.segment for event in finals]
+    assert len(numbers) == len(set(numbers)), f"colliding segment numbers: {numbers}"
+    assert numbers == sorted(numbers)

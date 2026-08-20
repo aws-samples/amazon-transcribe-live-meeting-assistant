@@ -40,6 +40,9 @@ const getAsrConfigQuery = `
       endpointingMs
       requireCorroboration
       splitOnSpeakerChange
+      liveTurnCut
+      turnCutIntervalMs
+      maxOpenSegmentMs
       diarizeByDefault
       engineDefaultMicrovm
     }
@@ -62,6 +65,8 @@ const NUMERIC_LIMITS = {
   minSegmentMs: { min: 0, max: 5000, label: 'Minimum utterance for speaker ID (ms)' },
   maxSpeakers: { min: 0, max: 30, label: 'Maximum speakers per channel' },
   endpointingMs: { min: 200, max: 5000, label: 'Endpointing silence (ms)' },
+  turnCutIntervalMs: { min: 200, max: 10000, label: 'Speaker-change check interval (ms)' },
+  maxOpenSegmentMs: { min: 0, max: 60000, label: 'Maximum open row duration (ms)' },
 };
 
 const EMPTY = {
@@ -69,8 +74,11 @@ const EMPTY = {
   minSegmentMs: '',
   maxSpeakers: '',
   endpointingMs: '',
+  turnCutIntervalMs: '',
+  maxOpenSegmentMs: '',
   requireCorroboration: false,
   splitOnSpeakerChange: true,
+  liveTurnCut: true,
   diarizeByDefault: true,
   engineDefaultMicrovm: false,
 };
@@ -107,6 +115,7 @@ const AsrConfigPage = () => {
         endpointingMs: stored.endpointingMs ?? '',
         requireCorroboration: stored.requireCorroboration ?? false,
         splitOnSpeakerChange: stored.splitOnSpeakerChange ?? true,
+        liveTurnCut: stored.liveTurnCut ?? true,
         diarizeByDefault: stored.diarizeByDefault ?? true,
         engineDefaultMicrovm: stored.engineDefaultMicrovm ?? false,
       });
@@ -317,7 +326,24 @@ const AsrConfigPage = () => {
                   'symptom rather than fixing the operating point, and a client that knows its own ' +
                   'meeting size can send a value that wins over this.',
               )}
-              {numberField('endpointingMs', 'Trailing silence that closes an utterance. Default: 1200.')}
+              {numberField(
+                'endpointingMs',
+                'Trailing silence that closes an utterance. With speaker-change splitting on, ' +
+                  'this is only a backstop rather than the thing that separates speakers. ' +
+                  'Default: 1200.',
+              )}
+              {numberField(
+                'turnCutIntervalMs',
+                'How often to look for a speaker change inside an open utterance. Each search is ' +
+                  'one segmentation-model window, so lowering this costs CPU on the MicroVM. ' +
+                  'Default: 1000.',
+              )}
+              {numberField(
+                'maxOpenSegmentMs',
+                'Close a row after this much unbroken speech even when no speaker change is ' +
+                  'found, so a monologue does not sit in the live transcript as one unlabelled ' +
+                  "block. 0 follows the engine's own utterance boundaries. Default: 20000.",
+              )}
             </ColumnLayout>
 
             <FormField
@@ -351,6 +377,25 @@ const AsrConfigPage = () => {
                     disabled={saving}
                   >
                     Split rows on a speaker change
+                  </Checkbox>
+                </FormField>
+
+                <FormField
+                  label="Split as soon as the speaker changes, not when the pause comes"
+                  description={
+                    'The setting above splits an utterance retroactively, once it ends. This one ' +
+                    'closes a row the moment a speaker change is confirmed, so a pause is no ' +
+                    'longer what separates people - two speakers talking over each other get a ' +
+                    'row each while they are still talking. Costs about one segmentation-model ' +
+                    'window per second per channel on the MicroVM.'
+                  }
+                >
+                  <Checkbox
+                    checked={config.liveTurnCut}
+                    onChange={({ detail }) => setConfig({ ...config, liveTurnCut: detail.checked })}
+                    disabled={saving}
+                  >
+                    Close a row on a confirmed speaker change
                   </Checkbox>
                 </FormField>
 

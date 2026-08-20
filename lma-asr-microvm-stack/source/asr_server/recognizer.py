@@ -144,6 +144,9 @@ class SessionConfig:
       They are per-session precisely so the operating point can be tuned without
       rebuilding an image: the correct threshold is empirical and specific to the
       speaker model, so it has to be changeable in seconds, not minutes.
+    * ``live_turn_cut`` / ``turn_cut_interval_ms`` / ``max_open_segment_ms`` — when
+      to close a row before the utterance ends, so a speaker change (rather than a
+      pause) is what separates rows. Per-session for the same reason as above.
     """
 
     sample_rate: int = 16000
@@ -153,6 +156,9 @@ class SessionConfig:
     min_segment_ms: int | None = None
     require_corroboration: bool | None = None
     split_on_speaker_change: bool | None = None
+    live_turn_cut: bool | None = None
+    turn_cut_interval_ms: int | None = None
+    max_open_segment_ms: int | None = None
 
 
 class SessionConfigError(ValueError):
@@ -184,6 +190,28 @@ class Recognizer(ABC):
     @abstractmethod
     def flush(self) -> list[Event]:
         """Signal end-of-audio; finalize any in-progress segment."""
+
+    def current_segment(self) -> int:
+        """Index of the segment still open, i.e. the next ``final``'s number.
+
+        Needed so a decorator that emits its own extra finals can number them on the
+        same sequence the inner recogniser is using.
+        """
+        return 0
+
+    def current_words(self) -> list[WordTiming]:
+        """Word timings for the segment still OPEN, when the engine has them.
+
+        Needed to cut a row at a speaker change before the utterance ends: text can
+        only be split at a word boundary, and until the segment closes its words are
+        not on any event. Asked for on demand — and rarely — rather than attached to
+        every partial, because partials fire on each hypothesis change while a cut is
+        considered about once a second.
+
+        Defaults to none, which disables live cutting for engines that cannot report
+        mid-utterance timings (the offline path decodes only at silence).
+        """
+        return []
 
 
 class RecognizerEngine(ABC):
@@ -383,6 +411,14 @@ class SherpaOnlineRecognizer(Recognizer):
             events.extend(self._finalize(end=self._elapsed))
             self._backend.reset()
         return events
+
+    def current_segment(self) -> int:
+        return self._segment
+
+    def current_words(self) -> list[WordTiming]:
+        if self._seg_start is None:
+            return []
+        return self._words(self._seg_start)
 
     def flush(self) -> list[Event]:
         self._backend.input_finished()

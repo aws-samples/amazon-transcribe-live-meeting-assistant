@@ -956,7 +956,10 @@ async def test_negotiated_config_is_threaded_into_new_session() -> None:
         SessionConfig(
             sample_rate=8000,
             endpointing_ms=800,
-            speaker_threshold=0.5,
+            # Unsent: the server keeps the operating point calibrated for the model
+            # bundle baked into the image. A concrete default here would silently
+            # override it for every client that does not send the field.
+            speaker_threshold=None,
             max_speakers=0,
         )
     ]

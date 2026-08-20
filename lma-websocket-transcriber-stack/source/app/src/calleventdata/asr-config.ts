@@ -48,6 +48,17 @@ export interface AsrRuntimeConfig {
     minSegmentMs?: number;
     requireCorroboration?: boolean;
     splitOnSpeakerChange?: boolean;
+    /**
+     * Close a row as soon as a speaker change is confirmed, instead of waiting for
+     * endpointing silence. Endpointing is what used to separate speakers, so two
+     * people talking without a gap shared one row and one label until somebody
+     * paused; with this on the speaker change is the boundary and the pause is only
+     * a backstop.
+     */
+    liveTurnCut?: boolean;
+    turnCutIntervalMs?: number;
+    /** Close a row after this much unbroken speech even with no boundary. 0 disables. */
+    maxOpenSegmentMs?: number;
     diarizeByDefault: boolean;
     engineDefaultMicrovm: boolean;
     /**
@@ -77,6 +88,15 @@ const envDefaults = (): AsrRuntimeConfig => ({
         : undefined,
     splitOnSpeakerChange: process.env['ASR_SPLIT_ON_SPEAKER_CHANGE']
         ? process.env['ASR_SPLIT_ON_SPEAKER_CHANGE'] === 'true'
+        : undefined,
+    liveTurnCut: process.env['ASR_LIVE_TURN_CUT']
+        ? process.env['ASR_LIVE_TURN_CUT'] === 'true'
+        : undefined,
+    turnCutIntervalMs: process.env['ASR_TURN_CUT_INTERVAL_MS']
+        ? parseInt(process.env['ASR_TURN_CUT_INTERVAL_MS'], 10)
+        : undefined,
+    maxOpenSegmentMs: process.env['ASR_MAX_OPEN_SEGMENT_MS']
+        ? parseInt(process.env['ASR_MAX_OPEN_SEGMENT_MS'], 10)
         : undefined,
     diarizeByDefault: (process.env['ASR_DIARIZE_DEFAULT'] || 'true') === 'true',
     engineDefaultMicrovm: (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase() === 'microvm',
@@ -164,6 +184,15 @@ export const getAsrRuntimeConfig = async (
                     item['requireCorroboration']?.BOOL ?? defaults.requireCorroboration,
                 splitOnSpeakerChange:
                     item['splitOnSpeakerChange']?.BOOL ?? defaults.splitOnSpeakerChange,
+                liveTurnCut: item['liveTurnCut']?.BOOL ?? defaults.liveTurnCut,
+                turnCutIntervalMs: optionalNumberOverride(
+                    item['turnCutIntervalMs']?.S,
+                    defaults.turnCutIntervalMs
+                ),
+                maxOpenSegmentMs: optionalNumberOverride(
+                    item['maxOpenSegmentMs']?.S,
+                    defaults.maxOpenSegmentMs
+                ),
                 diarizeByDefault: item['diarizeByDefault']?.BOOL ?? defaults.diarizeByDefault,
                 engineDefaultMicrovm:
                     item['engineDefaultMicrovm']?.BOOL ?? defaults.engineDefaultMicrovm,

@@ -394,6 +394,27 @@ Parameters:
       Hard ceiling on one ASR MicroVM's lifetime, and the cost backstop if a
       transcriber task dies without releasing it. Service maximum is 8 hours.
 
+  AsrLiveTurnCut:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Whether the MicroVM ASR engine closes a transcript row as soon as a speaker
+      change is confirmed, instead of waiting for a pause. Endpointing silence is what
+      previously separated speakers, so two people talking over each other shared one
+      row and one label until somebody stopped talking. Requires a bundle with a
+      turn-detection model.
+
+  AsrMaxOpenSegmentMs:
+    Type: Number
+    Default: 20000
+    MinValue: 0
+    MaxValue: 60000
+    Description: >-
+      Close a row after this much unbroken speech even when no speaker change is
+      found, so a monologue does not sit in the live transcript as one unlabelled
+      block. 0 follows the engine's own utterance boundaries.
+
   AsrMaxSpeakers:
     Type: Number
     Default: 0
@@ -910,6 +931,8 @@ Metadata:
           - AsrModelBundle
           - AsrMaxMeetingSeconds
           - AsrMaxSpeakers
+          - AsrLiveTurnCut
+          - AsrMaxOpenSegmentMs
       - Label:
           default: Transcript Event Processing Configuration
         Parameters:
@@ -1042,6 +1065,10 @@ Metadata:
         default: ASR MicroVM Maximum Lifetime (seconds)
       AsrMaxSpeakers:
         default: ASR Maximum Speakers Per Channel
+      AsrLiveTurnCut:
+        default: ASR Split Rows On Speaker Change (not just on pauses)
+      AsrMaxOpenSegmentMs:
+        default: ASR Maximum Open Row Duration (ms)
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
@@ -2731,6 +2758,8 @@ Resources:
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
           - ""
         AsrMaxSpeakers: !Ref AsrMaxSpeakers
+        AsrLiveTurnCut: !Ref AsrLiveTurnCut
+        AsrMaxOpenSegmentMs: !Ref AsrMaxOpenSegmentMs
         # The calibrated operating point for the deployed bundle, resolved from
         # catalog.json by the ASR stack. Previously a top-level parameter defaulting
         # to 0.2 while the catalog's measured value for the default embedder was

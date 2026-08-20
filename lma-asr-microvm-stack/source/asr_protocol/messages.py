@@ -46,9 +46,14 @@ class Config(BaseModel):
     max_speakers: int = 0
     # Cosine similarity above which two utterances are treated as one speaker.
     # Higher splits more eagerly; lower merges more eagerly. The right value is
-    # specific to the speaker model the image was built with, so it is negotiated
-    # per session rather than fixed at build time.
-    speaker_threshold: float = 0.5
+    # specific to the PAIRING of speaker model and utterance-length floor, so it is
+    # negotiated per session rather than fixed at build time.
+    #
+    # ``None`` means "use the server's configured value", which is the operating
+    # point calibrated for the model bundle the image was built with. It must NOT
+    # default to a number: a concrete default would silently override that
+    # calibrated value for every client that simply does not send the field.
+    speaker_threshold: float | None = None
     # Shortest utterance worth embedding; a shorter one inherits the current
     # speaker instead of minting an identity from an unreliable embedding.
     # ``None`` means "use the server's configured value".
@@ -56,7 +61,17 @@ class Config(BaseModel):
     # Withhold the first embedding that matches nobody until a second one agrees
     # with it. ``None`` means "use the server's configured value".
     require_corroboration: bool | None = None
+    # Split one endpointed utterance into a row per speaker turn, retroactively at
+    # the end of the utterance.
     split_on_speaker_change: bool | None = None
+    # Close a row as soon as a speaker change is confirmed, without waiting for
+    # endpointing silence, so a speaker change rather than a pause is what separates
+    # rows. ``None`` for all three means "use the server's configured value".
+    live_turn_cut: bool | None = None
+    turn_cut_interval_ms: int | None = None
+    # Close a row after this much unbroken speech even with no boundary found, so a
+    # monologue does not sit as one unlabelled row. 0 disables the bound.
+    max_open_segment_ms: int | None = None
 
 
 class Eos(BaseModel):

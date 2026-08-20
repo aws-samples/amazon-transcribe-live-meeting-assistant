@@ -83,6 +83,9 @@ interface AsrSessionOptions {
     minSegmentMs?: number;
     requireCorroboration?: boolean;
     splitOnSpeakerChange?: boolean;
+    liveTurnCut?: boolean;
+    turnCutIntervalMs?: number;
+    maxOpenSegmentMs?: number;
 }
 
 export interface AsrSessionSet {
@@ -501,6 +504,15 @@ export class AsrChannelSession {
                 ...(this.options.splitOnSpeakerChange === undefined
                     ? {}
                     : { split_on_speaker_change: this.options.splitOnSpeakerChange }),
+                ...(this.options.liveTurnCut === undefined
+                    ? {}
+                    : { live_turn_cut: this.options.liveTurnCut }),
+                ...(this.options.turnCutIntervalMs === undefined
+                    ? {}
+                    : { turn_cut_interval_ms: this.options.turnCutIntervalMs }),
+                ...(this.options.maxOpenSegmentMs === undefined
+                    ? {}
+                    : { max_open_segment_ms: this.options.maxOpenSegmentMs }),
             };
             try {
                 socket.send(JSON.stringify(config));
@@ -714,6 +726,9 @@ export const startMicrovmAsr = async (
         minSegmentMs: runtime.minSegmentMs,
         requireCorroboration: runtime.requireCorroboration,
         splitOnSpeakerChange: runtime.splitOnSpeakerChange,
+        liveTurnCut: runtime.liveTurnCut,
+        turnCutIntervalMs: runtime.turnCutIntervalMs,
+        maxOpenSegmentMs: runtime.maxOpenSegmentMs,
     });
     const registry = new SpeakerNameRegistry();
     const sessions = new Map<AsrChannelId, AsrChannelSession>();
