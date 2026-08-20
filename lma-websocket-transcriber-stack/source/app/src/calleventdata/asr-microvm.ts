@@ -22,7 +22,8 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
 import { AsrRuntimeConfig, getAsrRuntimeConfig, isSpeakerModelMeasured } from './asr-config';
 import { CallMetaData, SocketCallData } from './eventtypes';
-import { TranscriptSegmentRecord, writeSegmentToKds } from './transcribe';
+import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
+import { anyChannelDiarized, diarizationEnabledFor } from './diarization';
 import { normalizeErrorForLogging } from '../utils/common';
 import {
     ASR_CHANNEL_IDS,
@@ -120,9 +121,10 @@ export const shouldFallbackToTranscribe = (): boolean =>
 /**
  * Which engine transcribes this meeting.
  *
- * The client may ask for one explicitly; asking for diarization also selects the
- * MicroVM engine, since that is where speaker labels come from. A request the
- * deployment cannot serve falls back to Amazon Transcribe rather than failing.
+ * The engine is the DEPLOYMENT's choice and diarization is the CLIENT's: both
+ * engines partition speakers now, so asking for speaker labels no longer implies
+ * an engine. A client may still name one explicitly. A request the deployment
+ * cannot serve falls back to Amazon Transcribe rather than failing.
  */
 export const resolveAsrEngine = (
     callMetaData: CallMetaData,
@@ -132,10 +134,7 @@ export const resolveAsrEngine = (
     const deploymentDefault = runtime
         ? (runtime.engineDefaultMicrovm ? 'microvm' : 'transcribe')
         : ASR_ENGINE_DEFAULT;
-    const requested =
-        callMetaData.asrEngine?.toLowerCase() ||
-        (callMetaData.enableDiarization ? 'microvm' : '') ||
-        deploymentDefault;
+    const requested = callMetaData.asrEngine?.toLowerCase() || deploymentDefault;
     if (requested !== 'microvm') {
         return 'transcribe';
     }
@@ -686,20 +685,23 @@ export const startMicrovmAsr = async (
     const callMetadata = socketData.callMetadata;
 
     const runtime = await getAsrRuntimeConfig(server);
+    // Unlike Amazon Transcribe, whose ShowSpeakerLabel is stream-level, this engine
+    // runs an independent session per channel — so "diarize the tab but not the
+    // microphone" is honoured for real rather than by discarding half the labels.
+    const settings = diarizationSettingsFor(callMetadata);
     // A threshold that was never measured against this embedder is not a default,
     // it is a guess — and a wrong guess fragments one speaker into many or merges
     // several into one, which is worse than the channel labels this falls back to.
     // An admin-set threshold (typed, or applied from a calibration run) counts as
     // the measurement.
-    const diarizeRequested = callMetadata.enableDiarization ?? runtime.diarizeByDefault;
     const thresholdTrusted = isSpeakerModelMeasured() || runtime.speakerThresholdOverridden;
-    if (diarizeRequested && !thresholdTrusted) {
+    if (anyChannelDiarized(settings) && !thresholdTrusted) {
         server.log.warn(
             `[ASR]: [${callMetadata.callId}] - speaker labels withheld: this deployment's speaker model has no measured operating point. Run a calibration from the ASR Config page, or set a speaker threshold there. Transcribing with channel labels instead.`
         );
     }
-    const options: AsrSessionOptions = {
-        diarize: diarizeRequested && thresholdTrusted,
+    const optionsFor = (channelId: AsrChannelId): AsrSessionOptions => ({
+        diarize: thresholdTrusted && diarizationEnabledFor(channelId, settings),
         // A client-supplied count wins: only the person in the meeting knows how
         // many people share their microphone (the Upload Audio page asks the same
         // question). 0 still means "discover as many as appear".
@@ -709,7 +711,7 @@ export const startMicrovmAsr = async (
         minSegmentMs: runtime.minSegmentMs,
         requireCorroboration: runtime.requireCorroboration,
         splitOnSpeakerChange: runtime.splitOnSpeakerChange,
-    };
+    });
     const registry = new SpeakerNameRegistry();
     const sessions = new Map<AsrChannelId, AsrChannelSession>();
     // The endpoint is filled in by updateLease() once the MicroVM is running; the
@@ -718,7 +720,14 @@ export const startMicrovmAsr = async (
     for (const channelId of ASR_CHANNEL_IDS) {
         sessions.set(
             channelId,
-            new AsrChannelSession(server, socketData, channelId, pendingLease, registry, options)
+            new AsrChannelSession(
+                server,
+                socketData,
+                channelId,
+                pendingLease,
+                registry,
+                optionsFor(channelId)
+            )
         );
     }
     socketData.asr = { lease: pendingLease, deinterleaver: new StereoDeinterleaver(), sessions };
@@ -744,8 +753,11 @@ export const startMicrovmAsr = async (
         return false;
     }
 
+    const diarized = [...sessions.entries()]
+        .filter(([channelId]) => optionsFor(channelId).diarize)
+        .map(([channelId]) => channelId);
     server.log.info(
-        `[ASR]: [${callMetadata.callId}] - MicroVM ASR active on ${sessions.size} channel(s), client rate ${callMetadata.samplingRate}Hz, diarize=${options.diarize}`
+        `[ASR]: [${callMetadata.callId}] - MicroVM ASR active on ${sessions.size} channel(s), client rate ${callMetadata.samplingRate}Hz, diarized channel(s)=${diarized.length ? diarized.join(',') : 'none'}`
     );
     return true;
 };

@@ -116,7 +116,7 @@ lma deploy --stack-name MyLMA --template-file /tmp/lma-main.yaml --wait
 - If `--template-url` is specified, uses that URL directly
 - If `--template-file` is specified, uses the local file
 - If none specified, auto-selects the public LMA template for the current region:
-  - `us-east-1`, `us-west-2`, `ap-southeast-2` are supported
+  - `us-east-1`, `us-west-2`, `ap-northeast-1`, `eu-west-1` are supported
 
 **Smart Features:**
 - Auto-detects if the stack has an operation in progress and switches to monitoring mode

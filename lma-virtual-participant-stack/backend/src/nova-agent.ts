@@ -1665,15 +1665,24 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     const playbackRate = parseInt(process.env.NOVA_PLAYBACK_RATE || '16000');
-    
-    console.log('🔊 Starting persistent pacat playback stream...');
+    // 20ms was too tight to survive scheduling jitter: on a 2-vCPU MicroVM,
+    // Chromium + the avatar's 1080p rescale + video recording + Transcribe
+    // together stall the writer long enough to underrun the buffer, which is
+    // audible as crackling (GitHub #543). 80ms gives 4x the headroom and is
+    // still far below conversational turn-taking latency, so the assistant does
+    // not feel slower to reply.
+    const playbackLatencyMs = parseInt(process.env.NOVA_PLAYBACK_LATENCY_MS || '80');
+
+    console.log(
+      `🔊 Starting persistent pacat playback stream (${playbackRate}Hz, ${playbackLatencyMs}ms buffer)...`,
+    );
     this.pacatProcess = spawn('pacat', [
       '--playback',
       '--device=agent_output',
       '--format=s16le',
       '--rate=' + playbackRate,
       '--channels=1',
-      '--latency-msec=20',
+      '--latency-msec=' + playbackLatencyMs,
     ]);
 
     this.pacatProcess.stdin?.on('error', (error: any) => {

@@ -45,10 +45,36 @@ public static class Srp
 
     public readonly record struct Tokens(string AccessToken, string IdToken, string RefreshToken);
 
+    /// <summary>
+    /// Result of a REFRESH_TOKEN_AUTH exchange. `RefreshToken` is non-null only
+    /// when the pool has refresh-token rotation enabled — see RefreshAsync().
+    /// </summary>
+    public readonly record struct RefreshedTokens(string AccessToken, string IdToken, string? RefreshToken);
+
     public sealed class SrpException : Exception
     {
         public SrpException(string message) : base(message) { }
+
+        /// <summary>
+        /// True when Cognito rejected the CREDENTIAL itself rather than failing
+        /// to answer. Cognito returns these as HTTP 400 with a `__type`, so the
+        /// status code alone can't distinguish "your refresh token is dead"
+        /// (only an interactive sign-in recovers) from "the request was bad or
+        /// the service hiccuped" (retrying is worthwhile).
+        /// </summary>
+        public bool IsCredentialRejected => IsCredentialRejectedMessage(Message);
     }
+
+    /// <summary>
+    /// Classify a Cognito error message as terminal-for-this-credential. Pure +
+    /// static so `--selftest` can pin it (SrpException messages embed the
+    /// response's `__type` — see CallAsync).
+    /// </summary>
+    public static bool IsCredentialRejectedMessage(string message) =>
+        message.Contains("NotAuthorizedException")      // revoked/expired/password changed
+        || message.Contains("UserNotFoundException")    // user deleted
+        || message.Contains("UserNotConfirmedException")
+        || message.Contains("InvalidParameterException"); // malformed refresh token
 
     private static readonly HttpClient Http = new();
 
@@ -126,6 +152,45 @@ public static class Srp
         var id = auth.GetProperty("IdToken").GetString()!;
         var refresh = auth.TryGetProperty("RefreshToken", out var rt) ? (rt.GetString() ?? "") : "";
         return new Tokens(access, id, refresh);
+    }
+
+    /// <summary>
+    /// Redeem a refresh token for a NEW access + id token, via a single
+    /// unauthenticated InitiateAuth call with `AuthFlow=REFRESH_TOKEN_AUTH`.
+    ///
+    /// No SRP math and no password: the refresh token IS the credential. This is
+    /// the same exchange Amplify performs invisibly in the web UI, done here by
+    /// hand for the same reason LoginAsync is (see the note at the top of this
+    /// file — this client must stay SDK-free).
+    ///
+    /// Notes for anyone changing this:
+    ///   • Cognito does NOT return a new RefreshToken unless the app client has
+    ///     refresh-token rotation enabled, so callers must KEEP their existing
+    ///     one when `RefreshToken` comes back null. Dropping it would break every
+    ///     later refresh.
+    ///   • No SECRET_HASH is sent: the LMA user pool client is a public client
+    ///     with no secret (that is what lets the browser UI use it directly).
+    ///     A pool configured WITH a client secret would need SECRET_HASH here,
+    ///     and LoginAsync above would need it too — they fail or work together.
+    /// </summary>
+    public static async Task<RefreshedTokens> RefreshAsync(string refreshToken, string clientId, string region)
+    {
+        var body = new Dictionary<string, object>
+        {
+            ["AuthFlow"] = "REFRESH_TOKEN_AUTH",
+            ["ClientId"] = clientId,
+            ["AuthParameters"] = new Dictionary<string, object> { ["REFRESH_TOKEN"] = refreshToken },
+        };
+        var r = await CallAsync(region, "InitiateAuth", body);
+        if (!(r.TryGetProperty("AuthenticationResult", out var auth)
+              && auth.TryGetProperty("AccessToken", out var accessEl)
+              && accessEl.GetString() is { Length: > 0 } access))
+        {
+            throw new SrpException("no AuthenticationResult.AccessToken in REFRESH_TOKEN_AUTH response");
+        }
+        var id = auth.TryGetProperty("IdToken", out var idEl) ? (idEl.GetString() ?? "") : "";
+        var refresh = auth.TryGetProperty("RefreshToken", out var rtEl) ? rtEl.GetString() : null;
+        return new RefreshedTokens(access, id, refresh);
     }
 
     // MARK: - Cognito JSON API transport

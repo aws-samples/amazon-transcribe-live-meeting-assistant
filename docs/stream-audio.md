@@ -9,6 +9,7 @@ title: "Stream Audio"
 - [Overview](#overview)
 - [Use Cases](#use-cases)
 - [Step-by-Step Walkthrough](#step-by-step-walkthrough)
+- [Speaker Identification](#speaker-identification)
 - [Browser Compatibility](#browser-compatibility)
 - [Technical Details](#technical-details)
 - [Important Notice](#important-notice)
@@ -43,29 +44,67 @@ Use Stream Audio with any browser-based audio application when you want to stay 
 
 5. Enter **Participants (stream)** -- other participants' names, applied to incoming audio for speaker attribution.
 
-6. Click **Start Streaming**.
+6. Optionally enable **Speaker identification** for either channel -- see
+   [Speaker Identification](#speaker-identification) below.
+
+7. Click **Start Streaming**.
 
 ![Stream Audio UI](../images/readme-stream-audio.png)
 
-7. Select the Chrome tab with your audio source, then click **Allow** to share the tab audio.
+8. Select the Chrome tab with your audio source, then click **Allow** to share the tab audio.
 
-8. Use the "Open in progress meeting" link to view live transcription. It may take a few seconds for the first transcript segments to appear.
+9. Use the "Open in progress meeting" link to view live transcription. It may take a few seconds for the first transcript segments to appear.
 
 ![Open In-Progress Meeting](../images/readme-stream-audio-open-meeting.png)
 
-9. The meeting also appears in the meeting list as "In Progress".
+10. The meeting also appears in the meeting list as "In Progress".
 
 ![Meeting In List](../images/readme-stream-meeting-in-list.png)
 
-10. Use the **mute/unmute button** to control your microphone during the stream.
+11. Use the **mute/unmute button** to control your microphone during the stream.
 
 ![Mute Microphone](../images/readme-stream-audio-mute-mic.png)
 
-11. Click **Stop Streaming** to end the session.
+12. Click **Stop Streaming** to end the session.
 
-12. A link to the recorded meeting appears at the bottom of the Stream Audio page.
+13. A link to the recorded meeting appears at the bottom of the Stream Audio page.
 
 ![Open Recorded Meeting](../images/readme-stream-audio-open-recorded.png)
+
+## Speaker Identification
+
+The names you enter above give one speaker name per channel: everything from the
+shared tab is attributed to **Participants (stream)** and everything from your mic
+to **Meeting owner (microphone)**. That is enough for a one-to-one conversation,
+but not when several people share a channel.
+
+Enable **Speaker identification** to have Amazon Transcribe tell those voices
+apart. Each channel is controlled independently, so you can turn on either, both,
+or neither:
+
+| Setting | Turn it on when |
+|---|---|
+| Identify separate speakers in the shared tab audio | The captured call has several remote participants |
+| Identify separate speakers on my microphone | Several people share your microphone, e.g. in a meeting room |
+
+Distinct voices are appended to the channel's name as `(spk_0)`, `(spk_1)`, and so
+on -- for example `Other Participant (spk_0)` and `Other Participant (spk_1)`. The
+transcript then shows each voice as its own turn, and the labels also reach the
+meeting summary and the Meeting Assistant.
+
+Notes:
+
+- Both settings are **off by default** and can only be changed before you start
+  streaming.
+- Speakers are numbered **per channel**, each starting at `spk_0`.
+- A segment gets its label when it finalizes, so it briefly appears without one
+  while still being transcribed.
+- Accuracy is best with **five or fewer voices per channel**.
+- Labels are numbers, not names -- Transcribe distinguishes voices but does not
+  identify who they belong to. If you need real names for meeting participants,
+  use the [Chrome Extension](browser-extension.md) or a
+  [Virtual Participant](virtual-participant.md), which read them from the meeting.
+- There is no additional Amazon Transcribe charge for speaker identification.
 
 ## Browser Compatibility
 
@@ -75,7 +114,14 @@ Chrome browser is required. Stream Audio relies on Chrome's tab audio capture AP
 
 Stream Audio combines your microphone input and the selected tab's audio into a stereo (two-channel) audio stream. Your microphone is assigned to one channel while the tab audio is assigned to the other, enabling speaker attribution during transcription. The combined stream is sent via WebSocket to the Fargate-based transcription server for real-time processing.
 
-Because attribution is per channel, several people sharing one microphone appear as a single speaker. If a deployment enables the experimental [on-demand ASR & diarization engine](microvm-asr.md), an **Enable speaker diarization** checkbox appears here and labels the transcript per voice instead.
+Because attribution is per channel, several people sharing one microphone appear
+as a single speaker unless you tick the **Speaker identification** boxes above.
+Your speaker-identification choices are sent once, in the session's opening
+message, and the server enables speaker partitioning for the channels you chose.
+Which engine does the partitioning depends on the deployment: Amazon Transcribe
+by default, or the [on-demand ASR & diarization engine](microvm-asr.md) when that
+is deployed. See [WebSocket Streaming API](websocket-streaming-api.md#speaker-identification-diarization)
+for the protocol details.
 
 ## Important Notice
 

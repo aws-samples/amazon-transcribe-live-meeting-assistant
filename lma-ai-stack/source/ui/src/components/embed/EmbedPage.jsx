@@ -19,6 +19,8 @@
  *   participants - Pre-fill participant label
  *   owner        - Pre-fill meeting owner
  *   autoStart    - Auto-start streaming (true/false)
+ *   diarizeSystem - Identify separate speakers in the shared tab audio (true/false)
+ *   diarizeMic    - Identify separate speakers on the microphone (true/false)
  *   authMode     - Authentication mode: cognito (default), token
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -63,6 +65,8 @@ const useEmbedParams = () => {
       participants: searchParams.get('participants') || '',
       owner: searchParams.get('owner') || '',
       autoStart: searchParams.get('autoStart') === 'true',
+      diarizeSystem: searchParams.get('diarizeSystem') === 'true',
+      diarizeMic: searchParams.get('diarizeMic') === 'true',
 
       // VP-loader parameters
       meetingName: searchParams.get('meetingName') || '',

@@ -102,6 +102,12 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     agentId: userIdentifier || DEFAULT_LOCAL_SPEAKER_NAME,
     fromNumber: DEFAULT_OTHER_SPEAKER_NAME,
     toNumber: SYSTEM,
+    // Per-channel Amazon Transcribe speaker partitioning. Sent in the START
+    // frame; both default off so the transcript is unchanged unless asked for.
+    // Distinct from the upload mode's `enableDiarization` below, which drives a
+    // Transcribe *batch* job and is a different feature.
+    diarizeSystemChannel: false,
+    diarizeMicChannel: false,
   });
   // Track whether the user has manually edited the agentId field so we don't
   // overwrite their input when the authenticated user's identifier becomes
@@ -151,10 +157,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [isFlashing, setIsFlashing] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
-  // Live speaker diarization, served by the MicroVM ASR engine instead of
-  // Amazon Transcribe. Only offered when the deployment built an ASR image with
-  // a speaker model (settings.AsrDiarizationAvailable).
-  const [enableStreamDiarization, setEnableStreamDiarization] = useState(false);
   // How many people share this microphone/tab. Nobody but the user can know it, so
   // it is asked for rather than guessed — the same question Upload Audio asks.
   // Blank means "discover as many speakers as appear".
@@ -242,6 +244,20 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
     });
   };
 
+  const handleDiarizeSystemChannelChange = (e) => {
+    setCallMetaData({
+      ...callMetaData,
+      diarizeSystemChannel: e.detail.checked,
+    });
+  };
+
+  const handleDiarizeMicChannelChange = (e) => {
+    setCallMetaData({
+      ...callMetaData,
+      diarizeMicChannel: e.detail.checked,
+    });
+  };
+
   const audioProcessor = useRef();
   const audioContext = useRef();
   const displayStream = useRef();
@@ -305,9 +321,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       callId: `${meetingPrefix} - ${getTimestampStr()}`,
       agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
       fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
-      // Asking for diarization selects the MicroVM ASR engine, which is where
-      // per-voice speaker labels come from.
-      enableDiarization: enableStreamDiarization,
       maxSpeakers: Number.parseInt(streamMaxSpeakers, 10) || 0,
     };
     setCallMetaData(callMetaDataCopy);
@@ -323,9 +336,10 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       // 16 kHz is the ASR models' native rate, so capturing there means no
       // resampling anywhere in the chain. Other rates still work (the
       // transcriber resamples), they just cost CPU and buy no accuracy.
-      audioContext.current = enableStreamDiarization
-        ? new window.AudioContext({ sampleRate: 16000 })
-        : new window.AudioContext();
+      audioContext.current =
+        recordingCallMetaData.diarizeSystemChannel || recordingCallMetaData.diarizeMicChannel
+          ? new window.AudioContext({ sampleRate: 16000 })
+          : new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
         video: true,
         audio: true,
@@ -708,54 +722,66 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                 </FormField>
               </ColumnLayout>
 
-              {mode === MODE_STREAM && `${settings.AsrDiarizationAvailable}` === 'true' && (
+              {mode === MODE_STREAM && (
                 <Box margin={{ top: 'l' }}>
                   <FormField
-                    label="Speaker diarization (experimental)"
+                    label="Speaker identification"
                     description={
-                      'Labels the transcript by voice rather than by audio channel, so several people ' +
-                      'sharing one microphone are told apart. Transcription then runs on this ' +
-                      "deployment's on-demand ASR engine instead of Amazon Transcribe, which does not " +
-                      'support content redaction, custom vocabularies or language identification.'
+                      'Optionally tell apart individual voices within a channel. Each distinct voice ' +
+                      'is labelled (spk_0), (spk_1), … alongside the names above. Works best with ' +
+                      'five or fewer speakers per channel.'
                     }
+                    stretch
                   >
-                    <Checkbox
-                      checked={enableStreamDiarization}
-                      onChange={({ detail }) => setEnableStreamDiarization(detail.checked)}
-                      disabled={recording}
-                    >
-                      Enable speaker diarization
-                    </Checkbox>
-                  </FormField>
-                  {enableStreamDiarization && (
-                    <Box margin={{ top: 's' }}>
-                      <FormField
-                        label="Speakers on this side (optional)"
-                        description={
-                          'How many people share your microphone or the shared tab, if you know. ' +
-                          'Leave blank to discover as many voices as appear. Setting it caps the ' +
-                          'labels per channel, which helps when short utterances would otherwise ' +
-                          'be mistaken for new speakers.'
-                        }
-                        errorText={
-                          streamMaxSpeakers !== '' &&
-                          (Number.isNaN(Number.parseInt(streamMaxSpeakers, 10)) ||
-                            Number.parseInt(streamMaxSpeakers, 10) < 1 ||
-                            Number.parseInt(streamMaxSpeakers, 10) > 30)
-                            ? 'Must be between 1 and 30, or blank'
-                            : undefined
-                        }
+                    <SpaceBetween direction="vertical" size="xxs">
+                      <Checkbox
+                        checked={callMetaData.diarizeSystemChannel}
+                        onChange={handleDiarizeSystemChannelChange}
+                        disabled={recording}
+                        description="Use when the shared tab has several people on the call."
                       >
-                        <Input
-                          value={streamMaxSpeakers}
-                          type="number"
-                          placeholder="discover automatically"
-                          onChange={({ detail }) => setStreamMaxSpeakers(detail.value)}
-                          disabled={recording}
-                        />
-                      </FormField>
-                    </Box>
-                  )}
+                        Identify separate speakers in the shared tab audio
+                      </Checkbox>
+                      <Checkbox
+                        checked={callMetaData.diarizeMicChannel}
+                        onChange={handleDiarizeMicChannelChange}
+                        disabled={recording}
+                        description="Use when several people share this microphone, e.g. in a meeting room."
+                      >
+                        Identify separate speakers on my microphone
+                      </Checkbox>
+                    </SpaceBetween>
+                  </FormField>
+                  {(callMetaData.diarizeSystemChannel || callMetaData.diarizeMicChannel) &&
+                    `${settings.AsrDiarizationAvailable}` === 'true' && (
+                      <Box margin={{ top: 's' }}>
+                        <FormField
+                          label="Speakers per channel (optional)"
+                          description={
+                            'How many people share your microphone or the shared tab, if you know. ' +
+                            'Leave blank to discover as many voices as appear. Setting it caps the ' +
+                            'labels per channel, which helps when short utterances would otherwise ' +
+                            'be mistaken for new speakers.'
+                          }
+                          errorText={
+                            streamMaxSpeakers !== '' &&
+                            (Number.isNaN(Number.parseInt(streamMaxSpeakers, 10)) ||
+                              Number.parseInt(streamMaxSpeakers, 10) < 1 ||
+                              Number.parseInt(streamMaxSpeakers, 10) > 30)
+                              ? 'Must be between 1 and 30, or blank'
+                              : undefined
+                          }
+                        >
+                          <Input
+                            value={streamMaxSpeakers}
+                            type="number"
+                            placeholder="discover automatically"
+                            onChange={({ detail }) => setStreamMaxSpeakers(detail.value)}
+                            disabled={recording}
+                          />
+                        </FormField>
+                      </Box>
+                    )}
                 </Box>
               )}
 

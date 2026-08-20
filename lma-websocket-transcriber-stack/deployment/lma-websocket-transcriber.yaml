@@ -274,7 +274,11 @@ Parameters:
     Type: String
     Default: "false"
     Description: >-
-      Enable diarization on Transcribe streaming
+      DEFAULT for Amazon Transcribe speaker partitioning (diarization), used only
+      for clients that do not send their own per-channel choice in the START
+      frame. Clients that do (the desktop capture app and the Stream Audio browser
+      tab, via diarizeSystemChannel / diarizeMicChannel) always take precedence.
+      When it applies, "true" enables diarization on BOTH channels.
     AllowedValues:
       - "true"
       - "false"

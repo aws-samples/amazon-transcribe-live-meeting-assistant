@@ -585,6 +585,19 @@ export class SimliAvatar {
                 // track.stop() does not fire 'ended', so self-terminate on a
                 // dead track: the camera watchdog can call getUserMedia every
                 // 10s, and a leaked 1080p draw loop per call would pile up.
+                // Geometry is recomputed only when the source size changes. The
+                // letterbox bars are constant, so clearing the FULL target every
+                // frame was a wasted 1920x1080 memset 15x/second — on the 2-vCPU
+                // MicroVM that starved PulseAudio and made the voice assistant
+                // crackle on Teams, whose ACS SDK is the only caller that
+                // requests `exact` dimensions and so the only one on this path
+                // (GitHub #543).
+                let lastSrcW = 0;
+                let lastSrcH = 0;
+                let dx = 0;
+                let dy = 0;
+                let dw = 0;
+                let dh = 0;
                 const draw = () => {
                   try {
                     if (scaledTrack && scaledTrack.readyState !== 'live') {
@@ -594,12 +607,20 @@ export class SimliAvatar {
                       return;
                     }
                     if (!video.videoWidth) return;
-                    const scale = Math.min(targetW / video.videoWidth, targetH / video.videoHeight);
-                    const dw = video.videoWidth * scale;
-                    const dh = video.videoHeight * scale;
-                    ctx.fillStyle = '#000';
-                    ctx.fillRect(0, 0, targetW, targetH);
-                    ctx.drawImage(video, (targetW - dw) / 2, (targetH - dh) / 2, dw, dh);
+                    if (video.videoWidth !== lastSrcW || video.videoHeight !== lastSrcH) {
+                      lastSrcW = video.videoWidth;
+                      lastSrcH = video.videoHeight;
+                      const scale = Math.min(targetW / lastSrcW, targetH / lastSrcH);
+                      dw = lastSrcW * scale;
+                      dh = lastSrcH * scale;
+                      dx = (targetW - dw) / 2;
+                      dy = (targetH - dh) / 2;
+                      // Paint the letterbox once for this geometry.
+                      ctx.fillStyle = '#000';
+                      ctx.fillRect(0, 0, targetW, targetH);
+                    }
+                    // Only the avatar region changes; the bars stay as painted.
+                    ctx.drawImage(video, dx, dy, dw, dh);
                   } catch { /* keep the loop alive */ }
                 };
                 timer = setInterval(draw, Math.max(1000 / fps, 33)) as unknown as number;

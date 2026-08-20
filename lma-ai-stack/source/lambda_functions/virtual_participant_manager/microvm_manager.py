@@ -44,9 +44,7 @@ class MicrovmManager:
     @property
     def client(self) -> MicrovmClient:
         if self._client is None:
-            self._client = MicrovmClient(
-                region=os.environ.get("AWS_REGION", "us-east-1")
-            )
+            self._client = MicrovmClient(region=os.environ.get("AWS_REGION", "us-east-1"))
         return self._client
 
     def terminate_microvm(self, microvm_id: str, vp_id: str) -> bool:
@@ -78,9 +76,7 @@ class MicrovmManager:
                 if attempt < _TERMINATE_ATTEMPTS:
                     time.sleep(_RETRY_SLEEP_SECONDS)
             except Exception:  # noqa: BLE001 - must not mask the status update
-                logger.exception(
-                    f"Unexpected error terminating MicroVM {microvm_id}"
-                )
+                logger.exception(f"Unexpected error terminating MicroVM {microvm_id}")
                 return False
 
         logger.error(

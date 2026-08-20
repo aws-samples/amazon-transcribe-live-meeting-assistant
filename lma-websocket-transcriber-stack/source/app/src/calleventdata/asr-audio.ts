@@ -12,6 +12,7 @@
  * takes one mono 16 kHz stream per session, so each channel is split out and
  * resampled here. Both steps are pure and stateful-per-call, never per frame.
  */
+import { appendSpeakerLabel, formatSpeakerLabel } from './diarization';
 
 export const ASR_SAMPLE_RATE = 16000;
 
@@ -201,12 +202,6 @@ export class ChannelResampler {
  * channels can never render the same "Speaker N".
  */
 export class SpeakerNameRegistry {
-    private readonly labels = new Map<string, string>();
-
-    private readonly primaryByChannel = new Map<AsrChannelId, string>();
-
-    private nextNumber = 1;
-
     /**
      * @param channelId which audio channel produced the utterance
      * @param speakerId engine speaker id, or undefined when diarization is off
@@ -217,30 +212,6 @@ export class SpeakerNameRegistry {
         speakerId: string | null | undefined,
         channelName: string
     ): string {
-        if (!speakerId) {
-            return channelName;
-        }
-
-        // The microphone's name is the signed-in user - a real identity, and the one
-        // name worth keeping. The tab's is a placeholder like "Other Participant",
-        // and handing that to the first voice heard there makes a correctly
-        // identified person read as the leftover bucket: a reviewer given a
-        // transcript of "Other Participant" beside "Speaker 1 (tab)" concluded the
-        // two had been merged when they had not. Placeholders are never identities.
-        const isMicrophone = channelId === 'ch_1';
-        const primary = this.primaryByChannel.get(channelId);
-        if (isMicrophone && (primary === undefined || primary === speakerId)) {
-            this.primaryByChannel.set(channelId, speakerId);
-            return channelName;
-        }
-
-        const key = `${channelId}:${speakerId}`;
-        let label = this.labels.get(key);
-        if (label === undefined) {
-            label = `Speaker ${this.nextNumber} (${channelToLabelSuffix(channelId)})`;
-            this.nextNumber += 1;
-            this.labels.set(key, label);
-        }
-        return label;
+        return appendSpeakerLabel(channelName, formatSpeakerLabel(speakerId ?? undefined));
     }
 }

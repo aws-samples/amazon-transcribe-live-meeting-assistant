@@ -33,12 +33,15 @@ from lma_cli.formatters import (
 TEMPLATE_URLS = {
     "us-east-1": "https://s3.us-east-1.amazonaws.com/aws-ml-blog-us-east-1/artifacts/lma/lma-main.yaml",
     "us-west-2": "https://s3.us-west-2.amazonaws.com/aws-ml-blog-us-west-2/artifacts/lma/lma-main.yaml",
+    # Tokyo and Ireland publish to the Big Data Blog replica buckets — the ML Blog
+    # buckets exist only in us-east-1 and us-west-2.
     "ap-northeast-1": (
         "https://s3.ap-northeast-1.amazonaws.com/"
-        "aws-ml-blog-ap-northeast-1/artifacts/lma/lma-main.yaml"
+        "aws-bigdata-blog-replica-ap-northeast-1/artifacts/lma/lma-main.yaml"
     ),
     "eu-west-1": (
-        "https://s3.eu-west-1.amazonaws.com/aws-ml-blog-eu-west-1/artifacts/lma/lma-main.yaml"
+        "https://s3.eu-west-1.amazonaws.com/"
+        "aws-bigdata-blog-replica-eu-west-1/artifacts/lma/lma-main.yaml"
     ),
 }
 

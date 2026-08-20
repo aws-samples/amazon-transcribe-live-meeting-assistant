@@ -541,8 +541,12 @@ const onTextMessage = async (
                 samplingRate: callMetaData.samplingRate,
                 channels: callMetaData.channels,
                 asrEngine: callMetaData.asrEngine,
-                enableDiarization: callMetaData.enableDiarization,
-                maxSpeakers: callMetaData.maxSpeakers
+                maxSpeakers: callMetaData.maxSpeakers,
+                // Per-channel diarization opt-in, honoured by both engines. This
+                // object is a WHITELIST copy, so a field omitted here is silently
+                // dropped and the feature would appear to do nothing.
+                diarizeSystemChannel: callMetaData.diarizeSystemChannel,
+                diarizeMicChannel: callMetaData.diarizeMicChannel
             },
             audioInputStream: audioInputStream,
             writeRecordingStream: writeRecordingStream,

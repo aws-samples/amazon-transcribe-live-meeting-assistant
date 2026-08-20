@@ -298,6 +298,23 @@ Parameters:
       - hi-IN
       - th-TH
 
+  ShowSpeakerLabel:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Default for Amazon Transcribe speaker partitioning (diarization) on
+      WebSocket streaming sessions - the desktop capture app and the Stream Audio
+      browser tab. When enabled, Transcribe tells apart individual voices within
+      an audio channel and each distinct voice is appended to the channel's
+      speaker name as "(spk_0)", "(spk_1)", and so on. Works best with five or
+      fewer voices per channel. This is only the DEFAULT: clients that offer
+      per-channel speaker identification settings (the desktop capture app and
+      the Stream Audio tab) send their own choice per meeting, which takes
+      precedence. Leave "false" unless you want it on for clients that do not.
+
   TranscribePiiEntityTypes:
     Type: String
     Default: BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN
@@ -935,6 +952,7 @@ Metadata:
           - TranscribeLanguageOptions
           - TranscribePreferredLanguage
           - TranscribeContentRedactionType
+          - ShowSpeakerLabel
           - TranscribePiiEntityTypes
           - CustomVocabularyName
           - CustomLanguageModelName
@@ -1066,6 +1084,8 @@ Metadata:
         default: Transcribe Preferred Language
       TranscribeContentRedactionType:
         default: Content Redaction Type for Transcription
+      ShowSpeakerLabel:
+        default: Default for Speaker Identification on Streaming Sessions
       TranscribePiiEntityTypes:
         default: Transcription PII Redaction Entity Types
       CustomVocabularyName:
@@ -2754,6 +2774,7 @@ Resources:
         TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
         TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
+        ShowSpeakerLabel: !Ref ShowSpeakerLabel
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
         AsrLauncherFunctionArn: !If

@@ -84,6 +84,29 @@ public static class AppSettings
         set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(MicDeviceValue, value, RegistryValueKind.String); }
     }
 
+    // MARK: - Per-channel speaker identification (Transcribe diarization)
+
+    private const string DiarizeSystemValue = "DiarizeSystemChannel";
+    private const string DiarizeMicValue = "DiarizeMicChannel";
+
+    /// <summary>
+    /// Tell apart individual voices in the system / meeting audio channel (ch_0).
+    /// Absent registry value reads as false, so speaker identification stays off
+    /// for every existing install until the user opts in.
+    /// </summary>
+    public static bool DiarizeSystemChannel
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(DiarizeSystemValue) as int?) == 1; }
+        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(DiarizeSystemValue, value ? 1 : 0, RegistryValueKind.DWord); }
+    }
+
+    /// <summary>Same, for the microphone channel (ch_1).</summary>
+    public static bool DiarizeMicChannel
+    {
+        get { using var k = Registry.CurrentUser.OpenSubKey(SettingsKeyPath); return (k?.GetValue(DiarizeMicValue) as int?) == 1; }
+        set { using var k = Registry.CurrentUser.CreateSubKey(SettingsKeyPath); k.SetValue(DiarizeMicValue, value ? 1 : 0, RegistryValueKind.DWord); }
+    }
+
     // MARK: - Optional desktop-video capture (screen recording)
 
     private const string VideoEnabledValue = "VideoEnabled";

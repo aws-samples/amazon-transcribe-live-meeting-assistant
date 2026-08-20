@@ -162,11 +162,11 @@ test('a partial and its final land on one transcript row', async () => {
     assert.equal(rows[1].Channel, 'AGENT');
     assert.equal(rows[1].StartTime, 0.5);
     assert.equal(rows[1].EndTime, 2.25);
-    // First voice on the microphone keeps the name LMA already has for it.
-    assert.equal(rows[1].Speaker, 'Alex');
+    // The channel's name plus the engine's voice id.
+    assert.equal(rows[1].Speaker, 'Alex (spk_0)');
 });
 
-test('a second voice on a channel becomes a numbered speaker', async () => {
+test('a second voice on a channel gets its own suffix', async () => {
     const asr = await startFakeAsr((socket) => {
         socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
             if (isBinary) {
@@ -189,11 +189,11 @@ test('a second voice on a channel becomes a numbered speaker', async () => {
     await session.finish();
     await asr.close();
 
-    // Both voices on the tab are numbered: giving the first one the channel's
-    // placeholder name made a correctly separated speaker read as a leftover bucket.
+    // The suffix is what separates the two voices. Without it the first would take
+    // the channel's placeholder name and read as a leftover bucket next to the second.
     assert.deepEqual(
         rows.map((row) => row.Speaker),
-        ['Speaker 1 (tab)', 'Speaker 2 (tab)', 'Speaker 1 (tab)']
+        ['Meeting audio (spk_0)', 'Meeting audio (spk_1)', 'Meeting audio (spk_0)']
     );
     assert.deepEqual(
         rows.map((row) => row.SegmentId),

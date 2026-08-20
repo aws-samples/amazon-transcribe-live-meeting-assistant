@@ -187,14 +187,30 @@ name you see in the Dock.
   the mic tap automatically.
 - **`--debug-wav` / `LMA_DEBUG_WAV`:** writes the exact streamed stereo PCM to a
   WAV so you can verify channels offline (`ch0`=Left=system, `ch1`=Right=mic).
+- **Token refresh (issue #535):** Cognito access tokens last ~1 h; the server
+  401s an expired one. `TokenStore` keeps the token alive for the life of the
+  session — a proactive timer renews it ~5 min before `exp` (on a wall-clock
+  deadline, so it survives sleep), `connect()` renews on demand when a token is
+  already past that window (covers wake-from-sleep and a Start an hour later),
+  and a rejected handshake triggers one refresh-and-retry before it counts
+  toward the fatal threshold. Only when the refresh token itself is rejected is
+  auth fatal: the **menu-bar app stays alive** and re-shows the sign-in form
+  (mirroring the Windows client's `OnFatalAuth`); the headless CLI exits
+  non-zero. The pure scheduling/classification logic is pinned by `--selftest`.
 
 ### Getting a token for the spike
 
 Fastest path: log into the LMA web UI in Chrome, open DevTools → Application →
 Session/Local Storage, and copy the Cognito **access token** and **id token**
 (keys under `CognitoIdentityServiceProvider.<clientId>.<user>.accessToken` /
-`.idToken`). Paste into `--token` / `--id-token`. Tokens expire in ~1 hour —
-fine for a spike; production needs the OAuth flow below.
+`.idToken`). Paste into `--token` / `--id-token`. Access tokens expire in ~1 hour;
+to let a pasted-token session renew itself, also copy the **refresh token**
+(`.refreshToken`) into `LMA_REFRESH_TOKEN` (preferred — a refresh token is a
+long-lived credential, ~30 days, and anything on the command line is visible to
+other local users via `ps`; `--refresh-token` exists for parity) — with it the
+client refreshes proactively before `exp` and retries once after a 401 (see
+"Token refresh" below). The in-app `--username` login captures the refresh token
+automatically, so it never needs this flag.
 
 ### Permission prompts during the spike (important)
 
@@ -234,7 +250,10 @@ Rough phasing; each builds on the prior.
   system browser, catch the redirect on `http://127.0.0.1:<port>` (or a custom
   URL scheme), exchange the code for tokens.
 - **Refresh-token handling**: access tokens expire (~1 h); refresh before
-  reconnect. Store the refresh token in the **macOS Keychain**.
+  reconnect. ✅ *Done (issue #535):* `TokenStore` refreshes proactively before
+  `exp` and reactively on a 401 via Cognito `REFRESH_TOKEN_AUTH`. Still TODO:
+  persist the refresh token in the **macOS Keychain** so it survives an app
+  restart (today it lives only in memory, so a relaunch needs a fresh sign-in).
 - Fetch `WSEndpoint` + Cognito App Client ID / Hosted-UI domain from a small
   bootstrap config (today those live in SSM; expose a tiny unauthenticated
   config endpoint or ship a downloadable `.lmaconfig` file from the LMA site).

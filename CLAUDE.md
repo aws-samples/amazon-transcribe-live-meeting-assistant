@@ -49,6 +49,11 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 **Virtual Participant** (in `lma-virtual-participant-stack/backend/`):
 ```bash
 npm install && npm run build   # TypeScript build
+npm test                       # node:test unit tests
+```
+Its CloudFormation/entrypoint tests are Python:
+```bash
+python3 -m pytest lma-virtual-participant-stack/test/
 ```
 
 ## Linting

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Page } from 'playwright-core';
 
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from "./details.js";
+import { details, matchesEndCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
@@ -10,6 +10,85 @@ import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick, humanType } from './prejoin-actions.js';
+import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
+
+/** Polls before a sustained condition is believed. 3 x 20s poll = ~60s grace. */
+export const POLLS_BEFORE_END = 3;
+
+/** What one poll of the Teams roster badge told us. */
+export type AttendeeReading = { state: 'OK'; count: number } | { state: 'BADGE_MISSING' };
+
+/** Debounced counters carried across polls. */
+export interface AttendeeWatchdogState {
+    consecutiveLonely: number;
+    consecutiveMissing: number;
+}
+
+export type AttendeeDecision =
+    | { action: 'continue' }
+    | { action: 'end'; reason: ExitReasonCode; trigger: string; detail: string };
+
+/**
+ * Decide whether the meeting has ended, from one badge reading plus the running
+ * counters.
+ *
+ * Extracted from the watchdog's setInterval so the decision is unit-testable —
+ * the bug this fixes lived in a closure that no test could reach.
+ *
+ * BADGE_MISSING is the important case. Teams removes the roster badge when the
+ * host ends the meeting, so a missing badge is the *expected* state for the very
+ * event we need to detect. It was previously treated as "unknown, never leave"
+ * with an unconditional early return, which meant no number of missing reads
+ * could ever end the meeting: the VP kept recording video and holding a voice
+ * session until the 8-hour MicroVM ceiling (GitHub #540).
+ *
+ * It cannot simply be treated as "alone" either — the badge legitimately
+ * disappears on a collapsed roster, content share, or re-layout, and reacting to
+ * a single misread ended live meetings mid-sentence (GitHub #317, #318).
+ *
+ * So it gets its OWN debounced counter, exactly as zoom.ts already does: a
+ * transient miss is absorbed, but a sustained one is bounded and ends the
+ * meeting. Note the two counters are mutually exclusive — a reading is either a
+ * genuine count or a miss, never both — so each resets the other.
+ */
+export function decideAttendeeAction(
+    reading: AttendeeReading,
+    state: AttendeeWatchdogState,
+    pollsBeforeEnd: number = POLLS_BEFORE_END,
+): AttendeeDecision {
+    if (reading.state !== 'OK') {
+        state.consecutiveMissing += 1;
+        state.consecutiveLonely = 0;
+        if (state.consecutiveMissing >= pollsBeforeEnd) {
+            return {
+                action: 'end',
+                reason: 'removed-from-meeting',
+                trigger: 'attendee-badge-missing',
+                detail:
+                    `attendee badge absent for ${state.consecutiveMissing} consecutive polls — ` +
+                    'the meeting has ended or the VP was removed',
+            };
+        }
+        return { action: 'continue' };
+    }
+
+    state.consecutiveMissing = 0;
+    if (reading.count > 1) {
+        state.consecutiveLonely = 0;
+        return { action: 'continue' };
+    }
+
+    state.consecutiveLonely += 1;
+    if (state.consecutiveLonely >= pollsBeforeEnd) {
+        return {
+            action: 'end',
+            reason: 'alone-in-meeting',
+            trigger: 'attendees-left',
+            detail: `count<=1 for ${state.consecutiveLonely} consecutive polls`,
+        };
+    }
+    return { action: 'continue' };
+}
 
 export default class Teams {
     private endRequested: Promise<ExitInfo>;
@@ -506,8 +585,11 @@ export default class Teams {
         await substep('Entering the meeting room…');
         try {
             console.log("Getting meeting link.");
-            await page.goto(
-                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?p=${details.invite.meetingPassword}&anon=true`
+            await gotoMeetingPage(
+                page,
+                `https://teams.microsoft.com/v2/?meetingjoin=true#/meet/${details.invite.meetingId}?p=${details.invite.meetingPassword}&anon=true`,
+                MEETING_HOST_PATTERNS.teams,
+                'teams-join',
             );
         } catch {
             console.log("Your scribe was unable to join the meeting.");
@@ -854,51 +936,91 @@ export default class Teams {
         // document reviews are real meetings).
         console.log("Listening for attendee changes.");
         const POLL_MS = 20_000;
-        const POLLS_BEFORE_END = 3; // ~60s of sustained "alone" before leaving
-        let consecutiveLonely = 0;
+        const watchdogState: AttendeeWatchdogState = {
+            consecutiveLonely: 0,
+            consecutiveMissing: 0,
+        };
         const attendeeWatchdog = setInterval(async () => {
             if (page.isClosed()) {
                 clearInterval(attendeeWatchdog);
                 return;
             }
-            let result: { state: string; count?: number };
+
+            // Strongest signal first: Teams renders an unmistakable post-meeting
+            // screen ("You left the meeting" / "The meeting has ended", or a
+            // /postmeeting-style URL). Checking this before the roster badge means
+            // a genuinely-ended meeting is detected in ONE poll instead of waiting
+            // out the badge debounce (GitHub #540).
+            let ended: { ended: boolean; how?: string } = { ended: false };
             try {
-                result = await page.evaluate(() => {
+                ended = await page.evaluate(() => {
+                    const url = window.location.href;
+                    if (/\/postmeeting|\/meetingended|calling\/end/i.test(url)) {
+                        return { ended: true, how: `url:${url.slice(0, 120)}` };
+                    }
+                    const text = (document.body?.innerText || '').slice(0, 4000);
+                    const phrases = [
+                        /you (?:have )?left the meeting/i,
+                        /the meeting (?:has )?ended/i,
+                        /this meeting has ended/i,
+                        /you(?:'|’)?ve been removed from (?:the|this) meeting/i,
+                        /the call (?:has )?ended/i,
+                    ];
+                    for (const re of phrases) {
+                        const m = text.match(re);
+                        if (m) return { ended: true, how: `text:${m[0]}` };
+                    }
+                    return { ended: false };
+                });
+            } catch {
+                // Page closed/navigated or CDP error — fall through to the badge
+                // reading, which handles unknown state with its own debounce.
+                ended = { ended: false };
+            }
+
+            if (ended.ended) {
+                console.log(`Teams meeting has ended (${ended.how}) — leaving.`);
+                clearInterval(attendeeWatchdog);
+                details.start = false;
+                this.requestEnd({ reason: 'host-ended', trigger: 'post-meeting-screen' });
+                return;
+            }
+
+            let reading: AttendeeReading;
+            try {
+                reading = await page.evaluate(() => {
                     const badgeElement = document.querySelector('span[data-tid="toolbar-item-badge"]');
-                    if (!badgeElement) return { state: 'BADGE_MISSING' };
+                    if (!badgeElement) return { state: 'BADGE_MISSING' as const };
                     const text = (badgeElement.textContent || '').trim();
-                    if (text === '') return { state: 'BADGE_MISSING' };
+                    if (text === '') return { state: 'BADGE_MISSING' as const };
                     const n = parseInt(text, 10);
-                    return { state: 'OK', count: Number.isFinite(n) ? n : 0 };
+                    return { state: 'OK' as const, count: Number.isFinite(n) ? n : 0 };
                 });
             } catch {
                 // page.evaluate threw — page closed/navigated or CDP error.
-                // Treat as unknown, not a leave signal.
-                result = { state: 'BADGE_MISSING' };
+                reading = { state: 'BADGE_MISSING' };
             }
 
-            if (result.state !== 'OK') {
-                // Badge missing/empty is a normal transient on Teams (collapsed
-                // roster, content-share, re-layout) — do NOT treat as alone.
-                console.log('DEBUG: Teams attendee badge missing/empty — treating as unknown (not leaving).');
-                consecutiveLonely = 0;
-                return;
+            const decision = decideAttendeeAction(reading, watchdogState);
+            if (reading.state === 'OK') {
+                console.log(
+                    `DEBUG: Teams attendee count: ${reading.count}, ` +
+                        `hasOthers: ${reading.count > 1}, ` +
+                        `consecutiveLonely: ${watchdogState.consecutiveLonely}/${POLLS_BEFORE_END}`,
+                );
+            } else {
+                console.log(
+                    'DEBUG: Teams attendee badge missing/empty — ' +
+                        `${watchdogState.consecutiveMissing}/${POLLS_BEFORE_END} consecutive ` +
+                        '(the badge also disappears when the meeting ends, so this is now bounded)',
+                );
             }
 
-            const count = result.count ?? 0;
-            const hasOthers = count > 1;
-            console.log(`DEBUG: Teams attendee count: ${count}, hasOthers: ${hasOthers}, consecutiveLonely: ${hasOthers ? 0 : consecutiveLonely + 1}/${POLLS_BEFORE_END}`);
-            if (hasOthers) {
-                consecutiveLonely = 0;
-                return;
-            }
-
-            consecutiveLonely += 1;
-            if (consecutiveLonely >= POLLS_BEFORE_END) {
-                console.log(`LMA Virtual Participant got lonely and left (count<=1 for ${consecutiveLonely} consecutive polls).`);
+            if (decision.action === 'end') {
+                console.log(`LMA Virtual Participant is leaving: ${decision.detail}`);
                 clearInterval(attendeeWatchdog);
                 details.start = false;
-                this.requestEnd({ reason: 'alone-in-meeting', trigger: 'attendees-left' });
+                this.requestEnd({ reason: decision.reason, trigger: decision.trigger });
             }
         }, POLL_MS);
         page.once('close', () => clearInterval(attendeeWatchdog));

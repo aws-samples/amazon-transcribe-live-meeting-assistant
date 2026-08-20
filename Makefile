@@ -340,7 +340,8 @@ test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
 	@echo "Running Virtual Participant template + MicroVM client tests..."
 	$(PYTHON) -m pytest $(VP_DIR)/test/test_vp_template.py $(VP_DIR)/test/test_microvm_client.py \
 		$(VP_DIR)/test/test_ai_stack_vnc_alb.py $(VP_DIR)/test/test_microvm_manager.py \
-		$(VP_DIR)/test/test_microvm_vnc_token.py $(VP_DIR)/test/test_audio_sample_rates.py -q
+		$(VP_DIR)/test/test_microvm_vnc_token.py $(VP_DIR)/test/test_audio_sample_rates.py \
+		$(VP_DIR)/test/test_audio_single_writer.py -q
 	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
 
 test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)

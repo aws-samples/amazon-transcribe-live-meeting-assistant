@@ -128,6 +128,8 @@ ComponentSelector.propTypes = {
     participants: PropTypes.string,
     owner: PropTypes.string,
     autoStart: PropTypes.bool,
+    diarizeSystem: PropTypes.bool,
+    diarizeMic: PropTypes.bool,
     authMode: PropTypes.string,
     meetingName: PropTypes.string,
     meetingPlatform: PropTypes.string,

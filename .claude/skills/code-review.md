@@ -30,7 +30,7 @@ make test               # SAM unit + local-invoke tests
 ```bash
 cd lma-websocket-transcriber-stack/source/app
 npm install && npm run build   # TypeScript build
-npm test                       # jest tests
+npm test                       # node:test unit tests
 ```
 
 **Virtual Participant — `lma-virtual-participant-stack/backend/`:**

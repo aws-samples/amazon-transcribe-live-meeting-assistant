@@ -16,30 +16,33 @@ import CryptoKit
 ///   --endpoint   wss://<cloudfront-domain>/api/v1/ws   (or LMA_WS_ENDPOINT)
 ///   --token      <Cognito ACCESS token, no "Bearer " prefix>   (or LMA_ACCESS_TOKEN)
 ///   --id-token   <Cognito ID token>                            (or LMA_ID_TOKEN)
+///   --refresh-token <Cognito REFRESH token>   (or LMA_REFRESH_TOKEN) — lets the
+///                pasted-token path renew itself instead of dying at the ~1h
+///                access-token TTL. Not needed with --username (SRP login
+///                captures it automatically).
 ///   --call-id    "My meeting - 2026-07-04"                     (or LMA_CALL_ID)
 ///   --agent-id   "alice@example.com"  (label for the mic channel)
 ///   --from       "Other participants" (label for the meeting channel)
 ///   --sample-rate 48000
 ///   --diarization  (label the transcript per voice; use --sample-rate 16000 with it)
 ///   --debug-wav  /tmp/lma-debug.wav  (tee exact streamed PCM for verification)
+///   --diarize-system 1 (label individual voices in the meeting audio)
+///   --diarize-mic    1 (label individual voices on the microphone)
 ///   --config     /path/to/lma-config.json  (override config-file location)
 struct Config {
     var endpoint: String
     var accessToken: String
     var idToken: String
+    /// Cognito REFRESH token. Retained (it used to be discarded at sign-in —
+    /// issue #535) so the ~1 h access token can be renewed without another
+    /// interactive sign-in. Redeemed by TokenStore, never sent to the server.
+    var refreshToken: String
     var callId: String
     var agentId: String
     var fromNumber: String
     var toNumber: String
     var sampleRate: Int
     var debugWavPath: String   // empty = disabled
-
-    /// Label the transcript per voice ("Speaker 1 (mic)") instead of per audio
-    /// channel. Served by the deployment's on-demand ASR engine rather than
-    /// Amazon Transcribe, so it requires that engine to be deployed. The models
-    /// run at 16 kHz, so `--sample-rate 16000` avoids a resample in the
-    /// transcriber; other rates work unchanged.
-    var diarizationEnabled: Bool
 
     // In-app SRP login (alternative to pasting --token/--id-token).
     var username: String
@@ -60,6 +63,14 @@ struct Config {
     var videoEnabled: Bool
     /// CLI: video source id ("display:<id>" / "window:<id>"; "" = main display).
     var videoSourceID: String
+
+    /// Ask Amazon Transcribe to tell apart individual voices on the system /
+    /// meeting audio channel (ch_0), labelling each with (spk_0), (spk_1), …
+    /// Useful when the captured meeting has several remote participants.
+    /// The GUI overrides these from its persisted Settings toggles.
+    var diarizeSystemChannel: Bool
+    /// Same, for the microphone channel (ch_1) — for a shared conference-room mic.
+    var diarizeMicChannel: Bool
 
     /// Name of the LMA CloudFormation stack this download came from. Shown in
     /// the UI and — critically — used to namespace all per-machine identifiers
@@ -154,15 +165,13 @@ struct Config {
             endpoint: value("endpoint", "LMA_WS_ENDPOINT", "wssEndpoint"),
             accessToken: value("token", "LMA_ACCESS_TOKEN"),
             idToken: value("id-token", "LMA_ID_TOKEN"),
+            refreshToken: value("refresh-token", "LMA_REFRESH_TOKEN"),
             callId: value("call-id", "LMA_CALL_ID", nil, defaultCallId),
             agentId: value("agent-id", "LMA_AGENT_ID", nil, "Me"),
             fromNumber: value("from", "LMA_FROM", nil, "Other participants"),
             toNumber: value("to", "LMA_TO", nil, "System"),
             sampleRate: sr,
             debugWavPath: value("debug-wav", "LMA_DEBUG_WAV"),
-            diarizationEnabled: ["1", "true", "yes"].contains(
-                value("diarization", "LMA_ENABLE_DIARIZATION", "enableDiarization").lowercased()
-            ),
             username: value("username", "LMA_USERNAME"),
             password: value("password", "LMA_PASSWORD"),
             userPoolId: value("user-pool-id", "LMA_USER_POOL_ID", "userPoolId"),
@@ -173,6 +182,10 @@ struct Config {
                                        Config.defaultDisclaimer),
             videoEnabled: ["1", "true", "yes"].contains(value("video", "LMA_VIDEO").lowercased()),
             videoSourceID: value("video-source", "LMA_VIDEO_SOURCE"),
+            diarizeSystemChannel: ["1", "true", "yes"].contains(
+                value("diarize-system", "LMA_DIARIZE_SYSTEM").lowercased()),
+            diarizeMicChannel: ["1", "true", "yes"].contains(
+                value("diarize-mic", "LMA_DIARIZE_MIC").lowercased()),
             stackName: value("stack-name", "LMA_STACK_NAME", "stackName"),
             appVersion: value("app-version", "LMA_APP_VERSION", "appVersion")
         )

@@ -121,10 +121,8 @@ class VirtualParticipantManager:
                     listener_arn = os.environ.get("ALB_LISTENER_ARN")
                     if listener_arn:
                         logger.info(f"Cleaning up ALB resources for VP {vp_id}")
-                        alb_cleanup_success = (
-                            self.alb_cleanup_manager.cleanup_vp_alb_resources(
-                                vp_id, listener_arn
-                            )
+                        alb_cleanup_success = self.alb_cleanup_manager.cleanup_vp_alb_resources(
+                            vp_id, listener_arn
                         )
                     else:
                         logger.warning(

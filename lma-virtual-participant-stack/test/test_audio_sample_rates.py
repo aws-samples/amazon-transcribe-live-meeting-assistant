@@ -106,9 +106,30 @@ def test_resampler_favours_quality_over_speed(dockerfile: str) -> None:
     assert int(method.rsplit("-", 1)[1]) >= 3, "quality level should be >= 3"
 
 
-def test_avoid_resampling_is_enabled(dockerfile: str) -> None:
-    """Makes PulseAudio follow the stream's rate instead of converting."""
-    assert "avoid-resampling = yes" in dockerfile
+def test_avoid_resampling_is_not_enabled(dockerfile: str) -> None:
+    """avoid-resampling must stay OFF; the explicit sink pinning replaces it.
+
+    It tells PulseAudio to RECONFIGURE a device to a client's rate rather than
+    resample for it. That buys nothing here -- every null sink already carries an
+    explicit ``rate=16000 channels=1 format=s16le`` (see the tests above), and
+    that pinning is what removed the triple resample of GitHub #538.
+
+    It can, however, do harm. Teams opens the agent_mic remap source TWICE with
+    conflicting formats (one mono capture with echoCancellation/AGC on, one stereo
+    capture with them off -- both observed on a live call via the audio
+    diagnostics), so two clients demand incompatible formats from a single monitor
+    source. Zoom opens it once, and Zoom is the platform that sounds fine. Device
+    re-negotiation glitches audio without dropping an RTP packet, which matches
+    every measurement taken for #543: the container-side recording is clean, the
+    packet counters are clean, and only the meeting listener hears garble.
+    """
+    # Match the printf form the config lines are actually written in, not any
+    # mention of the word -- the Dockerfile comment explains why it is absent, and
+    # a bare substring check would fail on that explanation.
+    setting = [
+        line for line in dockerfile.splitlines() if re.match(r"\s*'avoid-resampling", line)
+    ]
+    assert not setting, f"avoid-resampling must not be set: {setting}"
 
 
 def test_daemon_config_is_owned_by_the_running_user(dockerfile: str) -> None:
@@ -136,13 +157,18 @@ def test_entrypoint_warns_if_the_sinks_are_not_16k_mono(entrypoint: str) -> None
 
 
 def test_pacat_streams_use_the_pipeline_rate() -> None:
-    """The playback/capture streams either side of the sinks must agree.
+    """The playback stream either side of the sinks must agree with them.
 
-    nova-agent.ts plays Nova's output into agent_output and scribe.ts pipes
-    meeting audio into combined_audio; both must match the sink format or the
-    resample simply moves rather than disappears.
+    nova-agent.ts plays Nova's output into agent_output, and ffmpeg captures the
+    monitors at 16 kHz; a mismatch would just move the resample rather than
+    remove it.
+
+    scribe.ts is deliberately NOT checked here: its pacat pipe into
+    combined_audio was removed as the duplicate writer behind #542. See
+    test_audio_single_writer.py, which asserts it stays removed.
     """
     nova = (BACKEND / "src" / "nova-agent.ts").read_text()
     scribe = (BACKEND / "src" / "scribe.ts").read_text()
     assert f"NOVA_PLAYBACK_RATE || '{PIPELINE_RATE}'" in nova
-    assert f"'--rate={PIPELINE_RATE}'" in scribe or f"--rate=16000" in scribe
+    # ffmpeg still captures the monitors at the pipeline rate.
+    assert f"'-ar', '{PIPELINE_RATE}'" in scribe or f"String(this.sampleRate)" in scribe

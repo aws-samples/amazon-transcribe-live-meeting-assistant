@@ -93,6 +93,29 @@ export interface ChannelSpeakerData {
     startTimes: number[];
 }
 
+/**
+ * Per-channel Amazon Transcribe speaker partitioning (diarization).
+ *
+ * Amazon Transcribe's `ShowSpeakerLabel` is a STREAM-level flag and we send one
+ * 2-channel stream, so these two booleans do not map 1:1 onto the API: the flag
+ * is enabled when EITHER channel opts in, and the resulting labels are applied
+ * only to the channel(s) that asked for them.
+ *
+ * Named by channel ROLE, not by ch_0/ch_1, so clients never need to know the
+ * interleave order — the server owns that mapping (see CHANNEL_* below).
+ */
+export type DiarizationSettings = {
+    /** Diarize the system / meeting audio channel (ch_0). */
+    diarizeSystemChannel?: boolean,
+    /** Diarize the microphone channel (ch_1). */
+    diarizeMicChannel?: boolean,
+};
+
+/** Transcribe's channel id for the system / meeting audio (shared tab, screen). */
+export const CHANNEL_SYSTEM = 'ch_0';
+/** Transcribe's channel id for the local microphone. */
+export const CHANNEL_MIC = 'ch_1';
+
 export type CallMetaData = {
     callId: Uuid,
     fromNumber?: string,
@@ -109,8 +132,6 @@ export type CallMetaData = {
      * 'microvm', since that is where speaker labels come from.
      */
     asrEngine?: string,
-    /** Label the transcript per voice instead of per audio channel. */
-    enableDiarization?: boolean,
     /**
      * How many people share this client's audio, when the user knows. Only they
      * can know it — the Upload Audio page asks the same question. Absent or 0
@@ -128,10 +149,35 @@ export type CallMetaData = {
     channels: {
         [channelId: string]: ChannelSpeakerData;
     };
+    /**
+     * Server-managed (never sent by a client): running count of final results and
+     * how many carried speaker labels, so a call where diarization was requested
+     * but Transcribe returned nothing can be warned about exactly once.
+     */
+    diarizationDiagnostics?: {
+        finals: number;
+        labelled: number;
+        warned: boolean;
+        /**
+         * Highest window count already logged for the in-progress result, per
+         * channel, so the info-level diagnostic fires once per window boundary
+         * rather than once per partial. Reset when the result changes, so it
+         * cannot grow with the length of the meeting.
+         */
+        windowMarks?: {
+            [channelId: string]: {
+                resultId: string;
+                settledEmitted: number;
+                logged: number;
+                /** Window anchor, pinned on first sight so it cannot drift. */
+                origin?: number;
+            };
+        };
+    };
     accessToken?: string,
     idToken?: string,
     refreshToken?: string,
-};
+} & DiarizationSettings;
 
 export type SocketCallData = {
     callMetadata: CallMetaData,

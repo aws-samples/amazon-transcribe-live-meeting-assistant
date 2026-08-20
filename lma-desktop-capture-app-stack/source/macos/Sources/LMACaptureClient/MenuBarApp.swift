@@ -38,6 +38,10 @@ final class MenuBarAppState: ObservableObject {
     // controller so they ride the START frame.
     @Published var micLabel = ""
     @Published var systemLabel = ""
+    /// Per-channel Amazon Transcribe speaker identification (diarization). Off by
+    /// default: it changes the transcript's speaker names, so it is opt-in.
+    @Published var diarizeSystemChannel = false
+    @Published var diarizeMicChannel = false
     @Published var micDeviceUID = ""            // "" = System Default
     @Published var micDevices: [MicDevices.Device] = []
 
@@ -65,6 +69,9 @@ final class MenuBarAppState: ObservableObject {
     private var segmentStartedAt: Date?
     private var accumulatedSeconds = 0
     private var elapsedTimer: Timer?
+    /// Turns the state stream into begin/end recording events (see
+    /// CaptureController.SessionTracker).
+    private var sessionTracker = CaptureController.SessionTracker()
 
     /// Recently used meeting names (most recent first), for quick re-selection.
     @Published var recentMeetingNames: [String] = []
@@ -108,6 +115,8 @@ final class MenuBarAppState: ObservableObject {
     private static let kMicLabel = "lma.micLabel"
     private static let kSystemLabel = "lma.systemLabel"
     private static let kMicDeviceUID = "lma.micDeviceUID"
+    private static let kDiarizeSystem = "lma.diarizeSystemChannel"
+    private static let kDiarizeMic = "lma.diarizeMicChannel"
     private static let kVideoEnabled = "lma.videoEnabled"
     private static let kVideoSourceID = "lma.videoSourceID"
     private static let kDisclaimerAgreed = "lma.disclaimerAgreed"
@@ -127,6 +136,10 @@ final class MenuBarAppState: ObservableObject {
         self.micLabel = defaults.string(forKey: Self.kMicLabel) ?? ""
         self.systemLabel = defaults.string(forKey: Self.kSystemLabel) ?? ""
         self.micDeviceUID = defaults.string(forKey: Self.kMicDeviceUID) ?? ""
+        // Absent key -> false, i.e. speaker identification stays off for every
+        // existing install until the user opts in.
+        self.diarizeSystemChannel = defaults.bool(forKey: Self.kDiarizeSystem)
+        self.diarizeMicChannel = defaults.bool(forKey: Self.kDiarizeMic)
         self.videoEnabled = defaults.bool(forKey: Self.kVideoEnabled)
         self.videoSourceID = defaults.string(forKey: Self.kVideoSourceID) ?? ""
         self.recentMeetingNames = defaults.stringArray(forKey: Self.kRecentMeetings) ?? []
@@ -139,17 +152,19 @@ final class MenuBarAppState: ObservableObject {
         }
         controller.onStateChange = { [weak self] s in
             guard let self = self else { return }
-            let wasStreaming = self.isStreaming
             self.state = s
-            let nowStreaming = self.isStreaming
-            if nowStreaming && !wasStreaming {
+            // An error (rejected token, capture failure) means nothing was
+            // uploaded — don't tell the user a recording is on its way. The
+            // outcome is taken from the terminal state AFTER teardown, not from
+            // the `.stopping` that every teardown passes through; see
+            // CaptureController.SessionTracker for why that distinction matters.
+            switch self.sessionTracker.observe(s) {
+            case .none:
+                break
+            case .started:
                 self.beginElapsedTimer()
-            } else if !nowStreaming && wasStreaming {
-                // An error (bad token, capture failure) or sign-out means nothing
-                // was uploaded — don't tell the user a recording is on its way.
-                let failed: Bool
-                if case .error = s { failed = true } else { failed = false }
-                self.endElapsedTimer(succeeded: !failed)
+            case .ended(let succeeded):
+                self.endElapsedTimer(succeeded: succeeded)
             }
         }
         controller.onLevels = { [weak self] m, k, c, p in
@@ -176,6 +191,8 @@ final class MenuBarAppState: ObservableObject {
         defaults.set(micLabel, forKey: Self.kMicLabel)
         defaults.set(systemLabel, forKey: Self.kSystemLabel)
         defaults.set(micDeviceUID, forKey: Self.kMicDeviceUID)
+        defaults.set(diarizeSystemChannel, forKey: Self.kDiarizeSystem)
+        defaults.set(diarizeMicChannel, forKey: Self.kDiarizeMic)
         defaults.set(videoEnabled, forKey: Self.kVideoEnabled)
         defaults.set(videoSourceID, forKey: Self.kVideoSourceID)
         pushSettingsToController()
@@ -274,6 +291,8 @@ final class MenuBarAppState: ObservableObject {
     private func pushSettingsToController() {
         controller.micLabel = effectiveMicLabel
         controller.systemLabel = effectiveSystemLabel
+        controller.diarizeSystemChannel = diarizeSystemChannel
+        controller.diarizeMicChannel = diarizeMicChannel
         controller.micDeviceUID = micDeviceUID
         controller.videoEnabled = videoEnabled
         controller.videoSourceID = videoSourceID
@@ -940,6 +959,24 @@ struct SettingsView: View {
                     .textFieldStyle(.roundedBorder).font(.caption)
             }
             Text("These appear as the speaker names in the LMA transcript. Leave blank for the defaults shown.")
+                .font(.caption2).foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text("Speaker identification").font(.caption).foregroundColor(.secondary).padding(.top, 2)
+            Toggle("Identify separate speakers in meeting audio",
+                   isOn: Binding(get: { s.diarizeSystemChannel },
+                                 set: { s.diarizeSystemChannel = $0; s.saveSettings() }))
+                .font(.caption)
+                .disabled(s.isStreaming)
+            Toggle("Identify separate speakers on my microphone",
+                   isOn: Binding(get: { s.diarizeMicChannel },
+                                 set: { s.diarizeMicChannel = $0; s.saveSettings() }))
+                .font(.caption)
+                .disabled(s.isStreaming)
+            Text("Amazon Transcribe tells apart individual voices within a channel and appends "
+                 + "(spk_0), (spk_1), … to the labels above. Turn on meeting audio when the call has "
+                 + "several remote participants, or the microphone when several people share this mic. "
+                 + "Works best with five or fewer voices per channel. Takes effect on the next recording.")
                 .font(.caption2).foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
