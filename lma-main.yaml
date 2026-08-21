@@ -355,8 +355,9 @@ Parameters:
       language models and language identification do not apply to them, and the
       default model is English only. REQUIRES a region where AWS Lambda MicroVMs
       is available (it is not available in GovCloud). Deploying it does not change
-      existing behaviour on its own: meetings still use Amazon Transcribe unless a
-      client asks for diarization.
+      existing behaviour on its own: every meeting still uses Amazon Transcribe until
+      an admin makes this engine the default on the ASR Config page. Both engines can
+      produce speaker labels, so requesting them does not select an engine.
 
   AsrModelBundle:
     Type: String
@@ -2749,8 +2750,9 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
           - ""
-        # Deploying the engine does not silently switch meetings onto it: clients
-        # still get Amazon Transcribe unless they ask for diarization.
+        # Deploying the engine does not silently switch meetings onto it. Both
+        # engines diarize now, so asking for speaker labels does not select one:
+        # an admin makes this the default from the ASR Config page instead.
         AsrEngineDefault: transcribe
         AsrDiarizationAvailable: !If [ShouldEnableAsrDiarization, "true", "false"]
         # A model nobody has measured gets no speaker labels until this deployment

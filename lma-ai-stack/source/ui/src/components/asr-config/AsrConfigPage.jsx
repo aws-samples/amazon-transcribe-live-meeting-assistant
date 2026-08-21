@@ -398,10 +398,13 @@ const AsrConfigPage = () => {
                 <FormField
                   label="Use this engine for every streaming meeting"
                   description={
-                    'Off by default: meetings use Amazon Transcribe unless a client asks for ' +
-                    'diarization. Turning this on routes ALL Stream Audio and Desktop Capture ' +
-                    'meetings here, which also means no content redaction, custom vocabulary, ' +
-                    'custom language model or language identification for any of them.'
+                    'Off by default, so every meeting uses Amazon Transcribe. Both engines can ' +
+                    'produce speaker labels now, so asking for them does NOT pick an engine — ' +
+                    'this switch is the only way a Stream Audio or Desktop Capture meeting reaches ' +
+                    'the on-demand engine, and it routes ALL of them here. That also means no ' +
+                    'content redaction, custom vocabulary, custom language model or language ' +
+                    'identification for any of them. A meeting whose MicroVM cannot start still ' +
+                    'falls back to Amazon Transcribe on its own.'
                   }
                 >
                   <Checkbox

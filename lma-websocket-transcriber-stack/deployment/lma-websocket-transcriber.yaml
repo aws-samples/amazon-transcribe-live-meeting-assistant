@@ -1729,6 +1729,12 @@ Resources:
         AsrModelBundleId: !Ref AsrModelBundleId
         AsrBundleThreshold: !Ref AsrBundleThreshold
         AsrEngineDefault: !Ref AsrEngineDefault
+        # Whether the on-demand engine is deployed AT ALL, as distinct from
+        # AsrDiarizationAvailable (which is also false for a transcription-only
+        # bundle). Read by the Stream Audio page to offer a per-meeting engine
+        # choice, so reaching this engine does not require an admin to flip the
+        # deployment-wide default.
+        AsrEngineAvailable: !If [ShouldEnableMicrovmAsr, "true", "false"]
         # The ASR Config page posts calibration runs here (the UI is on its own
         # CloudFront domain, so it needs the absolute URL).
         AsrCalibrateEndpoint: !If

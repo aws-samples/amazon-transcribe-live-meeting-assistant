@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A per-meeting transcription engine choice, instead of only a deployment-wide default.** Stream Audio now shows a **Transcription engine** radio when the on-demand engine is deployed, and the Desktop Capture apps take `--asr-engine microvm` (`LMA_ASR_ENGINE`, or `asrEngine` in `lma-config.json`). Both send `asrEngine` in the opening message, which wins over the deployment default and the ASR Config table — so trying the engine no longer requires an admin to route *every* meeting to it, which was the only route before and is a blunt instrument for an experiment. Omitting it leaves the deployment default untouched, so behaviour is unchanged for anyone who does not use it.
+
+  `maxSpeakers` and 16 kHz capture now follow the engine choice rather than the diarization checkboxes: neither means anything on the Amazon Transcribe path, so offering them there was a control that did nothing.
+
+### Fixed
+
+- **The ASR Config page and two CloudFormation descriptions still claimed that asking for diarization selects the on-demand engine.** That stopped being true when both engines gained speaker partitioning: ticking the speaker-identification boxes gets Amazon Transcribe's diarization, and nothing in the web UI could reach the on-demand engine at all. The text now says so, and the per-meeting picker above gives it a route.
+
+
 - **Streaming Parakeet bundles, to test whether a different ASR model fixes the text quality.** `parakeet-streaming-titanet-small` (560 ms) and `parakeet-streaming-low-latency` (240 ms). Diarization is not this engine's weak half — text is: a reviewer ranked its transcript below Amazon Transcribe's, and a real meeting produced a ten-token repetition loop plus "diarization" rendered six different wrong ways. The 560 ms bundle is a clean A/B against the default: identical embedder, identical turn detection, identical lookahead, so any difference on a side-by-side meeting is the ASR model alone.
 
   Parakeet unified is the newer sibling of Nemotron (Granary / YTC / Yodas2 training data), the same cache-aware streaming transducer family, and the **same NVIDIA Open Model License** — no licensing gain, no licensing regression. Not to be confused with `parakeet-tdt-0.6b-v3`, which is CC-BY-4.0 but offline: there is no permissive *streaming* Parakeet.

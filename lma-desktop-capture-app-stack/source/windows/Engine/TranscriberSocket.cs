@@ -270,6 +270,12 @@ public sealed class TranscriberSocket
             ["diarizeSystemChannel"] = _config.DiarizeSystemChannel,
             ["diarizeMicChannel"] = _config.DiarizeMicChannel,
         };
+        // Omitted when unset so the server keeps its own default, rather than this
+        // client pinning every meeting to one engine by accident.
+        if (!string.IsNullOrWhiteSpace(_config.AsrEngine))
+        {
+            meta["asrEngine"] = _config.AsrEngine;
+        }
         SendJson(meta, "START");
     }
 

@@ -18,6 +18,7 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 - [What it does](#what-it-does)
 - [Feature trade-offs versus Amazon Transcribe](#feature-trade-offs-versus-amazon-transcribe)
 - [Deploying it](#deploying-it)
+- [Choosing the engine for a meeting](#choosing-the-engine-for-a-meeting)
 - [Tuning it without a redeploy](#tuning-it-without-a-redeploy)
 - [Calibrating the operating point](#calibrating-the-operating-point)
 - [Cost and sizing](#cost-and-sizing)
@@ -210,6 +211,25 @@ than the channel labels it falls back to.
 **optional overrides**. Blank — the default — means "use the value calibrated for the
 deployed bundle". Set one only to override a bundle deliberately; the ASR Config admin
 page does the same thing without a 20-minute stack update.
+
+## Choosing the engine for a meeting
+
+Both engines can produce speaker labels, so asking for labels does **not** pick an
+engine. There are three ways to choose one, in precedence order:
+
+1. **Per meeting, from the client.** Stream Audio shows a **Transcription engine**
+   radio when this engine is deployed; the Desktop Capture apps take
+   `--asr-engine microvm`. This wins over everything below, so a user can try the
+   engine without an admin changing anything.
+2. **Per deployment, at runtime.** **Make the on-demand ASR engine the default** on the
+   ASR Config page routes every Stream Audio and Desktop Capture meeting here. Takes
+   effect on the next meeting; no redeploy.
+3. **Nothing.** Every meeting uses Amazon Transcribe. This is the default, and deploying
+   the engine does not change it.
+
+A meeting that selects this engine and whose MicroVM cannot start falls back to Amazon
+Transcribe by itself, so a failed launch costs a warning in the log rather than a
+transcript.
 
 ## Tuning it without a redeploy
 

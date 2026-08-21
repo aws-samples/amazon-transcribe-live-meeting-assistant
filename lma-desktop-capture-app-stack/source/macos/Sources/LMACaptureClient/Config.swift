@@ -28,6 +28,7 @@ import CryptoKit
 ///   --debug-wav  /tmp/lma-debug.wav  (tee exact streamed PCM for verification)
 ///   --diarize-system 1 (label individual voices in the meeting audio)
 ///   --diarize-mic    1 (label individual voices on the microphone)
+///   --asr-engine transcribe|microvm (which engine transcribes this meeting)
 ///   --config     /path/to/lma-config.json  (override config-file location)
 struct Config {
     var endpoint: String
@@ -71,6 +72,13 @@ struct Config {
     var diarizeSystemChannel: Bool
     /// Same, for the microphone channel (ch_1) — for a shared conference-room mic.
     var diarizeMicChannel: Bool
+
+    /// Which engine transcribes this meeting: "transcribe" (Amazon Transcribe) or
+    /// "microvm" (the deployment's on-demand ASR + diarization engine). Empty means
+    /// "use the deployment default", which is what the server does with an absent
+    /// value. Both engines produce speaker labels, so the diarize flags above do NOT
+    /// select an engine — this is the only way a client picks one.
+    var asrEngine: String
 
     /// Name of the LMA CloudFormation stack this download came from. Shown in
     /// the UI and — critically — used to namespace all per-machine identifiers
@@ -186,6 +194,7 @@ struct Config {
                 value("diarize-system", "LMA_DIARIZE_SYSTEM").lowercased()),
             diarizeMicChannel: ["1", "true", "yes"].contains(
                 value("diarize-mic", "LMA_DIARIZE_MIC").lowercased()),
+            asrEngine: value("asr-engine", "LMA_ASR_ENGINE", "asrEngine").lowercased(),
             stackName: value("stack-name", "LMA_STACK_NAME", "stackName"),
             appVersion: value("app-version", "LMA_APP_VERSION", "appVersion")
         )

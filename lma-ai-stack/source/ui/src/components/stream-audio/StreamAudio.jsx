@@ -23,6 +23,7 @@ import {
   Checkbox,
   ProgressBar,
   Alert,
+  RadioGroup,
 } from '@cloudscape-design/components';
 import '@cloudscape-design/global-styles/index.css';
 import * as ReactUseWebSocket from 'react-use-websocket';
@@ -78,6 +79,11 @@ const appsyncClient = generateClient();
 const StreamAudio = ({ mode: modeProp = undefined }) => {
   const { currentSession, user, authState } = useAppContext();
   const { settings } = useSettingsContext();
+  // The on-demand ASR engine is offered per meeting only where it is deployed.
+  // Distinct from AsrDiarizationAvailable, which is also false for a
+  // transcription-only bundle.
+  const asrEngineAvailable = `${settings?.AsrEngineAvailable}` === 'true';
+  const asrEngineDefault = `${settings?.AsrEngineDefault}` === 'microvm' ? 'microvm' : 'transcribe';
   // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
   // The refresh token is not exposed via fetchAuthSession in v6; pass an empty string
   // since the websocket server's JWT verifier only strictly requires access/id tokens.
@@ -157,10 +163,20 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [isFlashing, setIsFlashing] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
+  // Which engine transcribes this meeting. Sent in the START frame, where it beats
+  // both the deployment default and the ASR Config table, so a user can try the
+  // on-demand engine without an admin switching every meeting over to it.
+  const [streamEngine, setStreamEngine] = useState('');
   // How many people share this microphone/tab. Nobody but the user can know it, so
   // it is asked for rather than guessed — the same question Upload Audio asks.
   // Blank means "discover as many speakers as appear".
   const [streamMaxSpeakers, setStreamMaxSpeakers] = useState('');
+
+  // Start the picker on whatever the deployment already defaults to, so choosing
+  // nothing behaves exactly as it did before this control existed.
+  useEffect(() => {
+    setStreamEngine((current) => current || asrEngineDefault);
+  }, [asrEngineDefault]);
 
   // --- Upload mode state --------------------------------------------------
   const [uploadFiles, setUploadFiles] = useState([]);
@@ -322,6 +338,8 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
       fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
       maxSpeakers: Number.parseInt(streamMaxSpeakers, 10) || 0,
+      // Wins over both the deployment default and the ASR Config table.
+      asrEngine: streamEngine || asrEngineDefault,
     };
     setCallMetaData(callMetaDataCopy);
     return callMetaDataCopy;
@@ -337,7 +355,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       // resampling anywhere in the chain. Other rates still work (the
       // transcriber resamples), they just cost CPU and buy no accuracy.
       audioContext.current =
-        recordingCallMetaData.diarizeSystemChannel || recordingCallMetaData.diarizeMicChannel
+        recordingCallMetaData.asrEngine === 'microvm'
           ? new window.AudioContext({ sampleRate: 16000 })
           : new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
@@ -722,6 +740,41 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                 </FormField>
               </ColumnLayout>
 
+              {mode === MODE_STREAM && asrEngineAvailable && (
+                <Box margin={{ top: 'l' }}>
+                  <FormField
+                    label="Transcription engine"
+                    description={
+                      'Amazon Transcribe is the default. The on-demand engine transcribes and ' +
+                      'identifies speakers in one pass on a MicroVM launched for this meeting, ' +
+                      'which separates voices sharing one microphone more reliably — but it does ' +
+                      'not support content redaction, custom vocabularies, custom language models ' +
+                      'or language identification, and it is English only.'
+                    }
+                  >
+                    <RadioGroup
+                      value={streamEngine}
+                      onChange={({ detail }) => setStreamEngine(detail.value)}
+                      items={[
+                        {
+                          value: 'transcribe',
+                          label: 'Amazon Transcribe',
+                          description: 'Supports redaction, custom vocabulary and 30+ languages.',
+                        },
+                        {
+                          value: 'microvm',
+                          label: 'On-demand ASR & diarization (experimental)',
+                          description:
+                            'Better at telling apart several people on one channel. English only. ' +
+                            'Falls back to Amazon Transcribe if the MicroVM cannot start.',
+                        },
+                      ]}
+                      disabled={recording}
+                    />
+                  </FormField>
+                </Box>
+              )}
+
               {mode === MODE_STREAM && (
                 <Box margin={{ top: 'l' }}>
                   <FormField
@@ -753,7 +806,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                     </SpaceBetween>
                   </FormField>
                   {(callMetaData.diarizeSystemChannel || callMetaData.diarizeMicChannel) &&
-                    `${settings.AsrDiarizationAvailable}` === 'true' && (
+                    streamEngine === 'microvm' && (
                       <Box margin={{ top: 's' }}>
                         <FormField
                           label="Speakers per channel (optional)"
