@@ -415,6 +415,15 @@ const startTranscription = async (
     const runtime = await getAsrRuntimeConfig(server_);
     if (resolveAsrEngine(socketData.callMetadata, server_, runtime) === 'microvm') {
         if (await startMicrovmAsr(socketData, server_)) {
+            // startTranscribe is the ONLY consumer of audioInputStream, and it is not
+            // running on this path — so every frame onBinaryMessage writes would sit
+            // in the stream's buffer for the whole meeting. At the 16 kHz stereo this
+            // engine negotiates that is 64 kB/s, about 230 MB an hour, in a 1 GiB
+            // task shared by every other meeting on it. Draining discards each frame
+            // as it arrives; writes stay unconditional so the recording is untouched,
+            // and this happens only AFTER a successful start so the audio buffered
+            // during MicroVM acquisition is still there for the fallback below.
+            socketData.audioInputStream?.resume();
             return;
         }
         if (!shouldFallbackToTranscribe()) {

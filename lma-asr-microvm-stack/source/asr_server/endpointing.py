@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Config-driven trailing-silence and max-utterance endpointing rules.
 
 Decides when a partial hypothesis is promoted to a FINAL, i.e. when an utterance

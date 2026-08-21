@@ -11,7 +11,6 @@ import {
     ChannelResampler,
     SpeakerNameRegistry,
     StereoDeinterleaver,
-    channelToLabelSuffix,
     channelToTranscriptChannel,
 } from './asr-audio';
 
@@ -125,11 +124,9 @@ test('resampler handles a non-integer ratio and upsampling', () => {
     );
 });
 
-test('channel identity maps to the existing transcript channels and label suffixes', () => {
+test('channel identity maps to the existing transcript channels', () => {
     assert.equal(channelToTranscriptChannel('ch_0'), 'CALLER');
     assert.equal(channelToTranscriptChannel('ch_1'), 'AGENT');
-    assert.equal(channelToLabelSuffix('ch_0'), 'tab');
-    assert.equal(channelToLabelSuffix('ch_1'), 'mic');
 });
 
 test('the channel name carries a voice suffix once a speaker is identified', () => {

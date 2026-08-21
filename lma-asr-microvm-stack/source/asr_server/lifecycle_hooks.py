@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """MicroVM runtime lifecycle hook handlers.
 
 Runs **inside the MicroVM** under the **execution role** (API doc §5: the runtime

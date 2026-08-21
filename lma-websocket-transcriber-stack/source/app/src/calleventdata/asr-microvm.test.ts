@@ -17,7 +17,11 @@ import { AddressInfo } from 'node:net';
 import { FastifyInstance } from 'fastify';
 import WebSocket, { WebSocketServer } from 'ws';
 
-import { AsrChannelSession, coalesceBacklog } from './asr-microvm';
+import {
+    AsrChannelSession,
+    coalesceBacklog,
+    resolveMaxSpeakers,
+} from './asr-microvm';
 import { SpeakerNameRegistry } from './asr-audio';
 import { TranscriptSegmentRecord } from './transcribe';
 import { CallMetaData, SocketCallData } from './eventtypes';
@@ -374,4 +378,23 @@ test('an empty backlog flushes nothing', () => {
 test('a backlog smaller than one frame is sent uncopied', () => {
     const only = Buffer.alloc(3200, 4);
     assert.deepEqual(coalesceBacklog([only]), [only]);
+});
+
+test('a blank speaker count leaves the deployment cap in force', () => {
+    // 0 is what a blank field in the UI sends, i.e. "no opinion". Treating it as an
+    // explicit "unbounded" meant every Stream Audio meeting silently overrode a cap
+    // an admin had set, so the cap never applied to the client that most needed it.
+    assert.equal(resolveMaxSpeakers(0, 2), 2);
+    assert.equal(resolveMaxSpeakers(undefined, 2), 2);
+});
+
+test('a real speaker count from the client wins over the deployment cap', () => {
+    // Only the person in the meeting knows how many people share their microphone.
+    assert.equal(resolveMaxSpeakers(4, 2), 4);
+    assert.equal(resolveMaxSpeakers(1, 0), 1);
+});
+
+test('no cap anywhere still means discover as many speakers as appear', () => {
+    assert.equal(resolveMaxSpeakers(undefined, 0), 0);
+    assert.equal(resolveMaxSpeakers(0, 0), 0);
 });

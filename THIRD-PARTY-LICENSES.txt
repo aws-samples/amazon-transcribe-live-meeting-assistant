@@ -505,35 +505,69 @@ Amazon Transcribe path.
 ** Speech recognition and speaker-embedding model weights (downloaded at image
    build time, NOT redistributed by this project)
 
-The on-demand ASR MicroVM image downloads the model selected by the AsrModelId
-and AsrSpeakerModelId CloudFormation parameters from its published source and
-verifies it against a pinned SHA256. The weights are baked into that image inside
-the deploying AWS account; this project distributes no model weights. Each model's
-own license file is copied into the image next to its weights.
+The on-demand ASR MicroVM image downloads the models named by the AsrModelBundle
+CloudFormation parameter from their published source and verifies each against a
+pinned SHA256. The weights are baked into that image inside the deploying AWS
+account; this project distributes no model weights. Each model's own license file is
+copied into the image next to its weights, and the deployed bundle's licences are
+reported in the ASR stack's AsrLicenceSummary and AsrRedistributable outputs.
 
-Defaults:
+A bundle names one ASR model, one speaker-embedding model, one turn-detection model
+and (for the offline engine) a VAD. AsrRedistributable is "false" for any bundle
+containing a weight whose license does not permit redistribution.
 
-  * NVIDIA Nemotron speech-streaming EN 0.6B (streaming ASR)
-    NVIDIA Open Model License
+Speech recognition:
+
+  * NVIDIA Nemotron speech-streaming EN 0.6B (streaming; default bundle)
+    NVIDIA Open Model License -- NOT redistributable
     https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
 
-  * NVIDIA TitaNet-small speaker embedding (diarization)
+  * NVIDIA Parakeet unified EN 0.6B, 240/560 ms (streaming)
+    NVIDIA Open Model License -- NOT redistributable
+    https://huggingface.co/nvidia/parakeet-unified-en-0.6b
+
+  * NVIDIA FastConformer hybrid large streaming multi, EN (streaming)
     CC-BY-4.0
-    https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large
+    https://huggingface.co/nvidia/stt_en_fastconformer_hybrid_large_streaming_multi
 
-Selectable alternatives, for a deployment that needs permissive licensing
-throughout (AsrModelId + AsrSpeakerModelId):
+  * NVIDIA Parakeet TDT 0.6B v3 (offline / "accurate" engine)
+    CC-BY-4.0
+    https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
 
-  * icefall streaming Zipformer EN, int8 (streaming ASR)
+  * icefall streaming Zipformer EN, int8 (streaming)
     Apache-2.0
     https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26
     (this archive ships no LICENSE file, so none is copied into the image; the
     license is declared on the model page above)
 
-  * WeSpeaker CAM++_LM and ResNet293_LM speaker embedding (diarization)
+Speaker embedding (diarization):
+
+  * NVIDIA TitaNet-small and TitaNet-large
+    CC-BY-4.0
+    https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large
+
+  * WeSpeaker CAM++_LM and ResNet293_LM
     Apache-2.0
     https://github.com/wenet-e2e/wespeaker
 
-You are responsible for complying with the license of whichever model you select,
-including any model you supply yourself via the Custom model parameters. See
+  * 3D-Speaker CAM++ and ERes2Net, EN VoxCeleb
+    Apache-2.0
+    https://github.com/modelscope/3D-Speaker
+
+Speaker-turn detection:
+
+  * pyannote segmentation 3.0, converted to ONNX and redistributed ungated by
+    k2-fsa together with the upstream license file
+    MIT
+    https://huggingface.co/pyannote/segmentation-3.0
+
+Voice activity detection (offline engine only):
+
+  * Silero VAD
+    MIT
+    https://github.com/snakers4/silero-vad
+
+Every model is a curated entry in lma-asr-microvm-stack/source/catalog.json with a
+pinned checksum; there is no parameter for supplying an arbitrary model URL. You are
+responsible for complying with the license of whichever bundle you select. See
 docs/microvm-asr.md.

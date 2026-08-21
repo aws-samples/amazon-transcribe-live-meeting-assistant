@@ -30,10 +30,6 @@ export const CHANNEL_INDEX: Record<AsrChannelId, number> = { ch_0: 0, ch_1: 1 };
 export const channelToTranscriptChannel = (channelId: AsrChannelId): string =>
     channelId === 'ch_0' ? 'CALLER' : 'AGENT';
 
-/** Short suffix used in generated speaker labels, e.g. "Speaker 2 (mic)". */
-export const channelToLabelSuffix = (channelId: AsrChannelId): string =>
-    channelId === 'ch_0' ? 'tab' : 'mic';
-
 /**
  * Splits the interleaved stereo stream into per-channel mono buffers.
  *
@@ -195,11 +191,18 @@ export class ChannelResampler {
 /**
  * Per-meeting speaker display names.
  *
- * The engine reports per-channel, per-session ids (spk_0, spk_1, ...). The voice on
- * the microphone keeps the name LMA already has for the signed-in user; every voice
- * on the tab is numbered, because the name LMA has for that side is a placeholder
- * rather than a person. Numbers come from a counter shared by both channels, so two
- * channels can never render the same "Speaker N".
+ * The engine reports per-channel, per-session ids (spk_0, spk_1, ...). Each is
+ * appended to the channel's own name through the SAME formatter the Amazon
+ * Transcribe path uses, so a transcript reads identically whichever engine produced
+ * it: "Other Participant (spk_0)", "alex@example.com (spk_1)".
+ *
+ * The suffix is what does the work. Both channels run independent sessions and both
+ * restart at spk_0 for DIFFERENT people, so the base name separates the channels
+ * while the suffix separates voices within one. Without it the first voice heard on
+ * a channel took that channel's placeholder name alone, and a reviewer reading such
+ * a transcript concluded two correctly separated speakers had been merged.
+ *
+ * Stateless: it holds no counter, because nothing needs renumbering.
  */
 export class SpeakerNameRegistry {
     /**

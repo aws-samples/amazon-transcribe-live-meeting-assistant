@@ -22,7 +22,6 @@ import {
   StatusIndicator,
   KeyValuePairs,
   FileUpload,
-  ExpandableSection as Section,
 } from '@cloudscape-design/components';
 
 import useSettingsContext from '../../contexts/settings';
@@ -85,7 +84,10 @@ export const EMPTY = {
 
 const AsrConfigPage = () => {
   const { settings } = useSettingsContext();
-  const engineDeployed = `${settings?.AsrDiarizationAvailable}` === 'true';
+  const engineDeployed = `${settings?.AsrEngineAvailable}` === 'true';
+  // Separate question: the image may be transcription-only, in which case the engine
+  // is deployed and configurable but produces no speaker labels.
+  const diarizationAvailable = `${settings?.AsrDiarizationAvailable}` === 'true';
   const calibrateEndpoint = settings?.AsrCalibrateEndpoint || '';
   const speakerModelMeasured = `${settings?.AsrSpeakerModelMeasured}` !== 'false';
   const bundleId = settings?.AsrModelBundleId || '';
@@ -165,12 +167,13 @@ const AsrConfigPage = () => {
     try {
       const session = await fetchAuthSession();
       const token = session?.tokens?.accessToken?.toString() || '';
-      // Token on the query string, as the WebSocket route does; the WAV itself is
-      // the request body and is never stored anywhere.
-      const url = `${calibrateEndpoint}?authorization=${encodeURIComponent(`Bearer ${token}`)}`;
-      const response = await fetch(url, {
+      // Header, not the query string: this CloudFront distribution has access logging
+      // enabled, so a token in the URL would be persisted to the log bucket (and the
+      // server logs request.url at INFO). The WebSocket route has no choice — the
+      // browser WebSocket API cannot set headers — but this is a plain fetch.
+      const response = await fetch(calibrateEndpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'audio/wav' },
+        headers: { 'Content-Type': 'audio/wav', Authorization: `Bearer ${token}` },
         body: calibrateFiles[0],
       });
       const raw = await response.text();
@@ -275,13 +278,20 @@ const AsrConfigPage = () => {
           <Spinner />
         ) : (
           <SpaceBetween size="l">
+            {!diarizationAvailable && (
+              <Alert type="info" header="This deployment transcribes but does not diarize">
+                The deployed bundle carries no speaker-embedding model, so the speaker settings below have no effect and
+                calibration is not offered. Choose a bundle with an embedder to enable speaker labels.
+              </Alert>
+            )}
+
             {status && (
               <Alert type={status.type} dismissible onDismiss={() => setStatus(null)}>
                 {status.text}
               </Alert>
             )}
 
-            {!speakerModelMeasured && (
+            {diarizationAvailable && !speakerModelMeasured && (
               <Alert type="warning" header="This speaker model has no measured operating point">
                 Speaker labels are being withheld: nobody has measured what cosine similarity means for this embedder,
                 and a guessed threshold splits one person into several or merges several into one. Calibrate below, or
@@ -444,7 +454,7 @@ const AsrConfigPage = () => {
         )}
       </Container>
 
-      {calibrateEndpoint && (
+      {calibrateEndpoint && diarizationAvailable && (
         <Container
           header={
             <Header
@@ -461,7 +471,7 @@ const AsrConfigPage = () => {
           }
         >
           <SpaceBetween size="l">
-            <Section headerText="How to make a calibration file" defaultExpanded={!calibration}>
+            <ExpandableSection headerText="How to make a calibration file" defaultExpanded={!calibration}>
               <SpaceBetween size="s">
                 <Box variant="p">
                   The file must be a <b>WAV, 16-bit PCM, with two channels</b>, where{' '}
@@ -490,7 +500,7 @@ const AsrConfigPage = () => {
                   carries no ground truth.
                 </Box>
               </SpaceBetween>
-            </Section>
+            </ExpandableSection>
 
             <FormField
               label="Calibration audio"

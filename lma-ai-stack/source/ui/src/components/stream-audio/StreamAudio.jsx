@@ -167,6 +167,11 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // both the deployment default and the ASR Config table, so a user can try the
   // on-demand engine without an admin switching every meeting over to it.
   const [streamEngine, setStreamEngine] = useState('');
+  // Whether the user actually moved the radio. Until they do, the START frame omits
+  // asrEngine entirely so the server decides — otherwise every meeting would carry an
+  // explicit engine and the ASR Config page's deployment-wide default could never
+  // apply, which is exactly what that switch claims to do.
+  const [engineChosen, setEngineChosen] = useState(false);
   // How many people share this microphone/tab. Nobody but the user can know it, so
   // it is asked for rather than guessed — the same question Upload Audio asks.
   // Blank means "discover as many speakers as appear".
@@ -337,9 +342,13 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       callId: `${meetingPrefix} - ${getTimestampStr()}`,
       agentId: callMetaData.agentId || DEFAULT_LOCAL_SPEAKER_NAME,
       fromNumber: callMetaData.fromNumber || DEFAULT_OTHER_SPEAKER_NAME,
-      maxSpeakers: Number.parseInt(streamMaxSpeakers, 10) || 0,
-      // Wins over both the deployment default and the ASR Config table.
-      asrEngine: streamEngine || asrEngineDefault,
+      // Omitted when blank rather than sent as 0, so leaving the field alone means
+      // "no opinion" and the deployment's own cap applies.
+      ...(Number.parseInt(streamMaxSpeakers, 10) > 0 ? { maxSpeakers: Number.parseInt(streamMaxSpeakers, 10) } : {}),
+      // Sent ONLY when the user chose, because it wins over both the deployment
+      // default and the ASR Config table. Always sending it made that admin switch
+      // inert for every web meeting.
+      ...(engineChosen && streamEngine ? { asrEngine: streamEngine } : {}),
     };
     setCallMetaData(callMetaDataCopy);
     return callMetaDataCopy;
@@ -355,7 +364,7 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       // resampling anywhere in the chain. Other rates still work (the
       // transcriber resamples), they just cost CPU and buy no accuracy.
       audioContext.current =
-        recordingCallMetaData.asrEngine === 'microvm'
+        (recordingCallMetaData.asrEngine || asrEngineDefault) === 'microvm'
           ? new window.AudioContext({ sampleRate: 16000 })
           : new window.AudioContext();
       displayStream.current = await window.navigator.mediaDevices.getDisplayMedia({
@@ -754,7 +763,10 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
                   >
                     <RadioGroup
                       value={streamEngine}
-                      onChange={({ detail }) => setStreamEngine(detail.value)}
+                      onChange={({ detail }) => {
+                        setStreamEngine(detail.value);
+                        setEngineChosen(true);
+                      }}
                       items={[
                         {
                           value: 'transcribe',

@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Streaming speaker diarization ("who spoke") layered onto the ASR timeline.
 
 Answers *who* said each transcript segment, on the **same audio timeline** the

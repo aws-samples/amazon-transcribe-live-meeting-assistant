@@ -134,6 +134,14 @@ Parameters:
       - DEBUG
     Description: Log level for the ASR control-plane Lambda functions.
 
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: >-
+      Retention for this stack's Lambda log groups. Without an explicit group these
+      functions log to an implicit /aws/lambda/<name> group that keeps everything
+      forever and is not encrypted with the customer-managed key.
+
   CustomerManagedEncryptionKeyArn:
     Type: String
     Default: ""
@@ -272,6 +280,13 @@ Resources:
                   - s3:DeleteObject
                 Resource: !Sub "${AsrImageSourceBucket.Arn}/*"
 
+  AsrImageSourceFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/AsrImageSourceFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
   AsrImageSourceFunction:
     Type: AWS::Lambda::Function
     Metadata:
@@ -288,6 +303,8 @@ Resources:
     # checkov:skip=CKV_AWS_117: "VPC access not required; reaches S3 public APIs only"
     Properties:
       FunctionName: !Sub "${LMAStackName}-AsrImageSource"
+      LoggingConfig:
+        LogGroup: !Ref AsrImageSourceFunctionLogGroup
       Handler: index.lambda_handler
       Runtime: python3.12
       Timeout: 300
@@ -519,6 +536,13 @@ Resources:
                 Action: iam:PassRole
                 Resource: !GetAtt AsrMicrovmExecutionRole.Arn
 
+  AsrLauncherFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/AsrLauncherFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
   AsrLauncherFunction:
     Type: AWS::Lambda::Function
     Metadata:
@@ -540,6 +564,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive ARNs and limits"
     Properties:
       FunctionName: !Sub "${LMAStackName}-AsrLauncher"
+      LoggingConfig:
+        LogGroup: !Ref AsrLauncherFunctionLogGroup
       Handler: index.lambda_handler
       Runtime: python3.12
       # RunMicrovm plus the wait for RUNNING.

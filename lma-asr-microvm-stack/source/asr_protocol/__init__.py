@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Shared wire-protocol models for the streaming ASR system.
 
 This package holds the pydantic (v2) models for every WebSocket message defined

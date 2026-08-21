@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Pydantic v2 models for every WebSocket wire message in ``design.md`` §5.
 
 Both the ASR server (inside the MicroVM) and the control-plane router import

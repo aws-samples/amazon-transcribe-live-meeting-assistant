@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Round-trip serialization tests for every wire message.
 
 Covers each message in ``design.md`` §5, plus the tagged-union parse helpers

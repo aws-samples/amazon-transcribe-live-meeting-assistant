@@ -201,7 +201,7 @@ type Mutation @aws_iam {
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
 	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools
 	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools
-	updateAsrConfig(input: UpdateAsrConfigInput!): UpdateAsrConfigOutput @aws_cognito_user_pools
+	updateAsrConfig(input: UpdateAsrConfigInput!): UpdateAsrConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools

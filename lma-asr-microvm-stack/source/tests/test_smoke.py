@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Smoke test: ensures pytest collects and runs with a green suite."""
 
 from __future__ import annotations

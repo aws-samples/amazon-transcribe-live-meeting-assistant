@@ -123,6 +123,25 @@ export const shouldFallbackToTranscribe = (): boolean =>
     (process.env['ASR_FALLBACK_TO_TRANSCRIBE'] || 'true') === 'true';
 
 /**
+ * How many speakers to expect on one channel.
+ *
+ * A client-supplied count wins, because only the person in the meeting knows how
+ * many people share their microphone. But a FALSY client value means "no opinion",
+ * not "unbounded": `0` is the wire representation of a blank field, and treating it
+ * as an explicit choice (which `??` does, since 0 is not nullish) let every Stream
+ * Audio meeting silently override a cap an admin had set, so the cap never applied.
+ *
+ * The cost is that a client can no longer demand "no cap" against a deployment that
+ * set one — it gets the deployment's value instead. That is the lesser problem: a
+ * cap is a deliberate act by an admin, and 0 is what a client sends when it has
+ * nothing to say.
+ */
+export const resolveMaxSpeakers = (
+    clientValue: number | undefined,
+    deploymentValue: number
+): number => clientValue || deploymentValue;
+
+/**
  * Which engine transcribes this meeting.
  *
  * The engine is the DEPLOYMENT's choice and diarization is the CLIENT's: both
@@ -717,10 +736,7 @@ export const startMicrovmAsr = async (
     }
     const optionsFor = (channelId: AsrChannelId): AsrSessionOptions => ({
         diarize: thresholdTrusted && diarizationEnabledFor(channelId, settings),
-        // A client-supplied count wins: only the person in the meeting knows how
-        // many people share their microphone (the Upload Audio page asks the same
-        // question). 0 still means "discover as many as appear".
-        maxSpeakers: callMetadata.maxSpeakers ?? runtime.maxSpeakers,
+        maxSpeakers: resolveMaxSpeakers(callMetadata.maxSpeakers, runtime.maxSpeakers),
         speakerThreshold: runtime.speakerThreshold,
         endpointingMs: runtime.endpointingMs,
         minSegmentMs: runtime.minSegmentMs,

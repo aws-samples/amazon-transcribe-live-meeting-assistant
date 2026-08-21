@@ -24,7 +24,6 @@ import CryptoKit
 ///   --agent-id   "alice@example.com"  (label for the mic channel)
 ///   --from       "Other participants" (label for the meeting channel)
 ///   --sample-rate 48000
-///   --diarization  (label the transcript per voice; use --sample-rate 16000 with it)
 ///   --debug-wav  /tmp/lma-debug.wav  (tee exact streamed PCM for verification)
 ///   --diarize-system 1 (label individual voices in the meeting audio)
 ///   --diarize-mic    1 (label individual voices on the microphone)

@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Unit and integration tests for the ASR WebSocket server.
 
 A local WebSocket client streaming PCM receives
