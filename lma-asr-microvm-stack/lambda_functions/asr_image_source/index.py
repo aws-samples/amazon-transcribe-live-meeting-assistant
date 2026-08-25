@@ -81,10 +81,17 @@ def _find(entries: list, entry_id: str) -> dict:
     raise ResolutionError(f"{entry_id!r} is not in the catalog. Available: {available}")
 
 
+# What the al2023-1 base MicroVM image actually accepts. Anything else is rejected by
+# CreateMicrovmImage, and the rejection arrives from the AsrMicrovmImage resource
+# minutes into a stack update rather than from here - so this list exists to fail the
+# custom resource in seconds instead. 16384 was set on a bundle and looked plausible
+# because the old AsrBaselineMemoryMiB parameter offered it; the service does not.
+_SUPPORTED_MEMORY_MIB = (512, 1024, 2048, 4096, 8192)
+
 # Memory is allocated at 2 GiB per vCPU, and inference threads are matched to the
 # vCPU count. Kept here rather than as a CloudFormation Mapping because the memory
 # now comes from the bundle, and a Mapping cannot be keyed on a resolved value.
-_THREADS_BY_MEMORY_MIB = {4096: 2, 8192: 4, 16384: 8}
+_THREADS_BY_MEMORY_MIB = {512: 1, 1024: 1, 2048: 1, 4096: 2, 8192: 4}
 
 
 def _threads_for(memory_mib: int) -> int:
@@ -102,6 +109,12 @@ def resolve(properties: dict, catalog: dict) -> dict:
     speaker_id = bundle.get("speakerModelId", "none")
 
     memory_mib = int(bundle.get("baselineMemoryMiB", 8192))
+    if memory_mib not in _SUPPORTED_MEMORY_MIB:
+        raise ResolutionError(
+            f"bundle {bundle_id!r} asks for {memory_mib} MiB, which the base MicroVM "
+            f"image does not support. Supported sizes are "
+            f"{list(_SUPPORTED_MEMORY_MIB)}; fix baselineMemoryMiB in catalog.json."
+        )
     # The template needs the memory as a CloudFormation-typed number for
     # MinimumMemoryInMiB, so it carries its own copy. Cross-check them: a silent
     # disagreement would size the MicroVM for one bundle and thread the inference

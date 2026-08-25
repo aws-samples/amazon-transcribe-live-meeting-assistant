@@ -92,10 +92,10 @@
       "segmentationModelId": "pyannote-segmentation-3-0",
       "vadModelId": "silero-vad-v5",
       "minSegmentMs": 2500,
-      "baselineMemoryMiB": 16384,
+      "baselineMemoryMiB": 8192,
       "redistributable": true,
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
-      "notes": "Highest expected text accuracy and fully redistributable, at the cost of live latency: Parakeet TDT is OFFLINE, so the accurate engine segments audio with Silero VAD and decodes each utterance only once it closes. There is no interim text during an utterance, which changes the live meeting experience materially - live cutting cannot apply either, because a mid-utterance word list does not exist. Sized at 16384 MiB (8 vCPU) because a 0.6B offline decode has to catch up in bursts rather than keeping pace frame by frame. NOT YET CALIBRATED, and the latency has not been measured on a real meeting."
+      "notes": "Highest expected text accuracy and fully redistributable, at the cost of live latency: Parakeet TDT is OFFLINE, so the accurate engine segments audio with Silero VAD and decodes each utterance only once it closes. There is no interim text during an utterance, which changes the live meeting experience materially - live cutting cannot apply either, because a mid-utterance word list does not exist. UNVALIDATED and possibly not viable: 8192 MiB (4 vCPU) is the largest the base MicroVM image supports, and a 0.6B offline decode has to catch up in bursts rather than keeping pace frame by frame, so it may not hold real time on this engine at all. Measure the real-time factor before offering it to users. NOT YET CALIBRATED."
     },
     {
       "id": "parakeet-streaming-titanet-small",

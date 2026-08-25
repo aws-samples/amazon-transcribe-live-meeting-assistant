@@ -185,9 +185,13 @@ audio is cut into utterances by **Silero VAD** (MIT) and each closed utterance i
 in one pass. The trade is stark and worth stating plainly — **there is no interim text
 while somebody is still speaking**, only when they stop, and live cutting cannot apply
 either because a mid-utterance word list does not exist. It suits an accuracy-first
-deployment more than a live meeting view. Sized at 16 GiB (8 vCPU) because a 0.6B offline
-decode catches up in bursts rather than keeping pace frame by frame. Its latency on a real
-meeting is **unmeasured**.
+deployment more than a live meeting view.
+
+**It may not be viable at all**, and that is worth knowing before you try it. A 0.6B
+offline decode catches up in bursts rather than keeping pace frame by frame, which wants
+headroom — but the `al2023-1` base MicroVM image caps memory at **8192 MiB (4 vCPU)**, the
+same as every other bundle, so there is none to give it. Its real-time factor on a real
+meeting is **unmeasured**; measure that before offering it to anyone.
 
 Parakeet was chosen over Whisper — also permissive, also offline — because TDT is a
 transducer and reports token timestamps. Turn splitting and live cutting both need word
@@ -607,8 +611,12 @@ Honest state of validation, so nobody deploys this expecting known numbers:
 - **MicroVM launch time and the real-time factor** of two concurrent channel
   sessions on one MicroVM have not been measured on Graviton. If a meeting's first
   transcript is slow to appear, or transcripts lag live audio, raise
-  the bundle's `baselineMemoryMiB` in `catalog.json` (and the matching `BundleMemory`
-  entry in `template.yaml`) to `16384` (8 vCPU) and compare.
+  the bundle's `baselineMemoryMiB` in `catalog.json` and re-run
+  `scripts/sync_bundles.py`. Note the ceiling: the `al2023-1` base MicroVM image
+  accepts only **512, 1024, 2048, 4096 or 8192 MiB**, so 8192 (4 vCPU) is as large as
+  a MicroVM gets and there is no headroom above the default. The image resolver
+  refuses anything else up front rather than letting the stack fail minutes later at
+  `AWS::Lambda::MicrovmImage`.
 
 Measure these in a dev stack before offering the engine to users. Every number
 needed is in the MicroVM log group: per-session summaries carry audio seconds,

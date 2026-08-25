@@ -389,8 +389,11 @@ def test_a_matching_memory_is_accepted() -> None:
     assert selection["memoryMiB"] == 8192
 
 
-@pytest.mark.parametrize(("memory", "threads"), [(4096, 2), (8192, 4), (16384, 8)])
+@pytest.mark.parametrize(("memory", "threads"), [(2048, 1), (4096, 2), (8192, 4)])
 def test_threads_track_the_two_gib_per_vcpu_ratio(memory: int, threads: int) -> None:
+    # Only sizes the base image actually supports: 8192 is the ceiling, so a case for
+    # 16384 would assert a thread count for a MicroVM that cannot be created.
+    assert memory in index._SUPPORTED_MEMORY_MIB
     assert index._threads_for(memory) == threads
 
 
@@ -551,3 +554,34 @@ def test_a_failed_build_reports_failed_to_cloudformation() -> None:
         index.lambda_handler(event, mock.Mock(log_stream_name="stream"))
 
     assert send.call_args[0][2] == index.cfn_response.FAILED
+
+
+def test_every_shipped_bundle_asks_for_a_memory_size_the_service_supports() -> None:
+    """CreateMicrovmImage rejects anything outside its list, minutes into an update.
+
+    A bundle shipped at 16384 MiB because the parameter it replaced offered that value;
+    the base image does not, so the stack update failed at AsrMicrovmImage after the
+    image source had already been republished.
+    """
+    catalog = json.loads(
+        (Path(__file__).resolve().parents[2] / "source" / "catalog.json").read_text()
+    )
+
+    unsupported = {
+        bundle["id"]: bundle["baselineMemoryMiB"]
+        for bundle in catalog["bundles"]
+        if bundle.get("baselineMemoryMiB", 8192) not in index._SUPPORTED_MEMORY_MIB
+    }
+    assert unsupported == {}
+
+
+def test_an_unsupported_memory_size_is_refused_before_the_image_build() -> None:
+    catalog = {**CATALOG, "bundles": [{**CATALOG["bundles"][0], "baselineMemoryMiB": 16384}]}
+
+    with pytest.raises(index.ResolutionError, match="does not support"):
+        index.resolve({"BundleId": CATALOG["bundles"][0]["id"]}, catalog)
+
+
+def test_every_supported_memory_size_maps_to_a_thread_count() -> None:
+    for memory in index._SUPPORTED_MEMORY_MIB:
+        assert index._threads_for(memory) >= 1

@@ -102,7 +102,7 @@ ASR image, so a deployment gets a working configuration without knowing any numb
 | `permissive-fastconformer-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Best redistributable option: same architecture as the default, trained on conversational speech, quarter the size |
 | `nemotron-titanet-large` | No | No — NVIDIA OML | The default with a larger embedder, aimed at under-splitting |
 | `apache-only-zipformer-3dspeaker` | No | Yes — Apache-2.0 + MIT | For deployments that cannot accept CC-BY-4.0 attribution |
-| `accurate-parakeet-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Offline: highest accuracy, but **no interim text** while speaking. Needs 16 GiB |
+| `accurate-parakeet-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Offline: highest accuracy, but **no interim text** while speaking, and may not hold real time — unmeasured |
 
 An uncalibrated bundle produces **no speaker labels** until the deployment runs a
 calibration from the ASR Config page — a threshold borrowed from another pairing
