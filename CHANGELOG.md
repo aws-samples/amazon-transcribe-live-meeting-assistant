@@ -71,6 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The offline (`accurate`) engine could never have worked: nothing set the variable that selects it.** `warmup.py` and `ws_server.py` both read `$ASR_ENGINE`, but the image resolver wrote only `ASR_MODEL_ENGINE`, which is descriptive. So selecting `accurate-parakeet-titanet-large` still warmed the **streaming** recognizer, which then failed loading offline weights — `'window_size' does not exist in the metadata` — and the stack update surfaced that as an unexplained `AWS::Lambda::MicrovmImage ... did not stabilize`. `model.env` now sets both names, with three tests: the offline fixture, the streaming fixture, and one asserting every shipped bundle names the engine its model actually uses.
+
+  The failure was at least loud in the right place: the build-time warmup exists so that an image which cannot load its own model is never published, and it did its job.
+
+
 - **The `accurate-parakeet-titanet-large` bundle failed the stack update.** It asked for 16384 MiB, but the `al2023-1` base MicroVM image supports only 512/1024/2048/4096/8192 — so `AWS::Lambda::MicrovmImage` rejected it and the stack rolled back, minutes in and after the image source had already been republished. 16384 looked plausible because the `AsrBaselineMemoryMiB` parameter it replaced offered that value; the service never accepted it, so that parameter had the same latent bug and the bundle merely made it reachable by default. The bundle is now 8192, the image resolver refuses an unsupported size up front with the supported list in the message, and a test asserts every shipped bundle asks for one the service accepts.
 
   Consequence worth stating rather than papering over: 8192 MiB (4 vCPU) is the ceiling for *every* bundle, so the offline Parakeet bundle has no headroom above the streaming ones — and a 0.6B offline decode catches up in bursts rather than keeping pace frame by frame. It may not hold real time at all. Its real-time factor is unmeasured and the docs now say so instead of implying it was sized for the job.

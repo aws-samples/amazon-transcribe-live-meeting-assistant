@@ -230,6 +230,13 @@ def render_model_env(selection: dict) -> str:
         f"ASR_MODEL_DECODER_FILE={files['decoder']}",
         f"ASR_MODEL_JOINER_FILE={files['joiner']}",
         f"ASR_MODEL_TOKENS_FILE={files['tokens']}",
+        # BOTH names, deliberately. The runtime selects its engine from $ASR_ENGINE
+        # (warmup.py, ws_server.py); ASR_MODEL_ENGINE is only descriptive. Writing the
+        # descriptive one alone meant an 'accurate' bundle still warmed the STREAMING
+        # recognizer, which then failed the image build loading offline weights
+        # ("'window_size' does not exist in the metadata") - so the offline engine
+        # could never have worked.
+        f"ASR_ENGINE={model.get('engine', 'streaming')}",
         f"ASR_MODEL_ENGINE={model.get('engine', 'streaming')}",
         f"ASR_MODEL_LICENSE={model.get('license', 'unknown')}",
         f"ASR_SPEAKER_MODEL_ID={speaker.get('id', 'none')}",

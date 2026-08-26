@@ -585,3 +585,50 @@ def test_an_unsupported_memory_size_is_refused_before_the_image_build() -> None:
 def test_every_supported_memory_size_maps_to_a_thread_count() -> None:
     for memory in index._SUPPORTED_MEMORY_MIB:
         assert index._threads_for(memory) >= 1
+
+
+def test_model_env_sets_the_variable_the_runtime_actually_reads() -> None:
+    """The runtime selects its engine from $ASR_ENGINE, not $ASR_MODEL_ENGINE.
+
+    Writing only the descriptive name meant an offline bundle still warmed the
+    streaming recognizer, and the image build died loading offline weights with
+    "'window_size' does not exist in the metadata". The offline engine could never
+    have worked, and the failure arrived as an unexplained "did not stabilize".
+    """
+    catalog = {
+        **CATALOG,
+        "bundles": [{**b, "vadModelId": "silero"} if b["id"] == "bundle-offline" else b
+                    for b in CATALOG["bundles"]],
+        "vadModels": [
+            {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64,
+             "archive": "onnx", "license": "MIT"}
+        ],
+    }
+
+    env = index.render_model_env(index.resolve({"BundleId": "bundle-offline"}, catalog))
+    values = dict(
+        line.split("=", 1)
+        for line in env.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+
+    assert values["ASR_ENGINE"] == "accurate"
+    assert values["ASR_MODEL_ENGINE"] == "accurate"
+
+
+def test_a_streaming_bundle_sets_the_streaming_engine() -> None:
+    env = index.render_model_env(index.resolve({"BundleId": "bundle-a"}, CATALOG))
+
+    assert "ASR_ENGINE=streaming" in env
+
+
+def test_every_shipped_bundle_names_the_engine_its_model_uses() -> None:
+    """Guards the pairing across the whole shipped catalog, not just a fixture."""
+    catalog = json.loads(
+        (Path(__file__).resolve().parents[2] / "source" / "catalog.json").read_text()
+    )
+
+    for bundle in catalog["bundles"]:
+        selection = index.resolve({"BundleId": bundle["id"]}, catalog)
+        engine = selection["model"].get("engine", "streaming")
+        assert f"ASR_ENGINE={engine}" in index.render_model_env(selection)
