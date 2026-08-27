@@ -166,9 +166,14 @@ server.after(() => {
 });
 
 // The ASR Config admin page lives on the UI's CloudFront domain, not this one, so
-// its calls are cross-origin. No cookies are involved (the bearer token travels in
-// the query string, as the WebSocket route's does), so echoing the origin grants
-// nothing a request without that token could not already do.
+// its calls are cross-origin. Echoing the origin back is safe here because nothing
+// this route trusts is attached by the browser on its own: the credential is an
+// Authorization header the page sets explicitly, no cookie is read, and
+// Access-Control-Allow-Credentials is deliberately never sent. A cross-origin page
+// therefore cannot forge an authenticated request it could not already make
+// directly, and cannot read the response without a token of its own.
+// Semgrep flags this as cors-misconfiguration; the rule assumes reflection implies
+// credentialed access, which is the one thing this route never grants.
 const ASR_CALIBRATE_PATH = '/api/v1/asr/calibrate';
 const ADMIN_GROUP = 'Admin';
 
