@@ -95,8 +95,9 @@ def test_only_the_custom_record_can_be_written() -> None:
 
 def test_malformed_json_is_rejected() -> None:
     table = mock.Mock()
-    with mock.patch.object(index.dynamodb, "Table", return_value=table), pytest.raises(
-        Exception, match="Invalid JSON"
+    with (
+        mock.patch.object(index.dynamodb, "Table", return_value=table),
+        pytest.raises(Exception, match="Invalid JSON"),
     ):
         index.lambda_handler(
             {"arguments": {"input": {"AsrConfigId": "CustomAsrConfig", "ConfigData": "{not json"}}},
