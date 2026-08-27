@@ -6830,7 +6830,14 @@ Resources:
       TargetConfiguration:
         Mcp:
           Lambda:
-            LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
+            # Spelled out rather than !GetAtt MCPServerAnalyticsFunction.Arn because
+            # LambdaArn carries "format": "AWS::Lambda::Function.Arn", and cfn-lint
+            # does not resolve that format through the SAM transform for an
+            # AWS::Serverless::Function. The format failure invalidates the Lambda
+            # branch of TargetConfiguration.Mcp's oneOf, which then reports every
+            # other branch as missing - 12 errors from one false positive. The Ref
+            # keeps the same implicit dependency GetAtt gave us.
+            LambdaArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${MCPServerAnalyticsFunction}"
             ToolSchema:
               InlinePayload:
                 - Name: search_lma_meetings
