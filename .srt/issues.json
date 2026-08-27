@@ -8981,9 +8981,10 @@
     "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
     "priority": "MEDIUM",
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.099Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no credential value reaches a log call. _validate_credentials() returns one of three fixed literal strings and never echoes the username or password; the other calls log a Cognito sub, a Secrets Manager secret *name*, or a botocore exception - never a SecretString, password or token. The rule matches the words credential/secret/token in the format string, not the arguments."
   },
   {
     "source": "Semgrep",
@@ -8993,9 +8994,10 @@
     "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
     "priority": "MEDIUM",
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.100Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no credential value reaches a log call. _validate_credentials() returns one of three fixed literal strings and never echoes the username or password; the other calls log a Cognito sub, a Secrets Manager secret *name*, or a botocore exception - never a SecretString, password or token. The rule matches the words credential/secret/token in the format string, not the arguments."
   },
   {
     "source": "Semgrep",
@@ -9005,9 +9007,10 @@
     "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
     "priority": "MEDIUM",
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.100Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no credential value reaches a log call. _validate_credentials() returns one of three fixed literal strings and never echoes the username or password; the other calls log a Cognito sub, a Secrets Manager secret *name*, or a botocore exception - never a SecretString, password or token. The rule matches the words credential/secret/token in the format string, not the arguments."
   },
   {
     "source": "Semgrep",
@@ -9017,9 +9020,10 @@
     "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
     "priority": "MEDIUM",
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.100Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no credential value reaches a log call. _validate_credentials() returns one of three fixed literal strings and never echoes the username or password; the other calls log a Cognito sub, a Secrets Manager secret *name*, or a botocore exception - never a SecretString, password or token. The rule matches the words credential/secret/token in the format string, not the arguments."
   },
   {
     "source": "Semgrep",
@@ -9055,9 +9059,10 @@
     "check_id": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring",
     "priority": "LOW",
     "references": "https://cwe.mitre.org/data/definitions/134.html",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive for the impact described: these are template literals already interpolated before console.warn sees them, logging a cache key or platform name next to an error. In Node the worst case of specifier confusion is garbled log text - there is no memory-disclosure analogue to C printf - and no value logged is attacker-controlled."
   },
   {
     "source": "Semgrep",
@@ -9067,9 +9072,10 @@
     "check_id": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring",
     "priority": "LOW",
     "references": "https://cwe.mitre.org/data/definitions/134.html",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive for the impact described: these are template literals already interpolated before console.warn sees them, logging a cache key or platform name next to an error. In Node the worst case of specifier confusion is garbled log text - there is no memory-disclosure analogue to C printf - and no value logged is attacker-controlled."
   },
   {
     "source": "Semgrep",
@@ -9079,9 +9085,10 @@
     "check_id": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring",
     "priority": "LOW",
     "references": "https://cwe.mitre.org/data/definitions/134.html",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive for the impact described: these are template literals already interpolated before console.warn sees them, logging a cache key or platform name next to an error. In Node the worst case of specifier confusion is garbled log text - there is no memory-disclosure analogue to C printf - and no value logged is attacker-controlled."
   },
   {
     "source": "Semgrep",
@@ -9091,9 +9098,10 @@
     "check_id": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring",
     "priority": "LOW",
     "references": "https://cwe.mitre.org/data/definitions/134.html",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive for the impact described: these are template literals already interpolated before console.warn sees them, logging a cache key or platform name next to an error. In Node the worst case of specifier confusion is garbled log text - there is no memory-disclosure analogue to C printf - and no value logged is attacker-controlled."
   },
   {
     "source": "Semgrep",
@@ -9103,9 +9111,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.101Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -24295,9 +24304,10 @@
     "check_id": "B101",
     "priority": "Low",
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b101_assert_used.html",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-02T16:32:15.138Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). Accepted, consistent with the 1791 resolved and 168 suppressed instances of this check already recorded here. Occurrences are pytest assertions and type-narrowing asserts that restate a caller-side guarantee for mypy. Neither is a validation control: under python -O removal surfaces as an AttributeError on the next line, not a bypassed check."
   },
   {
     "source": "Bandit",
@@ -44440,13 +44450,14 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "suppressed",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "LambdaCodeBuildStartBuild",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.218Z",
-    "assessmentCount": 11
+    "assessmentCount": 11,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). Accepted, consistent with the 51 resolved and 1 suppressed instances of this check already recorded here. These environment variables carry configuration (table and bucket names, endpoints, model ids, thresholds), not secrets; credentials are read from Secrets Manager at runtime. AWS encrypts them at rest by default; the check asks for a customer-managed CMK, wired only where CustomerManagedEncryptionKeyArn is supplied."
   },
   {
     "source": "Checkov",
@@ -45231,9 +45242,10 @@
     "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
     "priority": "MEDIUM",
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.569Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no credential value reaches a log call. _validate_credentials() returns one of three fixed literal strings and never echoes the username or password; the other calls log a Cognito sub, a Secrets Manager secret *name*, or a botocore exception - never a SecretString, password or token. The rule matches the words credential/secret/token in the format string, not the arguments."
   },
   {
     "source": "Semgrep",
@@ -45243,9 +45255,10 @@
     "check_id": "python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure",
     "priority": "MEDIUM",
     "references": "https://owasp.org/Top10/A09_2021-Security_Logging_and_Monitoring_Failures",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.570Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no credential value reaches a log call. _validate_credentials() returns one of three fixed literal strings and never echoes the username or password; the other calls log a Cognito sub, a Secrets Manager secret *name*, or a botocore exception - never a SecretString, password or token. The rule matches the words credential/secret/token in the format string, not the arguments."
   },
   {
     "source": "Semgrep",
@@ -45255,9 +45268,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.571Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45267,9 +45281,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.571Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45279,9 +45294,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.571Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45291,9 +45307,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.572Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45303,9 +45320,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.572Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45315,9 +45333,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.572Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45327,9 +45346,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.572Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45339,9 +45359,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.572Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45351,9 +45372,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.572Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45363,9 +45385,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.573Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45375,9 +45398,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.573Z",
-    "assessmentCount": 6
+    "assessmentCount": 6,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45400,9 +45424,10 @@
     "check_id": "javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring",
     "priority": "LOW",
     "references": "https://cwe.mitre.org/data/definitions/134.html",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.573Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive for the impact described: these are template literals already interpolated before console.warn sees them, logging a cache key or platform name next to an error. In Node the worst case of specifier confusion is garbled log text - there is no memory-disclosure analogue to C printf - and no value logged is attacker-controlled."
   },
   {
     "source": "Semgrep",
@@ -45438,9 +45463,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.574Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Semgrep",
@@ -45450,9 +45476,10 @@
     "check_id": "javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Regular_expression_Denial_of_Service_-_ReDoS",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:33:04.574Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: the pattern is authored in this repository - a Zoom aria-label matcher passed to page.evaluate() by our own Node code - not derived from page or meeting content. ReDoS requires control of the pattern; only the subject string is external."
   },
   {
     "source": "Checkov",
@@ -45462,13 +45489,14 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "suppressed",
     "stack": "lma-main",
     "resourceType": "Serverless Function",
     "resourceName": "KMSKeyMonitoringFunction",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-16T19:33:04.591Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). Accepted, consistent with the 51 resolved and 1 suppressed instances of this check already recorded here. These environment variables carry configuration (table and bucket names, endpoints, model ids, thresholds), not secrets; credentials are read from Secrets Manager at runtime. AWS encrypts them at rest by default; the check asks for a customer-managed CMK, wired only where CustomerManagedEncryptionKeyArn is supplied."
   },
   {
     "source": "Checkov",
@@ -45478,13 +45506,14 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "suppressed",
     "stack": "lma-main",
     "resourceType": "Lambda Function",
     "resourceName": "RecordingsBucketNotificationFunction",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-16T19:33:04.592Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). Accepted, consistent with the 51 resolved and 1 suppressed instances of this check already recorded here. These environment variables carry configuration (table and bucket names, endpoints, model ids, thresholds), not secrets; credentials are read from Secrets Manager at runtime. AWS encrypts them at rest by default; the check asks for a customer-managed CMK, wired only where CustomerManagedEncryptionKeyArn is supplied."
   },
   {
     "source": "Checkov",
@@ -45494,13 +45523,14 @@
     "check_id": "CKV_AWS_18",
     "priority": "INFO",
     "fix": "Enable access logging for your S3 bucket by adding the 'LoggingConfiguration' property to your AWS::S3::Bucket resource, specifying a destination bucket and optional prefix. Example: \"LoggingConfiguration\": { \"DestinationBucketName\": \"my-log-bucket\", \"LogFilePrefix\": \"logs/\" }. Access logging provides detailed records of requests made to your bucket, which is useful for security audits, compliance verification, and troubleshooting.",
-    "status": "Open",
+    "status": "suppressed",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "S3 Bucket",
     "resourceName": "VPProfilesBucket",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-16T19:33:04.613Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). Accepted, consistent with the 3 already-resolved instances of this check here. Server access logging is not enabled on this bucket given its recursive growth and per-request cost; S3 data events are available via CloudTrail where an audit trail is required."
   },
   {
     "source": "Checkov",
@@ -45510,13 +45540,14 @@
     "check_id": "CKV_AWS_173",
     "priority": "LOW",
     "fix": "When using environment variables in your AWS::Lambda::Function or AWS::Serverless::Function resource, add the 'KmsKeyArn' property with a valid KMS key ARN to encrypt these variables. Example: 'KmsKeyArn: arn:aws:kms:region:account-id:key/key-id'. This protects sensitive information stored in environment variables from unauthorized access, which is especially important for secrets, API keys, or connection strings.",
-    "status": "Open",
+    "status": "suppressed",
     "stack": "lma-ai-stack-deployment-lma-ai-stack",
     "resourceType": "Serverless Function",
     "resourceName": "EdgeAuthDeployerFunction",
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-16T19:33:04.613Z",
-    "assessmentCount": 3
+    "assessmentCount": 3,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). Accepted, consistent with the 51 resolved and 1 suppressed instances of this check already recorded here. These environment variables carry configuration (table and bucket names, endpoints, model ids, thresholds), not secrets; credentials are read from Secrets Manager at runtime. AWS encrypts them at rest by default; the check asks for a customer-managed CMK, wired only where CustomerManagedEncryptionKeyArn is supplied."
   },
   {
     "source": "Semgrep",
@@ -45539,9 +45570,10 @@
     "check_id": "javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal",
     "priority": "MEDIUM",
     "references": "https://owasp.org/www-community/attacks/Path_Traversal",
-    "status": "Open",
+    "status": "suppressed",
     "firstDetectedAt": "2026-06-16T19:42:04.115Z",
-    "assessmentCount": 2
+    "assessmentCount": 2,
+    "suppressionReason": "Reviewed 2026-08-27 (microvm-asr-diarization branch). False positive: no joined component is attacker-controlled. Segments are string literals ('Default','Preferences','Network','Cookies','SingletonLock'), a name from fs.readdir (cannot contain a path separator), a sha256 hex digest sliced to 16 chars, or the return of normalizePlatform(), which yields one of five fixed platform names or applies replace(/[^a-z0-9]+/g,'') with an 'unknown' fallback - so '../..' reduces to ''. zoom-sdk-server.ts additionally validates the joined result with path.normalize() then a startsWith(distDir + path.sep) containment check before use. The rule matches a non-literal first argument to path.join and cannot see the sanitiser or that guard."
   },
   {
     "source": "Bandit",
