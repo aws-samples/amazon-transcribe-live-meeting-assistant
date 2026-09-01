@@ -1,0 +1,667 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Amazon LMA - On-demand streaming ASR and speaker diarization on AWS Lambda
+  MicroVMs, as an alternative to Amazon Transcribe streaming (v0.3.7)
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Model selection
+        Parameters:
+          - AsrModelBundle
+          - AsrEnableDiarization
+      - Label:
+          default: Runtime sizing and tuning
+        Parameters:
+          - AsrMaxMeetingSeconds
+          - AsrMaxSpeakers
+          - AsrLogLevel
+
+Parameters:
+  LMAStackName:
+    Type: String
+    Description: Name of the parent LMA stack, used to name the image and log group.
+
+  SourceCodeLocation:
+    Type: String
+    Description: >-
+      bucket/key of the published ASR MicroVM image source zip (Dockerfile at the
+      zip root). Rewritten per stack with the resolved model selection.
+
+  LambdaArtifactBucket:
+    Type: String
+    Description: Bucket holding the published Lambda deployment packages.
+
+  AsrLauncherS3Key:
+    Type: String
+    Description: S3 key of the ASR launcher Lambda deployment package.
+
+  AsrImageSourceS3Key:
+    Type: String
+    Description: S3 key of the ASR image-source packager Lambda deployment package.
+
+  AsrModelBundle:
+    Type: String
+    Default: nemotron-titanet-small
+    AllowedValues:
+      - nemotron-titanet-small
+      - permissive-zipformer-campplus
+      - transcription-only
+      - permissive-fastconformer-titanet-large
+      - nemotron-titanet-large
+      - apache-only-zipformer-3dspeaker
+      - accurate-parakeet-titanet-large
+      - parakeet-streaming-titanet-small
+      - parakeet-streaming-low-latency
+    Description: >-
+      Which pre-vetted model pairing the MicroVM ASR engine uses. Each bundle names an
+      ASR model, a speaker-embedding model and a turn-detection model TOGETHER WITH the
+      diarization operating point measured for that combination, so a deployment gets a
+      working configuration without tuning anything. Picking the models separately is
+      deliberately not offered: the similarity threshold is not a property of the
+      embedder alone (utterance length moves it as much as the model does), so it is
+      only meaningful for a stated pairing.
+      CALIBRATED, so speaker labels work immediately - nemotron-titanet-small is the
+      default and validated on real meetings, but its ASR weights are under the NVIDIA
+      Open Model License and are NOT redistributable; permissive-zipformer-campplus is
+      Apache-2.0 and MIT throughout and measurably worse, its ASR model being trained on
+      read speech; transcription-only has no diarization and labels by audio channel.
+      NOT YET CALIBRATED, so they produce NO speaker labels until this deployment runs a
+      calibration from the ASR Config page, because a threshold borrowed from another
+      pairing fragments or merges speakers - permissive-fastconformer-titanet-large is
+      CC-BY-4.0 and MIT throughout and so redistributable, its ASR model sharing the
+      default's architecture but trained on conversational speech at a quarter the size,
+      which makes it the one to try if you need to redistribute the image;
+      nemotron-titanet-large is the validated default with a larger embedder, aimed at
+      under-splitting on a channel dominated by one talker;
+      apache-only-zipformer-3dspeaker is for a deployment that cannot accept CC-BY-4.0
+      attribution, both halves being the weaker choice; accurate-parakeet-titanet-large
+      has the highest expected accuracy and is redistributable but is OFFLINE, meaning
+      audio is segmented by VAD and decoded per utterance so there is NO interim text
+      while somebody is still speaking, and it needs 16 GiB.
+      Changing the bundle rebuilds the MicroVM image (~20 minutes).
+
+  AsrEnableDiarization:
+    Type: String
+    Default: Auto
+    AllowedValues:
+      - Auto
+      - "On"
+      - "Off"
+    Description: >-
+      Auto enables diarization when a speaker model is present in the image. On
+      fails at startup if it is missing. Off disables it regardless.
+
+  AsrMaxMeetingSeconds:
+    Type: Number
+    Default: 14400
+    MinValue: 600
+    MaxValue: 28800
+    Description: >-
+      Hard ceiling on one ASR MicroVM's lifetime. Also the cost backstop: a
+      transcriber task that dies without releasing the MicroVM cannot leak
+      compute for longer than this. The service maximum is 8 hours.
+
+  AsrMaxSpeakers:
+    Type: Number
+    Default: 0
+    MinValue: 0
+    MaxValue: 30
+    Description: >-
+      Optional cap on distinct speakers per audio channel. 0 (the default)
+      discovers as many as appear. A cap is a safety net for noisy embeddings, not
+      a fix for over-splitting; set it only when the meeting size is known.
+
+  AsrLogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - INFO
+      - DEBUG
+    Description: >-
+      DEBUG adds a throttled per-session ingest/decode/emit heartbeat to the
+      MicroVM log group.
+
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - INFO
+      - DEBUG
+    Description: Log level for the ASR control-plane Lambda functions.
+
+  CloudWatchLogsExpirationInDays:
+    Type: Number
+    Default: 14
+    Description: >-
+      Retention for this stack's Lambda log groups. Without an explicit group these
+      functions log to an implicit /aws/lambda/<name> group that keeps everything
+      forever and is not encrypted with the customer-managed key.
+
+  CustomerManagedEncryptionKeyArn:
+    Type: String
+    Default: ""
+    Description: ARN of the customer managed KMS key used to encrypt the config table.
+
+  LoggingBucketName:
+    Type: String
+    Default: ""
+    Description: Optional bucket for S3 server access logs.
+
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: Optional IAM permissions boundary applied to created roles.
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  HasLoggingBucket: !Not [!Equals [!Ref LoggingBucketName, ""]]
+  HasEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, ""]]
+  ForceDiarizationOn: !Equals [!Ref AsrEnableDiarization, "On"]
+  SetDiarizationExplicitly: !Not [!Equals [!Ref AsrEnableDiarization, "Auto"]]
+
+Mappings:
+  # ONNX Runtime threads should match the baseline vCPU count (2 GiB per vCPU).
+  # Baseline memory per bundle. Duplicated from catalog.json because
+  # MinimumMemoryInMiB needs a CloudFormation-typed number and a Mapping cannot be
+  # keyed on a value resolved by a custom resource. AsrImageSource is passed this
+  # figure and FAILS the stack if it disagrees with the bundle, so the two cannot
+  # drift silently. Threads are derived by the resolver (2 GiB per vCPU).
+  BundleMemory:
+    nemotron-titanet-small:
+      MiB: 8192
+    permissive-zipformer-campplus:
+      MiB: 8192
+    transcription-only:
+      MiB: 8192
+    permissive-fastconformer-titanet-large:
+      MiB: 8192
+    nemotron-titanet-large:
+      MiB: 8192
+    apache-only-zipformer-3dspeaker:
+      MiB: 8192
+    accurate-parakeet-titanet-large:
+      MiB: 8192
+    parakeet-streaming-titanet-small:
+      MiB: 8192
+    parakeet-streaming-low-latency:
+      MiB: 8192
+
+Resources:
+  ##########################################################################
+  # Per-stack image source artifact
+  ##########################################################################
+
+  AsrImageSourceBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: "Access logging is enabled when a logging bucket is supplied by the parent stack"
+    # checkov:skip=CKV_AWS_18: "Access logging is conditional on the parent stack's logging bucket"
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration: !If
+        - HasLoggingBucket
+        - DestinationBucketName: !Ref LoggingBucketName
+          LogFilePrefix: !Sub "${LMAStackName}-asr-image-source/"
+        - !Ref AWS::NoValue
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireSupersededSources
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 7
+
+  AsrImageSourceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AsrImageSourceBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnforceSSLOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AsrImageSourceBucket.Arn
+              - !Sub "${AsrImageSourceBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": false
+
+  AsrImageSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: PackageImageSource
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/lambda/*"
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${SourceCodeLocation}"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:DeleteObject
+                Resource: !Sub "${AsrImageSourceBucket.Arn}/*"
+
+  AsrImageSourceFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/AsrImageSourceFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
+  AsrImageSourceFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: "Log write permissions are granted inline on the execution role"
+          - id: W89
+            reason: "Reaches S3 public APIs only; VPC attachment is not required"
+          - id: W92
+            reason: "Runs a handful of times per stack lifecycle; reserved concurrency is unnecessary"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "CloudFormation reports failures; a DLQ adds nothing"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches S3 public APIs only"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-AsrImageSource"
+      LoggingConfig:
+        LogGroup: !Ref AsrImageSourceFunctionLogGroup
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 300
+      MemorySize: 1024
+      TracingConfig:
+        Mode: Active
+      Role: !GetAtt AsrImageSourceRole.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucket
+        S3Key: !Ref AsrImageSourceS3Key
+
+  # Resolves the model parameters against source/catalog.json and republishes the
+  # image source zip with the selection baked in. CreateMicrovmImage has no
+  # build-arg passthrough, so the selection has to travel inside the artifact.
+  AsrImageSource:
+    Type: Custom::AsrImageSource
+    Properties:
+      ServiceToken: !GetAtt AsrImageSourceFunction.Arn
+      SourceLocation: !Ref SourceCodeLocation
+      DestBucket: !Ref AsrImageSourceBucket
+      DestPrefix: image-source
+      BundleId: !Ref AsrModelBundle
+      BaselineMemoryMiB: !FindInMap [BundleMemory, !Ref AsrModelBundle, MiB]
+
+  # Runtime overrides for the diarization operating point, edited from the web UI's
+  # ASR Config page. Everything here is per-session in the WebSocket protocol, so a
+  # change takes effect on the NEXT meeting with no rebuild and no stack update —
+  # which is what makes the threshold practical to tune (it is model-specific and
+  # measured, see source/catalog.json).
+  AsrConfigTable:
+    Type: AWS::DynamoDB::Table
+    # DDB-002: Data plane logging disabled due to cost; control plane logging via CloudTrail is sufficient
+    Properties:
+      KeySchema:
+        - AttributeName: AsrConfigId
+          KeyType: HASH
+      AttributeDefinitions:
+        - AttributeName: AsrConfigId
+          AttributeType: S
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification: !If
+        - HasEncryptionKey
+        - SSEEnabled: true
+          SSEType: KMS
+          KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+        - !Ref AWS::NoValue
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  ##########################################################################
+  # MicroVM image
+  ##########################################################################
+
+  AsrMicrovmBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: AsrMicrovmImageBuild
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: !Sub "${AsrImageSourceBucket.Arn}/*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
+
+  # Assumed by the running MicroVM. The ASR server makes no AWS API calls -- the
+  # transcriber owns Kinesis -- so this grants logging only.
+  AsrMicrovmExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: AsrMicrovmRuntime
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
+
+  AsrMicrovmImage:
+    Type: AWS::Lambda::MicrovmImage
+    # cfn-lint ships no schema for this resource type yet (service launched
+    # 2026-06), so E3006 would otherwise fail the lint.
+    Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            - E3006
+    Properties:
+      Name: !Sub "${LMAStackName}-asr"
+      Description: !Sub "LMA streaming ASR + diarization (${LMAStackName})"
+      BaseImageArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:microvm-image:al2023-1"
+      # Major version only; "1.0" is rejected at create time.
+      BaseImageVersion: "1"
+      BuildRoleArn: !GetAtt AsrMicrovmBuildRole.Arn
+      CpuConfigurations:
+        - Architecture: ARM_64
+      Logging:
+        CloudWatch:
+          LogGroup: !Sub "/aws/lambda-microvms/${LMAStackName}-asr"
+      # The Lambda-managed pool is enough: egress is only used at build time to
+      # download the model, and the running ASR server makes no outbound calls.
+      EgressNetworkConnectors:
+        - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
+      CodeArtifact:
+        Uri: !GetAtt AsrImageSource.SourceUri
+      Resources:
+        - MinimumMemoryInMiB: !FindInMap [BundleMemory, !Ref AsrModelBundle, MiB]
+      # Required by the CloudFormation resource even though the ASR server needs
+      # no extra Linux capabilities (unlike the Virtual Participant's Chromium
+      # sandbox, which needs ALL). Empty is the least-privilege value.
+      AdditionalOsCapabilities: []
+      EnvironmentVariables:
+        - Key: ASR_NUM_THREADS
+          Value: !GetAtt AsrImageSource.NumThreads
+        - Key: ASR_LOG_LEVEL
+          Value: !Ref AsrLogLevel
+        - Key: ASR_MAX_SPEAKERS
+          Value: !Ref AsrMaxSpeakers
+        - !If
+          - SetDiarizationExplicitly
+          - Key: ASR_DIARIZE
+            Value: !If [ForceDiarizationOn, "1", "0"]
+          - !Ref AWS::NoValue
+      Hooks:
+        Port: 9000
+        MicrovmImageHooks:
+          # /ready returning 200 is when the snapshot is taken, so it only
+          # succeeds once the model is loaded AND a decode has run through the
+          # real WebSocket path.
+          Ready: ENABLED
+          ReadyTimeoutInSeconds: 900
+          # /validate lets Lambda sample which snapshot pages the decode touches
+          # so it can prefetch them on later launches.
+          Validate: ENABLED
+          ValidateTimeoutInSeconds: 900
+        MicrovmHooks:
+          Run: ENABLED
+          RunTimeoutInSeconds: 30
+          Suspend: DISABLED
+          Resume: DISABLED
+          Terminate: ENABLED
+          TerminateTimeoutInSeconds: 30
+
+  ##########################################################################
+  # Session control plane called by the WebSocket transcriber
+  ##########################################################################
+
+  AsrLauncherRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: "RunMicrovm/GetMicrovm/TerminateMicrovm/CreateMicrovmAuthToken do not support resource-level permissions"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-IAM5
+            reason: "lambda-microvms actions are scoped by region and account; the service has no resource-level permissions for RunMicrovm"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: AsrMicrovmSessions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/lambda/*"
+              - Effect: Allow
+                Action:
+                  - lambda:RunMicrovm
+                  - lambda:GetMicrovm
+                  - lambda:TerminateMicrovm
+                  - lambda:CreateMicrovmAuthToken
+                Resource: "*"
+              # Attaching a connector is authorized on the connector itself;
+              # RunMicrovm permission alone is not sufficient.
+              - Effect: Allow
+                Action: lambda:PassNetworkConnector
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:ALL_INGRESS"
+                  - !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:aws:network-connector:aws-network-connector:INTERNET_EGRESS"
+              # No iam:PassedToService condition: RunMicrovm does not populate
+              # that context key, so any condition on it evaluates to a deny.
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt AsrMicrovmExecutionRole.Arn
+
+  AsrLauncherFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/AsrLauncherFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
+  AsrLauncherFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: "Log write permissions are granted inline on the execution role"
+          - id: W89
+            reason: "Called by the transcriber task over the Lambda API; VPC attachment is not required"
+          - id: W92
+            reason: "Concurrency is bounded by the number of concurrent meetings"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: "python3.12 is an actively supported Lambda runtime"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "The caller handles failures and falls back to Amazon Transcribe"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only non-sensitive ARNs and limits"
+    Properties:
+      FunctionName: !Sub "${LMAStackName}-AsrLauncher"
+      LoggingConfig:
+        LogGroup: !Ref AsrLauncherFunctionLogGroup
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      # RunMicrovm plus the wait for RUNNING.
+      Timeout: 300
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Role: !GetAtt AsrLauncherRole.Arn
+      Environment:
+        Variables:
+          MICROVM_IMAGE_ARN: !GetAtt AsrMicrovmImage.ImageArn
+          EXECUTION_ROLE_ARN: !GetAtt AsrMicrovmExecutionRole.Arn
+          MAX_MEETING_SECONDS: !Ref AsrMaxMeetingSeconds
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        S3Bucket: !Ref LambdaArtifactBucket
+        S3Key: !Ref AsrLauncherS3Key
+
+Outputs:
+  AsrLauncherFunctionArn:
+    Description: ARN of the ASR session launcher invoked by the WebSocket transcriber.
+    Value: !GetAtt AsrLauncherFunction.Arn
+
+  AsrMicrovmImageArn:
+    Description: ARN of the ASR MicroVM image.
+    Value: !GetAtt AsrMicrovmImage.ImageArn
+
+  AsrModelBundleId:
+    Description: Pre-vetted model pairing baked into the image.
+    Value: !GetAtt AsrImageSource.BundleId
+
+  AsrModelBundleStatus:
+    Description: >-
+      "vetted" when this pairing has been validated on real meeting audio,
+      "experimental" when it is offered for licensing reasons but measured worse.
+    Value: !GetAtt AsrImageSource.BundleStatus
+
+  AsrLicenceSummary:
+    Description: Licences of every weight in the bundle.
+    Value: !GetAtt AsrImageSource.LicenceSummary
+
+  AsrRedistributable:
+    Description: >-
+      Whether every weight in this bundle may be redistributed. "false" means the
+      image must not be copied outside this account.
+    Value: !GetAtt AsrImageSource.Redistributable
+
+  AsrModelId:
+    Description: Model baked into the image.
+    Value: !GetAtt AsrImageSource.ModelId
+
+  AsrModelLicense:
+    Description: Licence of the model baked into the image.
+    Value: !GetAtt AsrImageSource.ModelLicense
+
+  AsrSpeakerModelId:
+    Description: Speaker-embedding model baked into the image.
+    Value: !GetAtt AsrImageSource.SpeakerModelId
+
+  DiarizationAvailable:
+    Description: Whether the image can produce speaker labels.
+    Value: !GetAtt AsrImageSource.DiarizationAvailable
+
+  TurnDetectionAvailable:
+    Description: >-
+      Whether a speaker-turn detection model is baked in, so one endpointed
+      utterance containing two voices can be split rather than labelled once.
+    Value: !GetAtt AsrImageSource.TurnDetectionAvailable
+
+  SpeakerModelMeasured:
+    Description: >-
+      Whether THIS PAIRING has a calibrated operating point. "false" means any
+      threshold would be a guess, which is why diarization is withheld until the
+      deployment calibrates its own.
+    Value: !GetAtt AsrImageSource.SpeakerModelMeasured
+
+  SpeakerThreshold:
+    Description: >-
+      Calibrated cosine similarity operating point for this bundle, empty when the
+      pairing has never been measured. Passed to the transcriber as its default.
+    Value: !GetAtt AsrImageSource.SpeakerThreshold
+
+  MinSegmentMs:
+    Description: >-
+      Shortest utterance worth embedding for this bundle. A shorter one inherits the
+      current speaker rather than minting an identity from an unreliable vector.
+    Value: !GetAtt AsrImageSource.MinSegmentMs
+
+  AsrConfigTableName:
+    Description: Runtime ASR configuration table, edited from the ASR Config admin page.
+    Value: !Ref AsrConfigTable
+
+  AsrConfigTableArn:
+    Description: ARN of the runtime ASR configuration table.
+    Value: !GetAtt AsrConfigTable.Arn
+
+  MicrovmLogGroup:
+    Description: CloudWatch log group for ASR MicroVM sessions.
+    Value: !Sub "/aws/lambda-microvms/${LMAStackName}-asr"

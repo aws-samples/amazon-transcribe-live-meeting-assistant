@@ -10,6 +10,7 @@ import {
 } from '@aws-sdk/client-transcribe-streaming';
 import stream from 'stream';
 import { WriteStream } from 'fs';
+import type { AsrSessionSet } from './asr-microvm';
 
 export type Uuid = string;             // UUID as defined by RFC#4122
 
@@ -124,6 +125,19 @@ export type CallMetaData = {
     samplingRate: number,
     callEvent: string,
     activeSpeaker: string,
+    /**
+     * Transcription engine for this meeting: 'transcribe' (Amazon Transcribe
+     * streaming) or 'microvm' (on-demand ASR + diarization MicroVM). Absent
+     * means the deployment default; asking for diarization also selects
+     * 'microvm', since that is where speaker labels come from.
+     */
+    asrEngine?: string,
+    /**
+     * How many people share this client's audio, when the user knows. Only they
+     * can know it — the Upload Audio page asks the same question. Absent or 0
+     * means discover as many speakers as appear.
+     */
+    maxSpeakers?: number,
     // START_VIDEO only: ms between audio-stream start and video-stream start,
     // applied as an offset when muxing so video aligns with audio/transcript.
     videoTimeOffsetMs?: number,
@@ -170,6 +184,12 @@ export type SocketCallData = {
     audioInputStream?: stream.PassThrough,
     writeRecordingStream?: WriteStream,
     recordingFileSize?: number
+    /**
+     * MicroVM ASR engine state for this call: the MicroVM lease, the stereo
+     * de-interleaver, and one WebSocket session per audio channel. Undefined
+     * when the meeting is transcribed by Amazon Transcribe.
+     */
+    asr?: AsrSessionSet,
     startStreamTime: Date,
     speakerEvents: [],
     ended: boolean,

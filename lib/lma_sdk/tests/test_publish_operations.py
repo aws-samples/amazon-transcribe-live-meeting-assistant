@@ -134,19 +134,20 @@ class TestStackDefinitions:
 
     def test_all_stacks_defined(self):
         """All expected stacks are defined."""
-        assert len(STACK_DEFINITIONS) == 12
+        assert len(STACK_DEFINITIONS) == 13
 
     def test_stack_names_list(self):
         """STACK_NAMES matches definitions."""
-        assert len(STACK_NAMES) == 12
+        assert len(STACK_NAMES) == 13
         assert "lma-ai-stack" in STACK_NAMES
         assert "lma-virtual-participant-stack" in STACK_NAMES
+        assert "lma-asr-microvm-stack" in STACK_NAMES
 
     def test_available_stacks_from_operations(self, client):
         """PublishOperations.available_stacks() returns list."""
         stacks = client.publish.available_stacks()
         assert isinstance(stacks, list)
-        assert len(stacks) == 12
+        assert len(stacks) == 13
 
 
 class TestPrerequisiteChecks:

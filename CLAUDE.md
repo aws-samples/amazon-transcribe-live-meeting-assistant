@@ -36,7 +36,14 @@ npm test                    # vitest tests
 **WebSocket server** (in `lma-websocket-transcriber-stack/source/app/`):
 ```bash
 npm install && npm run build   # TypeScript build
-npm test                       # node:test unit tests
+npm test                       # build + node --test on dist/**/*.test.js
+```
+
+**ASR MicroVM runtime** (in `lma-asr-microvm-stack/source/`):
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q   # no model weights needed (backends are injected)
+.venv/bin/ruff check .
 ```
 
 **Virtual Participant** (in `lma-virtual-participant-stack/backend/`):
@@ -72,6 +79,7 @@ Python uses Black (formatter), Flake8, Pylint (100 char lines). Config in `lma-a
 | `lma-ai-stack/` | Core stack: Lambda functions, AppSync GraphQL API, Cognito auth, DynamoDB, UI (React/CloudFront) | Python (Lambdas), React (UI) |
 | `lma-websocket-transcriber-stack/` | WebSocket server on ECS Fargate ingesting stereo audio, streaming to Amazon Transcribe, writing to Kinesis | TypeScript/Fastify |
 | `lma-virtual-participant-stack/` | Headless CloakBrowser/Chromium (Playwright) on ECS Fargate joining meetings, optional voice assistant + avatar | TypeScript |
+| `lma-asr-microvm-stack/` | Optional on-demand streaming ASR + speaker diarization on Lambda MicroVMs (alternative to Amazon Transcribe); model selectable by CFN parameter | Python (sherpa-onnx) |
 | `lma-vpc-stack/` | VPC networking, security groups, NAT gateways | CloudFormation |
 | `lma-meetingassist-setup-stack/` | Meeting assistant configuration | CloudFormation |
 | `lma-bedrockkb-stack/` | Bedrock Knowledge Base setup | CloudFormation |
@@ -81,6 +89,8 @@ Python uses Black (formatter), Flake8, Pylint (100 char lines). Config in `lma-a
 | `lma-nova-sonic-config-stack/` | Nova Sonic voice assistant config | CloudFormation |
 
 **Data flow:** Browser audio -> WebSocket server (Fargate) -> Amazon Transcribe -> Kinesis Data Stream -> Call Event Processor Lambda (Strands Agents SDK) -> DynamoDB + AppSync (real-time GraphQL subscriptions) -> React UI.
+
+The Amazon Transcribe step is pluggable: when `TranscriptionEngine=MicrovmAsr`, a meeting that opts into diarization is instead transcribed by an ASR MicroVM (one per meeting, one WebSocket session per audio channel), which returns text and speaker labels together. Both engines emit identical `ADD_TRANSCRIPT_SEGMENT` events, so nothing downstream of Kinesis is engine-aware. See `docs/microvm-asr.md`.
 
 **Key source locations:**
 - Lambda functions: `lma-ai-stack/source/lambda_functions/` (19 functions)

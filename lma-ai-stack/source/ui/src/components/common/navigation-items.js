@@ -13,6 +13,7 @@ import {
   DESKTOP_CAPTURE_APP_PATH,
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
+  ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   DEFAULT_PATH,
@@ -81,6 +82,11 @@ export const generateNavigationItems = (settings, isAdmin) => {
           type: 'link',
           text: 'Nova Sonic Config',
           href: `#${NOVA_SONIC_CONFIG_PATH}`,
+        },
+        {
+          type: 'link',
+          text: 'ASR Config',
+          href: `#${ASR_CONFIG_PATH}`,
         },
         {
           type: 'link',

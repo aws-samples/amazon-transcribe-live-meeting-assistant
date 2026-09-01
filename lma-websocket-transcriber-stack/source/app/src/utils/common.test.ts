@@ -18,7 +18,24 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { isError, normalizeErrorForLogging, posixifyFilename } from './common';
+import {
+    isError,
+    normalizeErrorForLogging,
+    posixifyFilename,
+    resolveShouldRecordCall
+} from './common';
+
+test('the deployment default decides when the client says nothing', () => {
+    // The web UI never sends the flag, so this is the normal path.
+    assert.equal(resolveShouldRecordCall(undefined, true), true);
+    assert.equal(resolveShouldRecordCall(null, true), true);
+    assert.equal(resolveShouldRecordCall(undefined, false), false);
+});
+
+test('an explicit client value wins over the deployment default', () => {
+    assert.equal(resolveShouldRecordCall(false, true), false);
+    assert.equal(resolveShouldRecordCall(true, false), true);
+});
 
 test('characters that are unsafe in a filename become underscores', () => {
     assert.equal(posixifyFilename('Weekly Sync: Q3/Q4'), 'Weekly_Sync__Q3_Q4');

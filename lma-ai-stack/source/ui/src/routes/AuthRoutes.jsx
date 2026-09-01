@@ -22,6 +22,7 @@ import DesktopCaptureAppRoutes from './DesktopCaptureAppRoutes';
 import MeetingsQueryRoutes from './MeetingsQueryRoutes';
 import MCPServersRoutes from './MCPServersRoutes';
 import NovaSonicConfigRoutes from './NovaSonicConfigRoutes';
+import AsrConfigRoutes from './AsrConfigRoutes';
 import TranscriptSummaryRoutes from './TranscriptSummaryRoutes';
 import UserManagementRoutes from './UserManagementRoutes';
 import EmbedRoutes from './EmbedRoutes';
@@ -40,6 +41,7 @@ import {
   MEETINGS_QUERY_PATH,
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
+  ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   EMBED_PATH,
@@ -86,6 +88,7 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={`${DESKTOP_CAPTURE_APP_PATH}/*`} element={<DesktopCaptureAppRoutes />} />
         <Route path={`${MCP_SERVERS_PATH}/*`} element={<MCPServersRoutes />} />
         <Route path={`${NOVA_SONIC_CONFIG_PATH}/*`} element={<NovaSonicConfigRoutes />} />
+        <Route path={`${ASR_CONFIG_PATH}/*`} element={<AsrConfigRoutes />} />
         <Route path={`${TRANSCRIPT_SUMMARY_PATH}/*`} element={<TranscriptSummaryRoutes />} />
         <Route path={`${USER_MANAGEMENT_PATH}/*`} element={<UserManagementRoutes />} />
         <Route path={`${EMBED_PATH}/*`} element={<EmbedRoutes />} />
