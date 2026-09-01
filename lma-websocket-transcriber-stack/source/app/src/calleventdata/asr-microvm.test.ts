@@ -10,6 +10,8 @@ process.env['ASR_MIN_BACKOFF_MS'] = '20';
 process.env['ASR_READY_TIMEOUT_MS'] = '5000';
 process.env['ASR_FINISH_TIMEOUT_MS'] = '500';
 process.env['AWS_REGION'] = process.env['AWS_REGION'] || 'us-east-1';
+// A non-empty ARN so invokeLauncher actually calls the (patched) Lambda client.
+process.env['ASR_LAUNCHER_FUNCTION_ARN'] = 'arn:aws:lambda:us-east-1:000000000000:function:fake';
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
@@ -17,10 +19,14 @@ import { AddressInfo } from 'node:net';
 import { FastifyInstance } from 'fastify';
 import WebSocket, { WebSocketServer } from 'ws';
 
+import { LambdaClient } from '@aws-sdk/client-lambda';
+
 import {
     AsrChannelSession,
     coalesceBacklog,
     resolveMaxSpeakers,
+    startMicrovmAsr,
+    stopMicrovmAsr,
 } from './asr-microvm';
 import { SpeakerNameRegistry } from './asr-audio';
 import { TranscriptSegmentRecord } from './transcribe';
@@ -397,4 +403,58 @@ test('a real speaker count from the client wins over the deployment cap', () => 
 test('no cap anywhere still means discover as many speakers as appear', () => {
     assert.equal(resolveMaxSpeakers(undefined, 0), 0);
     assert.equal(resolveMaxSpeakers(0, 0), 0);
+});
+
+test('a call that ends during MicroVM acquisition releases the acquired MicroVM', async () => {
+    // The acquire takes seconds (a MicroVM boot); the client can hang up in that
+    // window. stopMicrovmAsr then has nothing to release (the pending lease has
+    // no microvmId yet) - the bug was that the resolving acquire wrote through
+    // the cleared socketData.asr (TypeError) and the fresh MicroVM ran unreleased
+    // until its max-duration backstop.
+    const invocations: Array<Record<string, unknown>> = [];
+    let resolveAcquire: ((value: unknown) => void) | undefined;
+    const originalSend = LambdaClient.prototype.send;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (LambdaClient.prototype as any).send = (command: any) => {
+        const payload = JSON.parse(Buffer.from(command.input.Payload).toString('utf8'));
+        invocations.push(payload);
+        if (payload.action === 'acquire') {
+            return new Promise((resolve) => {
+                resolveAcquire = resolve;
+            });
+        }
+        return Promise.resolve({
+            Payload: Buffer.from(JSON.stringify({ ok: 'true' })),
+        });
+    };
+    try {
+        const socketData = makeSocketData();
+        const startPromise = startMicrovmAsr(socketData, fakeServer);
+        while (!resolveAcquire) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+
+        await stopMicrovmAsr(socketData, fakeServer);
+        assert.equal(socketData.asr, undefined);
+
+        resolveAcquire({
+            Payload: Buffer.from(
+                JSON.stringify({
+                    ok: 'true',
+                    microvmId: 'm-race',
+                    endpoint: 'example.com/session',
+                    authToken: 'token',
+                })
+            ),
+        });
+
+        const started = await startPromise;
+        assert.equal(started, false);
+        const release = invocations.find((p) => p['action'] === 'release');
+        assert.ok(release, 'the freshly acquired MicroVM must be released');
+        assert.equal(release['microvmId'], 'm-race');
+        assert.equal(socketData.asr, undefined);
+    } finally {
+        LambdaClient.prototype.send = originalSend;
+    }
 });

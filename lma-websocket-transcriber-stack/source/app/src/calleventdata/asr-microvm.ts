@@ -61,6 +61,10 @@ const ASR_BACKLOG_FRAME_BYTES = parseInt(
 const ASR_MAX_RETRIES = parseInt(process.env['ASR_MAX_RETRIES'] || '5', 10);
 const ASR_RETRY_BACKOFF_MS = parseInt(process.env['ASR_RETRY_BACKOFF_MS'] || '2000', 10);
 const ASR_MAX_BACKOFF_MS = parseInt(process.env['ASR_MAX_BACKOFF_MS'] || '10000', 10);
+// How long a session must stay up after `ready` before the retry counter is
+// forgiven. Without this an engine that dies right after becoming ready would
+// reset the counter each time and reconnect on a short backoff forever.
+const ASR_HEALTHY_SESSION_MS = parseInt(process.env['ASR_HEALTHY_SESSION_MS'] || '10000', 10);
 const ASR_MIN_BACKOFF_MS = parseInt(process.env['ASR_MIN_BACKOFF_MS'] || '500', 10);
 const ASR_PORT = 8080;
 
@@ -321,6 +325,8 @@ export class AsrChannelSession {
     private observedMaxEnd = 0;
 
     private attempt = 0;
+
+    private readyAt = 0;
 
     private resampler: ChannelResampler;
 
@@ -586,6 +592,10 @@ export class AsrChannelSession {
         if (this.finished || this.socketData.ended) {
             return;
         }
+        if (this.readyAt && Date.now() - this.readyAt >= ASR_HEALTHY_SESSION_MS) {
+            this.attempt = 0;
+        }
+        this.readyAt = 0;
         this.attempt += 1;
         if (this.attempt > ASR_MAX_RETRIES) {
             this.server.log.error(
@@ -619,7 +629,11 @@ export class AsrChannelSession {
     private onMessage(message: AsrServerMessage): void {
         switch (message.type) {
             case 'ready':
-                this.attempt = 0;
+                // Deliberately NOT this.attempt = 0 here: an engine that dies right
+                // after ready would then retry every backoff interval forever. The
+                // counter is forgiven in scheduleReconnect only once the session has
+                // stayed up for ASR_HEALTHY_SESSION_MS, matching the Transcribe path.
+                this.readyAt = Date.now();
                 this.diarizeEffective = message.effective_config?.diarize === true;
                 if (this.options.diarize && !this.diarizeEffective) {
                     this.server.log.warn(
@@ -677,21 +691,30 @@ export class AsrChannelSession {
             this.channelName()
         );
 
-        this.writes = this.writes.then(async () => {
-            await this.writeSegment(
-                {
-                    SegmentId: segmentId,
-                    Channel: channelToTranscriptChannel(this.channelId),
-                    StartTime: start,
-                    EndTime: end,
-                    Transcript: text,
-                    IsPartial: isPartial,
-                    Speaker: speaker,
-                },
-                this.socketData.callMetadata,
-                this.server
-            );
-        });
+        this.writes = this.writes
+            .then(async () => {
+                await this.writeSegment(
+                    {
+                        SegmentId: segmentId,
+                        Channel: channelToTranscriptChannel(this.channelId),
+                        StartTime: start,
+                        EndTime: end,
+                        Transcript: text,
+                        IsPartial: isPartial,
+                        Speaker: speaker,
+                    },
+                    this.socketData.callMetadata,
+                    this.server
+                );
+            })
+            // Without a per-link catch, one rejection leaves the chain in a
+            // rejected state and every later .then() is skipped - the channel
+            // would silently stop writing segments for the rest of the meeting.
+            .catch((error) => {
+                this.server.log.error(
+                    `[ASR]: [${this.callId}][${this.channelId}] - segment write failed: ${normalizeErrorForLogging(error)}`
+                );
+            });
     }
 
     private channelName(): string {
@@ -769,6 +792,20 @@ export const startMicrovmAsr = async (
     const lease = await acquireLease(callMetadata.callId, server);
     if (!lease) {
         socketData.asr = undefined;
+        return false;
+    }
+    // The client can disconnect while the acquire is in flight (a MicroVM boot
+    // takes seconds); stopMicrovmAsr then clears socketData.asr but has nothing
+    // to release because the pending lease carries no microvmId yet. Writing
+    // through the cleared reference would throw, and the freshly acquired
+    // MicroVM would run unreleased until its max-duration backstop.
+    if (socketData.asr?.lease !== pendingLease) {
+        server.log.warn(
+            `[ASR]: [${callMetadata.callId}] - call ended during MicroVM acquisition; releasing ${lease.microvmId}.`
+        );
+        if (lease.microvmId) {
+            await releaseLease(lease.microvmId, server);
+        }
         return false;
     }
     socketData.asr.lease = lease;

@@ -120,14 +120,18 @@ const server = fastify({
 // register the @fastify/websocket plugin with the fastify server
 server.register(websocket);
 
-// Setup preHandler hook to authenticate
-server.addHook('preHandler', async (request, reply) => {
+// Authenticate at onRequest, which runs BEFORE body parsing. As a preHandler
+// this ran after Fastify had already buffered the request body, so an
+// unauthenticated POST to the calibration route could hold its full upload
+// (up to ASR_CALIBRATION_MAX_UPLOAD_BYTES, 64 MB) in memory on a task that is
+// also transcribing live meetings. Authentication needs only the headers.
+server.addHook('onRequest', async (request, reply) => {
     // A CORS preflight carries no credentials by design, so authenticating it
     // would 401 every cross-origin call before the real request is ever made.
     if (!request.url.includes('health') && request.method !== 'OPTIONS') {
         const clientIP = getClientIP(request.headers);
         server.log.debug(
-            `[AUTH]: [${clientIP}] - Received preHandler hook for authentication. URI: <${
+            `[AUTH]: [${clientIP}] - Received onRequest hook for authentication. URI: <${
                 request.url
             }>, Headers: ${JSON.stringify(request.headers)}`
         );
