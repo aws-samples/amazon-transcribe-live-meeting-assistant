@@ -6,7 +6,7 @@
 # installed only inside the ARM64 image, pinned per model by the catalog (see
 # model.env and the Dockerfile). numpy IS needed: the offline engine's VAD gate is
 # a numpy-only wrapper that the tests construct directly.
-pytest==8.3.3
+pytest==9.0.3
 pytest-asyncio==0.24.0
 pydantic==2.9.2
 websockets==13.1
