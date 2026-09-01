@@ -90,6 +90,10 @@ def test_handler_returns_a_serializable_timestamp(
     """End-to-end shape check through the real handler, AWS calls stubbed."""
     monkeypatch.setenv("VP_TABLE_NAME", "vp-table")
     monkeypatch.setenv("VP_TASK_REGISTRY_TABLE_NAME", "registry-table")
+    # index.py creates boto3 clients at import time, and client construction
+    # resolves an endpoint even though every call below is stubbed. CI has no
+    # ambient AWS config, so without a region the IMPORT raises NoRegionError.
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     import index as token_index
 
     class _FakeDynamo:
