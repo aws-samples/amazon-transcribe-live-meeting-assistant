@@ -43,6 +43,11 @@ RUN ORT_CAPI="$(python3.11 -c 'import onnxruntime, os; print(os.path.join(os.pat
 
 COPY scripts/fetch_model.py /build/fetch_model.py
 RUN python3.11 /build/fetch_model.py --env-file /build/model.env --dest /opt/models
+# Keep the bundle's settings next to the weights they describe: warmup and the
+# server load this as environment DEFAULTS (asr_server/model_env.py), which is
+# how the baked engine selection and calibrated diarization operating point
+# actually reach the process. Explicit environment variables still win.
+RUN cp /build/model.env /opt/models/model.env
 
 ENV ASR_MODEL_DIR=/opt/models \
     ASR_HOST=0.0.0.0 \

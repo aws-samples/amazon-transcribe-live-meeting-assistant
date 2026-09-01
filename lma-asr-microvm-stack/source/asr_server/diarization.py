@@ -458,6 +458,7 @@ def build_diarization_config(
     threshold: float | None = None,
     max_speakers: int | None = None,
     min_segment_ms: int | None = None,
+    min_turn_ms: int | None = None,
     require_corroboration: bool | None = None,
     split_on_speaker_change: bool | None = None,
     live_turn_cut: bool | None = None,
@@ -496,6 +497,8 @@ def build_diarization_config(
         min_segment_ms = int(
             os.environ.get("ASR_MIN_SEGMENT_MS", str(DiarizationConfig.min_segment_ms))
         )
+    if min_turn_ms is None:
+        min_turn_ms = int(os.environ.get("ASR_MIN_TURN_MS", str(DiarizationConfig.min_turn_ms)))
     if require_corroboration is None:
         require_corroboration = (
             os.environ.get("ASR_REQUIRE_CORROBORATION", "0").strip().lower() in _TRUTHY
@@ -524,6 +527,7 @@ def build_diarization_config(
         threshold=threshold,
         max_speakers=max_speakers,
         min_segment_ms=min_segment_ms,
+        min_turn_ms=min_turn_ms,
         require_corroboration=require_corroboration,
         split_on_speaker_change=split_on_speaker_change,
         live_turn_cut=live_turn_cut,

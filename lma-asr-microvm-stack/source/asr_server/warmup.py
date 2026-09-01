@@ -36,6 +36,7 @@ from collections.abc import Callable, Sequence
 
 from asr_protocol import Config as _Config
 
+from asr_server.model_env import load_model_env
 from asr_server.offline_recognizer import (
     OfflineModelConfig,
     SherpaOfflineRecognizer,
@@ -323,6 +324,10 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    # Before argument parsing: --engine defaults to $ASR_ENGINE, which for an
+    # image build comes from the baked model.env (an 'accurate' bundle must warm
+    # the offline engine, or the build fails loading offline weights).
+    load_model_env()
     sys.exit(run(sys.argv[1:]))
 
 

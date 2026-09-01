@@ -73,6 +73,7 @@ from asr_server.diarization import (
     diarization_enabled,
     pcm16_to_float32,
 )
+from asr_server.model_env import load_model_env
 from asr_server.offline_recognizer import (
     build_offline_model_config,
     create_sherpa_offline_engine,
@@ -519,7 +520,19 @@ class AsrSession:
                     await self._enqueue(first_pcm)
                 graceful = await self._ingest()
             finally:
-                await self._queue.put(None)  # sentinel: let the consumer drain and stop
+                # Sentinel: let the consumer drain and stop. Never `await put` here -
+                # if the consumer died on a fatal error while the bounded queue was
+                # full, an awaited put would block forever and leak the session task,
+                # the recognizer stream and the socket. Making room by discarding one
+                # queued frame is fine on that path: the consumer that would have
+                # decoded it is already gone.
+                while True:
+                    try:
+                        self._queue.put_nowait(None)
+                        break
+                    except asyncio.QueueFull:
+                        with contextlib.suppress(asyncio.QueueEmpty):
+                            self._queue.get_nowait()
                 await consumer
 
             if self._fatal:
@@ -1076,6 +1089,10 @@ def main() -> None:
     logged before the traceback so CloudWatch shows the actionable cause.
     """
     _configure_logging()  # route asr_server logs to stdout → CloudWatch (API doc §5)
+    # The image's baked defaults (engine, calibrated diarization operating
+    # point) become environment defaults before any config is read; explicit
+    # environment variables and per-session wire config still win.
+    load_model_env()
     _LOG.info("ASR WebSocket server starting on port %d", ServerConfig.from_env().port)
     try:
         asyncio.run(serve_asr(ServerConfig.from_env()))
