@@ -154,7 +154,7 @@ const transcribeClient = new TranscribeStreamingClient({ region: AWS_REGION });
  * reads the environment, and diarization.ts must stay env-free so the offline
  * unit tests can import it.
  */
-const diarizationSettingsFor = (callMetaData: CallMetaData): DiarizationSettings => {
+export const diarizationSettingsFor = (callMetaData: CallMetaData): DiarizationSettings => {
     const clientSpecified =
         typeof callMetaData.diarizeSystemChannel === 'boolean' ||
         typeof callMetaData.diarizeMicChannel === 'boolean';
@@ -267,6 +267,45 @@ export const writeCallVideoRecordingEvent = async (
         RefreshToken: callMetaData.refreshToken,
     };
     await writeCallEvent(callVideoRecordingEvent, server);
+};
+
+/**
+ * Maximum bytes per Transcribe `AudioChunk`.
+ *
+ * The audio source is iterated with `for await`, so a chunk is whatever Node's
+ * opportunistic read returns — not a fixed frame. Whenever the read loop starts
+ * late or stalls, the queued audio comes out as one large buffer and Transcribe
+ * rejects the request with "Your stream is too big. Reduce the frame size and try
+ * your request again.", which aborts transcription for the rest of the meeting.
+ *
+ * That is exactly what a MicroVM ASR acquisition does: it delays the start of the
+ * Transcribe consumer by seconds, so a fallback to Amazon Transcribe would open
+ * with an oversized frame and never recover.
+ *
+ * 16 KB = 512 ms at 16 kHz mono PCM16. Kept in sync with MAX_AUDIO_CHUNK_BYTES in
+ * the Virtual Participant scribe (scribe.ts), which fixed the same failure for
+ * ffmpeg-sourced audio (GitHub #536).
+ */
+export const MAX_AUDIO_CHUNK_BYTES = 16 * 1024;
+
+/**
+ * Split a PCM buffer into frames no larger than `maxBytes`.
+ *
+ * Slices rather than drops: every byte is forwarded, in order, so no audio is
+ * lost. Buffers already within the limit pass through uncopied.
+ */
+export const frameAudioChunk = (
+    chunk: Buffer,
+    maxBytes: number = MAX_AUDIO_CHUNK_BYTES
+): Buffer[] => {
+    if (chunk.length <= maxBytes) {
+        return [chunk];
+    }
+    const frames: Buffer[] = [];
+    for (let offset = 0; offset < chunk.length; offset += maxBytes) {
+        frames.push(chunk.subarray(offset, Math.min(offset + maxBytes, chunk.length)));
+    }
+    return frames;
 };
 
 // True when a Transcribe streaming error indicates the SessionId we tried to
@@ -429,7 +468,12 @@ export const startTranscribe = async (
                 audioInputStream.pipe(audioSink, { end: false });
                 try {
                     for await (const chunk of audioSink) {
-                        yield { AudioEvent: { AudioChunk: chunk } };
+                        // Never yield a chunk Transcribe would reject as too big
+                        // (see frameAudioChunk): audio queued while this consumer
+                        // was starting arrives as one large buffer.
+                        for (const frame of frameAudioChunk(chunk)) {
+                            yield { AudioEvent: { AudioChunk: frame } };
+                        }
                     }
                 } finally {
                     audioInputStream.unpipe(audioSink);
@@ -832,6 +876,70 @@ function recordDiarizationDiagnostics(
     }
 }
 
+export interface TranscriptSegmentRecord {
+    SegmentId: string;
+    Channel: string;
+    StartTime: number;
+    EndTime: number;
+    Transcript: string;
+    IsPartial: boolean;
+    Speaker: string;
+}
+
+// Shared by every transcription engine (Amazon Transcribe and the MicroVM ASR),
+// so both produce identical ADD_TRANSCRIPT_SEGMENT records downstream.
+export const writeSegmentToKds = async (
+    segment: TranscriptSegmentRecord,
+    callMetadata: CallMetaData,
+    server: FastifyInstance
+): Promise<void> => {
+    const now = new Date().toISOString();
+    const kdsObject: AddTranscriptSegmentEvent = {
+        EventType: 'ADD_TRANSCRIPT_SEGMENT',
+        CallId: callMetadata.callId,
+        Channel: segment.Channel,
+        SegmentId: segment.SegmentId,
+        StartTime: segment.StartTime,
+        EndTime: segment.EndTime,
+        Transcript: segment.Transcript,
+        IsPartial: segment.IsPartial,
+        CreatedAt: now,
+        UpdatedAt: now,
+        Sentiment: undefined,
+        TranscriptEvent: undefined,
+        UtteranceEvent: undefined,
+        Speaker: segment.Speaker,
+        AccessToken: callMetadata.accessToken,
+        IdToken: callMetadata.idToken,
+        RefreshToken: callMetadata.refreshToken,
+    };
+
+    const putParams = {
+        StreamName: kdsStreamName,
+        PartitionKey: callMetadata.callId,
+        Data: Buffer.from(JSON.stringify(kdsObject)),
+    };
+
+    try {
+        await kinesisClient.send(new PutRecordCommand(putParams));
+        server.log.debug(
+            `[${kdsObject.EventType}]: [${callMetadata.callId}] - Written ${
+                kdsObject.EventType
+            } event to KDS: ${JSON.stringify(kdsObject)}`
+        );
+    } catch (error) {
+        server.log.error(
+            `[${kdsObject.EventType}]: [${
+                callMetadata.callId
+            }] - Error writing ${
+                kdsObject.EventType
+            } to KDS : ${normalizeErrorForLogging(
+                error
+            )} KDS object: ${JSON.stringify(kdsObject)}`
+        );
+    }
+};
+
 function processTranscriptionResults(
     speakerName: string,
     result: Result,
@@ -980,57 +1088,24 @@ export const writeTranscriptionSegment = async function (
                 if (segment.EndTime > maxEndTime) {
                     maxEndTime = segment.EndTime;
                 }
-                const now = new Date().toISOString();
-                const kdsObject: AddTranscriptSegmentEvent = {
-                    EventType: 'ADD_TRANSCRIPT_SEGMENT',
-                    CallId: callMetadata.callId,
-                    Channel: result.ChannelId === CHANNEL_SYSTEM ? 'CALLER' : 'AGENT',
-                    SegmentId: segment.SegmentId,
-                    StartTime: segment.StartTime,
-                    EndTime: segment.EndTime,
-                    Transcript: segment.Transcript,
-                    // Per-segment: a diarized channel can settle an early
-                    // window while Transcribe still calls the result partial.
-                    IsPartial: segment.IsPartial ?? result.IsPartial,
-                    CreatedAt: now,
-                    UpdatedAt: now,
-                    Sentiment: undefined,
-                    TranscriptEvent: undefined,
-                    UtteranceEvent: undefined,
-                    // Already carries any `(spk_N)` suffix — see
-                    // buildDiarizedSegments. Identical to the pre-feature value
-                    // when the channel has diarization off.
-                    Speaker: segment.Speaker,
-                    AccessToken: callMetadata.accessToken,
-                    IdToken: callMetadata.idToken,
-                    RefreshToken: callMetadata.refreshToken,
-                };
+                await writeSegmentToKds(
+                    {
+                        SegmentId: segment.SegmentId,
+                        Channel: result.ChannelId === CHANNEL_SYSTEM ? 'CALLER' : 'AGENT',
+                        StartTime: segment.StartTime,
+                        EndTime: segment.EndTime,
+                        Transcript: segment.Transcript,
+                        // Per-segment: a diarized channel can settle an early
+                        // window while Transcribe still calls the result partial.
+                        IsPartial: segment.IsPartial ?? result.IsPartial ?? false,
+                        // Already carries any `(spk_N)` suffix — see
+                        // buildDiarizedSegments.
+                        Speaker: segment.Speaker,
+                    },
+                    callMetadata,
+                    server
+                );
 
-                const putParams = {
-                    StreamName: kdsStreamName,
-                    PartitionKey: callMetadata.callId,
-                    Data: Buffer.from(JSON.stringify(kdsObject)),
-                };
-
-                const putCmd = new PutRecordCommand(putParams);
-                try {
-                    await kinesisClient.send(putCmd);
-                    server.log.debug(
-                        `[${kdsObject.EventType}]: [${callMetadata.callId}] - Written ${
-                            kdsObject.EventType
-                        } event to KDS: ${JSON.stringify(kdsObject)}`
-                    );
-                } catch (error) {
-                    server.log.error(
-                        `[${kdsObject.EventType}]: [${
-                            callMetadata.callId
-                        }] - Error writing ${
-                            kdsObject.EventType
-                        } to KDS : ${normalizeErrorForLogging(
-                            error
-                        )} KDS object: ${JSON.stringify(kdsObject)}`
-                    );
-                }
             }
         }
     }

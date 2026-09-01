@@ -1,0 +1,22 @@
+[project]
+name = "lma-asr-microvm"
+version = "0.0.0"
+description = "LMA streaming ASR + speaker diarization on AWS Lambda MicroVMs"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = "-ra"
+# The WebSocket server tests are async; auto mode runs `async def` tests without
+# a per-test marker while leaving synchronous tests untouched.
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["asr_protocol", "asr_server", "asr_microvm", "scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "C4", "SIM"]
