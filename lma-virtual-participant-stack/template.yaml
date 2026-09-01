@@ -3127,10 +3127,17 @@ Resources:
                 Resource: 
                   - !Ref TaskDefinition
                   - !Sub "${TaskDefinition}:*"
+              # CreateSchedule passes the role EventBridge Scheduler assumes at
+              # fire time: the ECS runTask role for EC2/FARGATE, and additionally
+              # the launcher-invoke role under MICROVM.
               - Effect: Allow
                 Action:
                   - iam:PassRole
-                Resource: !GetAtt VPSchedulerExecutionRole.Arn
+                Resource: !If
+                  - UseMicrovmLaunchType
+                  - - !GetAtt VPSchedulerExecutionRole.Arn
+                    - !GetAtt VPScheduleInvokeLauncherRole.Arn
+                  - - !GetAtt VPSchedulerExecutionRole.Arn
               - Effect: Allow
                 Action:
                   - dynamodb:DescribeStream
@@ -3175,7 +3182,48 @@ Resources:
           
           scheduler_client = boto3.client('scheduler')
           ecs_client = boto3.client('ecs')
-          
+
+
+          def _ecs_params(vp_id, new_image, launch_type, meeting_time_int,
+                          user_sub, zoom_secret_name, enable_video_recording_str):
+              """RunTask parameters for the EC2/FARGATE scheduled launch path."""
+              return {
+                  'ClientToken': vp_id,
+                  'TaskDefinition': os.environ['TASK_DEFINITION_ARN'],
+                  'Cluster': os.environ['CLUSTER_ARN'],
+                  'LaunchType': launch_type,
+                  'NetworkConfiguration': {
+                      'AwsvpcConfiguration': {
+                          'AssignPublicIp': 'DISABLED',
+                          'SecurityGroups': json.loads(os.environ['SECURITY_GROUPS']),
+                          'Subnets': json.loads(os.environ['SUBNETS']),
+                      }
+                  },
+                  'Overrides': {
+                      'ContainerOverrides': [{
+                          'Name': os.environ['CONTAINER_NAME'],
+                          'Environment': [
+                              {'Name': 'VIRTUAL_PARTICIPANT_ID', 'Value': vp_id},
+                              {'Name': 'MEETING_PLATFORM', 'Value': new_image.get('meetingPlatform', {}).get('S', '')},
+                              {'Name': 'MEETING_ID', 'Value': new_image.get('meetingId', {}).get('S', '')},
+                              {'Name': 'MEETING_PASSWORD', 'Value': new_image.get('meetingPassword', {}).get('S', '')},
+                              {'Name': 'MEETING_NAME', 'Value': new_image.get('meetingName', {}).get('S', '')},
+                              {'Name': 'MEETING_TIME', 'Value': str(meeting_time_int)},
+                              {'Name': 'LMA_USER', 'Value': new_image.get('owner', {}).get('S', '')},
+                              {'Name': 'LMA_USER_SUB', 'Value': user_sub},
+                              {'Name': 'ZOOM_CREDENTIALS_SECRET_NAME', 'Value': zoom_secret_name},
+                              {'Name': 'GRAPHQL_ENDPOINT', 'Value': os.environ.get('GRAPHQL_ENDPOINT', '')},
+                              {'Name': 'CALL_DATA_STREAM_NAME', 'Value': os.environ.get('CALL_DATA_STREAM_NAME', '')},
+                              {'Name': 'RECORDINGS_BUCKET_NAME', 'Value': os.environ.get('RECORDINGS_BUCKET_NAME', '')},
+                              {'Name': 'VP_TASK_REGISTRY_TABLE_NAME', 'Value': os.environ.get('VP_TASK_REGISTRY_TABLE_NAME', '')},
+                              {'Name': 'ENABLE_VIDEO_RECORDING', 'Value': enable_video_recording_str},
+                          ]
+                      }]
+                  },
+                  'EnableExecuteCommand': False
+              }
+
+
           def lambda_handler(event, context):
               logger.info("Processing VP scheduler request")
               logger.info(f"Event: {json.dumps(event, default=str)}")
@@ -3201,7 +3249,6 @@ Resources:
                           
                           if is_scheduled and meeting_time:
                               meeting_time_int = int(meeting_time)
-                              current_time = int(datetime.now().timestamp())
 
                               # Schedule for future execution
                               delay_seconds = 120  # 2 minutes before meeting
@@ -3221,44 +3268,53 @@ Resources:
                                   if user_zoom_sub and stack_name else ''
                               )
 
-                              ecs_params = {
-                                  'ClientToken': vp_id,
-                                  'TaskDefinition': os.environ['TASK_DEFINITION_ARN'],
-                                  'Cluster': os.environ['CLUSTER_ARN'],
-                                  'LaunchType': os.environ.get('VP_LAUNCH_TYPE', 'FARGATE'),
-                                  'NetworkConfiguration': {
-                                      'AwsvpcConfiguration': {
-                                          'AssignPublicIp': 'DISABLED',
-                                          'SecurityGroups': json.loads(os.environ['SECURITY_GROUPS']),
-                                          'Subnets': json.loads(os.environ['SUBNETS']),
-                                      }
-                                  },
-                                  'Overrides': {
-                                      'ContainerOverrides': [{
-                                          'Name': os.environ['CONTAINER_NAME'],
-                                          'Environment': [
-                                              {'Name': 'VIRTUAL_PARTICIPANT_ID', 'Value': vp_id},
-                                              {'Name': 'MEETING_PLATFORM', 'Value': new_image.get('meetingPlatform', {}).get('S', '')},
-                                              {'Name': 'MEETING_ID', 'Value': new_image.get('meetingId', {}).get('S', '')},
-                                              {'Name': 'MEETING_PASSWORD', 'Value': new_image.get('meetingPassword', {}).get('S', '')},
-                                              {'Name': 'MEETING_NAME', 'Value': new_image.get('meetingName', {}).get('S', '')},
-                                              {'Name': 'MEETING_TIME', 'Value': str(meeting_time_int)},
-                                              {'Name': 'LMA_USER', 'Value': new_image.get('owner', {}).get('S', '')},
-                                              {'Name': 'LMA_USER_SUB', 'Value': user_sub},
-                                              {'Name': 'ZOOM_CREDENTIALS_SECRET_NAME', 'Value': zoom_secret_name},
-                                              {'Name': 'GRAPHQL_ENDPOINT', 'Value': os.environ.get('GRAPHQL_ENDPOINT', '')},
-                                              {'Name': 'CALL_DATA_STREAM_NAME', 'Value': os.environ.get('CALL_DATA_STREAM_NAME', '')},
-                                              {'Name': 'RECORDINGS_BUCKET_NAME', 'Value': os.environ.get('RECORDINGS_BUCKET_NAME', '')},
-                                              {'Name': 'VP_TASK_REGISTRY_TABLE_NAME', 'Value': os.environ.get('VP_TASK_REGISTRY_TABLE_NAME', '')},
-                                              {'Name': 'ENABLE_VIDEO_RECORDING', 'Value': enable_video_recording_str},
-                                          ]
-                                      }]
-                                  },
-                                  'EnableExecuteCommand': False
-                              }
-                              
+                              launch_type = os.environ.get('VP_LAUNCH_TYPE', 'FARGATE')
+
+                              if launch_type == 'MICROVM':
+                                  # EventBridge Scheduler has a native ECS runTask target but
+                                  # none for lambda-microvms, so a MICROVM schedule invokes the
+                                  # launcher Lambda instead -- the same target the "start now"
+                                  # state machine uses (see ScheduledMeetingTarget). Forwarding
+                                  # VP_LAUNCH_TYPE into an ecs:runTask LaunchType instead makes
+                                  # ECS reject the fire with "launch type should be one of
+                                  # [EC2,FARGATE,EXTERNAL]", and because the schedule is
+                                  # ActionAfterCompletion=DELETE it then vanishes, leaving the
+                                  # VP stuck at SCHEDULED with no visible error (issue #613).
+                                  #
+                                  # The launcher accepts this flat payload as well as the state
+                                  # machine's {"data": {...}} shape; the key names below are the
+                                  # ones its FIELD_MAP looks for. Cognito tokens are absent by
+                                  # design -- they are minted per session and would have expired
+                                  # by the meeting time -- which matches what the ECS scheduled
+                                  # path passes today.
+                                  target = {
+                                      'Arn': os.environ['MICROVM_LAUNCHER_ARN'],
+                                      'RoleArn': os.environ['SCHEDULE_INVOKE_LAUNCHER_ROLE_ARN'],
+                                      'Input': json.dumps({
+                                          'virtualParticipantId': vp_id,
+                                          'meetingPlatform': new_image.get('meetingPlatform', {}).get('S', ''),
+                                          'meetingId': new_image.get('meetingId', {}).get('S', ''),
+                                          'meetingPassword': new_image.get('meetingPassword', {}).get('S', ''),
+                                          'meetingName': new_image.get('meetingName', {}).get('S', ''),
+                                          'meetingTime': str(meeting_time_int),
+                                          'owner': new_image.get('owner', {}).get('S', ''),
+                                          'userSub': user_sub,
+                                          'zoomCredentialsSecretName': zoom_secret_name,
+                                          'enableVideoRecording': enable_video_recording_str,
+                                      })
+                                  }
+                              else:
+                                  target = {
+                                      'Arn': 'arn:aws:scheduler:::aws-sdk:ecs:runTask',
+                                      'RoleArn': os.environ['SCHEDULER_ROLE_ARN'],
+                                      'Input': json.dumps(_ecs_params(
+                                          vp_id, new_image, launch_type, meeting_time_int,
+                                          user_sub, zoom_secret_name, enable_video_recording_str,
+                                      ))
+                                  }
+
                               schedule_expression = f"at({scheduled_time.strftime('%Y-%m-%dT%H:%M:%S')})"
-                              
+
                               response = scheduler_client.create_schedule(
                                   ActionAfterCompletion='DELETE',
                                   FlexibleTimeWindow={'Mode': 'OFF'},
@@ -3267,17 +3323,16 @@ Resources:
                                   ScheduleExpression=schedule_expression,
                                   ScheduleExpressionTimezone='UTC',
                                   State='ENABLED',
-                                  Target={
-                                      'Arn': 'arn:aws:scheduler:::aws-sdk:ecs:runTask',
-                                      'RoleArn': os.environ['SCHEDULER_ROLE_ARN'],
-                                      'Input': json.dumps(ecs_params)
-                                  }
+                                  Target=target
                               )
-                              
-                              logger.info(f"Successfully scheduled VP {vp_id} with schedule ARN: {response.get('ScheduleArn')}")
+
+                              logger.info(
+                                  f"Successfully scheduled VP {vp_id} ({launch_type}) "
+                                  f"with schedule ARN: {response.get('ScheduleArn')}"
+                              )
                           else:
                               logger.info(f"VP {vp_id} is not scheduled, skipping")
-                              
+
                       elif event_name == 'REMOVE':
                           try:
                               scheduler_client.delete_schedule(
@@ -3313,6 +3368,18 @@ Resources:
           SCHEDULE_GROUP_NAME: !Ref VPScheduleGroup
           SCHEDULER_ROLE_ARN: !GetAtt VPSchedulerExecutionRole.Arn
           VP_LAUNCH_TYPE: !Ref VPLaunchType
+          # MICROVM only: the schedule target is the launcher Lambda rather than
+          # ecs:runTask, so it needs the function ARN and the role EventBridge
+          # Scheduler assumes to invoke it. Both resources are conditional on
+          # UseMicrovmLaunchType, so these are omitted for EC2/FARGATE.
+          MICROVM_LAUNCHER_ARN: !If
+            - UseMicrovmLaunchType
+            - !GetAtt VPMicrovmLauncherFunction.Arn
+            - !Ref AWS::NoValue
+          SCHEDULE_INVOKE_LAUNCHER_ROLE_ARN: !If
+            - UseMicrovmLaunchType
+            - !GetAtt VPScheduleInvokeLauncherRole.Arn
+            - !Ref AWS::NoValue
           LMA_STACK_NAME: !Ref LMAStackName
           LOG_LEVEL: !Ref LogLevel
   # DynamoDB Event Source Mapping for Scheduler Lambda
