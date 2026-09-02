@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Optional custom domain for the web UI** — two new CloudFormation parameters, `WebAppCustomDomainName` and `WebAppCustomDomainCertificateArn`, let you serve the LMA web user interface from your own domain (for example `https://lma.example.com/`) instead of the generated `*.cloudfront.net` name. When set, the name is added to the CloudFront distribution as an alternate domain name with your ACM certificate (`sni-only`, `TLSv1.2_2021`), and every user-facing URL the stack emits switches to it: the `ApplicationCloudfrontEndpoint` output, the Chrome extension and Desktop Capture App download URLs, `CloudFrontEndpoint` in the LMA settings parameter (which the Cognito welcome email embeds), the MCP server OAuth callback and logout URLs on the Cognito app client, `VITE_OAUTH_CALLBACK_URL` in the web app build, and `LMA_WEB_APP_URL` used by the MCP analytics tools. Both parameters default to empty so existing deployments are unchanged, and the switch works on a stack update in both directions. The certificate must be issued in **us-east-1** regardless of the deployment Region, because that is the only Region CloudFront accepts viewer certificates from; the parameter's `AllowedPattern` enforces this so a wrong-Region ARN is rejected at parameter validation instead of failing mid-deployment. The `WebAppCloudFrontDomainName` output continues to report the real distribution domain, since that is the DNS target for the alias or CNAME record you create afterwards. The WebSocket streaming endpoint intentionally stays on its CloudFront domain — the web app reads it from the settings parameter at runtime and the Content Security Policy already permits `wss://*.cloudfront.net`. See [Custom Domain](docs/custom-domain.md).
+
 ## [0.3.7] - 2026-08-17
 
 ### Added

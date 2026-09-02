@@ -133,10 +133,13 @@ None of these requires user configuration. The AI fallback resolver model is con
 | InstallationPermissionsBoundaryArn | Optional IAM permissions boundary ARN applied to all created roles | (none) | Valid IAM policy ARN |
 | CloudFrontPriceClass | CloudFront distribution price class | PriceClass_100 | PriceClass_100, PriceClass_200, PriceClass_All |
 | CloudFrontGeoRestrictions | Comma-separated ISO 3166-1 country codes for geographic access restrictions | (none) | ISO 3166-1 alpha-2 codes |
+| WebAppCustomDomainName | Custom domain name to serve the web UI from. Leave empty to use the default CloudFront domain name. See [Custom Domain](custom-domain.md). | (none) | Fully qualified domain name |
+| WebAppCustomDomainCertificateArn | ACM certificate ARN covering `WebAppCustomDomainName`. Must be issued in **us-east-1** because CloudFront only accepts viewer certificates from that Region. Required when `WebAppCustomDomainName` is set. | (none) | ACM certificate ARN in us-east-1 |
 
 > **Note:** This is a representative list of parameters. For the most current and complete list, see the CloudFormation template parameters when creating or updating your stack.
 
 ## Related Documentation
 
 - [Prerequisites & Deployment](prerequisites-and-deployment.md)
+- [Custom Domain](custom-domain.md)
 - [Stack Updates & Upgrades](stack-updates-and-upgrades.md)
