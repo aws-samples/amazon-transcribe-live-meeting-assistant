@@ -15,6 +15,7 @@ import {
     installAudioDiagnostics,
     startAudioDeviceSpecPolling,
     startAudioDiagnosticsPolling,
+    startSenderTrackBypass,
 } from './audio-diagnostics.js';
 import { sendEndMeeting, sendStartMeeting } from './kinesis-stream.js';
 import { MCPCommandHandler } from './mcp-command-handler.js';
@@ -450,6 +451,9 @@ const main = async (): Promise<void> => {
     // cloakbrowser (only warnings/errors do), which is why the first version of
     // these diagnostics produced nothing across three live sessions.
     const stopAudioDiagnostics = startAudioDiagnosticsPolling(page);
+    // Keep the meeting client's Web Audio graph off the transmit path (Teams
+    // chops the agent's voice inside it — see startSenderTrackBypass).
+    const stopSenderBypass = startSenderTrackBypass(page);
     // PulseAudio device formats, logged only when they change. Teams opens the
     // virtual mic twice with conflicting formats (mono vs stereo); with
     // avoid-resampling that can make PulseAudio re-negotiate the device
@@ -737,6 +741,7 @@ const main = async (): Promise<void> => {
         // reference would keep the Node process alive past teardown.
         try {
             stopAudioDiagnostics();
+            stopSenderBypass();
             stopDeviceSpecs();
         } catch { /* never block cleanup */ }
 

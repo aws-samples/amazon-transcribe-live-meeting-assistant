@@ -97,11 +97,17 @@ export class NovaAgent implements VoiceAssistantProvider {
   private speakingTimeout: NodeJS.Timeout | null = null;
   private readonly SPEAKING_TIMEOUT_MS = 500; // Mark as not speaking after 500ms of silence
   
-  // Session refresh configuration
-  private readonly SESSION_REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes (3 min buffer before 8 min timeout)
+  // Session refresh configuration. Nova closes the stream itself after 295s
+  // without interactive content ("Timed out waiting for audio bytes or
+  // interactive content"), and neither continuous meeting silence nor the 30s
+  // keep-alive counts as interactive — so at the old 300s this timer lost the
+  // race by 5 seconds in every quiet meeting. 240s pre-empts it with margin.
+  private readonly SESSION_REFRESH_INTERVAL = 4 * 60 * 1000;
   private sessionRefreshTimer: NodeJS.Timeout | null = null;
   private isRefreshing: boolean = false;
   private refreshQueued: boolean = false;
+  private lastUserActivityAt: number = 0;
+  private readonly USER_QUIET_MS_BEFORE_REFRESH = 5000;
   private keepAliveTimer: NodeJS.Timeout | null = null;
   private readonly KEEP_ALIVE_INTERVAL = 30 * 1000; // Send keep-alive every 30 seconds
   
@@ -842,6 +848,18 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
 
+    // A refresh tears down the bidirectional stream, so a user mid-utterance
+    // loses whatever they were saying: the old session dies with their audio
+    // and the new one only receives the text as history, which never triggers
+    // a response. The agent then appears deaf until re-addressed. Nova's USER
+    // text events are the freshest signal we have for "someone is talking",
+    // so hold the refresh until they have been quiet for a few seconds.
+    if (Date.now() - this.lastUserActivityAt < this.USER_QUIET_MS_BEFORE_REFRESH) {
+      console.log('🗣️  User recently speaking - will retry refresh check in 2 seconds');
+      setTimeout(() => this.checkAndExecuteQueuedRefresh(), 2000);
+      return;
+    }
+
     // Agent is idle - execute refresh
     this.refreshQueued = false;
     this.refreshSession().catch(error => {
@@ -1207,6 +1225,9 @@ export class NovaAgent implements VoiceAssistantProvider {
               // Accumulate text for current turn if it's a FINAL transcript
               if (currentTurn.role && currentTurn.isFinal) {
                 currentTurn.content += textContent;
+                if (currentTurn.role === 'USER') {
+                  this.lastUserActivityAt = Date.now();
+                }
               }
             } else if (jsonResponse.event?.audioOutput) {
               // Received audio from Nova - play it immediately (non-blocking)

@@ -202,7 +202,7 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
     /// here rather than only on the first connect — otherwise speaker
     /// identification would silently switch itself off after a network blip.
     func sendStart() {
-        let meta: [String: Any] = [
+        var meta: [String: Any] = [
             "callId": config.callId,
             "agentId": config.agentId,      // mic channel (ch_1 → AGENT)
             "fromNumber": config.fromNumber, // meeting channel (ch_0 → CALLER)
@@ -212,6 +212,11 @@ final class TranscriberSocket: NSObject, URLSessionWebSocketDelegate, URLSession
             "diarizeSystemChannel": config.diarizeSystemChannel,
             "diarizeMicChannel": config.diarizeMicChannel,
         ]
+        // Omitted when unset so the server keeps its own default, rather than this
+        // client pinning every meeting to one engine by accident.
+        if !config.asrEngine.isEmpty {
+            meta["asrEngine"] = config.asrEngine
+        }
         sendJSON(meta, label: "START")
     }
 

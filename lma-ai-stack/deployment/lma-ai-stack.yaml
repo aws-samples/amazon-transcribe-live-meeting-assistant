@@ -382,6 +382,18 @@ Parameters:
       The DynamoDB table name where the default and custom STRANDS agent chat button
       configurations are stored.
 
+  AsrConfigTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      Runtime configuration table for the MicroVM ASR engine. Empty when that
+      engine is not deployed, in which case the ASR Config page is not offered.
+
+  AsrConfigTableArn:
+    Type: String
+    Default: ""
+    Description: ARN of the runtime ASR configuration table.
+
   NovaSonicConfigTableName:
     Type: String
     Description:
@@ -653,6 +665,7 @@ Conditions:
     !Equals [!Ref EndOfCallTranscriptSummary, "LAMBDA"]
   ShouldEnableBedrockSummarizer:
     !Equals [!Ref EndOfCallTranscriptSummary, "BEDROCK"]
+  HasAsrConfigTable: !Not [!Equals [!Ref AsrConfigTableName, ""]]
 
   IsTranscriptSummaryEnabled: !Or
     - !Condition ShouldEnableEndOfCallLambdaHookFunction
@@ -3257,6 +3270,207 @@ Resources:
                 Condition:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  ##########################################################################
+  # ASR runtime config (MicroVM ASR engine) - Lambda, IAM, DataSources
+  ##########################################################################
+
+  UpdateAsrConfigResolverFunction:
+    Type: AWS::Serverless::Function
+    Condition: HasAsrConfigTable
+    Properties:
+      Handler: index.lambda_handler
+      Role: !GetAtt UpdateAsrConfigResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/update_asr_config_resolver
+      Description: Lambda resolver for updateAsrConfig with input validation
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          ASR_CONFIG_TABLE_NAME: !Ref AsrConfigTableName
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/UpdateAsrConfigResolverFunction
+    DependsOn:
+      - UpdateAsrConfigResolverFunctionLogGroup
+
+  UpdateAsrConfigResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: HasAsrConfigTable
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/UpdateAsrConfigResolverFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  UpdateAsrConfigResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: HasAsrConfigTable
+    Properties:
+      Description: UpdateAsrConfigResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-UpdateAsrConfig
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AsrConfigTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  AppSyncUpdateAsrConfigLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: HasAsrConfigTable
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: InvokeLambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt UpdateAsrConfigResolverFunction.Arn
+
+  UpdateAsrConfigLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: HasAsrConfigTable
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UpdateAsrConfigLambda
+      Description: Lambda function for updateAsrConfig with input validation
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncUpdateAsrConfigLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt UpdateAsrConfigResolverFunction.Arn
+
+  AsrConfigDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: HasAsrConfigTable
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: AsrConfigTable
+      Description: MicroVM ASR runtime configuration DynamoDB Table
+      Type: AMAZON_DYNAMODB
+      ServiceRoleArn: !GetAtt AsrConfigDataSourceRole.Arn
+      DynamoDBConfig:
+        TableName: !Ref AsrConfigTableName
+        AwsRegion: !Ref AWS::Region
+
+  AsrConfigDataSourceRole:
+    Type: AWS::IAM::Role
+    Condition: HasAsrConfigTable
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AsrConfigTableName}"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+
+  GetAsrConfigResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: HasAsrConfigTable
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AsrConfigDataSource.Name
+      TypeName: Query
+      FieldName: getAsrConfig
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+
+        export function request(ctx) {
+          return {
+            operation: 'GetItem',
+            key: util.dynamodb.toMapValues({ AsrConfigId: ctx.args.AsrConfigId }),
+          };
+        }
+
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          // No record yet simply means every value falls back to the stack
+          // parameter, so an absent item is not an error.
+          return ctx.result ?? { AsrConfigId: ctx.args.AsrConfigId };
+        }
+
+  UpdateAsrConfigResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: HasAsrConfigTable
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt UpdateAsrConfigLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateAsrConfig
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      Code: |
+        import { util } from '@aws-appsync/utils';
+
+        export function request(ctx) {
+          return { operation: 'Invoke', payload: ctx };
+        }
+
+        export function response(ctx) {
+          if (ctx.error) {
+            util.error(ctx.error.message, ctx.error.type);
+          }
+          return ctx.result;
+        }
 
   ##########################################################################
   # LLM Prompt Template Config - Lambda, IAM, DataSources
@@ -6671,7 +6885,14 @@ Resources:
       TargetConfiguration:
         Mcp:
           Lambda:
-            LambdaArn: !GetAtt MCPServerAnalyticsFunction.Arn
+            # Spelled out rather than !GetAtt MCPServerAnalyticsFunction.Arn because
+            # LambdaArn carries "format": "AWS::Lambda::Function.Arn", and cfn-lint
+            # does not resolve that format through the SAM transform for an
+            # AWS::Serverless::Function. The format failure invalidates the Lambda
+            # branch of TargetConfiguration.Mcp's oneOf, which then reports every
+            # other branch as missing - 12 errors from one false positive. The Ref
+            # keeps the same implicit dependency GetAtt gave us.
+            LambdaArn: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${MCPServerAnalyticsFunction}"
             ToolSchema:
               InlinePayload:
                 - Name: search_lma_meetings

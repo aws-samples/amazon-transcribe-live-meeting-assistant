@@ -75,6 +75,19 @@ Transcribe charge.
 For headless/CLI use, the same options are `--diarize-system` / `--diarize-mic`
 (or `LMA_DIARIZE_SYSTEM` / `LMA_DIARIZE_MIC`).
 
+### Choosing the transcription engine
+
+If the deployment also runs the [on-demand ASR & diarization engine](microvm-asr.md),
+`--asr-engine microvm` sends this meeting there instead of to Amazon Transcribe
+(`LMA_ASR_ENGINE`, or `asrEngine` in `lma-config.json`). Omit it and the deployment's
+own default applies.
+
+Both engines produce speaker labels, so the two flags above do **not** pick an engine —
+this is the only way a client chooses one. The on-demand engine separates voices sharing
+a single microphone more reliably, but it is English only and does not support content
+redaction, custom vocabularies, custom language models or language identification. A
+meeting whose MicroVM cannot start falls back to Amazon Transcribe on its own.
+
 ## Optional: record screen video
 
 In addition to audio, the app can **capture and stream desktop video** — a

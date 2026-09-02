@@ -74,6 +74,13 @@ public sealed class Config
     /// <summary>Same, for the microphone channel (ch_1) — for a shared conference-room mic.</summary>
     public bool DiarizeMicChannel = false;
 
+    /// <summary>Which engine transcribes this meeting: "transcribe" (Amazon Transcribe)
+    /// or "microvm" (the deployment's on-demand ASR + diarization engine)
+    /// (--asr-engine / LMA_ASR_ENGINE / asrEngine in lma-config.json). Empty means "use
+    /// the deployment default". Both engines produce speaker labels, so the diarize
+    /// flags above do NOT select an engine - this is the only way a client picks one.</summary>
+    public string AsrEngine = "";
+
     /// <summary>
     /// Name of the LMA CloudFormation stack this download came from. Shown in
     /// the UI and used to namespace every machine-scoped identifier (registry
@@ -149,6 +156,7 @@ public sealed class Config
                 .Contains(Value("diarize-system", "LMA_DIARIZE_SYSTEM").ToLowerInvariant()),
             DiarizeMicChannel = new[] { "1", "true", "yes" }
                 .Contains(Value("diarize-mic", "LMA_DIARIZE_MIC").ToLowerInvariant()),
+            AsrEngine = Value("asr-engine", "LMA_ASR_ENGINE", "asrEngine").ToLowerInvariant(),
             StackName = Value("stack-name", "LMA_STACK_NAME", "stackName"),
             AppVersion = Value("app-version", "LMA_APP_VERSION", "appVersion"),
         };

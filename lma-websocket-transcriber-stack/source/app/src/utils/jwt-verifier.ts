@@ -38,6 +38,16 @@ type headersobj = {
 export type AuthenticatedCaller = {
     sub: string;
     username?: string;
+    /** Cognito groups from the verified token; 'Admin' gates admin-only routes. */
+    groups: string[];
+};
+
+const claimedGroups = (payload: Record<string, unknown>): string[] => {
+    const groups = payload['cognito:groups'];
+    if (Array.isArray(groups)) {
+        return groups.map(String);
+    }
+    return typeof groups === 'string' && groups.length > 0 ? [groups] : [];
 };
 
 /** Retrieve the identity established by jwtVerifier for this connection. */
@@ -79,6 +89,7 @@ export const jwtVerifier = async (request: FastifyRequest, reply: FastifyReply) 
         (request as FastifyRequest & { lmaCaller?: AuthenticatedCaller }).lmaCaller = {
             sub: String(payload.sub),
             username: typeof payload['username'] === 'string' ? payload['username'] : undefined,
+            groups: claimedGroups(payload as unknown as Record<string, unknown>),
         };
         request.log.info(`[AUTH]: [${clientIP}] - Connection request authorized. URI: <${request.url}>, Headers: ${JSON.stringify(request.headers)}`);
 

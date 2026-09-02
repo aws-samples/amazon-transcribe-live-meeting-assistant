@@ -66,6 +66,54 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | ContentRedactionLanguages | Languages that support content redaction | en-US | en-US, en-AU, en-GB, es-US |
 | ShowSpeakerLabel | Default for per-channel speaker partitioning (diarization) on WebSocket streaming sessions -- the Stream Audio tab and the Desktop Capture App. Applies to both channels when used. Clients that send their own per-channel choice take precedence, so leave this false unless you want it on for clients that do not. See [Transcription & Translation](transcription-and-translation.md#speaker-identification-within-a-channel). | false | true, false |
 
+## On-demand ASR and Diarization (MicroVM)
+
+Alternative streaming engine to Amazon Transcribe, giving per-voice speaker labels.
+Off by default. A meeting transcribed by this engine does not go through Amazon
+Transcribe, so the redaction, custom vocabulary, custom language model and language
+identification parameters above do not apply to it. Requires a region where AWS
+Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-asr.md).
+
+| Parameter | Description | Default | Allowed Values |
+|-----------|-------------|---------|----------------|
+| TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe unless a client opts in | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
+| AsrModelBundle | A pre-vetted pairing of ASR model, speaker embedder and turn-detection model, **together with the diarization operating point measured for that combination** | nemotron-titanet-small | nemotron-titanet-small, permissive-zipformer-campplus, transcription-only |
+| AsrMaxMeetingSeconds | Hard lifetime ceiling per MicroVM and the cost backstop if a transcriber task dies without releasing it | 14400 | 600–28800 |
+| AsrMaxSpeakers | Cap on distinct speakers per audio channel (0 discovers as many as appear) | 0 | 0–30 |
+
+### Why a bundle instead of three model parameters
+
+The similarity threshold is not a property of the embedder alone — utterance length
+moves it as much as the model does (CAM++ measured 0.30 on 1–2 s utterances and 0.68
+on 5–20 s ones). So an operating point is only meaningful for a stated *pairing*, and
+choosing the three models separately let a deployment assemble a combination nobody
+had measured. It also produced a concrete bug: the threshold parameter defaulted to
+`0.2` while the catalog's measured value for the default embedder was `0.4`, nothing
+reconciled them, and the deployment merged two speakers into one.
+
+A bundle now carries its own calibrated threshold and utterance floor, baked into the
+ASR image, so a deployment gets a working configuration without knowing any numbers.
+
+| Bundle | Calibrated | Redistributable | Notes |
+|--------|-----------|-----------------|-------|
+| `nemotron-titanet-small` | Yes (0.4) | No — NVIDIA OML | Default, validated on real meetings |
+| `permissive-zipformer-campplus` | Yes (0.68) | Yes — Apache-2.0 + MIT | Worse on spontaneous speech (ASR trained on read speech) |
+| `transcription-only` | n/a | No — NVIDIA OML | No diarization; labelled by audio channel |
+| `permissive-fastconformer-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Best redistributable option: same architecture as the default, trained on conversational speech, quarter the size |
+| `nemotron-titanet-large` | No | No — NVIDIA OML | The default with a larger embedder, aimed at under-splitting |
+| `apache-only-zipformer-3dspeaker` | No | Yes — Apache-2.0 + MIT | For deployments that cannot accept CC-BY-4.0 attribution |
+| `accurate-parakeet-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Offline: highest accuracy, but **no interim text** while speaking, and may not hold real time — unmeasured |
+
+An uncalibrated bundle produces **no speaker labels** until the deployment runs a
+calibration from the ASR Config page — a threshold borrowed from another pairing
+fragments or merges speakers, so no number is shipped rather than a wrong one.
+
+There are deliberately no parameters for supplying a model URL: every model is a
+curated entry in the ASR stack's `catalog.json`, with its checksum pinned and (for a
+speaker model) its operating point measured. Runtime tuning stays available on the ASR
+Config admin page without a stack update. See
+[On-demand ASR & Speaker Diarization](microvm-asr.md#changing-the-model).
+
 ## End-of-Call Summary
 
 | Parameter | Description | Default | Allowed Values |
