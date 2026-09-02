@@ -347,100 +347,13 @@ Parameters:
       - AmazonTranscribe
       - MicrovmAsr
     Description: >-
-      Streaming transcription engine for Stream Audio and the Audio Capture apps.
-      AmazonTranscribe is the default. MicrovmAsr deploys an on-demand ASR +
-      speaker-diarization engine on AWS Lambda MicroVMs and makes per-voice
-      speaker labels available; meetings that opt in are then NOT transcribed by
-      Amazon Transcribe, so content redaction, custom vocabularies, custom
-      language models and language identification do not apply to them, and the
-      default model is English only. REQUIRES a region where AWS Lambda MicroVMs
-      is available (it is not available in GovCloud). Deploying it does not change
-      existing behaviour on its own: every meeting still uses Amazon Transcribe until
-      an admin makes this engine the default on the ASR Config page. Both engines can
-      produce speaker labels, so requesting them does not select an engine.
-
-  AsrModelBundle:
-    Type: String
-    Default: nemotron-titanet-small
-    AllowedValues:
-      - nemotron-titanet-small
-      - permissive-zipformer-campplus
-      - transcription-only
-      - permissive-fastconformer-titanet-large
-      - nemotron-titanet-large
-      - apache-only-zipformer-3dspeaker
-      - accurate-parakeet-titanet-large
-      - parakeet-streaming-titanet-small
-      - parakeet-streaming-low-latency
-    Description: >-
-      Which pre-vetted model pairing the MicroVM ASR engine uses. Each bundle names an
-      ASR model, a speaker-embedding model and a turn-detection model TOGETHER WITH the
-      diarization operating point measured for that combination, so a deployment gets a
-      working configuration without tuning anything. Picking the models separately is
-      deliberately not offered: the similarity threshold is not a property of the
-      embedder alone (utterance length moves it as much as the model does), so it is
-      only meaningful for a stated pairing.
-      CALIBRATED, so speaker labels work immediately - nemotron-titanet-small is the
-      default and validated on real meetings, but its ASR weights are under the NVIDIA
-      Open Model License and are NOT redistributable; permissive-zipformer-campplus is
-      Apache-2.0 and MIT throughout and measurably worse, its ASR model being trained on
-      read speech; transcription-only has no diarization and labels by audio channel.
-      NOT YET CALIBRATED, so they produce NO speaker labels until this deployment runs a
-      calibration from the ASR Config page, because a threshold borrowed from another
-      pairing fragments or merges speakers - permissive-fastconformer-titanet-large is
-      CC-BY-4.0 and MIT throughout and so redistributable, its ASR model sharing the
-      default's architecture but trained on conversational speech at a quarter the size,
-      which makes it the one to try if you need to redistribute the image;
-      nemotron-titanet-large is the validated default with a larger embedder, aimed at
-      under-splitting on a channel dominated by one talker;
-      apache-only-zipformer-3dspeaker is for a deployment that cannot accept CC-BY-4.0
-      attribution, both halves being the weaker choice; accurate-parakeet-titanet-large
-      has the highest expected accuracy and is redistributable but is OFFLINE, meaning
-      audio is segmented by VAD and decoded per utterance so there is NO interim text
-      while somebody is still speaking, and it needs 16 GiB.
-      Changing the bundle rebuilds the MicroVM image (~20 minutes).
-
-  AsrMaxMeetingSeconds:
-    Type: Number
-    Default: 14400
-    MinValue: 600
-    MaxValue: 28800
-    Description: >-
-      Hard ceiling on one ASR MicroVM's lifetime, and the cost backstop if a
-      transcriber task dies without releasing it. Service maximum is 8 hours.
-
-  AsrLiveTurnCut:
-    Type: String
-    Default: "true"
-    AllowedValues: ["true", "false"]
-    Description: >-
-      Whether the MicroVM ASR engine closes a transcript row as soon as a speaker
-      change is confirmed, instead of waiting for a pause. Endpointing silence is what
-      previously separated speakers, so two people talking over each other shared one
-      row and one label until somebody stopped talking. Requires a bundle with a
-      turn-detection model.
-
-  AsrMaxOpenSegmentMs:
-    Type: Number
-    Default: 20000
-    MinValue: 0
-    MaxValue: 60000
-    Description: >-
-      Close a row after this much unbroken speech even when no speaker change is
-      found, so a monologue does not sit in the live transcript as one unlabelled
-      block. 0 follows the engine's own utterance boundaries.
-
-  AsrMaxSpeakers:
-    Type: Number
-    Default: 0
-    MinValue: 0
-    MaxValue: 30
-    Description: >-
-      Optional cap on distinct speakers per audio channel. 0 (the default)
-      discovers as many as appear, which is the honest setting: how many people
-      share a microphone or a browser tab is not knowable in advance. A cap is a
-      safety net, not a fix for over-splitting — set it only when the meeting size
-      is genuinely known, the way the Upload Audio page asks for it.
+      Transcription engine for Stream Audio and the Audio Capture apps. Keep
+      AmazonTranscribe unless you are evaluating the EXPERIMENTAL MicrovmAsr engine,
+      which is not production ready. MicrovmAsr is English only, needs a region with
+      AWS Lambda MicroVMs (not GovCloud), and meetings using it get no content
+      redaction, custom vocabulary, custom language model or language ID. Deploying
+      it changes nothing on its own - an admin must enable it per meeting or make it
+      the default on the ASR Config page. See docs/microvm-asr.md.
 
   ModelValidation:
     Type: String
@@ -940,14 +853,9 @@ Metadata:
           - CustomVocabularyName
           - CustomLanguageModelName
       - Label:
-          default: On-demand ASR and Diarization (MicroVM, alternative to Amazon Transcribe)
+          default: EXPERIMENTAL - On-demand ASR and Diarization (MicroVM, alternative to Amazon Transcribe)
         Parameters:
           - TranscriptionEngine
-          - AsrModelBundle
-          - AsrMaxMeetingSeconds
-          - AsrMaxSpeakers
-          - AsrLiveTurnCut
-          - AsrMaxOpenSegmentMs
       - Label:
           default: Transcript Event Processing Configuration
         Parameters:
@@ -1073,17 +981,7 @@ Metadata:
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
       TranscriptionEngine:
-        default: Streaming Transcription Engine
-      AsrModelBundle:
-        default: ASR Model Bundle (pre-vetted pairing)
-      AsrMaxMeetingSeconds:
-        default: ASR MicroVM Maximum Lifetime (seconds)
-      AsrMaxSpeakers:
-        default: ASR Maximum Speakers Per Channel
-      AsrLiveTurnCut:
-        default: ASR Split Rows On Speaker Change (not just on pauses)
-      AsrMaxOpenSegmentMs:
-        default: ASR Maximum Open Row Duration (ms)
+        default: Streaming Transcription Engine (EXPERIMENTAL if not AmazonTranscribe)
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
@@ -1157,6 +1055,40 @@ Rules:
           BedrockKnowledgeBaseId is required when MeetingAssistService
           is 'STRANDS_BEDROCK_WITH_KB (Use Existing)'
 
+Mappings:
+  # Tuning defaults for the EXPERIMENTAL MicroVM ASR engine.
+  #
+  # These were five top-level CloudFormation parameters (AsrModelBundle,
+  # AsrMaxMeetingSeconds, AsrMaxSpeakers, AsrLiveTurnCut, AsrMaxOpenSegmentMs).
+  # They are fixed here instead of asked at deploy time because the engine is not
+  # production ready: exposing its operating point invites tuning a feature whose
+  # defaults are still moving, and it crowded the Parameters page with five
+  # questions almost nobody deploying LMA can answer.
+  #
+  # The values below are exactly what those parameters defaulted to, so a stack
+  # that accepted the defaults is unchanged. A stack that had OVERRIDDEN one is
+  # not: the override disappears with the parameter and this value takes over. In
+  # particular an existing stack on a non-default ModelBundle reverts to
+  # nemotron-titanet-small on the next update and rebuilds the image (~20 min).
+  # Edit the mapping before updating if you need to keep a different bundle.
+  #
+  # Nothing is lost by fixing them. MaxSpeakers, LiveTurnCut and MaxOpenSegmentMs
+  # are all overridable at runtime from the ASR Config page (maxSpeakers,
+  # liveTurnCut, maxOpenSegmentMs), which takes effect on the next meeting with no
+  # stack update. The other two genuinely need a deploy either way: ModelBundle
+  # rebuilds the MicroVM image (~20 min) and MaxMeetingSeconds is a MicroVM
+  # lifetime ceiling.
+  #
+  # ModelBundle must name a bundle in lma-asr-microvm-stack/source/catalog.json;
+  # scripts/sync_bundles.py --check enforces that.
+  AsrDefaults:
+    Engine:
+      ModelBundle: nemotron-titanet-small
+      MaxMeetingSeconds: "14400"
+      MaxSpeakers: "0"
+      LiveTurnCut: "true"
+      MaxOpenSegmentMs: "20000"
+
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
@@ -1190,7 +1122,10 @@ Conditions:
   ShouldDeployMicrovmAsr: !Equals [!Ref TranscriptionEngine, "MicrovmAsr"]
   ShouldEnableAsrDiarization: !And
     - !Condition ShouldDeployMicrovmAsr
-    - !Not [!Equals [!Ref AsrModelBundle, "transcription-only"]]
+    - !Not
+      - !Equals
+        - !FindInMap [AsrDefaults, Engine, ModelBundle]
+        - "transcription-only"
 
 Resources:
   ##########################################################################
@@ -2712,9 +2647,9 @@ Resources:
         LambdaArtifactBucket: <ARTIFACT_BUCKET_NAME_TOKEN>
         AsrLauncherS3Key: <ASR_MICROVM_LAUNCHER_S3_KEY_TOKEN>
         AsrImageSourceS3Key: <ASR_MICROVM_IMAGE_SOURCE_S3_KEY_TOKEN>
-        AsrModelBundle: !Ref AsrModelBundle
-        AsrMaxMeetingSeconds: !Ref AsrMaxMeetingSeconds
-        AsrMaxSpeakers: !Ref AsrMaxSpeakers
+        AsrModelBundle: !FindInMap [AsrDefaults, Engine, ModelBundle]
+        AsrMaxMeetingSeconds: !FindInMap [AsrDefaults, Engine, MaxMeetingSeconds]
+        AsrMaxSpeakers: !FindInMap [AsrDefaults, Engine, MaxSpeakers]
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
@@ -2774,9 +2709,9 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
           - ""
-        AsrMaxSpeakers: !Ref AsrMaxSpeakers
-        AsrLiveTurnCut: !Ref AsrLiveTurnCut
-        AsrMaxOpenSegmentMs: !Ref AsrMaxOpenSegmentMs
+        AsrMaxSpeakers: !FindInMap [AsrDefaults, Engine, MaxSpeakers]
+        AsrLiveTurnCut: !FindInMap [AsrDefaults, Engine, LiveTurnCut]
+        AsrMaxOpenSegmentMs: !FindInMap [AsrDefaults, Engine, MaxOpenSegmentMs]
         # The calibrated operating point for the deployed bundle, resolved from
         # catalog.json by the ASR stack. Previously a top-level parameter defaulting
         # to 0.2 while the catalog's measured value for the default embedder was

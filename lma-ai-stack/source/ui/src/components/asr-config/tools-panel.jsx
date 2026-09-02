@@ -4,16 +4,25 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React from 'react';
-import { HelpPanel, Icon } from '@cloudscape-design/components';
+import { Badge, HelpPanel, Icon } from '@cloudscape-design/components';
 
 const DOCS_BASE = 'https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant';
 
-const header = <h2>ASR Configuration</h2>;
+const header = (
+  <h2>
+    ASR Configuration <Badge color="severity-medium">Experimental</Badge>
+  </h2>
+);
 const content = (
   <>
     <p>
+      <b>This engine is experimental and not production ready.</b> Its transcript quality is below Amazon
+      Transcribe&apos;s, speaker labels require a calibrated operating point, and defaults may change between releases.
+      Amazon Transcribe remains the recommended engine for production meetings.
+    </p>
+    <p>
       Tune the on-demand ASR &amp; speaker diarization engine without redeploying. Every field is an optional override
-      on the CloudFormation parameters, read at the start of each meeting.
+      on the deployment defaults, read at the start of each meeting.
     </p>
     <h3>Tuning order when one person appears as several speakers</h3>
     <ol>

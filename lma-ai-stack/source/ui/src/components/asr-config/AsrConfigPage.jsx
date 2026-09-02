@@ -22,6 +22,7 @@ import {
   StatusIndicator,
   KeyValuePairs,
   FileUpload,
+  Badge,
 } from '@cloudscape-design/components';
 
 import useSettingsContext from '../../contexts/settings';
@@ -220,10 +221,17 @@ const AsrConfigPage = () => {
 
   if (!engineDeployed) {
     return (
-      <Container header={<Header variant="h1">ASR Configuration</Header>}>
+      <Container
+        header={
+          <Header variant="h1" info={<Badge color="severity-medium">Experimental</Badge>}>
+            ASR Configuration
+          </Header>
+        }
+      >
         <Alert type="info" header="On-demand ASR engine is not deployed">
-          These settings apply to the on-demand ASR &amp; diarization engine. Deploy it by setting{' '}
-          <b>TranscriptionEngine</b> to <b>MicrovmAsr</b> on the main stack.
+          These settings apply to the on-demand ASR &amp; diarization engine, which is{' '}
+          <b>experimental and not production ready</b> — Amazon Transcribe remains the recommended engine. To evaluate
+          it, set <b>TranscriptionEngine</b> to <b>MicrovmAsr</b> on the main stack.
         </Alert>
       </Container>
     );
@@ -254,9 +262,10 @@ const AsrConfigPage = () => {
         header={
           <Header
             variant="h1"
+            info={<Badge color="severity-medium">Experimental</Badge>}
             description={
               'Runtime settings for the on-demand ASR & speaker diarization engine. Every field is ' +
-              'optional: leave it blank to use the CloudFormation parameter. Changes take effect on ' +
+              'optional: leave it blank to use the deployment default. Changes take effect on ' +
               'the next meeting that starts — no stack update and no image rebuild.'
             }
             actions={
@@ -278,6 +287,12 @@ const AsrConfigPage = () => {
           <Spinner />
         ) : (
           <SpaceBetween size="l">
+            <Alert type="warning" header="Experimental — not production ready">
+              The on-demand ASR &amp; diarization engine is still under development. Transcript quality is below Amazon
+              Transcribe&apos;s, speaker labels depend on a calibrated operating point, and defaults may change between
+              releases. Amazon Transcribe remains the recommended engine for production meetings.
+            </Alert>
+
             {!diarizationAvailable && (
               <Alert type="info" header="This deployment transcribes but does not diarize">
                 The deployed bundle carries no speaker-embedding model, so the speaker settings below have no effect and

@@ -3,6 +3,9 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+import React from 'react';
+import { Badge } from '@cloudscape-design/components';
+
 import {
   CALLS_PATH,
   MEETINGS_QUERY_PATH,
@@ -87,6 +90,13 @@ export const generateNavigationItems = (settings, isAdmin) => {
           type: 'link',
           text: 'ASR Config',
           href: `#${ASR_CONFIG_PATH}`,
+          // The on-demand MicroVM ASR engine is not production ready. Flagged here
+          // as well as on the page itself so the label is visible before anyone
+          // navigates in. JSX inside this .js file is handled by the jsxInJsPlugin
+          // in vite.config.js; the React import above is for eslint's
+          // react/react-in-jsx-scope, which this config still enforces even though
+          // the build uses the automatic runtime.
+          info: <Badge color="severity-medium">Experimental</Badge>,
         },
         {
           type: 'link',

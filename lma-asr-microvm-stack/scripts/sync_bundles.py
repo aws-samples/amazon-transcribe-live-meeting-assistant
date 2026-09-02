@@ -4,12 +4,22 @@
 # See the LICENSE file in the project root for full license information.
 """Regenerate the CloudFormation bundle lists from ``source/catalog.json``.
 
-Adding a bundle otherwise means hand-editing the same two facts into two templates:
-the ``AsrModelBundle`` allowed values (in both ``lma-main.yaml`` and this stack's
-``template.yaml``) and the ``BundleMemory`` mapping. Both duplications are already
-guarded by tests, but a guard that fails after the fact is worse than not having to
-edit by hand at all -- an earlier character-offset edit to these blocks silently
-deleted four unrelated parameters, and only cfn-lint caught it.
+Adding a bundle otherwise means hand-editing the same two facts into this stack's
+``template.yaml``: the ``AsrModelBundle`` allowed values and the ``BundleMemory``
+mapping. Both duplications are already guarded by tests, but a guard that fails
+after the fact is worse than not having to edit by hand at all -- an earlier
+character-offset edit to these blocks silently deleted four unrelated parameters,
+and only cfn-lint caught it.
+
+``lma-main.yaml`` used to be rewritten here too, because it declared its own
+``AsrModelBundle`` parameter. It no longer does: the MicroVM ASR tuning parameters
+were withdrawn from the deploy-time surface while the engine is experimental, and
+the chosen bundle now lives in that template's ``AsrDefaults`` mapping. There is no
+list to generate there any more -- one value -- but it is still a hand-edited copy
+of a catalog id, so it is *validated* instead (see ``check_main_template``). Dropping
+the file from ``TEMPLATES`` without that check would have quietly lost the only
+thing stopping ``lma-main.yaml`` from naming a bundle that does not exist, which
+fails 20 minutes into a deploy rather than at commit time.
 
 The memory duplication cannot be removed: ``MinimumMemoryInMiB`` needs a
 CloudFormation-typed number and a Mapping cannot be keyed on a value a custom
@@ -35,10 +45,15 @@ from pathlib import Path
 STACK_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = STACK_DIR.parent
 CATALOG = STACK_DIR / "source" / "catalog.json"
-TEMPLATES = (REPO_ROOT / "lma-main.yaml", STACK_DIR / "template.yaml")
+TEMPLATES = (STACK_DIR / "template.yaml",)
+MAIN_TEMPLATE = REPO_ROOT / "lma-main.yaml"
 
 PARAM = "AsrModelBundle"
 MAPPING = "BundleMemory"
+
+# The single bundle id in lma-main.yaml's AsrDefaults mapping, e.g.
+#       ModelBundle: nemotron-titanet-small
+MAIN_BUNDLE_RE = re.compile(r"^ {6}ModelBundle: *(\S+) *$", re.MULTILINE)
 
 
 class SyncError(RuntimeError):
@@ -117,8 +132,33 @@ def rewrite_mapping(lines: list[str], memory: dict[str, int], ids: list[str]) ->
     return out
 
 
+def check_main_template(ids: list[str]) -> None:
+    """Assert lma-main.yaml's AsrDefaults mapping names a bundle the catalog ships.
+
+    Nothing is generated there -- the mapping holds one id, not a list -- but it is
+    still a hand-maintained copy of a catalog value, and a typo or a renamed bundle
+    would only surface when the ASR stack rejected the parameter partway through a
+    deploy.
+    """
+    text = MAIN_TEMPLATE.read_text()
+    found = MAIN_BUNDLE_RE.findall(text)
+    if not found:
+        raise SyncError(
+            f"{MAIN_TEMPLATE.name}: no 'ModelBundle:' entry found in the AsrDefaults "
+            "mapping (was the mapping renamed or reindented?)"
+        )
+    if len(found) > 1:
+        raise SyncError(f"{MAIN_TEMPLATE.name}: expected one ModelBundle entry, found {found}")
+    if found[0] not in ids:
+        raise SyncError(
+            f"{MAIN_TEMPLATE.name}: AsrDefaults ModelBundle is {found[0]!r}, which is not "
+            f"a bundle in catalog.json ({', '.join(ids)})"
+        )
+
+
 def sync(check: bool) -> int:
     ids, memory = bundles()
+    check_main_template(ids)
     stale: list[Path] = []
 
     for path in TEMPLATES:
