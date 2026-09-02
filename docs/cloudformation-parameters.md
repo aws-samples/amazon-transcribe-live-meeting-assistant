@@ -11,6 +11,7 @@ title: "CloudFormation Parameters Reference"
 - [Meeting Assistant](#meeting-assistant)
 - [Knowledge Base](#knowledge-base)
 - [Transcription](#transcription)
+- [On-demand ASR and Diarization (MicroVM) — EXPERIMENTAL](#on-demand-asr-and-diarization-microvm--experimental)
 - [End-of-Call Summary](#end-of-call-summary)
 - [Virtual Participant](#virtual-participant)
 - [Voice Assistant](#voice-assistant)
@@ -66,7 +67,12 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | ContentRedactionLanguages | Languages that support content redaction | en-US | en-US, en-AU, en-GB, es-US |
 | ShowSpeakerLabel | Default for per-channel speaker partitioning (diarization) on WebSocket streaming sessions -- the Stream Audio tab and the Desktop Capture App. Applies to both channels when used. Clients that send their own per-channel choice take precedence, so leave this false unless you want it on for clients that do not. See [Transcription & Translation](transcription-and-translation.md#speaker-identification-within-a-channel). | false | true, false |
 
-## On-demand ASR and Diarization (MicroVM)
+## On-demand ASR and Diarization (MicroVM) — EXPERIMENTAL
+
+> **EXPERIMENTAL — not production ready.** Transcript quality is below Amazon
+> Transcribe's, speaker labels depend on a calibrated operating point, and defaults
+> may change between releases. Amazon Transcribe remains the recommended engine for
+> production meetings.
 
 Alternative streaming engine to Amazon Transcribe, giving per-voice speaker labels.
 Off by default. A meeting transcribed by this engine does not go through Amazon
@@ -77,9 +83,21 @@ Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe unless a client opts in | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
-| AsrModelBundle | A pre-vetted pairing of ASR model, speaker embedder and turn-detection model, **together with the diarization operating point measured for that combination** | nemotron-titanet-small | nemotron-titanet-small, permissive-zipformer-campplus, transcription-only |
-| AsrMaxMeetingSeconds | Hard lifetime ceiling per MicroVM and the cost backstop if a transcriber task dies without releasing it | 14400 | 600–28800 |
-| AsrMaxSpeakers | Cap on distinct speakers per audio channel (0 discovers as many as appear) | 0 | 0–30 |
+
+`TranscriptionEngine` is the only deploy-time question for this engine. Its tuning
+knobs — the model bundle, MicroVM lifetime ceiling, speaker cap, turn-cut behaviour
+and maximum open row duration — used to be parameters (`AsrModelBundle`,
+`AsrMaxMeetingSeconds`, `AsrMaxSpeakers`, `AsrLiveTurnCut`, `AsrMaxOpenSegmentMs`) and
+are now fixed in the `AsrDefaults` mapping in `lma-main.yaml`, at the same values the
+parameters defaulted to. They were withdrawn because the engine is experimental and
+its defaults are still moving, so asking five unanswerable questions at deploy time
+was worse than picking known-good values.
+
+Most of them were never deploy-time decisions anyway: **maximum speakers per
+channel**, **live turn cut** and **maximum open row duration** are all overridable at
+runtime from the ASR Config page in the LMA UI, taking effect on the next meeting with
+no stack update. Only the model bundle and the lifetime ceiling need a redeploy — edit
+the mapping. Changing the bundle rebuilds the MicroVM image (~20 minutes).
 
 ### Why a bundle instead of three model parameters
 

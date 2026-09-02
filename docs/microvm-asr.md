@@ -7,10 +7,18 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 
 # On-demand ASR & Speaker Diarization (MicroVM)
 
-> **Status:** Experimental, opt-in, and off by default. Deploying it changes nothing
-> on its own: meetings still use Amazon Transcribe unless a client asks for
-> diarization. Accuracy (WER) and diarization error rate have not yet been
-> benchmarked — see [What is not yet measured](#what-is-not-yet-measured).
+> **Status: EXPERIMENTAL — not production ready.** Opt-in and off by default.
+> **Amazon Transcribe remains the recommended engine for production meetings**;
+> transcript quality here is below it, speaker labels depend on a calibrated operating
+> point, and defaults may change between releases. Deploying it changes nothing on its
+> own: meetings still use Amazon Transcribe unless a client asks for diarization.
+> Accuracy (WER) and diarization error rate have not yet been benchmarked — see
+> [What is not yet measured](#what-is-not-yet-measured).
+>
+> Because it is experimental, its tuning knobs are deliberately **not** exposed as
+> CloudFormation parameters. `TranscriptionEngine` is the only deploy-time question;
+> everything else is either fixed in the `AsrDefaults` mapping in `lma-main.yaml` or
+> adjustable at runtime from the ASR Config page.
 
 ## Table of Contents
 
@@ -95,14 +103,28 @@ default) and warms it. Expect several extra minutes on the first create and on a
 later change to a model parameter. Build logs land in
 `/aws/lambda-microvms/<stack-name>-asr`.
 
-Relevant parameters (all under *On-demand ASR and Diarization* in the console):
+There is one CloudFormation parameter, under *EXPERIMENTAL - On-demand ASR and
+Diarization* in the console:
 
 | Parameter | Default | Purpose |
 |---|---|---|
 | `TranscriptionEngine` | `AmazonTranscribe` | `MicrovmAsr` deploys this engine |
-| `AsrModelBundle` | `nemotron-titanet-small` | A pre-vetted pairing of all three models plus its calibrated operating point |
-| `AsrMaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
-| `AsrMaxSpeakers` | `0` | Optional cap per channel; 0 discovers as many as appear |
+
+Everything else lives in the `AsrDefaults` mapping in `lma-main.yaml`, at the values
+the former parameters defaulted to:
+
+| Mapping key | Value | Purpose | Also settable at runtime? |
+|---|---|---|---|
+| `ModelBundle` | `nemotron-titanet-small` | A pre-vetted pairing of all three models plus its calibrated operating point | No — rebuilds the image (~20 min) |
+| `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop | No |
+| `MaxSpeakers` | `0` | Optional cap per channel; 0 discovers as many as appear | Yes — ASR Config page |
+| `LiveTurnCut` | `true` | Close a row on a confirmed speaker change, not just a pause | Yes — ASR Config page |
+| `MaxOpenSegmentMs` | `20000` | Close a row after this much unbroken speech regardless | Yes — ASR Config page |
+
+To change one of the first two, edit the mapping and update the stack. The rest are
+better changed on the ASR Config page, which takes effect on the next meeting with no
+stack update. `scripts/sync_bundles.py --check` verifies that `ModelBundle` names a
+bundle the catalog actually ships.
 
 ### Model bundles
 
@@ -150,8 +172,11 @@ Edit `source/catalog.json`, then run:
 python3 lma-asr-microvm-stack/scripts/sync_bundles.py
 ```
 
-That regenerates the `AsrModelBundle` allowed values in **both** `lma-main.yaml` and this
-stack's `template.yaml`, plus the `BundleMemory` mapping. The memory duplication cannot be
+That regenerates the `AsrModelBundle` allowed values in this stack's `template.yaml`,
+plus the `BundleMemory` mapping, and validates that the `ModelBundle` value in
+`lma-main.yaml`'s `AsrDefaults` mapping names a bundle the catalog ships. (`lma-main.yaml`
+used to be rewritten here too, when it had its own `AsrModelBundle` parameter; it now holds
+a single value, so it is checked rather than generated.) The memory duplication cannot be
 removed — `MinimumMemoryInMiB` needs a CloudFormation-typed number and a Mapping cannot be
 keyed on a value a custom resource resolved — so it is generated instead. `--check` reports
 drift without writing, and unit tests assert the same thing, so a hand-edit that updates one
@@ -238,11 +263,12 @@ transcript.
 ## Tuning it without a redeploy
 
 The diarization operating point is empirical and specific to the speaker model, so
-it lives in runtime configuration rather than only in stack parameters. **Configuration
+it lives in runtime configuration rather than in stack parameters. **Configuration
 ▸ ASR Config** (admin only) edits it, and the next meeting to start picks it up — no
 stack update, no image rebuild.
 
-Every field is an override: leave it blank and the CloudFormation parameter applies.
+Every field is an override: leave it blank and the deployment default applies — the
+bundle's own calibrated value, or the `AsrDefaults` mapping entry where there is one.
 There is no default record to keep in sync.
 
 | Field | Effect |
@@ -426,7 +452,8 @@ takes effect on the next meeting, with no rebuild.
 
 The split above is retroactive: it happens when the utterance closes, so until then a
 live row holds both speakers. With **Close a row on a confirmed speaker change**
-(`AsrLiveTurnCut`, on by default) the speaker change becomes the *primary* boundary and
+(`LiveTurnCut` in the `AsrDefaults` mapping, on by default, and `liveTurnCut` on the ASR
+Config page) the speaker change becomes the *primary* boundary and
 endpointing silence is only a backstop — which is the right way round, because a pause
 is not what separates people, taking turns is.
 
@@ -567,7 +594,8 @@ a local measurement rather than trusting the catalog for an unknown embedder.
   with video recording): inference happens in the MicroVM, not in the task.
 - One MicroVM serves both audio channels of a meeting. The default 8 GiB baseline
   gives 4 vCPU, which both channels share.
-- `AsrMaxMeetingSeconds` (default 4 h, service maximum 8 h) bounds what a single
+- `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
+  bounds what a single
   MicroVM can cost. The transcriber terminates the MicroVM on meeting end and on
   SIGTERM (deploys, scale-in); the ceiling is the backstop if the task dies
   without doing either.
@@ -741,7 +769,8 @@ If a single person still fragments: run
 [Calibrate](#calibrating-the-operating-point) against one of your own recorded
 meetings — it performs exactly the measurement above, automatically. Failing that,
 lower the threshold on the ASR Config page, raise the minimum utterance length, and only then
-consider `AsrMaxSpeakers` — a cap bounds the symptom but cannot fix a mis-set
+consider the maximum speakers per channel on the ASR Config page — a cap bounds the
+symptom but cannot fix a mis-set
 operating point. Sample sizes behind the numbers above are small (11 utterances, one
 voice pair), which is the reason calibration exists rather than a bigger table of
 defaults.
@@ -764,7 +793,8 @@ channel separation on its own — the two channels have to have come from two se
 sources.
 
 **Too many speakers detected on genuinely multi-speaker audio.** Lower
-`AsrSpeakerThreshold`, or set `AsrMaxSpeakers` to the room size.
+the speaker similarity threshold, or set the maximum speakers per channel to the room
+size — both on the ASR Config page.
 
 ## Licences
 
