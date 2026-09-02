@@ -16,9 +16,9 @@
   },
   "dependencies": {
     "@astrojs/markdown-remark": "^7.2.4",
-    "@astrojs/starlight": "^0.41.7",
-    "astro": "^7.2.4",
+    "@astrojs/starlight": "^0.41.10",
+    "astro": "^7.2.9",
     "sharp": "^0.35.3",
-    "zod": "^4.4.3"
+    "zod": "^4.5.4"
   }
 }
