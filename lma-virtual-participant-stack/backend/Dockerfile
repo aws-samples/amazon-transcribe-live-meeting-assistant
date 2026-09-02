@@ -1,6 +1,6 @@
 # checkov:skip=CKV_DOCKER_2: "ECS target-group health check on 5901"
 
-# CloakBrowser ships a glibc-only patched Chromium binary (pinned 0.3.29);
+# CloakBrowser ships a glibc-only patched Chromium binary (see the pin below);
 # ECR Public mirror avoids Docker Hub anonymous rate limits in CodeBuild.
 FROM public.ecr.aws/docker/library/python:3.12-slim
 
@@ -39,12 +39,29 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
-# Pinned to match the npm cloakbrowser dep (see package.json). 0.3.31 brings the
-# 58-patch fingerprint binary (Chrome 146 profiles) and a humanize iframe
-# pointer-events fix; deps/peerDeps/engines are unchanged from 0.3.29 (no
-# breaking changes verified against the changelog).
-ARG CLOAKBROWSER_VERSION=0.3.31
-RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_VERSION}" \
+# This pip package is BUILD-TIME ONLY: it downloads the patched Chromium into
+# CLOAKBROWSER_CACHE_DIR. Nothing at runtime imports it — the VP drives the
+# browser through the *npm* `cloakbrowser` client (src/index.ts), so this pin
+# and package.json must stay on the same version line to keep the wrapper that
+# lays the binary down in step with the client that launches it.
+#
+# It had drifted badly: 0.3.31 here vs npm 0.5.x in package.json. Realigned to
+# 0.5.10. `cloakbrowser info` reports the *identical* binary on both
+# (chromium-146.0.7680.177.5), so the patched browser — and therefore the
+# fingerprint surface — is unchanged by this bump; only the downloader moved.
+# The 0.5.x CLI keeps the `install`/`info` subcommands used below, and its new
+# free-tier note ("more than one concurrent session" needs a key) is satisfied
+# by design: one container per meeting runs exactly one browser session.
+#
+# The ARG is deliberately NOT named CLOAKBROWSER_VERSION. Docker exposes ARGs as
+# environment variables to RUN, and cloakbrowser 0.5.x reads $CLOAKBROWSER_VERSION
+# as a *Chromium binary* version pin — so the wrapper version leaked in as a
+# browser pin and `install` died with "Invalid browser version pin. Use a full
+# numeric Chromium version, e.g. '148.0.7778.215.2'." 0.3.31 ignored the
+# variable, which is why the old pin never tripped over it. Verified by docker
+# build; do not rename this back.
+ARG CLOAKBROWSER_PIP_VERSION=0.5.10
+RUN pip install --no-cache-dir "cloakbrowser[geoip]==${CLOAKBROWSER_PIP_VERSION}" \
     && python -m cloakbrowser install \
     && python -m cloakbrowser info
 
