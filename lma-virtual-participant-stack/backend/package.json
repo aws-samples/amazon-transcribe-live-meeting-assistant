@@ -39,7 +39,7 @@
     "aws-amplify": "^6.20.0",
     "aws-sigv4-fetch": "^5.0.1",
     "axios": "^1.19.0",
-    "cloakbrowser": "0.5.8",
+    "cloakbrowser": "0.5.10",
     "graphql": "^17.0.2",
     "graphql-tag": "^2.12.7",
     "jsonwebtoken": "^9.0.3",
@@ -63,11 +63,12 @@
     "typescript": "^5.9.3"
   },
   "overrides": {
-    "fast-xml-parser@4": "^4.5.6",
-    "jws": "^3.2.3",
-    "hono": "^4.12.25",
-    "ws": "^8.21.0",
     "ajv@8": "^8.18.0",
-    "form-data@4": "^4.0.6"
+    "fast-xml-parser@4": "^4.5.6",
+    "form-data@4": "^4.0.6",
+    "hono": "^4.12.25",
+    "jws": "^3.2.3",
+    "nanoid@3": "^3.3.18",
+    "ws": "^8.21.0"
   }
 }
