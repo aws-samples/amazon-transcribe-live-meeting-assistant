@@ -48,7 +48,7 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from uuid import uuid4
 
 from asr_server.recognizer import (
@@ -121,7 +121,7 @@ def _default_recognizer_factory() -> Recognizer:
 # --- State ------------------------------------------------------------------
 
 
-class Phase(str, Enum):
+class Phase(StrEnum):
     """The MicroVM lifecycle phase this process is in.
 
     ``CREATED`` is the pre-``/run`` state a fresh snapshot resumes into — note
