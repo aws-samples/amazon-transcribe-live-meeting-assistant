@@ -1,0 +1,1056 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-vdxcvpsm"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>On-demand ASR & Speaker Diarization (MicroVM) | LMA</title><link rel="canonical" href="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/microvm-asr/"/><link rel="sitemap" href="/amazon-transcribe-live-meeting-assistant/sitemap-index.xml"/><link rel="shortcut icon" href="/amazon-transcribe-live-meeting-assistant/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v7.2.9"/><meta name="generator" content="Starlight v0.41.10"/><meta property="og:title" content="On-demand ASR &amp; Speaker Diarization (MicroVM)"/><meta property="og:type" content="article"/><meta property="og:url" content="https://aws-samples.github.io/amazon-transcribe-live-meeting-assistant/microvm-asr/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><meta property="og:site_name" content="LMA"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Live Meeting Assistant — Real-time meeting transcription, AI-powered meeting assistance, and virtual meeting participation on AWS"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg><svg aria-hidden="true" class="dark astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg><svg aria-hidden="true" class="auto astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg></template><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/print.ehPL0gv-.css" media="print"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/common.DUFGQSCB.css"><style>@layer starlight.components{.card:where(.astro-zts4jgjd){--sl-card-border:var(--sl-color-purple);--sl-card-bg:var(--sl-color-purple-low);border:1px solid var(--sl-color-gray-5);background-color:var(--sl-color-black);flex-direction:column;gap:clamp(.5rem,.125rem + 1vw,1rem);padding:clamp(1rem,.125rem + 3vw,2.5rem)}.card:where(.astro-zts4jgjd):nth-child(4n+1){--sl-card-border:var(--sl-color-orange);--sl-card-bg:var(--sl-color-orange-low)}.card:where(.astro-zts4jgjd):nth-child(4n+3){--sl-card-border:var(--sl-color-green);--sl-card-bg:var(--sl-color-green-low)}.card:where(.astro-zts4jgjd):nth-child(4n+4){--sl-card-border:var(--sl-color-red);--sl-card-bg:var(--sl-color-red-low)}.card:where(.astro-zts4jgjd):nth-child(4n+5){--sl-card-border:var(--sl-color-blue);--sl-card-bg:var(--sl-color-blue-low)}.title:where(.astro-zts4jgjd){font-weight:600;font-size:var(--sl-text-h4);color:var(--sl-color-white);line-height:var(--sl-line-height-headings);align-items:center;gap:1rem}.card:where(.astro-zts4jgjd) .icon:where(.astro-zts4jgjd){border:1px solid var(--sl-card-border);background-color:var(--sl-card-bg);border-radius:.25rem;flex-shrink:0;padding:.2em}.card:where(.astro-zts4jgjd) .body:where(.astro-zts4jgjd){font-size:clamp(var(--sl-text-sm), calc(.5rem + 1vw), var(--sl-text-body));margin:0}.card-grid:where(.astro-lmor3ela){grid-template-columns:100%;gap:1rem;display:grid}.card-grid:where(.astro-lmor3ela)>*{margin-top:0!important}@media (width>=50rem){.card-grid:where(.astro-lmor3ela){grid-template-columns:1fr 1fr;gap:1.5rem}.stagger:where(.astro-lmor3ela){--stagger-height:5rem;padding-bottom:var(--stagger-height)}.stagger:where(.astro-lmor3ela)>:nth-child(2n){transform:translateY(var(--stagger-height))}}.sl-link-card:where(.astro-vodiqeol){border:1px solid var(--sl-color-gray-5);box-shadow:var(--sl-shadow-sm);border-radius:.5rem;grid-template-columns:1fr auto;gap:.5rem;padding:1rem;display:grid;position:relative}a:where(.astro-vodiqeol){line-height:var(--sl-line-height-headings);text-decoration:none}a:where(.astro-vodiqeol):before{content:"";position:absolute;inset:0}.stack:where(.astro-vodiqeol){flex-direction:column;gap:.5rem}.title:where(.astro-vodiqeol){color:var(--sl-color-white);font-weight:600;font-size:var(--sl-text-lg)}.description:where(.astro-vodiqeol){color:var(--sl-color-gray-3);line-height:1.5}.icon:where(.astro-vodiqeol){color:var(--sl-color-gray-3)}.sl-link-card:where(.astro-vodiqeol):hover{background:var(--sl-color-gray-7,var(--sl-color-gray-6));border-color:var(--sl-color-gray-2)}.sl-link-card:where(.astro-vodiqeol):hover .icon:where(.astro-vodiqeol){color:var(--sl-color-white)}}
+@layer starlight.components{svg:where(.astro-n5k4ipy7){color:var(--sl-icon-color);font-size:var(--sl-icon-size,1em);width:1em;height:1em}}
+</style><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/page.LAbJoB63.js"></script></head><body class="astro-vdxcvpsm"><a class="sl-skip-link astro-vxeigawq" href="#_top">Skip to content</a><div class="page sl-flex astro-gqpr5s5a"><header class="header astro-gqpr5s5a"><div class="header astro-nczgtkxc"><div class="title-wrapper sl-flex astro-nczgtkxc"><a href="/amazon-transcribe-live-meeting-assistant/" class="site-title sl-flex astro-clw6ags5"><img class="light:sl-hidden print:hidden astro-clw6ags5" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-dark.DjwyAsdJ.svg" width="120" height="40"><img class="dark:sl-hidden print:block astro-clw6ags5" alt src="/amazon-transcribe-live-meeting-assistant/_astro/logo-light.Therjg_H.svg" width="120" height="40"><span class="astro-clw6ags5" translate="no">LMA</span></a></div><div class="sl-flex print:hidden astro-nczgtkxc"><site-search class="astro-nczgtkxc astro-r5ar4xm7" data-translations="{&quot;placeholder&quot;:&quot;Search&quot;}"><button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-r5ar4xm7"><svg aria-hidden="true" class="astro-r5ar4xm7 astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg><span class="sl-hidden md:sl-block astro-r5ar4xm7" aria-hidden="true">Search</span><kbd class="sl-hidden md:sl-flex astro-r5ar4xm7" style="display: none;"><kbd class="astro-r5ar4xm7">Ctrl</kbd><kbd class="astro-r5ar4xm7">K</kbd></kbd></button><dialog style="padding:0" aria-label="Search" class="astro-r5ar4xm7"><div class="dialog-frame sl-flex astro-r5ar4xm7"><button data-close-modal class="sl-flex md:sl-hidden astro-r5ar4xm7">Cancel</button><div class="search-container astro-r5ar4xm7"><div id="starlight__search" class="astro-r5ar4xm7"></div></div></div></dialog></site-search><script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/Search.astro_astro_type_script_index_0_lang.CyJ7X4h2.js"></script></div><div class="sl-hidden md:sl-flex print:hidden right-group astro-nczgtkxc"><div class="sl-flex social-icons astro-nczgtkxc"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">GitHub</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-r2p65idu"><span class="sr-only astro-r2p65idu">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-r2p65idu"><option value="dark" class="astro-r2p65idu">Dark</option><option value="light" class="astro-r2p65idu">Light</option><option value="auto" selected class="astro-r2p65idu">Auto</option></select><svg aria-hidden="true" class="icon caret astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script><script type="module">var e=`starlight-theme`,t=e=>e===`auto`||e===`dark`||e===`light`?e:`auto`,n=()=>t(typeof localStorage<`u`&&localStorage.getItem(e));function r(t){typeof localStorage<`u`&&localStorage.setItem(e,t===`light`||t===`dark`?t:``)}var i=()=>matchMedia(`(prefers-color-scheme: light)`).matches?`light`:`dark`;function a(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e===`auto`?i():e,r(e)}matchMedia(`(prefers-color-scheme: light)`).addEventListener(`change`,()=>{n()===`auto`&&a(`auto`)});var o=class extends HTMLElement{constructor(){super(),a(n()),this.querySelector(`select`)?.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&a(t(e.currentTarget.value))})}};customElements.define(`starlight-theme-select`,o);</script><script type="module">var e=class extends HTMLElement{constructor(){super();let e=this.querySelector(`select`);e&&(e.addEventListener(`change`,e=>{e.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=e.currentTarget.value)}),window.addEventListener(`pageshow`,t=>{if(!t.persisted)return;let n=e.querySelector(`option[selected]`)?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}};customElements.define(`starlight-lang-select`,e);</script></div></div></header><nav class="sidebar print:hidden astro-gqpr5s5a" aria-label="Main"><starlight-menu-button class="print:hidden astro-vvx7mffu"><button aria-expanded="false" aria-label="Menu" aria-controls="starlight__sidebar" class="sl-flex md:sl-hidden astro-vvx7mffu"><svg aria-hidden="true" class="open-menu astro-vvx7mffu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg><svg aria-hidden="true" class="close-menu astro-vvx7mffu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="m13.41 12 6.3-6.29a1.004 1.004 0 1 0-1.42-1.42L12 10.59l-6.29-6.3a1.004 1.004 0 0 0-1.42 1.42l6.3 6.29-6.3 6.29a1 1 0 0 0 0 1.42.998.998 0 0 0 1.42 0l6.29-6.3 6.29 6.3a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.42L13.41 12Z"/></svg></button></starlight-menu-button><script type="module">var e=class extends HTMLElement{btn=this.querySelector(`button`);constructor(){super(),this.btn.addEventListener(`click`,()=>this.toggleExpanded());let e=this.closest(`nav`);e&&e.addEventListener(`keyup`,e=>this.closeOnEscape(e)),matchMedia(`(min-width: 50em)`).addEventListener(`change`,()=>this.setExpanded(!1))}setExpanded(e){this.setAttribute(`aria-expanded`,String(e)),document.body.toggleAttribute(`data-mobile-menu-expanded`,e),document.querySelectorAll(`.main-frame, .sl-skip-link`).forEach(t=>{t.toggleAttribute(`inert`,e)})}toggleExpanded(){this.setExpanded(this.getAttribute(`aria-expanded`)!==`true`)}closeOnEscape(e){e.code===`Escape`&&(this.setExpanded(!1),this.btn.focus())}};customElements.define(`starlight-menu-button`,e);</script><div id="starlight__sidebar" class="sidebar-pane astro-gqpr5s5a"><div class="sidebar-content sl-flex astro-gqpr5s5a"><sl-sidebar-state-persist data-hash="18g448y" class="astro-f5yvicm7"><script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script><ul class="top-level astro-ojxuodky"><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Overview</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="0"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/" class="astro-ojxuodky"><span class="astro-ojxuodky">Welcome</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Getting Started</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="1"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/prerequisites-and-deployment/" class="astro-ojxuodky"><span class="astro-ojxuodky">Prerequisites &amp; Deployment</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/quick-start-guide/" class="astro-ojxuodky"><span class="astro-ojxuodky">Quick Start Guide</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Core Features</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="2"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/transcription-and-translation/" class="astro-ojxuodky"><span class="astro-ojxuodky">Transcription &amp; Translation</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/microvm-asr/" aria-current="page" class="astro-ojxuodky"><span class="astro-ojxuodky">On-demand ASR &amp; Diarization (MicroVM)</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/meeting-assistant/" class="astro-ojxuodky"><span class="astro-ojxuodky">Meeting Assistant</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/transcript-summarization/" class="astro-ojxuodky"><span class="astro-ojxuodky">Transcript Summarization</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/meetings-query-tool/" class="astro-ojxuodky"><span class="astro-ojxuodky">Meetings Query Tool</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Meeting Sources</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="3"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/meeting-sources/" class="astro-ojxuodky"><span class="astro-ojxuodky">Meeting Sources Overview</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/stream-audio/" class="astro-ojxuodky"><span class="astro-ojxuodky">Stream Audio</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/browser-extension/" class="astro-ojxuodky"><span class="astro-ojxuodky">Browser Extension</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/desktop-capture-app/" class="astro-ojxuodky"><span class="astro-ojxuodky">Desktop Capture App</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant/" class="astro-ojxuodky"><span class="astro-ojxuodky">Virtual Participant</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Voice Assistant &amp; Avatar</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="4"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/voice-assistant/" class="astro-ojxuodky"><span class="astro-ojxuodky">Voice Assistant</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/nova-sonic-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Nova Sonic Setup</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/elevenlabs-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">ElevenLabs Setup</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/simli-avatar-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Simli Avatar Setup</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">MCP Server Integration</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="5"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/mcp-servers/" class="astro-ojxuodky"><span class="astro-ojxuodky">MCP Servers Overview</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/mcp-api-key-auth/" class="astro-ojxuodky"><span class="astro-ojxuodky">MCP API Key Auth</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/salesforce-mcp-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Salesforce MCP</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-mcp-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Amazon QuickSuite MCP</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/deepwiki-mcp-setup/" class="astro-ojxuodky"><span class="astro-ojxuodky">DeepWiki MCP</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Web UI</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="6"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/web-ui-guide/" class="astro-ojxuodky"><span class="astro-ojxuodky">Web UI Guide</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Access Control &amp; Security</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="7"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/user-management/" class="astro-ojxuodky"><span class="astro-ojxuodky">User Management</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/user-based-access-control/" class="astro-ojxuodky"><span class="astro-ojxuodky">User-Based Access Control</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/infrastructure-and-security/" class="astro-ojxuodky"><span class="astro-ojxuodky">Infrastructure &amp; Security</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/security-scanning/" class="astro-ojxuodky"><span class="astro-ojxuodky">Security Scanning (SRT)</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Integration &amp; API</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="8"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/websocket-streaming-api/" class="astro-ojxuodky"><span class="astro-ojxuodky">WebSocket Streaming API</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/embeddable-components/" class="astro-ojxuodky"><span class="astro-ojxuodky">Embeddable Components</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/lambda-hook-functions/" class="astro-ojxuodky"><span class="astro-ojxuodky">Lambda Hook Functions</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Administration</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="9"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-parameters/" class="astro-ojxuodky"><span class="astro-ojxuodky">CloudFormation Parameters</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/stack-updates-and-upgrades/" class="astro-ojxuodky"><span class="astro-ojxuodky">Stack Updates &amp; Upgrades</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/well-architected/" class="astro-ojxuodky"><span class="astro-ojxuodky">Well-Architected Assessment</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/troubleshooting/" class="astro-ojxuodky"><span class="astro-ojxuodky">Troubleshooting</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/cleanup/" class="astro-ojxuodky"><span class="astro-ojxuodky">Cleanup</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">Development</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="10"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/developer-guide/" class="astro-ojxuodky"><span class="astro-ojxuodky">Developer Guide</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/lma-cli/" class="astro-ojxuodky"><span class="astro-ojxuodky">LMA CLI Reference</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/lma-sdk/" class="astro-ojxuodky"><span class="astro-ojxuodky">LMA SDK Reference</span></a></li></ul></details></li><li class="astro-ojxuodky"><details open class="astro-ojxuodky"><summary class="astro-ojxuodky"><span class="group-label astro-ojxuodky"><span class="large astro-ojxuodky">New &amp; Uncategorized</span></span><svg aria-hidden="true" class="caret astro-ojxuodky astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></summary><sl-sidebar-restore data-index="11"></sl-sidebar-restore><ul class="astro-ojxuodky"><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/amazon-quick-desktop-integration/" class="astro-ojxuodky"><span class="astro-ojxuodky">Amazon Quick Desktop Integration</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/blog-update-proposal/" class="astro-ojxuodky"><span class="astro-ojxuodky">Blog Update Proposal</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/cloudformation-service-role/" class="astro-ojxuodky"><span class="astro-ojxuodky">Cloudformation Service Role</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/dependency-upgrade-validation-runbook/" class="astro-ojxuodky"><span class="astro-ojxuodky">Dependency Upgrade Validation Runbook</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/teams-acs-sdk/" class="astro-ojxuodky"><span class="astro-ojxuodky">Teams Acs Sdk</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/upload-audio/" class="astro-ojxuodky"><span class="astro-ojxuodky">Upload Audio</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/virtual-participant-local-dev/" class="astro-ojxuodky"><span class="astro-ojxuodky">Virtual Participant Local Dev</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/zoom-credentials-and-join-reliability/" class="astro-ojxuodky"><span class="astro-ojxuodky">Zoom Credentials And Join Reliability</span></a></li><li class="astro-ojxuodky"><a href="/amazon-transcribe-live-meeting-assistant/zoom-meeting-sdk/" class="astro-ojxuodky"><span class="astro-ojxuodky">Zoom Meeting Sdk</span></a></li></ul></details></li></ul><script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script></sl-sidebar-state-persist><div class="md:sl-hidden"><div class="mobile-preferences sl-flex astro-b5gddk54"><div class="social-icons astro-b5gddk54"><a href="https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant" rel="me" class="sl-flex astro-cg55etiy"><span class="sr-only astro-cg55etiy">GitHub</span><svg aria-hidden="true" class="astro-cg55etiy astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg></a></div><starlight-theme-select><label style="--sl-select-width: 6.25em" class="astro-r2p65idu"><span class="sr-only astro-r2p65idu">Select theme</span><svg aria-hidden="true" class="icon label-icon astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg><select autocomplete="off" class="astro-r2p65idu"><option value="dark" class="astro-r2p65idu">Dark</option><option value="light" class="astro-r2p65idu">Light</option><option value="auto" selected class="astro-r2p65idu">Auto</option></select><svg aria-hidden="true" class="icon caret astro-r2p65idu astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg></label></starlight-theme-select><script>
+	StarlightThemeProvider.updatePickers();
+</script></div></div></div></div></nav><div class="main-frame astro-gqpr5s5a"><script type="module">var e=document.getElementById(`starlight__sidebar`),t=e?.querySelector(`sl-sidebar-state-persist`),n=`sl-sidebar-state`,r=()=>{let r=[],i=t?.dataset.hash||``;try{let e=sessionStorage.getItem(n),t=JSON.parse(e||`{}`);Array.isArray(t.open)&&t.hash===i&&(r=t.open)}catch{}return{hash:i,open:r,scroll:e?.scrollTop||0}},i=e=>{try{sessionStorage.setItem(n,JSON.stringify(e))}catch{}},a=()=>i(r()),o=(e,t)=>{let n=r();n.open[t]=e,i(n)};t?.addEventListener(`click`,e=>{if(!(e.target instanceof Element))return;let t=e.target.closest(`summary`)?.closest(`details`);if(!t)return;let n=t.querySelector(`sl-sidebar-restore`),r=parseInt(n?.dataset.index||``);isNaN(r)||o(!t.open,r)}),addEventListener(`visibilitychange`,()=>{document.visibilityState===`hidden`&&a()});</script><div class="lg:sl-flex astro-abfeecmu"><aside class="right-sidebar-container print:hidden astro-abfeecmu"><div class="right-sidebar astro-abfeecmu"><div class="lg:sl-hidden astro-q5mffni3"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-5ulgm6bh"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-5ulgm6bh"><details id="starlight__mobile-toc" class="astro-5ulgm6bh"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-5ulgm6bh"><span class="toggle sl-flex astro-5ulgm6bh">On this page<svg aria-hidden="true" class="caret astro-5ulgm6bh astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg></span><span class="display-current astro-5ulgm6bh"></span></summary><div class="dropdown astro-5ulgm6bh"><ul class="isMobile astro-cxyftcne" style="--depth: 0;"><li style="--depth: 0;" class="astro-cxyftcne"><a href="#_top" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Overview</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#table-of-contents" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Table of Contents</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#why-this-exists" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Why this exists</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#what-it-does" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">What it does</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#feature-trade-offs-versus-amazon-transcribe" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Feature trade-offs versus Amazon Transcribe</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#deploying-it" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Deploying it</span></a><ul class="isMobile astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#model-bundles" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Model bundles</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#adding-a-bundle" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Adding a bundle</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#trying-to-improve-the-asr-text" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Trying to improve the ASR text</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#the-offline-accurate-bundle" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">The offline (accurate) bundle</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#choosing-the-engine-for-a-meeting" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Choosing the engine for a meeting</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#tuning-it-without-a-redeploy" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Tuning it without a redeploy</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#calibrating-the-operating-point" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Calibrating the operating point</span></a><ul class="isMobile astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#splitting-a-segment-on-a-speaker-change" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Splitting a segment on a speaker change</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#cutting-a-row-before-the-utterance-ends" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Cutting a row before the utterance ends</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#partials-name-nobody" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Partials name nobody</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#not-included-whisper-distil-whisper-and-the-whisperx-hybrid" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Not included: Whisper, Distil-Whisper, and the WhisperX hybrid</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#validating-a-model-against-a-public-corpus" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Validating a model against a public corpus</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#cost-and-sizing" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Cost and sizing</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#local-development" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Local development</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#what-is-not-yet-measured" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">What is not yet measured</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#speaker-names" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Speaker names</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#known-limitations" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Known limitations</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#troubleshooting" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Troubleshooting</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#licences" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Licences</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#see-also" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">See Also</span></a></li></ul></div></details></nav></mobile-starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.BcSo_yiZ.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-q5mffni3"><div class="sl-container astro-q5mffni3"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-cxyftcne" style="--depth: 0;"><li style="--depth: 0;" class="astro-cxyftcne"><a href="#_top" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Overview</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#table-of-contents" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Table of Contents</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#why-this-exists" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Why this exists</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#what-it-does" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">What it does</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#feature-trade-offs-versus-amazon-transcribe" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Feature trade-offs versus Amazon Transcribe</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#deploying-it" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Deploying it</span></a><ul class="astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#model-bundles" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Model bundles</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#adding-a-bundle" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Adding a bundle</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#trying-to-improve-the-asr-text" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Trying to improve the ASR text</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#the-offline-accurate-bundle" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">The offline (accurate) bundle</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#choosing-the-engine-for-a-meeting" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Choosing the engine for a meeting</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#tuning-it-without-a-redeploy" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Tuning it without a redeploy</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#calibrating-the-operating-point" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Calibrating the operating point</span></a><ul class="astro-cxyftcne" style="--depth: 1;"><li style="--depth: 1;" class="astro-cxyftcne"><a href="#splitting-a-segment-on-a-speaker-change" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Splitting a segment on a speaker change</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#cutting-a-row-before-the-utterance-ends" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Cutting a row before the utterance ends</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#partials-name-nobody" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Partials name nobody</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#not-included-whisper-distil-whisper-and-the-whisperx-hybrid" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Not included: Whisper, Distil-Whisper, and the WhisperX hybrid</span></a></li><li style="--depth: 1;" class="astro-cxyftcne"><a href="#validating-a-model-against-a-public-corpus" style="--depth: 1;" class="astro-cxyftcne"><span style="--depth: 1;" class="astro-cxyftcne">Validating a model against a public corpus</span></a></li></ul></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#cost-and-sizing" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Cost and sizing</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#local-development" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Local development</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#what-is-not-yet-measured" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">What is not yet measured</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#speaker-names" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Speaker names</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#known-limitations" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Known limitations</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#troubleshooting" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Troubleshooting</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#licences" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">Licences</span></a></li><li style="--depth: 0;" class="astro-cxyftcne"><a href="#see-also" style="--depth: 0;" class="astro-cxyftcne"><span style="--depth: 0;" class="astro-cxyftcne">See Also</span></a></li></ul></nav></starlight-toc><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/TableOfContents.astro_astro_type_script_index_0_lang.Csloo1VZ.js"></script></div></div></div></aside><div class="main-pane astro-abfeecmu"><main data-pagefind-body class="astro-vdxcvpsm" lang="en" dir="ltr"><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><h1 id="_top" class="astro-2sm4b3ln">On-demand ASR &amp; Speaker Diarization (MicroVM)</h1></div></div><div class="content-panel astro-oil7k7jf"><div class="sl-container astro-oil7k7jf"><div class="sl-markdown-content"><!-- Copyright (c) 2025 Amazon.com. This file is licensed under the MIT License. -->
+<!-- See the LICENSE file in the project root for full license information. -->
+<div class="sl-heading-wrapper level-h1"><h1 id="on-demand-asr--speaker-diarization-microvm">On-demand ASR &#x26; Speaker Diarization (MicroVM)</h1><a class="sl-anchor-link" href="#on-demand-asr--speaker-diarization-microvm"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “On-demand ASR &#x26; Speaker Diarization (MicroVM)”</span></a></div>
+<blockquote>
+<p><strong>Status: EXPERIMENTAL — not production ready.</strong> Opt-in and off by default.
+<strong>Amazon Transcribe remains the recommended engine for production meetings</strong>;
+transcript quality here is below it, speaker labels depend on a calibrated operating
+point, and defaults may change between releases. Deploying it changes nothing on its
+own: meetings still use Amazon Transcribe unless a client asks for diarization.
+Accuracy (WER) and diarization error rate have not yet been benchmarked — see
+<a href="#what-is-not-yet-measured">What is not yet measured</a>.</p>
+<p>Because it is experimental, its tuning knobs are deliberately <strong>not</strong> exposed as
+CloudFormation parameters. <code dir="auto">TranscriptionEngine</code> is the only deploy-time question;
+everything else is either fixed in the <code dir="auto">AsrDefaults</code> mapping in <code dir="auto">lma-main.yaml</code> or
+adjustable at runtime from the ASR Config page.</p>
+</blockquote>
+<div class="sl-heading-wrapper level-h2"><h2 id="table-of-contents">Table of Contents</h2><a class="sl-anchor-link" href="#table-of-contents"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Table of Contents”</span></a></div>
+<ul>
+<li><a href="#why-this-exists">Why this exists</a></li>
+<li><a href="#what-it-does">What it does</a></li>
+<li><a href="#feature-trade-offs-versus-amazon-transcribe">Feature trade-offs versus Amazon Transcribe</a></li>
+<li><a href="#deploying-it">Deploying it</a></li>
+<li><a href="#choosing-the-engine-for-a-meeting">Choosing the engine for a meeting</a></li>
+<li><a href="#tuning-it-without-a-redeploy">Tuning it without a redeploy</a></li>
+<li><a href="#calibrating-the-operating-point">Calibrating the operating point</a></li>
+<li><a href="#cost-and-sizing">Cost and sizing</a></li>
+<li><a href="#local-development">Local development</a></li>
+<li><a href="#what-is-not-yet-measured">What is not yet measured</a></li>
+<li><a href="#speaker-names">Speaker names</a></li>
+<li><a href="#known-limitations">Known limitations</a></li>
+<li><a href="#troubleshooting">Troubleshooting</a></li>
+<li><a href="#licences">Licences</a></li>
+<li><a href="#see-also">See Also</a></li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="why-this-exists">Why this exists</h2><a class="sl-anchor-link" href="#why-this-exists"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Why this exists”</span></a></div>
+<p>By default a <a href="../stream-audio/">Stream Audio</a> or <a href="../desktop-capture-app/">Desktop Capture App</a>
+meeting labels the transcript by <strong>audio channel</strong>: everything from your microphone
+is one speaker, everything from the shared tab is another. That is correct when one
+person sits on each side, and wrong when several people share a conference-room
+microphone or several remote participants arrive through one tab.</p>
+<p>This engine labels the transcript by <strong>voice</strong> instead, and does so by running
+speech recognition and speaker diarization in the <em>same process on the same audio</em>.
+That matters: pairing a separate diarizer with a separate ASR service gives you two
+timelines, each with its own voice-activity detection and its own clock, which then
+have to be aligned after the fact. Here the speaker label is derived from the exact
+samples and segment boundaries the recognizer produced, so the label and the text
+cannot drift apart.</p>
+<p>It is also, simply, a transcription engine that is not Amazon Transcribe — useful
+if you need a specific model for licensing reasons, or a CPU-only engine whose
+weights live inside your account.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-it-does">What it does</h2><a class="sl-anchor-link" href="#what-it-does"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What it does”</span></a></div>
+<ul>
+<li>Runs <code dir="auto">sherpa-onnx</code> streaming ASR plus online speaker diarization on an
+<strong>AWS Lambda MicroVM</strong>, launched per meeting and terminated when it ends.</li>
+<li>Speaks a WebSocket protocol: interim <code dir="auto">partial</code> results and committed <code dir="auto">final</code>
+results, each carrying a speaker label.</li>
+<li>Produces the same <code dir="auto">ADD_TRANSCRIPT_SEGMENT</code> events as the Amazon Transcribe path,
+so the transcript, summaries, meeting assistant, sharing and search work
+unchanged.</li>
+<li>Falls back to Amazon Transcribe automatically if a MicroVM cannot be acquired.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="feature-trade-offs-versus-amazon-transcribe">Feature trade-offs versus Amazon Transcribe</h2><a class="sl-anchor-link" href="#feature-trade-offs-versus-amazon-transcribe"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Feature trade-offs versus Amazon Transcribe”</span></a></div>
+<p>A meeting transcribed by this engine does <strong>not</strong> go through Amazon Transcribe, so
+these Transcribe features do not apply to it:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Feature</th><th>On this engine</th></tr></thead><tbody><tr><td>Content redaction / PII</td><td>Not available</td></tr><tr><td>Custom vocabulary</td><td>Not available</td></tr><tr><td>Custom language model</td><td>Not available</td></tr><tr><td>Language identification / multi-language</td><td>Not available</td></tr><tr><td>Transcribe Call Analytics</td><td>Not available</td></tr><tr><td>Languages</td><td>The default model is <strong>English only</strong></td></tr><tr><td>Speaker labels</td><td>Per voice, per channel (the reason to use it)</td></tr></tbody></table>
+<p>Meetings that do not opt in are unaffected. The two engines coexist in one
+deployment, chosen per meeting.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="deploying-it">Deploying it</h2><a class="sl-anchor-link" href="#deploying-it"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Deploying it”</span></a></div>
+<p>Set <strong><code dir="auto">TranscriptionEngine</code> = <code dir="auto">MicrovmAsr</code></strong> on the main stack. This creates the
+<code dir="auto">lma-asr-microvm-stack</code> nested stack: a MicroVM image, a session launcher Lambda,
+and the IAM roles they need.</p>
+<p><strong>Region requirement.</strong> AWS Lambda MicroVMs must be available in your region. It is
+not available in GovCloud. Deploying with <code dir="auto">MicrovmAsr</code> in an unsupported region
+fails with <code dir="auto">Unrecognized resource types: [AWS::Lambda::MicrovmImage]</code>.</p>
+<p><strong>First deployment builds the image</strong>, which downloads the model (~443 MB for the
+default) and warms it. Expect several extra minutes on the first create and on any
+later change to a model parameter. Build logs land in
+<code dir="auto">/aws/lambda-microvms/&#x3C;stack-name>-asr</code>.</p>
+<p>There is one CloudFormation parameter, under <em>EXPERIMENTAL - On-demand ASR and
+Diarization</em> in the console:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Default</th><th>Purpose</th></tr></thead><tbody><tr><td><code dir="auto">TranscriptionEngine</code></td><td><code dir="auto">AmazonTranscribe</code></td><td><code dir="auto">MicrovmAsr</code> deploys this engine</td></tr></tbody></table>
+<p>Everything else lives in the <code dir="auto">AsrDefaults</code> mapping in <code dir="auto">lma-main.yaml</code>, at the values
+the former parameters defaulted to:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Mapping key</th><th>Value</th><th>Purpose</th><th>Also settable at runtime?</th></tr></thead><tbody><tr><td><code dir="auto">ModelBundle</code></td><td><code dir="auto">nemotron-titanet-small</code></td><td>A pre-vetted pairing of all three models plus its calibrated operating point</td><td>No — rebuilds the image (~20 min)</td></tr><tr><td><code dir="auto">MaxMeetingSeconds</code></td><td><code dir="auto">14400</code></td><td>Hard lifetime ceiling per MicroVM, and the cost backstop</td><td>No</td></tr><tr><td><code dir="auto">MaxSpeakers</code></td><td><code dir="auto">0</code></td><td>Optional cap per channel; 0 discovers as many as appear</td><td>Yes — ASR Config page</td></tr><tr><td><code dir="auto">LiveTurnCut</code></td><td><code dir="auto">true</code></td><td>Close a row on a confirmed speaker change, not just a pause</td><td>Yes — ASR Config page</td></tr><tr><td><code dir="auto">MaxOpenSegmentMs</code></td><td><code dir="auto">20000</code></td><td>Close a row after this much unbroken speech regardless</td><td>Yes — ASR Config page</td></tr></tbody></table>
+<p>To change one of the first two, edit the mapping and update the stack. The rest are
+better changed on the ASR Config page, which takes effect on the next meeting with no
+stack update. <code dir="auto">scripts/sync_bundles.py --check</code> verifies that <code dir="auto">ModelBundle</code> names a
+bundle the catalog actually ships.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="model-bundles">Model bundles</h3><a class="sl-anchor-link" href="#model-bundles"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Model bundles”</span></a></div>
+<p>One selection carries the whole configuration: the ASR model, the speaker embedder,
+the turn-detection model, <strong>and the diarization operating point measured for that
+combination</strong> — the similarity threshold and the minimum utterance length. Those two
+are baked into the image, so a deployment gets a working setup without knowing any
+numbers.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Bundle</th><th>ASR</th><th>Embedder</th><th>Threshold</th><th>Redistributable</th></tr></thead><tbody><tr><td><code dir="auto">nemotron-titanet-small</code></td><td>Nemotron 560 ms</td><td>TitaNet-small</td><td><strong>0.4</strong></td><td>No (NVIDIA OML)</td></tr><tr><td><code dir="auto">permissive-zipformer-campplus</code></td><td>Zipformer</td><td>WeSpeaker CAM++</td><td><strong>0.68</strong></td><td>Yes (Apache-2.0 + MIT)</td></tr><tr><td><code dir="auto">transcription-only</code></td><td>Nemotron 560 ms</td><td>—</td><td>—</td><td>No (NVIDIA OML)</td></tr><tr><td><code dir="auto">permissive-fastconformer-titanet-large</code></td><td>FastConformer 480 ms</td><td>TitaNet-large</td><td><em>uncalibrated</em></td><td><strong>Yes</strong> (CC-BY-4.0 + MIT)</td></tr><tr><td><code dir="auto">nemotron-titanet-large</code></td><td>Nemotron 560 ms</td><td>TitaNet-large</td><td><em>uncalibrated</em></td><td>No (NVIDIA OML)</td></tr><tr><td><code dir="auto">apache-only-zipformer-3dspeaker</code></td><td>Zipformer</td><td>3D-Speaker CAM++</td><td><em>uncalibrated</em></td><td>Yes (Apache-2.0 + MIT)</td></tr><tr><td><code dir="auto">accurate-parakeet-titanet-large</code></td><td>Parakeet TDT v3 <strong>(offline)</strong></td><td>TitaNet-large</td><td><em>uncalibrated</em></td><td><strong>Yes</strong> (CC-BY-4.0 + MIT)</td></tr><tr><td><code dir="auto">parakeet-streaming-titanet-small</code></td><td>Parakeet unified 560 ms</td><td>TitaNet-small</td><td><em>uncalibrated</em></td><td>No (NVIDIA OML)</td></tr><tr><td><code dir="auto">parakeet-streaming-low-latency</code></td><td>Parakeet unified 240 ms</td><td>TitaNet-small</td><td><em>uncalibrated</em></td><td>No (NVIDIA OML)</td></tr></tbody></table>
+<p>A bundle marked <em>uncalibrated</em> ships <strong>no threshold</strong>, so it produces no speaker labels
+until this deployment runs a calibration. That is the guardrail working, not a bug: a
+threshold borrowed from another pairing fragments one speaker into many or merges
+several into one.</p>
+<p><strong>Which redistributable bundle to reach for.</strong> <code dir="auto">permissive-fastconformer-titanet-large</code>.
+Its ASR model is the same cache-aware streaming FastConformer-RNNT architecture as the
+Nemotron default, but CC-BY-4.0 rather than the NVIDIA Open Model License, and trained on
+NeMo ASRSET — LibriSpeech, <strong>Fisher</strong>, <strong>Switchboard</strong>, WSJ, MLS-EN and Common Voice.
+That matters: those are thousands of hours of <em>spontaneous conversational</em> speech, which
+is what a meeting is, whereas the Apache-2.0 Zipformer is LibriSpeech read speech. It is
+also a quarter of the download (106 MB against 464 MB).</p>
+<p>One correction worth recording, because it is easy to assume otherwise: Parakeet is only
+permissive <strong>offline</strong>. <code dir="auto">parakeet-tdt-0.6b-v2</code> and <code dir="auto">-v3</code> are CC-BY-4.0, but the
+<em>streaming</em> “unified” Parakeet export is under the NVIDIA Open Model License, exactly
+like Nemotron. There is no permissive streaming Parakeet.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="adding-a-bundle">Adding a bundle</h3><a class="sl-anchor-link" href="#adding-a-bundle"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Adding a bundle”</span></a></div>
+<p>Edit <code dir="auto">source/catalog.json</code>, then run:</p>
+<div class="expressive-code"><link rel="stylesheet" href="/amazon-transcribe-live-meeting-assistant/_astro/ec.w36nc.css"><script type="module" src="/amazon-transcribe-live-meeting-assistant/_astro/ec.0vx5m.js"></script><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">python3</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">lma-asr-microvm-stack/scripts/sync_bundles.py</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="python3 lma-asr-microvm-stack/scripts/sync_bundles.py"><div></div></button></div></figure></div>
+<p>That regenerates the <code dir="auto">AsrModelBundle</code> allowed values in this stack’s <code dir="auto">template.yaml</code>,
+plus the <code dir="auto">BundleMemory</code> mapping, and validates that the <code dir="auto">ModelBundle</code> value in
+<code dir="auto">lma-main.yaml</code>’s <code dir="auto">AsrDefaults</code> mapping names a bundle the catalog ships. (<code dir="auto">lma-main.yaml</code>
+used to be rewritten here too, when it had its own <code dir="auto">AsrModelBundle</code> parameter; it now holds
+a single value, so it is checked rather than generated.) The memory duplication cannot be
+removed — <code dir="auto">MinimumMemoryInMiB</code> needs a CloudFormation-typed number and a Mapping cannot be
+keyed on a value a custom resource resolved — so it is generated instead. <code dir="auto">--check</code> reports
+drift without writing, and unit tests assert the same thing, so a hand-edit that updates one
+file and forgets the other fails at commit time rather than 20 minutes into a deploy.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="trying-to-improve-the-asr-text">Trying to improve the ASR text</h3><a class="sl-anchor-link" href="#trying-to-improve-the-asr-text"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Trying to improve the ASR text”</span></a></div>
+<p>Diarization is not this engine’s weak half — text is. A reviewer ranked its transcript
+below Amazon Transcribe’s, and a real meeting produced a ten-token repetition loop
+(<code dir="auto">if if if if ...</code>) plus “diarization” rendered six different wrong ways. So there are two
+bundles whose only purpose is to test a different ASR model against the current default:</p>
+<p><code dir="auto">parakeet-streaming-titanet-small</code> is the A/B worth running. Identical embedder, identical
+turn detection, identical 560 ms lookahead — so any difference on a side-by-side meeting is
+the ASR model and nothing else. Parakeet unified is the newer sibling of Nemotron (Granary /
+YTC / Yodas2 training data), same cache-aware streaming transducer family, and the <strong>same
+NVIDIA Open Model License</strong>, so there is no licensing gain and no licensing regression.</p>
+<p><code dir="auto">parakeet-streaming-low-latency</code> drops the lookahead to 240 ms so partials appear sooner.
+Try it only after the 560 ms variant: it changes two things at once relative to the default,
+and a shorter lookahead costs a cache-aware model accuracy.</p>
+<p>Do not confuse the two Parakeets. <code dir="auto">parakeet-tdt-0.6b-v3</code> is CC-BY-4.0 but <strong>offline</strong>;
+<code dir="auto">parakeet-unified-...-streaming-*</code> streams but is <strong>NVIDIA-licensed</strong>. There is no
+permissive streaming Parakeet.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="the-offline-accurate-bundle">The offline (<code dir="auto">accurate</code>) bundle</h3><a class="sl-anchor-link" href="#the-offline-accurate-bundle"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “The offline (accurate) bundle”</span></a></div>
+<p><code dir="auto">accurate-parakeet-titanet-large</code> uses the offline engine: Parakeet TDT cannot stream, so
+audio is cut into utterances by <strong>Silero VAD</strong> (MIT) and each closed utterance is decoded
+in one pass. The trade is stark and worth stating plainly — <strong>there is no interim text
+while somebody is still speaking</strong>, only when they stop, and live cutting cannot apply
+either because a mid-utterance word list does not exist. It suits an accuracy-first
+deployment more than a live meeting view.</p>
+<p><strong>It may not be viable at all</strong>, and that is worth knowing before you try it. A 0.6B
+offline decode catches up in bursts rather than keeping pace frame by frame, which wants
+headroom — but the <code dir="auto">al2023-1</code> base MicroVM image caps memory at <strong>8192 MiB (4 vCPU)</strong>, the
+same as every other bundle, so there is none to give it. Its real-time factor on a real
+meeting is <strong>unmeasured</strong>; measure that before offering it to anyone.</p>
+<p>Parakeet was chosen over Whisper — also permissive, also offline — because TDT is a
+transducer and reports token timestamps. Turn splitting and live cutting both need word
+timings, and sherpa’s Whisper export provides none, so Whisper would silently reduce
+diarization to one speaker per VAD segment. See <em>Not included: Whisper</em> below.</p>
+<p>Bundles exist because a threshold is <strong>not</strong> a property of the embedder alone.
+Utterance length moves it as much as the model does: CAM++ measured 0.30 on 1–2 s
+utterances and 0.68 on 5–20 s ones, on the same voices. Choosing three models
+separately therefore let a deployment assemble a pairing nobody had ever measured —
+and it produced a real failure, where the threshold parameter defaulted to 0.2 while
+the catalog’s measured value for the default embedder was 0.4, nothing reconciled the
+two, and two speakers were merged into one label on a live meeting.</p>
+<p>A bundle with no calibrated threshold ships without one, and the engine then withholds
+speaker labels until that deployment calibrates its own. That is deliberate: a guessed
+threshold fragments one speaker into many or merges several into one, which is worse
+than the channel labels it falls back to.</p>
+<p><code dir="auto">AsrSpeakerThreshold</code> and <code dir="auto">AsrMinSegmentMs</code> still exist on the transcriber stack as
+<strong>optional overrides</strong>. Blank — the default — means “use the value calibrated for the
+deployed bundle”. Set one only to override a bundle deliberately; the ASR Config admin
+page does the same thing without a 20-minute stack update.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="choosing-the-engine-for-a-meeting">Choosing the engine for a meeting</h2><a class="sl-anchor-link" href="#choosing-the-engine-for-a-meeting"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Choosing the engine for a meeting”</span></a></div>
+<p>Both engines can produce speaker labels, so asking for labels does <strong>not</strong> pick an
+engine. There are three ways to choose one, in precedence order:</p>
+<ol>
+<li><strong>Per meeting, from the client.</strong> Stream Audio shows a <strong>Transcription engine</strong>
+radio when this engine is deployed; the Desktop Capture apps take
+<code dir="auto">--asr-engine microvm</code>. This wins over everything below, so a user can try the
+engine without an admin changing anything.</li>
+<li><strong>Per deployment, at runtime.</strong> <strong>Make the on-demand ASR engine the default</strong> on the
+ASR Config page routes every Stream Audio and Desktop Capture meeting here. Takes
+effect on the next meeting; no redeploy.</li>
+<li><strong>Nothing.</strong> Every meeting uses Amazon Transcribe. This is the default, and deploying
+the engine does not change it.</li>
+</ol>
+<p>A meeting that selects this engine and whose MicroVM cannot start falls back to Amazon
+Transcribe by itself, so a failed launch costs a warning in the log rather than a
+transcript.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="tuning-it-without-a-redeploy">Tuning it without a redeploy</h2><a class="sl-anchor-link" href="#tuning-it-without-a-redeploy"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Tuning it without a redeploy”</span></a></div>
+<p>The diarization operating point is empirical and specific to the speaker model, so
+it lives in runtime configuration rather than in stack parameters. <strong>Configuration
+▸ ASR Config</strong> (admin only) edits it, and the next meeting to start picks it up — no
+stack update, no image rebuild.</p>
+<p>Every field is an override: leave it blank and the deployment default applies — the
+bundle’s own calibrated value, or the <code dir="auto">AsrDefaults</code> mapping entry where there is one.
+There is no default record to keep in sync.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Field</th><th>Effect</th></tr></thead><tbody><tr><td>Speaker similarity threshold</td><td>The usual fix when one person fragments. Model-specific — <a href="#calibrating-the-operating-point">measure it</a> rather than guessing</td></tr><tr><td>Minimum utterance for speaker ID</td><td>Raise it to stop short utterances minting speakers</td></tr><tr><td>Maximum speakers per channel</td><td>Hard cap; a client that knows its own meeting size overrides it</td></tr><tr><td>Endpointing silence</td><td>Trailing silence that closes an utterance</td></tr><tr><td>Diarize by default</td><td>Whether meetings request speaker labels when the client is silent on it</td></tr><tr><td>Use this engine for every meeting</td><td>Routes all streaming meetings here, with the Transcribe feature losses above</td></tr><tr><td>Require corroboration</td><td>Off by default; see the troubleshooting section</td></tr><tr><td>Split rows on a speaker change</td><td>Splits one utterance into a row per speaker turn when the segmentation model is baked in</td></tr></tbody></table>
+<p>Stream Audio also asks <strong>Speakers on this side</strong> when diarization is ticked. Only the
+person in the meeting knows how many people share their microphone, which is why it is
+asked for rather than inferred; blank means discover as many as appear, and a value
+there overrides the deployment-wide cap for that meeting.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="calibrating-the-operating-point">Calibrating the operating point</h2><a class="sl-anchor-link" href="#calibrating-the-operating-point"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Calibrating the operating point”</span></a></div>
+<p>The speaker threshold is a property of the speaker-embedding model, not a universal
+constant, and getting it wrong is the single most visible failure this engine has.
+Measured on real meeting audio with TitaNet, two <em>different</em> speakers never scored
+above 0.107 while the <em>same</em> speaker scored 0.25–0.5 — so the value inherited from
+the upstream prototype (0.5) split one person into eight identities, then twenty-two.
+On the same audio, WeSpeaker ResNet293 scored <strong>0.54 between two different people</strong>,
+where that same 0.5 would have merged them instead. There is no number that is right
+for both.</p>
+<p>So the deployment measures it. <strong>Configuration ▸ ASR Config ▸ Calibrate from a
+two-channel recording</strong> takes a WAV you upload and derives the threshold from it.</p>
+<p><strong>Why an upload rather than a meeting ID.</strong> The ground truth is <em>channel
+separation</em>: one speaker per channel, so pairs within a channel are the same person
+and pairs across channels are definitely different people — exactly the comparison a
+threshold has to get right. That property belongs to the <em>file</em>, not to the meeting,
+so calibration takes the file directly. A sample can then come from a rehearsed
+recording, a meeting you downloaded, or a public corpus, and the same page works
+whether or not the deployment happens to have a suitable recorded meeting. The upload
+is embedded in memory and discarded — it is never written to S3 or into a transcript.</p>
+<p><strong>Requirements</strong></p>
+<ul>
+<li><strong>WAV, 16-bit PCM, two channels</strong>, one speaker per channel. Any sample rate (it is
+resampled to 16 kHz); up to 64 MB, of which the first 20 minutes are read.</li>
+<li>Two to five minutes is plenty. Both speakers should talk several times and avoid
+talking over each other; cross-talk is excluded from the statistics, so heavy
+overlap just leaves less to measure.</li>
+<li>A mono file, or a stereo file with both voices in both channels, is <strong>refused</strong>
+rather than measured: it carries no ground truth, and a number derived from it
+would be confidently wrong.</li>
+</ul>
+<p><strong>Making a sample on your own.</strong> Play a recording of someone else through your laptop
+speakers while you talk into the microphone, and capture it with <strong>Stream Audio</strong> —
+its two channels are exactly system audio and microphone, so the two voices land on
+separate channels without a second person in the room. Alternate: let the recording
+talk for ~20 s, then you talk for ~20 s, four or five times each. End the meeting,
+download the WAV, and upload it here.</p>
+<p><strong>Making a sample from a public corpus.</strong> Any dataset that ships <strong>one file per
+speaker</strong> works — merge two speakers into the two channels:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">ffmpeg</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-i</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">speakerA.wav</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-i</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">speakerB.wav</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#F78C6C;--1:#AA0982">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#82AAFF;--1:#3B61B0">-filter_complex</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">[0:a][1:a]amerge=inputs=2</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#F78C6C;--1:#AA0982">\</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#82AAFF;--1:#3B61B0">-ac</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#F78C6C;--1:#AA0982">2</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-ar</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#F78C6C;--1:#AA0982">16000</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-sample_fmt</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">s16</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">calib.wav</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="ffmpeg -i speakerA.wav -i speakerB.wav \  -filter_complex &#x22;[0:a][1:a]amerge=inputs=2&#x22; \  -ac 2 -ar 16000 -sample_fmt s16 calib.wav"><div></div></button></div></figure></div>
+<p>Note that this is the opposite of what most diarization pipelines do with a stereo
+file: pyannote and friends <strong>downmix to mono</strong> before segmenting. This engine never
+downmixes — it splits the channels and processes each independently, both for
+calibration and for live meetings (one ASR session per channel) — which is what makes
+channel identity usable as a label.</p>
+<p><strong>How it works.</strong> The transcriber de-interleaves the upload, resamples each channel to
+16 kHz, finds stretches where one channel clearly dominates the other (dominance
+rather than silence, so cross-talk is excluded), embeds up to 12 per channel on a
+MicroVM in embed mode, and compares every pair.</p>
+<p>The threshold is then placed <strong>inside the gap</strong> between the two distributions, nearer
+the different-speaker side, and additionally above the highest different-speaker score
+actually observed — so the guarantee is concrete: no pair the calibration saw would
+have been merged. Leaning towards splitting is deliberate. Both errors are real, but
+fragmentation is the one that makes a transcript unreadable, and merging is partly
+contained because channels are diarized separately (it can only ever merge people who
+share one microphone).</p>
+<p><strong>Reading the result.</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Verdict</th><th>Meaning</th></tr></thead><tbody><tr><td>Clear separation</td><td>Gap of 0.1 or more. Use the values</td></tr><tr><td>Narrow separation</td><td>A usable threshold, but sensitive to the audio it was measured on. Re-run on another sample before trusting it</td></tr><tr><td>No usable threshold</td><td>The distributions overlap: no threshold separates them on this audio. That is what a mismatched embedder looks like; it can also mean narrowband audio, heavy cross-talk, or a file whose channels are not actually speaker-separated</td></tr></tbody></table>
+<p>Calibration also reports a <strong>minimum utterance length</strong> when pairs involving a short
+segment score materially worse than long-only pairs — the measured cause of phantom
+speakers, every one of which came from a 1.2–2.4 s utterance.</p>
+<p><strong>Choose the two voices deliberately: the threshold can only be as demanding as the
+hardest pair in your sample.</strong> Measured on one real meeting, a man and a woman scored
+-0.07 to 0.10 against each other while two similar-sounding women scored 0.246-0.307 -
+and the same-speaker floor was 0.740. Calibrating on the easy pair returns about 0.36;
+calibrating on a pair that is <em>further</em> apart than your real participants returns a
+number too low to separate them. So use voices that resemble the meetings you actually
+run - ideally the participants themselves, and at least two people of the same gender
+and accent if that is what your meetings contain.</p>
+<p><strong>Nothing is applied automatically.</strong> A run reports; <strong>Use these values</strong> fills the
+fields, and <strong>Save</strong> applies them to the next meeting that starts. A sample where only
+one channel carries speech is refused before a MicroVM is even launched, since it
+contains no different-speaker comparison to make.</p>
+<p><strong>Who can run it.</strong> Admin group only (it launches a MicroVM), and single-flight per
+transcriber task.</p>
+<p><strong>Unmeasured models are withheld, not guessed at.</strong> Every speaker model in
+<code dir="auto">catalog.json</code> carries a <code dir="auto">measured</code> note recording what was actually observed. When a
+catalog entry carries no <code dir="auto">measured</code> note — a model added but not yet
+characterised — the stack reports <code dir="auto">SpeakerModelMeasured=false</code> and the transcriber
+transcribes with <strong>channel labels instead of speaker labels</strong>, logging why, until
+either a calibration is applied or an admin sets a threshold. A guessed threshold
+looks like working diarization while being wrong, which is worse than no diarization
+at all.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="splitting-a-segment-on-a-speaker-change">Splitting a segment on a speaker change</h3><a class="sl-anchor-link" href="#splitting-a-segment-on-a-speaker-change"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Splitting a segment on a speaker change”</span></a></div>
+<p>Endpointing closes an utterance on trailing silence, so when two people speak
+without a gap between them they land in one segment and share one speaker label.
+Comparing short embedding windows is the obvious fix and the wrong one: we measured
+sub-2.5 s utterances embedding unreliably (that is why <code dir="auto">AsrMinSegmentMs</code> exists), so
+an embedding-only detector false-splits exactly where turns are shortest.</p>
+<p>The detector is therefore <strong>pyannote segmentation 3.0</strong>, baked as a 6 MB ONNX model
+(pyannote segmentation 3.0, MIT, redistributed by k2-fsa so no Hugging Face token is
+needed). It is a specialist: 10-second windows, powerset output giving per-frame
+speaker activity <em>and</em> overlap, at ~17 ms resolution — finer than the word timings a
+<code dir="auto">final</code> already carries, so a cut can snap to a word edge.</p>
+<p>Three rules keep it from making transcripts worse:</p>
+<ul>
+<li><strong>It returns boundaries, not identities.</strong> Its per-window speaker numbering is
+arbitrary and not comparable across windows; identity stays with the embedder and
+the per-session registry, so nothing has to stitch labels together.</li>
+<li><strong>A change must persist for <code dir="auto">ASR_MIN_TURN_MS</code> (700 ms default)</strong> to count, so a
+back-channel “mhm” does not turn one sentence into three rows.</li>
+<li><strong>Windows overlap by half and only the middle half of each is trusted</strong> (the
+leading/trailing quarter for the first/last), so every instant is judged once, by
+the window with the most context around it, and a window seam is never mistaken
+for a turn.</li>
+</ul>
+<p>Validated against the real model: k2-fsa’s own <code dir="auto">1-two-speakers-en.wav</code> (16 s, two
+speakers) yields exactly one boundary, at 7.89 s, with a measured frame rate of
+16.98 ms.</p>
+<p><strong>How a split reaches the transcript.</strong> At segment close the engine runs the detector
+over the closed utterance, cuts the word list at the nearest word boundary to each
+turn, embeds each part separately, and emits <strong>one <code dir="auto">final</code> per turn</strong> with
+consecutive segment numbers. Outbound numbering therefore runs ahead of the
+recogniser’s own by however many extra rows have been emitted, and partials are
+renumbered with it, which is what keeps a partial and the first final of its
+utterance on the same row. The transcriber needs no change: it already maps each
+segment number to its own <code dir="auto">SegmentId</code>.</p>
+<p>Cutting the text requires word timings, so the streaming recogniser now reconstructs
+them from sherpa’s per-token <code dir="auto">tokens</code> + <code dir="auto">timestamps</code> (grouped on the SentencePiece
+<code dir="auto">▁</code> marker) and anchors them to the segment’s own start. A segment with no word
+timings is never split — guessing where the words divide would garble both rows — and
+a cut that would leave a part too short to embed is merged back into its neighbour.</p>
+<p>Measured end to end on k2-fsa’s <code dir="auto">1-two-speakers-en.wav</code>: the real model finds the turn
+at 7.89 s, the split snaps it to 7.90 s, and the two rows come back as <code dir="auto">spk_0</code>
+(0.00–7.90) and <code dir="auto">spk_1</code> (8.00–16.00) with the words divided 16/16.</p>
+<p>Turn splitting is off for a bundle with no segmentation model, when no speaker model is
+baked in (there would be no embedder to identify the turns it finds), or when
+<strong>Split rows on a speaker change</strong> is unticked on the ASR Config page — that last one
+takes effect on the next meeting, with no rebuild.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="cutting-a-row-before-the-utterance-ends">Cutting a row before the utterance ends</h3><a class="sl-anchor-link" href="#cutting-a-row-before-the-utterance-ends"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Cutting a row before the utterance ends”</span></a></div>
+<p>The split above is retroactive: it happens when the utterance closes, so until then a
+live row holds both speakers. With <strong>Close a row on a confirmed speaker change</strong>
+(<code dir="auto">LiveTurnCut</code> in the <code dir="auto">AsrDefaults</code> mapping, on by default, and <code dir="auto">liveTurnCut</code> on the ASR
+Config page) the speaker change becomes the <em>primary</em> boundary and
+endpointing silence is only a backstop — which is the right way round, because a pause
+is not what separates people, taking turns is.</p>
+<p>While a segment is open the engine re-runs the detector over the audio since the last
+cut, about once per <code dir="auto">turnCutIntervalMs</code> (1 s default) in audio time, and closes a row as
+soon as a boundary is <strong>confirmed</strong>: at least <code dir="auto">minSegmentMs</code> of audio before it, and at
+least <code dir="auto">ASR_MIN_TURN_MS</code> (700 ms) after it. That second condition is what stops a
+back-channel or a model flicker from producing one-word rows, and it is also why the cut
+lands a fraction of a second late — a change cannot be confirmed until some audio has
+followed it.</p>
+<p><strong>Why this is done in the diarization layer, not by endpointing the recogniser early.</strong>
+Forcing the recogniser to finalize would reset its decoder mid-utterance and cost it the
+left context it is using to decode. Text quality is already the weaker half of this
+engine, so cutting here leaves the decode completely untouched: the recogniser keeps
+running and never knows a row was closed underneath it.</p>
+<p>Three pieces of bookkeeping make that work, and each has a test that fails without it:</p>
+<ul>
+<li>The recogniser keeps reporting the <strong>whole</strong> open segment, so the committed prefix is
+subtracted from every later partial. Without it the settled words appear twice, once
+on a finished row and once in the live one.</li>
+<li>A cut consumes a wire segment number, so outbound numbering shifts by one. Without it
+two rows collide on a number and the later silently overwrites the earlier in
+DynamoDB, losing a labelled turn.</li>
+<li>The eventual real <code dir="auto">final</code> emits only the words after the last cut.</li>
+</ul>
+<p><strong>Bounded rows.</strong> With no speaker change at all, a row still closes after
+<code dir="auto">maxOpenSegmentMs</code> (20 s default, 0 disables) so a monologue does not sit in the live
+transcript as one unlabelled block. This mirrors the equivalent bound on the Amazon
+Transcribe path, which exists there because Transcribe caps a result near 30 s and never
+labels a partial; this engine has no such cap of its own, so without the bound a row
+could stay open for as long as somebody kept talking.</p>
+<p><strong>Revisions are corrected, not lost.</strong> A streaming decoder can revise earlier text as
+more audio arrives, so a row committed early was written from a hypothesis the decoder
+was still free to change. Waiting long enough to be certain would hand back the latency
+the cut exists to save, so instead each committed row is <strong>re-emitted when the utterance
+closes</strong>, once the word list is authoritative — and only if its text actually changed, so
+a meeting with no revisions costs no extra writes at all.</p>
+<p>This is safe because of how the write already works: <code dir="auto">addTranscriptSegment</code> is an
+unconditional <code dir="auto">PutItem</code> keyed on <code dir="auto">PK=trs#&#x3C;callId></code> / <code dir="auto">SK=s#&#x3C;segmentId></code>, with a condition
+that only stops a <em>partial</em> overwriting a final. Re-emitting a final for the same segment
+number therefore updates that row in place rather than adding one. The corrected row keeps
+its span, so nothing reorders (the UI sorts transcript rows by end time), and it keeps its
+<strong>original speaker</strong> — the audio behind it did not change, and re-assigning would fold the
+same embedding into a centroid twice.</p>
+<p>Two edges are handled deliberately: a revision that would leave a row <em>empty</em> is ignored,
+because blanking a transcript row loses text rather than correcting it; and the remainder
+after a cut is partitioned by <strong>time</strong> on the word list, not by stripping a text prefix,
+because a real recogniser’s <code dir="auto">text</code> is punctuated and capitalised while its word timings are
+bare tokens — so the committed text is never a literal prefix of the closing text, and
+prefix-matching duplicated every settled word onto the remainder’s row.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="partials-name-nobody">Partials name nobody</h3><a class="sl-anchor-link" href="#partials-name-nobody"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Partials name nobody”</span></a></div>
+<p>A partial used to carry the last identified speaker as a provisional label. On a real
+call that meant the person who had just <em>stopped</em> talking was named against the words of
+whoever started, until the final corrected it a second or two later — reviewers watching
+the live transcript reported that the label “transforms” mid-sentence, and read it as
+the diarization being unstable when the final labels were in fact correct.</p>
+<p>Partials now carry no speaker at all, so the row shows the plain channel name until the
+label is actually known, and the <code dir="auto">(spk_N)</code> suffix appears when there is something true
+to put in it. This matches the Amazon Transcribe path, which never had speaker labels on
+partials to begin with (they only arrive on final results).</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="not-included-whisper-distil-whisper-and-the-whisperx-hybrid">Not included: Whisper, Distil-Whisper, and the WhisperX hybrid</h3><a class="sl-anchor-link" href="#not-included-whisper-distil-whisper-and-the-whisperx-hybrid"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Not included: Whisper, Distil-Whisper, and the WhisperX hybrid”</span></a></div>
+<p>Whisper-family models (Whisper large-v3-turbo, Distil-Whisper — both MIT) are not
+selectable, and the reason is architectural rather than licensing. This stack is
+<strong>streaming-only by construction</strong>: the image resolver refuses any catalog entry
+whose <code dir="auto">engine</code> is not <code dir="auto">streaming</code>, and the streaming path builds a <code dir="auto">sherpa-onnx</code>
+<code dir="auto">OnlineRecognizer</code> over an encoder/decoder/joiner transducer. Whisper is not a
+frame-synchronous transducer; <code dir="auto">sherpa-onnx</code> loads it only through
+<code dir="auto">OfflineRecognizer.from_whisper(encoder, decoder, tokens)</code> — no joiner — so it can
+only be “streamed” by segmenting on VAD and decoding each closed utterance.</p>
+<p>The runtime already contains that shape: <code dir="auto">asr_server/vad.py</code> is a Silero VAD gate
+(MIT) and <code dir="auto">asr_server/offline_recognizer.py</code> is a VAD-segmented offline engine that
+emits one <code dir="auto">final</code> per utterance plus a synthetic <code dir="auto">partial</code> at segment close. It is
+unprovisioned — no pinned offline model, the Silero weights are not fetched by
+<code dir="auto">scripts/fetch_model.py</code>, and the resolver does not expose it. Adding Whisper
+therefore means: a <code dir="auto">from_whisper</code> backend branch, a joiner-less file set in the
+catalog and in <code dir="auto">fetch_model.py</code>, baking the Silero VAD weights, opening the offline
+engine in the resolver, and accepting that live meetings get no true partials. The
+real-time factor of large-v3-turbo for two concurrent channels on Graviton is also
+unmeasured; Distil-Whisper small/medium is the more plausible candidate.</p>
+<p><strong>Pyannote segmentation 3.0</strong> is likewise absent (an earlier prototype branch used
+pyannote + diart alongside Amazon Transcribe). Its code is MIT, but the published
+weights are access-gated on Hugging Face, so a build-time download needs a token and
+an accepted agreement — which is why the ungated, MIT Silero VAD is the segmentation
+model this runtime integrates.</p>
+<p><strong>The WhisperX hybrid</strong> (Whisper for text, a separate diarizer for speakers, merged
+by word-level forced alignment) is a good architecture — for <strong>offline</strong> audio. Its
+accuracy comes from seeing the whole file: batched VAD chunks, wav2vec2 forced
+alignment for word timestamps, and <em>global</em> speaker clustering, which decides how
+many speakers there were only at the end. On a live meeting that means labels would
+change retroactively for rows already displayed, and it reintroduces exactly the
+two-timeline drift this engine exists to avoid — the streaming engine emits the
+speaker label with the text it was derived from, so there is nothing to align.</p>
+<p>Where WhisperX fits is the <strong>Upload Media / batch</strong> path, which today uses Amazon
+Transcribe batch with <code dir="auto">ShowSpeakerLabels</code>. There a second pass costs nothing, word
+alignment is available, and global clustering is correct rather than premature. That
+remains deferred (see the plan’s <em>Deferred</em> section), and it is the natural home for
+Whisper-quality transcription and elite DER — a deliberate split, with one engine and
+one timeline live, two passes offline.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="validating-a-model-against-a-public-corpus">Validating a model against a public corpus</h3><a class="sl-anchor-link" href="#validating-a-model-against-a-public-corpus"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Validating a model against a public corpus”</span></a></div>
+<p>Before adding a <code dir="auto">measured</code> note to a catalog entry, measure the embedder on data
+other than one deployment’s meetings. Usable corpora:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Corpus</th><th>Why it fits</th><th>Licence</th></tr></thead><tbody><tr><td><a href="https://groups.inf.ed.ac.uk/ami/corpus/">AMI Meeting Corpus</a></td><td>Real 3–5 person meetings with a <strong>per-speaker headset mic</strong>, which gives the same speaker-per-channel ground truth this calibration relies on, plus a far-field array for the harder case</td><td>CC BY 4.0</td></tr><tr><td><a href="https://www.robots.ox.ac.uk/~vgg/data/voxconverse/">VoxConverse</a></td><td>In-the-wild multi-speaker audio with diarization labels; good for overlap and noise</td><td>CC BY 4.0</td></tr><tr><td>LibriSpeech-derived mixtures (LibriMix, Libri-CSS)</td><td>Synthetic, deterministic — useful as a regression test rather than a realism check</td><td>CC BY 4.0</td></tr><tr><td>DIHARD, CALLHOME, NIST RT</td><td>The classic DER benchmarks</td><td>LDC licence: not redistributable, so not usable in CI</td></tr></tbody></table>
+<p>Two cautions. <strong>VoxCeleb is not a valid check for these models</strong> — TitaNet and
+WeSpeaker are trained on it, so measuring their threshold there is circular and
+flattering. And a corpus result is a <em>prior</em>, not an operating point: microphone
+gain, codec, room acoustics and language all move the distributions, which is why
+per-deployment calibration stays the source of truth and why the guardrail asks for
+a local measurement rather than trusting the catalog for an unknown embedder.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="cost-and-sizing">Cost and sizing</h2><a class="sl-anchor-link" href="#cost-and-sizing"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Cost and sizing”</span></a></div>
+<ul>
+<li><strong>No idle cost.</strong> MicroVMs run per meeting. There is no warm pool and no
+always-on ASR capacity.</li>
+<li><strong>The transcriber task is unchanged</strong> (<code dir="auto">256</code> CPU / <code dir="auto">1024</code> MB, or <code dir="auto">1024</code>/<code dir="auto">2048</code>
+with video recording): inference happens in the MicroVM, not in the task.</li>
+<li>One MicroVM serves both audio channels of a meeting. The default 8 GiB baseline
+gives 4 vCPU, which both channels share.</li>
+<li><code dir="auto">MaxMeetingSeconds</code> in the <code dir="auto">AsrDefaults</code> mapping (default 4 h, service maximum 8 h)
+bounds what a single
+MicroVM can cost. The transcriber terminates the MicroVM on meeting end and on
+SIGTERM (deploys, scale-in); the ceiling is the backstop if the task dies
+without doing either.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="local-development">Local development</h2><a class="sl-anchor-link" href="#local-development"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Local development”</span></a></div>
+<p>The transcriber can talk to an ASR server running on your machine, with no AWS
+involved:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># 1. Run the ASR server (from the upstream prototype, which has the local demo</span></div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F">#    tooling and model download script)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">scripts/run_local_demo.sh</span><span style="--0:#D6DEEB;--1:#403F53">          </span><span style="--0:#919F9F;--1:#5F636F"># serves ws://localhost:8080</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># 2. Point the transcriber at it</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">lma-websocket-transcriber-stack/source/app</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">ASR_DIRECT_ENDPOINT</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">ws://localhost:8080</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">ASR_ENGINE_DEFAULT</span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#ECC48D;--1:#3B61B0">microvm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">npm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">start</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="scripts/run_local_demo.sh          # serves ws://localhost:8080cd lma-websocket-transcriber-stack/source/appASR_DIRECT_ENDPOINT=ws://localhost:8080 ASR_ENGINE_DEFAULT=microvm npm start"><div></div></button></div></figure></div>
+<p><code dir="auto">ASR_DIRECT_ENDPOINT</code> bypasses the launcher entirely, so no MicroVM is created and
+no auth token is needed.</p>
+<p>Tests:</p>
+<div class="expressive-code"><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">lma-websocket-transcriber-stack/source/app</span><span style="--0:#D6DEEB;--1:#403F53"> &#x26;&#x26; </span><span style="--0:#82AAFF;--1:#3B61B0">npm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">test</span><span style="--0:#D6DEEB;--1:#403F53">   </span><span style="--0:#919F9F;--1:#5F636F"># transcriber side</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C5E478;--1:#3B61B0">cd</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">lma-asr-microvm-stack/source</span><span style="--0:#D6DEEB;--1:#403F53"> &#x26;&#x26; </span><span style="--0:#82AAFF;--1:#3B61B0">.venv/bin/python</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-m</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">pytest</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">-q</span><span style="--0:#D6DEEB;--1:#403F53">   </span><span style="--0:#919F9F;--1:#5F636F"># ASR runtime</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="cd lma-websocket-transcriber-stack/source/app &#x26;&#x26; npm test   # transcriber sidecd lma-asr-microvm-stack/source &#x26;&#x26; .venv/bin/python -m pytest -q   # ASR runtime"><div></div></button></div></figure></div>
+<div class="sl-heading-wrapper level-h2"><h2 id="what-is-not-yet-measured">What is not yet measured</h2><a class="sl-anchor-link" href="#what-is-not-yet-measured"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “What is not yet measured”</span></a></div>
+<p>Honest state of validation, so nobody deploys this expecting known numbers:</p>
+<ul>
+<li><strong>Word error rate has not been benchmarked</strong> against Amazon Transcribe on real
+meeting audio.</li>
+<li><strong>Diarization error rate has not been measured</strong> end to end. The <em>operating point</em>
+for the shipped speaker models has been measured on real meeting audio (see
+<code dir="auto">measured</code> in <code dir="auto">catalog.json</code>, and
+<a href="#calibrating-the-operating-point">Calibrating the operating point</a> to measure it on
+your own), but that is the threshold, not a DER figure.</li>
+<li><strong>MicroVM launch time and the real-time factor</strong> of two concurrent channel
+sessions on one MicroVM have not been measured on Graviton. If a meeting’s first
+transcript is slow to appear, or transcripts lag live audio, raise
+the bundle’s <code dir="auto">baselineMemoryMiB</code> in <code dir="auto">catalog.json</code> and re-run
+<code dir="auto">scripts/sync_bundles.py</code>. Note the ceiling: the <code dir="auto">al2023-1</code> base MicroVM image
+accepts only <strong>512, 1024, 2048, 4096 or 8192 MiB</strong>, so 8192 (4 vCPU) is as large as
+a MicroVM gets and there is no headroom above the default. The image resolver
+refuses anything else up front rather than letting the stack fail minutes later at
+<code dir="auto">AWS::Lambda::MicrovmImage</code>.</li>
+</ul>
+<p>Measure these in a dev stack before offering the engine to users. Every number
+needed is in the MicroVM log group: per-session summaries carry audio seconds,
+segment counts and resident memory.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="speaker-names">Speaker names</h2><a class="sl-anchor-link" href="#speaker-names"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Speaker names”</span></a></div>
+<p>A row’s speaker is the channel’s own name plus the engine’s voice id:
+<code dir="auto">Other Participant (spk_0)</code>, <code dir="auto">Other Participant (spk_1)</code>, <code dir="auto">alex@example.com (spk_0)</code>.
+Both engines format it the same way (<code dir="auto">appendSpeakerLabel</code> in
+<code dir="auto">calleventdata/diarization.ts</code>), so a transcript reads identically whichever one
+produced it.</p>
+<p><strong>The suffix is not cosmetic.</strong> Each channel runs its own session and both restart
+numbering at <code dir="auto">spk_0</code> for different people, so the base name is what keeps them apart —
+and the suffix is what keeps two people on the <em>same</em> channel apart. Without it the
+first voice heard on the tab took that channel’s placeholder name (“Other Participant”)
+on its own, and a reviewer given such a transcript concluded the two tab speakers had
+been merged into a leftover bucket. They had in fact been separated correctly; one had
+simply spoken seven times as much. Clustering that meeting’s embeddings independently of
+the labels found two voices 0.34 apart, matching the labels one-for-one. A placeholder
+that looks like a bucket gets read as one, by people and by any model summarising the
+transcript.</p>
+<p>It also degrades well: a partial has no known speaker yet, so it shows the bare channel
+name and gains the suffix when the label arrives, rather than displaying somebody else’s
+name in the meantime.</p>
+<p>Labels are per meeting and per channel, and they are not identities. Mapping them onto
+real names — from the participant list, or by asking a model — is a separate step, and
+it works far better when every label is distinct.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="known-limitations">Known limitations</h2><a class="sl-anchor-link" href="#known-limitations"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Known limitations”</span></a></div>
+<ul>
+<li><strong>English only</strong> with the default model; <code dir="auto">language</code>, <code dir="auto">punctuate</code> and
+<code dir="auto">latency_mode</code> are accepted by the protocol but do not change behaviour.</li>
+<li><strong>Overlapping speech resolves to one speaker.</strong> The engine detects overlap but
+attributes the span to a single voice rather than emitting both.</li>
+<li><strong>A live cut lands slightly late</strong>, because a speaker change is only acted on once
+<code dir="auto">ASR_MIN_TURN_MS</code> of audio has confirmed it. Its text is corrected when the utterance
+closes, but the boundary itself is never moved.</li>
+<li><strong>The first minute is the least accurate</strong>, while the model is still learning
+each voice. There is no end-of-meeting correction pass.</li>
+<li><strong>Speaker identities are per session and per channel.</strong> A reconnect mid-meeting
+starts new identities.</li>
+<li><strong>8-hour hard ceiling</strong> per MicroVM (service limit).</li>
+<li>Applies to Stream Audio and the Desktop Capture Apps. The Virtual Participant
+and Upload Audio paths still use Amazon Transcribe.</li>
+</ul>
+<div class="sl-heading-wrapper level-h2"><h2 id="troubleshooting">Troubleshooting</h2><a class="sl-anchor-link" href="#troubleshooting"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Troubleshooting”</span></a></div>
+<p><strong>The diarization checkbox is missing from Stream Audio.</strong> The deployment either
+does not have <code dir="auto">TranscriptionEngine=MicrovmAsr</code> or built the image with
+the <code dir="auto">transcription-only</code> bundle. The UI reads <code dir="auto">AsrDiarizationAvailable</code> from the LMA
+settings parameter.</p>
+<p><strong>Transcripts appear but are labelled by channel.</strong> The image has no speaker model.
+Look for <code dir="auto">diarization was requested but this ASR image has no speaker model baked in</code> in the transcriber log.</p>
+<p><strong>Meetings fall back to Amazon Transcribe.</strong> Look for <code dir="auto">MicroVM ASR could not start</code> in the transcriber log; the reason from the launcher is logged with it
+(quota, region, image not ready). To make the failure loud instead, set
+<code dir="auto">ASR_FALLBACK_TO_TRANSCRIBE=false</code> on the transcriber task — meetings then produce
+no transcript when the engine is unavailable.</p>
+<p><strong>The image build fails.</strong> Check <code dir="auto">/aws/lambda-microvms/&#x3C;stack>-asr</code>. A <code dir="auto">SHA256 mismatch</code> means the pinned checksum does not match the download; <code dir="auto">model file ... is not in the archive</code> means the file names in the catalog entry are wrong; <code dir="auto">HTTP 404</code>
+means the URL is wrong.</p>
+<p>A transient failure from the model host (<code dir="auto">503</code>, <code dir="auto">429</code>, a cut connection) is retried
+five times with backoff before the build gives up — the log line reads
+<code dir="auto">retrying in 5s (1 of 5)</code>. If it still reports <code dir="auto">download failed after 5 attempt(s)</code>,
+the host is having a bad day: re-run the deployment. Nothing else needs undoing,
+because a failed image build rolls the nested stack back to the previous image and
+meetings keep using it.</p>
+<p><strong>One person appears as several speakers.</strong> This was the first real failure, and it
+is now measured rather than guessed. A live single-speaker meeting produced <strong>eight</strong>
+identities for one person; every hallucinated label was a 1.2–2.4 s utterance while
+long speech clustered correctly.</p>
+<p>The cause was the threshold, not the model. Replaying the production registry over
+that meeting’s real embeddings, with a second recording (two people, one per channel)
+as the different-speaker control:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Embedder</th><th>Same speaker</th><th>Different speakers</th><th>Operating point</th></tr></thead><tbody><tr><td>TitaNet-small (default)</td><td>median 0.25–0.51, p5 0.099</td><td>median −0.02, p95 0.074, <strong>max 0.107</strong></td><td><strong>0.2</strong></td></tr><tr><td>WeSpeaker CAM++_LM</td><td>median 0.27</td><td>median 0.30, p95 0.53</td><td>distributions overlap</td></tr><tr><td>WeSpeaker ResNet293_LM</td><td>median 0.84–0.93</td><td>median 0.54, p95 0.74</td><td>~0.8, tails still overlap</td></tr></tbody></table>
+<p>TitaNet separates different people very well — they never exceeded 0.107 — but the
+same speaker only scores 0.25–0.5, so the sherpa default of 0.5 split constantly.
+Identities produced for that one-speaker meeting (ideal: 1):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Threshold</th><th>Min segment</th><th>Identities</th></tr></thead><tbody><tr><td>0.5 (old default)</td><td>1200 ms</td><td>8</td></tr><tr><td>0.25</td><td>2500 ms</td><td>2</td></tr><tr><td><strong>0.2 (current default)</strong></td><td><strong>2500 ms</strong></td><td><strong>2</strong></td></tr></tbody></table>
+<p>At 0.2 the same audio yields 2 identities instead of 8, and a two-speaker recording
+resolves to exactly 2 with 100% attribution purity.</p>
+<p>Three things follow, and they are worth internalising before changing anything:</p>
+<ol>
+<li><strong>The threshold belongs to the embedder.</strong> Cosine scales differ per model — see
+<code dir="auto">recommendedThreshold</code> in <code dir="auto">source/catalog.json</code>. Swapping the speaker model
+without re-measuring will either fragment or merge speakers.</li>
+<li><strong>A same-speaker-only test is not evidence.</strong> ResNet293 produced a perfect single
+identity on one-speaker audio, which looked like the winner until the
+different-speaker control showed it scoring 0.54 between two different people —
+it would have merged participants.</li>
+<li><strong><code dir="auto">AsrRequireCorroboration</code> is off by default on purpose.</strong> Withholding the first
+unmatched embedding cut 8 identities to 2 at the <em>wrong</em> threshold, but with the
+threshold right it dropped two-speaker purity to 80%, and at 0.5 it merged two
+people into one label. Reach for it only when embeddings are known to be noisy.</li>
+</ol>
+<p>If a single person still fragments: run
+<a href="#calibrating-the-operating-point">Calibrate</a> against one of your own recorded
+meetings — it performs exactly the measurement above, automatically. Failing that,
+lower the threshold on the ASR Config page, raise the minimum utterance length, and only then
+consider the maximum speakers per channel on the ASR Config page — a cap bounds the
+symptom but cannot fix a mis-set
+operating point. Sample sizes behind the numbers above are small (11 utterances, one
+voice pair), which is the reason calibration exists rather than a bigger table of
+defaults.</p>
+<p><strong>Calibration says “No usable threshold”.</strong> The same-speaker and different-speaker
+scores overlap on that recording, so no threshold separates them. In order of
+likelihood: heavy cross-talk (both sides talking at once, so segments contain both
+voices), narrowband or heavily processed audio, a recording where one channel is a
+conference bridge carrying several people, or a speaker model that does not suit this
+audio. Try another meeting first; if two clean meetings both overlap, the model is the
+problem — the shipped <code dir="auto">measured</code> notes in <code dir="auto">catalog.json</code> show what a good and a bad
+embedder look like on the same audio.</p>
+<p><strong>Calibration refuses the file.</strong> “needs the two-channel recording” means the WAV is
+mono or the header says one channel — remember the requirement is one speaker per
+channel, not just a stereo file. “unsupported recording encoding” means it is not
+16-bit PCM (an MP3, M4A or float WAV): convert it first with
+<code dir="auto">ffmpeg -i in.m4a -ac 2 -ar 16000 -sample_fmt s16 out.wav</code>, which will <em>not</em> create
+channel separation on its own — the two channels have to have come from two separate
+sources.</p>
+<p><strong>Too many speakers detected on genuinely multi-speaker audio.</strong> Lower
+the speaker similarity threshold, or set the maximum speakers per channel to the room
+size — both on the ASR Config page.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="licences">Licences</h2><a class="sl-anchor-link" href="#licences"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “Licences”</span></a></div>
+<p>The image downloads model weights at build time. <strong>You are responsible for
+complying with their licences.</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Component</th><th>Licence</th></tr></thead><tbody><tr><td><code dir="auto">sherpa-onnx</code> runtime</td><td>Apache-2.0</td></tr><tr><td>NVIDIA Nemotron streaming EN 0.6B (default ASR model)</td><td><strong>NVIDIA Open Model License</strong></td></tr><tr><td>NVIDIA FastConformer streaming EN 480 ms</td><td>CC-BY-4.0</td></tr><tr><td>NVIDIA Parakeet TDT 0.6B v3 (offline)</td><td>CC-BY-4.0</td></tr><tr><td>icefall streaming Zipformer EN</td><td>Apache-2.0</td></tr><tr><td>NVIDIA TitaNet-small / TitaNet-large (speaker embedding)</td><td>CC-BY-4.0</td></tr><tr><td>WeSpeaker CAM++ / ResNet293 (speaker embedding)</td><td>Apache-2.0</td></tr><tr><td>3D-Speaker CAM++ / ERes2Net (speaker embedding)</td><td>Apache-2.0</td></tr><tr><td>pyannote segmentation 3.0 (turn detection)</td><td>MIT</td></tr><tr><td>Silero VAD (offline engine only)</td><td>MIT</td></tr></tbody></table>
+<p>Each model’s licence file is copied into the image alongside its weights, and the
+resolved licences are reported in the ASR stack’s <code dir="auto">AsrModelLicense</code>, <code dir="auto">AsrLicenceSummary</code>
+and <code dir="auto">AsrRedistributable</code> outputs. <strong><code dir="auto">AsrRedistributable</code> is the one to check</strong> before
+copying an image anywhere: it is <code dir="auto">false</code> whenever any weight in the bundle carries a
+licence that does not permit redistribution, which today means any bundle using the
+Nemotron default.</p>
+<p>Every checksum in <code dir="auto">catalog.json</code> was verified by downloading the artifact and hashing it;
+the three speaker models added on 2026-08-20 additionally match the publisher’s own
+<code dir="auto">checksum.txt</code>.</p>
+<div class="sl-heading-wrapper level-h2"><h2 id="see-also">See Also</h2><a class="sl-anchor-link" href="#see-also"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore="">Section titled “See Also”</span></a></div>
+<ul>
+<li><a href="../stream-audio/">Stream Audio</a></li>
+<li><a href="../desktop-capture-app/">Desktop Capture App</a></li>
+<li><a href="../transcription-and-translation/">Transcription &#x26; Translation</a></li>
+<li><a href="../websocket-streaming-api/">WebSocket Streaming API</a></li>
+<li><a href="../cloudformation-parameters/">CloudFormation Parameters Reference</a></li>
+</ul></div><footer class="sl-flex astro-xhxjzfa7"><div class="meta sl-flex astro-xhxjzfa7"></div><div class="pagination-links print:hidden astro-jgq3vlii" dir="ltr"><a href="/amazon-transcribe-live-meeting-assistant/transcription-and-translation/" rel="prev" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg><span class="astro-jgq3vlii">Previous<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Transcription &amp; Translation</span></span></a><a href="/amazon-transcribe-live-meeting-assistant/meeting-assistant/" rel="next" class="astro-jgq3vlii"><svg aria-hidden="true" class="astro-jgq3vlii astro-n5k4ipy7" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg><span class="astro-jgq3vlii">Next<br class="astro-jgq3vlii"><span class="link-title astro-jgq3vlii">Meeting Assistant</span></span></a></div></footer></div></div></main></div></div></div></div></body></html>
