@@ -1211,11 +1211,49 @@ def test_scheduled_microvm_payload_is_readable_by_the_launcher(
     """
     payload = json.loads(_run_scheduler(raw, "MICROVM")["Target"]["Input"])
 
+    # Strip comments BEFORE parsing: the FIELD_MAP block explains the meetingID
+    # / meetingId spelling trap in prose, so a naive scan of the whole block
+    # would treat any key merely *mentioned* in a comment as supported.
     block = launcher.split("FIELD_MAP = {", 1)[1].split("\n}", 1)[0]
-    known = set(re.findall(r'"([a-zA-Z]+)"', block))
+    code_only = "\n".join(
+        line for line in block.splitlines() if not line.strip().startswith("#")
+    )
+    entries = dict(re.findall(r'"([A-Z_]+)":\s*\(([^)]*)\)', code_only))
+    assert entries, "could not parse FIELD_MAP"
+    known = {c.strip().strip("\"'") for cands in entries.values() for c in cands.split(",") if c.strip()}
 
     unknown = sorted(set(payload) - known)
     assert not unknown, f"launcher FIELD_MAP does not read {unknown}"
+
+    # The other direction, which is the one that actually matters: the MICROVM
+    # payload must carry every per-meeting value the ECS branch sets as a
+    # container env var, or a scheduled MicroVM VP silently launches with less
+    # configuration than a scheduled Fargate one.
+    ecs_env = {
+        e["Name"]
+        for e in json.loads(_run_scheduler(raw, "FARGATE")["Target"]["Input"])[
+            "Overrides"
+        ]["ContainerOverrides"][0]["Environment"]
+    }
+    # These four are per-STACK, not per-meeting: the launcher reads them from the
+    # ECS task definition via _static_config() instead of the schedule payload.
+    from_task_definition = {
+        "GRAPHQL_ENDPOINT",
+        "CALL_DATA_STREAM_NAME",
+        "RECORDINGS_BUCKET_NAME",
+        "VP_TASK_REGISTRY_TABLE_NAME",
+    }
+    # env var name -> the payload key(s) FIELD_MAP resolves it from
+    supplied = {
+        env_key
+        for env_key, cands in entries.items()
+        if any(c.strip().strip("\"'") in payload for c in cands.split(",") if c.strip())
+    }
+    missing = sorted(ecs_env - from_task_definition - supplied)
+    assert not missing, (
+        f"the MICROVM schedule payload drops {missing}, which the ECS "
+        "scheduled path passes to the container"
+    )
 
     # The values the VP cannot join without.
     assert payload["virtualParticipantId"] == "vp-1"
@@ -1250,9 +1288,54 @@ def test_scheduler_lambda_can_pass_the_launcher_invoke_role(template: dict) -> N
     pass_role = [s for s in statements if "iam:PassRole" in s["Action"]]
     assert len(pass_role) == 1, "expected exactly one PassRole statement"
 
-    rendered = json.dumps(pass_role[0]["Resource"])
-    assert "VPSchedulerExecutionRole" in rendered
-    assert "VPScheduleInvokeLauncherRole" in rendered, (
-        "the MICROVM branch passes VPScheduleInvokeLauncherRole to EventBridge "
-        "Scheduler, so the Lambda needs PassRole on it"
+    # Assert on the Fn::If STRUCTURE, not a substring of the whole thing: both
+    # role names appear either way round, so a substring check would still pass
+    # with the branches inverted -- which cfn-lint flags as W1001 and which
+    # would break every MICROVM deploy.
+    resource = pass_role[0]["Resource"]
+    assert "Fn::If" in resource, "PassRole must be conditional on the launch type"
+    condition, if_microvm, if_ecs = resource["Fn::If"]
+    assert condition == "UseMicrovmLaunchType", condition
+
+    def _roles(branch: object) -> set[str]:
+        return set(re.findall(r"(VP[A-Za-z]+Role)", json.dumps(branch)))
+
+    assert _roles(if_microvm) == {
+        "VPSchedulerExecutionRole",
+        "VPScheduleInvokeLauncherRole",
+    }, "the MICROVM branch must pass BOTH the ECS-target and launcher-invoke roles"
+    # VPScheduleInvokeLauncherRole is itself Condition: UseMicrovmLaunchType, so
+    # referencing it from the false branch is an unresolvable GetAtt.
+    assert _roles(if_ecs) == {"VPSchedulerExecutionRole"}, (
+        "the EC2/FARGATE branch must not reference the MicroVM-only role"
+    )
+
+
+def test_launcher_async_retries_are_disabled(template: dict) -> None:
+    """A scheduled launch must not be retried into duplicate bots.
+
+    EventBridge Scheduler invokes the launcher asynchronously, so Lambda's
+    default async policy would re-run it twice more, minutes apart. If the first
+    attempt failed AFTER RunMicrovm succeeded, each retry adds another VP to the
+    same meeting.
+    """
+    config = template["Resources"]["VPMicrovmLauncherAsyncConfig"]
+    assert config["Condition"] == "UseMicrovmLaunchType"
+    props = config["Properties"]
+    assert props["MaximumRetryAttempts"] == 0
+    assert "VPMicrovmLauncherFunction" in json.dumps(props["FunctionName"])
+
+
+def test_launcher_never_raises_after_starting_a_microvm(launcher: str) -> None:
+    """The wait-for-RUNNING poll must not propagate transient API errors.
+
+    An exception here escapes the handler, and on the asynchronous
+    (EventBridge Scheduler) path that means a retry with a MicroVM already
+    running -- i.e. two bots in the meeting.
+    """
+    after_run = launcher.split('logger.info("Started MicroVM', 1)[1]
+    poll = after_run.split("if state != \"RUNNING\"", 1)[0]
+    assert "get_microvm" in poll, "could not locate the wait-for-RUNNING loop"
+    assert "try:" in poll and "except" in poll, (
+        "the wait-for-RUNNING poll must swallow transient GetMicrovm failures"
     )

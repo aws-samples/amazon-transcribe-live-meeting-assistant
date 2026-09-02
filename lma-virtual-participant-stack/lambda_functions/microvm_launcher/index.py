@@ -278,11 +278,21 @@ def lambda_handler(event, context):
     # Wait for RUNNING so a failure to start is reported now, while the
     # state machine can still mark the VP failed, rather than leaving
     # the UI waiting on a VP that never boots.
+    #
+    # Nothing below here may raise: RunMicrovm has already succeeded, and
+    # EventBridge Scheduler invokes this function ASYNCHRONOUSLY for scheduled
+    # meetings, so an unhandled exception hands the event back to Lambda's
+    # default async retry (2 more attempts, minutes apart) and can put a second
+    # and third bot in the same meeting. A transient GetMicrovm throttle or 5xx
+    # is therefore swallowed and simply retried until the deadline.
     state = response.get("state", "PENDING")
     deadline = time.time() + 120
     while state in ("PENDING", "STARTING") and time.time() < deadline:
         time.sleep(2)
-        state = microvms.get_microvm(microvm_id).get("state", state)
+        try:
+            state = microvms.get_microvm(microvm_id).get("state", state)
+        except Exception:  # noqa: BLE001 - see above; keep polling
+            logger.warning("GetMicrovm %s failed; retrying", microvm_id, exc_info=True)
 
     if state != "RUNNING":
         logger.error("MicroVM %s did not reach RUNNING (state=%s)", microvm_id, state)

@@ -2139,6 +2139,24 @@ Resources:
         S3Bucket: !Ref ArtifactBucket
         S3Key: !Ref MicrovmLauncherS3Key
 
+  # EventBridge Scheduler invokes this function ASYNCHRONOUSLY for scheduled
+  # meetings, so Lambda's default async policy would retry a failed invocation
+  # twice more, minutes apart -- putting a second and third bot in the same
+  # meeting if the failure happened after RunMicrovm had already succeeded.
+  # Retrying a meeting join minutes late is not useful anyway, so turn it off
+  # and let the launcher report the failure instead.
+  #
+  # This affects ONLY asynchronous invocations. The "start now" state machine
+  # calls the same function through states:::lambda:invoke (synchronous), which
+  # keeps its own Retry/Catch and is unaffected.
+  VPMicrovmLauncherAsyncConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Condition: UseMicrovmLaunchType
+    Properties:
+      FunctionName: !Ref VPMicrovmLauncherFunction
+      Qualifier: $LATEST
+      MaximumRetryAttempts: 0
+
   TaskDefinition:
     Type: "AWS::ECS::TaskDefinition"
     Metadata:
@@ -3181,7 +3199,6 @@ Resources:
           logger.setLevel(getattr(logging, os.environ.get('LOG_LEVEL', 'INFO')))
           
           scheduler_client = boto3.client('scheduler')
-          ecs_client = boto3.client('ecs')
 
 
           def _ecs_params(vp_id, new_image, launch_type, meeting_time_int,
