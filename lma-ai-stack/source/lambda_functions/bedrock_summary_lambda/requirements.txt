@@ -1,3 +1,3 @@
 requests
 urllib3<3
-boto3==1.43.67
+boto3==1.43.86

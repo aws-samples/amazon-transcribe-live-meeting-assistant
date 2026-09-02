@@ -97,6 +97,20 @@ updates:
       # makes tsc fail "Cannot find type definition file for 'uuid'" (TS2688).
       - dependency-name: "@types/uuid"
         versions: [">=10"]
+      # react/react-dom >=19: @azure/communication-react — which the Teams
+      # participant UI is built on — peers `react`, `react-dom`, `@types/react`
+      # and `@types/react-dom` at ">=16.8.0 <19.0.0", and that is still true on
+      # its latest release (1.34.0, verified). React 19 therefore makes
+      # `npm ci` fail outright with ERESOLVE, so it cannot be taken here at all.
+      # Unignore once @azure/communication-react widens its react peer to 19.
+      - dependency-name: react
+        versions: [">=19"]
+      - dependency-name: react-dom
+        versions: [">=19"]
+      - dependency-name: "@types/react"
+        versions: [">=19"]
+      - dependency-name: "@types/react-dom"
+        versions: [">=19"]
 
   # ── npm: browser extension (build/dev-heavy) ──────────────────────────────
   - package-ecosystem: npm
@@ -174,6 +188,11 @@ updates:
       - /lma-ai-stack/source/lambda_layers/*
       - /lma-websocket-transcriber-stack/source/lambda_functions/*
       - /lma-meetingassist-setup-stack/*
+      # The ASR MicroVM test deps were missing from this list, so they were
+      # surfaced as lone ungrouped PRs outside `python-minor-patch` (e.g. #612,
+      # which bumped pytest to 9 on its own and was uninstallable because
+      # pytest-asyncio was left behind). Listing the dir groups them instead.
+      - /lma-asr-microvm-stack/source
     schedule:
       interval: weekly
     target-branch: develop

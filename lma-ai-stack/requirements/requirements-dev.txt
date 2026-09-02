@@ -1,18 +1,18 @@
 # development dependencies
 bandit~=1.9.4
 black~=26.5.1
-cfn-lint~=1.54.0
+cfn-lint~=1.56.0
 cfn-policy-validator~=0.0.31
 flake8~=7.3.0
 mypy~=2.3
-pylint~=4.0.6
+pylint~=4.0.8
 toml>=0.10.2
 yamllint~=1.38.0
 
 # runtime and typing dependencies included to hint IDEs and make it easier to test/debug locally
-boto3~=1.43.67
-boto3-stubs[comprehend,codebuild,dynamodb,lambda,lexv2-runtime,s3,sqs,sns]~=1.43.67
+boto3~=1.43.86
+boto3-stubs[comprehend,codebuild,dynamodb,lambda,lexv2-runtime,s3,sqs,sns]~=1.43.86
 gql[botocore,aiohttp,requests]~=3.5.3
-aws-lambda-powertools~=3.31.1
-phonenumbers~=9.0.36
+aws-lambda-powertools~=3.34.0
+phonenumbers~=9.0.38
 crhelper~=2.0.12
