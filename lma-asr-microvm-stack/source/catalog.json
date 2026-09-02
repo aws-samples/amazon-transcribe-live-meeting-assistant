@@ -1,0 +1,427 @@
+{
+  "version": 2,
+  "defaultBundleId": "nemotron-titanet-small",
+  "bundleNote": "A bundle is a whole pre-vetted pairing: the three models AND the operating point measured for that combination. The threshold is not a property of the embedder alone - segment length moves it as much as the model does (CAM++ measured 0.30 on 1-2s utterances and 0.68 on 5-20s ones), so an operating point is only meaningful for a stated pairing and utterance-length floor. A bundle with no speakerThreshold has never been calibrated here; the engine then withholds speaker labels until a deployment calibrates its own, which is the honest failure rather than guessing.",
+  "bundles": [
+    {
+      "id": "nemotron-titanet-small",
+      "name": "Nemotron streaming + TitaNet-small (accuracy-first, NVIDIA licence)",
+      "status": "vetted",
+      "modelId": "nemotron-streaming-en-0.6b-560ms-int8",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.4,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "The pairing validated on real meetings, and the only one demonstrated end to end on a live multi-speaker call. NOT redistributable: the ASR weights are under the NVIDIA Open Model License. Threshold measured across two meetings; different speakers scored at most 0.107 in one and 0.307 in another, so 0.4 clears the harder pair rather than the easier one. Known weakness: under-splits a channel dominated by one talker - on a 31-minute three-person call the quieter tab voice took 13 rows against roughly 41 expected."
+    },
+    {
+      "id": "permissive-zipformer-campplus",
+      "name": "Zipformer + WeSpeaker CAM++ (Apache-2.0 and MIT only)",
+      "status": "experimental",
+      "modelId": "zipformer-streaming-en-2023-06-26-int8",
+      "speakerModelId": "wespeaker-en-cam++-lm",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.68,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "Apache-2.0 (ASR) + Apache-2.0 (speaker) + MIT (segmentation)",
+      "notes": "Redistributable, and worse. The ASR model is trained on LibriSpeech read speech, so expect degraded text on spontaneous meeting audio; the embedder's measured margin is 0.143 against TitaNet's 0.43 on identical audio, and a different speaker once reached 0.761 against a same-speaker floor of 0.763. 0.68 holds only for utterances of roughly 5s and up, which is why minSegmentMs matters more here than elsewhere."
+    },
+    {
+      "id": "transcription-only",
+      "name": "Nemotron streaming, no diarization",
+      "status": "vetted",
+      "modelId": "nemotron-streaming-en-0.6b-560ms-int8",
+      "speakerModelId": "none",
+      "segmentationModelId": "none",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR)",
+      "notes": "Smallest image and lowest latency for a deployment that wants an alternative to Amazon Transcribe but labels transcripts by audio channel. Diarization requests are reported as unsupported rather than silently returning no labels."
+    },
+    {
+      "id": "permissive-fastconformer-titanet-large",
+      "name": "FastConformer streaming + TitaNet-large (redistributable, CC-BY-4.0)",
+      "status": "uncalibrated",
+      "modelId": "fastconformer-streaming-en-480ms-int8",
+      "speakerModelId": "titanet-large",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "The redistributable bundle worth trying first: every weight is CC-BY-4.0 or MIT, the ASR model shares the Nemotron default's architecture but was trained on conversational corpora (Fisher, Switchboard) rather than read speech, and the image is far smaller (106 MB + 101 MB against 464 MB + 39 MB). NOT YET CALIBRATED: no speakerThreshold ships, so speaker labels are withheld until this deployment runs a calibration from the ASR Config page. That is deliberate - a threshold measured for another pairing would fragment or merge speakers."
+    },
+    {
+      "id": "nemotron-titanet-large",
+      "name": "Nemotron streaming + TitaNet-large (accuracy-first, NVIDIA licence)",
+      "status": "uncalibrated",
+      "modelId": "nemotron-streaming-en-0.6b-560ms-int8",
+      "speakerModelId": "titanet-large",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "The validated default with the larger embedder, to target the under-splitting measured on a 31-minute three-person call (the quieter voice on a Bob-dominated channel took 13 rows against roughly 41 expected). Same ASR weights as nemotron-titanet-small, so text quality should be identical and only diarization changes. NOT YET CALIBRATED: TitaNet-large has its own cosine scale, and the small model's 0.4 is not transferable."
+    },
+    {
+      "id": "apache-only-zipformer-3dspeaker",
+      "name": "Zipformer + 3D-Speaker CAM++ (Apache-2.0 and MIT only)",
+      "status": "uncalibrated",
+      "modelId": "zipformer-streaming-en-2023-06-26-int8",
+      "speakerModelId": "3dspeaker-campplus-en-voxceleb",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "Apache-2.0 (ASR) + Apache-2.0 (speaker) + MIT (segmentation)",
+      "notes": "For a deployment that needs Apache-2.0/MIT specifically and cannot accept CC-BY-4.0's attribution requirement. Both halves are the weaker choice: the ASR model is trained on LibriSpeech read speech, and this embedder replaces WeSpeaker's CAM++ (measured margin 0.143) with the 3D-Speaker export, which is unmeasured here. Prefer permissive-fastconformer-titanet-large unless CC-BY-4.0 is genuinely unacceptable."
+    },
+    {
+      "id": "accurate-parakeet-titanet-large",
+      "name": "Parakeet TDT v3 offline + TitaNet-large (accuracy-first, redistributable)",
+      "status": "uncalibrated",
+      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "speakerModelId": "titanet-large",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "vadModelId": "silero-vad-v5",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
+      "notes": "Highest expected text accuracy and fully redistributable, at the cost of live latency: Parakeet TDT is OFFLINE, so the accurate engine segments audio with Silero VAD and decodes each utterance only once it closes. There is no interim text during an utterance, which changes the live meeting experience materially - live cutting cannot apply either, because a mid-utterance word list does not exist. UNVALIDATED and possibly not viable: 8192 MiB (4 vCPU) is the largest the base MicroVM image supports, and a 0.6B offline decode has to catch up in bursts rather than keeping pace frame by frame, so it may not hold real time on this engine at all. Measure the real-time factor before offering it to users. NOT YET CALIBRATED."
+    },
+    {
+      "id": "parakeet-streaming-titanet-small",
+      "name": "Parakeet unified streaming 560ms + TitaNet-small (ASR quality trial)",
+      "status": "uncalibrated",
+      "modelId": "parakeet-unified-streaming-en-0.6b-560ms-int8",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "A/B against nemotron-titanet-small: identical embedder, identical turn detection, identical 560ms lookahead, so any difference in a side-by-side meeting is the ASR model. That is the comparison worth running, because text quality - not diarization - is what a reviewer ranked below Amazon Transcribe. Uncalibrated only because TitaNet-small's 0.4 was measured against Nemotron's segmentation of the same audio; if the text is better, calibrate and this replaces the default."
+    },
+    {
+      "id": "parakeet-streaming-low-latency",
+      "name": "Parakeet unified streaming 240ms + TitaNet-small (low latency)",
+      "status": "uncalibrated",
+      "modelId": "parakeet-unified-streaming-en-0.6b-240ms-int8",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "Half the lookahead of every other streaming bundle, so partials appear sooner. Worth trying only after the 560ms variant, since it changes two things at once relative to the current default (model AND lookahead) and a shorter lookahead costs accuracy on a cache-aware model."
+    }
+  ],
+  "models": [
+    {
+      "id": "nemotron-streaming-en-0.6b-560ms-int8",
+      "name": "NVIDIA Nemotron streaming English 0.6B (560ms, int8)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2",
+      "sha256": "78e2b79fcf7271553a74402a76b771b09ea40117a39566a79f52235b23db6358",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "NVIDIA Open Model License",
+      "licenseUrl": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 443,
+      "provenanceVerified": "2026-07-31"
+    },
+    {
+      "id": "zipformer-streaming-en-2023-06-26-int8",
+      "name": "icefall streaming Zipformer English (int8, Apache-2.0)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-streaming-zipformer-en-2023-06-26.tar.bz2",
+      "sha256": "639e25b578e9e997131402199419c13a941f8e4e198e2da1ce57dbf5cf401282",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        "decoder": "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        "joiner": "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 296,
+      "provenanceVerified": "2026-08-13",
+      "note": "Fully permissive alternative to the NVIDIA-licensed default: Apache-2.0 weights from icefall, so an Apache-2.0-only deployment can pair it with a WeSpeaker embedder. Trained on LibriSpeech read speech, so expect worse accuracy on real meeting audio (noise, cross-talk, spontaneous speech) than the Nemotron default; unmeasured here."
+    },
+    {
+      "id": "fastconformer-streaming-en-480ms-int8",
+      "name": "NVIDIA FastConformer streaming English (480ms, int8, CC-BY-4.0)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-480ms-int8.tar.bz2",
+      "sha256": "da93061cbf7b708b6b65976f70b29f519be29df750d8cdcabf98c65645930f13",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://huggingface.co/nvidia/stt_en_fastconformer_hybrid_large_streaming_multi",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 106,
+      "provenanceVerified": "2026-08-20",
+      "note": "The redistributable analogue of the Nemotron default: the same cache-aware streaming FastConformer-RNNT architecture, but CC-BY-4.0 instead of the NVIDIA Open Model License, and a quarter of the download. Trained on NeMo ASRSET - LibriSpeech, Fisher, Switchboard, WSJ, MLS-EN 2000h and Common Voice - so unlike the LibriSpeech-only Zipformer it has seen thousands of hours of SPONTANEOUS conversational speech, which is what meeting audio is. Source model exposes 0/480/1040ms lookaheads; 480ms is picked to sit near the Nemotron default's 560ms. Accuracy on real meeting audio is UNMEASURED here."
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v3-int8",
+      "name": "NVIDIA Parakeet TDT 0.6B v3 offline (int8, CC-BY-4.0)",
+      "engine": "accurate",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+      "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 487,
+      "provenanceVerified": "2026-08-20",
+      "requiresVad": true,
+      "note": "OFFLINE, not streaming: it is driven by the accurate engine, which segments audio with Silero VAD and decodes each closed utterance. That trades latency for accuracy - there is no interim text DURING an utterance, only when it ends - so it suits accuracy-first use more than a live meeting view. Chosen over Whisper (also permissive) because TDT is a transducer and reports token timestamps: turn splitting and live cutting both need word timings, and sherpa's Whisper export provides none, which would silently reduce diarization to one speaker per VAD segment."
+    },
+    {
+      "id": "parakeet-unified-streaming-en-0.6b-560ms-int8",
+      "name": "NVIDIA Parakeet unified streaming English 0.6B (560ms, int8)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms.tar.bz2",
+      "sha256": "dd2c2698f102eafbf0ee54bdfd7cd842ec00fa6cf2475cbbb048887f794ff52e",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "NVIDIA Open Model License",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-unified-en-0.6b",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 501,
+      "provenanceVerified": "2026-08-20",
+      "note": "Newer sibling of the Nemotron default: same cache-aware streaming transducer family and the SAME NVIDIA Open Model License, so no licensing gain - the reason to try it is ASR TEXT QUALITY, which is the weaker half of this engine (a reviewer ranked its text below Amazon Transcribe, and a real meeting produced a ten-token repetition loop). Trained on Granary / YTC / Yodas2 rather than Nemotron's data. NOT the same model as parakeet-tdt-0.6b-v3: that one is CC-BY-4.0 but offline, while this streaming 'unified' export is NVIDIA-licensed. Like-for-like against the Nemotron default's 560ms lookahead, so the two are directly comparable on the same meeting."
+    },
+    {
+      "id": "parakeet-unified-streaming-en-0.6b-240ms-int8",
+      "name": "NVIDIA Parakeet unified streaming English 0.6B (240ms, int8)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-240ms.tar.bz2",
+      "sha256": "dead05a9149f6f02d373f3eb4553c74af4f189ff74889b5e210b35ca102655da",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "NVIDIA Open Model License",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-unified-en-0.6b",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 501,
+      "provenanceVerified": "2026-08-20",
+      "note": "Newer sibling of the Nemotron default: same cache-aware streaming transducer family and the SAME NVIDIA Open Model License, so no licensing gain - the reason to try it is ASR TEXT QUALITY, which is the weaker half of this engine (a reviewer ranked its text below Amazon Transcribe, and a real meeting produced a ten-token repetition loop). Trained on Granary / YTC / Yodas2 rather than Nemotron's data. NOT the same model as parakeet-tdt-0.6b-v3: that one is CC-BY-4.0 but offline, while this streaming 'unified' export is NVIDIA-licensed. Half the lookahead of the default, for a more responsive live transcript. Expect somewhat worse accuracy than 560ms: a cache-aware model sees less right-context per chunk."
+    }
+  ],
+  "speakerModels": [
+    {
+      "id": "titanet-small",
+      "name": "NVIDIA TitaNet-small speaker embedding (192-dim)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx",
+      "sha256": "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large",
+      "approxDownloadMb": 39,
+      "provenanceVerified": "2026-08-05",
+      "recommendedThreshold": 0.4,
+      "embeddingDim": 192,
+      "measured": "2026-08-12, native 16 kHz meeting audio: same-speaker cosine median 0.25-0.51 (p5 0.099), different-speaker median -0.02 (p95 0.074, max 0.107). 2026-08-15, a second meeting with 7-20s utterances: same-speaker 0.74-0.91, and two similar-sounding women scored 0.246-0.307 between them while a third, very different voice scored -0.07 to 0.10 against both. Two lessons: same-speaker scores rise sharply once short utterances are filtered out (min_segment_ms), and how far apart two DIFFERENT speakers land depends on the pair - 0.107 for one pair, 0.307 for another - so a threshold has to clear the hardest pair it will meet, not the easiest one it was measured on."
+    },
+    {
+      "id": "titanet-large",
+      "name": "NVIDIA TitaNet-large speaker embedding (192-dim)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_large.onnx",
+      "sha256": "d51abcf31717ef28162f26acb9d44dd4127c3d44c9b8624f699f3425daca8e77",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large",
+      "approxDownloadMb": 101,
+      "provenanceVerified": "2026-08-20",
+      "embeddingDim": 192,
+      "note": "Same family as titanet-small, which is the only embedder measured to separate speakers well on real meeting audio (0.43 margin), and trained on conversational corpora - VoxCeleb 1/2, Fisher, Switchboard, LibriSpeech, SRE. Chosen to target the failure measured on a 31-minute three-person call, where the quieter voice on a channel dominated by one talker took 13 rows against roughly 41 expected. 2.5x the download of the small model. UNMEASURED here: it ships with no recommendedThreshold, so a bundle using it withholds speaker labels until the deployment calibrates."
+    },
+    {
+      "id": "wespeaker-en-cam++-lm",
+      "name": "WeSpeaker CAM++ (large-margin), English",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_CAM++_LM.onnx",
+      "sha256": "e197af7e9d473030cf486b3124149a19bf37014d0e4485e4c70c483b0ec10cb2",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/wenet-e2e/wespeaker",
+      "approxDownloadMb": 28,
+      "provenanceVerified": "2026-08-12",
+      "embeddingDim": 512,
+      "recommendedThreshold": 0.68,
+      "measured": "2026-08-12, utterances of 1-2s: same-speaker median 0.27, different-speaker median 0.30 (p95 0.53) - overlapping. 2026-08-19, the same voices with 5-20s utterances: same-speaker 0.763-0.872, different-speaker 0.407-0.621 within a channel, a gap of 0.143, so 0.68 works. Segment length moves this model's operating point as much as the model choice does. Caveat: across channels a different speaker reached 0.761, which nearly touches the same-speaker floor, so the margin is thinner than TitaNet's 0.43 on identical audio."
+    },
+    {
+      "id": "wespeaker-en-resnet293-lm",
+      "name": "WeSpeaker ResNet293 (large-margin), English",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/wespeaker_en_voxceleb_resnet293_LM.onnx",
+      "sha256": "f65dbc820e534eef64ae12d1e289e20244d60e60f7f00d7b092092b1c458be2e",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "Apache-2.0",
+      "licenseUrl": "https://github.com/wenet-e2e/wespeaker",
+      "approxDownloadMb": 109,
+      "provenanceVerified": "2026-08-12",
+      "embeddingDim": 256,
+      "measured": "NOT RECOMMENDED. 2026-08-19, real meeting audio: same-speaker 0.962-0.986 but different speakers 0.886-0.921, so the distributions overlap and no threshold separates them - 0.8 merged every voice on a channel into one. Everything recorded through the same path scores 0.88+ regardless of who is speaking while cross-channel pairs sit at 0.55-0.63, which suggests it encodes the recording condition more than the voice. Earlier note (2026-08-12) already showed overlapping tails; this quantifies it. No recommendedThreshold is shipped because there is no honest value."
+    },
+    {
+      "id": "3dspeaker-campplus-en-voxceleb",
+      "name": "3D-Speaker CAM++ English VoxCeleb (512-dim)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx",
+      "sha256": "357a834f702b80161e5b981182c038e18553c1f2ca752ed6cec2052365d4129b",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.modelscope.cn/models/iic/speech_campplus_sv_en_voxceleb_16k/summary",
+      "approxDownloadMb": 30,
+      "provenanceVerified": "2026-08-20",
+      "embeddingDim": 512,
+      "note": "Apache-2.0 alternative from the 3D-Speaker project, offered because both WeSpeaker options measured badly here (CAM++ a thin 0.143 margin, ResNet293 overlapping outright). UNMEASURED here, so it ships with no recommendedThreshold."
+    },
+    {
+      "id": "3dspeaker-eres2net-en-voxceleb",
+      "name": "3D-Speaker ERes2Net English VoxCeleb (192-dim)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_sv_en_voxceleb_16k.onnx",
+      "sha256": "c59158379255ad66e161679cca6af8d52d51e389e3224ab7d7a7baae295c2db5",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "Apache-2.0",
+      "licenseUrl": "https://www.modelscope.cn/models/iic/speech_eres2net_sv_en_voxceleb_16k/summary",
+      "approxDownloadMb": 27,
+      "provenanceVerified": "2026-08-20",
+      "embeddingDim": 192,
+      "note": "Apache-2.0 alternative from the 3D-Speaker project, offered because both WeSpeaker options measured badly here (CAM++ a thin 0.143 margin, ResNet293 overlapping outright). UNMEASURED here, so it ships with no recommendedThreshold."
+    },
+    {
+      "id": "none",
+      "name": "No speaker model (transcription only, no diarization)",
+      "url": "",
+      "sha256": "",
+      "archive": "none",
+      "license": "n/a",
+      "approxDownloadMb": 0
+    }
+  ],
+  "thresholdNote": "recommendedThreshold is per model and NOT interchangeable: cosine similarity scales differ between embedders. Changing the speaker model without re-measuring its operating point will either fragment one speaker into many or merge several into one.",
+  "defaultSegmentationModelId": "pyannote-segmentation-3-0",
+  "segmentationModels": [
+    {
+      "id": "pyannote-segmentation-3-0",
+      "name": "pyannote segmentation 3.0 (speaker turn and overlap detection)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2",
+      "sha256": "24615ee884c897d9d2ba09bb4d30da6bb1b15e685065962db5b02e76e4996488",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "file": "model.onnx",
+      "sampleRate": 16000,
+      "windowSec": 10.0,
+      "classes": 7,
+      "license": "MIT",
+      "licenseUrl": "https://huggingface.co/pyannote/segmentation-3.0",
+      "approxDownloadMb": 6,
+      "provenanceVerified": "2026-08-13",
+      "note": "Converted to ONNX by k2-fsa from the gated pyannote/segmentation-3.0 weights and redistributed ungated with the upstream MIT licence file, so no Hugging Face token is needed. Detects speaker turns and overlap inside one endpointed utterance, which raw embeddings cannot do reliably at short durations."
+    },
+    {
+      "id": "none",
+      "name": "No turn detection (one speaker per endpointed utterance)",
+      "url": "",
+      "sha256": "",
+      "archive": "none",
+      "license": "n/a",
+      "approxDownloadMb": 0
+    }
+  ],
+  "vadModels": [
+    {
+      "id": "silero-vad-v5",
+      "name": "Silero VAD (utterance segmentation for the offline engine)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+      "sha256": "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "MIT",
+      "licenseUrl": "https://github.com/snakers4/silero-vad",
+      "approxDownloadMb": 1,
+      "provenanceVerified": "2026-08-20",
+      "note": "Only the 'accurate' (offline) engine needs this: an offline model cannot stream, so audio is cut into utterances by VAD and each closed utterance is decoded. The streaming engine endpoints internally and never loads it."
+    }
+  ]
+}

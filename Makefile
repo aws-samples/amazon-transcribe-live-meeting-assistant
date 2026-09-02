@@ -38,6 +38,8 @@ WEBSOCKET_DIR := lma-websocket-transcriber-stack
 WEBSOCKET_APP_DIR := $(WEBSOCKET_DIR)/source/app
 VP_DIR := lma-virtual-participant-stack
 VP_BACKEND_DIR := $(VP_DIR)/backend
+ASR_DIR := lma-asr-microvm-stack
+ASR_SOURCE_DIR := $(ASR_DIR)/source
 VERSION_FILE := VERSION
 PYTHON_LINE_LENGTH := 100
 
@@ -46,6 +48,7 @@ CFN_TEMPLATES := \
 	lma-main.yaml \
 	$(AI_STACK_DIR)/deployment/lma-ai-stack.yaml \
 	$(AI_STACK_DIR)/deployment/virtual-participant-enhancements.yaml \
+	$(ASR_DIR)/template.yaml \
 	lma-bedrockagent-stack/template.yaml \
 	lma-bedrockkb-stack/template.yaml \
 	lma-chat-button-config-stack/deployment/chat-button-config.yaml \
@@ -280,7 +283,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-asr ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -300,7 +303,7 @@ test-cli: ## Run LMA CLI unit tests
 test-lambdas: ## Run all Lambda function unit tests (no AWS; each dir isolated)
 	@echo "Running Lambda function unit tests..."
 	@FAILED=0; RAN=0; \
-	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
+	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(ASR_DIR)/lambda_functions -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
 		files=$$(cd "$$d" && ls test_*.py 2>/dev/null); \
 		[ -z "$$files" ] && continue; \
 		RAN=$$((RAN+1)); \
@@ -341,6 +344,13 @@ test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
 		$(VP_DIR)/test/test_audio_single_writer.py -q
 	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
 
+test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
+	@echo "Running ASR MicroVM runtime tests..."
+	@test -d $(ASR_SOURCE_DIR)/.venv || $(PYTHON) -m venv $(ASR_SOURCE_DIR)/.venv
+	@$(ASR_SOURCE_DIR)/.venv/bin/pip install -q -r $(ASR_SOURCE_DIR)/requirements-dev.txt
+	cd $(ASR_SOURCE_DIR) && .venv/bin/python -m pytest -q && .venv/bin/ruff check .
+	@echo -e "$(GREEN)✅ ASR MicroVM runtime tests passed!$(NC)"
+
 test-ui-force: ## Run React UI tests (ignore checksum, always run)
 	@echo "Running UI tests (forced)..."
 	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run
@@ -352,7 +362,7 @@ test-ui-force: ## Run React UI tests (ignore checksum, always run)
 # declare them PHONY or make treats them as up-to-date files and skips them.
 .PHONY: docker-build-check docker-build-check-transcriber docker-build-check-vp \
         docker-build-check-all integ-tests integ-tests-live integ-deploy-and-test test-lambdas \
-        test-vp test-vp-template test-vp-microvm-e2e
+        test-vp test-vp-template test-vp-microvm-e2e test-asr
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then

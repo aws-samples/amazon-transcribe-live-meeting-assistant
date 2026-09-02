@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -1059,3 +1060,282 @@ def test_launcher_field_names_match_the_state_machine(raw: str, launcher: str) -
             f"{env_key} maps to {candidates}, none of which the template sends; "
             f"available: {sorted(authoritative)}"
         )
+
+
+# ----------------------------------------------------------------------
+# VPScheduler Lambda: the DynamoDB-stream scheduled-launch path
+# ----------------------------------------------------------------------
+# This is a SECOND scheduling path, separate from the state machine's
+# ScheduledMeetingTarget above: the UI writes an isScheduled row and the
+# DynamoDB stream drives this Lambda. It was missed when MICROVM was added,
+# so it forwarded VP_LAUNCH_TYPE straight into an ecs:runTask LaunchType and
+# every scheduled MICROVM meeting silently failed to launch (issue #613).
+# These tests run the inline code for real rather than grepping it.
+
+
+def _scheduler_source(raw: str) -> str:
+    """The VPScheduler Lambda's inline `Code: ZipFile` body, dedented."""
+    lines = raw.split("\n")
+    for i, line in enumerate(lines):
+        if "ZipFile: |" not in line:
+            continue
+        # Several inline functions exist in this template; pick the scheduler by
+        # the API only it calls.
+        if not any("create_schedule" in nxt for nxt in lines[i : i + 200]):
+            continue
+        indent = len(line) - len(line.lstrip()) + 2
+        body = []
+        for candidate in lines[i + 1 :]:
+            if not candidate.strip():
+                body.append("")
+                continue
+            if len(candidate) - len(candidate.lstrip()) < indent:
+                break
+            body.append(candidate[indent:])
+        return "\n".join(body)
+    raise AssertionError("could not find the VPScheduler inline code")
+
+
+class _FakeScheduler:
+    """Captures create_schedule kwargs instead of calling EventBridge."""
+
+    def __init__(self) -> None:
+        self.created: list[dict] = []
+
+    def create_schedule(self, **kwargs):  # noqa: ANN003
+        self.created.append(kwargs)
+        return {"ScheduleArn": "arn:aws:scheduler:::schedule/g/n"}
+
+
+SCHEDULER_ENV = {
+    "TASK_DEFINITION_ARN": "arn:aws:ecs:us-west-2:1:task-definition/vp:1",
+    "CLUSTER_ARN": "arn:aws:ecs:us-west-2:1:cluster/vp",
+    "SECURITY_GROUPS": '["sg-1"]',
+    "SUBNETS": '["subnet-1", "subnet-2"]',
+    "CONTAINER_NAME": "scribe",
+    "SCHEDULE_GROUP_NAME": "stack-vp-schedules",
+    "SCHEDULER_ROLE_ARN": "arn:aws:iam::1:role/EcsTarget",
+    "MICROVM_LAUNCHER_ARN": "arn:aws:lambda:us-west-2:1:function:Launcher",
+    "SCHEDULE_INVOKE_LAUNCHER_ROLE_ARN": "arn:aws:iam::1:role/InvokeLauncher",
+    "VP_TASK_REGISTRY_TABLE_NAME": "registry",
+    "LMA_STACK_NAME": "stack",
+}
+
+# A realistic isScheduled row, matching what the UI writes (captured from a
+# live stream event).
+SCHEDULED_ROW = {
+    "id": {"S": "vp-1"},
+    "isScheduled": {"BOOL": True},
+    "meetingTime": {"N": "1788299100"},
+    "meetingPlatform": {"S": "TEAMS"},
+    "meetingId": {"S": "25582977335241"},
+    "meetingPassword": {"S": "secret"},
+    "meetingName": {"S": "Teams Schedule"},
+    "owner": {"S": "user@example.com"},
+    "userSub": {"S": "sub-1"},
+    "enableVideoRecording": {"BOOL": True},
+}
+
+
+def _run_scheduler(raw: str, launch_type: str) -> dict:
+    """Execute the inline scheduler on one INSERT event; return the schedule."""
+    import types
+    from unittest import mock
+
+    fake = _FakeScheduler()
+    module = types.ModuleType("vpscheduler")
+    module.__dict__["__name__"] = "vpscheduler"
+    env = {**SCHEDULER_ENV, "VP_LAUNCH_TYPE": launch_type}
+    with mock.patch.dict("os.environ", env, clear=False), mock.patch(
+        "boto3.client",
+        side_effect=lambda service, *a, **k: fake if service == "scheduler" else mock.Mock(),
+    ):
+        exec(compile(_scheduler_source(raw), "vpscheduler", "exec"), module.__dict__)
+        event = {
+            "Records": [
+                {
+                    "eventName": "INSERT",
+                    "dynamodb": {"Keys": {"id": {"S": "vp-1"}}, "NewImage": SCHEDULED_ROW},
+                }
+            ]
+        }
+        result = module.lambda_handler(event, None)
+
+    assert result["statusCode"] == 200, result
+    assert len(fake.created) == 1, f"expected one schedule, got {fake.created}"
+    return fake.created[0]
+
+
+@pytest.mark.parametrize("launch_type", ["FARGATE", "EC2"])
+def test_scheduled_ecs_launch_types_still_use_run_task(raw: str, launch_type: str) -> None:
+    schedule = _run_scheduler(raw, launch_type)
+    target = schedule["Target"]
+
+    assert target["Arn"] == "arn:aws:scheduler:::aws-sdk:ecs:runTask"
+    assert target["RoleArn"] == SCHEDULER_ENV["SCHEDULER_ROLE_ARN"]
+    params = json.loads(target["Input"])
+    # The valid launch type must still reach ECS verbatim.
+    assert params["LaunchType"] == launch_type
+    assert params["ClientToken"] == "vp-1"
+    env = {e["Name"]: e["Value"] for e in params["Overrides"]["ContainerOverrides"][0]["Environment"]}
+    assert env["MEETING_ID"] == "25582977335241"
+    assert env["VIRTUAL_PARTICIPANT_ID"] == "vp-1"
+    assert env["ENABLE_VIDEO_RECORDING"] == "true"
+
+
+def test_scheduled_microvm_invokes_the_launcher_not_run_task(raw: str) -> None:
+    """The regression from issue #613.
+
+    ECS RunTask accepts only EC2/FARGATE/EXTERNAL, so a schedule carrying
+    LaunchType=MICROVM fails at fire time. Because the schedule is
+    ActionAfterCompletion=DELETE it then deletes itself, leaving the VP row at
+    SCHEDULED with nothing in the console to show why.
+    """
+    schedule = _run_scheduler(raw, "MICROVM")
+    target = schedule["Target"]
+
+    assert target["Arn"] == SCHEDULER_ENV["MICROVM_LAUNCHER_ARN"]
+    assert target["RoleArn"] == SCHEDULER_ENV["SCHEDULE_INVOKE_LAUNCHER_ROLE_ARN"]
+    assert "runTask" not in json.dumps(schedule), "MICROVM must not target ecs:runTask"
+    assert "MICROVM" not in target["Input"], "MICROVM must never appear as an ECS LaunchType"
+
+
+def test_scheduled_microvm_payload_is_readable_by_the_launcher(
+    raw: str, launcher: str
+) -> None:
+    """Every key the target sends must be one the launcher's FIELD_MAP reads.
+
+    The two sides are different files. A field the launcher does not recognise
+    is silently dropped and the meeting joins with a default instead — which is
+    how an empty meeting id previously reached Zoom.
+    """
+    payload = json.loads(_run_scheduler(raw, "MICROVM")["Target"]["Input"])
+
+    # Strip comments BEFORE parsing: the FIELD_MAP block explains the meetingID
+    # / meetingId spelling trap in prose, so a naive scan of the whole block
+    # would treat any key merely *mentioned* in a comment as supported.
+    block = launcher.split("FIELD_MAP = {", 1)[1].split("\n}", 1)[0]
+    code_only = "\n".join(
+        line for line in block.splitlines() if not line.strip().startswith("#")
+    )
+    entries = dict(re.findall(r'"([A-Z_]+)":\s*\(([^)]*)\)', code_only))
+    assert entries, "could not parse FIELD_MAP"
+    known = {c.strip().strip("\"'") for cands in entries.values() for c in cands.split(",") if c.strip()}
+
+    unknown = sorted(set(payload) - known)
+    assert not unknown, f"launcher FIELD_MAP does not read {unknown}"
+
+    # The other direction, which is the one that actually matters: the MICROVM
+    # payload must carry every per-meeting value the ECS branch sets as a
+    # container env var, or a scheduled MicroVM VP silently launches with less
+    # configuration than a scheduled Fargate one.
+    ecs_env = {
+        e["Name"]
+        for e in json.loads(_run_scheduler(raw, "FARGATE")["Target"]["Input"])[
+            "Overrides"
+        ]["ContainerOverrides"][0]["Environment"]
+    }
+    # These four are per-STACK, not per-meeting: the launcher reads them from the
+    # ECS task definition via _static_config() instead of the schedule payload.
+    from_task_definition = {
+        "GRAPHQL_ENDPOINT",
+        "CALL_DATA_STREAM_NAME",
+        "RECORDINGS_BUCKET_NAME",
+        "VP_TASK_REGISTRY_TABLE_NAME",
+    }
+    # env var name -> the payload key(s) FIELD_MAP resolves it from
+    supplied = {
+        env_key
+        for env_key, cands in entries.items()
+        if any(c.strip().strip("\"'") in payload for c in cands.split(",") if c.strip())
+    }
+    missing = sorted(ecs_env - from_task_definition - supplied)
+    assert not missing, (
+        f"the MICROVM schedule payload drops {missing}, which the ECS "
+        "scheduled path passes to the container"
+    )
+
+    # The values the VP cannot join without.
+    assert payload["virtualParticipantId"] == "vp-1"
+    assert payload["meetingId"] == "25582977335241"
+    assert payload["meetingPlatform"] == "TEAMS"
+    assert payload["meetingPassword"] == "secret"
+    # meetingTime is the real meeting time, not the (2-min-earlier) fire time.
+    assert payload["meetingTime"] == "1788299100"
+
+
+def test_scheduled_launch_fires_before_the_meeting_starts(raw: str) -> None:
+    # Both paths must leave boot headroom, or the VP joins late.
+    for launch_type in ("FARGATE", "MICROVM"):
+        expression = _run_scheduler(raw, launch_type)["ScheduleExpression"]
+        fires_at = datetime.strptime(
+            expression, "at(%Y-%m-%dT%H:%M:%S)"
+        ).replace(tzinfo=timezone.utc)
+        meeting = datetime.fromtimestamp(1788299100, tz=timezone.utc)
+        assert 0 < (meeting - fires_at).total_seconds() <= 300, launch_type
+
+
+def test_scheduler_lambda_can_pass_the_launcher_invoke_role(template: dict) -> None:
+    """CreateSchedule needs iam:PassRole on the role it hands to Scheduler.
+
+    Without it the create_schedule call itself fails, so no schedule is ever
+    written and the VP row again sits at SCHEDULED.
+    """
+    policies = template["Resources"]["VirtualParticipantSchedulerRole"]["Properties"][
+        "Policies"
+    ]
+    statements = policies[0]["PolicyDocument"]["Statement"]
+    pass_role = [s for s in statements if "iam:PassRole" in s["Action"]]
+    assert len(pass_role) == 1, "expected exactly one PassRole statement"
+
+    # Assert on the Fn::If STRUCTURE, not a substring of the whole thing: both
+    # role names appear either way round, so a substring check would still pass
+    # with the branches inverted -- which cfn-lint flags as W1001 and which
+    # would break every MICROVM deploy.
+    resource = pass_role[0]["Resource"]
+    assert "Fn::If" in resource, "PassRole must be conditional on the launch type"
+    condition, if_microvm, if_ecs = resource["Fn::If"]
+    assert condition == "UseMicrovmLaunchType", condition
+
+    def _roles(branch: object) -> set[str]:
+        return set(re.findall(r"(VP[A-Za-z]+Role)", json.dumps(branch)))
+
+    assert _roles(if_microvm) == {
+        "VPSchedulerExecutionRole",
+        "VPScheduleInvokeLauncherRole",
+    }, "the MICROVM branch must pass BOTH the ECS-target and launcher-invoke roles"
+    # VPScheduleInvokeLauncherRole is itself Condition: UseMicrovmLaunchType, so
+    # referencing it from the false branch is an unresolvable GetAtt.
+    assert _roles(if_ecs) == {"VPSchedulerExecutionRole"}, (
+        "the EC2/FARGATE branch must not reference the MicroVM-only role"
+    )
+
+
+def test_launcher_async_retries_are_disabled(template: dict) -> None:
+    """A scheduled launch must not be retried into duplicate bots.
+
+    EventBridge Scheduler invokes the launcher asynchronously, so Lambda's
+    default async policy would re-run it twice more, minutes apart. If the first
+    attempt failed AFTER RunMicrovm succeeded, each retry adds another VP to the
+    same meeting.
+    """
+    config = template["Resources"]["VPMicrovmLauncherAsyncConfig"]
+    assert config["Condition"] == "UseMicrovmLaunchType"
+    props = config["Properties"]
+    assert props["MaximumRetryAttempts"] == 0
+    assert "VPMicrovmLauncherFunction" in json.dumps(props["FunctionName"])
+
+
+def test_launcher_never_raises_after_starting_a_microvm(launcher: str) -> None:
+    """The wait-for-RUNNING poll must not propagate transient API errors.
+
+    An exception here escapes the handler, and on the asynchronous
+    (EventBridge Scheduler) path that means a retry with a MicroVM already
+    running -- i.e. two bots in the meeting.
+    """
+    after_run = launcher.split('logger.info("Started MicroVM', 1)[1]
+    poll = after_run.split("if state != \"RUNNING\"", 1)[0]
+    assert "get_microvm" in poll, "could not locate the wait-for-RUNNING loop"
+    assert "try:" in poll and "except" in poll, (
+        "the wait-for-RUNNING poll must swallow transient GetMicrovm failures"
+    )

@@ -24,6 +24,15 @@ import {
     CallMetaData,
     SocketCallData,
     writeCallRecordingEvent,
+    resolveAsrEngine,
+    startMicrovmAsr,
+    pushAsrAudio,
+    stopMicrovmAsr,
+    shouldFallbackToTranscribe,
+    getAsrRuntimeConfig,
+    runCalibration,
+    CalibrationError,
+    CalibrationRequest,
 } from './calleventdata';
 
 import {
@@ -31,6 +40,7 @@ import {
     posixifyFilename,
     normalizeErrorForLogging,
     getClientIP,
+    resolveShouldRecordCall,
 } from './utils';
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
@@ -110,12 +120,18 @@ const server = fastify({
 // register the @fastify/websocket plugin with the fastify server
 server.register(websocket);
 
-// Setup preHandler hook to authenticate
-server.addHook('preHandler', async (request, reply) => {
-    if (!request.url.includes('health')) {
+// Authenticate at onRequest, which runs BEFORE body parsing. As a preHandler
+// this ran after Fastify had already buffered the request body, so an
+// unauthenticated POST to the calibration route could hold its full upload
+// (up to ASR_CALIBRATION_MAX_UPLOAD_BYTES, 64 MB) in memory on a task that is
+// also transcribing live meetings. Authentication needs only the headers.
+server.addHook('onRequest', async (request, reply) => {
+    // A CORS preflight carries no credentials by design, so authenticating it
+    // would 401 every cross-origin call before the real request is ever made.
+    if (!request.url.includes('health') && request.method !== 'OPTIONS') {
         const clientIP = getClientIP(request.headers);
         server.log.debug(
-            `[AUTH]: [${clientIP}] - Received preHandler hook for authentication. URI: <${
+            `[AUTH]: [${clientIP}] - Received onRequest hook for authentication. URI: <${
                 request.url
             }>, Headers: ${JSON.stringify(request.headers)}`
         );
@@ -152,6 +168,93 @@ server.after(() => {
         }
     );
 });
+
+// The ASR Config admin page lives on the UI's CloudFront domain, not this one, so
+// its calls are cross-origin. Echoing the origin back is safe here because nothing
+// this route trusts is attached by the browser on its own: the credential is an
+// Authorization header the page sets explicitly, no cookie is read, and
+// Access-Control-Allow-Credentials is deliberately never sent. A cross-origin page
+// therefore cannot forge an authenticated request it could not already make
+// directly, and cannot read the response without a token of its own.
+// Semgrep flags this as cors-misconfiguration; the rule assumes reflection implies
+// credentialed access, which is the one thing this route never grants.
+const ASR_CALIBRATE_PATH = '/api/v1/asr/calibrate';
+const ADMIN_GROUP = 'Admin';
+
+const allowCrossOrigin = (
+    request: FastifyRequest,
+    reply: { header: (name: string, value: string) => unknown }
+): void => {
+    reply.header('Access-Control-Allow-Origin', request.headers.origin || '*');
+    reply.header('Vary', 'Origin');
+    reply.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    reply.header('Access-Control-Allow-Headers', 'authorization, content-type');
+    reply.header('Access-Control-Max-Age', '600');
+};
+
+// The calibration sample is posted as raw WAV bytes. It is never stored: the audio
+// is embedded in memory and only the resulting statistics come back, so a sample can
+// be a rehearsed recording or a clip from a public corpus without leaving a copy.
+const ASR_CALIBRATION_MAX_UPLOAD_BYTES = parseInt(
+    process.env['ASR_CALIBRATION_MAX_UPLOAD_BYTES'] || String(64 * 1024 * 1024),
+    10
+);
+
+server.addContentTypeParser(
+    ['application/octet-stream', 'audio/wav', 'audio/wave', 'audio/x-wav'],
+    { parseAs: 'buffer', bodyLimit: ASR_CALIBRATION_MAX_UPLOAD_BYTES },
+    (_request, body, done) => done(null, body)
+);
+
+server.options(ASR_CALIBRATE_PATH, { logLevel: 'warn' }, (request, reply) => {
+    allowCrossOrigin(request, reply);
+    reply.code(204).send();
+});
+
+/**
+ * Measure the diarization operating point from a meeting this deployment recorded.
+ *
+ * Admin-only: it launches an ASR MicroVM and reads a recording. The route only
+ * measures and reports — the admin decides whether to save the result — so a run
+ * on unrepresentative audio cannot quietly change how meetings are transcribed.
+ */
+server.post(
+    ASR_CALIBRATE_PATH,
+    { logLevel: 'info', bodyLimit: ASR_CALIBRATION_MAX_UPLOAD_BYTES },
+    async (request, reply) => {
+        allowCrossOrigin(request, reply);
+        const caller = getAuthenticatedCaller(request);
+        if (!caller?.groups.includes(ADMIN_GROUP)) {
+            server.log.warn(
+                `[ASR CALIBRATE]: refused for non-admin caller ${caller?.username || caller?.sub || 'unknown'}`
+            );
+            return reply
+                .code(403)
+                .send({ message: 'Calibration is limited to users in the Admin group.' });
+        }
+        const wav = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
+        const query = request.query as Record<string, string | undefined>;
+        const perChannel = query['maxSegmentsPerChannel'];
+        try {
+            const run = await runCalibration(
+                {
+                    wav,
+                    ...(perChannel ? { maxSegmentsPerChannel: Number(perChannel) } : {}),
+                } as CalibrationRequest,
+                server
+            );
+            return reply.code(200).send(run);
+        } catch (error) {
+            const status = error instanceof CalibrationError ? error.status : 500;
+            const message =
+                error instanceof CalibrationError
+                    ? error.message
+                    : `calibration failed: ${normalizeErrorForLogging(error)}`;
+            server.log.error(`[ASR CALIBRATE]: ${status} - ${message}`);
+            return reply.code(status).send({ message });
+        }
+    }
+);
 
 type HealthCheckRemoteInfo = {
     addr: string;
@@ -296,11 +399,53 @@ const onBinaryMessage = async (
         socketData.audioInputStream.write(data);
         socketData.writeRecordingStream.write(data);
         socketData.recordingFileSize += data.length;
+        pushAsrAudio(socketData, data);
     } else {
         server.log.error(
             `[ON BINARY MESSAGE]: [${clientIP}] - Error: received audio data before metadata. Check logs for errors in START event.`
         );
     }
+};
+
+/**
+ * Start transcription for a call with the engine it asked for.
+ *
+ * The MicroVM ASR engine has to acquire a MicroVM before it can transcribe
+ * anything, so a failure there (quota, region, image still building) falls back
+ * to Amazon Transcribe rather than losing the meeting's transcript. Audio that
+ * arrives during the acquisition is buffered by both engines.
+ */
+const startTranscription = async (
+    socketData: SocketCallData,
+    server_: typeof server
+): Promise<void> => {
+    // Runtime config decides the deployment default, so the engine can be switched
+    // from the ASR Config page without redeploying the task.
+    const runtime = await getAsrRuntimeConfig(server_);
+    if (resolveAsrEngine(socketData.callMetadata, server_, runtime) === 'microvm') {
+        if (await startMicrovmAsr(socketData, server_)) {
+            // startTranscribe is the ONLY consumer of audioInputStream, and it is not
+            // running on this path — so every frame onBinaryMessage writes would sit
+            // in the stream's buffer for the whole meeting. At the 16 kHz stereo this
+            // engine negotiates that is 64 kB/s, about 230 MB an hour, in a 1 GiB
+            // task shared by every other meeting on it. Draining discards each frame
+            // as it arrives; writes stay unconditional so the recording is untouched,
+            // and this happens only AFTER a successful start so the audio buffered
+            // during MicroVM acquisition is still there for the fallback below.
+            socketData.audioInputStream?.resume();
+            return;
+        }
+        if (!shouldFallbackToTranscribe()) {
+            server_.log.error(
+                `[TRANSCRIBING]: [${socketData.callMetadata.callId}] - MicroVM ASR could not start and fallback is disabled; this meeting will not be transcribed.`
+            );
+            return;
+        }
+        server_.log.warn(
+            `[TRANSCRIBING]: [${socketData.callMetadata.callId}] - MicroVM ASR could not start; falling back to Amazon Transcribe.`
+        );
+    }
+    void startTranscribe(socketData, server_);
 };
 
 const onTextMessage = async (
@@ -378,13 +523,10 @@ const onTextMessage = async (
         callMetaData.activeSpeaker =
             callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
 
-        // if (typeof callMetaData.shouldRecordCall === 'undefined' || callMetaData.shouldRecordCall === null) {
-        //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`);
-
-        //     callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
-        // } else {
-        //     server.log.debug(`[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`);
-        // }
+        callMetaData.shouldRecordCall = resolveShouldRecordCall(
+            callMetaData.shouldRecordCall,
+            SHOULD_RECORD_CALL
+        );
 
         callMetaData.agentId = callMetaData.agentId || randomUUID();
 
@@ -416,9 +558,11 @@ const onTextMessage = async (
                 shouldRecordCall: callMetaData.shouldRecordCall,
                 samplingRate: callMetaData.samplingRate,
                 channels: callMetaData.channels,
-                // Per-channel Transcribe diarization opt-in. This object is a
-                // WHITELIST copy, so a field omitted here is silently dropped and
-                // the feature would appear to do nothing.
+                asrEngine: callMetaData.asrEngine,
+                maxSpeakers: callMetaData.maxSpeakers,
+                // Per-channel diarization opt-in, honoured by both engines. This
+                // object is a WHITELIST copy, so a field omitted here is silently
+                // dropped and the feature would appear to do nothing.
                 diarizeSystemChannel: callMetaData.diarizeSystemChannel,
                 diarizeMicChannel: callMetaData.diarizeMicChannel
             },
@@ -433,7 +577,7 @@ const onTextMessage = async (
             ownerSub: getAuthenticatedCaller(request)?.sub,
         };
         socketMap.set(ws, socketCallMap);
-        startTranscribe(socketCallMap, server);
+        await startTranscription(socketCallMap, server);
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
         const socketData = socketMap.get(ws);
         server.log.debug(
@@ -534,20 +678,10 @@ const onTextMessage = async (
             )}`
         );
 
-        if (
-            typeof callMetaData.shouldRecordCall === 'undefined' ||
-      callMetaData.shouldRecordCall === null
-        ) {
-            server.log.debug(
-                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Client did not provide ShouldRecordCall in CallMetaData. Defaulting to  CFN parameter EnableAudioRecording =  ${SHOULD_RECORD_CALL}`
-            );
-
-            callMetaData.shouldRecordCall = SHOULD_RECORD_CALL;
-        } else {
-            server.log.debug(
-                `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Using client provided ShouldRecordCall parameter in CallMetaData =  ${callMetaData.shouldRecordCall}`
-            );
-        }
+        callMetaData.shouldRecordCall = resolveShouldRecordCall(
+            callMetaData.shouldRecordCall,
+            socketData.callMetadata.shouldRecordCall ?? SHOULD_RECORD_CALL
+        );
         await endCall(ws, socketData, callMetaData);
     }
 };
@@ -656,12 +790,18 @@ const endCall = async (
                     }
 
                     const recordingUrl = `https://${RECORDINGS_BUCKET_NAME}.s3.${AWS_REGION}.amazonaws.com/${RECORDING_FILE_PREFIX}${wavRecordingFilename}`;
+                    server.log.info(
+                        `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording uploaded: ${RECORDING_FILE_PREFIX}${wavRecordingFilename} (${socketData.recordingFileSize} bytes)`
+                    );
 
                     await writeCallRecordingEvent(callMetaData, recordingUrl, server);
                 } else {
                     // No audio WAV to mux; let any video session finalize
                     // video-only.
                     notifyAudioRecordingDone(callMetaData.callId, undefined, server);
+                    server.log.info(
+                        `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: shouldRecordCall=${callMetaData.shouldRecordCall} (deployment default ${SHOULD_RECORD_CALL}).`
+                    );
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${
                             callMetaData.callId
@@ -674,6 +814,9 @@ const endCall = async (
                 // No audio recording was produced (e.g. no audio bytes ever
                 // arrived); let any video session finalize video-only.
                 notifyAudioRecordingDone(callMetaData.callId, undefined, server);
+                server.log.info(
+                    `[${callMetaData.callEvent}]: [${callMetaData.callId}] - Recording NOT uploaded: no audio was written (${socketData.recordingFileSize ?? 0} bytes).`
+                );
             }
 
             if (socketData.audioInputStream) {
@@ -685,6 +828,19 @@ const endCall = async (
                 socketData.audioInputStream.end();
                 socketData.audioInputStream.destroy();
             }
+
+            // Flushes the tail utterance on each channel, then terminates the
+            // MicroVM. No-op for meetings transcribed by Amazon Transcribe.
+            try {
+                await stopMicrovmAsr(socketData, server);
+            } catch (error) {
+                server.log.error(
+                    `[${callMetaData.callEvent}]: [${
+                        callMetaData.callId
+                    }] - Error stopping the MicroVM ASR engine: ${normalizeErrorForLogging(error)}`
+                );
+            }
+
             if (socketData) {
                 server.log.debug(
                     `[${callMetaData.callEvent}]: [${
@@ -825,6 +981,22 @@ const shutdown = async (signal: string): Promise<void> => {
     }
     shuttingDown = true;
     server.log.info(`[SHUTDOWN]: Received ${signal}; finishing in-flight work.`);
+
+    // Release ASR MicroVMs explicitly. Their maximumDurationInSeconds is only a
+    // backstop, so without this a deploy or scale-in would leave one running
+    // (and billing) per in-flight meeting until that ceiling expired.
+    for (const socketData of socketMap.values()) {
+        if (socketData.asr) {
+            try {
+                await stopMicrovmAsr(socketData, server);
+            } catch (err) {
+                server.log.error(
+                    `[SHUTDOWN]: Error releasing the ASR MicroVM for ${socketData.callMetadata.callId}: ${normalizeErrorForLogging(err)}`
+                );
+            }
+        }
+    }
+
     try {
         await awaitPendingMuxes(server, SHUTDOWN_MUX_GRACE_MS);
     } catch (err) {

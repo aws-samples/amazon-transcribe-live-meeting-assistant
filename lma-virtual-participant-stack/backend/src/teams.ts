@@ -51,6 +51,25 @@ export type AttendeeDecision =
  * meeting. Note the two counters are mutually exclusive — a reading is either a
  * genuine count or a miss, never both — so each resets the other.
  */
+/**
+ * Teams' pre-join display-name field validates against a fixed character set —
+ * "letters, numbers, spaces, and these symbols: - ' . _ @" — and the default
+ * identity template `LMA ({LMA_USER})` fails it on the parentheses, blocking
+ * the join. Rewrite `LMA (user)` as `LMA - user` and strip anything else the
+ * field would reject. Teams-only: chat messages and every other platform
+ * accept the parenthesised form, so the identity itself is left alone.
+ */
+export function sanitizeTeamsDisplayName(name: string): string {
+    const cleaned = name
+        .replace(/\s*\(/g, ' - ')
+        .replace(/\)/g, '')
+        // eslint-disable-next-line no-useless-escape
+        .replace(/[^A-Za-z0-9 \-'._@]/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
+    return /[A-Za-z0-9]/.test(cleaned) ? cleaned : 'LMA';
+}
+
 export function decideAttendeeAction(
     reading: AttendeeReading,
     state: AttendeeWatchdogState,
@@ -646,25 +665,31 @@ export default class Teams {
         // "failed pointer_events check: element is covered by <unknown>". Clear
         // first, then verify the value landed and re-type once (the shroud can
         // swallow the first keystroke burst), mirroring the Zoom handler.
+        const displayName = sanitizeTeamsDisplayName(details.scribeIdentity);
+        if (displayName !== details.scribeIdentity) {
+            console.log(
+                `Display name "${details.scribeIdentity}" contains characters Teams rejects — joining as "${displayName}".`,
+            );
+        }
         await nameRes.element.evaluate((el: Element) => {
             const i = el as HTMLInputElement;
             i.focus();
             i.value = '';
         });
-        await humanType(page, nameRes.element, details.scribeIdentity);
+        await humanType(page, nameRes.element, displayName);
         const typedName = await nameRes.element.evaluate(
             (el: Element) => (el as HTMLInputElement).value || '',
         );
-        if (typedName !== details.scribeIdentity) {
+        if (typedName !== displayName) {
             console.warn(
-                `Display-name value mismatch (expected "${details.scribeIdentity}", got "${typedName}") — clearing and re-typing.`,
+                `Display-name value mismatch (expected "${displayName}", got "${typedName}") — clearing and re-typing.`,
             );
             await nameRes.element.evaluate((el: Element) => {
                 const i = el as HTMLInputElement;
                 i.focus();
                 i.value = '';
             });
-            await humanType(page, nameRes.element, details.scribeIdentity);
+            await humanType(page, nameRes.element, displayName);
         }
         // The field already holds focus from humanType, so press Enter via the
         // keyboard (no pointer hit-test) to commit any name autocomplete.

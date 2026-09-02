@@ -24,6 +24,10 @@ class StackPackageType(str, Enum):
     DELEGATE_SCRIPT = "delegate_script"
     BUILD_SCRIPT = "build_script"
     HASH_AND_PACKAGE = "hash_and_package"
+    # Zips source/ rooted at source/ (CreateMicrovmImage needs the Dockerfile at
+    # the zip ROOT) plus one deployment package per Lambda under
+    # lambda_functions/. Used by lma-asr-microvm-stack.
+    ASR_MICROVM = "asr_microvm"
 
 
 class StackDefinition(BaseModel):

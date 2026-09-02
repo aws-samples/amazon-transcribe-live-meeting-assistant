@@ -13,6 +13,7 @@ export const BROWSER_EXTENSION_PATH = '/browser-extension';
 export const DESKTOP_CAPTURE_APP_PATH = '/desktop-capture-app';
 export const MCP_SERVERS_PATH = '/configuration/mcp-servers';
 export const NOVA_SONIC_CONFIG_PATH = '/configuration/nova-sonic';
+export const ASR_CONFIG_PATH = '/configuration/asr';
 export const TRANSCRIPT_SUMMARY_PATH = '/configuration/transcript-summary';
 export const USER_MANAGEMENT_PATH = '/configuration/user-management';
 export const DEFAULT_PATH = CALLS_PATH;

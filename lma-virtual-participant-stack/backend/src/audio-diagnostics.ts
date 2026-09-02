@@ -471,6 +471,28 @@ export async function installAudioDiagnostics(page: Page): Promise<void> {
             Wrapped.prototype = NativePC.prototype;
             window.RTCPeerConnection = Wrapped;
             push('RTCPeerConnection instrumented');
+
+            // Teams negotiates Opus usedtx=1 (DTX): the encoder stops sending
+            // packets during perceived silence. A synthetic voice pauses to
+            // digital zero between every sentence, so each pause becomes a DTX
+            // enter/exit cycle and the exit clips the first packets of the next
+            // sentence — measured as pkt/s dips at every "Content start: AUDIO"
+            // (#543). Zoom does not negotiate DTX, which is why the identical
+            // playout path sounds fine there. Rewriting usedtx=1 to usedtx=0 in
+            // the remote description keeps the encoder sending continuously;
+            // the cost is ~14kbps of comfort noise while idle.
+            const origSRD = NativePC.prototype.setRemoteDescription;
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            NativePC.prototype.setRemoteDescription = function (this: RTCPeerConnection, desc: any, ...rest: any[]) {
+                try {
+                    if (desc && typeof desc.sdp === 'string' && desc.sdp.includes('usedtx=1')) {
+                        desc = { type: desc.type, sdp: desc.sdp.replace(/usedtx=1/g, 'usedtx=0') };
+                        push('usedtx=1 -> usedtx=0 in remote SDP (Opus DTX disabled for the synthetic voice)');
+                    }
+                } catch { /* leave the description untouched */ }
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                return (origSRD as any).call(this, desc, ...rest);
+            };
         }
         push(`diagnostics installed in frame ${location.href.slice(0, 120)}`);
     });
@@ -499,6 +521,71 @@ interface SenderSnapshot {
      * track goes through the audio processing module.
      */
     echoReturnLoss?: number;
+}
+
+/**
+ * Bypass the meeting client's in-page audio processing on the transmit path.
+ *
+ * Teams' light-meetings client routes the microphone through its own Web Audio
+ * graph (noise-suppression worklet) and transmits the graph's OUTPUT — the
+ * sender's track label is "MediaStreamAudioDestinationNode" rather than a
+ * device. In this container that graph drops 20-30ms output quanta ~9x per
+ * second, punching periodic holes into the agent's voice: recording both sides
+ * of the graph during the same utterance showed 0 hard cuts going in and 138
+ * coming out (#543). The synthetic-voice path needs none of that processing —
+ * the "mic" is a null-sink monitor with no room, no echo and no noise — so
+ * replace the sender's track with a raw unprocessed capture of the same device.
+ *
+ * Self-scoping: only a sender whose track label says MediaStreamAudioDestinationNode
+ * is touched, so Zoom and every platform that transmits the capture track
+ * directly are no-ops by construction. Polled rather than event-driven because
+ * the client may renegotiate or swap its track back at any time, and because
+ * new RTCPeerConnections appear on reconnects.
+ *
+ * Returns a stop function so the caller can clear the timer on teardown.
+ */
+export function startSenderTrackBypass(page: Page, intervalMs = 5000): () => void {
+    const timer = setInterval(() => {
+        void (async () => {
+            try {
+                await page.evaluate(async () => {
+                    const w = window as unknown as Record<string, unknown>;
+                    const pcs = (w.__lmaPCs as RTCPeerConnection[]) || [];
+                    const push = (line: string) => {
+                        if (!w.__lmaAudio) w.__lmaAudio = [];
+                        (w.__lmaAudio as string[]).push(line);
+                    };
+                    for (const pc of pcs) {
+                        if (pc.connectionState === 'closed') continue;
+                        for (const sender of pc.getSenders()) {
+                            const t = sender.track;
+                            if (!t || t.kind !== 'audio' || t.readyState !== 'live') continue;
+                            if (!t.label.includes('MediaStreamAudioDestinationNode')) continue;
+                            let stream = w.__lmaRawMicStream as MediaStream | undefined;
+                            if (!stream || stream.getAudioTracks()[0]?.readyState !== 'live') {
+                                stream = await navigator.mediaDevices.getUserMedia({
+                                    audio: {
+                                        echoCancellation: false,
+                                        noiseSuppression: false,
+                                        autoGainControl: false,
+                                    },
+                                });
+                                w.__lmaRawMicStream = stream;
+                            }
+                            await sender.replaceTrack(stream.getAudioTracks()[0]);
+                            push(
+                                `sender track bypass: replaced ${t.label} with raw capture ` +
+                                    `(the page's audio graph no longer sits on the transmit path)`,
+                            );
+                        }
+                    }
+                });
+            } catch {
+                /* page navigating or closing; retry next tick */
+            }
+        })();
+    }, intervalMs);
+    return () => clearInterval(timer);
 }
 
 /**

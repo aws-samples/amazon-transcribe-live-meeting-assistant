@@ -11,6 +11,7 @@ title: "CloudFormation Parameters Reference"
 - [Meeting Assistant](#meeting-assistant)
 - [Knowledge Base](#knowledge-base)
 - [Transcription](#transcription)
+- [On-demand ASR and Diarization (MicroVM) — EXPERIMENTAL](#on-demand-asr-and-diarization-microvm--experimental)
 - [End-of-Call Summary](#end-of-call-summary)
 - [Virtual Participant](#virtual-participant)
 - [Voice Assistant](#voice-assistant)
@@ -65,6 +66,71 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | TranscribeContentRedactionType | Type of content redaction | PII | PII |
 | ContentRedactionLanguages | Languages that support content redaction | en-US | en-US, en-AU, en-GB, es-US |
 | ShowSpeakerLabel | Default for per-channel speaker partitioning (diarization) on WebSocket streaming sessions -- the Stream Audio tab and the Desktop Capture App. Applies to both channels when used. Clients that send their own per-channel choice take precedence, so leave this false unless you want it on for clients that do not. See [Transcription & Translation](transcription-and-translation.md#speaker-identification-within-a-channel). | false | true, false |
+
+## On-demand ASR and Diarization (MicroVM) — EXPERIMENTAL
+
+> **EXPERIMENTAL — not production ready.** Transcript quality is below Amazon
+> Transcribe's, speaker labels depend on a calibrated operating point, and defaults
+> may change between releases. Amazon Transcribe remains the recommended engine for
+> production meetings.
+
+Alternative streaming engine to Amazon Transcribe, giving per-voice speaker labels.
+Off by default. A meeting transcribed by this engine does not go through Amazon
+Transcribe, so the redaction, custom vocabulary, custom language model and language
+identification parameters above do not apply to it. Requires a region where AWS
+Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-asr.md).
+
+| Parameter | Description | Default | Allowed Values |
+|-----------|-------------|---------|----------------|
+| TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe unless a client opts in | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
+
+`TranscriptionEngine` is the only deploy-time question for this engine. Its tuning
+knobs — the model bundle, MicroVM lifetime ceiling, speaker cap, turn-cut behaviour
+and maximum open row duration — used to be parameters (`AsrModelBundle`,
+`AsrMaxMeetingSeconds`, `AsrMaxSpeakers`, `AsrLiveTurnCut`, `AsrMaxOpenSegmentMs`) and
+are now fixed in the `AsrDefaults` mapping in `lma-main.yaml`, at the same values the
+parameters defaulted to. They were withdrawn because the engine is experimental and
+its defaults are still moving, so asking five unanswerable questions at deploy time
+was worse than picking known-good values.
+
+Most of them were never deploy-time decisions anyway: **maximum speakers per
+channel**, **live turn cut** and **maximum open row duration** are all overridable at
+runtime from the ASR Config page in the LMA UI, taking effect on the next meeting with
+no stack update. Only the model bundle and the lifetime ceiling need a redeploy — edit
+the mapping. Changing the bundle rebuilds the MicroVM image (~20 minutes).
+
+### Why a bundle instead of three model parameters
+
+The similarity threshold is not a property of the embedder alone — utterance length
+moves it as much as the model does (CAM++ measured 0.30 on 1–2 s utterances and 0.68
+on 5–20 s ones). So an operating point is only meaningful for a stated *pairing*, and
+choosing the three models separately let a deployment assemble a combination nobody
+had measured. It also produced a concrete bug: the threshold parameter defaulted to
+`0.2` while the catalog's measured value for the default embedder was `0.4`, nothing
+reconciled them, and the deployment merged two speakers into one.
+
+A bundle now carries its own calibrated threshold and utterance floor, baked into the
+ASR image, so a deployment gets a working configuration without knowing any numbers.
+
+| Bundle | Calibrated | Redistributable | Notes |
+|--------|-----------|-----------------|-------|
+| `nemotron-titanet-small` | Yes (0.4) | No — NVIDIA OML | Default, validated on real meetings |
+| `permissive-zipformer-campplus` | Yes (0.68) | Yes — Apache-2.0 + MIT | Worse on spontaneous speech (ASR trained on read speech) |
+| `transcription-only` | n/a | No — NVIDIA OML | No diarization; labelled by audio channel |
+| `permissive-fastconformer-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Best redistributable option: same architecture as the default, trained on conversational speech, quarter the size |
+| `nemotron-titanet-large` | No | No — NVIDIA OML | The default with a larger embedder, aimed at under-splitting |
+| `apache-only-zipformer-3dspeaker` | No | Yes — Apache-2.0 + MIT | For deployments that cannot accept CC-BY-4.0 attribution |
+| `accurate-parakeet-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Offline: highest accuracy, but **no interim text** while speaking, and may not hold real time — unmeasured |
+
+An uncalibrated bundle produces **no speaker labels** until the deployment runs a
+calibration from the ASR Config page — a threshold borrowed from another pairing
+fragments or merges speakers, so no number is shipped rather than a wrong one.
+
+There are deliberately no parameters for supplying a model URL: every model is a
+curated entry in the ASR stack's `catalog.json`, with its checksum pinned and (for a
+speaker model) its operating point measured. Runtime tuning stays available on the ASR
+Config admin page without a stack update. See
+[On-demand ASR & Speaker Diarization](microvm-asr.md#changing-the-model).
 
 ## End-of-Call Summary
 

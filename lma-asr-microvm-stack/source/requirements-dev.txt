@@ -1,0 +1,14 @@
+# Test dependencies for the ASR MicroVM runtime.
+#
+# The inference wheels (sherpa-onnx, onnxruntime) are NOT needed: the runtime
+# takes its decoder, VAD and speaker-embedding backends by injection, so the whole
+# pipeline is exercised with scripted fakes and no model weights. Those wheels are
+# installed only inside the ARM64 image, pinned per model by the catalog (see
+# model.env and the Dockerfile). numpy IS needed: the offline engine's VAD gate is
+# a numpy-only wrapper that the tests construct directly.
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pydantic==2.13.5
+websockets==13.1
+numpy==1.26.4
+ruff==0.16.5
