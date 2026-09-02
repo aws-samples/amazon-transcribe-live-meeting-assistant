@@ -37,7 +37,7 @@
     "@smithy/signature-v4": "^5.7.3",
     "@zoom/meetingsdk": "6.2.0",
     "aws-amplify": "^6.20.0",
-    "aws-sigv4-fetch": "^4.3.0",
+    "aws-sigv4-fetch": "^5.0.1",
     "axios": "^1.19.0",
     "cloakbrowser": "0.5.8",
     "graphql": "^17.0.2",
