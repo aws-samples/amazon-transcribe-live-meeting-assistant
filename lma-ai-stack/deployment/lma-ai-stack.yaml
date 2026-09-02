@@ -269,6 +269,28 @@ Parameters:
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
+  WebAppCustomDomainName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Custom domain name to serve the web user interface from, for
+      example lma.example.com. Leave empty to use the CloudFront distribution's
+      default domain name. Requires WebAppCustomDomainCertificateArn.
+    AllowedPattern: '^(|([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63})$'
+    ConstraintDescription: >-
+      A fully qualified domain name such as lma.example.com, or empty
+
+  WebAppCustomDomainCertificateArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an ACM certificate covering WebAppCustomDomainName. The
+      certificate must be issued in us-east-1 because CloudFront only accepts
+      viewer certificates from that Region.
+    AllowedPattern: '^(|arn:aws[a-zA-Z-]*:acm:us-east-1:[0-9]{12}:certificate/.+)$'
+    ConstraintDescription: >-
+      An ACM certificate ARN in the us-east-1 Region, or empty
+
   IsLambdaAgentAssistEnabled:
     Type: String
     Default: "false"
@@ -568,6 +590,8 @@ Metadata:
         Parameters:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
+          - WebAppCustomDomainName
+          - WebAppCustomDomainCertificateArn
     ParameterLabels:
       S3BucketName:
         default: Call Audio Bucket Name
@@ -575,6 +599,10 @@ Metadata:
         default: CloudFront Price Class
       CloudFrontAllowedGeos:
         default: CloudFront Allowed Geographies
+      WebAppCustomDomainName:
+        default: Web App Custom Domain Name (optional)
+      WebAppCustomDomainCertificateArn:
+        default: Web App Custom Domain ACM Certificate ARN in us-east-1 (optional)
       IsSentimentAnalysisEnabled:
         default: Enable Sentiment Analysis
       ComprehendLanguageCode:
@@ -609,6 +637,11 @@ Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
+  # When a custom domain is supplied, the CloudFront distribution gets it as an
+  # alternate domain name (CNAME) with the caller-supplied ACM certificate, and
+  # every user-facing URL the stack emits switches to that domain.
+  HasWebAppCustomDomain:
+    !Not [!Equals [!Ref WebAppCustomDomainName, ""]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
   HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   # Generic WAF enablement - true when WAFAllowedIPv4Ranges is restricted (not 0.0.0.0/0).
@@ -647,7 +680,9 @@ Outputs:
     Value: !Sub "https://${S3BucketName}.s3.${AWS::Region}.amazonaws.com/quicksight-recordingsbucket-manifest.json"
   CloudfrontEndpoint:
     Description: Endpoint for Cloudfront distribution
-    Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+    Value: !Sub
+      - "https://${Domain}/"
+      - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
   EventSourcingTableName:
     Description:
       The Name for the DynamoDB that is used to store transcriptions and
@@ -676,7 +711,10 @@ Outputs:
     Description: Name of S3 web app bucket
     Value: !Ref WebAppBucket
   CloudFrontDomainName:
-    Description: The full domain name of the CloudFront distribution
+    Description: >-
+      The full domain name of the CloudFront distribution. Point your custom
+      domain's DNS record (Route 53 alias or CNAME) at this value when
+      WebAppCustomDomainName is set.
     Value: !GetAtt WebAppCloudFrontDistribution.DomainName
   TranscriptSummaryFunctionArn:
     Description: Call Summarizer Lambda function ARN
@@ -703,13 +741,14 @@ Outputs:
         VITE_MCP_SERVER_TOKEN_URL=${McpServerTokenUrlValue}
         VITE_MCP_SERVER_CLIENT_ID=${McpServerClientIdValue}
         VITE_MCP_SERVER_USER_POOL_ID=${McpServerUserPoolIdValue}
-        VITE_OAUTH_CALLBACK_URL=https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback
+        VITE_OAUTH_CALLBACK_URL=https://${WebAppDomain}/#/oauth/callback
       - McpServerEndpointValue: !If [ShouldEnableMCPServer, !GetAtt MCPServerGateway.GatewayUrl, ""]
         McpServerApiKeyEndpointValue: !If [ShouldEnableMCPServer, !Sub "https://${MCPApiKeyRestApi}.execute-api.${AWS::Region}.amazonaws.com/mcp", ""]
         McpServerAuthUrlValue: !If [ShouldEnableMCPServer, !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/authorize", ""]
         McpServerTokenUrlValue: !If [ShouldEnableMCPServer, !Sub "https://${CognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com/oauth2/token", ""]
         McpServerClientIdValue: !If [ShouldEnableMCPServer, !Ref MCPServerExternalAppClient, ""]
         McpServerUserPoolIdValue: !If [ShouldEnableMCPServer, !Ref UserPoolId, ""]
+        WebAppDomain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
   VPTaskRegistryTableName:
     Description: Name of the VPTaskRegistry DynamoDB table
     Value: !Ref VPTaskRegistry
@@ -764,7 +803,9 @@ Outputs:
     Value: !Ref MCPLayerBuildProject
   OAuthCallbackUrl:
     Description: OAuth callback URL for MCP server authorization (use this in your OAuth provider)
-    Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+    Value: !Sub
+      - "https://${Domain}/#/oauth/callback"
+      - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
   OAuthStateTableName:
     Description: Name of the OAuth State DynamoDB table
     Value: !Ref OAuthStateTable
@@ -1044,7 +1085,9 @@ Resources:
         # CloudFrontEndpoint is embedded in the Cognito welcome email for users created
         # after the stack is deployed (initial admin created at stack-create time falls
         # back to the default email wording since this value is not yet populated).
-        CloudFrontEndpoint: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+        CloudFrontEndpoint: !Sub
+          - "https://${Domain}/"
+          - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
         # Add other existing settings that might be needed
         S3BucketName: !Ref S3BucketName
         AudioFilePrefix: !Ref AudioFilePrefix
@@ -1231,7 +1274,9 @@ Resources:
               - "LAMBDA"
               - "DISABLED"
           - Name: VITE_CLOUDFRONT_DOMAIN
-            Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+            Value: !Sub
+              - "https://${Domain}/"
+              - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
           - Name: VITE_ENABLE_MCP_SERVER
             Value: !Ref EnableMCPServer
           - Name: VITE_MCP_SERVER_ENDPOINT
@@ -1265,7 +1310,9 @@ Resources:
               - !Ref UserPoolId
               - ""
           - Name: VITE_OAUTH_CALLBACK_URL
-            Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+            Value: !Sub
+              - "https://${Domain}/#/oauth/callback"
+              - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
           - Name: VITE_VOICE_ASSISTANT_ACTIVATION_MODE
             Value: !Ref VoiceAssistantActivationMode
   # CodeBuild project for building MCP servers Lambda layer
@@ -4965,7 +5012,9 @@ Resources:
           OAUTH_STATE_TABLE: !Ref OAuthStateTable
           MCP_SERVERS_TABLE: !Ref MCPServersTable
           KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
-          OAUTH_CALLBACK_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+          OAUTH_CALLBACK_URL: !Sub
+            - "https://${Domain}/#/oauth/callback"
+            - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
       Policies:
         - DynamoDBCrudPolicy:
@@ -6642,9 +6691,13 @@ Resources:
       CallbackURLs: !If
         - HasCustomMCPServerCallbackURLs
         - !Split [",", !Ref MCPServerCallbackURLs]
-        - - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
+        - - !Sub
+            - "https://${Domain}/#/oauth/callback"
+            - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
       LogoutURLs:
-        - !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+        - !Sub
+          - "https://${Domain}/"
+          - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
       SupportedIdentityProviders:
         - COGNITO
 
@@ -6721,7 +6774,9 @@ Resources:
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
-          LMA_WEB_APP_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}"
+          LMA_WEB_APP_URL: !Sub
+            - "https://${Domain}"
+            - Domain: !If [HasWebAppCustomDomain, !Ref WebAppCustomDomainName, !GetAtt WebAppCloudFrontDistribution.DomainName]
           # Used by start_meeting_now to resolve user email → Cognito sub so
           # the MCP-launched VP can use the user's stored Zoom credentials.
           USER_POOL_ID: !Ref UserPoolId
@@ -7756,9 +7811,17 @@ Resources:
           Bucket: !Sub "${LoggingBucketName}.s3.amazonaws.com"
           Prefix: "cloudfront-logs/"
           IncludeCookies: false
-        ViewerCertificate:
-          CloudFrontDefaultCertificate: true
-          MinimumProtocolVersion: TLSv1.2_2021
+        Aliases: !If
+          - HasWebAppCustomDomain
+          - [!Ref WebAppCustomDomainName]
+          - !Ref AWS::NoValue
+        ViewerCertificate: !If
+          - HasWebAppCustomDomain
+          - AcmCertificateArn: !Ref WebAppCustomDomainCertificateArn
+            SslSupportMethod: sni-only
+            MinimumProtocolVersion: TLSv1.2_2021
+          - CloudFrontDefaultCertificate: true
+            MinimumProtocolVersion: TLSv1.2_2021
         CustomErrorResponses:
           # Send errors to index file
           - ErrorCachingMinTTL: 300
@@ -7849,6 +7912,15 @@ Resources:
           - GeoRestriction:
               RestrictionType: none
     Metadata:
+      cfn-lint:
+        config:
+          ignore_checks:
+            # W1030: WebAppCustomDomainCertificateArn defaults to an empty string,
+            # which cfn-lint checks against the ACM ARN format without accounting
+            # for the HasWebAppCustomDomain condition that guards the reference.
+            # The parameter's own AllowedPattern rejects any non-empty value that
+            # is not a us-east-1 ACM certificate ARN.
+            - W1030
       cfn_nag:
         rules_to_suppress:
           - id: W70

@@ -593,6 +593,33 @@ Parameters:
     ConstraintDescription: >-
       Comma separated list of uppercase two letter country codes or empty
 
+  WebAppCustomDomainName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Custom domain name to serve the LMA web user interface from, for
+      example lma.example.com. Leave empty to use the CloudFront distribution's
+      default domain name. When set, WebAppCustomDomainCertificateArn is also
+      required, and after deployment you must create a DNS record (Route 53 alias
+      or CNAME) pointing this name at the CloudFront distribution shown in the
+      WebAppCloudFrontDomainName stack output.
+    AllowedPattern: '^(|([a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?\.)+[a-zA-Z]{2,63})$'
+    ConstraintDescription: >-
+      A fully qualified domain name such as lma.example.com, or empty
+
+  WebAppCustomDomainCertificateArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of an AWS Certificate Manager certificate that covers
+      WebAppCustomDomainName. The certificate must be issued in the us-east-1
+      Region, because CloudFront only accepts viewer certificates from us-east-1,
+      regardless of the Region this stack is deployed to. Required when
+      WebAppCustomDomainName is set.
+    AllowedPattern: '^(|arn:aws[a-zA-Z-]*:acm:us-east-1:[0-9]{12}:certificate/.+)$'
+    ConstraintDescription: >-
+      An ACM certificate ARN in the us-east-1 Region, or empty
+
   EnableAudioRecording:
     Type: String
     Default: "true"
@@ -963,6 +990,8 @@ Metadata:
         Parameters:
           - CloudFrontPriceClass
           - CloudFrontAllowedGeos
+          - WebAppCustomDomainName
+          - WebAppCustomDomainCertificateArn
       - Label:
           default: Retention Settings
         Parameters:
@@ -1106,6 +1135,10 @@ Metadata:
         default: CloudFront Price Class
       CloudFrontAllowedGeos:
         default: CloudFront Allowed Geographies
+      WebAppCustomDomainName:
+        default: Web App Custom Domain Name (optional)
+      WebAppCustomDomainCertificateArn:
+        default: Web App Custom Domain ACM Certificate ARN in us-east-1 (optional)
       MeetingRecordExpirationInDays:
         default: Meeting Record Expiration In Days
       TranscriptionExpirationInDays:
@@ -2537,6 +2570,8 @@ Resources:
         IsSentimentAnalysisEnabled: "false"
         CloudFrontPriceClass: !Ref CloudFrontPriceClass
         CloudFrontAllowedGeos: !Ref CloudFrontAllowedGeos
+        WebAppCustomDomainName: !Ref WebAppCustomDomainName
+        WebAppCustomDomainCertificateArn: !Ref WebAppCustomDomainCertificateArn
         IsLambdaAgentAssistEnabled: "true"
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
