@@ -347,13 +347,11 @@ Parameters:
       - AmazonTranscribe
       - MicrovmAsr
     Description: >-
-      Transcription engine for Stream Audio and the Audio Capture apps. Keep
-      AmazonTranscribe unless you are evaluating the EXPERIMENTAL MicrovmAsr engine,
-      which is not production ready. MicrovmAsr is English only, needs a region with
-      AWS Lambda MicroVMs (not GovCloud), and meetings using it get no content
-      redaction, custom vocabulary, custom language model or language ID. Deploying
-      it changes nothing on its own - an admin must enable it per meeting or make it
-      the default on the ASR Config page. See docs/microvm-asr.md.
+      MicrovmAsr deploys the EXPERIMENTAL on-demand ASR and speaker diarization
+      engine as an alternative to Amazon Transcribe for Stream Audio, the Desktop
+      Capture apps and Virtual Participants. Meetings keep using Amazon Transcribe
+      until an admin switches the default on the ASR Config page. English only;
+      requires a region with AWS Lambda MicroVMs. See docs/microvm-asr.md.
 
   ModelValidation:
     Type: String
@@ -853,7 +851,7 @@ Metadata:
           - CustomVocabularyName
           - CustomLanguageModelName
       - Label:
-          default: EXPERIMENTAL - On-demand ASR and Diarization (MicroVM, alternative to Amazon Transcribe)
+          default: On-demand ASR and Speaker Diarization (EXPERIMENTAL)
         Parameters:
           - TranscriptionEngine
       - Label:
@@ -981,7 +979,7 @@ Metadata:
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
       TranscriptionEngine:
-        default: Streaming Transcription Engine (EXPERIMENTAL if not AmazonTranscribe)
+        default: Transcription Engine
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
