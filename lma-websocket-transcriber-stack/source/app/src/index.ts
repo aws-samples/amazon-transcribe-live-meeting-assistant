@@ -30,9 +30,6 @@ import {
     stopMicrovmAsr,
     shouldFallbackToTranscribe,
     getAsrRuntimeConfig,
-    runCalibration,
-    CalibrationError,
-    CalibrationRequest,
 } from './calleventdata';
 
 import {
@@ -120,11 +117,9 @@ const server = fastify({
 // register the @fastify/websocket plugin with the fastify server
 server.register(websocket);
 
-// Authenticate at onRequest, which runs BEFORE body parsing. As a preHandler
-// this ran after Fastify had already buffered the request body, so an
-// unauthenticated POST to the calibration route could hold its full upload
-// (up to ASR_CALIBRATION_MAX_UPLOAD_BYTES, 64 MB) in memory on a task that is
-// also transcribing live meetings. Authentication needs only the headers.
+// Authenticate at onRequest, which runs BEFORE body parsing: authentication needs
+// only the headers, and rejecting early means an unauthenticated request never
+// gets a body buffered for it on a task that is also transcribing live meetings.
 server.addHook('onRequest', async (request, reply) => {
     // A CORS preflight carries no credentials by design, so authenticating it
     // would 401 every cross-origin call before the real request is ever made.
@@ -168,93 +163,6 @@ server.after(() => {
         }
     );
 });
-
-// The ASR Config admin page lives on the UI's CloudFront domain, not this one, so
-// its calls are cross-origin. Echoing the origin back is safe here because nothing
-// this route trusts is attached by the browser on its own: the credential is an
-// Authorization header the page sets explicitly, no cookie is read, and
-// Access-Control-Allow-Credentials is deliberately never sent. A cross-origin page
-// therefore cannot forge an authenticated request it could not already make
-// directly, and cannot read the response without a token of its own.
-// Semgrep flags this as cors-misconfiguration; the rule assumes reflection implies
-// credentialed access, which is the one thing this route never grants.
-const ASR_CALIBRATE_PATH = '/api/v1/asr/calibrate';
-const ADMIN_GROUP = 'Admin';
-
-const allowCrossOrigin = (
-    request: FastifyRequest,
-    reply: { header: (name: string, value: string) => unknown }
-): void => {
-    reply.header('Access-Control-Allow-Origin', request.headers.origin || '*');
-    reply.header('Vary', 'Origin');
-    reply.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    reply.header('Access-Control-Allow-Headers', 'authorization, content-type');
-    reply.header('Access-Control-Max-Age', '600');
-};
-
-// The calibration sample is posted as raw WAV bytes. It is never stored: the audio
-// is embedded in memory and only the resulting statistics come back, so a sample can
-// be a rehearsed recording or a clip from a public corpus without leaving a copy.
-const ASR_CALIBRATION_MAX_UPLOAD_BYTES = parseInt(
-    process.env['ASR_CALIBRATION_MAX_UPLOAD_BYTES'] || String(64 * 1024 * 1024),
-    10
-);
-
-server.addContentTypeParser(
-    ['application/octet-stream', 'audio/wav', 'audio/wave', 'audio/x-wav'],
-    { parseAs: 'buffer', bodyLimit: ASR_CALIBRATION_MAX_UPLOAD_BYTES },
-    (_request, body, done) => done(null, body)
-);
-
-server.options(ASR_CALIBRATE_PATH, { logLevel: 'warn' }, (request, reply) => {
-    allowCrossOrigin(request, reply);
-    reply.code(204).send();
-});
-
-/**
- * Measure the diarization operating point from a meeting this deployment recorded.
- *
- * Admin-only: it launches an ASR MicroVM and reads a recording. The route only
- * measures and reports — the admin decides whether to save the result — so a run
- * on unrepresentative audio cannot quietly change how meetings are transcribed.
- */
-server.post(
-    ASR_CALIBRATE_PATH,
-    { logLevel: 'info', bodyLimit: ASR_CALIBRATION_MAX_UPLOAD_BYTES },
-    async (request, reply) => {
-        allowCrossOrigin(request, reply);
-        const caller = getAuthenticatedCaller(request);
-        if (!caller?.groups.includes(ADMIN_GROUP)) {
-            server.log.warn(
-                `[ASR CALIBRATE]: refused for non-admin caller ${caller?.username || caller?.sub || 'unknown'}`
-            );
-            return reply
-                .code(403)
-                .send({ message: 'Calibration is limited to users in the Admin group.' });
-        }
-        const wav = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
-        const query = request.query as Record<string, string | undefined>;
-        const perChannel = query['maxSegmentsPerChannel'];
-        try {
-            const run = await runCalibration(
-                {
-                    wav,
-                    ...(perChannel ? { maxSegmentsPerChannel: Number(perChannel) } : {}),
-                } as CalibrationRequest,
-                server
-            );
-            return reply.code(200).send(run);
-        } catch (error) {
-            const status = error instanceof CalibrationError ? error.status : 500;
-            const message =
-                error instanceof CalibrationError
-                    ? error.message
-                    : `calibration failed: ${normalizeErrorForLogging(error)}`;
-            server.log.error(`[ASR CALIBRATE]: ${status} - ${message}`);
-            return reply.code(status).send({ message });
-        }
-    }
-);
 
 type HealthCheckRemoteInfo = {
     addr: string;

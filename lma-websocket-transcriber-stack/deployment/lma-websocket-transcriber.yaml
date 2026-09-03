@@ -294,31 +294,10 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      (Optional) Runtime ASR configuration table. Read at meeting start so the
-      diarization operating point can be tuned from the ASR Config admin page
-      without a stack update. Empty means always use the parameters below.
-
-  AsrEngineDefault:
-    Type: String
-    Default: transcribe
-    AllowedValues:
-      - transcribe
-      - microvm
-    Description: >-
-      Transcription engine used when a client does not ask for one. "microvm"
-      routes every streaming meeting to the on-demand ASR + diarization engine,
-      which does not support content redaction, custom vocabularies, custom
-      language models or language identification.
-
-  AsrDiarizationDefault:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >-
-      Whether meetings on the MicroVM ASR engine request speaker labels when the
-      client does not say. Clients asking for diarization always get it.
+      (Optional) Runtime ASR configuration table, holding the two switches the
+      ASR Config admin page edits (deployment default engine, Virtual Participant
+      diarization). Read at meeting start, so a change needs no stack update.
+      Empty when the on-demand engine is not deployed.
 
   AsrDiarizationAvailable:
     Type: String
@@ -331,95 +310,12 @@ Parameters:
       to the web UI so the Stream Audio page only offers diarization when it can
       actually be served.
 
-  AsrLiveTurnCut:
-    Type: String
-    Default: "true"
-    AllowedValues: ["true", "false"]
-    Description: >-
-      Close a transcript row as soon as a speaker change is confirmed inside an
-      utterance, instead of waiting for endpointing silence. Endpointing is what
-      previously separated speakers, so two people talking without a gap shared one
-      row and one label until somebody paused. Requires a bundle with a
-      turn-detection model. Adds roughly one segmentation-model window per second per
-      channel of CPU on the MicroVM.
-
-  AsrMaxOpenSegmentMs:
-    Type: Number
-    Default: 20000
-    MinValue: 0
-    MaxValue: 60000
-    Description: >-
-      Close a row after this much unbroken speech even when no speaker change is
-      found, so a monologue does not sit in the live transcript as one unlabelled
-      block. 0 disables the bound and follows the engine's own utterance boundaries.
-      Mirrors the equivalent bound on the Amazon Transcribe path.
-
   AsrModelBundleId:
     Type: String
     Default: ""
     Description: >-
-      Which pre-vetted model bundle the deployed ASR image was built from. Shown on
-      the ASR Config page so an admin can see what the blank ("use the calibrated
-      value") fields actually resolve to.
-
-  AsrBundleThreshold:
-    Type: String
-    Default: ""
-    Description: >-
-      The similarity threshold calibrated for that bundle, displayed alongside the
-      override field. Empty when the pairing has never been calibrated.
-
-  AsrSpeakerModelMeasured:
-    Type: String
-    Default: "true"
-    AllowedValues:
-      - "true"
-      - "false"
-    Description: >-
-      Whether the deployed speaker model's operating point has been measured. When
-      "false" (a customer-supplied embedder, or a catalog entry with no measurement)
-      the transcriber withholds speaker labels until an admin has calibrated the
-      deployment or set a threshold on the ASR Config page, because a guessed
-      threshold splits one person into several or merges several into one.
-
-  AsrMaxSpeakers:
-    Type: Number
-    Default: 0
-    MinValue: 0
-    MaxValue: 30
-    Description: >-
-      Cap on distinct speakers per audio channel for the MicroVM ASR engine
-      (0 discovers as many as appear).
-
-  AsrSpeakerThreshold:
-    Type: String
-    Default: ""
-    AllowedPattern: "^$|^0?\\.[0-9]+$"
-    Description: >-
-      Cosine similarity above which the MicroVM ASR engine treats two utterances as
-      the same speaker. Higher splits voices more eagerly. BLANK (the default) means
-      "use the value calibrated for the deployed model bundle", which is baked into
-      the ASR image - that is almost always what you want, because the right value is
-      specific to the pairing of embedder and utterance-length floor. Set it only to
-      override a bundle deliberately; the ASR Config admin page does the same thing
-      without a stack update.
-
-  AsrEndpointingMs:
-    Type: Number
-    Default: 1200
-    MinValue: 200
-    MaxValue: 5000
-    Description: Trailing silence in ms that closes an utterance on the MicroVM ASR engine.
-
-  AsrMinSegmentMs:
-    Type: String
-    Default: ""
-    AllowedPattern: "^$|^[0-9]{1,4}$"
-    Description: >-
-      Shortest utterance the MicroVM ASR engine will compute a speaker embedding for;
-      shorter ones inherit the current speaker. BLANK (the default) means "use the
-      value calibrated for the deployed model bundle". Sent per session, so it can
-      also be overridden from the ASR Config page.
+      Which model bundle the deployed ASR image was built from. Shown on the ASR
+      Config page.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -1389,24 +1285,6 @@ Resources:
             # and every meeting is transcribed by Amazon Transcribe.
             - Name: ASR_LAUNCHER_FUNCTION_ARN
               Value: !Ref AsrLauncherFunctionArn
-            - Name: ASR_ENGINE_DEFAULT
-              Value: !Ref AsrEngineDefault
-            - Name: ASR_DIARIZE_DEFAULT
-              Value: !Ref AsrDiarizationDefault
-            - Name: ASR_MAX_SPEAKERS
-              Value: !Ref AsrMaxSpeakers
-            - Name: ASR_SPEAKER_THRESHOLD
-              Value: !Ref AsrSpeakerThreshold
-            - Name: ASR_ENDPOINTING_MS
-              Value: !Ref AsrEndpointingMs
-            - Name: ASR_MIN_SEGMENT_MS
-              Value: !Ref AsrMinSegmentMs
-            - Name: ASR_LIVE_TURN_CUT
-              Value: !Ref AsrLiveTurnCut
-            - Name: ASR_MAX_OPEN_SEGMENT_MS
-              Value: !Ref AsrMaxOpenSegmentMs
-            - Name: ASR_SPEAKER_MODEL_MEASURED
-              Value: !Ref AsrSpeakerModelMeasured
             - Name: ASR_CONFIG_TABLE_NAME
               Value: !Ref AsrConfigTableName
             - Name: WS_LOG_LEVEL
@@ -1721,30 +1599,16 @@ Resources:
           - ShouldEnableMicrovmAsr
           - !Ref AsrDiarizationAvailable
           - "false"
-        # Read by the ASR Config page: an unmeasured speaker model is told to
-        # calibrate rather than left to discover that speaker labels never appear.
-        AsrSpeakerModelMeasured: !Ref AsrSpeakerModelMeasured
-        # So the page can say WHICH bundle's calibrated value a blank field uses,
-        # rather than leaving "blank means the default" to be taken on faith.
+        # Read by the ASR Config page, so it can say which bundle this deployment
+        # runs. The deployment default engine is not a setting here: the page and
+        # the Stream Audio picker read it live from the config table (getAsrConfig).
         AsrModelBundleId: !Ref AsrModelBundleId
-        AsrBundleThreshold: !Ref AsrBundleThreshold
-        AsrEngineDefault: !Ref AsrEngineDefault
         # Whether the on-demand engine is deployed AT ALL, as distinct from
         # AsrDiarizationAvailable (which is also false for a transcription-only
         # bundle). Read by the Stream Audio page to offer a per-meeting engine
         # choice, so reaching this engine does not require an admin to flip the
         # deployment-wide default.
         AsrEngineAvailable: !If [ShouldEnableMicrovmAsr, "true", "false"]
-        # The ASR Config page posts calibration runs here (the UI is on its own
-        # CloudFront domain, so it needs the absolute URL).
-        AsrCalibrateEndpoint: !If
-          - ShouldEnableMicrovmAsr
-          - !Join
-            - ""
-            - - "https://"
-              - !GetAtt WebSocketCloudFrontDistribution.DomainName
-              - "/api/v1/asr/calibrate"
-          - ""
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

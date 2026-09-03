@@ -749,25 +749,14 @@ type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
 	Success: Boolean!
 }
 
-# On-demand ASR + diarization runtime configuration.
-#
-# Overrides for the diarization operating point, which is empirical and specific to
-# the speaker model: an omitted or empty field means "use the stack parameter", so
-# this record holds only what an operator has deliberately changed. Values are
-# strings so that "" can mean unset without colliding with 0.
+# Runtime switches for the on-demand ASR engine, edited from the ASR Config admin
+# page and read at the start of each meeting (transcriber and Virtual Participant),
+# so a change needs no stack update. Deliberately no tuning fields: the diarization
+# operating point is measured per model bundle and baked into the ASR image.
 type AsrConfig @aws_cognito_user_pools @aws_iam {
 	AsrConfigId: ID!
-	speakerThreshold: String
-	minSegmentMs: String
-	maxSpeakers: String
-	endpointingMs: String
-	requireCorroboration: Boolean
-	splitOnSpeakerChange: Boolean
-	liveTurnCut: Boolean
-	turnCutIntervalMs: String
-	maxOpenSegmentMs: String
-	diarizeByDefault: Boolean
 	engineDefaultMicrovm: Boolean
+	diarizeVirtualParticipant: Boolean
 }
 
 input UpdateAsrConfigInput {

@@ -1056,38 +1056,25 @@ Rules:
           is 'STRANDS_BEDROCK_WITH_KB (Use Existing)'
 
 Mappings:
-  # Tuning defaults for the EXPERIMENTAL MicroVM ASR engine.
+  # Deploy-time values for the on-demand ASR engine that are NOT CloudFormation
+  # parameters. TranscriptionEngine is the only question asked at deploy time;
+  # the engine is experimental and its bundle carries its own calibrated
+  # operating point, so there is nothing else for a deployer to tune. What used to
+  # be five parameters (model bundle, lifetime ceiling, speaker cap, turn-cut
+  # behaviour, maximum open row) is now two fixed values here plus the engine's own
+  # built-in defaults for the rest.
   #
-  # These were five top-level CloudFormation parameters (AsrModelBundle,
-  # AsrMaxMeetingSeconds, AsrMaxSpeakers, AsrLiveTurnCut, AsrMaxOpenSegmentMs).
-  # They are fixed here instead of asked at deploy time because the engine is not
-  # production ready: exposing its operating point invites tuning a feature whose
-  # defaults are still moving, and it crowded the Parameters page with five
-  # questions almost nobody deploying LMA can answer.
-  #
-  # The values below are exactly what those parameters defaulted to, so a stack
-  # that accepted the defaults is unchanged. A stack that had OVERRIDDEN one is
-  # not: the override disappears with the parameter and this value takes over. In
-  # particular an existing stack on a non-default ModelBundle reverts to
-  # nemotron-titanet-small on the next update and rebuilds the image (~20 min).
-  # Edit the mapping before updating if you need to keep a different bundle.
-  #
-  # Nothing is lost by fixing them. MaxSpeakers, LiveTurnCut and MaxOpenSegmentMs
-  # are all overridable at runtime from the ASR Config page (maxSpeakers,
-  # liveTurnCut, maxOpenSegmentMs), which takes effect on the next meeting with no
-  # stack update. The other two genuinely need a deploy either way: ModelBundle
-  # rebuilds the MicroVM image (~20 min) and MaxMeetingSeconds is a MicroVM
-  # lifetime ceiling.
-  #
-  # ModelBundle must name a bundle in lma-asr-microvm-stack/source/catalog.json;
-  # scripts/sync_bundles.py --check enforces that.
+  # ModelBundle names a bundle in lma-asr-microvm-stack/source/catalog.json;
+  # scripts/sync_bundles.py --check enforces that. Both bundles are permissively
+  # licensed and redistributable: fastconformer-titanet-small adds per-voice
+  # speaker labels, fastconformer-transcription-only labels by audio channel only.
+  # Changing it rebuilds the MicroVM image (~20 min). MaxMeetingSeconds is the
+  # hard lifetime ceiling per MicroVM and the cost backstop if a transcriber task
+  # dies without releasing one (service maximum 28800).
   AsrDefaults:
     Engine:
-      ModelBundle: nemotron-titanet-small
+      ModelBundle: fastconformer-titanet-small
       MaxMeetingSeconds: "14400"
-      MaxSpeakers: "0"
-      LiveTurnCut: "true"
-      MaxOpenSegmentMs: "20000"
 
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
@@ -1125,7 +1112,7 @@ Conditions:
     - !Not
       - !Equals
         - !FindInMap [AsrDefaults, Engine, ModelBundle]
-        - "transcription-only"
+        - "fastconformer-transcription-only"
 
 Resources:
   ##########################################################################
@@ -2649,7 +2636,6 @@ Resources:
         AsrImageSourceS3Key: <ASR_MICROVM_IMAGE_SOURCE_S3_KEY_TOKEN>
         AsrModelBundle: !FindInMap [AsrDefaults, Engine, ModelBundle]
         AsrMaxMeetingSeconds: !FindInMap [AsrDefaults, Engine, MaxMeetingSeconds]
-        AsrMaxSpeakers: !FindInMap [AsrDefaults, Engine, MaxSpeakers]
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
@@ -2686,43 +2672,18 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
           - ""
-        # Deploying the engine does not silently switch meetings onto it. Both
-        # engines diarize now, so asking for speaker labels does not select one:
-        # an admin makes this the default from the ASR Config page instead.
-        AsrEngineDefault: transcribe
+        # Deploying the engine does not switch meetings onto it. The deployment
+        # default is a runtime switch on the ASR Config page, read from the
+        # config table at meeting start. The diarization operating point is
+        # baked into the ASR image from the bundle and is not passed here at all.
         AsrDiarizationAvailable: !If [ShouldEnableAsrDiarization, "true", "false"]
-        # A model nobody has measured gets no speaker labels until this deployment
-        # has calibrated its own operating point (or an admin sets a threshold).
-        AsrSpeakerModelMeasured: !If
-          - ShouldDeployMicrovmAsr
-          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerModelMeasured
-          - "true"
         AsrModelBundleId: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleId
           - ""
-        AsrBundleThreshold: !If
-          - ShouldDeployMicrovmAsr
-          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerThreshold
-          - ""
         AsrConfigTableName: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
-          - ""
-        AsrMaxSpeakers: !FindInMap [AsrDefaults, Engine, MaxSpeakers]
-        AsrLiveTurnCut: !FindInMap [AsrDefaults, Engine, LiveTurnCut]
-        AsrMaxOpenSegmentMs: !FindInMap [AsrDefaults, Engine, MaxOpenSegmentMs]
-        # The calibrated operating point for the deployed bundle, resolved from
-        # catalog.json by the ASR stack. Previously a top-level parameter defaulting
-        # to 0.2 while the catalog's measured value for the default embedder was
-        # 0.4 - the disagreement merged two speakers into one on a live meeting.
-        AsrSpeakerThreshold: !If
-          - ShouldDeployMicrovmAsr
-          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerThreshold
-          - ""
-        AsrMinSegmentMs: !If
-          - ShouldDeployMicrovmAsr
-          - !GetAtt ASRMICROVMSTACK.Outputs.MinSegmentMs
           - ""
         PcaS3BucketName: ""
         PcaTranscriptsPrefix: ""
@@ -2801,6 +2762,12 @@ Resources:
         TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
         TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         CustomVocabularyName: !Ref CustomVocabularyName
+        # The on-demand ASR engine, when deployed. Whether a Virtual Participant
+        # uses it is the ASR Config page's runtime switch, read at meeting start.
+        AsrLauncherFunctionArn: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
+          - ""
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
         # Same source, packaged with the Dockerfile at the zip ROOT, which is
         # what CreateMicrovmImage requires (codeArtifact takes only a URI, so a

@@ -65,6 +65,15 @@ const UPLOAD_PHASE = {
 // AppSync client — reused only for the createUploadMeeting mutation.
 const appsyncClient = generateClient();
 
+// Only the field the engine picker needs; the ASR Config page owns the full record.
+const getAsrEngineDefaultQuery = `
+  query GetAsrConfig($AsrConfigId: ID!) {
+    getAsrConfig(AsrConfigId: $AsrConfigId) {
+      engineDefaultMicrovm
+    }
+  }
+`;
+
 /**
  * StreamAudio — unified component for both live streaming and uploading
  * pre-recorded meetings.
@@ -83,7 +92,27 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // Distinct from AsrDiarizationAvailable, which is also false for a
   // transcription-only bundle.
   const asrEngineAvailable = `${settings?.AsrEngineAvailable}` === 'true';
-  const asrEngineDefault = `${settings?.AsrEngineDefault}` === 'microvm' ? 'microvm' : 'transcribe';
+  // The deployment default engine is a runtime switch on the ASR Config page. It is
+  // read live from the config table rather than from the static settings blob, so
+  // the picker starts on what an admin has actually set, not on a deploy-time value.
+  const [asrEngineDefault, setAsrEngineDefault] = useState('transcribe');
+  useEffect(() => {
+    if (!asrEngineAvailable) return undefined;
+    let cancelled = false;
+    appsyncClient
+      .graphql({ query: getAsrEngineDefaultQuery, variables: { AsrConfigId: 'CustomAsrConfig' } })
+      .then((result) => {
+        if (!cancelled && result.data?.getAsrConfig?.engineDefaultMicrovm === true) {
+          setAsrEngineDefault('microvm');
+        }
+      })
+      .catch(() => {
+        // Stays 'transcribe', which is also what the server falls back to.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asrEngineAvailable]);
   // Amplify v6 exposes tokens as currentSession.tokens.{accessToken,idToken}.toString().
   // The refresh token is not exposed via fetchAuthSession in v6; pass an empty string
   // since the websocket server's JWT verifier only strictly requires access/id tokens.
@@ -177,11 +206,13 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // Blank means "discover as many speakers as appear".
   const [streamMaxSpeakers, setStreamMaxSpeakers] = useState('');
 
-  // Start the picker on whatever the deployment already defaults to, so choosing
-  // nothing behaves exactly as it did before this control existed.
+  // Follow the deployment default until the user moves the radio themselves, so
+  // choosing nothing behaves exactly as the ASR Config page says it will.
   useEffect(() => {
-    setStreamEngine((current) => current || asrEngineDefault);
-  }, [asrEngineDefault]);
+    if (!engineChosen) {
+      setStreamEngine(asrEngineDefault);
+    }
+  }, [asrEngineDefault, engineChosen]);
 
   // --- Upload mode state --------------------------------------------------
   const [uploadFiles, setUploadFiles] = useState([]);
@@ -383,7 +414,9 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       recordingCallMetaData.callEvent = 'START';
 
       // eslint-disable-next-line prettier/prettier
-      console.log(`DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`);
+      console.log(
+        `DEBUG - [${new Date().toISOString()}]: Send Call START msg: ${JSON.stringify(recordingCallMetaData)}`,
+      );
       sendMessage(JSON.stringify(recordingCallMetaData));
       setStreamingStarted(true);
 

@@ -13,12 +13,10 @@ Metadata:
           default: Model selection
         Parameters:
           - AsrModelBundle
-          - AsrEnableDiarization
       - Label:
           default: Runtime sizing and tuning
         Parameters:
           - AsrMaxMeetingSeconds
-          - AsrMaxSpeakers
           - AsrLogLevel
 
 Parameters:
@@ -46,55 +44,19 @@ Parameters:
 
   AsrModelBundle:
     Type: String
-    Default: nemotron-titanet-small
+    Default: fastconformer-titanet-small
     AllowedValues:
-      - nemotron-titanet-small
-      - permissive-zipformer-campplus
-      - transcription-only
-      - permissive-fastconformer-titanet-large
-      - nemotron-titanet-large
-      - apache-only-zipformer-3dspeaker
-      - accurate-parakeet-titanet-large
-      - parakeet-streaming-titanet-small
-      - parakeet-streaming-low-latency
+      - fastconformer-titanet-small
+      - fastconformer-transcription-only
     Description: >-
-      Which pre-vetted model pairing the MicroVM ASR engine uses. Each bundle names an
-      ASR model, a speaker-embedding model and a turn-detection model TOGETHER WITH the
-      diarization operating point measured for that combination, so a deployment gets a
-      working configuration without tuning anything. Picking the models separately is
-      deliberately not offered: the similarity threshold is not a property of the
-      embedder alone (utterance length moves it as much as the model does), so it is
-      only meaningful for a stated pairing.
-      CALIBRATED, so speaker labels work immediately - nemotron-titanet-small is the
-      default and validated on real meetings, but its ASR weights are under the NVIDIA
-      Open Model License and are NOT redistributable; permissive-zipformer-campplus is
-      Apache-2.0 and MIT throughout and measurably worse, its ASR model being trained on
-      read speech; transcription-only has no diarization and labels by audio channel.
-      NOT YET CALIBRATED, so they produce NO speaker labels until this deployment runs a
-      calibration from the ASR Config page, because a threshold borrowed from another
-      pairing fragments or merges speakers - permissive-fastconformer-titanet-large is
-      CC-BY-4.0 and MIT throughout and so redistributable, its ASR model sharing the
-      default's architecture but trained on conversational speech at a quarter the size,
-      which makes it the one to try if you need to redistribute the image;
-      nemotron-titanet-large is the validated default with a larger embedder, aimed at
-      under-splitting on a channel dominated by one talker;
-      apache-only-zipformer-3dspeaker is for a deployment that cannot accept CC-BY-4.0
-      attribution, both halves being the weaker choice; accurate-parakeet-titanet-large
-      has the highest expected accuracy and is redistributable but is OFFLINE, meaning
-      audio is segmented by VAD and decoded per utterance so there is NO interim text
-      while somebody is still speaking, and it needs 16 GiB.
-      Changing the bundle rebuilds the MicroVM image (~20 minutes).
-
-  AsrEnableDiarization:
-    Type: String
-    Default: Auto
-    AllowedValues:
-      - Auto
-      - "On"
-      - "Off"
-    Description: >-
-      Auto enables diarization when a speaker model is present in the image. On
-      fails at startup if it is missing. Off disables it regardless.
+      Which model bundle the MicroVM ASR engine is built from. A bundle names the
+      ASR model, the speaker-embedding model and the turn-detection model TOGETHER
+      WITH the diarization operating point measured for them, so nothing has to be
+      tuned. Both bundles are permissively licensed and redistributable and share
+      the same CC-BY-4.0 FastConformer ASR model; fastconformer-titanet-small adds
+      per-voice speaker labels, fastconformer-transcription-only labels by audio
+      channel and carries no speaker weights. Set from the AsrDefaults mapping in
+      lma-main.yaml. Changing it rebuilds the MicroVM image (~20 minutes).
 
   AsrMaxMeetingSeconds:
     Type: Number
@@ -105,16 +67,6 @@ Parameters:
       Hard ceiling on one ASR MicroVM's lifetime. Also the cost backstop: a
       transcriber task that dies without releasing the MicroVM cannot leak
       compute for longer than this. The service maximum is 8 hours.
-
-  AsrMaxSpeakers:
-    Type: Number
-    Default: 0
-    MinValue: 0
-    MaxValue: 30
-    Description: >-
-      Optional cap on distinct speakers per audio channel. 0 (the default)
-      discovers as many as appear. A cap is a safety net for noisy embeddings, not
-      a fix for over-splitting; set it only when the meeting size is known.
 
   AsrLogLevel:
     Type: String
@@ -161,8 +113,6 @@ Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasLoggingBucket: !Not [!Equals [!Ref LoggingBucketName, ""]]
   HasEncryptionKey: !Not [!Equals [!Ref CustomerManagedEncryptionKeyArn, ""]]
-  ForceDiarizationOn: !Equals [!Ref AsrEnableDiarization, "On"]
-  SetDiarizationExplicitly: !Not [!Equals [!Ref AsrEnableDiarization, "Auto"]]
 
 Mappings:
   # ONNX Runtime threads should match the baseline vCPU count (2 GiB per vCPU).
@@ -172,23 +122,9 @@ Mappings:
   # figure and FAILS the stack if it disagrees with the bundle, so the two cannot
   # drift silently. Threads are derived by the resolver (2 GiB per vCPU).
   BundleMemory:
-    nemotron-titanet-small:
+    fastconformer-titanet-small:
       MiB: 8192
-    permissive-zipformer-campplus:
-      MiB: 8192
-    transcription-only:
-      MiB: 8192
-    permissive-fastconformer-titanet-large:
-      MiB: 8192
-    nemotron-titanet-large:
-      MiB: 8192
-    apache-only-zipformer-3dspeaker:
-      MiB: 8192
-    accurate-parakeet-titanet-large:
-      MiB: 8192
-    parakeet-streaming-titanet-small:
-      MiB: 8192
-    parakeet-streaming-low-latency:
+    fastconformer-transcription-only:
       MiB: 8192
 
 Resources:
@@ -454,13 +390,6 @@ Resources:
           Value: !GetAtt AsrImageSource.NumThreads
         - Key: ASR_LOG_LEVEL
           Value: !Ref AsrLogLevel
-        - Key: ASR_MAX_SPEAKERS
-          Value: !Ref AsrMaxSpeakers
-        - !If
-          - SetDiarizationExplicitly
-          - Key: ASR_DIARIZE
-            Value: !If [ForceDiarizationOn, "1", "0"]
-          - !Ref AWS::NoValue
       Hooks:
         Port: 9000
         MicrovmImageHooks:
@@ -599,8 +528,10 @@ Outputs:
 
   AsrModelBundleStatus:
     Description: >-
-      "vetted" when this pairing has been validated on real meeting audio,
-      "experimental" when it is offered for licensing reasons but measured worse.
+      "calibrated" when the bundle carries an operating point measured for its
+      speaker model under this engine's segmentation policy; "vetted" when this
+      exact pairing has additionally been validated end to end on a live
+      multi-speaker meeting.
     Value: !GetAtt AsrImageSource.BundleStatus
 
   AsrLicenceSummary:
@@ -634,13 +565,6 @@ Outputs:
       Whether a speaker-turn detection model is baked in, so one endpointed
       utterance containing two voices can be split rather than labelled once.
     Value: !GetAtt AsrImageSource.TurnDetectionAvailable
-
-  SpeakerModelMeasured:
-    Description: >-
-      Whether THIS PAIRING has a calibrated operating point. "false" means any
-      threshold would be a guess, which is why diarization is withheld until the
-      deployment calibrates its own.
-    Value: !GetAtt AsrImageSource.SpeakerModelMeasured
 
   SpeakerThreshold:
     Description: >-
