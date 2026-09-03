@@ -146,10 +146,11 @@ export const resolveMaxSpeakers = (
 /**
  * Which engine transcribes this meeting.
  *
- * The engine is the DEPLOYMENT's choice and diarization is the CLIENT's: both
- * engines partition speakers now, so asking for speaker labels no longer implies
- * an engine. A client may still name one explicitly. A request the deployment
- * cannot serve falls back to Amazon Transcribe rather than failing.
+ * The engine is the DEPLOYMENT's choice (the ASR Config page's streaming-meetings
+ * setting) and diarization is the CLIENT's: both engines partition speakers, so
+ * asking for speaker labels does not imply an engine. A client may still name one
+ * explicitly (the desktop apps' --asr-engine). A request the deployment cannot
+ * serve falls back to Amazon Transcribe rather than failing.
  */
 export const resolveAsrEngine = (
     callMetaData: CallMetaData,
@@ -157,7 +158,7 @@ export const resolveAsrEngine = (
     runtime?: AsrRuntimeConfig
 ): AsrEngineName => {
     const deploymentDefault = runtime
-        ? (runtime.engineDefaultMicrovm ? 'microvm' : 'transcribe')
+        ? (runtime.streamingEngineMicrovm ? 'microvm' : 'transcribe')
         : ASR_ENGINE_DEFAULT;
     const requested = callMetaData.asrEngine?.toLowerCase() || deploymentDefault;
     if (requested !== 'microvm') {

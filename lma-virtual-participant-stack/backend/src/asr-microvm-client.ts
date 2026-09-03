@@ -18,10 +18,11 @@
  * counter and carries a cumulative time offset.
  *
  * Which engine a VP uses is the deployment's runtime switch (the ASR Config page's
- * "default engine", read from the config table at meeting start), overridable per
- * VP with ASR_ENGINE for local testing. Whether it asks for per-voice labels is the
- * second switch: the VP already names speakers from the meeting roster, so labels
- * are only worth having when several people sit behind one attendee tile.
+ * "Virtual Participants" engine setting, read from the config table at meeting
+ * start), overridable per VP with ASR_ENGINE for local testing. Whether it asks for
+ * per-voice labels is a further switch: the VP already names speakers from the
+ * meeting roster, so labels are only worth having when several people sit behind
+ * one attendee tile.
  */
 import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -53,14 +54,14 @@ const isLocalTest = process.env.LOCAL_TEST === 'true';
 
 export type AsrEngineName = 'transcribe' | 'microvm';
 
-/** The two runtime switches on the ASR Config page, as the VP reads them. */
+/** The ASR Config page's switches that concern a Virtual Participant. */
 export interface AsrRuntimeSwitches {
-    engineDefaultMicrovm: boolean;
+    virtualParticipantEngineMicrovm: boolean;
     diarizeVirtualParticipant: boolean;
 }
 
 export const DEFAULT_SWITCHES: AsrRuntimeSwitches = {
-    engineDefaultMicrovm: false,
+    virtualParticipantEngineMicrovm: false,
     diarizeVirtualParticipant: false,
 };
 
@@ -110,7 +111,8 @@ export function resolveVpAsrEngine(
     override: string | undefined = process.env.ASR_ENGINE,
 ): AsrEngineName {
     const requested =
-        (override || '').trim().toLowerCase() || (switches.engineDefaultMicrovm ? 'microvm' : 'transcribe');
+        (override || '').trim().toLowerCase() ||
+        (switches.virtualParticipantEngineMicrovm ? 'microvm' : 'transcribe');
     if (requested !== 'microvm') {
         return 'transcribe';
     }
@@ -124,7 +126,7 @@ export function resolveVpAsrEngine(
 const GET_ASR_CONFIG = `
   query GetAsrConfig($AsrConfigId: ID!) {
     getAsrConfig(AsrConfigId: $AsrConfigId) {
-      engineDefaultMicrovm
+      virtualParticipantEngineMicrovm
       diarizeVirtualParticipant
     }
   }
@@ -154,7 +156,12 @@ export async function fetchAsrRuntimeSwitches(
             return { ...DEFAULT_SWITCHES };
         }
         const body = (await response.json()) as {
-            data?: { getAsrConfig?: { engineDefaultMicrovm?: boolean; diarizeVirtualParticipant?: boolean } | null };
+            data?: {
+                getAsrConfig?: {
+                    virtualParticipantEngineMicrovm?: boolean;
+                    diarizeVirtualParticipant?: boolean;
+                } | null;
+            };
             errors?: unknown[];
         };
         if (body.errors?.length) {
@@ -163,7 +170,7 @@ export async function fetchAsrRuntimeSwitches(
         }
         const record = body.data?.getAsrConfig;
         return {
-            engineDefaultMicrovm: record?.engineDefaultMicrovm === true,
+            virtualParticipantEngineMicrovm: record?.virtualParticipantEngineMicrovm === true,
             diarizeVirtualParticipant: record?.diarizeVirtualParticipant === true,
         };
     } catch (error: any) {

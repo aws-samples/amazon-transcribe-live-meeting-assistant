@@ -16,13 +16,16 @@ const header = (
 const content = (
   <>
     <p>
-      Two switches decide where the on-demand ASR &amp; speaker diarization engine is used. Both apply to the next
-      meeting that starts.
+      Which engine transcribes streaming meetings (Stream Audio, the Desktop Capture apps) and which transcribes Virtual
+      Participants. Both settings apply to the next meeting that starts.
     </p>
-    <h3>Default engine</h3>
+    <h3>Amazon Transcribe</h3>
+    <p>The default and the recommended engine for production: redaction, custom vocabulary, 30+ languages.</p>
+    <h3>On-demand ASR &amp; diarization</h3>
     <p>
-      Off: every meeting uses Amazon Transcribe. On: streaming meetings and Virtual Participants use the on-demand
-      engine unless a Stream Audio meeting picks one itself.
+      Transcribes and identifies speakers in one pass on a MicroVM launched per meeting, so several people sharing one
+      microphone come apart reliably. English only; none of the Amazon Transcribe features above. A meeting whose
+      MicroVM cannot start falls back to Amazon Transcribe.
     </p>
     <h3>Virtual Participant voice separation</h3>
     <p>
@@ -36,7 +39,9 @@ const content = (
         the ASR image, so there is nothing to tune here.
       </li>
       <li>Speaker labels are per meeting and per audio channel, not identities.</li>
-      <li>Meetings on this engine do not use Amazon Transcribe features such as redaction or custom vocabulary.</li>
+      <li>
+        The Desktop Capture apps can still force an engine per run with <code>--asr-engine</code>.
+      </li>
     </ul>
     <h3>Documentation</h3>
     <ul>

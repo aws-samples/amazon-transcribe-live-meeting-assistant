@@ -38,16 +38,17 @@ const stubDynamo = (behaviour: () => Promise<unknown>): (() => void) => {
     };
 };
 
-test('the record decides the deployment default engine', async () => {
+test('the record decides which engine streaming meetings use', async () => {
     resetAsrConfigCache();
     const restore = stubDynamo(async () => ({
-        Item: { AsrConfigId: { S: 'CustomAsrConfig' }, engineDefaultMicrovm: { BOOL: true } },
+        Item: { AsrConfigId: { S: 'CustomAsrConfig' }, streamingEngineMicrovm: { BOOL: true } },
     }));
     const config = await getAsrRuntimeConfig(fakeServer);
     restore();
 
-    assert.equal(config.engineDefaultMicrovm, true);
-    // A field the record does not carry keeps its default rather than becoming undefined.
+    assert.equal(config.streamingEngineMicrovm, true);
+    // Fields the record does not carry keep their defaults rather than becoming undefined.
+    assert.equal(config.virtualParticipantEngineMicrovm, false);
     assert.equal(config.diarizeVirtualParticipant, false);
 });
 
@@ -57,7 +58,11 @@ test('both switches default off when there is no record, so a fresh deployment s
     const config = await getAsrRuntimeConfig(fakeServer);
     restore();
 
-    assert.deepEqual(config, { engineDefaultMicrovm: false, diarizeVirtualParticipant: false });
+    assert.deepEqual(config, {
+        streamingEngineMicrovm: false,
+        virtualParticipantEngineMicrovm: false,
+        diarizeVirtualParticipant: false,
+    });
 });
 
 test('retired tuning fields in an old record are ignored', async () => {
@@ -75,7 +80,11 @@ test('retired tuning fields in an old record are ignored', async () => {
     const config = await getAsrRuntimeConfig(fakeServer);
     restore();
 
-    assert.deepEqual(Object.keys(config).sort(), ['diarizeVirtualParticipant', 'engineDefaultMicrovm']);
+    assert.deepEqual(Object.keys(config).sort(), [
+        'diarizeVirtualParticipant',
+        'streamingEngineMicrovm',
+        'virtualParticipantEngineMicrovm',
+    ]);
     assert.equal(config.diarizeVirtualParticipant, true);
 });
 
@@ -90,7 +99,7 @@ test('a failed read degrades to the defaults instead of throwing', async () => {
 
     // Losing transcription over a config lookup would be far worse than running
     // on Amazon Transcribe.
-    assert.equal(config.engineDefaultMicrovm, false);
+    assert.equal(config.streamingEngineMicrovm, false);
     assert.equal(warnings.length, 1);
     assert.match(warnings[0], /using deployment defaults/);
 });
@@ -100,7 +109,7 @@ test('the record is cached, so concurrent meetings do not each read it', async (
     let reads = 0;
     const restore = stubDynamo(async () => {
         reads += 1;
-        return { Item: { engineDefaultMicrovm: { BOOL: true } } };
+        return { Item: { streamingEngineMicrovm: { BOOL: true } } };
     });
     await getAsrRuntimeConfig(fakeServer);
     await getAsrRuntimeConfig(fakeServer);

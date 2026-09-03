@@ -3,14 +3,14 @@
 # See the LICENSE file in the project root for full license information.
 """AppSync Lambda resolver for the updateAsrConfig mutation.
 
-The on-demand ASR engine has exactly two runtime switches, both booleans, both
+The on-demand ASR engine has exactly three runtime switches, all booleans, all
 read at the start of each meeting so a change needs no stack update:
 
-* engineDefaultMicrovm - route streaming meetings (Stream Audio, the Desktop
-  Capture apps) and Virtual Participants to the on-demand engine unless a client
-  names an engine itself.
-* diarizeVirtualParticipant - have the Virtual Participant ask the engine for
-  per-voice labels, so several people behind one attendee tile come out as
+* streamingEngineMicrovm - streaming meetings (Stream Audio, the Desktop Capture
+  apps) use the on-demand engine instead of Amazon Transcribe.
+* virtualParticipantEngineMicrovm - Virtual Participants use the on-demand engine.
+* diarizeVirtualParticipant - a Virtual Participant on the on-demand engine asks
+  for per-voice labels, so several people behind one attendee tile come out as
   "Name (spk_0)", "Name (spk_1)" instead of one name.
 
 There are deliberately no tuning fields. The diarization operating point (the
@@ -29,7 +29,9 @@ dynamodb = boto3.resource("dynamodb")
 
 CONFIG_ID = "CustomAsrConfig"
 
-BOOLEAN_FIELDS = frozenset({"engineDefaultMicrovm", "diarizeVirtualParticipant"})
+BOOLEAN_FIELDS = frozenset(
+    {"streamingEngineMicrovm", "virtualParticipantEngineMicrovm", "diarizeVirtualParticipant"}
+)
 ALLOWED_FIELDS = BOOLEAN_FIELDS
 
 

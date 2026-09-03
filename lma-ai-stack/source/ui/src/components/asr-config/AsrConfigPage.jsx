@@ -11,6 +11,7 @@ import {
   SpaceBetween,
   FormField,
   Checkbox,
+  RadioGroup,
   Button,
   Alert,
   Spinner,
@@ -28,7 +29,8 @@ export const getAsrConfigQuery = `
   query GetAsrConfig($AsrConfigId: ID!) {
     getAsrConfig(AsrConfigId: $AsrConfigId) {
       AsrConfigId
-      engineDefaultMicrovm
+      streamingEngineMicrovm
+      virtualParticipantEngineMicrovm
       diarizeVirtualParticipant
     }
   }
@@ -43,12 +45,29 @@ const updateAsrConfigMutation = `
   }
 `;
 
-// The engine's whole runtime surface: two switches. The diarization operating
+// The engine's whole runtime surface: which engine each kind of meeting uses, and
+// whether Virtual Participants ask for per-voice labels. The diarization operating
 // point is the model bundle's, baked into the ASR image, and is not configurable.
 export const EMPTY = {
-  engineDefaultMicrovm: false,
+  streamingEngineMicrovm: false,
+  virtualParticipantEngineMicrovm: false,
   diarizeVirtualParticipant: false,
 };
+
+const ENGINE_ITEMS = [
+  {
+    value: 'transcribe',
+    label: 'Amazon Transcribe',
+    description: 'Supports redaction, custom vocabulary and 30+ languages.',
+  },
+  {
+    value: 'microvm',
+    label: 'On-demand ASR & diarization (experimental)',
+    description:
+      'Better at telling apart several people on one channel. English only. ' +
+      'Falls back to Amazon Transcribe if the MicroVM cannot start.',
+  },
+];
 
 const AsrConfigPage = () => {
   const { settings } = useSettingsContext();
@@ -105,6 +124,15 @@ const AsrConfigPage = () => {
     }
   };
 
+  const engineRadio = (field) => (
+    <RadioGroup
+      value={config[field] ? 'microvm' : 'transcribe'}
+      onChange={({ detail }) => setConfig({ ...config, [field]: detail.value === 'microvm' })}
+      items={ENGINE_ITEMS}
+      readOnly={saving}
+    />
+  );
+
   if (!engineDeployed) {
     return (
       <Container
@@ -128,10 +156,7 @@ const AsrConfigPage = () => {
         <Header
           variant="h1"
           info={<Badge color="severity-medium">Experimental</Badge>}
-          description={
-            'Where the on-demand ASR & speaker diarization engine is used. Changes apply to the next meeting; ' +
-            'no redeploy.'
-          }
+          description="Which engine transcribes each kind of meeting. Changes apply to the next meeting; no redeploy."
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               <Button onClick={load} disabled={loading || saving}>
@@ -152,7 +177,8 @@ const AsrConfigPage = () => {
       ) : (
         <SpaceBetween size="l">
           <Alert type="warning" header="Experimental — not production ready">
-            Transcript quality is below Amazon Transcribe&apos;s and defaults may change between releases.
+            Transcript quality on the on-demand engine is below Amazon Transcribe&apos;s and defaults may change between
+            releases.
           </Alert>
 
           {status && (
@@ -177,33 +203,33 @@ const AsrConfigPage = () => {
           />
 
           <FormField
-            label="Default engine"
+            label="Streaming meetings"
             description={
-              'Applies to Stream Audio, the Desktop Capture apps and Virtual Participants. A Stream Audio meeting ' +
-              'can still pick an engine itself. English only; no redaction, custom vocabulary or language ' +
-              'identification. Falls back to Amazon Transcribe if the MicroVM cannot start.'
+              'Stream Audio and the Desktop Capture apps. Speaker identification per channel is still chosen on ' +
+              'the Stream Audio form.'
             }
           >
-            <Checkbox
-              checked={config.engineDefaultMicrovm}
-              onChange={({ detail }) => setConfig({ ...config, engineDefaultMicrovm: detail.checked })}
-              disabled={saving}
-            >
-              Use the on-demand ASR engine by default
-            </Checkbox>
+            {engineRadio('streamingEngineMicrovm')}
+          </FormField>
+
+          <FormField
+            label="Virtual Participants"
+            description="Speakers are named from the meeting roster with either engine."
+          >
+            {engineRadio('virtualParticipantEngineMicrovm')}
           </FormField>
 
           <FormField
             label="Virtual Participant voice separation"
             description={
-              'Speakers are normally named from the meeting roster. Turn this on when one attendee carries ' +
-              'several people, such as a conference room: their voices are labelled "Name (spk_0)", "Name (spk_1)".'
+              'Turn this on when one attendee carries several people, such as a conference room: their voices ' +
+              'are labelled "Name (spk_0)", "Name (spk_1)". Needs the on-demand engine for Virtual Participants.'
             }
           >
             <Checkbox
               checked={config.diarizeVirtualParticipant}
               onChange={({ detail }) => setConfig({ ...config, diarizeVirtualParticipant: detail.checked })}
-              disabled={saving || !diarizationAvailable}
+              disabled={saving || !diarizationAvailable || !config.virtualParticipantEngineMicrovm}
             >
               Identify separate voices behind one attendee
             </Checkbox>

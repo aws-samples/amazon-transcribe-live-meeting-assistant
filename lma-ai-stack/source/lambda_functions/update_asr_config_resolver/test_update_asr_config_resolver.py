@@ -35,21 +35,28 @@ def invoke(config: object, config_id: str = "CustomAsrConfig") -> tuple[dict, di
     return response, stored
 
 
-def test_both_switches_are_stored_as_booleans() -> None:
-    response, stored = invoke({"engineDefaultMicrovm": True, "diarizeVirtualParticipant": False})
+def test_the_switches_are_stored_as_booleans() -> None:
+    response, stored = invoke(
+        {
+            "streamingEngineMicrovm": True,
+            "virtualParticipantEngineMicrovm": False,
+            "diarizeVirtualParticipant": False,
+        }
+    )
 
     assert response == {"AsrConfigId": "CustomAsrConfig", "Success": True}
     assert stored == {
         "AsrConfigId": "CustomAsrConfig",
-        "engineDefaultMicrovm": True,
+        "streamingEngineMicrovm": True,
+        "virtualParticipantEngineMicrovm": False,
         "diarizeVirtualParticipant": False,
     }
 
 
 def test_truthy_strings_from_an_older_client_become_booleans() -> None:
-    _, stored = invoke({"engineDefaultMicrovm": "true"})
+    _, stored = invoke({"streamingEngineMicrovm": "true"})
 
-    assert stored["engineDefaultMicrovm"] is True
+    assert stored["streamingEngineMicrovm"] is True
 
 
 def test_retired_tuning_fields_are_filtered_out() -> None:
@@ -57,6 +64,7 @@ def test_retired_tuning_fields_are_filtered_out() -> None:
     still sends them must not be able to put a number back into the table."""
     _, stored = invoke(
         {
+            "streamingEngineMicrovm": True,
             "engineDefaultMicrovm": True,
             "speakerThreshold": 0.3,
             "minSegmentMs": 2500,
@@ -66,12 +74,12 @@ def test_retired_tuning_fields_are_filtered_out() -> None:
         }
     )
 
-    assert set(stored) == {"AsrConfigId", "engineDefaultMicrovm"}
+    assert set(stored) == {"AsrConfigId", "streamingEngineMicrovm"}
 
 
 def test_only_the_custom_record_can_be_written() -> None:
     with pytest.raises(Exception, match="Only CustomAsrConfig"):
-        invoke({"engineDefaultMicrovm": True}, config_id="DefaultAsrConfig")
+        invoke({"streamingEngineMicrovm": True}, config_id="DefaultAsrConfig")
 
 
 def test_malformed_json_is_rejected() -> None:
@@ -92,7 +100,11 @@ def test_a_json_array_is_rejected() -> None:
         invoke([1, 2, 3])
 
 
-def test_the_allow_list_is_exactly_the_two_switches() -> None:
+def test_the_allow_list_is_exactly_the_three_switches() -> None:
     """Adding a field here means adding it to the AppSync type, the transcriber's
     and the VP's readers and the ASR Config page - fail loudly if it drifts."""
-    assert index.ALLOWED_FIELDS == {"engineDefaultMicrovm", "diarizeVirtualParticipant"}
+    assert index.ALLOWED_FIELDS == {
+        "streamingEngineMicrovm",
+        "virtualParticipantEngineMicrovm",
+        "diarizeVirtualParticipant",
+    }

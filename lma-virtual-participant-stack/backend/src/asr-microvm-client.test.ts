@@ -207,15 +207,15 @@ test('a closed socket is not reconnected once the meeting is over', async () => 
     }
 });
 
-test('the per-VP override beats the deployment default, and both fall back when unconfigured', () => {
-    assert.equal(resolveVpAsrEngine({ engineDefaultMicrovm: false, diarizeVirtualParticipant: false }), 'transcribe');
-    assert.equal(resolveVpAsrEngine({ engineDefaultMicrovm: true, diarizeVirtualParticipant: false }), 'microvm');
+test('the per-VP override beats the Virtual Participant engine setting, and both fall back when unconfigured', () => {
+    assert.equal(resolveVpAsrEngine({ virtualParticipantEngineMicrovm: false, diarizeVirtualParticipant: false }), 'transcribe');
+    assert.equal(resolveVpAsrEngine({ virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false }), 'microvm');
     assert.equal(
-        resolveVpAsrEngine({ engineDefaultMicrovm: true, diarizeVirtualParticipant: false }, 'transcribe'),
+        resolveVpAsrEngine({ virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false }, 'transcribe'),
         'transcribe',
     );
     assert.equal(
-        resolveVpAsrEngine({ engineDefaultMicrovm: false, diarizeVirtualParticipant: false }, 'MicroVM'),
+        resolveVpAsrEngine({ virtualParticipantEngineMicrovm: false, diarizeVirtualParticipant: false }, 'MicroVM'),
         'microvm',
     );
 });
@@ -223,16 +223,16 @@ test('the per-VP override beats the deployment default, and both fall back when 
 test('the runtime switches are read from getAsrConfig and default off on any failure', async () => {
     const okFetch = (async () =>
         new Response(
-            JSON.stringify({ data: { getAsrConfig: { engineDefaultMicrovm: true, diarizeVirtualParticipant: true } } }),
+            JSON.stringify({ data: { getAsrConfig: { virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: true } } }),
         )) as unknown as typeof fetch;
     assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', okFetch), {
-        engineDefaultMicrovm: true,
+        virtualParticipantEngineMicrovm: true,
         diarizeVirtualParticipant: true,
     });
 
     const noRecord = (async () => new Response(JSON.stringify({ data: { getAsrConfig: null } }))) as unknown as typeof fetch;
     assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', noRecord), {
-        engineDefaultMicrovm: false,
+        virtualParticipantEngineMicrovm: false,
         diarizeVirtualParticipant: false,
     });
 
@@ -240,12 +240,12 @@ test('the runtime switches are read from getAsrConfig and default off on any fai
         throw new Error('network');
     }) as unknown as typeof fetch;
     assert.deepEqual(await fetchAsrRuntimeSwitches('https://example/graphql', failing), {
-        engineDefaultMicrovm: false,
+        virtualParticipantEngineMicrovm: false,
         diarizeVirtualParticipant: false,
     });
 
     assert.deepEqual(await fetchAsrRuntimeSwitches(''), {
-        engineDefaultMicrovm: false,
+        virtualParticipantEngineMicrovm: false,
         diarizeVirtualParticipant: false,
     });
 });

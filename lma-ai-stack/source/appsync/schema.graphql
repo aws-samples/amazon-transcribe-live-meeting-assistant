@@ -751,11 +751,14 @@ type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
 
 # Runtime switches for the on-demand ASR engine, edited from the ASR Config admin
 # page and read at the start of each meeting (transcriber and Virtual Participant),
-# so a change needs no stack update. Deliberately no tuning fields: the diarization
-# operating point is measured per model bundle and baked into the ASR image.
+# so a change needs no stack update: which engine streaming meetings use, which
+# engine Virtual Participants use, and whether VPs ask for per-voice labels.
+# Deliberately no tuning fields: the diarization operating point is measured per
+# model bundle and baked into the ASR image.
 type AsrConfig @aws_cognito_user_pools @aws_iam {
 	AsrConfigId: ID!
-	engineDefaultMicrovm: Boolean
+	streamingEngineMicrovm: Boolean
+	virtualParticipantEngineMicrovm: Boolean
 	diarizeVirtualParticipant: Boolean
 }
 

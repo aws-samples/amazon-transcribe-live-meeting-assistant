@@ -11,14 +11,14 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 > **Amazon Transcribe remains the recommended engine for production meetings**;
 > transcript quality here is below it and defaults may change between releases.
 > Deploying it changes nothing on its own: meetings still use Amazon Transcribe until
-> an admin switches the deployment default on the ASR Config page or a Stream Audio
-> meeting picks the engine. Accuracy (WER) and diarization error rate have not yet
+> an admin switches streaming meetings or Virtual Participants onto it on the ASR
+> Config page. Accuracy (WER) and diarization error rate have not yet
 > been benchmarked — see [What is not yet measured](#what-is-not-yet-measured).
 >
 > Because it is experimental, nothing about it is tunable at deploy time:
 > `TranscriptionEngine` is the only CloudFormation question, the model bundle ships
 > with its diarization operating point already measured, and the only runtime
-> settings are two switches on the ASR Config page.
+> settings are three switches on the ASR Config page.
 
 ## Table of Contents
 
@@ -26,7 +26,7 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 - [What it does](#what-it-does)
 - [Feature trade-offs versus Amazon Transcribe](#feature-trade-offs-versus-amazon-transcribe)
 - [Deploying it](#deploying-it)
-- [Choosing the engine for a meeting](#choosing-the-engine-for-a-meeting)
+- [Choosing the engine](#choosing-the-engine)
 - [Runtime switches](#runtime-switches)
 - [How speaker labels are produced](#how-speaker-labels-are-produced)
 - [Calibrating a new bundle (developers)](#calibrating-a-new-bundle-developers)
@@ -175,21 +175,22 @@ interim text while somebody is speaking, and its real-time factor on a real meet
 unmeasured. See *Not included: Whisper* below for why Parakeet TDT rather than
 Whisper would be the offline model to try first.
 
-## Choosing the engine for a meeting
+## Choosing the engine
 
-Both engines can produce speaker labels, so asking for labels does **not** pick an
-engine. There are three ways to choose one, in precedence order:
+The engine is a **deployment** setting, chosen separately for the two kinds of
+meeting on **Configuration ▸ ASR Config** (admin only) and read at the start of
+each meeting, so a change needs no redeploy:
 
-1. **Per meeting, from the client.** Stream Audio shows a **Transcription engine**
-   radio when this engine is deployed; the Desktop Capture apps take
-   `--asr-engine microvm`. This wins over everything below, so a user can try the
-   engine without an admin changing anything.
-2. **Per deployment, at runtime.** **Make the on-demand ASR engine the default** on the
-   ASR Config page routes every Stream Audio, Desktop Capture and Virtual Participant
-   meeting here. Takes effect on the next meeting; no redeploy. The Stream Audio radio
-   starts on whatever this is set to.
-3. **Nothing.** Every meeting uses Amazon Transcribe. This is the default, and deploying
-   the engine does not change it.
+| Setting | Covers | Default |
+|---|---|---|
+| Streaming meetings | Stream Audio and the Desktop Capture apps | Amazon Transcribe |
+| Virtual Participants | Every Virtual Participant | Amazon Transcribe |
+
+Deploying the engine changes nothing on its own: both settings start on Amazon
+Transcribe. Diarization stays a per-meeting choice — the Stream Audio form still asks
+which channels to identify speakers on, because only the person in the meeting knows
+whether several people share their microphone. The Desktop Capture apps can force an
+engine for one run with `--asr-engine`, which wins over the deployment setting.
 
 A meeting that selects this engine and whose MicroVM cannot start falls back to Amazon
 Transcribe by itself, so a failed launch costs a warning in the log rather than a
@@ -197,13 +198,14 @@ transcript.
 
 ## Runtime switches
 
-**Configuration ▸ ASR Config** (admin only) has exactly two settings. Both are read at
+**Configuration ▸ ASR Config** (admin only) has exactly three settings. All are read at
 the start of each meeting, so a change needs no stack update and no image rebuild.
 
-| Switch | Default | Effect |
+| Setting | Default | Effect |
 |---|---|---|
-| Make the on-demand ASR engine the default | off | Streaming meetings and Virtual Participants use this engine unless a Stream Audio meeting picks one itself |
-| Identify separate voices behind each Virtual Participant attendee | off | The Virtual Participant asks the engine for per-voice labels, so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. It already names speakers from the meeting roster, which is better than any voice-derived label, hence off by default |
+| Streaming meetings: engine | Amazon Transcribe | Which engine Stream Audio and the Desktop Capture apps use |
+| Virtual Participants: engine | Amazon Transcribe | Which engine Virtual Participants use |
+| Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off |
 
 There is deliberately nothing else. The similarity threshold, minimum utterance
 length, turn-cut behaviour and speaker cap that earlier versions exposed here are the

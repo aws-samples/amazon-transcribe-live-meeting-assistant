@@ -25,13 +25,17 @@ describe('ASR config form shape', () => {
     expect(missing).toEqual([]);
   });
 
-  it('is exactly the two switches the resolver accepts', () => {
+  it('is exactly the three switches the resolver accepts', () => {
     // The resolver's ALLOWED_FIELDS is asserted the same way on the Python side, so
     // a field added to one place and not the other fails in both test suites.
-    expect(Object.keys(EMPTY).sort()).toEqual(['diarizeVirtualParticipant', 'engineDefaultMicrovm']);
+    expect(Object.keys(EMPTY).sort()).toEqual([
+      'diarizeVirtualParticipant',
+      'streamingEngineMicrovm',
+      'virtualParticipantEngineMicrovm',
+    ]);
   });
 
-  it('defaults both switches off, so a fresh deployment stays on Amazon Transcribe', () => {
+  it('defaults every switch off, so a fresh deployment stays on Amazon Transcribe', () => {
     Object.entries(EMPTY).forEach(([field, value]) => {
       expect(value, `${field} must default to false`).toBe(false);
     });

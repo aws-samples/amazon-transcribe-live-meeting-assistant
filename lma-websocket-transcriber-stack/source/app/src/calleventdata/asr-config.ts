@@ -7,8 +7,8 @@
 /**
  * Runtime switches for the MicroVM ASR engine.
  *
- * Exactly two, both booleans, edited from the ASR Config admin page and read here
- * at meeting start so a change needs no stack update. There are deliberately no
+ * Three booleans, edited from the ASR Config admin page and read here at meeting
+ * start so a change needs no stack update. There are deliberately no
  * tuning fields: the diarization operating point (similarity threshold, minimum
  * utterance length) is measured for the model bundle and baked into the ASR image,
  * so no deployment has to know a number for it.
@@ -29,15 +29,17 @@ const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
 
 export interface AsrRuntimeConfig {
     /**
-     * Route streaming meetings (and Virtual Participants) to the on-demand engine
-     * when the client does not name one. Off means Amazon Transcribe.
+     * Streaming meetings (Stream Audio, the Desktop Capture apps) use the on-demand
+     * engine. Off means Amazon Transcribe. A client that names an engine in its
+     * START frame (the desktop apps' --asr-engine) still wins.
      */
-    engineDefaultMicrovm: boolean;
+    streamingEngineMicrovm: boolean;
     /**
-     * Read by the Virtual Participant, not here: whether it asks the engine for
-     * per-voice labels behind each attendee. Carried in this type so one shape
-     * describes the whole record.
+     * Read by the Virtual Participant, not here; carried so one type describes
+     * the whole record.
      */
+    virtualParticipantEngineMicrovm: boolean;
+    /** Also the Virtual Participant's: ask the engine for per-voice labels. */
     diarizeVirtualParticipant: boolean;
 }
 
@@ -45,7 +47,8 @@ export interface AsrRuntimeConfig {
 // no config table (ASR_DIRECT_ENDPOINT against a local engine); deployed stacks do
 // not set it, so the table is the only place the default lives.
 const envDefaults = (): AsrRuntimeConfig => ({
-    engineDefaultMicrovm: (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase() === 'microvm',
+    streamingEngineMicrovm: (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase() === 'microvm',
+    virtualParticipantEngineMicrovm: false,
     diarizeVirtualParticipant: false,
 });
 
@@ -84,7 +87,10 @@ export const getAsrRuntimeConfig = async (
         const item = result.Item;
         const config: AsrRuntimeConfig = item
             ? {
-                engineDefaultMicrovm: item['engineDefaultMicrovm']?.BOOL ?? defaults.engineDefaultMicrovm,
+                streamingEngineMicrovm:
+                    item['streamingEngineMicrovm']?.BOOL ?? defaults.streamingEngineMicrovm,
+                virtualParticipantEngineMicrovm:
+                    item['virtualParticipantEngineMicrovm']?.BOOL ?? defaults.virtualParticipantEngineMicrovm,
                 diarizeVirtualParticipant:
                     item['diarizeVirtualParticipant']?.BOOL ?? defaults.diarizeVirtualParticipant,
             }
