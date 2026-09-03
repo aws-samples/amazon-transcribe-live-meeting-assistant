@@ -419,6 +419,15 @@ Parameters:
       The name of the vocabulary to use when processing the transcription job. Leave blank if no
       custom vocabulary to be used. If yes, the custom vocabulary must pre-exist in your account.
 
+  AsrLauncherFunctionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of the on-demand MicroVM ASR session launcher. Empty means the
+      engine is not deployed and every Virtual Participant is transcribed by Amazon
+      Transcribe. When set, a VP still uses Amazon Transcribe unless the ASR Config
+      page's deployment default says otherwise; it reads that switch at meeting start.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 14
@@ -512,6 +521,7 @@ Parameters:
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
+  HasAsrLauncher: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
@@ -1105,6 +1115,18 @@ Resources:
                   - transcribe:StartTranscriptionJob
                   - transcribe:StartCallAnalyticsStreamTranscription
                 Resource: "*"
+        # Acquire, re-token and release ASR MicroVMs through the launcher, exactly
+        # as the WebSocket transcriber does; the VP never calls lambda-microvms itself.
+        - !If
+          - HasAsrLauncher
+          - PolicyName: AsrMicrovmLauncherPolicy
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action: lambda:InvokeFunction
+                  Resource: !Ref AsrLauncherFunctionArn
+          - !Ref AWS::NoValue
         - PolicyName: DetectPIIPolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -2194,6 +2216,8 @@ Resources:
               Value: !Ref TranscribePreferredLanguage
             - Name: CUSTOM_VOCABULARY_NAME
               Value: !Ref CustomVocabularyName
+            - Name: ASR_LAUNCHER_FUNCTION_ARN
+              Value: !Ref AsrLauncherFunctionArn
             - Name: LMA_IDENTITY
               Value: !Ref LMAIdentity
             - Name: INTRO_MESSAGE
