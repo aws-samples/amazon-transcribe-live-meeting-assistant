@@ -959,8 +959,10 @@ class DiarizingRecognizer(Recognizer):
         )
         self._segment_offset += 1
         _LOG.info(
-            "live turn cut at %.2fs: emitting %d word(s) as segment %d (speaker %s)",
+            "live turn cut at %.2fs (boundary %.2fs): emitting %d word(s) as segment %d "
+            "(speaker %s)",
             end,
+            cut,
             len(prefix),
             segment,
             speaker,
