@@ -454,6 +454,9 @@ export class MicrovmAsrSession {
     }
 
     private connect(): void {
+        if (this.finished) {
+            return;
+        }
         let socket: WebSocket;
         try {
             socket = new WebSocket(this.lease.endpointUrl, subprotocols(this.lease.authToken));
@@ -551,6 +554,9 @@ export class MicrovmAsrSession {
             if (body) {
                 this.lease = { ...this.lease, authToken: body.authToken };
             }
+        }
+        if (this.finished || !this.options.isMeetingLive()) {
+            return;
         }
         this.connect();
     }

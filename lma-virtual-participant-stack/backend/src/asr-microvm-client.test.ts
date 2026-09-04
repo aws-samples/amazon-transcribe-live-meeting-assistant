@@ -207,6 +207,26 @@ test('a closed socket is not reconnected once the meeting is over', async () => 
     }
 });
 
+test('finishing a session that never became ready stops its reconnect loop', async () => {
+    // The contract scribe's fallback path relies on: once finish() is called, a
+    // session whose engine never answered must not open another connection. Left
+    // unfinished, it reconnects for the whole retry budget, minting tokens against
+    // a MicroVM that has already been released (see scribe-asr-fallback.test.ts).
+    const asr = await startFakeAsr((socket) => {
+        setTimeout(() => socket.close(1011, 'never ready'), 10);
+    });
+    const session = newSession(asr, []);
+    try {
+        assert.equal(await session.start(), false);
+        await session.finish();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        assert.equal(asr.connections, 1);
+        assert.equal(session.hasGivenUp, false);
+    } finally {
+        await asr.close();
+    }
+});
+
 test('the per-VP override beats the Virtual Participant engine setting, and both fall back when unconfigured', () => {
     assert.equal(resolveVpAsrEngine({ virtualParticipantEngineMicrovm: false, diarizeVirtualParticipant: false }), 'transcribe');
     assert.equal(resolveVpAsrEngine({ virtualParticipantEngineMicrovm: true, diarizeVirtualParticipant: false }), 'microvm');

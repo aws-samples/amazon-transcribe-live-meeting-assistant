@@ -612,6 +612,9 @@ export class TranscriptionService {
         this.microvmSession = session;
         if (!(await session.start())) {
             console.error('[ASR] MicroVM ASR session never became ready');
+            // Finish before releasing: a session left open keeps reconnecting, and
+            // minting tokens, against a MicroVM that no longer exists.
+            await session.finish();
             await this.releaseMicrovm(session);
             this.microvmSession = null;
             return false;
