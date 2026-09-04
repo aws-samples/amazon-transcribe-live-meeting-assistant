@@ -53,10 +53,32 @@ def test_the_switches_are_stored_as_booleans() -> None:
     }
 
 
-def test_truthy_strings_from_an_older_client_become_booleans() -> None:
-    _, stored = invoke({"streamingEngineMicrovm": "true"})
+def test_string_booleans_from_an_older_client_are_parsed_not_truth_tested() -> None:
+    # bool("false") is True, and this is the value that moves a deployment onto the
+    # experimental engine.
+    _, stored = invoke(
+        {
+            "streamingEngineMicrovm": "true",
+            "virtualParticipantEngineMicrovm": "false",
+            "diarizeVirtualParticipant": "FALSE",
+        }
+    )
 
     assert stored["streamingEngineMicrovm"] is True
+    assert stored["virtualParticipantEngineMicrovm"] is False
+    assert stored["diarizeVirtualParticipant"] is False
+
+
+def test_a_value_that_is_not_a_boolean_is_dropped_rather_than_coerced() -> None:
+    _, stored = invoke(
+        {
+            "streamingEngineMicrovm": "yes",
+            "virtualParticipantEngineMicrovm": 1,
+            "diarizeVirtualParticipant": None,
+        }
+    )
+
+    assert stored == {"AsrConfigId": "CustomAsrConfig"}
 
 
 def test_retired_tuning_fields_are_filtered_out() -> None:

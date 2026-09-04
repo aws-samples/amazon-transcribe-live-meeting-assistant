@@ -6,8 +6,8 @@
 The on-demand ASR engine has exactly three runtime switches, all booleans, all
 read at the start of each meeting so a change needs no stack update:
 
-* streamingEngineMicrovm - streaming meetings (Stream Audio, the Desktop Capture
-  apps) use the on-demand engine instead of Amazon Transcribe.
+* streamingEngineMicrovm - streaming meetings (Stream Audio, the Chrome extension,
+  the Desktop Capture apps) use the on-demand engine instead of Amazon Transcribe.
 * virtualParticipantEngineMicrovm - Virtual Participants use the on-demand engine.
 * diarizeVirtualParticipant - a Virtual Participant on the on-demand engine asks
   for per-voice labels, so several people behind one attendee tile come out as
@@ -21,7 +21,7 @@ to know a number for, and a guessed value fragments or merges speakers.
 
 import json
 import os
-from typing import Any
+from typing import Any, Optional
 
 import boto3
 
@@ -33,6 +33,23 @@ BOOLEAN_FIELDS = frozenset(
     {"streamingEngineMicrovm", "virtualParticipantEngineMicrovm", "diarizeVirtualParticipant"}
 )
 ALLOWED_FIELDS = BOOLEAN_FIELDS
+
+
+def _as_switch(value: Any) -> Optional[bool]:
+    """A real boolean, or the strings "true"/"false" in any case; anything else is None.
+
+    ``bool(value)`` turned the string "false" into True, and this is the value that
+    moves a whole deployment onto the experimental engine.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return None
 
 
 def lambda_handler(event: dict, context: Any) -> dict:
@@ -62,7 +79,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
             if key not in ALLOWED_FIELDS:
                 print(f"Filtered out non-allowed field: {key}")
                 continue
-            item[key] = bool(value)
+            parsed = _as_switch(value)
+            if parsed is None:
+                print(f"Filtered out non-boolean value for {key}: {value!r}")
+                continue
+            item[key] = parsed
 
         table.put_item(Item=item)
         print(f"Updated ASR config: {json.dumps({k: str(v) for k, v in item.items()})}")
