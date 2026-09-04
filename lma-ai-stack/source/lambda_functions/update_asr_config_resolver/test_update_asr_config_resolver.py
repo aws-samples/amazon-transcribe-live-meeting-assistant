@@ -54,8 +54,7 @@ def test_the_switches_are_stored_as_booleans() -> None:
 
 
 def test_string_booleans_from_an_older_client_are_parsed_not_truth_tested() -> None:
-    # bool("false") is True, and this is the value that moves a deployment onto the
-    # experimental engine.
+    # bool("false") is True.
     _, stored = invoke(
         {
             "streamingEngineMicrovm": "true",

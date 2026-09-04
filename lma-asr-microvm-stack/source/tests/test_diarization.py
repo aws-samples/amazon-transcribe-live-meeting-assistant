@@ -944,11 +944,8 @@ def test_two_speakers_in_one_utterance_become_two_rows() -> None:
 
 
 def test_a_short_leading_part_folds_into_the_row_after_it_not_the_speaker_before() -> None:
-    # Seen live: a 19 s utterance where the detector placed boundaries 0.84 s and
-    # 2.07 s in. Later short groups fold into the part before them, but the first
-    # group has no part before it, so a 1.5 s opening fragment stood alone - too
-    # short to embed, it inherited the PREVIOUS row's speaker across the pause,
-    # while the same person kept talking for the next 17 seconds.
+    # Live shape: boundaries 0.84 s and 2.07 s into a 19 s utterance left a 1.5 s
+    # opening fragment that inherited the previous row's speaker.
     opening = _words(("do", 0.0, 0.3), ("you", 0.35, 0.6), ("want", 0.65, 0.8))
     second = _words(("to", 0.9, 1.1), ("dive", 1.2, 1.6), ("in", 1.7, 2.0))
     rest = _words(*[(f"w{i}", 2.2 + i * 0.4, 2.5 + i * 0.4) for i in range(42)])
@@ -1175,10 +1172,7 @@ def test_the_final_after_a_cut_emits_only_the_remainder() -> None:
 
 
 def test_a_one_token_word_at_the_cut_is_not_emitted_twice() -> None:
-    # Live meeting: 11 of 17 live cuts repeated the word at the cut in both rows
-    # ("...run through today" / "today does that work"). A one-token word starts and
-    # ends on the same timestamp, and the remainder was taken as the words STARTING
-    # at or after the committed end, which is exactly that timestamp.
+    # Live shape: a one-token word (start == end) at the cut appeared in both rows.
     words = _words(("one", 0.1, 0.5), ("today", 1.0, 1.0), ("three", 2.2, 2.6))
     inner = ScriptedRecognizer(
         [

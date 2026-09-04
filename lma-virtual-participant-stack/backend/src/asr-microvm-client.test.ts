@@ -208,10 +208,7 @@ test('a closed socket is not reconnected once the meeting is over', async () => 
 });
 
 test('finishing a session that never became ready stops its reconnect loop', async () => {
-    // The contract scribe's fallback path relies on: once finish() is called, a
-    // session whose engine never answered must not open another connection. Left
-    // unfinished, it reconnects for the whole retry budget, minting tokens against
-    // a MicroVM that has already been released (see scribe-asr-fallback.test.ts).
+    // The contract scribe's fallback relies on (see scribe-asr-fallback.test.ts).
     const asr = await startFakeAsr((socket) => {
         setTimeout(() => socket.close(1011, 'never ready'), 10);
     });

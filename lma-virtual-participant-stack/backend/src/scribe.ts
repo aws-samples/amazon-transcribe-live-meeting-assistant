@@ -316,11 +316,8 @@ export class TranscriptionService {
         // closed once when the meeting ends (below).
         const recordingStream = createWriteStream(details.tmpRecordingFilename, { flags: 'a' });
 
-        // Which engine transcribes this meeting is the deployment's runtime switch
-        // (ASR Config page), read now so a change applies to the next meeting with
-        // no redeploy; ASR_ENGINE overrides it per VP for local testing. A MicroVM
-        // that cannot be acquired falls through to Amazon Transcribe below rather
-        // than costing the meeting its transcript.
+        // The deployment's runtime switch, read per meeting; ASR_ENGINE overrides it
+        // per VP. A MicroVM that cannot be acquired falls through to Amazon Transcribe.
         const switches = await fetchAsrRuntimeSwitches();
         if (resolveVpAsrEngine(switches) === 'microvm') {
             const ran = await this.runMicrovmTranscription(recordingStream, switches.diarizeVirtualParticipant);
@@ -583,15 +580,9 @@ export class TranscriptionService {
     }
 
     /**
-     * Transcribe this meeting on the on-demand MicroVM ASR engine.
-     *
-     * Returns false if no MicroVM could be acquired or the engine never became
-     * ready, so the caller can fall back to Amazon Transcribe. Once running it
-     * owns the meeting: the engine's own reconnects are handled inside the
-     * session, and the method returns only when the meeting ends (or the session
-     * has exhausted its retries, in which case the rest of the meeting is not
-     * transcribed - logged loudly, the same limitation the WebSocket transcriber
-     * has, because the flowing audio cannot be replayed into another engine).
+     * Transcribe on the MicroVM engine. Returns false if no MicroVM could be acquired
+     * or the engine never became ready, so the caller falls back to Amazon Transcribe;
+     * otherwise returns when the meeting ends or the session exhausts its retries.
      */
     private async runMicrovmTranscription(
         recordingStream: NodeJS.WritableStream,
@@ -612,8 +603,7 @@ export class TranscriptionService {
         this.microvmSession = session;
         if (!(await session.start())) {
             console.error('[ASR] MicroVM ASR session never became ready');
-            // Finish before releasing: a session left open keeps reconnecting, and
-            // minting tokens, against a MicroVM that no longer exists.
+            // Finish first, or the session keeps reconnecting against a released MicroVM.
             await session.finish();
             await this.releaseMicrovm(session);
             this.microvmSession = null;
@@ -663,12 +653,7 @@ export class TranscriptionService {
         }
     }
 
-    /**
-     * One row from the MicroVM engine. The speaker is the roster name the VP already
-     * tracks from the meeting UI, plus the engine's voice id when per-voice labels
-     * are on - "Feldman, Jeremy (spk_1)" - so several people behind one attendee
-     * tile come apart while a normal attendee keeps their name.
-     */
+    /** One engine row; the speaker is the roster name plus the voice id when per-voice labels are on. */
     private handleAsrSegment(segment: AsrSegment): void {
         const rosterName = currentSpeaker && currentSpeaker !== 'none' ? currentSpeaker : 'Unknown';
         const speaker = speakerNameFor(rosterName, segment.speaker);
@@ -707,18 +692,11 @@ export class TranscriptionService {
         });
     }
 
-    /**
-     * Route meeting audio to where it has to go besides the transcription engine:
-     * into combined_audio (the sink the recording and Transcribe read) and to the
-     * voice assistant. Spawned once per transcription session and killed by
-     * teardownSessionProcesses().
-     */
+    /** Meeting audio to combined_audio and the voice assistant; killed by teardownSessionProcesses(). */
     private startMeetingAudioFanout(): void {
-        // Pipe meeting audio into combined_audio for Transcribe. This is the
-        // ONLY writer for meeting audio on that sink (entrypoint.sh
-        // deliberately has no loopback for it), so there is no duplication —
-        // and unlike a loopback, an active pacat stream keeps the null sink
-        // from suspending (#542, #569).
+        // The only writer of meeting audio on combined_audio (entrypoint.sh has no
+        // loopback for it); an active pacat stream also keeps the null sink from
+        // suspending (#542, #569).
         this.meetingToCombinedPipe = spawn('pacat', [
             '--playback',
             '--device=combined_audio',
@@ -772,14 +750,9 @@ export class TranscriptionService {
         this.novaAudioProcess.stdout?.on('data', async (chunk: Buffer) => {
             if (details.start && this.isTranscribing) {
                 try {
-                    // NOT written to the recording: this stream is meeting-only
-                    // by design (Nova must not hear itself), so recording it
-                    // silently dropped the assistant's replies. The recording is
-                    // teed from combined_audio.monitor in audioStream() instead.
-                    //
-                    // Sole route for meeting audio into combined_audio (see
-                    // the pacat spawn above). entrypoint.sh has no loopback
-                    // for it, so this does not duplicate (#542).
+                    // Not written to the recording: this stream is meeting-only (Nova
+                    // must not hear itself); audioStream() tees the recording from
+                    // combined_audio.monitor. Sole route into combined_audio (#542).
                     if (this.meetingToCombinedPipe?.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
                         this.meetingToCombinedPipe.stdin.write(chunk);
                     }

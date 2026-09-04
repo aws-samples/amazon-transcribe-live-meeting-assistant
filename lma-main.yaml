@@ -1055,21 +1055,14 @@ Rules:
           is 'STRANDS_BEDROCK_WITH_KB (Use Existing)'
 
 Mappings:
-  # Deploy-time values for the on-demand ASR engine that are NOT CloudFormation
-  # parameters. TranscriptionEngine is the only question asked at deploy time;
-  # the engine is experimental and its bundle carries its own calibrated
-  # operating point, so there is nothing else for a deployer to tune. What used to
-  # be five parameters (model bundle, lifetime ceiling, speaker cap, turn-cut
-  # behaviour, maximum open row) is now two fixed values here plus the engine's own
-  # built-in defaults for the rest.
+  # Deploy-time values for the on-demand ASR engine that are deliberately not
+  # CloudFormation parameters: TranscriptionEngine is the only deploy-time question,
+  # and the bundle carries its own calibrated operating point.
   #
-  # ModelBundle names a bundle in lma-asr-microvm-stack/source/catalog.json;
-  # scripts/sync_bundles.py --check enforces that. Both bundles are permissively
-  # licensed and redistributable: fastconformer-titanet-small adds per-voice
-  # speaker labels, fastconformer-transcription-only labels by audio channel only.
-  # Changing it rebuilds the MicroVM image (~20 min). MaxMeetingSeconds is the
-  # hard lifetime ceiling per MicroVM and the cost backstop if a transcriber task
-  # dies without releasing one (service maximum 28800).
+  # ModelBundle must name a bundle in lma-asr-microvm-stack/source/catalog.json
+  # (scripts/sync_bundles.py --check enforces it); changing it rebuilds the MicroVM
+  # image (~20 min). MaxMeetingSeconds is the per-MicroVM lifetime ceiling and the
+  # cost backstop if a transcriber task dies without releasing one (max 28800).
   AsrDefaults:
     Engine:
       ModelBundle: fastconformer-titanet-small
@@ -2671,10 +2664,8 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
           - ""
-        # Deploying the engine does not switch meetings onto it. The deployment
-        # default is a runtime switch on the ASR Config page, read from the
-        # config table at meeting start. The diarization operating point is
-        # baked into the ASR image from the bundle and is not passed here at all.
+        # Deploying the engine does not switch meetings onto it: the ASR Config
+        # page's runtime switches do, read from the config table at meeting start.
         AsrDiarizationAvailable: !If [ShouldEnableAsrDiarization, "true", "false"]
         AsrModelBundleId: !If
           - ShouldDeployMicrovmAsr

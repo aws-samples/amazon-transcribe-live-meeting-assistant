@@ -319,10 +319,8 @@ def build(properties: dict) -> tuple[str, dict]:
         "ModelLicense": selection["model"].get("license", "unknown"),
         "SpeakerModelId": selection["speaker"].get("id", "none"),
         "DiarizationAvailable": "true" if speaker_url else "false",
-        # Blank when THIS PAIRING has no calibrated operating point. Not a property
-        # of the embedder alone: utterance length moves the threshold as much as the
-        # model does, so a threshold is only meaningful for a stated pairing, and a
-        # guessed one fragments one speaker into many or merges several into one.
+        # Blank when this pairing has no calibrated operating point; a guessed
+        # threshold fragments or merges speakers.
         "SpeakerThreshold": "" if threshold is None else str(threshold),
         "MinSegmentMs": str(bundle.get("minSegmentMs", "")),
         "BaselineMemoryMiB": str(selection["memoryMiB"]),

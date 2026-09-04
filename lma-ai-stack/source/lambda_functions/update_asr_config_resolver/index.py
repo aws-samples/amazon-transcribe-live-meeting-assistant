@@ -36,11 +36,7 @@ ALLOWED_FIELDS = BOOLEAN_FIELDS
 
 
 def _as_switch(value: Any) -> Optional[bool]:
-    """A real boolean, or the strings "true"/"false" in any case; anything else is None.
-
-    ``bool(value)`` turned the string "false" into True, and this is the value that
-    moves a whole deployment onto the experimental engine.
-    """
+    """A boolean, or the strings "true"/"false" in any case; anything else is None."""
     if isinstance(value, bool):
         return value
     if isinstance(value, str):

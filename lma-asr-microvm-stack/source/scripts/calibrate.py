@@ -293,10 +293,8 @@ def derive_operating_point(segments: Sequence[Embedded]) -> OperatingPoint:
         )
         return point
 
-    # Midpoint of the gap: it maximises the margin to BOTH measured distributions, and
-    # the threshold has to survive pairs the sample never contained. A 40%-of-gap rule
-    # was tried first and returned 0.286 on a meeting where two similar voices NOT in
-    # that sample scored 0.25-0.31 and merged.
+    # Midpoint of the gap: a 40%-of-gap rule gave 0.286 on a meeting where two similar
+    # voices outside the sample scored 0.25-0.31 and merged.
     threshold = round(different_ceiling + point.separation * 0.5, 3)
 
     # p95 leaves a tail; with a small sample that tail is one or two pairs. Clear the

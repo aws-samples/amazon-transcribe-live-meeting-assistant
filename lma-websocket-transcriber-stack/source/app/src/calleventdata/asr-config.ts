@@ -7,11 +7,8 @@
 /**
  * Runtime switches for the MicroVM ASR engine.
  *
- * Three booleans, edited from the ASR Config admin page and read here at meeting
- * start so a change needs no stack update. There are deliberately no
- * tuning fields: the diarization operating point (similarity threshold, minimum
- * utterance length) is measured for the model bundle and baked into the ASR image,
- * so no deployment has to know a number for it.
+ * Three booleans, edited on the ASR Config page and read at meeting start. No
+ * tuning fields: the operating point is baked into the ASR image per bundle.
  */
 import { FastifyInstance } from 'fastify';
 import { DynamoDBClient, GetItemCommand } from '@aws-sdk/client-dynamodb';
@@ -29,10 +26,8 @@ const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
 
 export interface AsrRuntimeConfig {
     /**
-     * Streaming meetings (Stream Audio, the Chrome extension, the Desktop Capture
-     * apps) use the on-demand
-     * engine. Off means Amazon Transcribe. A client that names an engine in its
-     * START frame (the desktop apps' --asr-engine) still wins.
+     * Streaming meetings (Stream Audio, Chrome extension, Desktop Capture apps) use
+     * the on-demand engine; the desktop apps' --asr-engine still wins.
      */
     streamingEngineMicrovm: boolean;
     /**

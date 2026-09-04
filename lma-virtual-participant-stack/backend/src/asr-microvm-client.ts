@@ -5,24 +5,10 @@
  */
 
 /**
- * MicroVM ASR engine client for the Virtual Participant.
- *
- * The same on-demand engine Stream Audio uses (lma-asr-microvm-stack), reached the
- * same way: acquire a MicroVM through the launcher Lambda, open a WebSocket session
- * speaking the engine's protocol, stream 16 kHz mono PCM, map partial/final
- * messages to transcript rows, release the MicroVM at the end. A Virtual
- * Participant has ONE audio channel (the meeting mix plus the agent's own voice),
- * so this is the single-channel counterpart of the transcriber's per-channel
- * sessions, with the same reconnect semantics: the engine restarts its segment
- * numbering and clock on every connection, so a reconnect bumps a generation
- * counter and carries a cumulative time offset.
- *
- * Which engine a VP uses is the deployment's runtime switch (the ASR Config page's
- * "Virtual Participants" engine setting, read from the config table at meeting
- * start), overridable per VP with ASR_ENGINE for local testing. Whether it asks for
- * per-voice labels is a further switch: the VP already names speakers from the
- * meeting roster, so labels are only worth having when several people sit behind
- * one attendee tile.
+ * MicroVM ASR engine client for the Virtual Participant: the single-channel
+ * counterpart of the transcriber's per-channel sessions. The engine restarts its
+ * segment numbering and clock on every connection, so a reconnect bumps a
+ * generation counter and carries a cumulative time offset.
  */
 import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
@@ -102,9 +88,8 @@ export const isMicrovmAsrConfigured = (): boolean =>
     ASR_LAUNCHER_FUNCTION_ARN.length > 0 || ASR_DIRECT_ENDPOINT.length > 0;
 
 /**
- * Which engine this VP uses. A per-VP ASR_ENGINE wins (local testing), then the
- * deployment's runtime default. A request the deployment cannot serve falls back
- * to Amazon Transcribe rather than failing the meeting.
+ * Per-VP ASR_ENGINE wins (local testing), then the deployment's runtime setting;
+ * an engine the deployment cannot serve falls back to Amazon Transcribe.
  */
 export function resolveVpAsrEngine(
     switches: AsrRuntimeSwitches,
@@ -132,11 +117,7 @@ const GET_ASR_CONFIG = `
   }
 `;
 
-/**
- * Read the two switches from the config table through AppSync (IAM-signed, the
- * same way the status manager talks to AppSync). Never throws: a failed read
- * means Amazon Transcribe, which is the safe default.
- */
+/** Read the switches through AppSync (IAM-signed). Never throws: a failed read means Amazon Transcribe. */
 export async function fetchAsrRuntimeSwitches(
     graphqlEndpoint: string = process.env.GRAPHQL_ENDPOINT || '',
     fetchImpl: typeof fetch | undefined = undefined,
@@ -190,11 +171,7 @@ export const formatSpeakerLabel = (raw: string | null | undefined): string | und
     return trimmed.startsWith('spk_') ? trimmed : `spk_${trimmed}`;
 };
 
-/**
- * The VP's speaker for a row: the roster name it already has, plus the engine's
- * voice id when diarization is on — "Feldman, Jeremy (spk_1)". Same formatter as
- * the transcriber's, so a transcript reads identically whichever path produced it.
- */
+/** Roster name plus the engine's voice id when diarization is on, in the transcriber's label format. */
 export const speakerNameFor = (rosterName: string, voiceId: string | null | undefined): string => {
     const label = formatSpeakerLabel(voiceId);
     return label === undefined ? rosterName : `${rosterName} (${label})`;
@@ -273,10 +250,8 @@ const backoffDelay = (attempt: number): number =>
     Math.max(ASR_MIN_BACKOFF_MS, Math.min(attempt * ASR_RETRY_BACKOFF_MS, ASR_MAX_BACKOFF_MS));
 
 /**
- * Merge buffered audio into a few large frames before flushing it. The engine's
- * ingest queue is bounded (64 frames) and drops rather than grows, so a backlog
- * sent as hundreds of 100 ms frames in one loop loses audio; as 5 s frames it does
- * not, and the engine decodes the catch-up faster than real time.
+ * The engine's ingest queue is bounded (64 frames) and drops rather than grows, so
+ * a backlog goes out as a few large frames instead of hundreds of 100 ms ones.
  */
 export const coalesceBacklog = (pending: Buffer[], maxFrameBytes: number = ASR_BACKLOG_FRAME_BYTES): Buffer[] => {
     const frames: Buffer[] = [];
@@ -308,10 +283,7 @@ export interface MicrovmAsrSessionOptions {
     isMeetingLive: () => boolean;
 }
 
-/**
- * The VP's single ASR session: a WebSocket to the MicroVM plus the mapping from
- * engine messages to transcript rows.
- */
+/** The VP's single ASR session: a WebSocket to the MicroVM plus message-to-row mapping. */
 export class MicrovmAsrSession {
     private ws: WebSocket | null = null;
     private open = false;

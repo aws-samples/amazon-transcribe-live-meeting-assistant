@@ -78,12 +78,7 @@ export interface AsrLease {
     authToken?: string;
 }
 
-/**
- * What a session asks of the engine. Everything else about diarization - the
- * similarity threshold, the utterance floor, turn cutting - is the bundle's
- * calibrated operating point baked into the image, and is deliberately not
- * negotiable per session.
- */
+/** What a session asks of the engine; the operating point is baked into the image, not negotiable. */
 interface AsrSessionOptions {
     diarize: boolean;
     /** Cap on distinct voices for this channel; 0 discovers as many as appear. */
@@ -146,11 +141,8 @@ export const resolveMaxSpeakers = (
 /**
  * Which engine transcribes this meeting.
  *
- * The engine is the DEPLOYMENT's choice (the ASR Config page's streaming-meetings
- * setting) and diarization is the CLIENT's: both engines partition speakers, so
- * asking for speaker labels does not imply an engine. A client may still name one
- * explicitly (the desktop apps' --asr-engine). A request the deployment cannot
- * serve falls back to Amazon Transcribe rather than failing.
+ * The engine is the deployment's choice (ASR Config) and diarization the client's;
+ * a client may still name an engine (--asr-engine). Unservable requests fall back.
  */
 export const resolveAsrEngine = (
     callMetaData: CallMetaData,

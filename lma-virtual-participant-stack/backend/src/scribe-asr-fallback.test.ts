@@ -5,15 +5,8 @@
  */
 
 /**
- * Regression guard for the MicroVM ASR fallback path in scribe.ts.
- *
- * When the engine never became ready, scribe released the MicroVM and fell back
- * to Amazon Transcribe without finishing the session. The session's close handler
- * and reconnect loop stop only on `finished` or when the meeting ends, and the
- * meeting was still live, so the dead session kept reconnecting for the whole
- * retry budget, minting a token each time against a MicroVM that no longer
- * existed. Asserted at the source level, like scribe-recording-source.test.ts,
- * because the alternative is standing up the whole scribe.
+ * A MicroVM released before its session is finished keeps reconnecting against
+ * nothing. Asserted at the source level, like scribe-recording-source.test.ts.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';

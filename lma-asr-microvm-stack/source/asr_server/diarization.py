@@ -798,10 +798,8 @@ class DiarizingRecognizer(Recognizer):
         if committed_end is None:
             return event
         if event.words:
-            # Exact: partition by time on the authoritative word list rather than by
-            # matching a string prefix that the decoder may have revised. Partition on
-            # each word's END: a one-token word starts and ends on the same timestamp,
-            # so partitioning on start re-emitted the word at every cut.
+            # Partition the authoritative word list by each word's END: a one-token
+            # word starts and ends on the same timestamp.
             words = [word for word in event.words if word.e > committed_end]
             text = " ".join(word.w for word in words)
         else:
@@ -984,14 +982,9 @@ class DiarizingRecognizer(Recognizer):
     def _parts(self, event: Event, segment: list[float]) -> list[_SegmentPart]:
         """One part per speaker turn in the closed segment.
 
-        Cuts snap to word boundaries, so no word is split across two rows, and a
-        cut that would leave a part too short to embed is merged into a neighbour
-        rather than producing a row nobody can attribute. Later short groups fold
-        back into the part before them; a short LEADING group has no part before
-        it, so it folds forward into the part after it. Without that second rule a
-        1.5 s opening fragment became its own row and, being too short to embed,
-        inherited the previous row's speaker across the pause - wrong on a live
-        meeting where the same person kept talking for the next 17 seconds.
+        Cuts snap to word boundaries. A part too short to embed folds into a
+        neighbour: later groups into the part before them, a leading group into the
+        part after it (alone, it would inherit the previous row's speaker).
         """
         whole = _SegmentPart(
             start=event.start,
