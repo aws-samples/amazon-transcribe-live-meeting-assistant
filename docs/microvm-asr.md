@@ -267,7 +267,9 @@ Cutting the text requires word timings, so the streaming recogniser now reconstr
 them from sherpa's per-token `tokens` + `timestamps` (grouped on the SentencePiece
 `▁` marker) and anchors them to the segment's own start. A segment with no word
 timings is never split — guessing where the words divide would garble both rows — and
-a cut that would leave a part too short to embed is merged back into its neighbour.
+a cut that would leave a part too short to embed is merged into its neighbour: a middle or
+trailing fragment joins the part before it, an opening fragment joins the part after it, so
+a fragment is never labelled by a speaker it was not embedded against.
 
 Measured end to end on k2-fsa's `1-two-speakers-en.wav`: the real model finds the turn
 at 7.89 s, the split snaps it to 7.90 s, and the two rows come back as `spk_0`

@@ -663,6 +663,15 @@ class DiarizingRecognizer(Recognizer):
         # Audio time of the last boundary search, so the segmentation model runs about
         # once per turn_cut_interval_ms rather than on every hypothesis change.
         self._last_cut_check = 0.0
+        _LOG.info(
+            "speaker registry ready: threshold=%.2f max_speakers=%d min_segment_ms=%d "
+            "split_on_speaker_change=%s live_turn_cut=%s",
+            threshold,
+            max_speakers,
+            min_segment_ms,
+            split_on_speaker_change,
+            live_turn_cut,
+        )
 
     @property
     def registry(self) -> SpeakerRegistry:
