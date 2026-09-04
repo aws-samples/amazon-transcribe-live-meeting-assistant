@@ -205,8 +205,8 @@ const AsrConfigPage = () => {
           <FormField
             label="Streaming meetings"
             description={
-              'Stream Audio and the Desktop Capture apps. Speaker identification per channel is still chosen on ' +
-              'the Stream Audio form.'
+              'Stream Audio, the Chrome extension and the Desktop Capture apps. Speaker identification per ' +
+              'channel is still chosen on the Stream Audio form.'
             }
           >
             {engineRadio('streamingEngineMicrovm')}

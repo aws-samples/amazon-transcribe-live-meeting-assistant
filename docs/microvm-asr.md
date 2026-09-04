@@ -42,8 +42,9 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 
 ## Why this exists
 
-By default a [Stream Audio](stream-audio.md) or [Desktop Capture App](desktop-capture-app.md)
-meeting labels the transcript by **audio channel**: everything from your microphone
+By default a [Stream Audio](stream-audio.md), [Chrome extension](browser-extension.md) or
+[Desktop Capture App](desktop-capture-app.md) meeting labels the transcript by **audio
+channel**: everything from your microphone
 is one speaker, everything from the shared tab is another. That is correct when one
 person sits on each side, and wrong when several people share a conference-room
 microphone or several remote participants arrive through one tab.
@@ -183,7 +184,7 @@ each meeting, so a change needs no redeploy:
 
 | Setting | Covers | Default |
 |---|---|---|
-| Streaming meetings | Stream Audio and the Desktop Capture apps | Amazon Transcribe |
+| Streaming meetings | Stream Audio, the Chrome extension and the Desktop Capture apps | Amazon Transcribe |
 | Virtual Participants | Every Virtual Participant | Amazon Transcribe |
 
 Deploying the engine changes nothing on its own: both settings start on Amazon
@@ -203,7 +204,7 @@ the start of each meeting, so a change needs no stack update and no image rebuil
 
 | Setting | Default | Effect |
 |---|---|---|
-| Streaming meetings: engine | Amazon Transcribe | Which engine Stream Audio and the Desktop Capture apps use |
+| Streaming meetings: engine | Amazon Transcribe | Which engine Stream Audio, the Chrome extension and the Desktop Capture apps use |
 | Virtual Participants: engine | Amazon Transcribe | Which engine Virtual Participants use |
 | Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off |
 
@@ -312,7 +313,7 @@ Three pieces of bookkeeping make that work, and each has a test that fails witho
 - The eventual real `final` emits only the words after the last cut.
 
 **Bounded rows.** With no speaker change at all, a row still closes after
-`maxOpenSegmentMs` (20 s default, 0 disables) so a monologue does not sit in the live
+20 s (the engine's `max_open_segment_ms`; 0 disables) so a monologue does not sit in the live
 transcript as one unlabelled block. This mirrors the equivalent bound on the Amazon
 Transcribe path, which exists there because Transcribe caps a result near 30 s and never
 labels a partial; this engine has no such cap of its own, so without the bound a row
@@ -386,7 +387,7 @@ speaker label with the text it was derived from, so there is nothing to align.
 Where WhisperX fits is the **Upload Media / batch** path, which today uses Amazon
 Transcribe batch with `ShowSpeakerLabels`. There a second pass costs nothing, word
 alignment is available, and global clustering is correct rather than premature. That
-remains deferred (see the plan's *Deferred* section), and it is the natural home for
+remains future work, and it is the natural home for
 Whisper-quality transcription and elite DER — a deliberate split, with one engine and
 one timeline live, two passes offline.
 
@@ -468,9 +469,14 @@ The transcriber can talk to an ASR server running on your machine, with no AWS
 involved:
 
 ```bash
-# 1. Run the ASR server (from the upstream prototype, which has the local demo
-#    tooling and model download script)
-scripts/run_local_demo.sh          # serves ws://localhost:8080
+# 1. Run the ASR server on the bundle's weights. The catalog entry names the archive;
+#    the k2-fsa export ships int8 files, so point the server at them explicitly.
+cd lma-asr-microvm-stack/source
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+mkdir -p models && curl -sSL <url from catalog.json> | tar xj -C models --strip-components=1
+ASR_MODEL_DIR=$PWD/models ASR_MODEL_ENCODER=$PWD/models/encoder.int8.onnx \
+  ASR_MODEL_DECODER=$PWD/models/decoder.int8.onnx ASR_MODEL_JOINER=$PWD/models/joiner.int8.onnx \
+  .venv/bin/python -m asr_server.ws_server   # serves ws://localhost:8080; no speaker model = no labels
 
 # 2. Point the transcriber at it
 cd lma-websocket-transcriber-stack/source/app
@@ -553,15 +559,16 @@ it works far better when every label is distinct.
 - **Speaker identities are per session and per channel.** A reconnect mid-meeting
   starts new identities.
 - **8-hour hard ceiling** per MicroVM (service limit).
-- Applies to Stream Audio, the Desktop Capture Apps and the Virtual Participant. The
+- Applies to Stream Audio, the Chrome extension, the Desktop Capture Apps and the
+  Virtual Participant. The
   Upload Audio path still uses Amazon Transcribe batch.
 
 ## Troubleshooting
 
-**The diarization checkbox is missing from Stream Audio.** The deployment either
-does not have `TranscriptionEngine=MicrovmAsr` or built the image with
-the `fastconformer-transcription-only` bundle. The UI reads `AsrDiarizationAvailable` from the LMA
-settings parameter.
+**The "Speakers per channel" field is missing from Stream Audio.** It is shown only
+when speaker identification is ticked for at least one channel and the
+streaming-meetings engine on **Configuration ▸ ASR Config** is the on-demand engine. A
+deployment without `TranscriptionEngine=MicrovmAsr` never shows it.
 
 **Transcripts appear but are labelled by channel.** The image has no speaker model.
 Look for `diarization was requested but this ASR image has no speaker model baked

@@ -29,7 +29,8 @@ const dynamoClient = new DynamoDBClient({ region: AWS_REGION });
 
 export interface AsrRuntimeConfig {
     /**
-     * Streaming meetings (Stream Audio, the Desktop Capture apps) use the on-demand
+     * Streaming meetings (Stream Audio, the Chrome extension, the Desktop Capture
+     * apps) use the on-demand
      * engine. Off means Amazon Transcribe. A client that names an engine in its
      * START frame (the desktop apps' --asr-engine) still wins.
      */

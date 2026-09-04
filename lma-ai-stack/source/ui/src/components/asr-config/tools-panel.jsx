@@ -16,8 +16,8 @@ const header = (
 const content = (
   <>
     <p>
-      Which engine transcribes streaming meetings (Stream Audio, the Desktop Capture apps) and which transcribes Virtual
-      Participants. Both settings apply to the next meeting that starts.
+      Which engine transcribes streaming meetings (Stream Audio, the Chrome extension, the Desktop Capture apps) and
+      which transcribes Virtual Participants. Both settings apply to the next meeting that starts.
     </p>
     <h3>Amazon Transcribe</h3>
     <p>The default and the recommended engine for production: redaction, custom vocabulary, 30+ languages.</p>

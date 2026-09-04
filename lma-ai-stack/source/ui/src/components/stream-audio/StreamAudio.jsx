@@ -192,9 +192,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   const [isFlashing, setIsFlashing] = useState(false);
   const [micMuted, setMicMuted] = useState(false);
   const [recordedMeetingId, setRecordedMeetingId] = useState('');
-  // Which engine transcribes this meeting. Sent in the START frame, where it beats
-  // both the deployment default and the ASR Config table, so a user can try the
-  // on-demand engine without an admin switching every meeting over to it.
 
   // How many people share this microphone/tab. Nobody but the user can know it, so
   // it is asked for rather than guessed — the same question Upload Audio asks.
@@ -363,9 +360,6 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
       // Omitted when blank rather than sent as 0, so leaving the field alone means
       // "no opinion" and the deployment's own cap applies.
       ...(Number.parseInt(streamMaxSpeakers, 10) > 0 ? { maxSpeakers: Number.parseInt(streamMaxSpeakers, 10) } : {}),
-      // Sent ONLY when the user chose, because it wins over both the deployment
-      // default and the ASR Config table. Always sending it made that admin switch
-      // inert for every web meeting.
     };
     setCallMetaData(callMetaDataCopy);
     return callMetaDataCopy;

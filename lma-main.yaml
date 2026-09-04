@@ -348,10 +348,11 @@ Parameters:
       - MicrovmAsr
     Description: >-
       MicrovmAsr deploys the EXPERIMENTAL on-demand ASR and speaker diarization
-      engine as an alternative to Amazon Transcribe for Stream Audio, the Desktop
-      Capture apps and Virtual Participants. Meetings keep using Amazon Transcribe
-      until an admin switches the default on the ASR Config page. English only;
-      requires a region with AWS Lambda MicroVMs. See docs/microvm-asr.md.
+      engine as an alternative to Amazon Transcribe for Stream Audio, the Chrome
+      extension, the Desktop Capture apps and Virtual Participants. Meetings keep
+      using Amazon Transcribe until an admin switches the default on the ASR Config
+      page. English only; requires a region with AWS Lambda MicroVMs. See
+      docs/microvm-asr.md.
 
   ModelValidation:
     Type: String

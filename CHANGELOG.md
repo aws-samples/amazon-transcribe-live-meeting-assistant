@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The Virtual Participant can be transcribed by the on-demand MicroVM ASR engine.** It follows the ASR Config page's Virtual Participants engine setting (per-VP `ASR_ENGINE` override for local testing), acquires and releases its own MicroVM through the same launcher the WebSocket transcriber uses, and falls back to Amazon Transcribe when no MicroVM can be acquired. Speaker names still come from the meeting roster. A second switch, **Identify separate voices behind each Virtual Participant attendee**, asks the engine for per-voice labels so several people behind one attendee tile — a conference room, or a shared screen playing a recording — come out as `Name (spk_0)`, `Name (spk_1)` instead of one name; off by default because the roster name is the better label for a normal attendee.
+- **The Virtual Participant can be transcribed by the on-demand MicroVM ASR engine.** It follows the ASR Config page's Virtual Participants engine setting (per-VP `ASR_ENGINE` override for local testing), acquires and releases its own MicroVM through the same launcher the WebSocket transcriber uses, and falls back to Amazon Transcribe when no MicroVM can be acquired. Speaker names still come from the meeting roster. A second switch, **Virtual Participant voice separation**, asks the engine for per-voice labels so several people behind one attendee tile — a conference room, or a shared screen playing a recording — come out as `Name (spk_0)`, `Name (spk_1)` instead of one name; off by default because the roster name is the better label for a normal attendee.
 
 
 ## [0.3.8] - 2026-09-02

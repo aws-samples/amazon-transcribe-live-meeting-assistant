@@ -28,7 +28,6 @@ Returns:
     SegmentationModelId  resolved speaker-turn detection model id
     DiarizationAvailable "true" when a speaker model is baked into the image
     TurnDetectionAvailable "true" when a segmentation model is baked into the image
-    SpeakerModelMeasured "true" when the bundle carries a calibrated threshold
     SpeakerThreshold     the bundle's calibrated threshold, or "" when uncalibrated
     MinSegmentMs         shortest utterance worth embedding, for this bundle
     BaselineMemoryMiB    memory the bundle was sized for
@@ -320,12 +319,10 @@ def build(properties: dict) -> tuple[str, dict]:
         "ModelLicense": selection["model"].get("license", "unknown"),
         "SpeakerModelId": selection["speaker"].get("id", "none"),
         "DiarizationAvailable": "true" if speaker_url else "false",
-        # Whether THIS PAIRING has a calibrated operating point. Not a property of
-        # the embedder alone: utterance length moves the threshold as much as the
-        # model does, so a threshold is only meaningful for a stated pairing.
-        # "false" means any threshold would be a guess, and a guessed threshold
-        # fragments one speaker into many or merges several into one.
-        "SpeakerModelMeasured": "true" if threshold is not None else "false",
+        # Blank when THIS PAIRING has no calibrated operating point. Not a property
+        # of the embedder alone: utterance length moves the threshold as much as the
+        # model does, so a threshold is only meaningful for a stated pairing, and a
+        # guessed one fragments one speaker into many or merges several into one.
         "SpeakerThreshold": "" if threshold is None else str(threshold),
         "MinSegmentMs": str(bundle.get("minSegmentMs", "")),
         "BaselineMemoryMiB": str(selection["memoryMiB"]),
