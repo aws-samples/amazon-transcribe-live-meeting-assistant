@@ -1174,6 +1174,29 @@ def test_the_final_after_a_cut_emits_only_the_remainder() -> None:
     assert [word.w for word in cut[1].words or []] == ["three"]
 
 
+def test_a_one_token_word_at_the_cut_is_not_emitted_twice() -> None:
+    # Live meeting: 11 of 17 live cuts repeated the word at the cut in both rows
+    # ("...run through today" / "today does that work"). A one-token word starts and
+    # ends on the same timestamp, and the remainder was taken as the words STARTING
+    # at or after the committed end, which is exactly that timestamp.
+    words = _words(("one", 0.1, 0.5), ("today", 1.0, 1.0), ("three", 2.2, 2.6))
+    inner = ScriptedRecognizer(
+        [
+            [_partial(0, "one today", 0.1)],
+            [_final_with_words(0, 0.1, 2.6, words)],
+        ],
+        open_words=[words[:2], words],
+    )
+    rec = _live(inner, ScriptedEmbedder([VOICE_A, VOICE_B]), ScriptedTurnDetector([1.6]))
+
+    first = rec.accept_pcm(_pcm(1.5))
+    second = rec.accept_pcm(_pcm(1.5))
+
+    finals = [event for event in first + second if event.kind == "final"]
+    assert [event.text for event in finals] == ["one today", "three"]
+    assert [word.w for word in finals[1].words or []] == ["three"]
+
+
 def test_a_long_monologue_settles_instead_of_staying_open() -> None:
     """With no boundary found, a row still closes so the live view is not blank.
 

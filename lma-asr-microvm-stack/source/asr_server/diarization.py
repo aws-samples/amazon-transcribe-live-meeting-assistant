@@ -799,8 +799,10 @@ class DiarizingRecognizer(Recognizer):
             return event
         if event.words:
             # Exact: partition by time on the authoritative word list rather than by
-            # matching a string prefix that the decoder may have revised.
-            words = [word for word in event.words if word.s >= committed_end]
+            # matching a string prefix that the decoder may have revised. Partition on
+            # each word's END: a one-token word starts and ends on the same timestamp,
+            # so partitioning on start re-emitted the word at every cut.
+            words = [word for word in event.words if word.e > committed_end]
             text = " ".join(word.w for word in words)
         else:
             words = []
@@ -830,8 +832,15 @@ class DiarizingRecognizer(Recognizer):
         if not self._committed or not words:
             return []
         corrections: list[Event] = []
+        lower: float | None = None
         for row in self._committed:
-            spanned = [word for word in words if word.s >= row.start and word.e <= row.end]
+            spanned = [
+                word
+                for word in words
+                if (word.s >= row.start if lower is None else word.e > lower)
+                and word.e <= row.end
+            ]
+            lower = row.end
             text = " ".join(word.w for word in spanned)
             # An empty result means the revision dropped the row's words entirely;
             # there is nothing better to show than what was already sent, and blanking
@@ -926,7 +935,12 @@ class DiarizingRecognizer(Recognizer):
 
     def _commit(self, words: list[WordTiming], start: float, cut: float) -> list[Event]:
         """Emit the open segment up to ``cut`` as a final, and record it as sent."""
-        prefix = [word for word in words if word.s >= start and word.e <= cut]
+        after = self._committed_end
+        prefix = [
+            word
+            for word in words
+            if (word.s >= start if after is None else word.e > after) and word.e <= cut
+        ]
         if not prefix:
             return []
         end = prefix[-1].e
