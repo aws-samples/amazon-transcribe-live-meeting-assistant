@@ -960,8 +960,13 @@ class DiarizingRecognizer(Recognizer):
         """One part per speaker turn in the closed segment.
 
         Cuts snap to word boundaries, so no word is split across two rows, and a
-        cut that would leave a part too short to embed is dropped rather than
-        producing a row nobody can attribute.
+        cut that would leave a part too short to embed is merged into a neighbour
+        rather than producing a row nobody can attribute. Later short groups fold
+        back into the part before them; a short LEADING group has no part before
+        it, so it folds forward into the part after it. Without that second rule a
+        1.5 s opening fragment became its own row and, being too short to embed,
+        inherited the previous row's speaker across the pause - wrong on a live
+        meeting where the same person kept talking for the next 17 seconds.
         """
         whole = _SegmentPart(
             start=event.start,
@@ -1051,6 +1056,16 @@ class DiarizingRecognizer(Recognizer):
                     samples=samples,
                 )
             )
+        if len(parts) > 1 and len(parts[0].samples) < self._min_segment_samples:
+            head, following = parts[0], parts[1]
+            parts[1] = _SegmentPart(
+                start=head.start,
+                end=following.end,
+                text=f"{head.text} {following.text}".strip(),
+                words=head.words + following.words,
+                samples=self._sub_samples(segment, event.start, head.start, following.end),
+            )
+            del parts[0]
         _LOG.info(
             "turn detection: segment %s (%.2fs, %d words) - %d boundary(ies) at %s, "
             "%d overlap span(s), emitting %d row(s)",

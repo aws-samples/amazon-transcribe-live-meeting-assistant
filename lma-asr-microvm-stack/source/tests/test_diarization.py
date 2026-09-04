@@ -943,6 +943,44 @@ def test_two_speakers_in_one_utterance_become_two_rows() -> None:
     assert [word.w for word in events[0].words] == ["hello", "there"]
 
 
+def test_a_short_leading_part_folds_into_the_row_after_it_not_the_speaker_before() -> None:
+    # Seen live: a 19 s utterance where the detector placed boundaries 0.84 s and
+    # 2.07 s in. Later short groups fold into the part before them, but the first
+    # group has no part before it, so a 1.5 s opening fragment stood alone - too
+    # short to embed, it inherited the PREVIOUS row's speaker across the pause,
+    # while the same person kept talking for the next 17 seconds.
+    opening = _words(("do", 0.0, 0.3), ("you", 0.35, 0.6), ("want", 0.65, 0.8))
+    second = _words(("to", 0.9, 1.1), ("dive", 1.2, 1.6), ("in", 1.7, 2.0))
+    rest = _words(*[(f"w{i}", 2.2 + i * 0.4, 2.5 + i * 0.4) for i in range(42)])
+    utterance = [WordTiming(w=w.w, s=5.5 + w.s, e=5.5 + w.e) for w in opening + second + rest]
+    inner = ScriptedRecognizer(
+        [
+            [_final_with_words(0, 0.0, 4.5, _words(("great", 0.0, 0.5), ("thanks", 0.6, 1.0)))],
+            [_final_with_words(1, 5.5, 24.5, utterance)],
+        ]
+    )
+    # First utterance embeds as BOB; the second, once whole, as ALICE.
+    embedder = ScriptedEmbedder([BOB, ALICE])
+    recognizer = _recognizer(
+        inner,
+        embedder,
+        threshold=0.5,
+        min_segment_ms=2500,
+        turn_detector=ScriptedTurnDetector([0.84, 2.07]),
+    )
+
+    first = recognizer.accept_pcm(_pcm(4.5))
+    second_events = recognizer.accept_pcm(_pcm(20.0))
+
+    assert len(first) == 1
+    assert len(second_events) == 1, "the opening fragment must fold into the row after it"
+    row = second_events[0]
+    assert row.start == 5.5 and row.end == 24.5
+    assert row.text.startswith("do you want to dive in w0")
+    assert row.speaker != first[0].speaker, "labelled by the embedded 17 s, not inherited"
+    assert embedder.calls == 2
+
+
 def test_a_split_shifts_later_segment_numbers_so_none_collide() -> None:
     words = _words(("a", 0.0, 0.4), ("b", 0.5, 0.9), ("c", 2.0, 2.4), ("d", 2.5, 2.9))
     inner = ScriptedRecognizer(
