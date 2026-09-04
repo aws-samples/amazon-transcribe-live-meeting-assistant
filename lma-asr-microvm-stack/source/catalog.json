@@ -68,7 +68,7 @@
       "archive": "onnx",
       "sampleRate": 16000,
       "license": "CC-BY-4.0",
-      "licenseUrl": "https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large",
+      "licenseUrl": "https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_small",
       "approxDownloadMb": 39,
       "provenanceVerified": "2026-08-05",
       "recommendedThreshold": 0.5,
