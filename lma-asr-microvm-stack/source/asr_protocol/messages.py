@@ -108,6 +108,9 @@ class Partial(BaseModel):
     segment: int
     text: str
     start: float
+    # Audio time decoded so far. A client that sorts rows by end time needs a live
+    # row's end to grow, or it sits pinned at the utterance start.
+    end: float | None = None
     speaker: str | None = None
 
 

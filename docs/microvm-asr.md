@@ -65,8 +65,8 @@ weights live inside your account.
 
 - Runs `sherpa-onnx` streaming ASR plus online speaker diarization on an
   **AWS Lambda MicroVM**, launched per meeting and terminated when it ends.
-- Speaks a WebSocket protocol: interim `partial` results and committed `final`
-  results, each carrying a speaker label.
+- Speaks a WebSocket protocol: interim `partial` results, whose end is the audio
+  decoded so far, and committed `final` results, each carrying a speaker label.
 - Produces the same `ADD_TRANSCRIPT_SEGMENT` events as the Amazon Transcribe path,
   so the transcript, summaries, meeting assistant, sharing and search work
   unchanged.

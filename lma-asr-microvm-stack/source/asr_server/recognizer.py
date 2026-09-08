@@ -405,6 +405,7 @@ class SherpaOnlineRecognizer(Recognizer):
                         segment=self._segment,
                         text=text,
                         start=self._seg_start,
+                        end=chunk_start + len(samples) / self._sample_rate,
                     )
                 )
 

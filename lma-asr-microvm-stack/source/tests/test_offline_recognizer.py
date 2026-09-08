@@ -155,6 +155,10 @@ def test_final_per_utterance_with_synthetic_partial() -> None:
         ("partial", 1, "second utterance"),
         ("final", 1, "second utterance"),
     ]
+    # The synthetic partial closes with its segment, so it carries the segment's end.
+    assert [e.end for e in events if e.kind == "partial"] == [
+        e.end for e in events if e.kind == "final"
+    ]
     # Two utterances decoded offline, each exactly one 512-sample frame.
     assert len(backend.calls) == 2
     assert all(len(c) == FRAME_SAMPLES for c in backend.calls)
