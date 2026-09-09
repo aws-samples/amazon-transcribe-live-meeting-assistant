@@ -10,7 +10,7 @@ const DOCS_BASE = 'https://aws-samples.github.io/amazon-transcribe-live-meeting-
 
 const header = (
   <h2>
-    ASR Configuration <Badge color="severity-medium">Experimental</Badge>
+    Transcription Engine <Badge color="severity-medium">Experimental</Badge>
   </h2>
 );
 const content = (

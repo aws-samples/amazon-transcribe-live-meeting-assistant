@@ -81,7 +81,7 @@ Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-
 
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
-| TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe until an admin switches streaming meetings or Virtual Participants onto it on the ASR Config page | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
+| TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe until an admin switches streaming meetings or Virtual Participants onto it on the Transcription Engine page | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
 
 `TranscriptionEngine` is the **only** deploy-time question for this engine. Two more
 values are fixed in the `AsrDefaults` mapping in `lma-main.yaml` rather than asked:
@@ -113,7 +113,7 @@ There are deliberately no parameters for supplying a model URL: every model is a
 curated entry in the ASR stack's `catalog.json` with its checksum pinned and, for a
 speaker model, its operating point measured with `scripts/calibrate.py`. The three
 runtime switches (engine for streaming meetings, engine for Virtual Participants, Virtual
-Participant voice separation) live on the ASR Config admin page and take effect on the
+Participant voice separation) live on the Transcription Engine admin page and take effect on the
 next meeting with no stack update.
 
 ## End-of-Call Summary

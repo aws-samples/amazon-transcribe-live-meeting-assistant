@@ -295,7 +295,7 @@ Parameters:
     Default: ""
     Description: >-
       (Optional) Runtime ASR configuration table, holding the three switches the
-      ASR Config admin page edits (streaming-meetings engine, Virtual Participant
+      Transcription Engine admin page edits (streaming-meetings engine, Virtual Participant
       engine, Virtual Participant voice separation). Read at meeting start, so a
       change needs no stack update.
       Empty when the on-demand engine is not deployed.
@@ -1600,14 +1600,14 @@ Resources:
             - !GetAtt WebSocketCloudFrontDistribution.DomainName
             - "/api/v1/ws"
         recordingDisclaimer: !Ref RecordingDisclaimer
-        # Read by the ASR Config page: whether the deployed image carries a speaker
+        # Read by the Transcription Engine page: whether the deployed image carries a speaker
         # model, so the page can say whether speaker labels are available and
         # enable the Virtual Participant voice-separation switch.
         AsrDiarizationAvailable: !If
           - ShouldEnableMicrovmAsr
           - !Ref AsrDiarizationAvailable
           - "false"
-        # Read by the ASR Config page, so it can say which bundle this deployment
+        # Read by the Transcription Engine page, so it can say which bundle this deployment
         # runs. The engine switches are not settings here: the page, the Stream
         # Audio form and the transcriber read them live from the config table
         # (getAsrConfig).
@@ -1615,7 +1615,7 @@ Resources:
         AsrModelBundleName: !Ref AsrModelBundleName
         # Whether the on-demand engine is deployed AT ALL, as distinct from
         # AsrDiarizationAvailable (which is also false for a transcription-only
-        # bundle). The ASR Config page shows it, and the Stream Audio form only
+        # bundle). The Transcription Engine page shows it, and the Stream Audio form only
         # reads the streaming-engine switch when it is true.
         AsrEngineAvailable: !If [ShouldEnableMicrovmAsr, "true", "false"]
     UpdateReplacePolicy: Delete

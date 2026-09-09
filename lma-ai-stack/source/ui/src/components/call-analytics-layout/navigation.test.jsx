@@ -14,7 +14,7 @@ const NO_SIDE_NAV = new Set([DESKTOP_CAPTURE_APP_PATH]);
 
 describe('side navigation visibility', () => {
   it('renders on every internal page it links to', () => {
-    // The ASR Config page shipped with an empty navigation panel: its route mounted
+    // The Transcription Engine page shipped with an empty navigation panel: its route mounted
     // <Navigation />, but the component returns null off NAV_PATHS, and only the
     // activeHref branch had been added for the new path. Any admin nav link that
     // is an internal route must also be a path the navigation renders on.

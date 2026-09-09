@@ -64,7 +64,7 @@ const UPLOAD_PHASE = {
 // AppSync client — reused only for the createUploadMeeting mutation.
 const appsyncClient = generateClient();
 
-// Only the field this form needs; the ASR Config page owns the full record.
+// Only the field this form needs; the Transcription Engine page owns the full record.
 const getAsrEngineDefaultQuery = `
   query GetAsrConfig($AsrConfigId: ID!) {
     getAsrConfig(AsrConfigId: $AsrConfigId) {

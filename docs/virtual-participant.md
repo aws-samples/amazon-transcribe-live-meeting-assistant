@@ -234,7 +234,7 @@ In addition to the audio recording, the Virtual Participant can capture the meet
 
 A Virtual Participant is transcribed by Amazon Transcribe. A deployment with
 `TranscriptionEngine=MicrovmAsr` can move Virtual Participants onto the on-demand MicroVM
-ASR engine instead, from **Configuration ▸ ASR Config** (admin only):
+ASR engine instead, from **Configuration ▸ Transcription Engine** (admin only):
 
 - **Virtual Participants: engine** chooses the engine for every VP that starts after the
   change. The VP acquires and releases its own MicroVM, and falls back to Amazon

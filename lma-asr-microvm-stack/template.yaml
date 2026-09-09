@@ -269,7 +269,7 @@ Resources:
       BaselineMemoryMiB: !FindInMap [BundleMemory, !Ref AsrModelBundle, MiB]
 
   # Runtime overrides for the diarization operating point, edited from the web UI's
-  # ASR Config page. Everything here is per-session in the WebSocket protocol, so a
+  # Transcription Engine page. Everything here is per-session in the WebSocket protocol, so a
   # change takes effect on the NEXT meeting with no rebuild and no stack update —
   # which is what makes the threshold practical to tune (it is model-specific and
   # measured, see source/catalog.json).
@@ -583,7 +583,7 @@ Outputs:
     Value: !GetAtt AsrImageSource.MinSegmentMs
 
   AsrConfigTableName:
-    Description: Runtime ASR configuration table, edited from the ASR Config admin page.
+    Description: Runtime ASR configuration table, edited from the Transcription Engine admin page.
     Value: !Ref AsrConfigTable
 
   AsrConfigTableArn:

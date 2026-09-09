@@ -140,7 +140,7 @@ const AsrConfigPage = () => {
       <Container
         header={
           <Header variant="h1" info={<Badge color="severity-medium">Experimental</Badge>}>
-            ASR Configuration
+            Transcription Engine
           </Header>
         }
       >
@@ -173,7 +173,7 @@ const AsrConfigPage = () => {
             </SpaceBetween>
           }
         >
-          ASR Configuration
+          Transcription Engine
         </Header>
       }
     >

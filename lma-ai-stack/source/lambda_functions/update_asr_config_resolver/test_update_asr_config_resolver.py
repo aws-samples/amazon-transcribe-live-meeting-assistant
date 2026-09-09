@@ -123,7 +123,7 @@ def test_a_json_array_is_rejected() -> None:
 
 def test_the_allow_list_is_exactly_the_three_switches() -> None:
     """Adding a field here means adding it to the AppSync type, the transcriber's
-    and the VP's readers and the ASR Config page - fail loudly if it drifts."""
+    and the VP's readers and the Transcription Engine page - fail loudly if it drifts."""
     assert index.ALLOWED_FIELDS == {
         "streamingEngineMicrovm",
         "virtualParticipantEngineMicrovm",

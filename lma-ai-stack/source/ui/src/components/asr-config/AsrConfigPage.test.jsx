@@ -5,7 +5,7 @@
  */
 
 /**
- * Shape invariants for the ASR Config form.
+ * Shape invariants for the Transcription Engine form.
  *
  * Every switch exists in three places: EMPTY (shape + default), the GraphQL
  * selection set, and the resolver's allow-list. A field present in one but missing

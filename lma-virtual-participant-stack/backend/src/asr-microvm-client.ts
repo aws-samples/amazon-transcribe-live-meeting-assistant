@@ -40,7 +40,7 @@ const isLocalTest = process.env.LOCAL_TEST === 'true';
 
 export type AsrEngineName = 'transcribe' | 'microvm';
 
-/** The ASR Config page's switches that concern a Virtual Participant. */
+/** The Transcription Engine page's switches that concern a Virtual Participant. */
 export interface AsrRuntimeSwitches {
     virtualParticipantEngineMicrovm: boolean;
     diarizeVirtualParticipant: boolean;

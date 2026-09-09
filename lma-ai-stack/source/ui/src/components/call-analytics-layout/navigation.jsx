@@ -37,7 +37,7 @@ const defaultOnFollowHandler = (ev) => {
 
 // Paths on which the side navigation is rendered at all. A page whose route mounts
 // <Navigation /> but whose path is missing here shows an empty navigation panel -
-// which is exactly how the ASR Config page shipped, because only the activeHref
+// which is exactly how the Transcription Engine page shipped, because only the activeHref
 // branch below was added for it. Exported so a test can pin the two together.
 export const NAV_PATHS = [
   CALLS_PATH,

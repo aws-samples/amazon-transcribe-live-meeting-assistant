@@ -88,7 +88,7 @@ export const generateNavigationItems = (settings, isAdmin) => {
         },
         {
           type: 'link',
-          text: 'ASR Config',
+          text: 'Transcription Engine',
           href: `#${ASR_CONFIG_PATH}`,
           // The on-demand MicroVM ASR engine is not production ready. Flagged here
           // as well as on the page itself so the label is visible before anyone
