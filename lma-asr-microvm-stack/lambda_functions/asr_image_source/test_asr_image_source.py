@@ -294,6 +294,8 @@ def test_build_reports_whether_the_speaker_model_was_measured() -> None:
         _, unmeasured = index.build({**properties, "BundleId": "bundle-uncalibrated"})
 
     assert measured["SpeakerThreshold"] == "0.4"
+    names = {b["id"]: b.get("name", "") for b in CATALOG["bundles"]}
+    assert measured["BundleName"] == names[measured["BundleId"]]
     # Blank, not a guess: a wrong threshold fragments or merges speakers, which is
     # worse than the channel labels the transcriber falls back to.
     assert unmeasured["SpeakerThreshold"] == ""

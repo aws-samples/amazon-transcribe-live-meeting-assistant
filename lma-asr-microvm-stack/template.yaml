@@ -526,6 +526,10 @@ Outputs:
     Description: Pre-vetted model pairing baked into the image.
     Value: !GetAtt AsrImageSource.BundleId
 
+  AsrModelBundleName:
+    Description: Display name of that bundle, shown on the Transcription Engine page.
+    Value: !GetAtt AsrImageSource.BundleName
+
   AsrModelBundleStatus:
     Description: >-
       "calibrated" when the bundle carries an operating point measured for its

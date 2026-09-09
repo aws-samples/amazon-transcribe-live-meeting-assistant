@@ -2671,6 +2671,10 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleId
           - ""
+        AsrModelBundleName: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleName
+          - ""
         AsrConfigTableName: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName

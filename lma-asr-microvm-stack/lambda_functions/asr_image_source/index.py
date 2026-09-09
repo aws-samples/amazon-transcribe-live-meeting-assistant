@@ -23,6 +23,7 @@ Returns:
     SourceUri            s3:// URI for AWS::Lambda::MicrovmImage CodeArtifact
     SourceLocation       bucket/key form
     BundleId             resolved bundle id
+    BundleName           the bundle's display name
     ModelId              resolved model id
     SpeakerModelId       resolved speaker model id
     SegmentationModelId  resolved speaker-turn detection model id
@@ -312,6 +313,7 @@ def build(properties: dict) -> tuple[str, dict]:
         "SourceUri": f"s3://{dest_bucket}/{key}",
         "SourceLocation": f"{dest_bucket}/{key}",
         "BundleId": bundle.get("id", ""),
+        "BundleName": bundle.get("name", ""),
         "BundleStatus": bundle.get("status", "uncalibrated"),
         "LicenceSummary": bundle.get("licenceSummary", "unknown"),
         "Redistributable": "true" if bundle.get("redistributable") else "false",

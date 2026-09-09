@@ -76,6 +76,7 @@ const AsrConfigPage = () => {
   // A transcription-only bundle deploys the engine without speaker labels.
   const diarizationAvailable = `${settings?.AsrDiarizationAvailable}` === 'true';
   const bundleId = settings?.AsrModelBundleId || '';
+  const bundleName = settings?.AsrModelBundleName || '';
 
   const [config, setConfig] = useState(EMPTY);
   const [loading, setLoading] = useState(true);
@@ -194,7 +195,7 @@ const AsrConfigPage = () => {
           <KeyValuePairs
             columns={2}
             items={[
-              { label: 'Model bundle', value: bundleId || '—' },
+              { label: 'Model bundle', value: bundleName || bundleId || '—' },
               {
                 label: 'Speaker identification',
                 value: diarizationAvailable ? (
