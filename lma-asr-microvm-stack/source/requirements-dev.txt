@@ -11,4 +11,4 @@ pytest-asyncio==1.4.0
 pydantic==2.13.5
 websockets==13.1
 numpy==1.26.4
-ruff==0.16.5
+ruff==0.16.6
