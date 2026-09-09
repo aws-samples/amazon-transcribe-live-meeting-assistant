@@ -58,14 +58,15 @@ const ENGINE_ITEMS = [
   {
     value: 'transcribe',
     label: 'Amazon Transcribe',
-    description: 'Supports redaction, custom vocabulary and 30+ languages.',
+    description: 'Recommended for production. Redaction, custom vocabulary and 30+ languages.',
   },
   {
     value: 'microvm',
-    label: 'On-demand ASR & diarization (experimental)',
+    label: 'On-demand speech engine (experimental)',
     description:
-      'Better at telling apart several people on one channel. English only. ' +
-      'Falls back to Amazon Transcribe if the MicroVM cannot start.',
+      'Open-source models on a MicroVM launched per meeting in this account. Identifies separate speakers ' +
+      'on one channel. English only, and transcript quality is below Amazon Transcribe. Falls back to ' +
+      'Amazon Transcribe if it cannot start.',
   },
 ];
 
@@ -142,9 +143,9 @@ const AsrConfigPage = () => {
           </Header>
         }
       >
-        <Alert type="info" header="On-demand ASR engine is not deployed">
-          To evaluate the experimental on-demand ASR &amp; diarization engine, set <b>TranscriptionEngine</b> to{' '}
-          <b>MicrovmAsr</b> on the main stack. Amazon Transcribe remains the recommended engine.
+        <Alert type="info" header="The on-demand speech engine is not deployed">
+          To evaluate the experimental on-demand speech engine, set <b>TranscriptionEngine</b> to <b>MicrovmAsr</b> on
+          the main stack. Amazon Transcribe remains the recommended engine.
         </Alert>
       </Container>
     );
@@ -156,7 +157,10 @@ const AsrConfigPage = () => {
         <Header
           variant="h1"
           info={<Badge color="severity-medium">Experimental</Badge>}
-          description="Which engine transcribes each kind of meeting. Changes apply to the next meeting; no redeploy."
+          description={
+            'Choose which engine transcribes each kind of meeting. ' +
+            'Changes apply to meetings started after you save.'
+          }
           actions={
             <SpaceBetween direction="horizontal" size="xs">
               <Button onClick={load} disabled={loading || saving}>
@@ -192,7 +196,7 @@ const AsrConfigPage = () => {
             items={[
               { label: 'Model bundle', value: bundleId || '—' },
               {
-                label: 'Speaker labels',
+                label: 'Speaker identification',
                 value: diarizationAvailable ? (
                   <StatusIndicator type="success">Available</StatusIndicator>
                 ) : (
@@ -203,10 +207,10 @@ const AsrConfigPage = () => {
           />
 
           <FormField
-            label="Streaming meetings"
+            label="Stream Audio, Chrome extension and Desktop Capture"
             description={
-              'Stream Audio, the Chrome extension and the Desktop Capture apps. Speaker identification per ' +
-              'channel is still chosen on the Stream Audio form.'
+              'Speaker identification per channel is chosen per meeting, on the Stream Audio form or in the ' +
+              "desktop app's settings."
             }
           >
             {engineRadio('streamingEngineMicrovm')}
@@ -214,7 +218,7 @@ const AsrConfigPage = () => {
 
           <FormField
             label="Virtual Participants"
-            description="Speakers are named from the meeting roster with either engine."
+            description="Speaker names come from the meeting roster with either engine."
           >
             {engineRadio('virtualParticipantEngineMicrovm')}
           </FormField>
@@ -222,8 +226,8 @@ const AsrConfigPage = () => {
           <FormField
             label="Virtual Participant voice separation"
             description={
-              'Turn this on when one attendee carries several people, such as a conference room: their voices ' +
-              'are labelled "Name (spk_0)", "Name (spk_1)". Needs the on-demand engine for Virtual Participants.'
+              'When one attendee is several people, such as a conference room, label their voices ' +
+              '"Name (spk_0)", "Name (spk_1)". Requires the on-demand engine for Virtual Participants.'
             }
           >
             <Checkbox

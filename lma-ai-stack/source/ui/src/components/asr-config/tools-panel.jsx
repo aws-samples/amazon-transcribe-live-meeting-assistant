@@ -16,16 +16,17 @@ const header = (
 const content = (
   <>
     <p>
-      Which engine transcribes streaming meetings (Stream Audio, the Chrome extension, the Desktop Capture apps) and
-      which transcribes Virtual Participants. Both settings apply to the next meeting that starts.
+      Which engine transcribes Stream Audio, Chrome extension and Desktop Capture meetings, and which transcribes
+      Virtual Participants. Both settings apply to meetings started after you save.
     </p>
     <h3>Amazon Transcribe</h3>
     <p>The default and the recommended engine for production: redaction, custom vocabulary, 30+ languages.</p>
-    <h3>On-demand ASR &amp; diarization</h3>
+    <h3>On-demand speech engine</h3>
     <p>
-      Transcribes and identifies speakers in one pass on a MicroVM launched per meeting, so several people sharing one
-      microphone come apart reliably. English only; none of the Amazon Transcribe features above. A meeting whose
-      MicroVM cannot start falls back to Amazon Transcribe.
+      Open-source models on a MicroVM launched per meeting in this account. Transcribes and identifies speakers in one
+      pass, so several people sharing one microphone come apart. English only, transcript quality below Amazon
+      Transcribe, and none of the Transcribe features above. A meeting whose engine cannot start falls back to Amazon
+      Transcribe.
     </p>
     <h3>Virtual Participant voice separation</h3>
     <p>
@@ -36,7 +37,7 @@ const content = (
     <ul>
       <li>
         The speaker similarity threshold and minimum utterance length are measured for the model bundle and baked into
-        the ASR image, so there is nothing to tune here.
+        the ASR image.
       </li>
       <li>Speaker labels are per meeting and per audio channel, not identities.</li>
       <li>

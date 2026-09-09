@@ -184,7 +184,7 @@ each meeting, so a change needs no redeploy:
 
 | Setting | Covers | Default |
 |---|---|---|
-| Streaming meetings | Stream Audio, the Chrome extension and the Desktop Capture apps | Amazon Transcribe |
+| Stream Audio, Chrome extension and Desktop Capture | Every meeting from those three sources | Amazon Transcribe |
 | Virtual Participants | Every Virtual Participant | Amazon Transcribe |
 
 Deploying the engine changes nothing on its own: both settings start on Amazon
@@ -204,7 +204,7 @@ the start of each meeting, so a change needs no stack update and no image rebuil
 
 | Setting | Default | Effect |
 |---|---|---|
-| Streaming meetings: engine | Amazon Transcribe | Which engine Stream Audio, the Chrome extension and the Desktop Capture apps use |
+| Stream Audio, Chrome extension and Desktop Capture: engine | Amazon Transcribe | Which engine those meetings use |
 | Virtual Participants: engine | Amazon Transcribe | Which engine Virtual Participants use |
 | Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off |
 

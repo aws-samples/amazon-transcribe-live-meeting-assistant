@@ -77,7 +77,7 @@ For headless/CLI use, the same options are `--diarize-system` / `--diarize-mic`
 
 ### Choosing the transcription engine
 
-Which engine a desktop meeting uses is the deployment's **Streaming meetings** setting
+Which engine a desktop meeting uses is the deployment's **Stream Audio, Chrome extension and Desktop Capture** setting
 on **Configuration ▸ ASR Config**, the same setting that covers Stream Audio and the
 Chrome extension. When the deployment runs the
 [on-demand ASR & diarization engine](microvm-asr.md), `--asr-engine microvm` or
