@@ -58,6 +58,7 @@ logger = logging.getLogger()
 logger.setLevel(getattr(logging, os.environ.get("LOG_LEVEL", "INFO"), logging.INFO))
 
 s3 = boto3.client("s3")
+cloudformation = boto3.client("cloudformation")
 
 CATALOG_MEMBER = "catalog.json"
 MODEL_ENV_MEMBER = "model.env"
@@ -334,6 +335,33 @@ def build(properties: dict) -> tuple[str, dict]:
     }
 
 
+def _stack_is_deleting(stack_id: str) -> bool:
+    try:
+        stacks = cloudformation.describe_stacks(StackName=stack_id)["Stacks"]
+        return str(stacks[0].get("StackStatus", "")).startswith("DELETE")
+    except Exception:  # noqa: BLE001 - unknown means "not deleting": touch only our key
+        logger.exception("Could not read the status of %s", stack_id)
+        return False
+
+
+def _delete_versions(bucket: str, prefix: str | None = None) -> int:
+    """Remove every version and delete marker under ``prefix`` (the whole bucket if None)."""
+    kwargs = {"Bucket": bucket}
+    if prefix:
+        kwargs["Prefix"] = prefix
+    removed = 0
+    for page in s3.get_paginator("list_object_versions").paginate(**kwargs):
+        objects = [
+            {"Key": item["Key"], "VersionId": item["VersionId"]}
+            for group in ("Versions", "DeleteMarkers")
+            for item in page.get(group, [])
+        ]
+        if objects:
+            s3.delete_objects(Bucket=bucket, Delete={"Objects": objects, "Quiet": True})
+            removed += len(objects)
+    return removed
+
+
 def lambda_handler(event, context):
     request_type = event.get("RequestType")
     properties = event.get("ResourceProperties", {}) or {}
@@ -343,11 +371,18 @@ def lambda_handler(event, context):
         if request_type == "Delete":
             physical_id = event.get("PhysicalResourceId", "")
             dest_bucket = _prop(properties, "DestBucket")
-            if dest_bucket and physical_id.endswith(".zip"):
+            # The bucket is versioned and every rebuild writes a new key, so a stack
+            # delete has to empty it or the bucket cannot be removed. A replacement
+            # during an update only removes the superseded key.
+            if dest_bucket:
                 try:
-                    s3.delete_object(Bucket=dest_bucket, Key=physical_id)
+                    if _stack_is_deleting(event.get("StackId", "")):
+                        removed = _delete_versions(dest_bucket)
+                        logger.info("Emptied %d object(s) from %s", removed, dest_bucket)
+                    elif physical_id.endswith(".zip"):
+                        _delete_versions(dest_bucket, prefix=physical_id)
                 except Exception:  # noqa: BLE001 - never block a stack delete
-                    logger.exception("Could not delete s3://%s/%s", dest_bucket, physical_id)
+                    logger.exception("Could not clean up s3://%s/%s", dest_bucket, physical_id)
             cfn_response.send(event, context, cfn_response.SUCCESS, {}, physical_id)
             return
 

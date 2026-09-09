@@ -580,6 +580,19 @@ start` in the transcriber log; the reason from the launcher is logged with it
 `ASR_FALLBACK_TO_TRANSCRIBE=false` on the transcriber task — meetings then produce
 no transcript when the engine is unavailable.
 
+**Removing the engine fails with "the bucket you tried to delete is not empty".** A
+stack deployed before the image-source resource learned to empty its bucket left one zip
+per image rebuild behind. Empty the bucket, then retry the delete:
+
+```bash
+B=<the AsrImageSourceBucket name from the failed nested stack>
+aws s3api list-object-versions --bucket "$B" \
+  --query '{Objects: [Versions[].{Key:Key,VersionId:VersionId}, DeleteMarkers[].{Key:Key,VersionId:VersionId}][], Quiet: `true`}' \
+  --output json > /tmp/objects.json
+aws s3api delete-objects --bucket "$B" --delete file:///tmp/objects.json
+aws cloudformation delete-stack --stack-name <the nested ASR stack>
+```
+
 **The image build fails.** Check `/aws/lambda-microvms/<stack>-asr`. A `SHA256
 mismatch` means the pinned checksum does not match the download; `model file ... is
 not in the archive` means the file names in the catalog entry are wrong; `HTTP 404`

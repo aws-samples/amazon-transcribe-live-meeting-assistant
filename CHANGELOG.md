@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Virtual Participants can be transcribed by the on-demand MicroVM ASR engine.** Controlled by the Transcription Engine page's Virtual Participants engine setting, with fallback to Amazon Transcribe when no MicroVM can be acquired. A **Virtual Participant voice separation** switch (off by default) labels several voices behind one attendee as `Name (spk_0)`, `Name (spk_1)`.
 
 
+### Fixed
+
+- **Removing the on-demand engine no longer fails on its image-source bucket.** The bucket is versioned and kept one zip per image rebuild, so the nested stack's delete failed with "bucket is not empty". The image-source resource now empties the bucket when the stack is deleted. See [MicroVM ASR troubleshooting](docs/microvm-asr.md#troubleshooting) for stacks deployed earlier.
+
 ## [0.3.8] - 2026-09-02
 
 ### Fixed

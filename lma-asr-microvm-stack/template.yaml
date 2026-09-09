@@ -214,7 +214,15 @@ Resources:
                 Action:
                   - s3:PutObject
                   - s3:DeleteObject
+                  - s3:DeleteObjectVersion
                 Resource: !Sub "${AsrImageSourceBucket.Arn}/*"
+              # The bucket is versioned; a stack delete has to empty every version.
+              - Effect: Allow
+                Action: s3:ListBucketVersions
+                Resource: !GetAtt AsrImageSourceBucket.Arn
+              - Effect: Allow
+                Action: cloudformation:DescribeStacks
+                Resource: !Ref AWS::StackId
 
   AsrImageSourceFunctionLogGroup:
     Type: AWS::Logs::LogGroup
