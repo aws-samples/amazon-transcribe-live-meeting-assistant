@@ -145,8 +145,8 @@ const AsrConfigPage = () => {
         }
       >
         <Alert type="info" header="The on-demand speech engine is not deployed">
-          To evaluate the experimental on-demand speech engine, set <b>TranscriptionEngine</b> to <b>MicrovmAsr</b> on
-          the main stack. Amazon Transcribe remains the recommended engine.
+          To evaluate the experimental on-demand speech engine, set <b>EnableMicrovmAsr</b> to <b>true</b> on the main
+          stack. Amazon Transcribe remains the recommended engine.
         </Alert>
       </Container>
     );

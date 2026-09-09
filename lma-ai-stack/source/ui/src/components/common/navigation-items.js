@@ -86,18 +86,18 @@ export const generateNavigationItems = (settings, isAdmin) => {
           text: 'Nova Sonic Config',
           href: `#${NOVA_SONIC_CONFIG_PATH}`,
         },
-        {
-          type: 'link',
-          text: 'Transcription Engine',
-          href: `#${ASR_CONFIG_PATH}`,
-          // The on-demand MicroVM ASR engine is not production ready. Flagged here
-          // as well as on the page itself so the label is visible before anyone
-          // navigates in. JSX inside this .js file is handled by the jsxInJsPlugin
-          // in vite.config.js; the React import above is for eslint's
-          // react/react-in-jsx-scope, which this config still enforces even though
-          // the build uses the automatic runtime.
-          info: <Badge color="severity-medium">Experimental</Badge>,
-        },
+        // Only offered when the on-demand engine is deployed; the page has nothing
+        // to configure otherwise. JSX in this .js file relies on jsxInJsPlugin.
+        ...(`${settings?.AsrEngineAvailable}` === 'true'
+          ? [
+              {
+                type: 'link',
+                text: 'Transcription Engine',
+                href: `#${ASR_CONFIG_PATH}`,
+                info: <Badge color="severity-medium">Experimental</Badge>,
+              },
+            ]
+          : []),
         {
           type: 'link',
           text: 'Transcript Summary',

@@ -16,7 +16,7 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 > been benchmarked — see [What is not yet measured](#what-is-not-yet-measured).
 >
 > Because it is experimental, nothing about it is tunable at deploy time:
-> `TranscriptionEngine` is the only CloudFormation question, the model bundle ships
+> `EnableMicrovmAsr` is the only CloudFormation question, the model bundle ships
 > with its diarization operating point already measured, and the only runtime
 > settings are three switches on the Transcription Engine page.
 
@@ -92,7 +92,7 @@ deployment, chosen per meeting.
 
 ## Deploying it
 
-Set **`TranscriptionEngine` = `MicrovmAsr`** on the main stack. This creates the
+Set **`EnableMicrovmAsr` = `true`** on the main stack. This creates the
 `lma-asr-microvm-stack` nested stack: a MicroVM image, a session launcher Lambda,
 the runtime-switch table the Transcription Engine page edits, and the IAM roles they need.
 
@@ -568,7 +568,7 @@ it works far better when every label is distinct.
 **The "Speakers per channel" field is missing from Stream Audio.** It is shown only
 when speaker identification is ticked for at least one channel and the
 streaming-meetings engine on **Configuration ▸ Transcription Engine** is the on-demand engine. A
-deployment without `TranscriptionEngine=MicrovmAsr` never shows it.
+deployment without `EnableMicrovmAsr=true` never shows it.
 
 **Transcripts appear but are labelled by channel.** The image has no speaker model.
 Look for `diarization was requested but this ASR image has no speaker model baked

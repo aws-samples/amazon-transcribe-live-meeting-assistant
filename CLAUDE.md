@@ -90,7 +90,7 @@ Python uses Black (formatter), Flake8, Pylint (100 char lines). Config in `lma-a
 
 **Data flow:** Browser audio -> WebSocket server (Fargate) -> Amazon Transcribe -> Kinesis Data Stream -> Call Event Processor Lambda (Strands Agents SDK) -> DynamoDB + AppSync (real-time GraphQL subscriptions) -> React UI.
 
-The Amazon Transcribe step is pluggable: when `TranscriptionEngine=MicrovmAsr`, a meeting that opts into diarization is instead transcribed by an ASR MicroVM (one per meeting, one WebSocket session per audio channel), which returns text and speaker labels together. Both engines emit identical `ADD_TRANSCRIPT_SEGMENT` events, so nothing downstream of Kinesis is engine-aware. See `docs/microvm-asr.md`.
+The Amazon Transcribe step is pluggable: when `EnableMicrovmAsr=true` and an admin moves a meeting source onto it on the Transcription Engine page, meetings are instead transcribed by an ASR MicroVM (one per meeting, one WebSocket session per audio channel), which returns text and speaker labels together. Both engines emit identical `ADD_TRANSCRIPT_SEGMENT` events, so nothing downstream of Kinesis is engine-aware. See `docs/microvm-asr.md`.
 
 **Key source locations:**
 - Lambda functions: `lma-ai-stack/source/lambda_functions/` (19 functions)
