@@ -145,6 +145,19 @@ wss://<CLOUDFRONT_DOMAIN>/api/v1/ws?authorization=Bearer%20<access_token>&id_tok
 
 > **Note:** Query string parameters are useful for browser-based clients where the native `WebSocket` API does not support custom headers.
 
+### What the Server Records
+
+The transcriber's connection log lines identify the request without reproducing the tokens.
+For each connection attempt the server records the request path with the query string
+removed, the client IP taken from `X-Forwarded-For`, and a fixed set of non-sensitive
+header names (`host`, `origin`, `user-agent`, `content-type`, the `x-forwarded-*` fields
+and the WebSocket negotiation headers); any other header is reported as a count only. The
+same applies to the `START` / `END` control frames, which are logged with their
+`accessToken`, `idToken` and `refreshToken` fields replaced by `[REDACTED]`.
+
+This holds whichever option above you choose, so a client that passes tokens on the query
+string does not produce different log content than one using headers.
+
 ### Authentication Failure
 
 If authentication fails, the server responds with **HTTP 401 Unauthorized** before the WebSocket upgrade completes, and the connection is rejected. Common failure reasons:

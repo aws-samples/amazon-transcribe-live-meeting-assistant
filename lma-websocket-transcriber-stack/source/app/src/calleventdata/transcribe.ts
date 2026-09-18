@@ -61,6 +61,7 @@ import {
 // in jwt-verifier, which requires USERPOOL_ID at import time and would break
 // offline tests that import this module.
 import { normalizeErrorForLogging } from '../utils/common';
+import { stringifyCallMetaData } from '../utils/log-redaction';
 
 const formatPath = function (path: string) {
     let pathOut = path;
@@ -414,7 +415,7 @@ export const startTranscribe = async (
             server.log.debug(
                 `[${callMetaData.callEvent}]: [${
                     callMetaData.callId
-                }] - Starting transcribe:  ${JSON.stringify(callMetaData)}`
+                }] - Starting transcribe:  ${stringifyCallMetaData(callMetaData)}`
             );
 
             const transcribeInput = async function* () {
