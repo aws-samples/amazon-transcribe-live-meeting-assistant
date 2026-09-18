@@ -2071,13 +2071,28 @@ Resources:
             # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-property-function-kinesis.html#sam-property-function-kinesis--examples
             BatchSize: 200
             BisectBatchOnFunctionError: true
-            # TODO Add SQS queue for discarded records
-            # DestinationConfig:
+            # Batches that remain unprocessable after the retry and record-age
+            # bounds below are described to this queue so the shard can advance.
+            DestinationConfig:
+              OnFailure:
+                Destination: !GetAtt CallEventProcessorDiscardedRecordsQueue.Arn
             Enabled: true
+            # The function answers with the Kinesis sequence numbers that need to
+            # be redelivered, so a single failing record no longer replays the
+            # records that already succeeded alongside it.
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
             MaximumRetryAttempts: 2
             MaximumBatchingWindowInSeconds: 0
             ParallelizationFactor: 10
-            # XXX MaximumRecordAgeInSeconds: 900
+            # Upper bound on how long a record may be retried before it is
+            # reported to the on-failure destination and the shard moves past
+            # it. One hour absorbs a lengthy downstream outage or throttling
+            # episode, while keeping the worst-case delay for live meeting
+            # transcripts sharing the shard well inside the stream's retention
+            # period, so a record that can never succeed cannot stall the shard
+            # for the full retention window.
+            MaximumRecordAgeInSeconds: 3600
             StartingPosition: LATEST
             Stream: !GetAtt DataStreamConsumer.ConsumerARN
             # Tumbling Window is used for aggregations over different invocations
@@ -2149,6 +2164,23 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
+            # The event source mapping uses this role to describe unprocessable
+            # batches to the on-failure destination queue.
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt CallEventProcessorDiscardedRecordsQueue.Arn
+            # The discarded records queue is encrypted with a customer-managed
+            # KMS key, so the sender needs a data key for it.
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService":
+                    - !Sub "sqs.${AWS::Region}.${AWS::URLSuffix}"
       Runtime: python3.12
       Timeout: 900
       Environment:
@@ -2197,6 +2229,21 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # On-failure destination for the call event processor's Kinesis event source
+  # mapping. The event source mapping writes a description of each batch it gave
+  # up on - stream ARN, shard id and the failing sequence number range - rather
+  # than the record payloads themselves, which remain in the Kinesis stream for
+  # the remainder of its retention period and can be replayed from there.
+  CallEventProcessorDiscardedRecordsQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      # 14 days, the SQS maximum. These messages are the only durable record
+      # that a batch was skipped, so they are kept long enough to survive a
+      # weekend or a holiday before an operator triages them.
+      MessageRetentionPeriod: 1209600
 
   ##########################################################################
   # Transcript Enrichment Lambda Layers
