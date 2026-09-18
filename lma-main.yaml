@@ -567,7 +567,14 @@ Parameters:
       UI; for the Desktop Capture App it is a hard on/off (users opt in per
       machine in the app's Settings, and the server discards video when this is
       false). Video recordings consume additional CPU, ephemeral storage, and S3
-      storage.
+      storage. Leaving this at "true" also pins the WebSocket transcriber service
+      to a single task and forbids transcriber auto scaling, because Desktop
+      Capture App video arrives on a separate connection that must reach the task
+      holding that meeting's audio session; TranscriberDesiredTaskCount above 1
+      and TranscriberAutoScalingEnabled are rejected while this is "true". Only
+      the Desktop Capture App imposes that constraint — Virtual Participant video
+      does not — so scaling the transcriber means giving up desktop video
+      recording, not video recording in principle.
 
   AudioRecordingExpirationInDays:
     Type: Number
@@ -604,6 +611,17 @@ Parameters:
       until this timeout elapses. A meeting that is still connected but silent for
       longer than the timeout is also ended, so keep it comfortably longer than the
       longest quiet stretch your meetings have. Set to 0 to leave such meetings open.
+
+  MeetingInactivityLookbackInDays:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      How far back to look for meetings to close. A meeting that started longer
+      ago than this is never closed automatically, so raise it temporarily if you
+      are updating a deployment that has accumulated older meetings stuck in
+      progress. Higher values read more meeting records on every run.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -793,9 +811,10 @@ Parameters:
     Description: >-
       Scale the WebSocket transcriber service on average CPU utilization.
       Requires EnableVideoRecording to be false, for the same reason as
-      TranscriberDesiredTaskCount. Capacity is added automatically and reduced
-      only by a stack update, so that scaling never interrupts a meeting in
-      progress.
+      TranscriberDesiredTaskCount. Capacity is only ever added automatically, so
+      that scaling never interrupts a meeting in progress; it stays at its high
+      water mark until you reduce it deliberately, or until you set this back to
+      "false" and the task count returns to TranscriberDesiredTaskCount.
 
   TranscriberMinTaskCount:
     Type: Number
@@ -955,6 +974,7 @@ Metadata:
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
           - MeetingInactivityTimeoutInMinutes
+          - MeetingInactivityLookbackInDays
           - EnableDataRetentionOnDelete
       - Label:
           default: AppSync Configuration
@@ -1089,6 +1109,8 @@ Metadata:
         default: CloudWatch Logs Expiration In Days
       MeetingInactivityTimeoutInMinutes:
         default: Meeting Inactivity Timeout In Minutes
+      MeetingInactivityLookbackInDays:
+        default: Meeting Inactivity Lookback In Days
       EnableAppSyncApiCache:
         default: Enable AppSync Api Cache
       AppSyncApiCacheInstanceType:
@@ -2590,6 +2612,7 @@ Resources:
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
         MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
+        MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary

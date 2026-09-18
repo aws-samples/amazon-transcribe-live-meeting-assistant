@@ -36,6 +36,7 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | CloudWatchLogsExpirationInDays | Number of days to retain CloudWatch Logs | (varies) | Standard CloudWatch retention values |
 | EnableDataRetentionOnDelete | Retain DynamoDB tables, S3 buckets, the Cognito user pool, and KMS keys when the stack is deleted | true | true, false |
 | MeetingInactivityTimeoutInMinutes | Minutes a meeting may go without a finalized transcript segment before LMA ends it on the meeting's behalf. 0 leaves such meetings open | 240 | 0-10080 |
+| MeetingInactivityLookbackInDays | How far back the reaper looks for meetings to close. A meeting that started earlier than this is never closed automatically | 2 | 1-90 |
 
 `MeetingInactivityTimeoutInMinutes` backs the scheduled reaper that ends
 meetings whose client disconnected without sending its end-of-meeting event —
@@ -46,7 +47,15 @@ last update, which a transcript segment refreshes, so a meeting that is still
 connected but has produced no finalized speech for longer than the timeout is
 also ended; keep the value comfortably longer than the longest quiet stretch
 your meetings have. Meetings still being processed by the upload pipeline are
-left to `upload_meeting_finalizer`. See
+left to `upload_meeting_finalizer`.
+
+`MeetingInactivityLookbackInDays` bounds how much history each run examines, and
+with it how much the reaper can fix. A meeting that started before the window is
+never closed automatically, so if you are updating a deployment that has
+accumulated older meetings stuck in progress, raise this once, let a run complete,
+and put it back. Each run also stops after reading 500 candidate meetings —
+meetings are examined newest-first, so the ones that have just become eligible are
+always covered, and at any plausible meeting volume the cap is never reached. See
 [Troubleshooting → Meeting Stuck In Progress](troubleshooting.md#meeting-stuck-in-progress).
 
 ## Meeting Assistant
@@ -95,26 +104,39 @@ and the browser extension). They do not affect the Virtual Participant.
 | TranscriberMaxTaskCount | Maximum task count when auto scaling is enabled | 4 | 1-50 |
 | TranscriberScalingCpuTargetPercent | Average CPU utilization that auto scaling holds | 35 | 10-90 |
 
-Running more than one task requires `EnableVideoRecording` to be `false`. With
+Running more than one task requires `EnableVideoRecording` to be `false`, and the
+stack rejects the combination at deploy time rather than failing per meeting. With
 video recording enabled, the desktop capture app sends meeting video over a
 second WebSocket connection, and only the task already hosting that meeting's
-audio session can attach it. The load balancer in front of the service does not
+audio session can attach it. Note that `EnableVideoRecording` also governs
+Virtual Participant video, which has no such constraint, so scaling the
+transcriber means giving up *desktop app* video recording specifically. The load balancer in front of the service does not
 pin a client to a task, and cookie-based stickiness is not available because the
 CloudFront distribution in front of the load balancer forwards no cookies, so
 with several tasks the video connection is refused whenever it lands on a
 different task from the audio. Audio is unaffected either way: a meeting's audio
 uses one connection for its whole lifetime.
 
-Auto scaling adds capacity but never removes it. Taking a task away would end
-the meetings it is hosting once the load balancer's deregistration delay
-elapses, and a meeting can run for hours; capacity returns to
-`TranscriberDesiredTaskCount` on the next stack update. The CPU target is kept
-below the load at which a task reports itself unhealthy to the load balancer, so
-that scaling out happens before tasks start being replaced.
+Auto scaling adds capacity but never removes it. Taking a task away would end the
+meetings it is hosting once the load balancer's deregistration delay elapses, and
+a meeting can run for hours. The consequence is that capacity ratchets up and
+stays there: while `TranscriberAutoScalingEnabled` is `true`, Application Auto
+Scaling owns the task count and a stack update no longer resets it to
+`TranscriberDesiredTaskCount`. To bring it back down, either set
+`TranscriberAutoScalingEnabled` to `false` — which hands the count back to
+CloudFormation and applies `TranscriberDesiredTaskCount` — or reduce it directly
+with `aws ecs update-service --desired-count` or
+`aws application-autoscaling register-scalable-target`. Budget for the high water
+mark, not the average. The CPU target is kept below the load at which a task
+reports itself unhealthy to the load balancer, so that scaling out happens before
+tasks start being replaced.
 
 Deployments no longer reduce the service below its full task count while tasks
 are being replaced. A rolling deployment now briefly runs up to twice the task
-count instead.
+count instead — which is the one window where more than one task exists even with
+video recording enabled. That is harmless in practice: the draining task keeps
+serving the sessions already attached to it and the new task only receives new
+meetings, so no meeting is ever split across the two.
 
 ## On-demand ASR and Diarization (MicroVM) — EXPERIMENTAL
 

@@ -96,6 +96,14 @@ inside the timeout, already `ENDED`, or still owned by the upload pipeline (an
 in-flight Transcribe job on a long recording can easily outlast the timeout, so
 those meetings are skipped and closed by the finalizer instead).
 
+Two bounds decide which meetings a run can reach. `MeetingInactivityLookbackInDays`
+(default 2) is how far back it looks: **a meeting that started earlier than that is
+never closed automatically**, so if you have a backlog of older meetings stuck in
+progress — for example on the update that first introduces the reaper — raise the
+parameter, let one run complete, and set it back. Each run also stops after reading
+500 candidate meetings; they are examined newest-first, so meetings that have just
+become eligible are always covered, and a run that hits the cap says so in its log.
+
 Setting `MeetingInactivityTimeoutInMinutes` to `0` disables the schedule. With
 it disabled, or to end a meeting sooner than the timeout, you can still end a
 meeting by hand by updating its record (`PK` = `SK` = `c#<CallId>`) in the event
@@ -132,11 +140,24 @@ shapes arrive:
 - **From the function** — one message per skipped record, carrying `shardId`,
   `sequenceNumber`, `partitionKey`, `eventID` and the record's `data` exactly as
   Kinesis delivered it (base64). Decoding `data` shows what the producer sent,
-  which is usually enough to identify which client emitted it.
+  which is usually enough to identify which client emitted it. A payload too large
+  for an SQS message is cut short, with `dataTruncated: true` and the original
+  `dataLength` on the message; read the full record from the stream as below.
 
-To retrieve the original records for a failed batch, use the shard id and the
-first sequence number with `aws kinesis get-shard-iterator --shard-iterator-type
-AT_SEQUENCE_NUMBER` followed by `get-records`. **This is time-limited:** the call
+To retrieve the original records for a failed batch, turn the shard id and the
+first sequence number into an iterator and read from it:
+
+```bash
+ITERATOR=$(aws kinesis get-shard-iterator \
+  --stream-name <CallDataStream name> \
+  --shard-id <shardId from the message> \
+  --shard-iterator-type AT_SEQUENCE_NUMBER \
+  --starting-sequence-number <sequenceNumber from the message> \
+  --query ShardIterator --output text)
+aws kinesis get-records --shard-iterator "$ITERATOR" --limit 10
+```
+
+The records come back with `Data` base64-encoded. **This is time-limited:** the call
 data stream keeps records for 24 hours, so a batch reported more than a day ago
 can no longer be read back from the stream — only the queue message and the
 function's log lines remain. Queue messages themselves are kept for 14 days.

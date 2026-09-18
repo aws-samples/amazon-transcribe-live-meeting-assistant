@@ -91,9 +91,10 @@ The following may be modified during an update:
 ## Data Retention On Stack Deletion
 
 The `EnableDataRetentionOnDelete` parameter (default `true`) decides what happens
-to stateful resources when the stack itself is deleted. With it set to `true`,
-deleting the stack leaves the following behind in your account rather than
-removing them:
+to the resources that hold durable data when the stack itself is deleted. With it
+set to `true`, deleting the stack leaves the following behind in your account
+rather than removing them; the resources it deliberately does not cover are listed
+after the table.
 
 | Resource | Stack | Contents |
 |----------|-------|----------|
@@ -126,10 +127,24 @@ when you no longer need them — see [Cleanup](cleanup.md). Set
 `EnableDataRetentionOnDelete` to `false` if you would rather a stack deletion
 remove everything.
 
-Two resources are deliberately *not* covered. The web application bucket holds
-only build artifacts that a redeployment regenerates, and is emptied on stack
-deletion regardless of this parameter. The MCP server's Cognito app client is
-configuration rather than data, and is recreated by a redeployment.
+### What the parameter does not cover
+
+The parameter governs everything that holds durable user data. These resources are
+deleted with the stack either way, deliberately:
+
+| Resource | Stack | Why it is not retained |
+|----------|-------|------------------------|
+| `WebAppBucket` | AI stack | Build artifacts a redeployment regenerates; emptied on deletion regardless of this parameter |
+| `MCPServerExternalAppClient` | AI stack | Configuration rather than data; recreated by a redeployment |
+| `TranscriberCallEventTable` | Transcriber stack | Short-lived, TTL'd handoff state for the Post Call Analytics path, not user data. Its template does not read this parameter at all |
+| `AsrImageSourceBucket` | ASR MicroVM stack | Per-stack build context for the MicroVM image, rebuilt from the repository on the next deployment |
+| `CustomHeaderNameSecret`, `CustomHeaderValueSecret` | Transcriber stack | CloudFront origin-verification secrets, regenerated per deployment; retaining them would leave Secrets Manager entries that a new stack cannot use |
+| `CategorySNSTopic` | AI stack | A topic, not a store — it holds no messages between deliveries. Any subscriptions you added to it by hand are lost with it |
+
+One consequence to be aware of when deleting a stack: `AsrImageSourceBucket` has
+versioning enabled and, unlike `WebAppBucket`, no custom resource that empties it
+first, so a stack deletion can fail on a non-empty bucket. Empty it by hand and
+retry the deletion if that happens.
 
 The retention setting is stored as a CloudFormation resource attribute, so
 changing the parameter on an existing stack only takes effect once the stack

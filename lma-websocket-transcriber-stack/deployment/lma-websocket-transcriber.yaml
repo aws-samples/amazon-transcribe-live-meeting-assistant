@@ -1606,9 +1606,12 @@ Resources:
       # would make every stack update reset the service to this value and take
       # away tasks that are hosting meetings — the outcome DisableScaleIn exists
       # to avoid. With auto scaling off, CloudFormation owns the count as usual.
-      # On a create with auto scaling already enabled the service starts at zero
-      # tasks for the few seconds it takes the scalable target to register and
-      # raise it to TranscriberMinTaskCount.
+      # Nothing starts at zero: ECS defaults a new service without a desired
+      # count to one task, and registering the scalable target moves capacity
+      # into the min/max range as part of the RegisterScalableTarget call rather
+      # than waiting for a metric — which matters, because target tracking does
+      # not act on insufficient data and a service at zero tasks publishes no
+      # CPU datapoints to act on.
       DesiredCount: !If
         - ShouldEnableTranscriberAutoScaling
         - !Ref "AWS::NoValue"
@@ -1669,9 +1672,13 @@ Resources:
         # Capacity is added automatically but never removed automatically: a task
         # that is taken away stops transcribing the meetings it is hosting once
         # the target group's deregistration delay elapses, and a meeting can run
-        # for hours. Reduce capacity deliberately (a stack update returns the
-        # service to TranscriberDesiredTaskCount), or set this to false to accept
-        # automatic scale-in.
+        # for hours. The consequence is that capacity ratchets up and stays up —
+        # DesiredCount is not set while auto scaling is on, so a stack update no
+        # longer brings it back down. Reduce it deliberately with
+        # UpdateService/SetDesiredCapacity, by setting TranscriberAutoScalingEnabled
+        # back to false (which hands ownership back to CloudFormation and applies
+        # TranscriberDesiredTaskCount), or set this to false to accept automatic
+        # scale-in and its effect on running meetings.
         DisableScaleIn: true
 
   TranscriberWebsocketFargateServiceSecurityGroup:
