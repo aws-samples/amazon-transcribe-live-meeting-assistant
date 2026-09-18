@@ -1325,8 +1325,17 @@ Resources:
                     if [ "$PACKAGE_COUNT" -gt "0" ]; then
                       echo "MCP packages to install:";
                       cat mcp-servers.txt;
+                      # Each line must be a bare distribution name with at most one
+                      # version pin, matching the pattern the MCPServerManager
+                      # function applies on write. This build step re-checks rather
+                      # than trusting that it ran, so neither layer is the only gate.
+                      PACKAGE_SPEC_REGEX='^(@[a-z0-9][a-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*((==|>=|<=|~=|@)[A-Za-z0-9][A-Za-z0-9.*+_-]*)?$';
                       while IFS= read -r package; do
                         if [ -n "$package" ]; then
+                          if ! printf '%s' "$package" | grep -Eq "$PACKAGE_SPEC_REGEX"; then
+                            echo "SKIPPING entry that is not a plain package specifier: $package";
+                            continue;
+                          fi;
                           echo "Attempting to install: $package";
                           if python3.12 -m pip install "$package" -t . --no-cache-dir 2>&1; then
                             echo "Successfully installed $package";

@@ -259,15 +259,59 @@ class TestPathDetection(unittest.TestCase):
             "user123",
         )
 
-    def test_bedrock_path_no_user_defaults_to_admin(self):
-        """BedrockAgentCore with no user context defaults to admin."""
+    def test_bedrock_path_without_identity_is_rejected(self):
+        """A request with no caller identity is answered with 403, not admin access."""
         from tools import list_meetings
 
         list_meetings.execute = MagicMock(return_value={"meetings": []})
 
-        event = bedrock_event({"limit": 5})
-        index.lambda_handler(event, None)
-        list_meetings.execute.assert_called_once()
+        result = index.lambda_handler(bedrock_event({"limit": 5}), None)
+
+        self.assertEqual(result["statusCode"], 403)
+        list_meetings.execute.assert_not_called()
+
+    def test_bedrock_path_with_empty_claims_is_rejected(self):
+        """An empty claims envelope carries no caller either."""
+        from tools import list_meetings
+
+        list_meetings.execute = MagicMock(return_value={"meetings": []})
+
+        result = index.lambda_handler(bedrock_event({"limit": 5}, claims={}), None)
+
+        self.assertEqual(result["statusCode"], 403)
+        list_meetings.execute.assert_not_called()
+
+    def test_rejection_message_points_at_the_api_key_endpoint(self):
+        """The caller is told how to make an identity-carrying request."""
+        result = index.lambda_handler(bedrock_event({"limit": 5}), None)
+
+        self.assertIn("API key", json.loads(result["body"])["error"]["message"])
+
+
+class TestAdminGroupClaim(unittest.TestCase):
+    """Group membership is matched on whole group names, in both claim shapes."""
+
+    def test_admin_group_as_list(self):
+        self.assertTrue(index.is_admin_claim({"cognito:groups": ["Users", "Admin"]}))
+
+    def test_admin_group_as_comma_joined_string(self):
+        self.assertTrue(index.is_admin_claim({"cognito:groups": "Users,Admin"}))
+
+    def test_admin_group_as_single_string(self):
+        self.assertTrue(index.is_admin_claim({"cognito:groups": "Admin"}))
+
+    def test_non_admin_groups(self):
+        for groups in ([], ["Users"], "Users", "Users,Guests", None):
+            with self.subTest(groups=groups):
+                self.assertFalse(index.is_admin_claim({"cognito:groups": groups}))
+
+    def test_a_group_name_that_merely_contains_admin_is_not_the_admin_group(self):
+        for groups in ("Administrators", ["Administrators"], "NotAdmin"):
+            with self.subTest(groups=groups):
+                self.assertFalse(index.is_admin_claim({"cognito:groups": groups}))
+
+    def test_absent_claim(self):
+        self.assertFalse(index.is_admin_claim({}))
 
 
 class TestAPIGatewayUserContext(unittest.TestCase):
