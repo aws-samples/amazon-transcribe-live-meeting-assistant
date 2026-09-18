@@ -74,6 +74,14 @@ SRT tracks each finding's status in `.srt/issues.json`:
 
 `.srt/suppressions.json` is the only file here tracked in git (via a negative-gitignore rule). The binary, `.venv`, scan output, dashboard, config files and the `.srt/issues.json` working database are all gitignored.
 
+**Writing a `suppressionReason`:** `.srt/suppressions.json` is committed to a
+public repository, so the rationale is published. Write it as a statement about
+the code as it stands — the control that is in place, the configuration
+parameter that governs it, or why the rule does not match this call site — and
+not as an analysis of what would otherwise be reachable. See the disclosure
+hygiene section of [CLAUDE.md](../CLAUDE.md), which covers this field
+explicitly.
+
 **Triage workflow:**
 
 1. `make srt-scan`
