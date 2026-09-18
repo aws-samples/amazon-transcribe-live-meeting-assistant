@@ -25,9 +25,9 @@
   // markdown output, so they stay out of the allowed set entirely.
   //
   // Nothing is added to the profile. This page configures no `marked` renderer
-  // and makes no `marked.use()` call, so the default renderer's output is the
-  // whole of what has to survive, and it emits no `target`, `rel` or `style`
-  // attributes -- links render in this frame, as they already did.
+  // and makes no `setOptions`/`use` call, so marked's defaults -- GFM included
+  // -- are what has to survive. The default renderer emits no `target`, `rel` or
+  // `style` attributes, so links render in this frame, as they already did.
   //
   // `target` is absent from DOMPurify's default attribute set, so it is dropped
   // without being named. `rel` and `style` are present in that set, so they are
@@ -35,15 +35,57 @@
   // "no link-targeting or styling attributes survive" an enforced invariant
   // rather than a property of whatever the default set happens to contain.
   //
-  // Interactive form controls are in DOMPurify's default HTML profile but are
-  // never produced by markdown, and this page builds its own controls in code
-  // rather than through this function. Forbidding them keeps the rendered
-  // conversation to inert, non-interactive content.
+  // The submission-capable controls are forbidden outright: markdown never
+  // emits them and this page builds its own controls in code rather than
+  // through this function.
+  //
+  // `input` is deliberately NOT in that list. GFM is enabled by default in
+  // marked and this page overrides nothing, so `- [x] done` really does render
+  // as `<input checked disabled type="checkbox">`. Forbidding the tag would
+  // delete it, and since `checked` is the only difference between a done and a
+  // pending item, a checklist would silently render as plain bullets with its
+  // state erased. Instead the hook below narrows `input` to a disabled
+  // checkbox, which is exactly what `defaultSchema` permits on the React
+  // surfaces, so the same property holds on both render paths.
   var SANITIZE_CONFIG = {
     USE_PROFILES: { html: true },
     FORBID_ATTR: ['rel', 'style'],
-    FORBID_TAGS: ['form', 'input', 'button', 'textarea', 'select', 'option'],
+    FORBID_TAGS: ['form', 'button', 'textarea', 'select', 'option'],
   };
+
+  /**
+   * Reduce any `input` to the one form markdown legitimately produces: a
+   * disabled task-list checkbox. Anything else is dropped entirely.
+   */
+  function narrowInputToTaskListCheckbox(node, data) {
+    if (data.tagName !== 'input') {
+      return;
+    }
+
+    if ((node.getAttribute('type') || '').toLowerCase() !== 'checkbox') {
+      if (node.parentNode) {
+        node.parentNode.removeChild(node);
+      }
+      return;
+    }
+
+    // marked already emits task-list checkboxes disabled; set it unconditionally
+    // so a hand-written enabled one cannot be interactive either.
+    node.setAttribute('disabled', '');
+  }
+
+  // Registered against the sanitizer instance actually in use, on first render
+  // rather than at load time, so the hook cannot be missed if the vendored
+  // scripts are ever loaded in a different order.
+  var hookedSanitizer = null;
+
+  function ensureHooks(sanitizer) {
+    if (hookedSanitizer === sanitizer || typeof sanitizer.addHook !== 'function') {
+      return;
+    }
+    sanitizer.addHook('uponSanitizeElement', narrowInputToTaskListCheckbox);
+    hookedSanitizer = sanitizer;
+  }
 
   /**
    * Render markdown to a sanitized HTML string.
@@ -65,6 +107,8 @@
     if (!parser || typeof parser.parse !== 'function' || !sanitizer || typeof sanitizer.sanitize !== 'function') {
       return null;
     }
+
+    ensureHooks(sanitizer);
 
     return sanitizer.sanitize(parser.parse(text), SANITIZE_CONFIG);
   }

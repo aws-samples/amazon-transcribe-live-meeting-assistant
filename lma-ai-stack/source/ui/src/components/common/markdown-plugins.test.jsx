@@ -134,6 +134,47 @@ describe('renderMarkdownSafe (standalone chat page)', () => {
     expect(host.querySelector('a')?.getAttribute('href')).toBe('https://example.com/docs');
   });
 
+  /*
+   * The next three cases exist because every entry in FORBID_ATTR / FORBID_TAGS
+   * needs a companion assertion that it did not catch a legitimate construct.
+   * GFM is on by default in marked and this page overrides nothing, so task
+   * lists and aligned tables are output the renderer really produces.
+   */
+  it('renders task lists with their checked state intact', () => {
+    const host = renderToDom('- [ ] todo item\n- [x] done item');
+
+    const boxes = host.querySelectorAll('input[type="checkbox"]');
+    expect(boxes).toHaveLength(2);
+    // The two items differ only by `checked`, so losing it would make an
+    // unchecked and a checked task render identically.
+    expect(boxes[0].hasAttribute('checked')).toBe(false);
+    expect(boxes[1].hasAttribute('checked')).toBe(true);
+    // A rendered task list is never interactive.
+    expect(boxes[0].hasAttribute('disabled')).toBe(true);
+    expect(boxes[1].hasAttribute('disabled')).toBe(true);
+    expect(host.textContent).toContain('todo item');
+    expect(host.textContent).toContain('done item');
+  });
+
+  it('renders table column alignment', () => {
+    const host = renderToDom('| a | b |\n| :-: | --: |\n| 1 | 2 |');
+
+    const headers = host.querySelectorAll('th');
+    expect(headers).toHaveLength(2);
+    // marked emits alignment as an `align` attribute, not inline style, so it
+    // must survive FORBID_ATTR: ['style'].
+    expect(headers[0].getAttribute('align')).toBe('center');
+    expect(headers[1].getAttribute('align')).toBe('right');
+  });
+
+  it('renders fenced code blocks with their language class', () => {
+    const host = renderToDom('```js\nconst a = 1;\n```');
+
+    const code = host.querySelector('pre code');
+    expect(code?.getAttribute('class')).toBe('language-js');
+    expect(code?.textContent).toContain('const a = 1;');
+  });
+
   it('renders markdown without script elements', () => {
     const host = renderToDom('here is the summary\n\n<script>globalThis.chatMarker = 1;</script>');
 

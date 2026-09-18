@@ -9,6 +9,12 @@
  * produced by a model or typed by a user -- meeting summaries, transcript
  * segments, translations and meeting-query answers.
  *
+ * One deliberate exception: the question label in MeetingsQueryLayout's
+ * ValueWithLabel renders with no rehypePlugins at all. Without `rehype-raw`,
+ * react-markdown escapes HTML in the source instead of parsing it, so any markup
+ * in the label is shown as literal text. Adding this chain there would turn that
+ * escaping into parse-then-filter, which is weaker, so it is left alone.
+ *
  * `rehype-raw` is kept because those strings legitimately contain small bits of
  * inline HTML (line breaks, emphasis) that authors and prompt templates rely on.
  * `rehype-sanitize` runs immediately after it, so the invariant across all of
