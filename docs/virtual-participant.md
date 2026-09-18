@@ -149,7 +149,8 @@ The VNC preview provides real-time browser viewing and remote control of the VP'
 
 ### How a viewer is authorized
 
-Opening the viewer takes two steps, both of which happen automatically in the UI.
+Opening the viewer takes two steps, both of which happen automatically in the UI, and rests
+on a third control at the load balancer.
 
 **1. A token for the connection.** Before it opens the WebSocket, the viewer calls a
 GraphQL mutation to mint a token for the specific Virtual Participant it is about to
@@ -174,10 +175,10 @@ supports no layers, so the secret ARN and region are substituted into its source
 time) and refuses the request if it cannot read it. Both mutations mint on demand per viewer
 session, so the viewer's existing auto-reconnect simply mints again.
 
-This is one of two controls, not the whole of it. The edge function sees only traffic that
-arrives through this deployment's CloudFront distribution, so on its own it confines a
-viewer to one participant's view only for requests that took that route. The credential
-below is what applies regardless of the route taken, which is why both are in place.
+This is one of three controls, not the whole of it. The edge function sees traffic that
+arrives through this deployment's CloudFront distribution, which is what step 3 below
+establishes for every route into a task; the credential in step 2 applies at the VNC server
+itself.
 
 **2. A credential for the VNC server.** On the ECS launch types the VP generates a
 random VNC credential when it boots and publishes it on its own record; the
@@ -188,18 +189,42 @@ there is no per-meeting record to publish a credential to and any credential wou
 captured in the snapshot and shared by every launch; there the framebuffer is bound to the
 VM's loopback interface and the port-scoped auth token is the only route in.
 
-On the load balancer side, the CloudFront distribution attaches a per-deployment
-origin-verify header to every request it sends to the VNC load balancer, and the listener
-forwards only requests carrying it — anything else gets a 403. The load balancer's security
-group also admits only CloudFront's `com.amazonaws.global.cloudfront.origin-facing`
-managed prefix list, which is a useful coarse filter but is shared by every CloudFront
-distribution in every account, so it establishes that a request came from CloudFront rather
-than from this distribution. The header is what distinguishes them.
+**3. An origin-verify header on the load balancer.** The CloudFront distribution attaches a
+per-deployment header value to every request it sends to the VNC load balancer, and the load
+balancer forwards only requests carrying it — anything else gets a 403. This applies to both
+routes into a task: the rule the AI stack creates for the shared target group, and the rule
+each Virtual Participant creates for its own path at run time. The participant is given the
+secret's ARN, not its value, and reads the value from Secrets Manager once when it starts, so
+the value never appears in its task definition; if it cannot read the value it does not
+create a routing rule at all, and the participant fails to start rather than being reachable
+without the header.
 
-> **If you are upgrading:** under `MICROVM`, the framebuffer's loopback binding is applied
-> in `entrypoint.sh`, which runs at image-build time — so it takes effect only once the
-> MicroVM snapshot is rebuilt, on the next image build. Existing snapshots keep the previous
-> binding until then. The port-scoped auth token is unaffected and applies immediately.
+The load balancer's security group additionally admits only CloudFront's
+`com.amazonaws.global.cloudfront.origin-facing` managed prefix list. That is a useful coarse
+filter, but it is the address range CloudFront uses when calling any origin and the service
+shares it across the distributions it serves, so it establishes that a request came from
+CloudFront. The header establishes that it came from this deployment's distribution.
+
+> **If you are upgrading, these take effect only after the Virtual Participant container
+> image is rebuilt** — both are applied in code that runs inside the container:
+>
+> - The framebuffer's loopback binding (`entrypoint.sh`). Under `MICROVM` this runs at
+>   image-build time, so it lands when the MicroVM snapshot is rebuilt; existing snapshots
+>   keep the previous binding until then.
+> - The origin-verify condition on the per-participant routing rule (`status-manager.ts`).
+>
+> Everything else in this section — the token check at the edge, the mutations, and the
+> load balancer's own rule and default response — is CloudFormation and applies as soon as
+> the stack update completes.
+>
+> Virtual Participants that are already running when the stack updates keep the routing rule
+> their task created, which does not carry the header condition. Those rules are deleted when
+> each participant's meeting ends, by the same cleanup that removes its target group, so they
+> clear on their own as those meetings finish. A rule can outlive its task if that task ended
+> without the cleanup running; a participant started afterwards on the rebuilt image replaces
+> any rule it finds on its own path before creating its own, and a leftover rule for a
+> participant that no longer exists can be deleted from the load balancer's listener by hand
+> (its `VirtualParticipantId` tag names the participant it belonged to).
 
 #### Known limitations
 
