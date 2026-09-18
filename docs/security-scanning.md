@@ -75,12 +75,15 @@ SRT tracks each finding's status in `.srt/issues.json`:
 `.srt/suppressions.json` is the only file here tracked in git (via a negative-gitignore rule). The binary, `.venv`, scan output, dashboard, config files and the `.srt/issues.json` working database are all gitignored.
 
 **Writing a `suppressionReason`:** `.srt/suppressions.json` is committed to a
-public repository, so the rationale is published. Write it as a statement about
-the code as it stands — the control that is in place, the configuration
-parameter that governs it, or why the rule does not match this call site — and
-not as an analysis of what would otherwise be reachable. See the disclosure
-hygiene section of [CLAUDE.md](../CLAUDE.md), which covers this field
-explicitly.
+public repository, so every rationale in it is published. Write it as a
+statement about the code as it stands — the control that is in place, the
+configuration parameter or deployment parameter that governs it, or the reason
+the rule does not match this particular call site. Do not write it as an
+analysis of what would otherwise be reachable, and do not describe impact,
+preconditions or severity. The same applies to the rationale in `# nosec`,
+`# noqa` and `# nosemgrep` comments and in cfn-nag / Checkov `reason:` metadata.
+Claims about behaviour should be checkable against the code or the template, and
+references to other documents should name a section that exists.
 
 **Triage workflow:**
 

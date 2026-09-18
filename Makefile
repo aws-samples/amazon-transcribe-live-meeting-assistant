@@ -635,7 +635,11 @@ endif
 # Both helpers share _commit-push below. They stage modifications to tracked
 # files only (`git add -u`) and refuse to run while any untracked file is
 # present: this is a public repository and working trees here routinely contain
-# large local scratch directories, so `git add .` is the wrong default. The
+# large local scratch directories, so `git add .` is the wrong default. A path
+# that only ever exists in your own working tree belongs in .git/info/exclude
+# (local, not shared) rather than in .gitignore, which would hide it from
+# `git add` and `git status` for every contributor and on every branch — some
+# branches legitimately track paths that others treat as scratch. The
 # staged diffstat and the generated message are shown and confirmed before
 # anything is committed or pushed, and the prompt names the resolved upstream
 # (remote + branch) rather than just the local branch, because upstreams differ
@@ -656,17 +660,21 @@ _commit-preflight:
 		exit 1; \
 	fi
 	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
-	case "$$BRANCH" in \
-		develop|main) \
-			echo -e "$(RED)ERROR: refusing to commit directly to '$$BRANCH'.$(NC)"; \
-			echo -e "$(YELLOW)Create a branch ('git switch -c feature/<name>') and open a pull request instead.$(NC)"; \
-			exit 1;; \
-	esac
+	UPSTREAM=$$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null); \
+	SHARED=; \
+	case "$$BRANCH" in develop|main) SHARED=1;; esac; \
+	case "$$UPSTREAM" in */develop|*/main) SHARED=1;; esac; \
+	if [ -n "$$SHARED" ]; then \
+		echo -e "$(RED)ERROR: refusing to commit onto a shared branch ($$BRANCH -> $${UPSTREAM:-no upstream}).$(NC)"; \
+		echo -e "$(YELLOW)Create a branch ('git switch -c feature/<name>') and open a pull request instead.$(NC)"; \
+		exit 1; \
+	fi
 	@UNTRACKED=$$(git ls-files --others --exclude-standard); \
 	if [ -n "$$UNTRACKED" ]; then \
 		echo -e "$(RED)ERROR: untracked files present — refusing to commit.$(NC)"; \
 		echo "$$UNTRACKED"; \
-		echo -e "$(YELLOW)Stage them explicitly ('git add <path>'), ignore them, or remove them, then re-run.$(NC)"; \
+		echo -e "$(YELLOW)Stage them explicitly ('git add <path>'), remove them, or — if they are local-only$(NC)"; \
+		echo -e "$(YELLOW)paths — add them to .git/info/exclude, then re-run.$(NC)"; \
 		exit 1; \
 	fi
 

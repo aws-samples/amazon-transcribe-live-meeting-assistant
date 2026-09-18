@@ -21728,7 +21728,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Access logging on this load balancer is set through the ALB AccessLogs attribute, which needs a destination bucket in the deploying account; the template leaves that to the operator rather than creating a log bucket on their behalf. Listener TLS policy and security group scoping are set in the template. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Access logging on this load balancer is set through the ALB AccessLogs attribute, which needs a destination bucket in the deploying account; the template leaves that to the operator rather than creating a log bucket on their behalf. Listener TLS policy and security group scoping are set in the template."
   },
   {
     "source": "security-matrix",
@@ -21742,7 +21742,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Access logging on this load balancer is set through the ALB AccessLogs attribute, which needs a destination bucket in the deploying account; the template leaves that to the operator rather than creating a log bucket on their behalf. Listener TLS policy and security group scoping are set in the template. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Access logging on this load balancer is set through the ALB AccessLogs attribute, which needs a destination bucket in the deploying account; the template leaves that to the operator rather than creating a log bucket on their behalf. Listener TLS policy and security group scoping are set in the template."
   },
   {
     "source": "security-matrix",
@@ -21813,7 +21813,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.225Z",
     "assessmentCount": 12,
-    "suppressionReason": "TracingConfig.Mode and the matching AWSXRayDaemonWriteAccess grant are left to the operator: VPTaskReaperFunction is a small EventBridge-driven reaper for ECS task-state-change events and emits CloudWatch Logs for every invocation. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "TracingConfig.Mode and the matching AWSXRayDaemonWriteAccess grant are left to the operator: VPTaskReaperFunction is a small EventBridge-driven reaper for ECS task-state-change events and emits CloudWatch Logs for every invocation."
   },
   {
     "source": "security-matrix",
@@ -21826,7 +21826,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21840,7 +21840,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21854,7 +21854,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21868,7 +21868,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21911,7 +21911,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21924,7 +21924,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21951,7 +21951,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21964,7 +21964,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21978,7 +21978,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 2,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -21991,7 +21991,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -22004,7 +22004,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -22032,7 +22032,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -22045,7 +22045,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -22059,7 +22059,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -22086,7 +22086,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -22099,7 +22099,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -22113,7 +22113,7 @@
     "status": "suppressed",
     "isCustomResource": false,
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
@@ -22142,7 +22142,7 @@
     "isCustomResource": false,
     "firstDetectedAt": "2026-06-02T16:32:15.225Z",
     "assessmentCount": 12,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md. Same rationale as the other LAMBDA-011 entries on sister Lambdas in this codebase."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Same rationale as the other LAMBDA-011 entries on sister Lambdas in this codebase."
   },
   {
     "source": "security-matrix",
@@ -22170,7 +22170,7 @@
     "check_id": "LAMBDA-011",
     "status": "suppressed",
     "assessmentCount": 15,
-    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account. Documented under production hardening in docs/well-architected.md."
+    "suppressionReason": "Alarm thresholds and notification targets are account-specific, so these templates emit CloudWatch Logs for every function and leave alarm creation to the deploying account."
   },
   {
     "source": "security-matrix",
