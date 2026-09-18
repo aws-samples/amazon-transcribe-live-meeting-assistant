@@ -115,9 +115,12 @@ Full documentation lives in `./docs/` with the master entry point at `docs/INDEX
 ## Security Disclosure Hygiene
 
 <EXTREMELY_IMPORTANT>
-This repository is a **public** `aws-samples` repo (see also
-`docs/security-scanning.md`). Commit messages, PR/MR titles and bodies, branch
-names, CHANGELOG entries and code comments are all public and permanent.
+> **Mandatory for every change in this repository.**
+
+This repository is **public**: `aws-samples` on GitHub is the primary, and the
+GitLab remote is an internal mirror of it. Commit messages, PR/MR titles and
+bodies, branch names, CHANGELOG entries, release notes and code comments are
+all public and permanent.
 
 **Never describe a security weakness in any of them.** This applies to the
 weakness being fixed, to one being hardened against, and to anything removed
@@ -127,32 +130,69 @@ or restricted. Specifically, never write:
   forged tokens", "unsanitized input reaches…", "privilege escalation via…").
 - The precondition or entry point that makes something reachable.
 - Which versions or deployment configurations are affected.
-- Severity language that flags the change as a security fix (`CRITICAL`,
-  `RCE`, `XSS`, `CVE`, `vulnerability`, `exploit`, `bypass`, `injection`,
-  `unauthenticated`).
+- Severity or flaw-class vocabulary (`CRITICAL`, `RCE`, `XSS`, `CVE`,
+  `vulnerability`, `exploit`, `bypass`, `injection`, `unauthenticated`) **used
+  to characterise a defect in this repository**. The same words in their
+  ordinary senses are fine — a cache bypass, a dependency `CVE` bump, prompt
+  injection as a product concern, Teams' own lobby-bypass setting.
 - Links to internal findings, threat-model IDs, scanner issue IDs, or tickets
   whose contents describe the weakness.
 
+The same rule applies to every other artifact this repository publishes: files
+under `docs/` (built into the public documentation site), `threat-modeling/`,
+GitHub issue titles, comments and closing references, GitHub release notes and
+tag messages, `.github/workflows/` step and job names, and suppression
+rationale wherever it lives — `reason:` fields in cfn-nag/checkov metadata,
+`# nosec`, `# noqa` and `# nosemgrep` comments, and `suppressionReason` entries
+in `.srt/suppressions.json`. Suppression rationale is expected to explain why a
+finding does not apply to the code as it stands; write it as a statement about
+the code, not as an analysis of what would otherwise be reachable.
+
 **Write the change, not the weakness.** Describe the new behaviour in neutral,
-forward-looking engineering terms:
+forward-looking engineering terms — name the control that is now in place,
+never the gap it closes. Well-formed subjects look like:
 
-| Don't write | Write instead |
-|---|---|
-| `fix: JWT signature never verified, allows forged tokens` | `feat(vnc): verify signed access tokens at the edge` |
-| `fix: XSS — sanitize LLM output before innerHTML` | `feat(ui): sanitize rendered markdown output` |
-| `fix: any user could install arbitrary MCP packages (RCE)` | `feat(mcp): restrict server management to the Admin group` |
-| `fix: tighten CSP, current one allows arbitrary script` | `chore(ui): narrow Content-Security-Policy directives` |
+- `feat(<scope>): require signed capability tokens for access`
+- `feat(<scope>): sanitize rendered output before insertion`
+- `feat(<scope>): restrict management operations to the Admin group`
+- `chore(<scope>): narrow Content-Security-Policy directives`
 
-Tests follow the same rule: name them for the invariant they assert
-(`rejects_token_with_invalid_signature`), never for the attack
-(`test_auth_bypass`).
+A subject is malformed if, after the change has shipped, a reader of it still
+knows what used to be possible. Anything of the shape *"fix: \<flaw class\> —
+\<what it allowed\>"*, or that names a control together with the consequence of
+its absence ("…, current one allows …", "…, prevents …"), fails the rule
+however it is worded. Do not illustrate the rule with a specific bad example
+drawn from this repository: a paired "don't write / write instead" example is
+itself a disclosure.
+
+Tests follow the same rule: name them for the invariant they assert —
+`test_rejects_token_with_invalid_signature` — not for the attack that motivated
+them (`test_auth_bypass`). Keep the `test_` prefix pytest requires. A name that
+states what the code now guarantees is fine even if it contains a word from the
+list above (`test_unauthenticated_user_rejected` is a good name).
 
 Detailed findings, exploitability analysis and remediation write-ups belong in
-an internal Taskei task — **not** in this repo. In particular do not put them
-in `.srt/` or `.dsr/`, which are mirrored publicly.
+an internal Taskei task — **not** in this repo. That includes `.srt/` and
+`.dsr/`: their tracked files are committed to this public repository, not
+internal scratch space.
 
-Where a user-facing behaviour change needs a CHANGELOG entry, describe the new
-behaviour and any migration step, not the prior shortcoming.
+Where a **security-motivated** behaviour change needs a CHANGELOG entry,
+describe the new behaviour and any migration step rather than the prior
+shortcoming. This does not change how ordinary bug fixes are written —
+`### Fixed` entries still lead with the user-visible symptom and a sentence of
+cause, as `.claude/skills/prepare-changelog.md` requires.
+
+**This is about wording, not about withholding.** If users must act — rotate a
+credential, redeploy, change a stack parameter, or stop relying on a setting —
+say so plainly in the CHANGELOG and the release notes, in terms of the action
+required and the behaviour that changed. Where the impact genuinely cannot be
+conveyed without describing the weakness, do not water the entry down: raise it
+through the channel in
+[CONTRIBUTING.md](CONTRIBUTING.md#security-issue-notifications) (AWS/Amazon
+Security) and publish a GitHub Security Advisory or AWS security bulletin, then
+link that advisory from the CHANGELOG. An advisory published through those
+channels is the one place where the weakness is described on purpose; silence
+is never an acceptable substitute for one.
 </EXTREMELY_IMPORTANT>
 
 ## Skill Files
