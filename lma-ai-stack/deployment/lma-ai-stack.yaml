@@ -2179,8 +2179,10 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
-            # The event source mapping uses this role to describe unprocessable
-            # batches to the on-failure destination queue.
+            # Two senders share this grant: the event source mapping uses this
+            # role to describe unprocessable batches to the on-failure
+            # destination queue, and the function writes one message per record
+            # it skipped as undecodable.
             - Effect: Allow
               Action:
                 - sqs:SendMessage
@@ -2230,6 +2232,10 @@ Resources:
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
           PARAMETER_STORE_NAME: !Ref LMASettingsParameterName
+          # Where records that cannot be decoded are copied. Skipping such a
+          # record does not fail the invocation, so the event source mapping's
+          # on-failure destination never sees it.
+          DISCARDED_RECORDS_QUEUE_URL: !Ref CallEventProcessorDiscardedRecordsQueue
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/CallEventProcessorFunction
@@ -2245,13 +2251,21 @@ Resources:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
-  # On-failure destination for the call event processor's Kinesis event source
-  # mapping. The event source mapping writes a description of each batch it gave
-  # up on - stream ARN, shard id and the failing sequence number range - rather
-  # than the record payloads themselves, which remain in the Kinesis stream for
-  # the remainder of its retention period and can be replayed from there.
+  # Destination for transcript records the pipeline did not apply, from two
+  # sources. The Kinesis event source mapping writes a description of each batch
+  # it gave up on - stream ARN, shard id and the failing sequence number range -
+  # rather than the record payloads, which remain in the Kinesis stream for the
+  # rest of its retention period and can be replayed from there. The function
+  # itself writes one message per record it skipped as undecodable, carrying that
+  # record's shard id, sequence number and raw payload, because a skipped record
+  # does not fail the invocation and so never reaches the mapping's destination.
   CallEventProcessorDiscardedRecordsQueue:
     Type: AWS::SQS::Queue
+    # Un-triaged skip records are data nobody has looked at yet, so they follow
+    # the same retention setting as the tables rather than disappearing with the
+    # stack. Messages still expire on their own after MessageRetentionPeriod.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
       KmsDataKeyReusePeriodSeconds: 300
@@ -3066,6 +3080,17 @@ Resources:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           MEETING_INACTIVITY_TIMEOUT_IN_MINUTES: !Ref MeetingInactivityTimeoutInMinutes
+          # How far back a run looks for candidates. Has to exceed the longest
+          # meeting a deployment expects plus the inactivity timeout, because a
+          # meeting that started before the window is not examined.
+          REAPER_LOOKBACK_IN_DAYS: 2
+          # Caps the meeting rows read per run. Candidates cannot be narrowed on
+          # the index (it projects no Status), so each one costs part of a
+          # BatchGetItem; the newest are read first and the rest wait for the
+          # next run.
+          REAPER_MAX_CANDIDATES: 500
+          # Caps the END events emitted per run.
+          REAPER_MAX_MEETINGS_PER_RUN: 100
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/StaleMeetingReaperFunction

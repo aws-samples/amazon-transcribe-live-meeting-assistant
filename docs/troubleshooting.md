@@ -14,6 +14,7 @@ title: "Troubleshooting"
   - [Deployment Fails on Nested Stack](#deployment-fails-on-nested-stack)
   - [Meeting Stuck In Progress](#meeting-stuck-in-progress)
   - [No Transcription Appearing](#no-transcription-appearing)
+  - [Discarded Transcript Records](#discarded-transcript-records)
   - [Meeting Assistant Not Responding](#meeting-assistant-not-responding)
   - [VP Fails to Join Meeting](#vp-fails-to-join-meeting)
   - [VP Stuck at MANUAL_ACTION_REQUIRED](#vp-stuck-at-manual_action_required)
@@ -105,6 +106,45 @@ sourcing DynamoDB table.
 1. Check the WebSocket Fargate task logs for errors.
 2. Verify that audio is being streamed from the client.
 3. Check Amazon Transcribe service limits to ensure you have not exceeded the concurrent stream quota.
+
+### Discarded Transcript Records
+
+Transcript events reach the Call Event Processor Lambda as Kinesis batches. When a
+record cannot be applied, the processor reports it to the event source mapping,
+which retries the shard from that record and — after the retries are exhausted or
+the record passes `MaximumRecordAgeInSeconds` (one hour) — describes the batch it
+gave up on to an SQS queue whose name contains
+`CallEventProcessorDiscardedRecordsQueue` (CloudFormation generates the full name
+from the AI stack's name). A record the processor
+could not decode at all is not retried, because it would fail the same way every
+time and hold up every later meeting on its shard; those records are copied to the
+same queue individually, since skipping one does not fail the invocation and so
+never reaches the mapping's own destination.
+
+An empty queue is the normal state. If there are messages on it, read them with
+**SQS console → the queue → Send and receive messages → Poll for messages**, or
+`aws sqs receive-message --queue-url <url> --max-number-of-messages 10`. Two
+shapes arrive:
+
+- **From the event source mapping** — a description of a failed batch: the stream
+  ARN, the shard id, and the sequence number range it covers. The payloads are not
+  included; they are still in the Kinesis stream.
+- **From the function** — one message per skipped record, carrying `shardId`,
+  `sequenceNumber`, `partitionKey`, `eventID` and the record's `data` exactly as
+  Kinesis delivered it (base64). Decoding `data` shows what the producer sent,
+  which is usually enough to identify which client emitted it.
+
+To retrieve the original records for a failed batch, use the shard id and the
+first sequence number with `aws kinesis get-shard-iterator --shard-iterator-type
+AT_SEQUENCE_NUMBER` followed by `get-records`. **This is time-limited:** the call
+data stream keeps records for 24 hours, so a batch reported more than a day ago
+can no longer be read back from the stream — only the queue message and the
+function's log lines remain. Queue messages themselves are kept for 14 days.
+
+The matching log lines are in the `CallEventProcessor` log group: the function
+logs a warning naming the reporting decision (`reporting Kinesis batch item
+failures`) or the skip (`skipped Kinesis records that could not be decoded`) with
+the sequence numbers involved.
 
 ### Meeting Assistant Not Responding
 

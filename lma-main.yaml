@@ -1142,6 +1142,28 @@ Rules:
           BedrockKnowledgeBaseId is required when MeetingAssistService
           is 'STRANDS_BEDROCK_WITH_KB (Use Existing)'
 
+  # Meeting video arrives on a second WebSocket connection that only the task
+  # already hosting that meeting's audio session can attach, and the load
+  # balancer cannot pin a client to a task, so a multi-task transcriber service
+  # refuses video whenever the two connections land on different tasks. Rejecting
+  # the combination at deploy time turns a silent per-meeting failure into an
+  # error on the parameters page. TranscriberDesiredTaskCount has MinValue 1, so
+  # asserting equality with 1 is the same as asserting it is not greater.
+  TranscriberSingleTaskWhenVideoRecordingEnabled:
+    RuleCondition: !Equals [!Ref EnableVideoRecording, "true"]
+    Assertions:
+      - Assert: !Equals [!Ref TranscriberDesiredTaskCount, 1]
+        AssertDescription:
+          TranscriberDesiredTaskCount must be 1 when EnableVideoRecording is
+          'true' — meeting video can only be attached by the task holding that
+          meeting's audio session. Set EnableVideoRecording to 'false' to run
+          more than one transcriber task.
+      - Assert: !Equals [!Ref TranscriberAutoScalingEnabled, "false"]
+        AssertDescription:
+          TranscriberAutoScalingEnabled must be 'false' when
+          EnableVideoRecording is 'true' — scaling out would place meeting video
+          connections on tasks that do not hold the matching audio session.
+
 Mappings:
   # Tuning defaults for the EXPERIMENTAL MicroVM ASR engine.
   #
@@ -2488,6 +2510,7 @@ Resources:
         Domain: "Default"
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
   CHATBUTTONCONFIGSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2499,6 +2522,7 @@ Resources:
       Parameters:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
   NOVASONICONFIGSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2510,6 +2534,7 @@ Resources:
       Parameters:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2743,6 +2768,7 @@ Resources:
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
         LogLevel: !Ref LogLevel
 
   WEBSOCKETTRANSCRIBERSTACK:

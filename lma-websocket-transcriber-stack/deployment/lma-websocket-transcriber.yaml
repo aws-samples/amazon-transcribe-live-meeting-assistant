@@ -1601,9 +1601,18 @@ Resources:
         # the task count is running.
         MaximumPercent: 200
         MinimumHealthyPercent: 100
-      # A stack update sets the running count back to this value; when auto
-      # scaling is enabled it adjusts again within a few minutes.
-      DesiredCount: !Ref TranscriberDesiredTaskCount
+      # Left unset when auto scaling is enabled, so that Application Auto
+      # Scaling is the only owner of the running count. Setting it here as well
+      # would make every stack update reset the service to this value and take
+      # away tasks that are hosting meetings — the outcome DisableScaleIn exists
+      # to avoid. With auto scaling off, CloudFormation owns the count as usual.
+      # On a create with auto scaling already enabled the service starts at zero
+      # tasks for the few seconds it takes the scalable target to register and
+      # raise it to TranscriberMinTaskCount.
+      DesiredCount: !If
+        - ShouldEnableTranscriberAutoScaling
+        - !Ref "AWS::NoValue"
+        - !Ref TranscriberDesiredTaskCount
       HealthCheckGracePeriodSeconds: 60
       EnableECSManagedTags: false
       LaunchType: FARGATE

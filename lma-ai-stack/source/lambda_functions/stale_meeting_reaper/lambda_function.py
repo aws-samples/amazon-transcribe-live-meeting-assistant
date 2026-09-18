@@ -46,6 +46,16 @@ work bounded. A meeting that started before the lookback window and is still
 open is not reaped, so the lookback wants to comfortably exceed the longest
 meeting a deployment expects.
 
+Work per run is bounded on both sides of the read path. The GSI cannot narrow the
+candidate set any further — it has no ``Status`` in its projection, and its
+projected ``UpdatedAt`` belongs to the ``cls#`` list row, which nothing stamps
+after the meeting starts — so every candidate costs part of a ``BatchGetItem``
+whether or not it turns out to be open. ``REAPER_MAX_CANDIDATES`` caps how many
+are read and ``REAPER_MAX_MEETINGS_PER_RUN`` caps how many END events are
+emitted. The query runs newest-first so that the meetings which have just crossed
+the cutoff — the ones a cap would otherwise starve — are always examined, and a
+truncated run is logged.
+
 Meetings still being processed by the upload pipeline are skipped. A batch
 Amazon Transcribe job on a long recording can easily run past the inactivity
 timeout without touching the meeting row, and ``upload_meeting_finalizer``
@@ -62,7 +72,7 @@ from aws_lambda_powertools import Logger
 from aws_lambda_powertools.utilities.typing import LambdaContext
 from boto3.dynamodb.conditions import Key
 from botocore.config import Config as BotoCoreConfig
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 if TYPE_CHECKING:
     from mypy_boto3_kinesis.client import KinesisClient
@@ -73,11 +83,15 @@ LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 CALL_DATA_STREAM_NAME = os.environ["CALL_DATA_STREAM_NAME"]
-# 0 disables the reaper without removing its resources.
-INACTIVITY_TIMEOUT_MINUTES = int(os.environ.get("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0"))
-LOOKBACK_DAYS = float(os.environ.get("REAPER_LOOKBACK_IN_DAYS", "7"))
+# 0 disables the reaper without removing its resources. int(float(...)) because
+# the CloudFormation Number type accepts a fractional value.
+INACTIVITY_TIMEOUT_MINUTES = int(
+    float(os.environ.get("MEETING_INACTIVITY_TIMEOUT_IN_MINUTES", "0"))
+)
+LOOKBACK_DAYS = float(os.environ.get("REAPER_LOOKBACK_IN_DAYS", "2"))
 # Bounds the work a single invocation does; the next scheduled run continues.
-MAX_MEETINGS_PER_RUN = int(os.environ.get("REAPER_MAX_MEETINGS_PER_RUN", "100"))
+MAX_CANDIDATES = int(float(os.environ.get("REAPER_MAX_CANDIDATES", "500")))
+MAX_MEETINGS_PER_RUN = int(float(os.environ.get("REAPER_MAX_MEETINGS_PER_RUN", "100")))
 
 CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 DYNAMODB_RESOURCE = boto3.resource("dynamodb", config=CLIENT_CONFIG)
@@ -91,8 +105,11 @@ OPEN_STATUSES = frozenset({"STARTED", "TRANSCRIBING"})
 ACTIVE_UPLOAD_JOB_STATUSES = frozenset({"CREATED", "PENDING", "UPLOADED", "TRANSCRIBING"})
 # DynamoDB BatchGetItem hard limit.
 BATCH_GET_LIMIT = 100
-# Pages of GSI results a single invocation reads.
-MAX_QUERY_PAGES = 20
+# Items per GSI page. Kept at the BatchGetItem batch size so a page of candidates
+# maps onto one read request.
+QUERY_PAGE_SIZE = 50
+# Attempts to re-request keys DynamoDB returned as unprocessed.
+MAX_BATCH_GET_ATTEMPTS = 5
 DEFAULT_OWNER = "system@lma.aws"
 
 
@@ -135,7 +152,13 @@ def _call_id_from_list_row(row: Dict[str, Any]) -> Optional[str]:
 
 
 def _query_candidate_call_ids(window_start: datetime, cutoff: datetime) -> List[str]:
-    """List meeting ids whose meeting-list row falls in the candidate window."""
+    """List meeting ids whose meeting-list row falls in the candidate window.
+
+    Newest first, and never more than ``MAX_CANDIDATES``: a meeting becomes a
+    candidate the moment it crosses the cutoff, which puts it at the newest end
+    of the window, so reading that end first means a cap can only drop meetings
+    that earlier runs already examined.
+    """
     table = DYNAMODB_RESOURCE.Table(EVENT_SOURCING_TABLE)
     key_condition = Key("ItemType").eq(ITEM_TYPE_CALL) & Key("SK").between(
         f"ts#{window_start.isoformat()}",
@@ -145,10 +168,13 @@ def _query_candidate_call_ids(window_start: datetime, cutoff: datetime) -> List[
     call_ids: List[str] = []
     seen = set()
     last_key = None
-    for _page in range(MAX_QUERY_PAGES):
+    truncated = False
+    while len(call_ids) < MAX_CANDIDATES:
         query_kwargs: Dict[str, Any] = {
             "IndexName": TYPE_DATE_INDEX,
             "KeyConditionExpression": key_condition,
+            "Limit": min(QUERY_PAGE_SIZE, MAX_CANDIDATES - len(call_ids)),
+            "ScanIndexForward": False,
         }
         if last_key:
             query_kwargs["ExclusiveStartKey"] = last_key
@@ -162,9 +188,14 @@ def _query_candidate_call_ids(window_start: datetime, cutoff: datetime) -> List[
         if not last_key:
             break
     else:
+        truncated = True
+
+    # Only a run that stopped at the cap *and* still had pages left has skipped
+    # anything; filling the cap exactly on the last page has not.
+    if truncated and last_key:
         LOGGER.warning(
-            "candidate query page limit reached; remaining meetings are left for the next run",
-            extra={"page_limit": MAX_QUERY_PAGES, "candidates": len(call_ids)},
+            "candidate limit reached; older meetings in the window were not examined this run",
+            extra={"max_candidates": MAX_CANDIDATES, "candidates": len(call_ids)},
         )
     return call_ids
 
@@ -193,7 +224,7 @@ def _batch_get_rows(call_ids: List[str]) -> Dict[str, Dict[str, Any]]:
                 "ConsistentRead": True,
             }
         }
-        for _attempt in range(5):
+        for _attempt in range(MAX_BATCH_GET_ATTEMPTS):
             response = client.batch_get_item(RequestItems=request)
             for item in response.get("Responses", {}).get(EVENT_SOURCING_TABLE, []):
                 primary_key = item.get("PK")
@@ -203,6 +234,17 @@ def _batch_get_rows(call_ids: List[str]) -> Dict[str, Dict[str, Any]]:
             if not unprocessed or not unprocessed.get("Keys"):
                 break
             request = {EVENT_SOURCING_TABLE: unprocessed}
+        else:
+            # Throttling that outlasts the retries would otherwise silently
+            # shrink the candidate set, making the run look like it found
+            # nothing to do. The next scheduled run re-examines these meetings.
+            LOGGER.warning(
+                "gave up re-requesting unprocessed keys; some meetings were not examined this run",
+                extra={
+                    "attempts": MAX_BATCH_GET_ATTEMPTS,
+                    "unprocessed_keys": len(request[EVENT_SOURCING_TABLE].get("Keys", [])),
+                },
+            )
     return rows
 
 
@@ -276,7 +318,10 @@ def handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
         call_id = call_row["PK"][len("c#") :]
         try:
             _emit_end_event(call_row)
-        except ClientError:
+        except (ClientError, BotoCoreError):
+            # One meeting's END event failing must not abandon the rest of the
+            # run; BotoCoreError covers parameter and endpoint problems as well
+            # as the service errors ClientError carries.
             failed += 1
             LOGGER.exception("could not emit END event", extra={"call_id": call_id})
             continue

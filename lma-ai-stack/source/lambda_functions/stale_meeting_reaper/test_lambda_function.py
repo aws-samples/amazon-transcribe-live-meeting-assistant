@@ -75,31 +75,59 @@ def upload_job_row(call_id: str, status: str) -> dict:
 class FakeTable:
     """Returns the configured list rows for any TypeDateIndex query."""
 
-    def __init__(self, list_rows, recorded_queries):
-        self._list_rows = list_rows
+    def __init__(self, pages, recorded_queries):
+        self._pages = pages
         self._recorded_queries = recorded_queries
 
     def query(self, **kwargs):
         self._recorded_queries.append(kwargs)
-        return {"Items": list(self._list_rows)}
+        start_key = kwargs.get("ExclusiveStartKey")
+        page_index = int(start_key["page"]) if start_key else 0
+        items = self._pages[page_index] if page_index < len(self._pages) else []
+        response = {"Items": list(items)}
+        if page_index + 1 < len(self._pages):
+            response["LastEvaluatedKey"] = {"page": page_index + 1}
+        return response
 
 
 class FakeClient:
-    def __init__(self, items_by_pk):
+    """BatchGetItem fake that can withhold keys as unprocessed.
+
+    ``unprocessed_rounds`` is how many responses hold the batch's first key back
+    in ``UnprocessedKeys`` before answering in full, mimicking a throttled table.
+    """
+
+    def __init__(self, items_by_pk, unprocessed_rounds=0):
         self._items_by_pk = items_by_pk
+        self._unprocessed_rounds = unprocessed_rounds
+        self.call_count = 0
 
     def batch_get_item(self, RequestItems):  # noqa: N803 — boto3 parameter name
+        self.call_count += 1
         keys = RequestItems[TABLE_NAME]["Keys"]
+        if self._unprocessed_rounds > 0 and keys:
+            self._unprocessed_rounds -= 1
+            withheld, answered = keys[:1], keys[1:]
+            found = [self._items_by_pk[k["PK"]] for k in answered if k["PK"] in self._items_by_pk]
+            return {
+                "Responses": {TABLE_NAME: found},
+                "UnprocessedKeys": {TABLE_NAME: {"Keys": withheld, "ConsistentRead": True}},
+            }
         found = [self._items_by_pk[k["PK"]] for k in keys if k["PK"] in self._items_by_pk]
         return {"Responses": {TABLE_NAME: found}}
 
 
 class FakeDynamoDbResource:
-    def __init__(self, list_rows, items):
+    def __init__(self, list_rows, items, unprocessed_rounds=0):
         self.recorded_queries = []
-        self._table = FakeTable(list_rows, self.recorded_queries)
+        # A flat list of rows is the single-page case; a list of lists is paged.
+        pages = list_rows if list_rows and isinstance(list_rows[0], list) else [list_rows]
+        self._table = FakeTable(pages, self.recorded_queries)
         self.meta = MagicMock()
-        self.meta.client = FakeClient({item["PK"]: item for item in items})
+        self.meta.client = FakeClient(
+            {item["PK"]: item for item in items},
+            unprocessed_rounds=unprocessed_rounds,
+        )
 
     def Table(self, name):  # noqa: N802 — boto3 method name
         assert name == TABLE_NAME
@@ -130,8 +158,8 @@ class FakeKinesisClient:
 def run_reaper_fixture(monkeypatch):
     """Runs the handler against fake AWS clients and returns (summary, kinesis)."""
 
-    def _run(list_rows, items, fail_for_call_ids=()):
-        dynamodb = FakeDynamoDbResource(list_rows, items)
+    def _run(list_rows, items, fail_for_call_ids=(), unprocessed_rounds=0):
+        dynamodb = FakeDynamoDbResource(list_rows, items, unprocessed_rounds=unprocessed_rounds)
         kinesis = FakeKinesisClient(fail_for_call_ids)
         monkeypatch.setattr(reaper, "DYNAMODB_RESOURCE", dynamodb)
         monkeypatch.setattr(reaper, "KINESIS_CLIENT", kinesis)
@@ -272,6 +300,81 @@ def test_run_is_capped_at_the_per_invocation_maximum(run_reaper, monkeypatch):
     assert summary["stale"] == 5
     assert summary["ended"] == 2
     assert len(kinesis.records) == 2
+
+
+def test_candidates_are_collected_across_query_pages(run_reaper):
+    """A candidate on the second page is examined like one on the first."""
+    pages = [[list_row("page-one-stale")], [list_row("page-two-stale")]]
+    summary, kinesis, dynamodb = run_reaper(
+        pages,
+        [
+            call_row("page-one-stale", updated_minutes_ago=TIMEOUT_MINUTES + 10),
+            call_row("page-two-stale", updated_minutes_ago=TIMEOUT_MINUTES + 10),
+        ],
+    )
+
+    assert len(dynamodb.recorded_queries) == 2
+    assert dynamodb.recorded_queries[1]["ExclusiveStartKey"] == {"page": 1}
+    assert summary["candidates"] == 2
+    assert {r["payload"]["CallId"] for r in kinesis.records} == {
+        "page-one-stale",
+        "page-two-stale",
+    }
+
+
+def test_candidate_reads_stop_at_the_candidate_cap(run_reaper, monkeypatch):
+    """Reads are bounded even when the window holds more meetings than the cap."""
+    monkeypatch.setattr(reaper, "MAX_CANDIDATES", 1)
+    pages = [[list_row("newest")], [list_row("older")]]
+    summary, kinesis, dynamodb = run_reaper(
+        pages,
+        [
+            call_row("newest", updated_minutes_ago=TIMEOUT_MINUTES + 10),
+            call_row("older", updated_minutes_ago=TIMEOUT_MINUTES + 10),
+        ],
+    )
+
+    assert len(dynamodb.recorded_queries) == 1
+    assert summary["candidates"] == 1
+    assert [r["payload"]["CallId"] for r in kinesis.records] == ["newest"]
+
+
+def test_the_newest_candidates_are_read_first(run_reaper):
+    """A meeting crosses the cutoff at the newest end of the window."""
+    _, _, dynamodb = run_reaper(
+        [list_row("abandoned")],
+        [call_row("abandoned", updated_minutes_ago=TIMEOUT_MINUTES + 10)],
+    )
+
+    assert dynamodb.recorded_queries[0]["ScanIndexForward"] is False
+    assert dynamodb.recorded_queries[0]["Limit"] > 0
+
+
+def test_a_key_returned_as_unprocessed_is_requested_again(run_reaper):
+    summary, kinesis, dynamodb = run_reaper(
+        [list_row("throttled")],
+        [call_row("throttled", updated_minutes_ago=TIMEOUT_MINUTES + 10)],
+        unprocessed_rounds=1,
+    )
+
+    assert dynamodb.meta.client.call_count == 2
+    assert summary["ended"] == 1
+    assert kinesis.records[0]["payload"]["CallId"] == "throttled"
+
+
+def test_keys_left_unprocessed_are_logged_rather_than_silently_dropped(run_reaper):
+    """Sustained throttling must not make a run look like it found nothing."""
+    with patch.object(reaper.LOGGER, "warning") as warning:
+        summary, kinesis, dynamodb = run_reaper(
+            [list_row("throttled")],
+            [call_row("throttled", updated_minutes_ago=TIMEOUT_MINUTES + 10)],
+            unprocessed_rounds=99,
+        )
+
+    assert dynamodb.meta.client.call_count == reaper.MAX_BATCH_GET_ATTEMPTS
+    assert summary["ended"] == 0
+    assert kinesis.records == []
+    assert warning.call_count == 1
 
 
 def test_candidate_query_upper_bound_is_the_inactivity_cutoff(run_reaper):
