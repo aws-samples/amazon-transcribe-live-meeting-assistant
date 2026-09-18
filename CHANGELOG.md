@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Viewing a Virtual Participant's live desktop now requires a token minted for that participant.** Before the viewer connects, the UI calls a new `createVncEdgeToken(vpId)` mutation (or `createMicrovmVncToken(vpId)` under `VPLaunchType=MICROVM`), which confirms the caller's access to that Virtual Participant — owner, a user it was shared with, or an `Admin` — and returns a short-lived token scoped to that participant's live-view path and port. On the ECS launch types a Lambda@Edge function on the CloudFront `/vnc/*` behaviour checks the token's signature, expiry and participant before the request reaches the load balancer, and the load balancer forwards only requests carrying this deployment's own origin-verify header. The Virtual Participant's VNC server additionally requires a credential, generated on each boot and published on that participant's own record, which the mutation returns to an authorized viewer. No new parameters and no manual steps; see [Virtual Participant](docs/virtual-participant.md#how-a-viewer-is-authorized). ([#673](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/pull/673))
+
+  Two notes when upgrading. Virtual Participants already running when the stack updates have no credential on their record; the viewer connects to them as before, and participants started afterwards publish one. Under `MICROVM` the framebuffer's new loopback binding takes effect only once the MicroVM snapshot is rebuilt, which happens on the next image build.
+
 ## [0.3.8] - 2026-09-02
 
 ### Fixed

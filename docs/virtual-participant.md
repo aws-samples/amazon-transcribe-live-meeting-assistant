@@ -18,6 +18,7 @@ title: "Virtual Participant"
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
   - [How a viewer is authorized](#how-a-viewer-is-authorized)
+    - [Known limitations](#known-limitations)
 - [Launch Types](#launch-types)
   - [MicroVM launch type (default)](#microvm-launch-type-default)
 - [EC2 Instance Types](#ec2-instance-types)
@@ -162,24 +163,75 @@ calls depends on the launch type:
 | `EC2` / `FARGATE` | `createVncEdgeToken(vpId)` | Token passed as the `token` query parameter on `wss://<cloudfront>/vnc/<vpId>` |
 
 For the ECS launch types the token is `base64url(payload).base64url(HMAC-SHA256(payload))`.
-The payload names the `vpId`, the `/vnc/<vpId>` path prefix, the target port, and an
-expiry a few minutes out. A Lambda@Edge viewer-request function on the CloudFront
-`/vnc/*` behavior recomputes the MAC and forwards the request only when the signature
-matches, the expiry is in the future, and the `vpId` in the payload is the one in the
-request path — so one token opens one participant's view, for a few minutes. The signing
-key is generated per deployment into AWS Secrets Manager and read only by the minting
-resolver and the edge function; the edge function fetches it once per cold start from the
-stack's home region (Lambda@Edge takes no environment variables and supports no layers,
-so the secret ARN and region are substituted into its source at deploy time) and refuses
-the request if it cannot read it. Both mutations mint on demand per viewer session, so
-the viewer's existing auto-reconnect simply mints again.
+The payload names the `vpId`, the `/vnc/<vpId>` path, the target port, and an expiry a few
+minutes out. A Lambda@Edge viewer-request function on the CloudFront `/vnc/*` behavior
+recomputes the MAC and forwards the request only when the signature matches, the expiry is
+inside the permitted window, and both the `vpId` and the path in the payload equal the ones
+in the request. The signing key is generated per deployment into AWS Secrets Manager and
+read only by the minting resolver and the edge function; the edge function fetches it once
+per cold start from the stack's home region (Lambda@Edge takes no environment variables and
+supports no layers, so the secret ARN and region are substituted into its source at deploy
+time) and refuses the request if it cannot read it. Both mutations mint on demand per viewer
+session, so the viewer's existing auto-reconnect simply mints again.
+
+This is one of two controls, not the whole of it. The edge function sees only traffic that
+arrives through this deployment's CloudFront distribution, so on its own it confines a
+viewer to one participant's view only for requests that took that route. The credential
+below is what applies regardless of the route taken, which is why both are in place.
 
 **2. A credential for the VNC server.** On the ECS launch types the VP generates a
 random VNC credential when it boots and publishes it on its own record; the
 `createVncEdgeToken` response carries it back to the already-authorized viewer, which
 supplies it to the server. The credential belongs to one task and is replaced on every
-boot. Under `MICROVM` the framebuffer is not reachable from outside the VM at all and the
-port-scoped auth token is the only route in, so there is no per-task credential there.
+boot. Under `MICROVM` the VP runs as a pre-snapshot stack at image-build time, where
+there is no per-meeting record to publish a credential to and any credential would be
+captured in the snapshot and shared by every launch; there the framebuffer is bound to the
+VM's loopback interface and the port-scoped auth token is the only route in.
+
+On the load balancer side, the CloudFront distribution attaches a per-deployment
+origin-verify header to every request it sends to the VNC load balancer, and the listener
+forwards only requests carrying it — anything else gets a 403. The load balancer's security
+group also admits only CloudFront's `com.amazonaws.global.cloudfront.origin-facing`
+managed prefix list, which is a useful coarse filter but is shared by every CloudFront
+distribution in every account, so it establishes that a request came from CloudFront rather
+than from this distribution. The header is what distinguishes them.
+
+> **If you are upgrading:** under `MICROVM`, the framebuffer's loopback binding is applied
+> in `entrypoint.sh`, which runs at image-build time — so it takes effect only once the
+> MicroVM snapshot is rebuilt, on the next image build. Existing snapshots keep the previous
+> binding until then. The port-scoped auth token is unaffected and applies immediately.
+
+#### Known limitations
+
+These are current trade-offs rather than oversights, recorded so they are visible when
+planning changes to this path.
+
+**The ECS token is a bearer credential in a URL.** Browsers cannot set headers on a
+WebSocket handshake, so the token travels as the `token` query parameter, and the `/vnc/*`
+behavior sets `ForwardedValues: QueryString: true`. It therefore appears in CloudFront
+access logs and in browser history, and it is a bearer credential — valid for whoever
+presents it, with nothing binding it to the browser it was minted for. Its few-minute
+lifetime and the VNC server credential are what bound that. The MicroVM path avoids
+carrying the token in the URL at all, by passing it as a WebSocket
+subprotocol, which is the same trick applied to a different endpoint. The same approach
+could in principle be used here, but websockify would have to be configured to accept and
+ignore the extra subprotocol, and the edge function would have to read it from the
+`Sec-WebSocket-Protocol` header instead of the query string; that has not been done.
+
+**The edge function calls Secrets Manager cross-region on a cold start.** A viewer-request
+trigger is capped at 5 seconds and 128 MB, and the signing key lives in one region while
+the function runs replicated in whichever edge region is nearest the viewer. The call is
+made once per container and cached for its lifetime, and the function refuses the request
+if it cannot complete — so the failure mode is a viewer in a distant region intermittently
+being unable to open the live view, not an unchecked request. Lambda@Edge cannot be
+pre-warmed. Worth watching after a first deployment.
+
+**Rotating the signing key requires a deliberate rollover.** The key is cached for the life
+of each edge container with no TTL, and nothing rotates it on a schedule. Replacing the
+secret's value therefore leaves already-warm replicas verifying against the previous key and
+rejecting newly minted tokens, for as long as those containers live — an interval that is
+not bounded by anything in the design. A rotation needs either a tolerated window of
+failures or a change that lets the function hold more than one key.
 
 ## Launch Types
 
