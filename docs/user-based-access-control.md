@@ -11,6 +11,7 @@ title: "User-Based Access Control"
 - [Non-Admin User](#non-admin-user)
 - [Authorized Account Email Domain](#authorized-account-email-domain)
 - [Meeting Sharing](#meeting-sharing)
+- [Recording Playback](#recording-playback)
 - [Meeting Deletion](#meeting-deletion)
 - [Upgrading from v0.1.9 or Earlier](#upgrading-from-v019-or-earlier)
 - [Service Limits](#service-limits)
@@ -89,6 +90,30 @@ Different users see different meeting lists based on ownership and sharing:
 ![User 1 meeting view](../lma-ai-stack/images/meeting-sharing-view-user-1.png)
 
 ![User 2 meeting view](../lma-ai-stack/images/meeting-sharing-view-user-2.png)
+
+## Recording Playback
+
+Meeting *metadata* — the meeting list, transcript segments, summaries and meeting-assistant
+history — is served by the AppSync GraphQL API, and the owner / shared-with rules described
+above are applied there before any result is returned.
+
+The audio and video *recordings* travel on a separate path. The meeting record stores the
+recording's S3 location, and the web UI's players sign their own `GET` for that object using
+the browser's Amazon Cognito identity-pool credentials, reading the media directly from S3
+rather than through AppSync or CloudFront. A signed link is generated when playback starts
+and is short-lived.
+
+Those identity-pool credentials come from the `CognitoAuthorizedRole` in
+`lma-cognito-stack`, whose S3 grant is limited to the two key prefixes the players read —
+the audio recordings prefix (`lma-audio-recordings/`) and the video recordings prefix
+(`lma-video-recordings/`). The other prefixes in the recordings bucket, such as
+`lma-transcripts/`, `lma-uploads-pending/` and `lma-video-chunks/`, are reachable only by
+the backend roles that own them. If a future release adds another prefix that the players
+read, that prefix has to be added to the same grant.
+
+If your organisation requires recording playback to be governed by the same per-meeting
+decision as the metadata, plan for that decision to be applied where the playback link is
+produced, which today is the web UI.
 
 ## Meeting Deletion
 
