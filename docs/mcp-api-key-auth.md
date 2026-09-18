@@ -46,6 +46,17 @@ Users generate personal API keys from the LMA UI (MCP Servers Configuration page
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Connecting with a User Identity
+
+Every tool the MCP server exposes is scoped to the calling user: a request returns that user's meetings, and the scope widens to all meetings in the account only for a member of the **Admin** group. The function therefore needs to know who is calling on every request, and both supported paths supply that:
+
+- **API key path** — the REQUEST authorizer resolves the key to `{ userId, username, isAdmin }` and API Gateway passes it to the function in the request context.
+- **OAuth (3LO) path** — the BedrockAgentCore Gateway validates the caller's JWT and forwards the claims, which provide `sub`, `cognito:username` and `cognito:groups`.
+
+If a request arrives on the gateway path carrying no claims, `MCPServerAnalyticsFunction` answers `403` with a message naming the API key endpoint, rather than choosing a caller on the request's behalf. A client that gets that response should connect to the `MCPServerApiKeyEndpoint` REST endpoint with a personal API key instead — that path carries a user identity on every call. See [Key Generation Flow](#key-generation-flow) and [Connecting from Quick Suite](#connecting-from-quick-suite).
+
+Group membership is read from the `cognito:groups` claim, which Cognito supplies either as a list or as a comma-separated string; both are accepted, and the comparison is an exact match on a whole group name (a group called `Administrators`, for instance, is not the `Admin` group).
+
 ## Request Flow (API Key Path)
 
 ```
@@ -89,7 +100,7 @@ User clicks "Generate API Key" on MCP Servers Configuration page
 | `lma-ai-stack/source/appsync/schema.graphql` | MCPApiKey type, GenerateMCPApiKeyOutput type, generateMCPApiKey/revokeMCPApiKey mutations, listMCPApiKeys query |
 | `lma-ai-stack/source/lambda_functions/mcp_api_key_authorizer/index.py` | REQUEST authorizer — accepts both `Authorization: Bearer` and `x-api-key` headers, hashes token, DynamoDB lookup, returns IAM policy + user context |
 | `lma-ai-stack/source/lambda_functions/mcp_api_key_manager/index.py` | AppSync resolver — generate/list/revoke per-user API keys, one key per user enforced |
-| `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | MCP JSON-RPC 2.0 protocol handler (initialize, tools/list, tools/call, ping) for API Gateway path; BedrockAgentCore path unchanged |
+| `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | MCP JSON-RPC 2.0 protocol handler (initialize, tools/list, tools/call, ping) for the API Gateway path; on the BedrockAgentCore path, resolves the caller from the forwarded claims (see [Connecting with a User Identity](#connecting-with-a-user-identity)) |
 | `lma-ai-stack/source/ui/src/graphql/mutations.js` | generateMCPApiKey, revokeMCPApiKey, listMCPApiKeys GraphQL operations |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPApiKeySection.jsx` | Cloudscape UI component for key management |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPServersPage.jsx` | Integrated MCPApiKeySection at top of page |
@@ -152,7 +163,8 @@ Located on the **MCP Servers Configuration** page (`/configuration/mcp-servers`)
 - "Generate API Key" button (disabled when a key already exists)
 - Generated key shown in a modal with CopyToClipboard and warning it won't be shown again
 - "Revoke" button with confirmation modal
-- Currently on the admin-only Configuration page; consider making accessible to all users
+- The **Hosted MCP Access** tab, including this API key container, is available to every signed-in user; the **External MCP Servers** tab on the same page is read-only for users outside the Admin group (see [MCP Servers › Admin UI](mcp-servers.md#admin-ui))
+- The left navigation still lists **Configuration › MCP Servers** for Admin users only, so a non-admin user needs the direct link (`/#/configuration/mcp-servers`) to reach their API key. Surfacing the link for all users is a follow-up.
 
 ## Security Considerations
 
