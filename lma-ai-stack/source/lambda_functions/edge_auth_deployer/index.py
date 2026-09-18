@@ -1,7 +1,13 @@
 """
 Custom Resource Lambda to deploy Lambda@Edge function in us-east-1.
-This function creates, updates, and deletes the Lambda@Edge function
-that validates Cognito tokens for VNC WebSocket connections.
+This function creates, updates, and deletes the Lambda@Edge viewer-request
+function that authorizes /vnc/* requests on the CloudFront distribution.
+
+The edge function's source is held here as a string literal and zipped in
+memory, because Lambda@Edge supports neither layers nor environment variables:
+its configuration (the signing secret's ARN and home region) is substituted into
+the code at stack create/update time, and it must run on the Python runtime's
+own modules alone.
 """
 
 import io
@@ -51,180 +57,178 @@ def send(
         print(f"send(..) failed executing request: {e}")
 
 
-# Lambda@Edge function code
+# Lambda@Edge function code.
+#
+# Substituted and zipped by this deployer at stack create/update time. Uses only
+# the Python runtime's own modules: Lambda@Edge cannot attach layers.
 EDGE_FUNCTION_CODE = '''
-import json
 import base64
-import urllib.request
-from datetime import datetime
+import hashlib
+import hmac
+import json
+import time
+import urllib.parse
 
-# Cache for JWKS keys (in-memory, persists across warm starts)
-jwks_cache = {}
+import boto3
 
-def get_jwks(region, user_pool_id):
-    """Fetch JWKS from Cognito User Pool"""
-    cache_key = f"{region}:{user_pool_id}"
-    if cache_key in jwks_cache:
-        return jwks_cache[cache_key]
-    
-    jwks_url = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}/.well-known/jwks.json"
-    
+# Injected by the deployer. Lambda@Edge has no environment variables, so the
+# configuration is baked into the code.
+SIGNING_SECRET_ARN = "SIGNING_SECRET_ARN_PLACEHOLDER"
+SIGNING_SECRET_REGION = "SIGNING_SECRET_REGION_PLACEHOLDER"
+
+# Upper bound on how far ahead a token's expiry may sit. The minter issues a few
+# minutes; this ceiling is checked here as well so the edge does not depend on the
+# minter having done so, and it is what rejects an expiry of Infinity.
+MAX_TOKEN_LIFETIME_SECONDS = 3600
+
+# One cached copy per warm container. The secret is generated once per
+# deployment, so there is nothing to refresh.
+_signing_secret = []
+
+
+def get_signing_secret():
+    """The deployment's signing secret, or None when it cannot be read."""
+    if _signing_secret:
+        return _signing_secret[0]
     try:
-        with urllib.request.urlopen(jwks_url) as response:
-            jwks = json.loads(response.read().decode())
-            jwks_cache[cache_key] = jwks
-            return jwks
-    except Exception as e:
-        print(f"Error fetching JWKS: {e}")
+        # Lambda@Edge runs replicated in the edge location nearest the viewer, so
+        # the region holding the secret has to be named explicitly rather than
+        # inherited from the execution environment.
+        client = boto3.client("secretsmanager", region_name=SIGNING_SECRET_REGION)
+        secret = client.get_secret_value(SecretId=SIGNING_SECRET_ARN)["SecretString"]
+    except Exception as exc:
+        print("Could not read the signing secret: %s" % type(exc).__name__)
         return None
+    _signing_secret.append(secret)
+    return secret
 
-def decode_token(token):
-    """Decode JWT token without verification (just to extract claims)"""
-    try:
-        # Split token into parts
-        parts = token.split('.')
-        if len(parts) != 3:
-            return None
-        
-        # Decode payload (add padding if needed)
-        payload = parts[1]
-        padding = 4 - len(payload) % 4
-        if padding != 4:
-            payload += '=' * padding
-        
-        decoded = base64.urlsafe_b64decode(payload)
-        return json.loads(decoded)
-    except Exception as e:
-        print(f"Error decoding token: {e}")
-        return None
 
-def validate_token(token, region, user_pool_id, client_id):
-    """Validate Cognito JWT token"""
-    try:
-        # Decode token to get claims
-        claims = decode_token(token)
-        if not claims:
-            print("Failed to decode token")
-            return False
-        
-        print(f"Token claims: {json.dumps(claims)}")
-        
-        # Check expiration
-        exp = claims.get('exp', 0)
-        if exp < datetime.utcnow().timestamp():
-            print(f"Token expired: {exp}")
-            return False
-        
-        # Check issuer
-        expected_issuer = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}"
-        if claims.get('iss') != expected_issuer:
-            print(f"Invalid issuer: {claims.get('iss')}")
-            return False
-        
-        # Check token_use (should be 'id' or 'access')
-        token_use = claims.get('token_use')
-        if token_use not in ['id', 'access']:
-            print(f"Invalid token_use: {token_use}")
-            return False
-        
-        # For ID tokens, check client_id
-        if token_use == 'id':
-            aud = claims.get('aud')
-            if aud != client_id:
-                print(f"Invalid audience: {aud}")
-                return False
-        
-        # For access tokens, check client_id in claims
-        if token_use == 'access':
-            token_client_id = claims.get('client_id')
-            if token_client_id != client_id:
-                print(f"Invalid client_id: {token_client_id}")
-                return False
-        
-        print("Token validation successful")
-        return True
-        
-    except Exception as e:
-        print(f"Token validation error: {e}")
-        return False
+def b64url_decode(value):
+    """Decode unpadded base64url."""
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
-def extract_token_from_cookies(cookies):
-    """Extract Cognito token from cookies"""
-    if not cookies:
-        return None
-    
-    # Look for common Cognito cookie patterns
-    cookie_names = [
-        'CognitoIdentityServiceProvider',
-        'idToken',
-        'accessToken',
-    ]
-    
-    for cookie in cookies:
-        cookie_str = cookie.get('value', '')
-        # Try to find token-like strings (JWT format: xxx.yyy.zzz)
-        parts = cookie_str.split('.')
-        if len(parts) == 3:
-            return cookie_str
-    
+
+def vp_id_from_uri(uri):
+    """The participant id in /vnc/<vpId>, or "" when the shape is unexpected."""
+    parts = uri.split("/")
+    if len(parts) < 3 or parts[1] != "vnc":
+        return ""
+    return parts[2]
+
+
+def token_from_querystring(querystring):
+    """The value of the `token` query parameter, or None."""
+    for param in (querystring or "").split("&"):
+        if "=" not in param:
+            continue
+        key, value = param.split("=", 1)
+        if key == "token":
+            return urllib.parse.unquote(value)
     return None
 
+
+def uri_is_plain(uri):
+    """True when the path is already in the form the token can be compared to.
+
+    CloudFront normalizes the path to pick a cache behavior but forwards the path
+    as the viewer sent it, so the string compared here is the one the origin will
+    receive. Paths carrying a relative segment, an encoded dot, or an empty
+    segment are refused outright rather than normalized: normalizing correctly is
+    the hard part, and this function's only job is to establish that the single
+    comparison below is the whole of the path check.
+    """
+    lowered = uri.lower()
+    return ".." not in lowered and "%2e" not in lowered and "//" not in lowered
+
+
+def verify_token(token, secret, vp_id, uri):
+    """True when the token is intact, unexpired, and issued for this exact path.
+
+    The MAC covers the encoded payload exactly as received, so the payload is
+    parsed only once the signature has been confirmed. The payload names one
+    participant and one path, and both are compared for equality, so a token is
+    usable on the single path it was issued for and no other.
+    """
+    parts = token.split(".")
+    if len(parts) != 2:
+        return False
+    payload_b64, signature_b64 = parts
+    try:
+        provided = b64url_decode(signature_b64)
+    except Exception:
+        return False
+    expected = hmac.new(
+        secret.encode("utf-8"), payload_b64.encode("utf-8"), hashlib.sha256
+    ).digest()
+    if not hmac.compare_digest(expected, provided):
+        return False
+    try:
+        payload = json.loads(b64url_decode(payload_b64))
+    except Exception:
+        return False
+    # Every read below assumes a mapping. A signed scalar would otherwise raise
+    # out of this function rather than returning a decision.
+    if not isinstance(payload, dict):
+        return False
+    try:
+        expiry = float(payload.get("exp", 0))
+    except (TypeError, ValueError):
+        return False
+    # Bounded on both sides, as a positive test, so the only values that pass are
+    # the ones that genuinely sit in the window. json accepts the bare literals
+    # NaN and Infinity and float() converts both: NaN fails every comparison, and
+    # Infinity orders after any clock reading, so an upper bound is what rejects
+    # it. The ceiling is deliberately looser than the minter's own lifetime -- it
+    # is a sanity bound held independently of the minter, not a copy of its
+    # policy.
+    now = time.time()
+    if not now < expiry <= now + MAX_TOKEN_LIFETIME_SECONDS:
+        return False
+    if not payload.get("vpId") or payload.get("vpId") != vp_id:
+        return False
+    prefix = payload.get("prefix")
+    if not prefix or uri != prefix:
+        return False
+    return True
+
+
+def deny(status, description, message):
+    return {
+        "status": status,
+        "statusDescription": description,
+        "body": message,
+        "headers": {"content-type": [{"key": "Content-Type", "value": "text/plain"}]},
+    }
+
+
 def lambda_handler(event, context):
-    """Lambda@Edge handler for viewer request"""
-    request = event['Records'][0]['cf']['request']
-    uri = request.get('uri', '')
-    querystring = request.get('querystring', '')
-    
-    print(f"Request URI: {uri}")
-    print(f"Query string: {querystring}")
-    
-    # Only validate /vnc/* paths
-    if not uri.startswith('/vnc/'):
-        print("Not a VNC path, allowing through")
+    """Viewer-request handler for the /vnc/* behavior.
+
+    Nothing here logs the token or the request URI: both identify a specific
+    viewing session, and CloudFront already records the request itself.
+    """
+    request = event["Records"][0]["cf"]["request"]
+    uri = request.get("uri", "")
+
+    # This behavior only matches /vnc/*, but the function passes anything else
+    # through untouched in case it is ever associated more widely.
+    if not uri.startswith("/vnc/"):
         return request
-    
-    # Extract token from query string parameter
-    token = None
-    if querystring:
-        # Parse query string to find token parameter
-        params = querystring.split('&')
-        for param in params:
-            if '=' in param:
-                key, value = param.split('=', 1)
-                if key == 'token':
-                    # URL decode the token
-                    import urllib.parse
-                    token = urllib.parse.unquote(value)
-                    break
-    
+
+    token = token_from_querystring(request.get("querystring", ""))
     if not token:
-        print("No token found in query string")
-        return {
-            'status': '401',
-            'statusDescription': 'Unauthorized',
-            'body': 'Authentication required - token parameter missing',
-            'headers': {
-                'content-type': [{'key': 'Content-Type', 'value': 'text/plain'}]
-            }
-        }
-    
-    # Validate token (config injected at deployment time)
-    region = "REGION_PLACEHOLDER"
-    user_pool_id = "USER_POOL_ID_PLACEHOLDER"
-    client_id = "CLIENT_ID_PLACEHOLDER"
-    
-    if not validate_token(token, region, user_pool_id, client_id):
-        print("Token validation failed")
-        return {
-            'status': '403',
-            'statusDescription': 'Forbidden',
-            'body': 'Invalid or expired token',
-            'headers': {
-                'content-type': [{'key': 'Content-Type', 'value': 'text/plain'}]
-            }
-        }
-    
-    print("Authentication successful, allowing request")
+        return deny("401", "Unauthorized", "Authentication required")
+
+    secret = get_signing_secret()
+    if not secret:
+        # Fail closed: with no secret, no token can be checked.
+        print("Denying /vnc request: signing secret unavailable")
+        return deny("403", "Forbidden", "Access denied")
+
+    vp_id = vp_id_from_uri(uri)
+    if not vp_id or not uri_is_plain(uri) or not verify_token(token, secret, vp_id, uri):
+        return deny("403", "Forbidden", "Access denied")
+
     return request
 '''
 
@@ -274,17 +278,17 @@ def wait_for_version_active(lambda_client, function_name, version):
         raise
 
 
+def render_edge_code(signing_secret_arn, signing_secret_region):
+    """The edge source with its deploy-time configuration substituted in."""
+    code = EDGE_FUNCTION_CODE.replace("SIGNING_SECRET_ARN_PLACEHOLDER", signing_secret_arn)
+    return code.replace("SIGNING_SECRET_REGION_PLACEHOLDER", signing_secret_region)
+
+
 def create_edge_function(
-    lambda_client, iam_client, function_name, role_arn, user_pool_id, region, client_id
+    lambda_client, function_name, role_arn, signing_secret_arn, signing_secret_region
 ):
     """Create Lambda@Edge function in us-east-1"""
-    # Replace placeholders in code
-    code = EDGE_FUNCTION_CODE.replace("REGION_PLACEHOLDER", region)
-    code = code.replace("USER_POOL_ID_PLACEHOLDER", user_pool_id)
-    code = code.replace("CLIENT_ID_PLACEHOLDER", client_id)
-
-    # Create zip file
-    zip_content = create_zip_file(code)
+    zip_content = create_zip_file(render_edge_code(signing_secret_arn, signing_secret_region))
 
     try:
         response = lambda_client.create_function(
@@ -293,7 +297,7 @@ def create_edge_function(
             Role=role_arn,
             Handler="index.lambda_handler",
             Code={"ZipFile": zip_content},
-            Description="Lambda@Edge function for VNC WebSocket authentication",
+            Description="Lambda@Edge viewer-request authorizer for the /vnc/* behavior",
             Timeout=5,
             MemorySize=128,
             Publish=True,  # Must publish for Lambda@Edge
@@ -323,19 +327,14 @@ def create_edge_function(
         if e.response["Error"]["Code"] == "ResourceConflictException":
             # Function already exists, update it
             return update_edge_function(
-                lambda_client, function_name, user_pool_id, region, client_id
+                lambda_client, function_name, signing_secret_arn, signing_secret_region
             )
         raise
 
 
-def update_edge_function(lambda_client, function_name, user_pool_id, region, client_id):
+def update_edge_function(lambda_client, function_name, signing_secret_arn, signing_secret_region):
     """Update existing Lambda@Edge function"""
-    code = EDGE_FUNCTION_CODE.replace("REGION_PLACEHOLDER", region)
-    code = code.replace("USER_POOL_ID_PLACEHOLDER", user_pool_id)
-    code = code.replace("CLIENT_ID_PLACEHOLDER", client_id)
-
-    # Create zip file
-    zip_content = create_zip_file(code)
+    zip_content = create_zip_file(render_edge_code(signing_secret_arn, signing_secret_region))
 
     # Make sure any previous in-flight update on $LATEST has finished before we
     # try to publish a new version (otherwise we can hit ResourceConflictException).
@@ -435,18 +434,22 @@ def handler(event, context):
         props = event["ResourceProperties"]
         function_name = props["FunctionName"]
         role_arn = props["RoleArn"]
-        user_pool_id = props["UserPoolId"]
-        region = props["Region"]
-        client_id = props["ClientId"]
+        # The secret lives in the stack's own region; the edge function runs
+        # replicated, so it has to be told where to look for it.
+        signing_secret_arn = props["SigningSecretArn"]
+        signing_secret_region = props["SigningSecretRegion"]
 
-        # Create clients for us-east-1
+        # Lambda@Edge functions must live in us-east-1
         lambda_client = boto3.client("lambda", region_name="us-east-1")
-        iam_client = boto3.client("iam", region_name="us-east-1")
 
         if event["RequestType"] in ["Create", "Update"]:
             # Create or update function
             function_arn = create_edge_function(
-                lambda_client, iam_client, function_name, role_arn, user_pool_id, region, client_id
+                lambda_client,
+                function_name,
+                role_arn,
+                signing_secret_arn,
+                signing_secret_region,
             )
 
             # Return the versioned ARN (required for Lambda@Edge)

@@ -38,6 +38,10 @@ import {
     normalizeErrorForLogging,
     getClientIP,
     resolveShouldRecordCall,
+    describeRequest,
+    stringifyCallMetaData,
+    redactTokenLike,
+    PINO_REDACT_OPTIONS,
 } from './utils';
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
@@ -102,6 +106,13 @@ const findAudioSessionByCallId = (
 const server = fastify({
     logger: {
         level: WS_LOG_LEVEL,
+        // Backstop for object-style log records only: pino's redact rewrites
+        // properties of the logged object and never inspects the rendered
+        // message. Every log line in this package is an interpolated string, so
+        // each one is redacted at its call site via describeRequest() /
+        // stringifyCallMetaData(); this config covers anything logged as an
+        // object, now or later.
+        redact: PINO_REDACT_OPTIONS,
         transport: {
             target: 'pino-pretty',
             options: {
@@ -126,9 +137,9 @@ server.addHook('onRequest', async (request, reply) => {
     if (!request.url.includes('health') && request.method !== 'OPTIONS') {
         const clientIP = getClientIP(request.headers);
         server.log.debug(
-            `[AUTH]: [${clientIP}] - Received onRequest hook for authentication. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(request.headers)}`
+            `[AUTH]: [${clientIP}] - Received onRequest hook for authentication. ${describeRequest(
+                request
+            )}`
         );
 
         await jwtVerifier(request, reply);
@@ -154,9 +165,9 @@ server.after(() => {
         (socket, request) => {
             const clientIP = getClientIP(request.headers);
             server.log.debug(
-                `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. URI: <${
-                    request.url
-                }>, Headers: ${JSON.stringify(request.headers)}`
+                `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. ${describeRequest(
+                    request
+                )}`
             );
 
             registerHandlers(clientIP, socket, request); // setup the handler functions for websocket events
@@ -183,10 +194,8 @@ server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
     const item = healthCheckStats.get(remoteIp);
     if (!item) {
         server.log.debug(
-            `[HEALTH CHECK]: [${remoteIp}] - Received First health check from load balancer. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(
-                request.headers
+            `[HEALTH CHECK]: [${remoteIp}] - Received First health check from load balancer. ${describeRequest(
+                request
             )} ==> Health Check status - CPU Usage%: ${cpuUsage}, IsHealthy: ${isHealthy}, Status: ${status}`
         );
         healthCheckStats.set(remoteIp, {
@@ -203,8 +212,8 @@ server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
             server.log.debug(
                 `[HEALTH CHECK]: [${remoteIp}] - Received Health check # ${
                     item.count
-                } from load balancer. URI: <${request.url}>, Headers: ${JSON.stringify(
-                    request.headers
+                } from load balancer. ${describeRequest(
+                    request
                 )} ==> Health Check status - CPU Usage%: ${cpuUsage}, IsHealthy: ${isHealthy}, Status: ${status}`
             );
         }
@@ -386,17 +395,21 @@ const onTextMessage = async (
         callMetaData = JSON.parse(data) as CallMetaData;
     } catch (parseErr) {
         // A truncated/garbled control frame is the client's problem, not grounds
-        // for tearing down every other call on this task.
+        // for tearing down every other call on this task. The serialized error can
+        // quote a fragment of the frame it failed on, so it goes through
+        // redactTokenLike() for the same reason the verifier errors do.
         server.log.error(
-            `[ON TEXT MESSAGE]: [${clientIP}] - Ignoring unparseable control frame: ${normalizeErrorForLogging(parseErr)}`
+            `[ON TEXT MESSAGE]: [${clientIP}] - Ignoring unparseable control frame: ${redactTokenLike(
+                normalizeErrorForLogging(parseErr)
+            )}`
         );
         return;
     }
     if (!match) {
         server.log.error(
-            `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(request.headers)}`
+            `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. ${describeRequest(
+                request
+            )}`
         );
 
         return;
@@ -404,20 +417,14 @@ const onTextMessage = async (
 
     const accessToken = match[1];
 
-    try {
-        server.log.debug(
-            `[ON TEXT MESSAGE]: [${clientIP}][${callMetaData.callId}] - Call Metadata received from client: ${data}`
-        );
-    } catch (error) {
-        server.log.error(
-            `[ON TEXT MESSAGE]: [${clientIP}][${
-                callMetaData.callId
-            }] - Error parsing call metadata: ${data} ${normalizeErrorForLogging(
-                error
-            )}`
-        );
-        callMetaData.callId = randomUUID();
-    }
+    // The parsed frame is logged rather than the raw `data` string: a client may
+    // put token fields in the control frame as well as in the query string, and
+    // stringifyCallMetaData drops those while keeping the rest of the metadata.
+    server.log.debug(
+        `[ON TEXT MESSAGE]: [${clientIP}][${
+            callMetaData.callId
+        }] - Call Metadata received from client: ${stringifyCallMetaData(callMetaData)}`
+    );
 
     callMetaData.accessToken = accessToken;
     callMetaData.idToken = idToken;
@@ -514,7 +521,7 @@ const onTextMessage = async (
             server.log.error(
                 `[${callMetaData.callEvent}]: [${
                     callMetaData.callId
-                }] - Invalid call metadata: ${JSON.stringify(callMetaData)}`
+                }] - Invalid call metadata: ${stringifyCallMetaData(callMetaData)}`
             );
         }
     } else if (callMetaData.callEvent === 'START_VIDEO') {
@@ -527,13 +534,11 @@ const onTextMessage = async (
             );
             return;
         }
-        // AUTHORIZATION. callId comes from the client and is guessable (the web
-        // UI builds it as "<meeting topic> - <timestamp>"), so accepting it on
-        // faith would let ANY authenticated user attach video to someone else's
-        // call — and, because the mux pulls in that call's audio WAV, would
-        // publish the victim's audio under an object the attacker can read.
-        // Require a LIVE audio session for this callId, owned by the same
-        // verified Cognito subject that opened it.
+        // AUTHORIZATION. A video stream is admitted for this callId only when
+        // there is a live audio session for the same callId AND that session's
+        // owner is the same verified Cognito subject as this caller. The callId
+        // in the frame is client-supplied and is not used as evidence of
+        // anything on its own; ownership comes from the verified token.
         const caller = getAuthenticatedCaller(request);
         const audioSession = findAudioSessionByCallId(callMetaData.callId);
         if (!audioSession) {
@@ -572,7 +577,7 @@ const onTextMessage = async (
             server.log.error(
                 `[${callMetaData.callEvent}]: [${
                     callMetaData.callId
-                }] - Received END without starting a call:  ${JSON.stringify(
+                }] - Received END without starting a call:  ${stringifyCallMetaData(
                     callMetaData
                 )}`
             );
@@ -581,7 +586,7 @@ const onTextMessage = async (
         server.log.debug(
             `[${callMetaData.callEvent}]: [${
                 callMetaData.callId
-            }] - Received call end event from client, writing it to KDS:  ${JSON.stringify(
+            }] - Received call end event from client, writing it to KDS:  ${stringifyCallMetaData(
                 callMetaData
             )}`
         );
@@ -613,7 +618,7 @@ const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
         server.log.debug(
             `[ON WSCLOSE]: [${
                 socketData.callMetadata.callId
-            }] - Writing call end event due to websocket close event ${JSON.stringify(
+            }] - Writing call end event due to websocket close event ${stringifyCallMetaData(
                 socketData.callMetadata
             )}`
         );
@@ -642,7 +647,7 @@ const endCall = async (
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${
                             callMetaData.callId
-                        }] - Audio Recording enabled. Writing to S3.: ${JSON.stringify(
+                        }] - Audio Recording enabled. Writing to S3.: ${stringifyCallMetaData(
                             callMetaData
                         )}`
                     );
@@ -713,7 +718,7 @@ const endCall = async (
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${
                             callMetaData.callId
-                        }] - Audio Recording disabled. Add s3 url event is not written to KDS. : ${JSON.stringify(
+                        }] - Audio Recording disabled. Add s3 url event is not written to KDS. : ${stringifyCallMetaData(
                             callMetaData
                         )}`
                     );
@@ -731,7 +736,7 @@ const endCall = async (
                 server.log.debug(
                     `[${callMetaData.callEvent}]: [${
                         callMetaData.callId
-                    }] - Closing audio input stream:  ${JSON.stringify(callMetaData)}`
+                    }] - Closing audio input stream:  ${stringifyCallMetaData(callMetaData)}`
                 );
                 socketData.audioInputStream.end();
                 socketData.audioInputStream.destroy();
@@ -753,7 +758,7 @@ const endCall = async (
                 server.log.debug(
                     `[${callMetaData.callEvent}]: [${
                         callMetaData.callId
-                    }] - Deleting websocket from map: ${JSON.stringify(callMetaData)}`
+                    }] - Deleting websocket from map: ${stringifyCallMetaData(callMetaData)}`
                 );
                 socketMap.delete(ws);
             }
@@ -765,7 +770,7 @@ const endCall = async (
             server.log.error(
                 `[${callMetaData.callEvent}]: [${
                     callMetaData.callId
-                }] - Duplicate End call event. Already received the end call event: ${JSON.stringify(
+                }] - Duplicate End call event. Already received the end call event: ${stringifyCallMetaData(
                     callMetaData
                 )}`
             );

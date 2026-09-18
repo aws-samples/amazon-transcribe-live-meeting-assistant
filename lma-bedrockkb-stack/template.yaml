@@ -219,6 +219,11 @@ Resources:
 
   S3VectorIndex:
     Type: AWS::S3Vectors::Index
+    # The vectors live in the index, not the bucket, so retaining the bucket on
+    # its own would leave an empty bucket behind and lose the embeddings. The
+    # index follows the same setting as the bucket that holds it.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     DependsOn:
       - S3VectorBucket
     Properties:
@@ -330,7 +335,10 @@ Resources:
     Type: AWS::Bedrock::DataSource
     Condition: IsS3DataSource
     Properties:
-      DataDeletionPolicy: DELETE
+      # Deleting the data source deletes the vectors it ingested unless this says
+      # otherwise, which would empty a retained index. Follows the stack's data
+      # retention setting so the three S3 Vectors resources agree.
+      DataDeletionPolicy: !If [ShouldRetainDataOnDelete, RETAIN, DELETE]
       DataSourceConfiguration:
         Type: S3
         S3Configuration:

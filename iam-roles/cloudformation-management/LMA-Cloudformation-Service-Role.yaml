@@ -8,6 +8,27 @@ Description: >
   service role to CloudFormation. The iam:PassRole policy must be attached to
   the user or role that will be using the CloudFormation Service Role in order
   to successfully pass the role.
+
+Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Recommended) ARN of an existing IAM managed policy to require as the permissions
+      boundary on every IAM role this service role creates. When set, iam:CreateRole,
+      iam:PutRolePolicy and iam:AttachRolePolicy are allowed only for roles that carry
+      this boundary, so the roles the LMA stacks create cannot hold more permission than
+      the boundary allows. Set the LMA stack's own PermissionsBoundaryArn parameter to the
+      same ARN so that every role the stacks define attaches it. Leave empty to keep the
+      previous behaviour, in which role creation is not constrained to a boundary.
+    AllowedPattern: '^(|arn:aws[a-zA-Z-]*:iam::\d{12}:policy/.+)$'
+    ConstraintDescription: >-
+      Must be empty, or the ARN of an IAM managed policy
+      (arn:aws:iam::<account-id>:policy/<policy-name>).
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
 Resources:
   CloudFormationServiceRole:
     Type: AWS::IAM::Role
@@ -62,16 +83,27 @@ Resources:
                   - serverlessrepo:CreateCloudFormationChangeSet
                   - serverlessrepo:GetApplication
                 Resource: '*'
+              # Role, policy and instance-profile lifecycle actions, granted
+              # unconditionally. Role CREATION and policy ATTACHMENT are not here;
+              # they are in the boundary-aware statement that follows.
+              #
+              # iam:DeleteRolePolicy and iam:DetachRolePolicy do support the
+              # iam:PermissionsBoundary condition key and are nonetheless left
+              # unconditioned on purpose: CloudFormation uses them when updating
+              # and deleting stacks, including for roles that predate the boundary
+              # or that never carried one (SAM implicit function roles never do).
+              # Conditioning them would leave those roles impossible to clean up
+              # and a stack delete unable to finish. The consequence to be aware
+              # of is that a boundary configured here constrains what the roles
+              # created through this service role may DO; it does not prevent this
+              # service role from detaching a policy from, or deleting, a role.
               - Sid: IAMRolesAndPolicies
                 Effect: Allow
                 Action:
-                  - iam:CreateRole
                   - iam:DeleteRole
                   - iam:GetRole
                   - iam:UpdateRole
-                  - iam:AttachRolePolicy
                   - iam:DetachRolePolicy
-                  - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
                   - iam:GetRolePolicy
                   - iam:ListRolePolicies
@@ -92,13 +124,73 @@ Resources:
                   - iam:RemoveRoleFromInstanceProfile
                   - iam:GetInstanceProfile
                 Resource: '*'
+              # Role creation and inline/managed policy attachment. When
+              # PermissionsBoundaryArn is supplied, the iam:PermissionsBoundary
+              # condition key ties all three actions to roles carrying that
+              # boundary: a role can only be created with it, and its policies can
+              # only be written while it still has it. The invariant this keeps is
+              # that every role reachable through this service role stays inside
+              # the boundary policy. The two branches are alternatives selected by
+              # HasPermissionsBoundary — with no boundary supplied the statement is
+              # the same as before, so the template stays usable as-is.
+              - !If
+                - HasPermissionsBoundary
+                - Sid: IAMCreateRoleAndAttachPoliciesWithinBoundary
+                  Effect: Allow
+                  Action:
+                    - iam:CreateRole
+                    - iam:PutRolePolicy
+                    - iam:AttachRolePolicy
+                    # Needed when a stack UPDATE adds the boundary to a role that
+                    # was created before it was configured; CreateRole sets the
+                    # boundary inline, so this is only reached on updates.
+                    - iam:PutRolePermissionsBoundary
+                    # And needed for the reverse update, so that going back to
+                    # PermissionsBoundaryArn="" can complete instead of failing
+                    # part-way through (a failed rollback here would leave the role
+                    # that deploys the whole solution in UPDATE_ROLLBACK_FAILED).
+                    #
+                    # Placing it inside this statement is INTENDED to restrict
+                    # removal to a role that currently carries exactly this
+                    # boundary, which is the only case the back-out needs. That
+                    # intent is not verified against a live account: whether IAM
+                    # populates iam:PermissionsBoundary in the request context for
+                    # this particular action was not established from the published
+                    # reference. If it does not, the condition never matches and the
+                    # grant is inert — in which case move this action to the
+                    # unconditioned statement above so that the revert can still
+                    # complete. Confirm on a throwaway account before relying on it.
+                    #
+                    # No paired explicit Deny: this template grants no iam:*
+                    # wildcard, so there is no broader grant of this action to claw
+                    # back, and a Deny here would block the back-out it exists to
+                    # enable.
+                    - iam:DeleteRolePermissionsBoundary
+                  Resource: '*'
+                  Condition:
+                    StringEquals:
+                      iam:PermissionsBoundary: !Ref PermissionsBoundaryArn
+                - Sid: IAMCreateRoleAndAttachPolicies
+                  Effect: Allow
+                  Action:
+                    - iam:CreateRole
+                    - iam:PutRolePolicy
+                    - iam:AttachRolePolicy
+                  Resource: '*'
+              # Application Auto Scaling creates its own service-linked role the
+              # first time an ECS scalable target is registered, so both service
+              # principals are listed.
               - Sid: IAMCreateServiceLinkedRole
                 Effect: Allow
                 Action: iam:CreateServiceLinkedRole
-                Resource: !Sub 'arn:${AWS::Partition}:iam::*:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::*:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS'
+                  - !Sub 'arn:${AWS::Partition}:iam::*:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
                 Condition:
                   StringEquals:
-                    iam:AWSServiceName: ecs.amazonaws.com
+                    iam:AWSServiceName:
+                      - ecs.amazonaws.com
+                      - ecs.application-autoscaling.amazonaws.com
               - Sid: IAMPassRole
                 Effect: Allow
                 Action:
@@ -147,6 +239,20 @@ Resources:
                 Effect: Allow
                 Action:
                   - sns:*
+                Resource: '*'
+              # The call event processor's Kinesis event source mapping sends the
+              # batches it could not apply to an SQS queue created by the AI stack.
+              - Sid: SQS
+                Effect: Allow
+                Action:
+                  - sqs:CreateQueue
+                  - sqs:DeleteQueue
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:SetQueueAttributes
+                  - sqs:TagQueue
+                  - sqs:UntagQueue
+                  - sqs:ListQueueTags
                 Resource: '*'
               - Sid: SES
                 Effect: Allow
@@ -258,6 +364,15 @@ Resources:
                 Action:
                   - autoscaling:*
                 Resource: '*'
+              # EC2 Auto Scaling above and Application Auto Scaling here are
+              # different services with different action prefixes. The latter
+              # backs the WebSocket transcriber service's optional scalable
+              # target and scaling policy.
+              - Sid: ApplicationAutoScaling
+                Effect: Allow
+                Action:
+                  - application-autoscaling:*
+                Resource: '*'
               - Sid: XRay
                 Effect: Allow
                 Action:
@@ -296,3 +411,11 @@ Outputs:
     Value: !Ref PassRolePolicy
     Export:
       Name: !Sub '${AWS::StackName}-PassRolePolicyArn'
+  RequiredPermissionsBoundaryArn:
+    Description: >-
+      Permissions boundary required on roles created through this service role, or
+      empty if none was configured. Pass this same value as the LMA stack's
+      PermissionsBoundaryArn parameter.
+    Value: !Ref PermissionsBoundaryArn
+    Export:
+      Name: !Sub '${AWS::StackName}-RequiredPermissionsBoundaryArn'

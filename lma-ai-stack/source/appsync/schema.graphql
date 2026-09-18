@@ -205,11 +205,11 @@ type Mutation @aws_iam {
 	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
-	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools
-	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools
-	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools
-	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools
-	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools
+	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	generateMCPApiKey: GenerateMCPApiKeyOutput @aws_cognito_user_pools
 	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
 	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -218,6 +218,7 @@ type Mutation @aws_iam {
 	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools
 	deleteMyChromeProfile(platform: String): Boolean @aws_cognito_user_pools
 	acknowledgeVPFailure(virtualParticipantId: ID!): Boolean @aws_cognito_user_pools
+	createVncEdgeToken(vpId: ID!): VncEdgeToken @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -794,6 +795,23 @@ type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
 # server-side. Tokens are capped at 60 minutes by the service while meetings can
 # run up to 8 hours, so the viewer mints one per session and again on reconnect
 # rather than receiving one at VP launch.
+# Short-lived access token for a Virtual Participant's /vnc/<vpId> path on the
+# CloudFront distribution (the ECS launch types).
+#
+# Minted by an authenticated resolver that first confirms the caller's access to
+# the Virtual Participant, and signed with a per-deployment key that the
+# Lambda@Edge viewer-request function checks. The payload names the one
+# participant and path the token is good for and expires within minutes, so the
+# viewer mints one per connection attempt rather than holding one.
+type VncEdgeToken @aws_cognito_user_pools {
+	token: String!
+	expiresAt: AWSDateTime!
+	# Credential for the VNC server itself, recorded per task by the VP. Returned
+	# alongside the token so an authorized viewer needs one round trip. Null for
+	# tasks that started before this was published.
+	vncPassword: String
+}
+
 type MicrovmVncToken @aws_cognito_user_pools {
 	authToken: String!
 	expiresAt: AWSDateTime!
@@ -813,6 +831,11 @@ input ToggleVNCPreviewInput {
 	Show: Boolean!
 }
 # MCP Server Management (Account-Level)
+#
+# AuthConfig is write-only: it is supplied through InstallMCPServerInput and is
+# read at runtime straight from DynamoDB by the meeting-assist function, so it is
+# deliberately absent from this type. HasAuthConfig reports whether a server has
+# stored credentials without exposing them.
 type MCPServer @aws_cognito_user_pools @aws_iam {
 	ServerId: ID!
 	AccountId: String!
@@ -822,7 +845,7 @@ type MCPServer @aws_cognito_user_pools @aws_iam {
 	Version: String
 	Transport: [String]
 	RequiresAuth: Boolean
-	AuthConfig: AWSJSON
+	HasAuthConfig: Boolean
 	Status: String
 	InstalledAt: AWSDateTime
 	UpdatedAt: AWSDateTime
@@ -881,9 +904,12 @@ input InitOAuthFlowInput {
 	serverName: String
 }
 
+# authorizationUrl and state are nullable because the resolver answers a request
+# it cannot start with {success: false, error: "..."} instead; a non-null field
+# would turn that readable message into a null-field error at the client.
 type InitOAuthFlowOutput @aws_cognito_user_pools @aws_iam {
-	authorizationUrl: String!
-	state: String!
+	authorizationUrl: String
+	state: String
 	success: Boolean
 	error: String
 }

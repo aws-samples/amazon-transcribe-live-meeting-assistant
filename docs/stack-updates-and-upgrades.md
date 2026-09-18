@@ -12,6 +12,7 @@ title: "Stack Updates & Upgrades"
 - [Building from Source](#building-from-source)
 - [What Is Preserved Across Updates](#what-is-preserved-across-updates)
 - [What May Change](#what-may-change)
+- [Data Retention On Stack Deletion](#data-retention-on-stack-deletion)
 - [Version Migration Notes](#version-migration-notes)
   - [v0.3.0](#v030)
   - [v0.2.0](#v020)
@@ -86,6 +87,68 @@ The following may be modified during an update:
 - Default prompt templates
 - Infrastructure resources (Lambda functions, ECS tasks, etc.)
 - Lambda function code
+
+## Data Retention On Stack Deletion
+
+The `EnableDataRetentionOnDelete` parameter (default `true`) decides what happens
+to the resources that hold durable data when the stack itself is deleted. With it
+set to `true`, deleting the stack leaves the following behind in your account
+rather than removing them; the resources it deliberately does not cover are listed
+after the table.
+
+| Resource | Stack | Contents |
+|----------|-------|----------|
+| `EventSourcingTable` | AI stack | Meetings, transcripts and summaries |
+| `VirtualParticipantTable` | AI stack | Virtual participant records and schedules |
+| `MCPServersTable` | AI stack | Installed MCP server configurations |
+| `MCPApiKeysTable` | AI stack | Hashed per-user MCP API keys |
+| `OAuthStateTable` | AI stack | In-flight OAuth authorization state |
+| `VPTaskRegistry` | AI stack | Virtual participant task registry |
+| `DomSelectorCache` | AI stack | Cached meeting-platform UI selectors |
+| `VPProfilesBucket` | AI stack | Virtual participant browser profiles |
+| `CallEventProcessorDiscardedRecordsQueue` | AI stack | Transcript records the pipeline did not apply, awaiting triage |
+| `RecordingsBucket` | Main stack | Meeting audio and video recordings, and transcript files |
+| `LoggingBucket` | Main stack | S3 server access logs and load balancer logs |
+| `CustomerManagedEncryptionKey` | Main stack | The KMS key every other retained resource is encrypted with |
+| `UserPool` | Cognito stack | User accounts and group memberships |
+| `IdentityPool` | Cognito stack | Identity pool and the identity ids issued from it |
+| `LLMPromptTemplateTable` | LLM template stack | Prompt templates edited from the web UI |
+| `ChatButtonConfigTable` | Chat button stack | Chat button definitions edited from the web UI |
+| `NovaSonicConfigTable` | Nova Sonic stack | Voice assistant prompt and model settings |
+| `AsrConfigTable` | ASR MicroVM stack | Diarization operating point tuned from the ASR Config page |
+| `S3VectorBucket`, `S3VectorIndex` | Bedrock KB stack | Knowledge base vector store and its embeddings |
+
+`CustomerManagedEncryptionKey` matters more than it looks: without the key, the
+retained tables and buckets cannot be read. Keep it for as long as you keep
+anything encrypted with it.
+
+Retained resources continue to incur storage charges and must be removed by hand
+when you no longer need them — see [Cleanup](cleanup.md). Set
+`EnableDataRetentionOnDelete` to `false` if you would rather a stack deletion
+remove everything.
+
+### What the parameter does not cover
+
+The parameter governs everything that holds durable user data. These resources are
+deleted with the stack either way, deliberately:
+
+| Resource | Stack | Why it is not retained |
+|----------|-------|------------------------|
+| `WebAppBucket` | AI stack | Build artifacts a redeployment regenerates; emptied on deletion regardless of this parameter |
+| `MCPServerExternalAppClient` | AI stack | Configuration rather than data; recreated by a redeployment |
+| `TranscriberCallEventTable` | Transcriber stack | Short-lived, TTL'd handoff state for the Post Call Analytics path, not user data. Its template does not read this parameter at all |
+| `AsrImageSourceBucket` | ASR MicroVM stack | Per-stack build context for the MicroVM image, rebuilt from the repository on the next deployment |
+| `CustomHeaderNameSecret`, `CustomHeaderValueSecret` | Transcriber stack | CloudFront origin-verification secrets, regenerated per deployment; retaining them would leave Secrets Manager entries that a new stack cannot use |
+| `CategorySNSTopic` | AI stack | A topic, not a store — it holds no messages between deliveries. Any subscriptions you added to it by hand are lost with it |
+
+One consequence to be aware of when deleting a stack: `AsrImageSourceBucket` has
+versioning enabled and, unlike `WebAppBucket`, no custom resource that empties it
+first, so a stack deletion can fail on a non-empty bucket. Empty it by hand and
+retry the deletion if that happens.
+
+The retention setting is stored as a CloudFormation resource attribute, so
+changing the parameter on an existing stack only takes effect once the stack
+update that carries it has completed.
 
 ## Version Migration Notes
 

@@ -28,6 +28,33 @@ from tools import (
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
+ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
+
+# Invariant: every tool scopes its results to the calling user and widens that
+# scope only for members of the admin group, so a request that does not resolve
+# to a user cannot be answered. Both entry paths carry an identity: the REST
+# endpoint through its authorizer context, the gateway through forwarded claims.
+NO_IDENTITY_MESSAGE = (
+    "Unable to determine the calling user. Connect through the per-user API key "
+    "endpoint so that each request carries a user identity "
+    "(see docs/mcp-api-key-auth.md)."
+)
+
+
+def is_admin_claim(claims: Dict[str, Any]) -> bool:
+    """Whether the caller's `cognito:groups` claim contains the admin group.
+
+    The claim arrives as a list from the Cognito user-pool authorizer and as a
+    comma-joined string from some token shapes. Both are normalized to a list of
+    group names so the comparison is an exact match on a whole group name.
+    """
+    groups = claims.get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [group.strip() for group in groups.split(",") if group.strip()]
+    elif not isinstance(groups, (list, tuple)):
+        groups = []
+    return ADMIN_GROUP in groups
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -35,8 +62,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Routes tool calls to appropriate implementations.
     Enforces user-based access control (UBAC).
     """
-    logger.info(f"MCP Analytics full event: {json.dumps(event, default=str)}")
-    logger.info(f"Event keys: {list(event.keys())}")
+    # An event carries caller claims or authorizer context, so the event body is
+    # not logged; its shape is, and the resolved caller is logged on its own below.
+    logger.info(f"Event keys: {sorted(event.keys())}")
 
     try:
         # Detect API Gateway proxy integration (API key auth path)
@@ -44,36 +72,43 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             body = event.get("body", "{}")
             tool_input = json.loads(body) if isinstance(body, str) else (body or {})
             authorizer = event.get("requestContext", {}).get("authorizer", {})
-            user_id = authorizer.get("userId", "api-key-user")
-            username = authorizer.get("username", "API Key User")
+            user_id = authorizer.get("userId")
+            username = authorizer.get("username") or user_id
             is_admin = authorizer.get("isAdmin", "false") == "true"
+
+            # The API key authorizer resolves the key to a user before this
+            # function runs, so a request without that context has no caller.
+            if not user_id:
+                logger.warning("Request carries no caller identity - rejecting")
+                return error_response(403, NO_IDENTITY_MESSAGE)
+
             logger.info(f"API Gateway path - User: {username}, Admin: {is_admin}")
 
             # Handle MCP JSON-RPC protocol messages
             if "jsonrpc" in tool_input and "method" in tool_input:
                 return handle_mcp_jsonrpc(tool_input, user_id, username, is_admin)
         else:
-            # BedrockAgentCore Gateway path
+            # BedrockAgentCore Gateway path: the function is invoked with the raw
+            # tool input, so the only identity available is whatever the event
+            # itself carries in requestContext.authorizer.claims.
             request_context = event.get("requestContext", {})
             authorizer = request_context.get("authorizer", {})
             claims = authorizer.get("claims", {})
 
             logger.info(f"requestContext keys: {list(request_context.keys())}")
             logger.info(f"authorizer keys: {list(authorizer.keys())}")
-            logger.info(f"claims: {claims}")
+            logger.info(f"claim keys: {sorted(claims.keys())}")
 
             user_id = claims.get("sub")
             username = claims.get("cognito:username", claims.get("email", user_id))
+            is_admin = is_admin_claim(claims)
 
-            groups = claims.get("cognito:groups", "")
-            is_admin = "Admin" in groups if isinstance(groups, str) else "Admin" in groups
-
-            # WORKAROUND: AgentCore Gateway doesn't pass user context
+            # Clients that reach this function without claims should use the
+            # per-user API key endpoint instead -- it supplies
+            # userId/username/isAdmin on every call. See docs/mcp-api-key-auth.md.
             if not user_id:
-                logger.warning("No user context from AgentCore Gateway - treating as admin")
-                user_id = "mcp-server-user"
-                username = "MCP Server User"
-                is_admin = True
+                logger.warning("Request carries no caller identity - rejecting")
+                return error_response(403, NO_IDENTITY_MESSAGE)
 
             tool_input = event
 
@@ -104,7 +139,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Default to list_meetings if we can't determine
             tool_name = "list_meetings"
 
-        logger.info(f"Inferred tool: {tool_name}, Input: {json.dumps(tool_input)}")
+        # On the gateway path `tool_input` is the event itself, which carries the
+        # caller's claims, so the argument names are logged rather than the values.
+        logger.info(f"Inferred tool: {tool_name}, Input keys: {sorted(tool_input.keys())}")
 
         # Route to appropriate tool
         if tool_name == "search_lma_meetings":

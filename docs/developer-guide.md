@@ -16,6 +16,7 @@ This guide describes how to build the LMA project from source code, run local de
 - [Virtual Participant](#virtual-participant)
 - [WebSocket Test Client](#websocket-test-client)
 - [Linting](#linting)
+- [Continuous Integration](#continuous-integration)
 - [Customization Entry Points](#customization-entry-points)
 - [Contributing](#contributing)
 
@@ -238,6 +239,36 @@ From `lma-ai-stack/`, the Makefile provides linting targets (requires `CONFIG_EN
 Code style conventions:
 - **Python**: Black formatter, Flake8, Pylint. 100-character line limit. Config in `.pylintrc`, `.flake8`.
 - **JavaScript/TypeScript**: ESLint (airbnb-base) + Prettier. 120-character line limit, single quotes, trailing commas. Config in `.eslintrc.json`, `.prettierrc`.
+
+## Continuous Integration
+
+Two pipelines run the same set of no-AWS checks:
+
+| Pipeline | File | Triggers |
+|----------|------|----------|
+| GitHub Actions `Code Checks` | `.github/workflows/code-checks.yml` | Pull requests to `develop` or `main`, and pushes to those branches |
+| GitLab `code_checks` | `.gitlab-ci.yml` | Every branch push and merge request |
+
+Both pin Node.js 22.23.2 (>= 22.22.2 is required by jsdom 30; keep the pin in
+sync with `NODE_VERSION` in the root `Makefile`) and run, in order:
+
+```bash
+make setup-python && make setup-cli-dev
+make lint-cfn                                # cfn-lint on all CloudFormation templates
+make test-sdk && make test-cli               # LMA SDK + CLI unit tests
+make test-lambdas                            # Lambda unit suites (each dir isolated)
+make lint-ui-force && make test-ui-force     # React UI eslint + vitest
+make lint-typescript                         # tsc + eslint (transcriber, Virtual Participant)
+make test-vp && make test-vp-template        # Virtual Participant unit + template tests
+make test-asr                                # ASR MicroVM runtime tests + ruff
+cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
+```
+
+None of these need AWS credentials or Docker. The integration tests
+(`make integ-tests`) and the local image builds (`make docker-build-check`) do,
+so they are run manually rather than in CI. The GitLab pipeline additionally
+runs the security review job on merge requests targeting `develop` — see
+[Security Scanning](security-scanning.md).
 
 ## Customization Entry Points
 
