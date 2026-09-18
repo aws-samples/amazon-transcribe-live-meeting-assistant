@@ -191,7 +191,7 @@ export const writeCallEvent = async (
         server.log.debug(
             `[${callEvent.EventType}]: ${callEvent.CallId} - Written ${
                 callEvent.EventType
-            } Event to KDS: ${JSON.stringify(callEvent)}`
+            } Event to KDS: ${stringifyCallMetaData(callEvent)}`
         );
     } catch (error) {
         server.log.debug(
@@ -199,7 +199,7 @@ export const writeCallEvent = async (
                 callEvent.EventType
             } Call Event to KDS : ${normalizeErrorForLogging(
                 error
-            )} Event: ${JSON.stringify(callEvent)}`
+            )} Event: ${stringifyCallMetaData(callEvent)}`
         );
     }
 };
@@ -926,7 +926,7 @@ export const writeSegmentToKds = async (
         server.log.debug(
             `[${kdsObject.EventType}]: [${callMetadata.callId}] - Written ${
                 kdsObject.EventType
-            } event to KDS: ${JSON.stringify(kdsObject)}`
+            } event to KDS: ${stringifyCallMetaData(kdsObject)}`
         );
     } catch (error) {
         server.log.error(
@@ -936,7 +936,7 @@ export const writeSegmentToKds = async (
                 kdsObject.EventType
             } to KDS : ${normalizeErrorForLogging(
                 error
-            )} KDS object: ${JSON.stringify(kdsObject)}`
+            )} KDS object: ${stringifyCallMetaData(kdsObject)}`
         );
     }
 };
