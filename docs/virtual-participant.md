@@ -17,6 +17,7 @@ title: "Virtual Participant"
 - [Meeting Scheduling](#meeting-scheduling)
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
+  - [How a viewer is authorized](#how-a-viewer-is-authorized)
 - [Launch Types](#launch-types)
   - [MicroVM launch type (default)](#microvm-launch-type-default)
 - [EC2 Instance Types](#ec2-instance-types)
@@ -144,6 +145,41 @@ The VNC preview provides real-time browser viewing and remote control of the VP'
 - See exactly what the VP sees in the meeting
 - Interact with the VP's browser session remotely
 - Troubleshoot joining issues in real time
+
+### How a viewer is authorized
+
+Opening the viewer takes two steps, both of which happen automatically in the UI.
+
+**1. A token for the connection.** Before it opens the WebSocket, the viewer calls a
+GraphQL mutation to mint a token for the specific Virtual Participant it is about to
+watch. The resolver looks the VP up in DynamoDB and mints only for the VP's owner, a
+user it has been shared with, or a member of the `Admin` group. Which mutation it
+calls depends on the launch type:
+
+| Launch type | Mutation | Transport |
+|---|---|---|
+| `MICROVM` | `createMicrovmVncToken(vpId)` | Port-scoped auth token passed as a WebSocket subprotocol to the MicroVM's own endpoint |
+| `EC2` / `FARGATE` | `createVncEdgeToken(vpId)` | Token passed as the `token` query parameter on `wss://<cloudfront>/vnc/<vpId>` |
+
+For the ECS launch types the token is `base64url(payload).base64url(HMAC-SHA256(payload))`.
+The payload names the `vpId`, the `/vnc/<vpId>` path prefix, the target port, and an
+expiry a few minutes out. A Lambda@Edge viewer-request function on the CloudFront
+`/vnc/*` behavior recomputes the MAC and forwards the request only when the signature
+matches, the expiry is in the future, and the `vpId` in the payload is the one in the
+request path — so one token opens one participant's view, for a few minutes. The signing
+key is generated per deployment into AWS Secrets Manager and read only by the minting
+resolver and the edge function; the edge function fetches it once per cold start from the
+stack's home region (Lambda@Edge takes no environment variables and supports no layers,
+so the secret ARN and region are substituted into its source at deploy time) and refuses
+the request if it cannot read it. Both mutations mint on demand per viewer session, so
+the viewer's existing auto-reconnect simply mints again.
+
+**2. A credential for the VNC server.** On the ECS launch types the VP generates a
+random VNC credential when it boots and publishes it on its own record; the
+`createVncEdgeToken` response carries it back to the already-authorized viewer, which
+supplies it to the server. The credential belongs to one task and is replaced on every
+boot. Under `MICROVM` the framebuffer is not reachable from outside the VM at all and the
+port-scoped auth token is the only route in, so there is no per-task credential there.
 
 ## Launch Types
 
