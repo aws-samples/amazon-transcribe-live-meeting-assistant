@@ -18,9 +18,25 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Retain the chat button configuration table when the stack is deleted. The
+      button definitions in it are edited from the LMA web UI.
+
+Conditions:
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
+
 Resources:
   ChatButtonConfigTable:
     Type: "AWS::DynamoDB::Table"
+    # Holds chat button definitions edited from the web UI.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       KeySchema:
         - AttributeName: ChatButtonConfigId

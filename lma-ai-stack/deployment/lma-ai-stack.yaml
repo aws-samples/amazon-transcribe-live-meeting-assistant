@@ -304,6 +304,28 @@ Parameters:
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
 
+  MeetingInactivityTimeoutInMinutes:
+    Type: Number
+    Default: 240
+    MinValue: 0
+    MaxValue: 10080
+    Description: >-
+      Number of minutes a meeting may go without producing a finalized transcript
+      segment before LMA ends it on the meeting's behalf. A meeting whose client
+      disconnects without sending its end-of-meeting event stays "In Progress"
+      until this timeout elapses. Set to 0 to leave such meetings open.
+
+  MeetingInactivityLookbackInDays:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      How far back to look for meetings to close. A meeting that started longer
+      ago than this is never closed automatically, so raise it temporarily if you
+      are updating a deployment that has accumulated older meetings stuck in
+      progress. Higher values read more meeting records on every run.
+
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
@@ -609,6 +631,10 @@ Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
+  # A timeout of 0 keeps the reaper's resources in the stack but stops its
+  # schedule, so the setting can be turned back on without a resource replace.
+  ShouldReapInactiveMeetings:
+    !Not [!Equals [!Ref MeetingInactivityTimeoutInMinutes, 0]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
   HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   # Generic WAF enablement - true when WAFAllowedIPv4Ranges is restricted (not 0.0.0.0/0).
@@ -2089,13 +2115,28 @@ Resources:
             # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-property-function-kinesis.html#sam-property-function-kinesis--examples
             BatchSize: 200
             BisectBatchOnFunctionError: true
-            # TODO Add SQS queue for discarded records
-            # DestinationConfig:
+            # Batches that remain unprocessable after the retry and record-age
+            # bounds below are described to this queue so the shard can advance.
+            DestinationConfig:
+              OnFailure:
+                Destination: !GetAtt CallEventProcessorDiscardedRecordsQueue.Arn
             Enabled: true
+            # The function answers with the Kinesis sequence numbers that need to
+            # be redelivered, so a single failing record no longer replays the
+            # records that already succeeded alongside it.
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
             MaximumRetryAttempts: 2
             MaximumBatchingWindowInSeconds: 0
             ParallelizationFactor: 10
-            # XXX MaximumRecordAgeInSeconds: 900
+            # Upper bound on how long a record may be retried before it is
+            # reported to the on-failure destination and the shard moves past
+            # it. One hour absorbs a lengthy downstream outage or throttling
+            # episode, while keeping the worst-case delay for live meeting
+            # transcripts sharing the shard well inside the stream's retention
+            # period, so a record that can never succeed cannot stall the shard
+            # for the full retention window.
+            MaximumRecordAgeInSeconds: 3600
             StartingPosition: LATEST
             Stream: !GetAtt DataStreamConsumer.ConsumerARN
             # Tumbling Window is used for aggregations over different invocations
@@ -2167,6 +2208,25 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
+            # Two senders share this grant: the event source mapping uses this
+            # role to describe unprocessable batches to the on-failure
+            # destination queue, and the function writes one message per record
+            # it skipped as undecodable.
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt CallEventProcessorDiscardedRecordsQueue.Arn
+            # The discarded records queue is encrypted with a customer-managed
+            # KMS key, so the sender needs a data key for it.
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService":
+                    - !Sub "sqs.${AWS::Region}.${AWS::URLSuffix}"
       Runtime: python3.12
       Timeout: 900
       Environment:
@@ -2201,6 +2261,10 @@ Resources:
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
           PARAMETER_STORE_NAME: !Ref LMASettingsParameterName
+          # Where records that cannot be decoded are copied. Skipping such a
+          # record does not fail the invocation, so the event source mapping's
+          # on-failure destination never sees it.
+          DISCARDED_RECORDS_QUEUE_URL: !Ref CallEventProcessorDiscardedRecordsQueue
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/CallEventProcessorFunction
@@ -2215,6 +2279,29 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Destination for transcript records the pipeline did not apply, from two
+  # sources. The Kinesis event source mapping writes a description of each batch
+  # it gave up on - stream ARN, shard id and the failing sequence number range -
+  # rather than the record payloads, which remain in the Kinesis stream for the
+  # rest of its retention period and can be replayed from there. The function
+  # itself writes one message per record it skipped as undecodable, carrying that
+  # record's shard id, sequence number and raw payload, because a skipped record
+  # does not fail the invocation and so never reaches the mapping's destination.
+  CallEventProcessorDiscardedRecordsQueue:
+    Type: AWS::SQS::Queue
+    # Un-triaged skip records are data nobody has looked at yet, so they follow
+    # the same retention setting as the tables rather than disappearing with the
+    # stack. Messages still expire on their own after MessageRetentionPeriod.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      # 14 days, the SQS maximum. These messages are the only durable record
+      # that a batch was skipped, so they are kept long enough to survive a
+      # weekend or a holiday before an operator triages them.
+      MessageRetentionPeriod: 1209600
 
   ##########################################################################
   # Transcript Enrichment Lambda Layers
@@ -2995,6 +3082,144 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt UploadMeetingFinalizerEventRule.Arn
 
+  ##########################################################################
+  # Stale Meeting Reaper — ends meetings whose client stopped sending
+  # activity without sending its end-of-meeting event. The Virtual
+  # Participant has the VP stack's task reaper and uploaded recordings have
+  # UploadMeetingFinalizer; this covers the websocket streaming clients
+  # (Stream Audio tab, desktop capture app, browser extension).
+  ##########################################################################
+
+  StaleMeetingReaperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.handler
+      Role: !GetAtt StaleMeetingReaperFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      Layers:
+        - !Ref TranscriptEnrichmentPythonLayer
+      CodeUri: ../source/lambda_functions/stale_meeting_reaper
+      Description: Ends meetings with no recent activity by emitting an END event
+      MemorySize: 256
+      Timeout: 300
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          CALL_DATA_STREAM_NAME: !Ref CallDataStream
+          MEETING_INACTIVITY_TIMEOUT_IN_MINUTES: !Ref MeetingInactivityTimeoutInMinutes
+          # How far back a run looks for candidates. Has to exceed the longest
+          # meeting a deployment expects plus the inactivity timeout, because a
+          # meeting that started before the window is not examined — which is why
+          # it is a parameter: an upgrade that inherits older stuck meetings needs
+          # to widen it once without editing the template.
+          REAPER_LOOKBACK_IN_DAYS: !Ref MeetingInactivityLookbackInDays
+          # Caps the meeting rows read per run. Candidates cannot be narrowed on
+          # the index (it projects no Status), so each one costs part of a
+          # BatchGetItem; the newest are read first and the rest wait for the
+          # next run.
+          REAPER_MAX_CANDIDATES: 500
+          # Caps the END events emitted per run.
+          REAPER_MAX_MEETINGS_PER_RUN: 100
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/StaleMeetingReaperFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it runs once per schedule tick"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; the next scheduled run retries any meeting it did not close"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - StaleMeetingReaperFunctionLogGroup
+
+  StaleMeetingReaperFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/StaleMeetingReaperFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  StaleMeetingReaperFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Stale Meeting Reaper Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-StaleMeetingReaper
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Find candidate meetings through the TypeDateIndex GSI, then read
+              # the meeting and upload-job rows for each candidate.
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub "${EventSourcingTable.Arn}/index/TypeDateIndex"
+              - Effect: Allow
+                Action:
+                  - dynamodb:BatchGetItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # Emit the same END event the meeting's client would have sent;
+              # call_event_processor applies it.
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: !Ref CallDataStreamArn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+                      - !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
+
+  StaleMeetingReaperScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-StaleMeetingReaper"
+      Description: >-
+        Runs the stale meeting reaper. The interval bounds how long after
+        MeetingInactivityTimeoutInMinutes a meeting keeps showing as in progress.
+      ScheduleExpression: "rate(15 minutes)"
+      State: !If [ShouldReapInactiveMeetings, ENABLED, DISABLED]
+      Targets:
+        - Arn: !GetAtt StaleMeetingReaperFunction.Arn
+          Id: StaleMeetingReaperTarget
+
+  StaleMeetingReaperSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt StaleMeetingReaperFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt StaleMeetingReaperScheduleRule.Arn
+
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3002,7 +3227,7 @@ Resources:
       Role: !GetAtt UpdateChatButtonConfigResolverFunctionExecutionRole.Arn
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/update_chat_button_config_resolver
-      Description: Lambda resolver for updateChatButtonConfig with AF-12 Mass Assignment security fix
+      Description: Lambda resolver that applies updateChatButtonConfig against an allowed field list
       MemorySize: 256
       Timeout: 30
       Environment:
@@ -3093,7 +3318,7 @@ Resources:
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       Name: UpdateChatButtonConfigLambda
-      Description: Lambda function for updateChatButtonConfig with AF-12 security fix
+      Description: Lambda data source backing the updateChatButtonConfig mutation
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt AppSyncUpdateChatButtonConfigLambdaRole.Arn
       LambdaConfig:
@@ -4881,6 +5106,8 @@ Resources:
   ##########################################################################
   VirtualParticipantTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-VirtualParticipant"
       AttributeDefinitions:
@@ -4901,6 +5128,8 @@ Resources:
   # MCP Servers Table - Account-level MCP server configurations
   MCPServersTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-MCPServers"
       AttributeDefinitions:
@@ -4924,6 +5153,10 @@ Resources:
   # OAuth State Table - Temporary storage for OAuth flow state
   OAuthStateTable:
     Type: AWS::DynamoDB::Table
+    # Short-lived TTL rows only, but the policy is applied uniformly so that a
+    # stack delete never removes a table whose contents were not inspected.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-OAuthState"
       AttributeDefinitions:
@@ -4946,6 +5179,8 @@ Resources:
   # MCP API Keys Table - Per-user API keys (hashed)
   MCPApiKeysTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Condition: ShouldEnableMCPServer
     Properties:
       TableName: !Sub "${AWS::StackName}-MCPApiKeys"
@@ -5865,6 +6100,8 @@ Resources:
   # VP Task Registry Table - stores task ARNs for efficient termination
   VPTaskRegistry:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-VPTaskRegistry"
       AttributeDefinitions:
@@ -5966,6 +6203,10 @@ Resources:
   # Entries auto-expire 30 days after lastUsedAt via the expiresAt TTL attribute.
   DomSelectorCache:
     Type: AWS::DynamoDB::Table
+    # Rebuildable cache, but the policy is applied uniformly so that a stack
+    # delete never removes a table whose contents were not inspected.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-DomSelectorCache"
       AttributeDefinitions:
