@@ -51,6 +51,19 @@ ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 BEDROCK_GUARDRAIL_ID = os.environ.get('BEDROCK_GUARDRAIL_ID', '').strip()
 BEDROCK_GUARDRAIL_VERSION = os.environ.get('BEDROCK_GUARDRAIL_VERSION', '').strip()
 
+# A guardrail id with no version is a half-configured deployment: the requests
+# below are built without a guardrail and the IAM role is granted no guardrail
+# permission, so say so once per cold start rather than failing closed in
+# silence. BedrockGuardrailVersion defaults to DRAFT, so reaching this needs the
+# parameter to have been explicitly blanked.
+if BEDROCK_GUARDRAIL_ID and not BEDROCK_GUARDRAIL_VERSION:
+    logger.warning(
+        "BEDROCK_GUARDRAIL_ID is set to '%s' but BEDROCK_GUARDRAIL_VERSION is empty, "
+        "so no guardrail will be applied. Set the BedrockGuardrailVersion parameter "
+        "(for example DRAFT, or a published version number) to enable it.",
+        BEDROCK_GUARDRAIL_ID,
+    )
+
 
 def get_guardrail_config() -> Dict[str, str]:
     """
@@ -1997,12 +2010,17 @@ Please provide a helpful response based on the meeting context. Keep it concise 
         # Apply the same optional guardrail as the Strands path, so the fallback
         # is not a way to reach the model without it. Empty unless both
         # CloudFormation parameters were supplied.
+        # 'trace' matches what the Strands path sends: BedrockModel defaults
+        # guardrail_trace to 'enabled', so setting it here keeps guardrail
+        # intervention visible in the response on both paths rather than only on
+        # the agent one.
         guardrail_config = get_guardrail_config()
         converse_kwargs = {}
         if guardrail_config:
             converse_kwargs['guardrailConfig'] = {
                 'guardrailIdentifier': guardrail_config['guardrail_id'],
                 'guardrailVersion': guardrail_config['guardrail_version'],
+                'trace': 'enabled',
             }
 
         # Call Bedrock

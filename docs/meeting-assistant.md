@@ -107,15 +107,17 @@ Create the guardrail in the Amazon Bedrock console first, in the same AWS accoun
 - **BedrockGuardrailId** -- The ID of your Bedrock Guardrail (for example `abcd1234efgh`). Empty by default, which means no guardrail is applied.
 - **BedrockGuardrailVersion** -- The guardrail version to use. Defaults to `DRAFT`, which always resolves to the working draft of the guardrail. Set a numeric version (for example `1`) to pin a published version.
 
-Both parameters must have a value for a guardrail to be applied. If **BedrockGuardrailId** is left empty -- the default -- the assistant behaves exactly as it does without the feature, and no guardrail permissions are granted to the assistant's IAM role. When both are set, the deployment scopes the role's `bedrock:ApplyGuardrail` permission to that single guardrail ARN.
+Both parameters must have a value for a guardrail to be applied. If **BedrockGuardrailId** is left empty -- the default -- the assistant behaves exactly as it does without the feature, and no guardrail permissions are granted to the assistant's IAM role. If you set an ID but blank the version, no guardrail is applied; the function logs a warning naming the ID at startup. When both are set, the deployment scopes the role's `bedrock:ApplyGuardrail` permission to that single guardrail ARN.
 
-When configured, the guardrail is attached to every path the assistant uses to reach Amazon Bedrock:
+When configured, the guardrail is attached to all five paths the assistant uses to reach Amazon Bedrock:
 
 - the Strands agent's Bedrock model, which covers normal streaming and non-streaming chat turns;
 - the direct `Converse` fallback used if the agent cannot be constructed, so the fallback is not a way to reach the model without the guardrail;
-- the Knowledge Base `RetrieveAndGenerate` call used by the document-search tool.
+- all three Knowledge Base `RetrieveAndGenerate` calls: the document-search tool, the meeting-history tool, and the per-meeting transcript knowledge base query.
 
-Guardrail intervention is reported by Bedrock in the response trace. If the assistant starts returning blocked or masked content after you enable a guardrail, review the guardrail's filter and topic policies in the Bedrock console -- LMA passes the request through unchanged and does not override guardrail decisions.
+On the two `Converse` paths the guardrail trace is enabled, so intervention is reported by Bedrock in the response trace. The `RetrieveAndGenerate` API has no trace option, so on the three Knowledge Base paths an intervention surfaces as the guardrail's configured blocked-input or blocked-output message in the returned text.
+
+If the assistant starts returning blocked or masked content after you enable a guardrail, review the guardrail's filter and topic policies in the Bedrock console -- LMA passes the request through unchanged and does not override guardrail decisions.
 
 ## Custom LLM Prompt Templates
 
