@@ -83,10 +83,20 @@ Resources:
                   - serverlessrepo:CreateCloudFormationChangeSet
                   - serverlessrepo:GetApplication
                 Resource: '*'
-              # Role and policy lifecycle actions that IAM does not evaluate the
-              # iam:PermissionsBoundary condition key against. The three actions
-              # that DO honour it (CreateRole, PutRolePolicy, AttachRolePolicy)
-              # are in the boundary-aware statement that follows.
+              # Role, policy and instance-profile lifecycle actions, granted
+              # unconditionally. Role CREATION and policy ATTACHMENT are not here;
+              # they are in the boundary-aware statement that follows.
+              #
+              # iam:DeleteRolePolicy and iam:DetachRolePolicy do support the
+              # iam:PermissionsBoundary condition key and are nonetheless left
+              # unconditioned on purpose: CloudFormation uses them when updating
+              # and deleting stacks, including for roles that predate the boundary
+              # or that never carried one (SAM implicit function roles never do).
+              # Conditioning them would leave those roles impossible to clean up
+              # and a stack delete unable to finish. The consequence to be aware
+              # of is that a boundary configured here constrains what the roles
+              # created through this service role may DO; it does not prevent this
+              # service role from detaching a policy from, or deleting, a role.
               - Sid: IAMRolesAndPolicies
                 Effect: Allow
                 Action:
@@ -133,10 +143,21 @@ Resources:
                     - iam:AttachRolePolicy
                     # Needed when a stack UPDATE adds the boundary to a role that
                     # was created before it was configured; CreateRole sets the
-                    # boundary inline, so this is only reached on updates. The
-                    # matching Delete action is deliberately not granted, so the
-                    # boundary can be applied through this role but not taken off.
+                    # boundary inline, so this is only reached on updates.
                     - iam:PutRolePermissionsBoundary
+                    # And needed for the reverse update, so that going back to
+                    # PermissionsBoundaryArn="" can complete instead of failing
+                    # part-way through (a failed rollback here would leave the role
+                    # that deploys the whole solution in UPDATE_ROLLBACK_FAILED).
+                    # Under this statement's condition the boundary can only be
+                    # removed from a role that currently carries exactly this
+                    # boundary, which is the only case the back-out needs.
+                    #
+                    # No paired explicit Deny: this template grants no iam:*
+                    # wildcard, so there is no broader grant of this action to claw
+                    # back, and a Deny here would block the back-out it exists to
+                    # enable.
+                    - iam:DeleteRolePermissionsBoundary
                   Resource: '*'
                   Condition:
                     StringEquals:

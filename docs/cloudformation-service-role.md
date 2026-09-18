@@ -24,8 +24,9 @@ The template creates two resources:
 1. **CloudFormationServiceRole** — An IAM role that only `cloudformation.amazonaws.com` can assume. It has three inline policies covering all AWS services required by LMA.
 2. **PassRolePolicy** — A managed policy that grants `iam:PassRole` for the service role. Attach this to users or roles that need to deploy LMA.
 
-It takes one parameter, `PermissionsBoundaryArn`, described under
-[Permissions boundary](#permissions-boundary-recommended) below.
+It takes one parameter, `PermissionsBoundaryArn`, which should be left at its default
+empty value — see [Permissions boundary](#permissions-boundary-not-yet-supported-end-to-end)
+below.
 
 ```
 ┌─────────────────┐     iam:PassRole     ┌───────────────────┐     sts:AssumeRole     ┌──────────────┐
@@ -42,15 +43,46 @@ It takes one parameter, `PermissionsBoundaryArn`, described under
                                                                                      └──────────────┘
 ```
 
-## Permissions boundary (recommended)
+## Permissions boundary (not yet supported end to end)
 
-The service role creates the IAM roles that the LMA stacks need (Lambda execution roles, ECS task roles, and so on). The recommended configuration is to supply an [IAM permissions boundary](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html) so that every role created through the service role is capped by that boundary, which keeps the roles the deployment produces inside limits your security team sets once, independently of the service role's own policies.
+The service role creates the IAM roles that the LMA stacks need (Lambda execution roles, ECS task roles, and so on). The template accepts an [IAM permissions boundary](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html) through its `PermissionsBoundaryArn` parameter so that role creation through the service role can be required to carry that boundary.
 
-Supply it through the `PermissionsBoundaryArn` parameter. When the parameter is set, the service role's `iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy` grants carry an `iam:PermissionsBoundary` condition, so a role can only be created — and only have policies written to it — while it carries that exact boundary policy. When the parameter is left empty (the default), the template behaves as it did before and role creation is not tied to a boundary.
+⚠️ **This is not a supported configuration yet.** Setting `PermissionsBoundaryArn` to a non-empty value will stop an LMA deployment, because LMA does not yet attach a boundary to every role it creates — see [Current coverage](#current-coverage) for the measured numbers. The parameter is here so the boundary work can be completed and tested incrementally. Leave it at its default empty value for a normal deployment.
 
-### Setting it up
+When the parameter is set, the service role's `iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy` grants carry an `iam:PermissionsBoundary` condition, so a role can only be created — and only have policies written to it — while it carries that exact boundary policy. When the parameter is left empty (the default), a CloudFormation `Condition` selects an alternative statement with no condition and the template behaves exactly as it did before.
 
-1. **Create the boundary policy** (once, by an administrator). It must allow everything the LMA roles legitimately do. A practical starting point is to copy the action lists from the three inline policies in `LMA-Cloudformation-Service-Role.yaml` and narrow them to your account's resources and regions.
+### Current coverage
+
+Counted by static inspection of every CloudFormation template in the repository at this revision:
+
+| | Count |
+|---|---|
+| `AWS::IAM::Role` resources declared across the LMA templates | 102 |
+| …of which set a `PermissionsBoundary` property | 54 |
+| …in `lma-ai-stack` alone | 51 declared, 16 with the property |
+| Roles generated implicitly by SAM (an `AWS::Serverless::Function` with no explicit `Role:` and no `PermissionsBoundary` property) | 16, none of them with a boundary |
+| …of those, declared in `lma-main.yaml` itself | 3 |
+| Nested stacks that `lma-main.yaml` passes `PermissionsBoundaryArn` down to | 6 of 14 |
+| Role creations that would end up carrying a non-empty boundary | roughly 47 of roughly 118 |
+
+One of those rows is a hard blocker rather than a gap to fill in later. **`lma-main.yaml` declares 3 of the implicitly-generated roles itself**, so a service role that requires the boundary fails on the *root* stack, before any nested stack is created. There is no partial-adoption path around that one — it has to be fixed first.
+
+An `AWS::Serverless::Function` *can* set a boundary on its generated role, through the function's own `PermissionsBoundary` property; none of the 16 in LMA set it today, so each needs that one property added (not a conversion to an explicit role).
+
+The eight nested stacks that do not receive the value are the LLM-template, chat-button-config, nova-sonic-config, transcript-knowledge-base, meeting-assist setup, VPC, browser-extension and desktop-capture stacks. The browser-extension, desktop-capture and meeting-assist templates define boundary properties internally but are never given the ARN. `lma-vpc-stack` has no `PermissionsBoundaryArn` parameter at all, so its flow-logs role cannot take one yet.
+
+### What completing this would take
+
+1. Add the `PermissionsBoundary` property to the 16 `AWS::Serverless::Function` resources with a generated role — starting with the 3 in `lma-main.yaml`, which block everything else.
+2. Add the `PermissionsBoundaryArn` parameter to `lma-vpc-stack`, and pass the value to the eight nested stacks that do not currently receive it.
+3. Add the `PermissionsBoundary` property to the 48 declared roles that do not yet have it, 35 of them in `lma-ai-stack`.
+4. Author the boundary policy itself. It must allow everything the LMA roles legitimately do; a practical starting point is the action lists from the three inline policies in `LMA-Cloudformation-Service-Role.yaml`, narrowed to your account's resources and regions.
+
+### Trying it on a test stack
+
+If you are working on the above, this is the sequence. Do it on a throwaway stack, not on an existing deployment.
+
+1. **Create the boundary policy** (once, by an administrator):
 
    ```bash
    aws iam create-policy \
@@ -86,11 +118,18 @@ Supply it through the `PermissionsBoundaryArn` parameter. When the parameter is 
      -p PermissionsBoundaryArn=$BOUNDARY_ARN --wait
    ```
 
-### Coverage note
+### Returning to no boundary
 
-Not every IAM role across every LMA nested stack attaches the boundary today — the VPC stack's flow-logs role, for example, does not take the parameter. Try this on a test stack before enabling it on an existing deployment. If a stack operation stops with an authorization failure on `iam:CreateRole`, either add the `PermissionsBoundary` property to that role's definition or redeploy the service role with `PermissionsBoundaryArn=""` to return to the unconstrained behaviour.
+Both halves of the setting can be reverted, and both directions of the transition are granted:
 
-Updating a deployment *to* a boundary also rewrites existing roles, so the service role is granted `iam:PutRolePermissionsBoundary` when — and only when — a boundary is configured. The matching delete action is not granted, so the boundary can be applied through this role but not removed through it.
+- Adding a boundary to a deployment that already has roles rewrites those roles, so the service role is granted `iam:PutRolePermissionsBoundary` when a boundary is configured.
+- Removing it requires CloudFormation to take the boundary off those roles, so `iam:DeleteRolePermissionsBoundary` is granted in the same statement, under the same condition — the boundary can only be removed from a role that currently carries exactly this boundary.
+
+Without that second grant the revert would fail part-way through, and the rollback of that failed update would fail too, leaving the role that deploys the whole solution in `UPDATE_ROLLBACK_FAILED`.
+
+Revert in this order: set the LMA stack's `PermissionsBoundaryArn` back to `""` and let that update finish, *then* redeploy the service role with `PermissionsBoundaryArn=""`. Doing it the other way round removes the grant before the work that needs it.
+
+Note that a boundary configured here constrains what the roles created through this service role may *do*. It does not stop this service role from detaching a policy from, or deleting, a role: `iam:DetachRolePolicy`, `iam:DeleteRolePolicy` and `iam:DeleteRole` stay unconditioned so that CloudFormation can still update and delete stacks containing roles that predate the boundary or never carried one.
 
 ## Deploying the Service Role
 
@@ -98,7 +137,7 @@ Updating a deployment *to* a boundary also rewrites existing roles, so the servi
 
 - AWS Administrator access (one-time setup)
 - AWS CLI configured with appropriate credentials
-- Optionally, a permissions boundary managed policy — see [Permissions boundary](#permissions-boundary-recommended)
+- No permissions boundary policy is needed; leave `PermissionsBoundaryArn` empty — see [Permissions boundary](#permissions-boundary-not-yet-supported-end-to-end)
 
 ### Via CLI
 
@@ -109,11 +148,11 @@ aws cloudformation deploy \
   --template-file LMA-Cloudformation-Service-Role.yaml \
   --stack-name LMA-CFServiceRole \
   --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides PermissionsBoundaryArn=<boundary-policy-arn> \
   --region <your-region>
 ```
 
-Omit `--parameter-overrides` to deploy without a boundary.
+`PermissionsBoundaryArn` defaults to empty, which is the configuration LMA supports; see
+[Permissions boundary](#permissions-boundary-not-yet-supported-end-to-end).
 
 ### Via Console
 
@@ -121,10 +160,10 @@ Omit `--parameter-overrides` to deploy without a boundary.
 2. Click **Create stack** → **With new resources (standard)**
 3. Select **Upload a template file** and choose `LMA-Cloudformation-Service-Role.yaml`
 4. Set **Stack name** to `LMA-CFServiceRole` (or your preferred name)
-5. Set **PermissionsBoundaryArn** to your boundary policy ARN (leave blank to deploy without one)
+5. Leave **PermissionsBoundaryArn** blank
 6. Click through **Next**, acknowledge IAM capabilities, and **Submit**
 7. Wait for `CREATE_COMPLETE`
-8. Copy the **ServiceRoleArn** and **RequiredPermissionsBoundaryArn** values from the **Outputs** tab
+8. Copy the **ServiceRoleArn** value from the **Outputs** tab
 
 ## Assigning the PassRole Policy to Users
 
@@ -204,7 +243,7 @@ The role provides access to the following AWS services required by LMA:
 ### Security Details
 
 - **Trust policy** restricts role assumption to `cloudformation.amazonaws.com` only
-- **Permissions boundary** — when `PermissionsBoundaryArn` is supplied, `iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy` are conditioned on `iam:PermissionsBoundary`, so the roles created for LMA stay within that boundary policy. This is the recommended configuration; see [Permissions boundary](#permissions-boundary-recommended)
+- **Permissions boundary** — when `PermissionsBoundaryArn` is supplied, `iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy` are conditioned on `iam:PermissionsBoundary`, so the roles created for LMA would stay within that boundary policy. LMA cannot yet deploy in that configuration, so the parameter defaults to empty; see [Permissions boundary](#permissions-boundary-not-yet-supported-end-to-end)
 - **PassRole** lets CloudFormation hand the roles it creates to the services that consume them (Lambda, ECS, CodeBuild, AppSync, Step Functions, Bedrock, and the other services listed above)
 - **Service-linked role creation** is limited to the ECS service
 - All CloudFormation operations using this role are logged in **CloudTrail**
@@ -218,8 +257,9 @@ The role provides access to the following AWS services required by LMA:
 | **Stack creation fails with capability error** | Include `CAPABILITY_NAMED_IAM` when deploying the service role template |
 | **Missing permissions during LMA deployment** | This role covers all known LMA services. If new services are added, update the template and redeploy |
 | **Role name conflicts** | The role name includes the stack name — use a unique stack name |
-| **LMA deployment fails on `iam:CreateRole` after setting a boundary** | The LMA stack must attach the same boundary it is required to carry. Set the LMA stack's `PermissionsBoundaryArn` to the value of the service role stack's `RequiredPermissionsBoundaryArn` output, or redeploy the service role with `PermissionsBoundaryArn=""` |
+| **LMA deployment fails on `iam:CreateRole` after setting a boundary** | Expected: LMA does not yet attach a boundary to every role it creates, so the root stack fails first. Redeploy the service role with `PermissionsBoundaryArn=""`. See [Permissions boundary](#permissions-boundary-not-yet-supported-end-to-end) |
 | **Boundary policy too narrow** | The boundary caps what the LMA roles can do, so anything it omits is unavailable to them at runtime. Widen the boundary policy rather than removing it |
+| **Reverting a boundary leaves the stack in `UPDATE_ROLLBACK_FAILED`** | Revert the LMA stack's `PermissionsBoundaryArn` to `""` and let that finish *before* redeploying the service role without the boundary; the reverse order removes `iam:DeleteRolePermissionsBoundary` while it is still needed |
 
 ## Cleanup
 
