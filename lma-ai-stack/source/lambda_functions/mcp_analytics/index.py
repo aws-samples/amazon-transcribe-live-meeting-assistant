@@ -28,6 +28,23 @@ from tools import (
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
+ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
+
+
+def is_admin_claim(claims: Dict[str, Any]) -> bool:
+    """Whether the caller's `cognito:groups` claim contains the admin group.
+
+    The claim arrives as a list from the Cognito user-pool authorizer and as a
+    comma-joined string from some token shapes. Both are normalized to a list of
+    group names so the comparison is an exact match on a whole group name.
+    """
+    groups = claims.get("cognito:groups") or []
+    if isinstance(groups, str):
+        groups = [group.strip() for group in groups.split(",") if group.strip()]
+    elif not isinstance(groups, (list, tuple)):
+        groups = []
+    return ADMIN_GROUP in groups
+
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
@@ -53,27 +70,35 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             if "jsonrpc" in tool_input and "method" in tool_input:
                 return handle_mcp_jsonrpc(tool_input, user_id, username, is_admin)
         else:
-            # BedrockAgentCore Gateway path
+            # BedrockAgentCore Gateway path. The gateway validates the caller's
+            # JWT and then invokes this function with the raw tool input, so the
+            # only identity available here is whatever the event itself carries.
             request_context = event.get("requestContext", {})
             authorizer = request_context.get("authorizer", {})
             claims = authorizer.get("claims", {})
 
             logger.info(f"requestContext keys: {list(request_context.keys())}")
             logger.info(f"authorizer keys: {list(authorizer.keys())}")
-            logger.info(f"claims: {claims}")
+            logger.info(f"claim keys: {sorted(claims.keys())}")
 
             user_id = claims.get("sub")
             username = claims.get("cognito:username", claims.get("email", user_id))
+            is_admin = is_admin_claim(claims)
 
-            groups = claims.get("cognito:groups", "")
-            is_admin = "Admin" in groups if isinstance(groups, str) else "Admin" in groups
-
-            # WORKAROUND: AgentCore Gateway doesn't pass user context
+            # Invariant: every tool scopes its results to `user_id` and only
+            # widens that scope for members of the admin group, so a request that
+            # carries no caller cannot be answered. Clients that reach this
+            # function without claims should use the per-user API key endpoint
+            # instead -- it supplies userId/username/isAdmin on every call. See
+            # docs/mcp-api-key-auth.md.
             if not user_id:
-                logger.warning("No user context from AgentCore Gateway - treating as admin")
-                user_id = "mcp-server-user"
-                username = "MCP Server User"
-                is_admin = True
+                logger.warning("Request carries no caller identity - rejecting")
+                return error_response(
+                    403,
+                    "Unable to determine the calling user. Connect through the "
+                    "per-user API key endpoint so that each request carries a "
+                    "user identity (see docs/mcp-api-key-auth.md).",
+                )
 
             tool_input = event
 
