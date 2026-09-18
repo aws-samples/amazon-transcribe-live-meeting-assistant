@@ -742,7 +742,7 @@ export default class Webex {
         console.log('Listening for message changes.');
         await frame.evaluate(() => {
                 const targetNode = document.querySelector(
-                    'div[class^="style-chat-box"]'
+                    'div[class^="style-chat-box"], #activity-list > mdc-list'
                 );
 
                 const config = { childList: true, subtree: true };
@@ -752,12 +752,12 @@ export default class Webex {
                     const addedNode = lastMutation.addedNodes[0] as Element;
                     if (addedNode) {
                         const sender = addedNode.querySelector(
-                            'h3[class^="style-chat-label"]'
+                            'h3[class^="style-chat-label"], .sender-name'
                         )?.textContent;
                         const message = addedNode.querySelector(
-                            'span[class^="style-chat-msg"]'
+                            'span[class^="style-chat-msg"], .activity-item-message'
                         )?.textContent;
-                        if (!sender!.startsWith('from LMA')) {
+                        if (!sender!.startsWith('from LMA') && sender !== "You") {
                             (window as any).messageChange(message);
                         }
                     }
