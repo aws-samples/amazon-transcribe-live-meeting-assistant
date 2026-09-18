@@ -7,13 +7,20 @@
 MCP Server Manager Lambda Function
 Handles installation and management of MCP servers from the public registry
 Account-level management (all users share installed servers)
+
+Authorization is enforced at two independent layers, mirroring the
+`user_management` resolver:
+  1. The AppSync schema pins the management mutations to the "Admin" Cognito
+     group (`@aws_cognito_user_pools(cognito_groups: ["Admin"])`)
+  2. This handler re-checks the caller's `cognito:groups` claim, so the
+     resolver directive is never the only control
 """
 
-import json
 import logging
 import os
+import re
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import boto3
 
@@ -30,6 +37,141 @@ MCP_SERVERS_TABLE = os.environ.get("MCP_SERVERS_TABLE", "")
 CODEBUILD_PROJECT = os.environ.get("CODEBUILD_PROJECT", "")
 MAX_SERVERS_PER_ACCOUNT = 5
 ACCOUNT_ID = os.environ.get("AWS_ACCOUNT_ID", "")
+ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
+
+# Installed servers are account-wide and their packages are baked into the shared
+# meeting-assist Lambda layer, so changing them is an administrator operation.
+ADMIN_ONLY_FIELDS = frozenset({"installMCPServer", "uninstallMCPServer", "updateMCPServer"})
+
+# AuthConfig holds the credential material for servers that require
+# authentication (bearer tokens, OAuth client credentials, custom headers and
+# environment variables). It is write-only: it is supplied on install and read at
+# runtime directly from DynamoDB by the meeting-assist function, so the read path
+# here projects it away and reports presence instead.
+CREDENTIAL_FIELDS = ("AuthConfig",)
+
+# Accepted package specifier forms. The MCP layer CodeBuild buildspec in
+# lma-ai-stack/deployment/lma-ai-stack.yaml re-applies an equivalent pattern to
+# every line it reads out of DynamoDB, so both layers agree on what a specifier
+# is and neither depends on the other having run.
+#
+# Invariant: a stored NpmPackage is a bare distribution name with at most one
+# version pin, drawn from letters, digits, '.', '_' and '-' (plus the single npm
+# scope separator). Anything else is rejected rather than rewritten.
+PYPI_PACKAGE_PATTERN = re.compile(
+    r"[A-Za-z0-9][A-Za-z0-9._-]*((==|>=|<=|~=)[A-Za-z0-9][A-Za-z0-9.*+_-]*)?"
+)
+NPM_PACKAGE_PATTERN = re.compile(
+    r"(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9.*+_-]*)?"
+)
+# Remote servers store their endpoint in NpmPackage instead of a package name;
+# nothing installs them, so they only need to be an http(s) URL within the same
+# length bound as a package specifier. Invariant: the stored endpoint holds no
+# whitespace and no control characters. Kept identical to the copy in
+# oauth_manager/index.py, which a test asserts.
+HTTP_ENDPOINT_PATTERN = re.compile(r"https?://[^\s\x00-\x1f\x7f]+")
+
+MAX_PACKAGE_SPECIFIER_LENGTH = 214
+
+PACKAGE_SPECIFIER_HELP = (
+    "Accepted forms are 'name' and 'name<operator>version' -- where the operator "
+    "is '==', '>=', '<=' or '~=' -- for pypi packages, or 'name', '@scope/name' "
+    "and 'name@version' for npm packages. "
+    "Names and versions may contain letters, digits, '.', '_' and '-' only. "
+    "Registry URLs, local paths, VCS references and multiple specifiers are not "
+    "accepted -- install the published package by name instead."
+)
+
+
+class ForbiddenError(Exception):
+    """Raised when the caller is not authorized."""
+
+
+class ValidationError(Exception):
+    """Raised when input validation fails."""
+
+
+def _get_caller_identity(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Extract the caller's Cognito groups / username from the AppSync event.
+
+    `cognito:groups` arrives as a list from the Cognito user-pool authorizer and
+    as a comma-joined string from some token shapes, so both are normalized.
+    """
+    identity = event.get("identity") or {}
+    claims = identity.get("claims") or {}
+    groups = claims.get("cognito:groups") or identity.get("groups") or []
+    if isinstance(groups, str):
+        groups = [g.strip() for g in groups.split(",") if g.strip()]
+    elif not isinstance(groups, (list, tuple)):
+        groups = []
+    username = claims.get("cognito:username") or identity.get("username") or claims.get("sub") or ""
+    return {
+        "username": username,
+        "groups": list(groups),
+        "is_admin": ADMIN_GROUP in groups,
+    }
+
+
+def _require_admin(caller: Dict[str, Any]) -> None:
+    """Re-check the caller's group membership inside the function.
+
+    Keeps the schema directive from being the only place the constraint exists.
+    """
+    if not caller["is_admin"]:
+        logger.warning(
+            "Caller '%s' is not a member of the %s group (groups=%s)",
+            caller["username"],
+            ADMIN_GROUP,
+            caller["groups"],
+        )
+        raise ForbiddenError(f"Only members of the {ADMIN_GROUP} group can manage MCP servers")
+
+
+def validate_package_specifier(package: Any, package_type: str) -> str:
+    """Return `package` unchanged if it is an accepted specifier, else raise.
+
+    Values are rejected rather than rewritten so that what is stored is exactly
+    what the caller asked for.
+    """
+    if package_type == "streamable-http":
+        # Remote servers are addressed by URL and are never installed.
+        if (
+            not isinstance(package, str)
+            or len(package) > MAX_PACKAGE_SPECIFIER_LENGTH
+            or not HTTP_ENDPOINT_PATTERN.fullmatch(package)
+        ):
+            raise ValidationError(
+                "ServerUrl must be an http:// or https:// URL with no spaces and at most "
+                f"{MAX_PACKAGE_SPECIFIER_LENGTH} characters for streamable-http servers"
+            )
+        return package
+
+    if not isinstance(package, str) or not package:
+        raise ValidationError(f"NpmPackage is required. {PACKAGE_SPECIFIER_HELP}")
+    if len(package) > MAX_PACKAGE_SPECIFIER_LENGTH:
+        raise ValidationError(
+            f"NpmPackage must be {MAX_PACKAGE_SPECIFIER_LENGTH} characters or fewer."
+        )
+    pattern = NPM_PACKAGE_PATTERN if package_type == "npm" else PYPI_PACKAGE_PATTERN
+    if not pattern.fullmatch(package):
+        raise ValidationError(
+            f"NpmPackage '{package}' is not an accepted package specifier. {PACKAGE_SPECIFIER_HELP}"
+        )
+    return package
+
+
+def redact_server(server: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return a copy of a stored server row without its credential material.
+
+    Invariant: nothing the read path returns contains a credential. The boolean
+    `HasAuthConfig` is substituted so callers can still tell whether a server has
+    credentials configured.
+    """
+    if not server:
+        return server
+    redacted = {k: v for k, v in server.items() if k not in CREDENTIAL_FIELDS}
+    redacted["HasAuthConfig"] = any(bool(server.get(field)) for field in CREDENTIAL_FIELDS)
+    return redacted
 
 
 def install_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -49,11 +191,14 @@ def install_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         InstallMCPServerOutput with success status and build ID
     """
+    input_data: Dict[str, Any] = {}
     try:
-        logger.info(f"Install MCP server request: {json.dumps(event)}")
-
-        # Extract input from GraphQL resolver event
+        # AuthConfig is credential material, so the request is not logged verbatim.
         input_data = event.get("arguments", {}).get("input", {})
+        logger.info(
+            "Install MCP server request: %s",
+            {k: v for k, v in input_data.items() if k not in CREDENTIAL_FIELDS},
+        )
 
         # Use AWS Account ID for account-level management
         account_id = ACCOUNT_ID or os.environ.get("AWS_ACCOUNT_ID", "unknown")
@@ -65,6 +210,9 @@ def install_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         transport = input_data.get("Transport", ["stdio"])
         requires_auth = input_data.get("RequiresAuth", False)
         auth_config = input_data.get("AuthConfig")
+        package_type = input_data.get(
+            "PackageType", "pypi"
+        )  # Default to pypi for backward compatibility
 
         if not all([server_id, name, npm_package]):
             return {
@@ -72,6 +220,14 @@ def install_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "Success": False,
                 "Message": "Missing required fields: ServerId, Name, NpmPackage",
             }
+
+        # Validate before anything is stored: the layer build installs whatever
+        # NpmPackage holds, so only accepted specifiers are ever written.
+        try:
+            npm_package = validate_package_specifier(npm_package, package_type)
+        except ValidationError as exc:
+            logger.warning("Rejected MCP server package specifier for %s: %s", server_id, exc)
+            return {"ServerId": server_id, "Success": False, "Message": str(exc)}
 
         # Check if table is configured
         if not MCP_SERVERS_TABLE:
@@ -103,9 +259,6 @@ def install_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         # Store server configuration in DynamoDB
         now = datetime.utcnow().isoformat() + "Z"
-        package_type = input_data.get(
-            "PackageType", "pypi"
-        )  # Default to pypi for backward compatibility
         server_url = input_data.get("ServerUrl")  # For HTTP servers
 
         item = {
@@ -207,7 +360,8 @@ def uninstall_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         UninstallMCPServerOutput with success status
     """
     try:
-        logger.info(f"Uninstall MCP server request: {json.dumps(event)}")
+        # The event carries the caller's claims, so only the arguments are logged.
+        logger.info("Uninstall MCP server request: %s", event.get("arguments", {}))
 
         server_id = event.get("arguments", {}).get("serverId")
 
@@ -273,11 +427,16 @@ def update_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         UpdateMCPServerOutput with success status and build ID
     """
+    input_data: Dict[str, Any] = {}
     try:
-        logger.info(f"Update MCP server request: {json.dumps(event)}")
-
-        # Extract input
+        # Extract input. AuthConfig is credential material and the event also
+        # carries the caller's claims, so neither is logged verbatim.
         input_data = event.get("arguments", {}).get("input", {})
+        logger.info(
+            "Update MCP server request: %s",
+            {k: v for k, v in input_data.items() if k not in CREDENTIAL_FIELDS},
+        )
+
         server_id = input_data.get("ServerId")
         new_version = input_data.get("Version")
 
@@ -402,7 +561,7 @@ def list_installed_servers(event: Dict[str, Any], context: Any) -> list:
         servers = response.get("Items", [])
         logger.info(f"Found {len(servers)} installed servers for account {account_id}")
 
-        return servers
+        return [redact_server(server) for server in servers]
 
     except Exception as e:
         logger.error(f"Error listing installed servers: {str(e)}")
@@ -430,7 +589,7 @@ def get_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         response = table.get_item(Key={"AccountId": account_id, "ServerId": server_id})
 
-        return response.get("Item")
+        return redact_server(response.get("Item"))
 
     except Exception as e:
         logger.error(f"Error getting MCP server: {str(e)}")
@@ -444,6 +603,14 @@ def handler(event: Dict[str, Any], context: Any) -> Any:
     field_name = event.get("info", {}).get("fieldName", "")
 
     logger.info(f"MCP Server Manager - Field: {field_name}")
+
+    if field_name in ADMIN_ONLY_FIELDS:
+        try:
+            _require_admin(_get_caller_identity(event))
+        except ForbiddenError as exc:
+            # Surface as an AppSync error so the client sees an authorization failure
+            # rather than a generic operation result.
+            raise Exception(f"Unauthorized: {exc}") from exc
 
     if field_name == "installMCPServer":
         return install_mcp_server(event, context)

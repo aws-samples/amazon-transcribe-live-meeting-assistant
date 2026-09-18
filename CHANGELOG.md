@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **MCP server management is now an Admin-group operation.** Installing, updating and uninstalling MCP servers, and configuring a server's OAuth credentials, are limited to members of the **Admin** Cognito group; both the GraphQL API and the resolver functions enforce it, and the MCP Servers page shows the installed set read-only to everyone else. Servers already installed are unaffected and keep loading for every meeting. ⚠️ Migration: if a non-admin user manages MCP servers in your deployment, add them to the Admin group on the User Management page, or route future changes through an administrator. See the [MCP Servers guide](docs/mcp-servers.md#admin-ui). (#670)
+
+- **`listInstalledMCPServers` and `getMCPServer` return `HasAuthConfig` in place of `AuthConfig`.** A server's stored credential material is no longer part of the read API; the new boolean reports whether a server has credentials configured. Stored credentials are untouched and are still used at runtime, and the LMA UI needs no change. ⚠️ Migration: a custom client that selected `AuthConfig` must select `HasAuthConfig` instead, and change a credential by re-entering it through the UI or an `updateMCPServer` call. See [Stored Server Credentials](docs/mcp-servers.md#stored-server-credentials). (#670)
+
+- **An external MCP client must supply a user identity on every request.** LMA's hosted MCP server scopes each tool result to the calling user, so a request it cannot resolve to a user is answered with `403 Unable to determine the calling user`. ⚠️ Migration: a client that hits this should connect through the per-user API key endpoint (`MCPServerApiKeyEndpoint`), which carries the user's identity on every call and exposes the same tools — Quick Desktop, Claude Desktop and any client that can send a bearer token or an `x-api-key` header — see [Connecting with a User Identity](docs/mcp-api-key-auth.md#connecting-with-a-user-identity) and [Amazon Quick MCP Setup](docs/amazon-quick-mcp-setup.md#tool-calls-return-403-unable-to-determine-the-calling-user). (#670)
+
+- **A stored MCP package specifier must be a published package name with at most one version pin.** Both the install path and the MCP layer build accept `name` and `name<operator>version` — where the operator is `==`, `>=`, `<=` or `~=` — for pypi packages, and `name`, `@scope/name` and `name@version` for npm; anything else is refused with a message naming the accepted form, and a stored entry that does not match is logged and skipped by the build rather than failing the stack update. Remote (`streamable-http`) servers are unaffected. See [Package Specifiers](docs/mcp-servers.md#package-specifiers). (#670)
+
 ## [0.3.8] - 2026-09-02
 
 ### Fixed

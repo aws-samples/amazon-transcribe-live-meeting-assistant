@@ -46,6 +46,19 @@ Users generate personal API keys from the LMA UI (MCP Servers Configuration page
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Connecting with a User Identity
+
+Every tool the MCP server exposes is scoped to the calling user: a request returns that user's meetings, and the scope widens to all meetings in the account only for a member of the **Admin** group. `MCPServerAnalyticsFunction` therefore resolves a caller from each request and refuses the request when it cannot. What it reads from the event:
+
+- **API key path** — `requestContext.authorizer.userId`, `username` and `isAdmin`, which the REQUEST authorizer put there after resolving the API key.
+- **OAuth (3LO) path** — `requestContext.authorizer.claims`, taking the user from `sub`, the display name from `cognito:username` (or `email`) and group membership from `cognito:groups`.
+
+A request on either path that does not resolve to a user is answered with `403` and a message naming the API key endpoint. A client that receives that response should connect to the `MCPServerApiKeyEndpoint` REST endpoint with a personal API key, which supplies a caller on every request. See [Key Generation Flow](#key-generation-flow) and [Connecting from Quick Suite](#connecting-from-quick-suite).
+
+> **To confirm on a deployed stack:** whether the BedrockAgentCore Gateway (`CUSTOM_JWT` authorizer, `GATEWAY_IAM_ROLE` credential provider) includes the caller's Cognito claims in the event it sends to its Lambda target has not been verified against a live deployment. Where it does not, the OAuth path returns the `403` described above and the API key endpoint is the route that works for those clients. Worth confirming before a release.
+
+Group membership is read from the `cognito:groups` claim, which Cognito supplies either as a list or as a comma-separated string; both are accepted, and the comparison is an exact match on a whole group name (a group called `Administrators`, for instance, is not the `Admin` group).
+
 ## Request Flow (API Key Path)
 
 ```
@@ -89,7 +102,7 @@ User clicks "Generate API Key" on MCP Servers Configuration page
 | `lma-ai-stack/source/appsync/schema.graphql` | MCPApiKey type, GenerateMCPApiKeyOutput type, generateMCPApiKey/revokeMCPApiKey mutations, listMCPApiKeys query |
 | `lma-ai-stack/source/lambda_functions/mcp_api_key_authorizer/index.py` | REQUEST authorizer — accepts both `Authorization: Bearer` and `x-api-key` headers, hashes token, DynamoDB lookup, returns IAM policy + user context |
 | `lma-ai-stack/source/lambda_functions/mcp_api_key_manager/index.py` | AppSync resolver — generate/list/revoke per-user API keys, one key per user enforced |
-| `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | MCP JSON-RPC 2.0 protocol handler (initialize, tools/list, tools/call, ping) for API Gateway path; BedrockAgentCore path unchanged |
+| `lma-ai-stack/source/lambda_functions/mcp_analytics/index.py` | MCP JSON-RPC 2.0 protocol handler (initialize, tools/list, tools/call, ping) for the API Gateway path; on the BedrockAgentCore path, resolves the caller from the forwarded claims (see [Connecting with a User Identity](#connecting-with-a-user-identity)) |
 | `lma-ai-stack/source/ui/src/graphql/mutations.js` | generateMCPApiKey, revokeMCPApiKey, listMCPApiKeys GraphQL operations |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPApiKeySection.jsx` | Cloudscape UI component for key management |
 | `lma-ai-stack/source/ui/src/components/mcp-servers-page/MCPServersPage.jsx` | Integrated MCPApiKeySection at top of page |
@@ -152,7 +165,8 @@ Located on the **MCP Servers Configuration** page (`/configuration/mcp-servers`)
 - "Generate API Key" button (disabled when a key already exists)
 - Generated key shown in a modal with CopyToClipboard and warning it won't be shown again
 - "Revoke" button with confirmation modal
-- Currently on the admin-only Configuration page; consider making accessible to all users
+- The **Hosted MCP Access** tab, including this API key container, is available to every signed-in user; the **External MCP Servers** tab on the same page is read-only for users outside the Admin group (see [MCP Servers › Admin UI](mcp-servers.md#admin-ui))
+- The left navigation still lists **Configuration › MCP Servers** for Admin users only, so a non-admin user needs the direct link (`/#/configuration/mcp-servers`) to reach their API key. Surfacing the link for all users is a follow-up.
 
 ## Security Considerations
 
@@ -182,3 +196,5 @@ Add as a remote MCP server in Quick Suite:
 - **Token**: Your LMA API key (e.g. `lma_a1b2c3d4-e5f6-7890-abcd-ef1234567890`)
 
 Quick Suite sends `Authorization: Bearer <key>` on all requests via `streamablehttp_client`.
+
+> **To confirm on a deployed stack:** this has not been verified against a live Quick Suite tenant, and the Quick Suite setup guide documents only user-authentication (OAuth) for a remote MCP server. If your Quick Suite version has no bearer-token or API-key field, use Quick Desktop, Claude Desktop or another MCP client for the API key route. LMA's endpoint accepts the key over `Authorization: Bearer` or `x-api-key` regardless of the client.
