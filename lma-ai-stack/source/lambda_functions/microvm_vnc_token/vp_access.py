@@ -8,8 +8,9 @@ a Virtual Participant, so the check lives in one module. Lambda packages are
 built per ``CodeUri`` and cannot import across directories, so this file is
 copied verbatim into each function's source directory -- the same convention
 ``microvm_client.py`` already follows in this tree. The copies are asserted
-byte-identical by ``test_vp_access.py``, so a change in one is a test failure
-until it is applied to the other.
+byte-identical by ``test_vp_access_copies_are_identical`` in
+``vnc_edge_token/test_index.py``, so a change in one is a test failure until
+it is applied to the other.
 
 The VP id on its own is not a credential: it appears in URLs and logs. Access is
 decided from the caller identity AppSync supplies, checked against the VP

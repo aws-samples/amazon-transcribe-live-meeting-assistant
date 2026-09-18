@@ -76,6 +76,11 @@ import boto3
 SIGNING_SECRET_ARN = "SIGNING_SECRET_ARN_PLACEHOLDER"
 SIGNING_SECRET_REGION = "SIGNING_SECRET_REGION_PLACEHOLDER"
 
+# Upper bound on how far ahead a token's expiry may sit. The minter issues a few
+# minutes; this ceiling is checked here as well so the edge does not depend on the
+# minter having done so, and it is what rejects an expiry of Infinity.
+MAX_TOKEN_LIFETIME_SECONDS = 3600
+
 # One cached copy per warm container. The secret is generated once per
 # deployment, so there is nothing to refresh.
 _signing_secret = []
@@ -122,13 +127,27 @@ def token_from_querystring(querystring):
     return None
 
 
+def uri_is_plain(uri):
+    """True when the path is already in the form the token can be compared to.
+
+    CloudFront normalizes the path to pick a cache behavior but forwards the path
+    as the viewer sent it, so the string compared here is the one the origin will
+    receive. Paths carrying a relative segment, an encoded dot, or an empty
+    segment are refused outright rather than normalized: normalizing correctly is
+    the hard part, and this function's only job is to establish that the single
+    comparison below is the whole of the path check.
+    """
+    lowered = uri.lower()
+    return ".." not in lowered and "%2e" not in lowered and "//" not in lowered
+
+
 def verify_token(token, secret, vp_id, uri):
-    """True when the token is intact, unexpired, and scoped to this request.
+    """True when the token is intact, unexpired, and issued for this exact path.
 
     The MAC covers the encoded payload exactly as received, so the payload is
     parsed only once the signature has been confirmed. The payload names one
-    participant and one path prefix, which is what keeps a token issued for one
-    Virtual Participant confined to that participant's own path.
+    participant and one path, and both are compared for equality, so a token is
+    usable on the single path it was issued for and no other.
     """
     parts = token.split(".")
     if len(parts) != 2:
@@ -147,16 +166,28 @@ def verify_token(token, secret, vp_id, uri):
         payload = json.loads(b64url_decode(payload_b64))
     except Exception:
         return False
+    # Every read below assumes a mapping. A signed scalar would otherwise raise
+    # out of this function rather than returning a decision.
+    if not isinstance(payload, dict):
+        return False
     try:
         expiry = float(payload.get("exp", 0))
     except (TypeError, ValueError):
         return False
-    if expiry <= time.time():
+    # Bounded on both sides, as a positive test, so the only values that pass are
+    # the ones that genuinely sit in the window. json accepts the bare literals
+    # NaN and Infinity and float() converts both: NaN fails every comparison, and
+    # Infinity orders after any clock reading, so an upper bound is what rejects
+    # it. The ceiling is deliberately looser than the minter's own lifetime -- it
+    # is a sanity bound held independently of the minter, not a copy of its
+    # policy.
+    now = time.time()
+    if not now < expiry <= now + MAX_TOKEN_LIFETIME_SECONDS:
         return False
     if not payload.get("vpId") or payload.get("vpId") != vp_id:
         return False
     prefix = payload.get("prefix")
-    if not prefix or not uri.startswith(prefix):
+    if not prefix or uri != prefix:
         return False
     return True
 
@@ -195,7 +226,7 @@ def lambda_handler(event, context):
         return deny("403", "Forbidden", "Access denied")
 
     vp_id = vp_id_from_uri(uri)
-    if not vp_id or not verify_token(token, secret, vp_id, uri):
+    if not vp_id or not uri_is_plain(uri) or not verify_token(token, secret, vp_id, uri):
         return deny("403", "Forbidden", "Access denied")
 
     return request
