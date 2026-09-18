@@ -155,6 +155,12 @@ Conditions:
   ShouldConfigureTranscriptBedrockKB:
     !Not [!Equals [!Ref TranscriptBedrockKnowledgeBaseId, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  # BedrockGuardrailId is empty by default; the agent only applies a guardrail
+  # when both the id and the version have a value.
+  HasBedrockGuardrail: !And [
+    !Not [!Equals [!Ref BedrockGuardrailId, ""]],
+    !Not [!Equals [!Ref BedrockGuardrailVersion, ""]]
+  ]
 
 Resources:
   Boto3Layer:
@@ -208,10 +214,17 @@ Resources:
                   - "bedrock:GetInferenceProfile"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
-              - Effect: Allow
-                Action:
-                  - "bedrock:ApplyGuardrail"
-                Resource: "*"
+              # Scoped to the guardrail named by BedrockGuardrailId. The
+              # statement is omitted entirely when no guardrail is configured,
+              # which is the default.
+              - !If
+                - HasBedrockGuardrail
+                - Effect: Allow
+                  Action:
+                    - "bedrock:ApplyGuardrail"
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+                - !Ref AWS::NoValue
           PolicyName: BedrockPolicy
         - PolicyDocument:
             Version: 2012-10-17

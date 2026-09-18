@@ -102,12 +102,20 @@ The model selection affects response quality, latency, and cost. Lighter models 
 
 Optionally configure Amazon Bedrock Guardrails to apply content filtering and safety controls to the assistant's responses.
 
-Set the following CloudFormation parameters:
+Create the guardrail in the Amazon Bedrock console first, in the same AWS account and Region as the LMA stack, then set the following CloudFormation parameters:
 
-- **BedrockGuardrailId** -- The ID of your Bedrock Guardrail.
-- **BedrockGuardrailVersion** -- The version of the guardrail to use.
+- **BedrockGuardrailId** -- The ID of your Bedrock Guardrail (for example `abcd1234efgh`). Empty by default, which means no guardrail is applied.
+- **BedrockGuardrailVersion** -- The guardrail version to use. Defaults to `DRAFT`, which always resolves to the working draft of the guardrail. Set a numeric version (for example `1`) to pin a published version.
 
-When configured, all assistant requests are evaluated against the guardrail policies before responses are returned.
+Both parameters must have a value for a guardrail to be applied. If **BedrockGuardrailId** is left empty -- the default -- the assistant behaves exactly as it does without the feature, and no guardrail permissions are granted to the assistant's IAM role. When both are set, the deployment scopes the role's `bedrock:ApplyGuardrail` permission to that single guardrail ARN.
+
+When configured, the guardrail is attached to every path the assistant uses to reach Amazon Bedrock:
+
+- the Strands agent's Bedrock model, which covers normal streaming and non-streaming chat turns;
+- the direct `Converse` fallback used if the agent cannot be constructed, so the fallback is not a way to reach the model without the guardrail;
+- the Knowledge Base `RetrieveAndGenerate` call used by the document-search tool.
+
+Guardrail intervention is reported by Bedrock in the response trace. If the assistant starts returning blocked or masked content after you enable a guardrail, review the guardrail's filter and topic policies in the Bedrock console -- LMA passes the request through unchanged and does not override guardrail decisions.
 
 ## Custom LLM Prompt Templates
 
