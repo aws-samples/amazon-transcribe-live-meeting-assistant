@@ -56,6 +56,11 @@ from transcript_batch_processor import TranscriptBatchProcessor
 
 LOGGER = Logger(child=True, location="%(filename)s:%(lineno)d - %(funcName)s()")
 
+# Ceiling on the base64 payload carried in a discarded-record message. Well under
+# the smallest documented SQS message limit, leaving room for the metadata fields
+# and the JSON envelope around them.
+MAX_DATA_CHARS = 200 * 1024
+
 
 def record_sequence_number(record: Any) -> str:
     """Returns the Kinesis sequence number of a batch record.
@@ -132,7 +137,13 @@ def discarded_record_messages(
 
     The raw ``data`` is passed through base64-encoded exactly as Kinesis
     delivered it, so the message is a complete record of what was skipped and
-    can be decoded or re-put by hand.
+    can be decoded or re-put by hand — up to :data:`MAX_DATA_CHARS`. A Kinesis
+    record can be 1 MiB, which is about 1.4 MB once base64-encoded and larger
+    than an SQS message may be; the payload is truncated with a
+    ``dataTruncated`` marker rather than letting the whole message be rejected,
+    because the identifying metadata is worth more than the tail of the payload
+    and the record itself stays readable from the stream for its retention
+    period.
     """
     wanted = {number for number in sequence_numbers if number}
     if not wanted:
@@ -145,20 +156,23 @@ def discarded_record_messages(
         if sequence_number not in wanted:
             continue
         event_id = str(record.get("eventID", ""))
-        messages.append(
-            {
-                "reason": "record could not be decoded or mapped",
-                "eventID": event_id,
-                "shardId": _shard_id(event_id),
-                "sequenceNumber": sequence_number,
-                "partitionKey": str(kinesis.get("partitionKey", "")),
-                "approximateArrivalTimestamp": str(kinesis.get("approximateArrivalTimestamp", "")),
-                "eventSourceARN": str(record.get("eventSourceARN", "")),
-                # Base64, as delivered — not decoded, because the reason the
-                # record is here is that decoding it did not work.
-                "data": str(kinesis.get("data", "")),
-            }
-        )
+        # Base64, as delivered — not decoded, because the reason the record is
+        # here is that decoding it did not work.
+        data = str(kinesis.get("data", ""))
+        message = {
+            "reason": "record could not be decoded or mapped",
+            "eventID": event_id,
+            "shardId": _shard_id(event_id),
+            "sequenceNumber": sequence_number,
+            "partitionKey": str(kinesis.get("partitionKey", "")),
+            "approximateArrivalTimestamp": str(kinesis.get("approximateArrivalTimestamp", "")),
+            "eventSourceARN": str(record.get("eventSourceARN", "")),
+            "data": data[:MAX_DATA_CHARS],
+        }
+        if len(data) > MAX_DATA_CHARS:
+            message["dataTruncated"] = "true"
+            message["dataLength"] = str(len(data))
+        messages.append(message)
     return messages
 
 

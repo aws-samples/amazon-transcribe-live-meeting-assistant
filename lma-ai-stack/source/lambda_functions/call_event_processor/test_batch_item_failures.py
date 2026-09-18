@@ -202,6 +202,29 @@ def test_an_undecodable_record_is_copied_to_the_discarded_records_queue() -> Non
     assert base64.b64decode(message["body"]["data"]) == b"this is not json"
 
 
+def test_an_oversized_payload_is_truncated_so_the_message_still_lands() -> None:
+    """An SQS message has a size limit; the metadata matters more than the tail."""
+    oversized = b"x" * (batch_item_failures.MAX_DATA_CHARS * 2)
+    event = kinesis_event(["100"], payloads=[oversized])
+
+    messages = batch_item_failures.discarded_record_messages(event, ["100"])
+
+    assert len(messages) == 1
+    assert len(messages[0]["data"]) == batch_item_failures.MAX_DATA_CHARS
+    assert messages[0]["dataTruncated"] == "true"
+    assert int(messages[0]["dataLength"]) > batch_item_failures.MAX_DATA_CHARS
+    assert messages[0]["sequenceNumber"] == "100"
+
+
+def test_a_payload_within_the_limit_is_not_marked_truncated() -> None:
+    messages = batch_item_failures.discarded_record_messages(
+        kinesis_event(["100"], payloads=[b"small"]), ["100"]
+    )
+
+    assert base64.b64decode(messages[0]["data"]) == b"small"
+    assert "dataTruncated" not in messages[0]
+
+
 def test_a_discarded_records_queue_failure_does_not_fail_the_invocation() -> None:
     """The record was already skipped; failing here would redeliver good records."""
     from botocore.exceptions import ClientError

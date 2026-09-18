@@ -1451,7 +1451,7 @@ async def execute_process_event_api_mutation(
         "END",
     ]:
         LOGGER.debug("END Event: update status")
-        # Read the status before the mutation writes ENDED, so a redelivered END
+        # Read the status before anything here writes ENDED, so a redelivered END
         # is distinguishable from the first one. The event source mapping reports
         # partial batch failures, which means every record from a failing record
         # onwards is redelivered; the summary orchestrator is not idempotent, so
@@ -1461,14 +1461,12 @@ async def execute_process_event_api_mutation(
             await get_call_status(message=message, appsync_session=appsync_session) == "ENDED"
         )
 
-        response = await execute_update_call_status_mutation(
-            message=message, appsync_session=appsync_session
-        )
-        if isinstance(response, Exception):
-            return_value["errors"].append(response)
-        else:
-            return_value["successes"].append(response)
-
+        # Summary first, status second. The invoke is not wrapped in a try, so a
+        # transient failure propagates and the record is redelivered — and it has
+        # to find the meeting still open when it comes back, or the check above
+        # would skip the summary on the retry and the meeting would end with no
+        # summary at all. Ordering it ahead of the status mutation makes the worst
+        # case a duplicate summary rather than a missing one.
         if IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended:
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN,
@@ -1483,6 +1481,9 @@ async def execute_process_event_api_mutation(
                 extra=dict(call_id=message.get("CallId")),
             )
 
+        response = await execute_update_call_status_mutation(
+            message=message, appsync_session=appsync_session
+        )
         if isinstance(response, Exception):
             return_value["errors"].append(response)
         else:
