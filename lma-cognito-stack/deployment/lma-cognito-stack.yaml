@@ -101,10 +101,22 @@ Parameters:
     Default: ""
     Description: LMA build date/time (used in welcome email footer)
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable data retention on stack deletion for compliance requirements.
+      When true (default), the Cognito user pool will be retained. When false,
+      all resources deleted.
+
 Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
 
 Outputs:
   CognitoLoginUrl:
@@ -135,6 +147,10 @@ Resources:
   ##########################################################################
   UserPool:
     Type: AWS::Cognito::UserPool
+    # The user pool holds the only copy of every user identity and group
+    # membership; it cannot be rebuilt from anywhere else in the stack.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       AdminCreateUserConfig:
         AllowAdminCreateUserOnly: !If

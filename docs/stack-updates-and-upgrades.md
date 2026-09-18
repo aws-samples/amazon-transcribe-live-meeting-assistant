@@ -12,6 +12,7 @@ title: "Stack Updates & Upgrades"
 - [Building from Source](#building-from-source)
 - [What Is Preserved Across Updates](#what-is-preserved-across-updates)
 - [What May Change](#what-may-change)
+- [Data Retention On Stack Deletion](#data-retention-on-stack-deletion)
 - [Version Migration Notes](#version-migration-notes)
   - [v0.3.0](#v030)
   - [v0.2.0](#v020)
@@ -86,6 +87,40 @@ The following may be modified during an update:
 - Default prompt templates
 - Infrastructure resources (Lambda functions, ECS tasks, etc.)
 - Lambda function code
+
+## Data Retention On Stack Deletion
+
+The `EnableDataRetentionOnDelete` parameter (default `true`) decides what happens
+to stateful resources when the stack itself is deleted. With it set to `true`,
+deleting the stack leaves the following behind in your account rather than
+removing them:
+
+| Resource | Stack | Contents |
+|----------|-------|----------|
+| `EventSourcingTable` | AI stack | Meetings, transcripts and summaries |
+| `VirtualParticipantTable` | AI stack | Virtual participant records and schedules |
+| `MCPServersTable` | AI stack | Installed MCP server configurations |
+| `MCPApiKeysTable` | AI stack | Hashed per-user MCP API keys |
+| `OAuthStateTable` | AI stack | In-flight OAuth authorization state |
+| `VPTaskRegistry` | AI stack | Virtual participant task registry |
+| `DomSelectorCache` | AI stack | Cached meeting-platform UI selectors |
+| `VPProfilesBucket` | AI stack | Virtual participant browser profiles |
+| `UserPool` | Cognito stack | User accounts and group memberships |
+
+Retained resources continue to incur storage charges and must be removed by hand
+when you no longer need them — see [Cleanup](cleanup.md). Set
+`EnableDataRetentionOnDelete` to `false` if you would rather a stack deletion
+remove everything.
+
+Two stateful resources are deliberately *not* covered. The web application
+bucket holds only build artifacts that a redeployment regenerates, and is
+emptied on stack deletion regardless of this parameter. The MCP server's Cognito
+app client is configuration rather than data, and is recreated by a
+redeployment.
+
+The retention setting is stored as a CloudFormation resource attribute, so
+changing the parameter on an existing stack only takes effect once the stack
+update that carries it has completed.
 
 ## Version Migration Notes
 

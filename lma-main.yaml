@@ -2444,6 +2444,7 @@ Resources:
         LMASettingsParameterName: !Ref LMASettingsParameter
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
         LMAVersion: "<VERSION_TOKEN>"
         BuildDateTime: "<BUILD_DATE_TIME_TOKEN>"
 

@@ -4910,6 +4910,8 @@ Resources:
   ##########################################################################
   VirtualParticipantTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-VirtualParticipant"
       AttributeDefinitions:
@@ -4930,6 +4932,8 @@ Resources:
   # MCP Servers Table - Account-level MCP server configurations
   MCPServersTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-MCPServers"
       AttributeDefinitions:
@@ -4953,6 +4957,10 @@ Resources:
   # OAuth State Table - Temporary storage for OAuth flow state
   OAuthStateTable:
     Type: AWS::DynamoDB::Table
+    # Short-lived TTL rows only, but the policy is applied uniformly so that a
+    # stack delete never removes a table whose contents were not inspected.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-OAuthState"
       AttributeDefinitions:
@@ -4975,6 +4983,8 @@ Resources:
   # MCP API Keys Table - Per-user API keys (hashed)
   MCPApiKeysTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Condition: ShouldEnableMCPServer
     Properties:
       TableName: !Sub "${AWS::StackName}-MCPApiKeys"
@@ -5891,6 +5901,8 @@ Resources:
   # VP Task Registry Table - stores task ARNs for efficient termination
   VPTaskRegistry:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-VPTaskRegistry"
       AttributeDefinitions:
@@ -5992,6 +6004,10 @@ Resources:
   # Entries auto-expire 30 days after lastUsedAt via the expiresAt TTL attribute.
   DomSelectorCache:
     Type: AWS::DynamoDB::Table
+    # Rebuildable cache, but the policy is applied uniformly so that a stack
+    # delete never removes a table whose contents were not inspected.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-DomSelectorCache"
       AttributeDefinitions:

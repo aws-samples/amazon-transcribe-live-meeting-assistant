@@ -33,7 +33,7 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | AuthorizedAccountEmailDomain | Comma-separated email domains allowed for self-registration | (none) | Comma-separated domain names |
 | MeetingRecordExpirationInDays | Number of days to retain meeting data before automatic deletion | 90 | Positive integer |
 | CloudWatchLogsExpirationInDays | Number of days to retain CloudWatch Logs | (varies) | Standard CloudWatch retention values |
-| EnableDataRetentionOnDelete | Retain DynamoDB tables, S3 buckets, and KMS keys when the stack is deleted | (false) | true, false |
+| EnableDataRetentionOnDelete | Retain DynamoDB tables, S3 buckets, the Cognito user pool, and KMS keys when the stack is deleted | true | true, false |
 
 ## Meeting Assistant
 
