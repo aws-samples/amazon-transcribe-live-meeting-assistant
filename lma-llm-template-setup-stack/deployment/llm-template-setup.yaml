@@ -26,9 +26,26 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Retain the LLM prompt template table when the stack is deleted. The
+      templates in it are edited from the LMA web UI and exist nowhere else.
+
+Conditions:
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
+
 Resources:
   LLMPromptTemplateTable:
     Type: "AWS::DynamoDB::Table"
+    # Holds prompt templates edited from the web UI, which no redeployment can
+    # reproduce once a deployment has customized them.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       KeySchema:
         - AttributeName: LLMPromptTemplateId
