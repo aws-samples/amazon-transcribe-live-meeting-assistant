@@ -29,10 +29,10 @@ import {
   Textarea,
   Toggle,
 } from '@cloudscape-design/components';
-import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
+import markdownRehypePlugins from '../common/markdown-plugins';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
 import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
 import { splitDiarizationLabel } from '../common/utilities';
@@ -274,7 +274,7 @@ const CallSummary = ({ item }) => {
                   <div>
                     {/* eslint-disable-next-line react/no-array-index-key */}
                     <TextContent color="gray">
-                      <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                      <ReactMarkdown rehypePlugins={markdownRehypePlugins}>
                         {getMarkdownSummary(item.callSummaryText)}
                       </ReactMarkdown>
                     </TextContent>
@@ -405,8 +405,10 @@ const TranscriptContent = ({ segment, translateCache }) => {
       // prettier-ignore
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
-        <ReactMarkdown rehypePlugins={[rehypeRaw]}>{text.trim()}</ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={[rehypeRaw]}>{translatedText.trim()}</ReactMarkdown>
+        <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{text.trim()}</ReactMarkdown>
+        <ReactMarkdown className="translated-text" rehypePlugins={markdownRehypePlugins}>
+          {translatedText.trim()}
+        </ReactMarkdown>
       </TextContent>
     );
   });
@@ -1153,6 +1155,22 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           }
         >
           <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
+            {/*
+              No `sandbox` attribute, deliberately. The chat page is a first-party
+              document served from this same distribution, and the parent/frame
+              channel below depends on being same-origin in both directions: the
+              parent only acts on messages whose `event.origin` equals its own
+              origin, and it addresses the frame with an explicit targetOrigin
+              rather than '*'. A `sandbox` that omitted `allow-same-origin` would
+              move the frame to an opaque origin, forcing both of those back to
+              '*'/"null" and trading a precise channel for a vaguer one. Adding
+              `sandbox="allow-scripts allow-same-origin"` instead would be purely
+              cosmetic, since that combination lets the frame remove its own
+              sandboxing. The frame renders agent output, and that content is
+              constrained where it is rendered (renderMarkdownSafe in
+              strands-chat.html) plus by the distribution's response headers, not
+              by frame flags. The frame reads no credentials from shared storage.
+            */}
             <iframe
               style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
               title="Meeting Assist"

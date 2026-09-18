@@ -331,8 +331,18 @@
             animation: spin 1s linear infinite;
         }
     </style>
-    <!-- Include marked.js for markdown parsing (vendored locally to avoid external CDN dependency) -->
+    <!--
+      Vendored locally to avoid an external CDN dependency. Versions are pinned;
+      see the banner at the top of each file and the notes in js/render-markdown.js.
+        marked v11.1.1    https://github.com/markedjs/marked
+        DOMPurify 3.4.15  https://github.com/cure53/DOMPurify
+      render-markdown.js composes the two into renderMarkdownSafe(), which is the
+      only way this page turns markdown into HTML, so every rendered string has
+      been through the sanitizer's allowed tag/attribute set.
+    -->
     <script src="js/marked.min.js"></script>
+    <script src="js/purify.min.js"></script>
+    <script src="js/render-markdown.js"></script>
 </head>
 <body>
     <div class="chat-container">
@@ -369,8 +379,17 @@
         let buttonConfig = null;
         loadButtonConfiguration();
 
+        // This page is always served from the same origin as the LMA app that
+        // frames it, so the postMessage channel is pinned to that origin in both
+        // directions: outbound messages target PARENT_ORIGIN instead of '*', and
+        // inbound messages are only acted on when they came from it.
+        const PARENT_ORIGIN = window.location.origin;
+
+        const isFromParent = (event) => event.origin === PARENT_ORIGIN;
+
         // Listen for reload message from parent
         window.addEventListener('message', (event) => {
+            if (!isFromParent(event)) return;
             if (event.data?.type === 'STRANDS_RELOAD_BUTTONS') {
                 // Reload button configuration when admin saves changes
                 loadButtonConfiguration();
@@ -386,9 +405,24 @@
             const header = document.createElement('div');
             header.className = 'thinking-header';
             
+            // Built with DOM nodes rather than an HTML string because messageId
+            // comes from the backend response.
             const currentStep = document.createElement('div');
             currentStep.className = 'thinking-current-step';
-            currentStep.innerHTML = '<div style="width: 12px;"><span class="thinking-spinner"></span></div> <span id="current-step-text-' + messageId + '">Analyzing request...</span>';
+
+            const spinnerWrapper = document.createElement('div');
+            spinnerWrapper.style.width = '12px';
+            const spinner = document.createElement('span');
+            spinner.className = 'thinking-spinner';
+            spinnerWrapper.appendChild(spinner);
+
+            const currentStepLabel = document.createElement('span');
+            currentStepLabel.id = `current-step-text-${messageId}`;
+            currentStepLabel.textContent = 'Analyzing request...';
+
+            currentStep.appendChild(spinnerWrapper);
+            currentStep.appendChild(document.createTextNode(' '));
+            currentStep.appendChild(currentStepLabel);
             
             const toggle = document.createElement('div');
             toggle.className = 'thinking-toggle';
@@ -466,7 +500,9 @@
                     break;
             }
             
-            currentStepText.innerHTML = `${icon} ${displayText}`;
+            // step.Content is model output and the label needs no markup, so it
+            // is written as text.
+            currentStepText.textContent = `${icon} ${displayText}`;
         }
         
         function addStepToDetailedView(messageId, step) {
@@ -508,7 +544,14 @@
                     break;
             }
             
-            header.innerHTML = `<span>${icon}</span><span>${title}</span>`;
+            // `title` embeds step.ToolName from the agent, so the two spans are
+            // created as nodes and filled with text.
+            const iconSpan = document.createElement('span');
+            iconSpan.textContent = icon;
+            const titleSpan = document.createElement('span');
+            titleSpan.textContent = title;
+            header.appendChild(iconSpan);
+            header.appendChild(titleSpan);
             stepDiv.appendChild(header);
             
             if (step.Content) {
@@ -588,7 +631,7 @@
         function finalizeThinkingContainer(messageId) {
             const currentStepText = document.getElementById(`current-step-text-${messageId}`);
             if (currentStepText) {
-                currentStepText.innerHTML = '✓ Complete';
+                currentStepText.textContent = '✓ Complete';
             }
             
             const container = document.getElementById(`thinking-${messageId}`);
@@ -605,8 +648,9 @@
             messageDiv.className = `message ${type}`;
             
             // Use markdown rendering for assistant messages, plain text for user/error
-            if (type === 'assistant' && typeof marked !== 'undefined') {
-                messageDiv.innerHTML = marked.parse(text);
+            const rendered = type === 'assistant' ? renderMarkdownSafe(text) : null;
+            if (rendered !== null) {
+                messageDiv.innerHTML = rendered;
             } else {
                 messageDiv.textContent = text;
             }
@@ -692,6 +736,7 @@
                 const messageId = `strands-chat-${Date.now()}`;
                 
                 const messageHandler = (event) => {
+                    if (!isFromParent(event)) return;
                     if (event.data?.type === 'STRANDS_CHAT_RESPONSE' && event.data.messageId === messageId) {
                         window.removeEventListener('message', messageHandler);
                         event.data.success ? resolve(event.data.result) : reject(new Error(event.data.error));
@@ -707,7 +752,7 @@
                         callId,
                         message,
                         conversationHistory: conversationHistory
-                    }, '*');
+                    }, PARENT_ORIGIN);
                     
                     setTimeout(() => {
                         window.removeEventListener('message', messageHandler);
@@ -734,9 +779,10 @@
                 type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION',
                 callId,
                 messageId
-            }, '*');
+            }, PARENT_ORIGIN);
             
             const tokenHandler = (event) => {
+                if (!isFromParent(event)) return;
                 if (event.data?.type === 'STRANDS_TOKEN_MESSAGE') {
                     const token = event.data.token;
                     
@@ -750,8 +796,13 @@
                             finalizeThinkingContainer(messageId);
                             
                             // Final render with markdown
-                            if (typeof marked !== 'undefined' && accumulatedText) {
-                                streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
+                            if (accumulatedText) {
+                                const finalHtml = renderMarkdownSafe(accumulatedText);
+                                if (finalHtml !== null) {
+                                    streamingMessageDiv.innerHTML = finalHtml;
+                                } else {
+                                    streamingMessageDiv.textContent = accumulatedText;
+                                }
                             }
                             
                             // Add completed response to conversation history
@@ -777,8 +828,9 @@
                             accumulatedText += token.Token;
                             
                             // Render markdown incrementally during streaming
-                            if (typeof marked !== 'undefined') {
-                                streamingMessageDiv.innerHTML = marked.parse(accumulatedText);
+                            const partialHtml = renderMarkdownSafe(accumulatedText);
+                            if (partialHtml !== null) {
+                                streamingMessageDiv.innerHTML = partialHtml;
                             } else {
                                 streamingMessageDiv.textContent = accumulatedText;
                             }
@@ -884,6 +936,7 @@
                 const requestId = `button-config-${Date.now()}`;
                 
                 const configHandler = (event) => {
+                    if (!isFromParent(event)) return;
                     if (event.data?.type === 'STRANDS_BUTTON_CONFIG_RESPONSE' && event.data.requestId === requestId) {
                         window.removeEventListener('message', configHandler);
                         event.data.success ? resolve(event.data.config) : reject(new Error(event.data.error));
@@ -896,7 +949,7 @@
                     window.parent.postMessage({
                         type: 'STRANDS_BUTTON_CONFIG_REQUEST',
                         requestId
-                    }, '*');
+                    }, PARENT_ORIGIN);
                     
                     setTimeout(() => {
                         window.removeEventListener('message', configHandler);
@@ -910,7 +963,7 @@
         
         function renderSuggestionButtons(config) {
             const container = document.getElementById('suggestionsContainer');
-            container.innerHTML = '';
+            container.replaceChildren();
             
             if (!config || Object.keys(config).length === 0) {
                 renderDefaultButtons();
@@ -990,7 +1043,7 @@
             ];
             
             const container = document.getElementById('suggestionsContainer');
-            container.innerHTML = '';
+            container.replaceChildren();
             
             let hasHiddenButtons = false;
             

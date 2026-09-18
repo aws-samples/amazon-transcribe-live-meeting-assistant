@@ -18,7 +18,6 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
 import {
   Badge,
@@ -36,6 +35,7 @@ import {
   Link,
 } from '@cloudscape-design/components';
 
+import markdownRehypePlugins from '../common/markdown-plugins';
 import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
@@ -61,7 +61,7 @@ const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]
 const EmbedSummaryPanel = ({ item }) => (
   <Container header={<Header variant="h4">Meeting Summary</Header>}>
     <TextContent color="gray">
-      <ReactMarkdown rehypePlugins={[rehypeRaw]}>{getMarkdownSummary(item.callSummaryText)}</ReactMarkdown>
+      <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{getMarkdownSummary(item.callSummaryText)}</ReactMarkdown>
     </TextContent>
   </Container>
 );
@@ -232,8 +232,8 @@ const TranscriptContent = ({ segment, translateCache }) => {
     return (
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
-        <ReactMarkdown rehypePlugins={[rehypeRaw]}>{text.trim()}</ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={[rehypeRaw]}>
+        <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{text.trim()}</ReactMarkdown>
+        <ReactMarkdown className="translated-text" rehypePlugins={markdownRehypePlugins}>
           {translatedText.trim()}
         </ReactMarkdown>
       </TextContent>

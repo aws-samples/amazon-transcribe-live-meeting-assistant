@@ -1,0 +1,41 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/*
+ * Shared rehype plugin chain for every <ReactMarkdown> that renders text
+ * produced by a model or typed by a user -- meeting summaries, transcript
+ * segments, translations and meeting-query answers.
+ *
+ * `rehype-raw` is kept because those strings legitimately contain small bits of
+ * inline HTML (line breaks, emphasis) that authors and prompt templates rely on.
+ * `rehype-sanitize` runs immediately after it, so the invariant across all of
+ * these surfaces is that the HTML tree handed to React has already been reduced
+ * to the GitHub-flavoured allowlist in `defaultSchema` -- the tags and
+ * attributes markdown itself produces, plus `className` on `code`/`pre` for
+ * syntax highlighting hints.
+ *
+ * Order matters: raw HTML has to be parsed into nodes before it can be filtered,
+ * so `rehypeRaw` must stay first in the array.
+ */
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
+
+const schema = {
+  ...defaultSchema,
+  attributes: {
+    ...defaultSchema.attributes,
+    // Markdown fenced code blocks emit `class="language-xxx"`; keep that so
+    // existing code rendering is unchanged.
+    code: [...(defaultSchema.attributes?.code || []), ['className', /^language-./]],
+  },
+};
+
+/**
+ * rehype plugin chain to spread onto <ReactMarkdown rehypePlugins={...}>.
+ */
+const markdownRehypePlugins = [rehypeRaw, [rehypeSanitize, schema]];
+
+export default markdownRehypePlugins;
