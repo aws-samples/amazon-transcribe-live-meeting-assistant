@@ -9,7 +9,7 @@ import asyncio
 import json
 import re
 from os import environ, getenv
-from typing import TYPE_CHECKING, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List
 
 import boto3
 
@@ -20,11 +20,11 @@ from appsync_utils import AppsyncAioGqlClient
 # third-party imports from Lambda layer
 from aws_lambda_powertools import Logger
 from aws_lambda_powertools.utilities.typing import LambdaContext
-from botocore.config import Config as BotoCoreConfig
 
 # local imports
+from batch_item_failures import SequenceTrackingBatchProcessor
+from botocore.config import Config as BotoCoreConfig
 from event_processor import execute_process_event_api_mutation
-from transcript_batch_processor import TranscriptBatchProcessor
 
 # pylint: enable=import-error
 
@@ -85,9 +85,9 @@ if "AssistantWakePhraseRegEx" in SETTINGS:
     SETTINGS["AssistantWakePhraseRegEx"] = re.compile(SETTINGS["AssistantWakePhraseRegEx"])
 
 
-async def process_event(event) -> Dict[str, List]:
+async def process_event(event) -> SequenceTrackingBatchProcessor:
     """Processes a Batch of Transcript Records"""
-    async with TranscriptBatchProcessor(
+    async with SequenceTrackingBatchProcessor(
         appsync_client=APPSYNC_CLIENT,
         agent_assist_args=dict(
             is_lambda_agent_assist_enabled=IS_LAMBDA_AGENT_ASSIST_ENABLED,
@@ -102,24 +102,48 @@ async def process_event(event) -> Dict[str, List]:
     ) as processor:
         await processor.handle_event(event=event)
 
-    return processor.results
+    return processor
 
 
 @LOGGER.inject_lambda_context
-def handler(event, context: LambdaContext):
+def handler(event, context: LambdaContext) -> Dict[str, List[Dict[str, str]]]:
     # pylint: disable=unused-argument
-    """Lambda handler"""
+    """Lambda handler.
+
+    Returns a Kinesis partial batch response. The event source mapping is
+    configured with ``FunctionResponseTypes: [ReportBatchItemFailures]``, so the
+    shard checkpoint advances past every record except the ones named here. See
+    ``batch_item_failures`` for which failures are reported and why.
+    """
     LOGGER.debug("lambda event", extra={"event": event})
 
-    event_processor_results = EVENT_LOOP.run_until_complete(process_event(event=event))
+    processor = EVENT_LOOP.run_until_complete(process_event(event=event))
+    event_processor_results: Dict[str, List[Any]] = processor.results
     LOGGER.debug("event processor results", extra=dict(event_results=event_processor_results))
 
-    for error in event_processor_results.get("errors", []):
-        LOGGER.error("event processor error: %s", error)
-        if isinstance(error, Exception):
-            try:
-                raise error
-            except Exception:  # pylint: disable=broad-except
-                LOGGER.exception("event processor exception")
+    errors = event_processor_results.get("errors", [])
+    for error in errors:
+        LOGGER.error(
+            "event processor error: %s",
+            error,
+            exc_info=error if isinstance(error, BaseException) else None,
+        )
 
-    return
+    if errors and processor.has_unreportable_failure:
+        # No sequence number can express this failure, so the only way to keep
+        # the event source mapping from checkpointing past it is to fail the
+        # whole invocation.
+        raise RuntimeError("event processor failed with no reportable Kinesis record")
+
+    response = processor.batch_item_failures_response
+    if response["batchItemFailures"]:
+        LOGGER.warning(
+            "reporting Kinesis batch item failures",
+            extra=dict(
+                batch_item_failures=response["batchItemFailures"],
+                failing_sequence_numbers=processor.failing_sequence_numbers,
+                discarded_sequence_numbers=processor.discarded_sequence_numbers,
+            ),
+        )
+
+    return response
