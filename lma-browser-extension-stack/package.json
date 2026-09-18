@@ -3,12 +3,12 @@
   "version": "<VERSION_TOKEN>",
   "private": true,
   "dependencies": {
-    "@cloudscape-design/components": "^3.0.1377",
+    "@cloudscape-design/components": "^3.0.1379",
     "@cloudscape-design/global-styles": "^1.0.70",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-use-websocket": "^4.13.0",
-    "web-vitals": "^6.2.1"
+    "web-vitals": "^6.2.2"
   },
   "scripts": {
     "start": "react-scripts start",
@@ -35,13 +35,13 @@
     ]
   },
   "devDependencies": {
-    "@testing-library/dom": "^10.4.0",
+    "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.7",
-    "@types/chrome": "^0.2.9",
+    "@types/chrome": "^0.3.0",
     "@types/jest": "^30.0.0",
-    "@types/node": "^26.5.1",
+    "@types/node": "^26.6.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "eslint": "^8.57.0",
