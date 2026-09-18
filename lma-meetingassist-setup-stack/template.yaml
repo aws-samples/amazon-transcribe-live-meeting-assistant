@@ -118,7 +118,18 @@ Parameters:
   BedrockGuardrailId:
     Type: String
     Default: ""
-    Description: Bedrock Guardrail ID for the Strands agent
+    Description: >-
+      (Optional) Bedrock Guardrail ID for the Strands agent -- the bare ID only
+      (for example abcd1234efgh), not the full guardrail ARN. The ARN is built
+      from this value. Leave blank to apply no guardrail.
+    # Matches the bare-identifier half of the Bedrock guardrailIdentifier pattern.
+    # Rejecting an ARN here is deliberate: pasting one would otherwise be
+    # substituted into arn:...:guardrail/${BedrockGuardrailId} and produce a
+    # malformed ARN that only surfaces later as an AccessDenied at request time.
+    AllowedPattern: "^(|[a-z0-9]{1,64})$"
+    ConstraintDescription: >-
+      Must be empty, or a Bedrock guardrail ID of 1-64 lowercase alphanumeric
+      characters. Supply the ID only, not the guardrail ARN.
 
   BedrockGuardrailVersion:
     Type: String
