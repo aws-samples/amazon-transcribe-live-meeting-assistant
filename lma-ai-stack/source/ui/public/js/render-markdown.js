@@ -39,18 +39,33 @@
   // emits them and this page builds its own controls in code rather than
   // through this function.
   //
+  // `style` is forbidden as a tag as well as an attribute. Both are in
+  // DOMPurify's html profile and markdown emits neither, and permitting the
+  // element would be the more capable of the two -- a `<style>` block reaches
+  // every node in the frame, not just the one it sits on. Note a top-level
+  // `<style>` is dropped by the HTML parser hoisting it into `<head>`, so only
+  // the nested positions (mid-paragraph, in a list item, in a table cell) were
+  // ever reachable; both are covered now. Both React paths already drop it:
+  // `defaultSchema.tagNames` excludes it, and the one plugin-free
+  // <ReactMarkdown> escapes it.
+  //
   // `input` is deliberately NOT in that list. GFM is enabled by default in
   // marked and this page overrides nothing, so `- [x] done` really does render
   // as `<input checked disabled type="checkbox">`. Forbidding the tag would
   // delete it, and since `checked` is the only difference between a done and a
   // pending item, a checklist would silently render as plain bullets with its
   // state erased. Instead the hook below narrows `input` to a disabled
-  // checkbox, which is exactly what `defaultSchema` permits on the React
-  // surfaces, so the same property holds on both render paths.
+  // checkbox: the same disabled task-list checkbox `defaultSchema` permits on
+  // the React surfaces, plus a few inert presentational attributes that come
+  // from DOMPurify's default set. `defaultSchema` allows only `type` and
+  // `disabled`, whereas this path also keeps `name`, `value` and `src`. Those
+  // cannot do anything here -- `src` is meaningless on a checkbox, and
+  // `name`/`value` on a disabled control with no ancestor `form` (forbidden
+  // below) can never be submitted.
   var SANITIZE_CONFIG = {
     USE_PROFILES: { html: true },
     FORBID_ATTR: ['rel', 'style'],
-    FORBID_TAGS: ['form', 'button', 'textarea', 'select', 'option'],
+    FORBID_TAGS: ['form', 'style', 'button', 'textarea', 'select', 'option'],
   };
 
   /**
@@ -76,7 +91,13 @@
 
   // Registered against the sanitizer instance actually in use, on first render
   // rather than at load time, so the hook cannot be missed if the vendored
-  // scripts are ever loaded in a different order.
+  // scripts are ever loaded in a different order, or if purify.min.js is loaded
+  // twice (module-scope registration would hook the discarded instance).
+  //
+  // The identity guard assumes hooks are never removed. Nothing calls
+  // `removeAllHooks()` or `removeHook()` today, and this is the only `addHook`
+  // in the codebase. If that changes, this guard would still be satisfied while
+  // the hook itself was gone, so clear `hookedSanitizer` alongside any such call.
   var hookedSanitizer = null;
 
   function ensureHooks(sanitizer) {

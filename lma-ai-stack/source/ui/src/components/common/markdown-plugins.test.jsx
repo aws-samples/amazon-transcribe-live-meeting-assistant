@@ -228,6 +228,20 @@ describe('renderMarkdownSafe (standalone chat page)', () => {
     expect(host.querySelector('button')).toBeNull();
   });
 
+  it('renders markdown without style elements', () => {
+    // Nested rather than at the start of the input on purpose. The HTML parser
+    // hoists a leading <style> into <head>, which masks the element surviving in
+    // the positions model output actually puts it in -- mid-paragraph, or inside
+    // a list item or table cell.
+    const host = renderToDom('Here are the action items: <style>p{display:none}</style>');
+
+    expect(host.querySelector('style')).toBeNull();
+    expect(host.textContent).toContain('Here are the action items:');
+    // The declaration text is dropped with the element rather than being left
+    // behind as visible text.
+    expect(host.textContent).not.toContain('display:none');
+  });
+
   it('renders markdown without style attributes', () => {
     const host = renderToDom('<p style="position:fixed;top:0">styled</p>');
 
