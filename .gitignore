@@ -16,12 +16,13 @@ samconfig.toml
 .ui-test-checksum
 .ui-lint-checksum
 .claude/settings.json
+# Per-agent git worktrees created under the repo (see `git worktree list`).
+.claude/worktrees/
 
-# DSR (legacy) — superseded by .srt/. Scanner exports and per-machine settings
-# are generated output and stay untracked; the hand-written review document is
-# the only file here worth keeping under version control.
+# DSR (legacy) — superseded by .srt/. Nothing here is tracked: scanner exports
+# and per-machine settings are generated output, and the review write-up is kept
+# internally.
 .dsr/*
-!.dsr/feature-security-review-v0.1.0-to-v0.3.2.md
 
 # SRT (https://github.com/aws-samples/sample-security-review-tool)
 # Only the hand-curated review decisions (.srt/suppressions.json) are tracked.
@@ -31,9 +32,6 @@ samconfig.toml
 # docs/security-scanning.md.
 .srt/*
 !.srt/suppressions.json
-
-# Large local working directory of vendored packages — must never be committed.
-lma-aims-stack/
 
 .ash/
 
