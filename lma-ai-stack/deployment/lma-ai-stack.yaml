@@ -7108,6 +7108,25 @@ Resources:
   # Lambda@Edge for VNC Authentication
   ##########################################################################
 
+  # Key used to sign the short-lived access tokens for the /vnc/* behavior.
+  #
+  # Generated once per deployment and read by exactly two principals: the
+  # resolver that mints tokens (VncEdgeTokenFunction) and the Lambda@Edge
+  # function that checks them. Created unconditionally, matching
+  # MicrovmVncTokenFunction, so the AppSync resolver is always present.
+  VncEdgeTokenSigningSecret:
+    Type: AWS::SecretsManager::Secret
+    # checkov:skip=CKV_AWS_149: "Encrypted with the stack's customer-managed key"
+    Properties:
+      Description: !Sub "Signing key for ${AWS::StackName} Virtual Participant VNC access tokens"
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      GenerateSecretString:
+        # Punctuation excluded only so the value stays convenient to handle in
+        # shell/JSON contexts; 64 alphanumeric characters is ample for an
+        # HMAC-SHA256 key.
+        PasswordLength: 64
+        ExcludePunctuation: true
+
   # IAM Role for Lambda@Edge function (must be assumable by both lambda and edgelambda)
   EdgeAuthFunctionRole:
     Type: AWS::IAM::Role
@@ -7127,6 +7146,24 @@ Resources:
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
+      Policies:
+        # Scoped to the one secret the edge function needs, and nothing else.
+        - PolicyName: ReadVncTokenSigningSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref VncEdgeTokenSigningSecret
+              # The secret is encrypted with the customer-managed key, so
+              # GetSecretValue alone is not enough to read it.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
 
   # Custom resource Lambda to deploy Lambda@Edge in us-east-1
   EdgeAuthDeployerRole:
@@ -7210,12 +7247,168 @@ Resources:
       ServiceToken: !GetAtt EdgeAuthDeployerFunction.Arn
       FunctionName: !Sub '${AWS::StackName}-VNCEdgeAuth'
       RoleArn: !GetAtt EdgeAuthFunctionRole.Arn
-      UserPoolId: !Ref UserPoolId
-      Region: !Ref AWS::Region
-      ClientId: !Ref CognitoClientId
+      # Baked into the edge source at create/update time: Lambda@Edge supports
+      # no environment variables, and the replicated function has to be told
+      # which region holds the secret.
+      SigningSecretArn: !Ref VncEdgeTokenSigningSecret
+      SigningSecretRegion: !Ref AWS::Region
       # Hash of the Lambda@Edge code - changing this forces the custom resource to update
       # This value is replaced during the build process by the Makefile
       CodeHash: "EDGE_AUTH_CODE_HASH_PLACEHOLDER"
+
+  ##########################################################################
+  # Token minting for the /vnc/* CloudFront behavior
+  #
+  # The viewer calls createVncEdgeToken(vpId) before connecting. This resolver
+  # confirms the caller's access to that Virtual Participant against the VP
+  # record, then returns a few-minute token signed with
+  # VncEdgeTokenSigningSecret and scoped to that VP's /vnc/<vpId> path, which is
+  # what the Lambda@Edge function checks.
+  #
+  # Created unconditionally (like MicrovmVncTokenFunction) so the resolver is
+  # always attached; the token is only used by the ECS launch types, where the
+  # ALB and CloudFront behavior exist.
+  ##########################################################################
+
+  VncEdgeTokenFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: MintVncEdgeToken
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref VncEdgeTokenSigningSecret
+              - Effect: Allow
+                # Look up the caller's VP to confirm access before signing, and
+                # to read the VNC server credential the VP task recorded there.
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt VirtualParticipantTable.Arn
+              # Both the table and the secret are encrypted with the
+              # customer-managed key, so the read actions above are not
+              # sufficient on their own.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+                      - !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
+
+  # Dedicated, KMS-encrypted log group, matching every other function in this
+  # stack. The function logs VP ids and caller identities, so its logs must not
+  # land in an unencrypted default group.
+  VncEdgeTokenFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VncEdgeTokenFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VncEdgeTokenFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function only calls AWS public APIs; no VPC resources"
+          - id: W92
+            reason: "Reserved concurrency not required; invoked once per viewer session"
+    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only a table name and a secret ARN"
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 15
+      MemorySize: 256
+      Role: !GetAtt VncEdgeTokenFunctionRole.Arn
+      Environment:
+        Variables:
+          VP_TABLE_NAME: !Ref VirtualParticipantTable
+          SIGNING_SECRET_ARN: !Ref VncEdgeTokenSigningSecret
+      CodeUri: ../source/lambda_functions/vnc_edge_token
+      LoggingConfig:
+        LogGroup: !Ref VncEdgeTokenFunctionLogGroup
+
+  VncEdgeTokenDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt VncEdgeTokenFunction.Arn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  VncEdgeTokenDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: VncEdgeTokenManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt VncEdgeTokenDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VncEdgeTokenFunction.Arn
+
+  CreateVncEdgeTokenResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createVncEdgeToken
+      DataSourceName: !GetAtt VncEdgeTokenDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "createVncEdgeToken"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($context.error)
+          $utils.error($context.error.message, $context.error.type)
+        #end
+        $utils.toJson($context.result)
 
   ##########################################################################
   # VNC Application Load Balancer for VNC Viewer Remove FrameBuffer Stream
