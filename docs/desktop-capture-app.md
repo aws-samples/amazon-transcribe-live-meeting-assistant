@@ -52,8 +52,8 @@ By default each channel gets a single speaker name — everything from system au
 is the **Meeting Audio** label, everything from your mic is the **My Mic** label.
 That is enough for a one-to-one call, but not when several people share a channel.
 
-**Settings (⚙) → Speaker identification** turns on Amazon Transcribe speaker
-partitioning (diarization), independently per channel:
+**Settings (⚙) → Speaker identification** turns on speaker partitioning
+(diarization) independently per channel, on whichever engine the deployment uses:
 
 | Setting | Turn it on when |
 |---|---|
@@ -77,16 +77,19 @@ For headless/CLI use, the same options are `--diarize-system` / `--diarize-mic`
 
 ### Choosing the transcription engine
 
-If the deployment also runs the [on-demand ASR & diarization engine](microvm-asr.md),
-`--asr-engine microvm` sends this meeting there instead of to Amazon Transcribe
-(`LMA_ASR_ENGINE`, or `asrEngine` in `lma-config.json`). Omit it and the deployment's
-own default applies.
+Which engine a desktop meeting uses is the deployment's **Stream Audio, Chrome extension and Desktop Capture** setting
+on **Configuration ▸ Transcription Engine**, the same setting that covers Stream Audio and the
+Chrome extension. When the deployment runs the
+[on-demand ASR & diarization engine](microvm-asr.md), `--asr-engine microvm` or
+`--asr-engine transcribe` (`LMA_ASR_ENGINE`, or `asrEngine` in `lma-config.json`)
+overrides that setting for one run in either direction; omit it and the deployment
+setting applies.
 
-Both engines produce speaker labels, so the two flags above do **not** pick an engine —
-this is the only way a client chooses one. The on-demand engine separates voices sharing
-a single microphone more reliably, but it is English only and does not support content
-redaction, custom vocabularies, custom language models or language identification. A
-meeting whose MicroVM cannot start falls back to Amazon Transcribe on its own.
+Both engines produce speaker labels, so the two flags above do **not** pick an engine.
+The on-demand engine separates voices sharing a single microphone more reliably, but it
+is English only and does not support content redaction, custom vocabularies, custom
+language models or language identification. A meeting whose MicroVM cannot start falls
+back to Amazon Transcribe on its own.
 
 ## Optional: record screen video
 

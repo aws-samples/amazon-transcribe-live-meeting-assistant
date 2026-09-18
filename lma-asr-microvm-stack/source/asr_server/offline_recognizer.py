@@ -276,7 +276,7 @@ class SherpaOfflineRecognizer(Recognizer):
         if self._emit_segment_partial:
             # R4.4: an offline engine MAY emit a single ``partial`` at segment close.
             events.append(
-                Event(kind="partial", segment=self._segment, text=text, start=start_t)
+                Event(kind="partial", segment=self._segment, text=text, start=start_t, end=end_t)
             )
         # Word timings from the decode are segment-relative; offset onto the
         # absolute session timeline so ``final`` word times line up with start/end.

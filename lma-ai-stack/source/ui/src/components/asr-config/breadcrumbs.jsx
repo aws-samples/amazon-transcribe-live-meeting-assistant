@@ -10,7 +10,7 @@ import { ASR_CONFIG_PATH, DEFAULT_PATH } from '../../routes/constants';
 export const asrConfigBreadcrumbItems = [
   { text: 'Meeting Assistant', href: `#${DEFAULT_PATH}` },
   { text: 'Configuration', href: '#' },
-  { text: 'ASR Config', href: `#${ASR_CONFIG_PATH}` },
+  { text: 'Transcription Engine', href: `#${ASR_CONFIG_PATH}` },
 ];
 
 const Breadcrumbs = () => <BreadcrumbGroup ariaLabel="Breadcrumbs" items={asrConfigBreadcrumbItems} />;

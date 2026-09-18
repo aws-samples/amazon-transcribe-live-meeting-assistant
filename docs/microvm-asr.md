@@ -9,16 +9,16 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 
 > **Status: EXPERIMENTAL — not production ready.** Opt-in and off by default.
 > **Amazon Transcribe remains the recommended engine for production meetings**;
-> transcript quality here is below it, speaker labels depend on a calibrated operating
-> point, and defaults may change between releases. Deploying it changes nothing on its
-> own: meetings still use Amazon Transcribe unless a client asks for diarization.
-> Accuracy (WER) and diarization error rate have not yet been benchmarked — see
-> [What is not yet measured](#what-is-not-yet-measured).
+> transcript quality here is below it and defaults may change between releases.
+> Deploying it changes nothing on its own: meetings still use Amazon Transcribe until
+> an admin switches streaming meetings or Virtual Participants onto it on the ASR
+> Config page. Accuracy (WER) and diarization error rate have not yet
+> been benchmarked — see [What is not yet measured](#what-is-not-yet-measured).
 >
-> Because it is experimental, its tuning knobs are deliberately **not** exposed as
-> CloudFormation parameters. `TranscriptionEngine` is the only deploy-time question;
-> everything else is either fixed in the `AsrDefaults` mapping in `lma-main.yaml` or
-> adjustable at runtime from the ASR Config page.
+> Because it is experimental, nothing about it is tunable at deploy time:
+> `EnableMicrovmAsr` is the only CloudFormation question, the model bundle ships
+> with its diarization operating point already measured, and the only runtime
+> settings are three switches on the Transcription Engine page.
 
 ## Table of Contents
 
@@ -26,9 +26,10 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 - [What it does](#what-it-does)
 - [Feature trade-offs versus Amazon Transcribe](#feature-trade-offs-versus-amazon-transcribe)
 - [Deploying it](#deploying-it)
-- [Choosing the engine for a meeting](#choosing-the-engine-for-a-meeting)
-- [Tuning it without a redeploy](#tuning-it-without-a-redeploy)
-- [Calibrating the operating point](#calibrating-the-operating-point)
+- [Choosing the engine](#choosing-the-engine)
+- [Runtime switches](#runtime-switches)
+- [How speaker labels are produced](#how-speaker-labels-are-produced)
+- [Calibrating a new bundle (developers)](#calibrating-a-new-bundle-developers)
 - [Cost and sizing](#cost-and-sizing)
 - [Local development](#local-development)
 - [What is not yet measured](#what-is-not-yet-measured)
@@ -41,8 +42,9 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 
 ## Why this exists
 
-By default a [Stream Audio](stream-audio.md) or [Desktop Capture App](desktop-capture-app.md)
-meeting labels the transcript by **audio channel**: everything from your microphone
+By default a [Stream Audio](stream-audio.md), [Chrome extension](browser-extension.md) or
+[Desktop Capture App](desktop-capture-app.md) meeting labels the transcript by **audio
+channel**: everything from your microphone
 is one speaker, everything from the shared tab is another. That is correct when one
 person sits on each side, and wrong when several people share a conference-room
 microphone or several remote participants arrive through one tab.
@@ -63,8 +65,8 @@ weights live inside your account.
 
 - Runs `sherpa-onnx` streaming ASR plus online speaker diarization on an
   **AWS Lambda MicroVM**, launched per meeting and terminated when it ends.
-- Speaks a WebSocket protocol: interim `partial` results and committed `final`
-  results, each carrying a speaker label.
+- Speaks a WebSocket protocol: interim `partial` results, whose end is the audio
+  decoded so far, and committed `final` results, each carrying a speaker label.
 - Produces the same `ADD_TRANSCRIPT_SEGMENT` events as the Amazon Transcribe path,
   so the transcript, summaries, meeting assistant, sharing and search work
   unchanged.
@@ -90,316 +92,145 @@ deployment, chosen per meeting.
 
 ## Deploying it
 
-Set **`TranscriptionEngine` = `MicrovmAsr`** on the main stack. This creates the
+Set **`EnableMicrovmAsr` = `true`** on the main stack. This creates the
 `lma-asr-microvm-stack` nested stack: a MicroVM image, a session launcher Lambda,
-and the IAM roles they need.
+the runtime-switch table the Transcription Engine page edits, and the IAM roles they need.
 
 **Region requirement.** AWS Lambda MicroVMs must be available in your region. It is
 not available in GovCloud. Deploying with `MicrovmAsr` in an unsupported region
 fails with `Unrecognized resource types: [AWS::Lambda::MicrovmImage]`.
 
-**First deployment builds the image**, which downloads the model (~443 MB for the
-default) and warms it. Expect several extra minutes on the first create and on any
-later change to a model parameter. Build logs land in
-`/aws/lambda-microvms/<stack-name>-asr`.
+**First deployment builds the image**, which downloads the models (~150 MB for the
+default bundle) and warms them. Expect several extra minutes on the first create and
+on any later change of bundle. Build logs land in `/aws/lambda-microvms/<stack-name>-asr`.
 
-There is one CloudFormation parameter, under *EXPERIMENTAL - On-demand ASR and
-Diarization* in the console:
+That is the whole deploy-time surface. Two more values are fixed in the `AsrDefaults`
+mapping in `lma-main.yaml` rather than asked, because neither is a question a
+deployer should have to answer:
 
-| Parameter | Default | Purpose |
+| Mapping key | Value | Purpose |
 |---|---|---|
-| `TranscriptionEngine` | `AmazonTranscribe` | `MicrovmAsr` deploys this engine |
+| `ModelBundle` | `fastconformer-titanet-small` | Which models the image is built from, with their measured diarization operating point |
+| `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
 
-Everything else lives in the `AsrDefaults` mapping in `lma-main.yaml`, at the values
-the former parameters defaulted to:
-
-| Mapping key | Value | Purpose | Also settable at runtime? |
-|---|---|---|---|
-| `ModelBundle` | `nemotron-titanet-small` | A pre-vetted pairing of all three models plus its calibrated operating point | No — rebuilds the image (~20 min) |
-| `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop | No |
-| `MaxSpeakers` | `0` | Optional cap per channel; 0 discovers as many as appear | Yes — ASR Config page |
-| `LiveTurnCut` | `true` | Close a row on a confirmed speaker change, not just a pause | Yes — ASR Config page |
-| `MaxOpenSegmentMs` | `20000` | Close a row after this much unbroken speech regardless | Yes — ASR Config page |
-
-To change one of the first two, edit the mapping and update the stack. The rest are
-better changed on the ASR Config page, which takes effect on the next meeting with no
-stack update. `scripts/sync_bundles.py --check` verifies that `ModelBundle` names a
-bundle the catalog actually ships.
+To change either, edit the mapping and update the stack. `scripts/sync_bundles.py
+--check` verifies that `ModelBundle` names a bundle the catalog ships.
 
 ### Model bundles
 
 One selection carries the whole configuration: the ASR model, the speaker embedder,
-the turn-detection model, **and the diarization operating point measured for that
-combination** — the similarity threshold and the minimum utterance length. Those two
-are baked into the image, so a deployment gets a working setup without knowing any
-numbers.
+the turn-detection model, **and the diarization operating point measured for them** —
+the similarity threshold and the minimum utterance length. Those are baked into the
+image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 
-| Bundle | ASR | Embedder | Threshold | Redistributable |
-|---|---|---|---|---|
-| `nemotron-titanet-small` | Nemotron 560 ms | TitaNet-small | **0.4** | No (NVIDIA OML) |
-| `permissive-zipformer-campplus` | Zipformer | WeSpeaker CAM++ | **0.68** | Yes (Apache-2.0 + MIT) |
-| `transcription-only` | Nemotron 560 ms | — | — | No (NVIDIA OML) |
-| `permissive-fastconformer-titanet-large` | FastConformer 480 ms | TitaNet-large | *uncalibrated* | **Yes** (CC-BY-4.0 + MIT) |
-| `nemotron-titanet-large` | Nemotron 560 ms | TitaNet-large | *uncalibrated* | No (NVIDIA OML) |
-| `apache-only-zipformer-3dspeaker` | Zipformer | 3D-Speaker CAM++ | *uncalibrated* | Yes (Apache-2.0 + MIT) |
-| `accurate-parakeet-titanet-large` | Parakeet TDT v3 **(offline)** | TitaNet-large | *uncalibrated* | **Yes** (CC-BY-4.0 + MIT) |
-| `parakeet-streaming-titanet-small` | Parakeet unified 560 ms | TitaNet-small | *uncalibrated* | No (NVIDIA OML) |
-| `parakeet-streaming-low-latency` | Parakeet unified 240 ms | TitaNet-small | *uncalibrated* | No (NVIDIA OML) |
+| Bundle | ASR | Embedder | Turn detection | Threshold | Licences |
+|---|---|---|---|---|---|
+| `fastconformer-titanet-small` (default) | FastConformer streaming EN 480 ms | TitaNet-small | pyannote segmentation 3.0 | **0.5**, min utterance 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT |
+| `fastconformer-transcription-only` | FastConformer streaming EN 480 ms | — | — | — | CC-BY-4.0 |
 
-A bundle marked *uncalibrated* ships **no threshold**, so it produces no speaker labels
-until this deployment runs a calibration. That is the guardrail working, not a bug: a
-threshold borrowed from another pairing fragments one speaker into many or merges
-several into one.
+Both are permissively licensed and **redistributable** (`AsrRedistributable` is a stack
+output, and is `true` for both). The ASR model is the same cache-aware streaming
+FastConformer-RNNT architecture as NVIDIA's Nemotron speech models, but CC-BY-4.0
+rather than the NVIDIA Open Model License, and trained on NeMo ASRSET — LibriSpeech,
+**Fisher**, **Switchboard**, WSJ, MLS-EN and Common Voice — so it has seen thousands
+of hours of spontaneous conversational speech, which is what a meeting is. English
+only.
 
-**Which redistributable bundle to reach for.** `permissive-fastconformer-titanet-large`.
-Its ASR model is the same cache-aware streaming FastConformer-RNNT architecture as the
-Nemotron default, but CC-BY-4.0 rather than the NVIDIA Open Model License, and trained on
-NeMo ASRSET — LibriSpeech, **Fisher**, **Switchboard**, WSJ, MLS-EN and Common Voice.
-That matters: those are thousands of hours of *spontaneous conversational* speech, which
-is what a meeting is, whereas the Apache-2.0 Zipformer is LibriSpeech read speech. It is
-also a quarter of the download (106 MB against 464 MB).
-
-One correction worth recording, because it is easy to assume otherwise: Parakeet is only
-permissive **offline**. `parakeet-tdt-0.6b-v2` and `-v3` are CC-BY-4.0, but the
-*streaming* "unified" Parakeet export is under the NVIDIA Open Model License, exactly
-like Nemotron. There is no permissive streaming Parakeet.
+**Why the threshold travels with the embedder, not the ASR model.** A speaker
+embedding is computed from raw audio samples; the ASR model contributes nothing to
+those samples, and under a fixed endpointing configuration nothing to where a segment
+starts and ends either. TitaNet-small's 0.5 comes from real meeting audio under
+exactly the segmentation policy this bundle runs (1200 ms endpointing, 2500 ms
+minimum utterance): different speakers scored at most 0.107 in one meeting and 0.307
+in another, while the same speaker at utterances of 2.5 s or longer scored 0.74–0.91,
+and the midpoint of that gap is 0.52. A synthetic same-gender control (two male neural
+TTS voices) corroborated it — different-speaker max 0.402, same-speaker floor 0.70,
+recommendation 0.539 — and showed the earlier 0.4 would have merged that pair's
+closest utterances. Its `status` is `calibrated` — the
+operating point is measured — and becomes `vetted` once this exact pairing has been
+validated end to end on a live multi-speaker meeting. A different *embedder* always
+needs its own measurement; see
+[Calibrating a new bundle](#calibrating-a-new-bundle-developers).
 
 ### Adding a bundle
 
-Edit `source/catalog.json`, then run:
+Edit `source/catalog.json` (pin every checksum, and record the measured operating
+point on the speaker model and the bundle), then run:
 
 ```bash
 python3 lma-asr-microvm-stack/scripts/sync_bundles.py
 ```
 
-That regenerates the `AsrModelBundle` allowed values in this stack's `template.yaml`,
-plus the `BundleMemory` mapping, and validates that the `ModelBundle` value in
-`lma-main.yaml`'s `AsrDefaults` mapping names a bundle the catalog ships. (`lma-main.yaml`
-used to be rewritten here too, when it had its own `AsrModelBundle` parameter; it now holds
-a single value, so it is checked rather than generated.) The memory duplication cannot be
-removed — `MinimumMemoryInMiB` needs a CloudFormation-typed number and a Mapping cannot be
-keyed on a value a custom resource resolved — so it is generated instead. `--check` reports
-drift without writing, and unit tests assert the same thing, so a hand-edit that updates one
-file and forgets the other fails at commit time rather than 20 minutes into a deploy.
+That regenerates the `AsrModelBundle` allowed values and the `BundleMemory` mapping in
+this stack's `template.yaml`, and validates that `lma-main.yaml`'s `AsrDefaults`
+mapping names a bundle the catalog ships. `--check` reports drift without writing,
+and unit tests assert the same thing, so a hand-edit that updates one file and forgets
+the other fails at commit time rather than 20 minutes into a deploy. The memory
+duplication cannot be removed — `MinimumMemoryInMiB` needs a CloudFormation-typed
+number and a Mapping cannot be keyed on a value a custom resource resolved.
 
-### Trying to improve the ASR text
+The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
+per closed utterance, for transducer models that cannot stream — and the catalog
+schema supports a `vadModels` section for it. No offline bundle ships: it produces no
+interim text while somebody is speaking, and its real-time factor on a real meeting is
+unmeasured. See *Not included: Whisper* below for why Parakeet TDT rather than
+Whisper would be the offline model to try first.
 
-Diarization is not this engine's weak half — text is. A reviewer ranked its transcript
-below Amazon Transcribe's, and a real meeting produced a ten-token repetition loop
-(`if if if if ...`) plus "diarization" rendered six different wrong ways. So there are two
-bundles whose only purpose is to test a different ASR model against the current default:
+## Choosing the engine
 
-`parakeet-streaming-titanet-small` is the A/B worth running. Identical embedder, identical
-turn detection, identical 560 ms lookahead — so any difference on a side-by-side meeting is
-the ASR model and nothing else. Parakeet unified is the newer sibling of Nemotron (Granary /
-YTC / Yodas2 training data), same cache-aware streaming transducer family, and the **same
-NVIDIA Open Model License**, so there is no licensing gain and no licensing regression.
+The engine is a **deployment** setting, chosen separately for the two kinds of
+meeting on **Configuration ▸ Transcription Engine** (admin only) and read at the start of
+each meeting, so a change needs no redeploy:
 
-`parakeet-streaming-low-latency` drops the lookahead to 240 ms so partials appear sooner.
-Try it only after the 560 ms variant: it changes two things at once relative to the default,
-and a shorter lookahead costs a cache-aware model accuracy.
+| Setting | Covers | Default |
+|---|---|---|
+| Stream Audio, Chrome extension and Desktop Capture | Every meeting from those three sources | Amazon Transcribe |
+| Virtual Participants | Every Virtual Participant | Amazon Transcribe |
 
-Do not confuse the two Parakeets. `parakeet-tdt-0.6b-v3` is CC-BY-4.0 but **offline**;
-`parakeet-unified-...-streaming-*` streams but is **NVIDIA-licensed**. There is no
-permissive streaming Parakeet.
-
-### The offline (`accurate`) bundle
-
-`accurate-parakeet-titanet-large` uses the offline engine: Parakeet TDT cannot stream, so
-audio is cut into utterances by **Silero VAD** (MIT) and each closed utterance is decoded
-in one pass. The trade is stark and worth stating plainly — **there is no interim text
-while somebody is still speaking**, only when they stop, and live cutting cannot apply
-either because a mid-utterance word list does not exist. It suits an accuracy-first
-deployment more than a live meeting view.
-
-**It may not be viable at all**, and that is worth knowing before you try it. A 0.6B
-offline decode catches up in bursts rather than keeping pace frame by frame, which wants
-headroom — but the `al2023-1` base MicroVM image caps memory at **8192 MiB (4 vCPU)**, the
-same as every other bundle, so there is none to give it. Its real-time factor on a real
-meeting is **unmeasured**; measure that before offering it to anyone.
-
-Parakeet was chosen over Whisper — also permissive, also offline — because TDT is a
-transducer and reports token timestamps. Turn splitting and live cutting both need word
-timings, and sherpa's Whisper export provides none, so Whisper would silently reduce
-diarization to one speaker per VAD segment. See *Not included: Whisper* below.
-
-Bundles exist because a threshold is **not** a property of the embedder alone.
-Utterance length moves it as much as the model does: CAM++ measured 0.30 on 1–2 s
-utterances and 0.68 on 5–20 s ones, on the same voices. Choosing three models
-separately therefore let a deployment assemble a pairing nobody had ever measured —
-and it produced a real failure, where the threshold parameter defaulted to 0.2 while
-the catalog's measured value for the default embedder was 0.4, nothing reconciled the
-two, and two speakers were merged into one label on a live meeting.
-
-A bundle with no calibrated threshold ships without one, and the engine then withholds
-speaker labels until that deployment calibrates its own. That is deliberate: a guessed
-threshold fragments one speaker into many or merges several into one, which is worse
-than the channel labels it falls back to.
-
-`AsrSpeakerThreshold` and `AsrMinSegmentMs` still exist on the transcriber stack as
-**optional overrides**. Blank — the default — means "use the value calibrated for the
-deployed bundle". Set one only to override a bundle deliberately; the ASR Config admin
-page does the same thing without a 20-minute stack update.
-
-## Choosing the engine for a meeting
-
-Both engines can produce speaker labels, so asking for labels does **not** pick an
-engine. There are three ways to choose one, in precedence order:
-
-1. **Per meeting, from the client.** Stream Audio shows a **Transcription engine**
-   radio when this engine is deployed; the Desktop Capture apps take
-   `--asr-engine microvm`. This wins over everything below, so a user can try the
-   engine without an admin changing anything.
-2. **Per deployment, at runtime.** **Make the on-demand ASR engine the default** on the
-   ASR Config page routes every Stream Audio and Desktop Capture meeting here. Takes
-   effect on the next meeting; no redeploy.
-3. **Nothing.** Every meeting uses Amazon Transcribe. This is the default, and deploying
-   the engine does not change it.
+Deploying the engine changes nothing on its own: both settings start on Amazon
+Transcribe. Diarization stays a per-meeting choice — the Stream Audio form still asks
+which channels to identify speakers on, because only the person in the meeting knows
+whether several people share their microphone. The Desktop Capture apps can force an
+engine for one run with `--asr-engine`, which wins over the deployment setting.
 
 A meeting that selects this engine and whose MicroVM cannot start falls back to Amazon
 Transcribe by itself, so a failed launch costs a warning in the log rather than a
 transcript.
 
-## Tuning it without a redeploy
+## Runtime switches
 
-The diarization operating point is empirical and specific to the speaker model, so
-it lives in runtime configuration rather than in stack parameters. **Configuration
-▸ ASR Config** (admin only) edits it, and the next meeting to start picks it up — no
-stack update, no image rebuild.
+**Configuration ▸ Transcription Engine** (admin only) has exactly three settings. All are read at
+the start of each meeting, so a change needs no stack update and no image rebuild.
 
-Every field is an override: leave it blank and the deployment default applies — the
-bundle's own calibrated value, or the `AsrDefaults` mapping entry where there is one.
-There is no default record to keep in sync.
+| Setting | Default | Effect |
+|---|---|---|
+| Stream Audio, Chrome extension and Desktop Capture: engine | Amazon Transcribe | Which engine those meetings use |
+| Virtual Participants: engine | Amazon Transcribe | Which engine Virtual Participants use |
+| Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off |
 
-| Field | Effect |
-|---|---|
-| Speaker similarity threshold | The usual fix when one person fragments. Model-specific — [measure it](#calibrating-the-operating-point) rather than guessing |
-| Minimum utterance for speaker ID | Raise it to stop short utterances minting speakers |
-| Maximum speakers per channel | Hard cap; a client that knows its own meeting size overrides it |
-| Endpointing silence | Trailing silence that closes an utterance |
-| Diarize by default | Whether meetings request speaker labels when the client is silent on it |
-| Use this engine for every meeting | Routes all streaming meetings here, with the Transcribe feature losses above |
-| Require corroboration | Off by default; see the troubleshooting section |
-| Split rows on a speaker change | Splits one utterance into a row per speaker turn when the segmentation model is baked in |
+There is deliberately nothing else. The similarity threshold, minimum utterance
+length, turn-cut behaviour and speaker cap that earlier versions exposed here are the
+bundle's measured operating point (or the engine's built-in defaults), baked into the
+image. Stream Audio still asks **Speakers per channel** when diarization is ticked:
+only the person in the meeting knows how many people share their microphone, and that
+per-meeting cap is the one number a user can usefully supply.
 
-Stream Audio also asks **Speakers on this side** when diarization is ticked. Only the
-person in the meeting knows how many people share their microphone, which is why it is
-asked for rather than inferred; blank means discover as many as appear, and a value
-there overrides the deployment-wide cap for that meeting.
+## How speaker labels are produced
 
-## Calibrating the operating point
-
-The speaker threshold is a property of the speaker-embedding model, not a universal
-constant, and getting it wrong is the single most visible failure this engine has.
-Measured on real meeting audio with TitaNet, two *different* speakers never scored
-above 0.107 while the *same* speaker scored 0.25–0.5 — so the value inherited from
-the upstream prototype (0.5) split one person into eight identities, then twenty-two.
-On the same audio, WeSpeaker ResNet293 scored **0.54 between two different people**,
-where that same 0.5 would have merged them instead. There is no number that is right
-for both.
-
-So the deployment measures it. **Configuration ▸ ASR Config ▸ Calibrate from a
-two-channel recording** takes a WAV you upload and derives the threshold from it.
-
-**Why an upload rather than a meeting ID.** The ground truth is *channel
-separation*: one speaker per channel, so pairs within a channel are the same person
-and pairs across channels are definitely different people — exactly the comparison a
-threshold has to get right. That property belongs to the *file*, not to the meeting,
-so calibration takes the file directly. A sample can then come from a rehearsed
-recording, a meeting you downloaded, or a public corpus, and the same page works
-whether or not the deployment happens to have a suitable recorded meeting. The upload
-is embedded in memory and discarded — it is never written to S3 or into a transcript.
-
-**Requirements**
-
-- **WAV, 16-bit PCM, two channels**, one speaker per channel. Any sample rate (it is
-  resampled to 16 kHz); up to 64 MB, of which the first 20 minutes are read.
-- Two to five minutes is plenty. Both speakers should talk several times and avoid
-  talking over each other; cross-talk is excluded from the statistics, so heavy
-  overlap just leaves less to measure.
-- A mono file, or a stereo file with both voices in both channels, is **refused**
-  rather than measured: it carries no ground truth, and a number derived from it
-  would be confidently wrong.
-
-**Making a sample on your own.** Play a recording of someone else through your laptop
-speakers while you talk into the microphone, and capture it with **Stream Audio** —
-its two channels are exactly system audio and microphone, so the two voices land on
-separate channels without a second person in the room. Alternate: let the recording
-talk for ~20 s, then you talk for ~20 s, four or five times each. End the meeting,
-download the WAV, and upload it here.
-
-**Making a sample from a public corpus.** Any dataset that ships **one file per
-speaker** works — merge two speakers into the two channels:
-
-```bash
-ffmpeg -i speakerA.wav -i speakerB.wav \
-  -filter_complex "[0:a][1:a]amerge=inputs=2" \
-  -ac 2 -ar 16000 -sample_fmt s16 calib.wav
-```
-
-Note that this is the opposite of what most diarization pipelines do with a stereo
-file: pyannote and friends **downmix to mono** before segmenting. This engine never
-downmixes — it splits the channels and processes each independently, both for
-calibration and for live meetings (one ASR session per channel) — which is what makes
-channel identity usable as a label.
-
-**How it works.** The transcriber de-interleaves the upload, resamples each channel to
-16 kHz, finds stretches where one channel clearly dominates the other (dominance
-rather than silence, so cross-talk is excluded), embeds up to 12 per channel on a
-MicroVM in embed mode, and compares every pair.
-
-The threshold is then placed **inside the gap** between the two distributions, nearer
-the different-speaker side, and additionally above the highest different-speaker score
-actually observed — so the guarantee is concrete: no pair the calibration saw would
-have been merged. Leaning towards splitting is deliberate. Both errors are real, but
-fragmentation is the one that makes a transcript unreadable, and merging is partly
-contained because channels are diarized separately (it can only ever merge people who
-share one microphone).
-
-**Reading the result.**
-
-| Verdict | Meaning |
-|---|---|
-| Clear separation | Gap of 0.1 or more. Use the values |
-| Narrow separation | A usable threshold, but sensitive to the audio it was measured on. Re-run on another sample before trusting it |
-| No usable threshold | The distributions overlap: no threshold separates them on this audio. That is what a mismatched embedder looks like; it can also mean narrowband audio, heavy cross-talk, or a file whose channels are not actually speaker-separated |
-
-Calibration also reports a **minimum utterance length** when pairs involving a short
-segment score materially worse than long-only pairs — the measured cause of phantom
-speakers, every one of which came from a 1.2–2.4 s utterance.
-
-**Choose the two voices deliberately: the threshold can only be as demanding as the
-hardest pair in your sample.** Measured on one real meeting, a man and a woman scored
--0.07 to 0.10 against each other while two similar-sounding women scored 0.246-0.307 -
-and the same-speaker floor was 0.740. Calibrating on the easy pair returns about 0.36;
-calibrating on a pair that is *further* apart than your real participants returns a
-number too low to separate them. So use voices that resemble the meetings you actually
-run - ideally the participants themselves, and at least two people of the same gender
-and accent if that is what your meetings contain.
-
-**Nothing is applied automatically.** A run reports; **Use these values** fills the
-fields, and **Save** applies them to the next meeting that starts. A sample where only
-one channel carries speech is refused before a MicroVM is even launched, since it
-contains no different-speaker comparison to make.
-
-**Who can run it.** Admin group only (it launches a MicroVM), and single-flight per
-transcriber task.
-
-**Unmeasured models are withheld, not guessed at.** Every speaker model in
-`catalog.json` carries a `measured` note recording what was actually observed. When a
-catalog entry carries no `measured` note — a model added but not yet
-characterised — the stack reports `SpeakerModelMeasured=false` and the transcriber
-transcribes with **channel labels instead of speaker labels**, logging why, until
-either a calibration is applied or an admin sets a threshold. A guessed threshold
-looks like working diarization while being wrong, which is worse than no diarization
-at all.
+The engine embeds each utterance with the bundle's speaker model and assigns it to the
+closest known voice whose cosine similarity clears the bundle's threshold, minting a
+new voice when none does. Utterances shorter than the bundle's `minSegmentMs` inherit
+the current speaker instead of being embedded: a one- or two-word clip embeds
+unreliably, and with the speaker count unbounded every unreliable embedding that
+misses the threshold invents a person. Three mechanisms below then decide *where* a
+row is cut.
 
 ### Splitting a segment on a speaker change
 
 Endpointing closes an utterance on trailing silence, so when two people speak
 without a gap between them they land in one segment and share one speaker label.
 Comparing short embedding windows is the obvious fix and the wrong one: we measured
-sub-2.5 s utterances embedding unreliably (that is why `AsrMinSegmentMs` exists), so
+sub-2.5 s utterances embedding unreliably (that is why the bundle carries a `minSegmentMs`), so
 an embedding-only detector false-splits exactly where turns are shortest.
 
 The detector is therefore **pyannote segmentation 3.0**, baked as a 6 MB ONNX model
@@ -437,29 +268,29 @@ Cutting the text requires word timings, so the streaming recogniser now reconstr
 them from sherpa's per-token `tokens` + `timestamps` (grouped on the SentencePiece
 `▁` marker) and anchors them to the segment's own start. A segment with no word
 timings is never split — guessing where the words divide would garble both rows — and
-a cut that would leave a part too short to embed is merged back into its neighbour.
+a cut that would leave a part too short to embed is merged into its neighbour: a middle or
+trailing fragment joins the part before it, an opening fragment joins the part after it, so
+a fragment is never labelled by a speaker it was not embedded against.
 
 Measured end to end on k2-fsa's `1-two-speakers-en.wav`: the real model finds the turn
 at 7.89 s, the split snaps it to 7.90 s, and the two rows come back as `spk_0`
 (0.00–7.90) and `spk_1` (8.00–16.00) with the words divided 16/16.
 
-Turn splitting is off for a bundle with no segmentation model, when no speaker model is
-baked in (there would be no embedder to identify the turns it finds), or when
-**Split rows on a speaker change** is unticked on the ASR Config page — that last one
-takes effect on the next meeting, with no rebuild.
+Turn splitting is off for a bundle with no segmentation model, or when no speaker model
+is baked in (there would be no embedder to identify the turns it finds).
 
 ### Cutting a row before the utterance ends
 
 The split above is retroactive: it happens when the utterance closes, so until then a
-live row holds both speakers. With **Close a row on a confirmed speaker change**
-(`LiveTurnCut` in the `AsrDefaults` mapping, on by default, and `liveTurnCut` on the ASR
-Config page) the speaker change becomes the *primary* boundary and
+live row holds both speakers. With live turn cutting (on by default in the
+engine; `ASR_LIVE_TURN_CUT=0` in the image environment turns it off) the speaker
+change becomes the *primary* boundary and
 endpointing silence is only a backstop — which is the right way round, because a pause
 is not what separates people, taking turns is.
 
 While a segment is open the engine re-runs the detector over the audio since the last
-cut, about once per `turnCutIntervalMs` (1 s default) in audio time, and closes a row as
-soon as a boundary is **confirmed**: at least `minSegmentMs` of audio before it, and at
+cut, about once per second of audio (`ASR_TURN_CUT_INTERVAL_MS`), and closes a row as
+soon as a boundary is **confirmed**: at least the bundle's `minSegmentMs` of audio before it, and at
 least `ASR_MIN_TURN_MS` (700 ms) after it. That second condition is what stops a
 back-channel or a model flicker from producing one-word rows, and it is also why the cut
 lands a fraction of a second late — a change cannot be confirmed until some audio has
@@ -482,7 +313,7 @@ Three pieces of bookkeeping make that work, and each has a test that fails witho
 - The eventual real `final` emits only the words after the last cut.
 
 **Bounded rows.** With no speaker change at all, a row still closes after
-`maxOpenSegmentMs` (20 s default, 0 disables) so a monologue does not sit in the live
+20 s (the engine's `max_open_segment_ms`; 0 disables) so a monologue does not sit in the live
 transcript as one unlabelled block. This mirrors the equivalent bound on the Amazon
 Transcribe path, which exists there because Transcribe caps a result near 30 s and never
 labels a partial; this engine has no such cap of its own, so without the bound a row
@@ -526,30 +357,23 @@ partials to begin with (they only arrive on final results).
 ### Not included: Whisper, Distil-Whisper, and the WhisperX hybrid
 
 Whisper-family models (Whisper large-v3-turbo, Distil-Whisper — both MIT) are not
-selectable, and the reason is architectural rather than licensing. This stack is
-**streaming-only by construction**: the image resolver refuses any catalog entry
-whose `engine` is not `streaming`, and the streaming path builds a `sherpa-onnx`
-`OnlineRecognizer` over an encoder/decoder/joiner transducer. Whisper is not a
-frame-synchronous transducer; `sherpa-onnx` loads it only through
-`OfflineRecognizer.from_whisper(encoder, decoder, tokens)` — no joiner — so it can
-only be "streamed" by segmenting on VAD and decoding each closed utterance.
+offered, and the reason is architectural rather than licensing. The live path is a
+`sherpa-onnx` `OnlineRecognizer` over an encoder/decoder/joiner transducer, decoding
+frame by frame. Whisper is not a frame-synchronous transducer; `sherpa-onnx` loads it
+only through `OfflineRecognizer.from_whisper(encoder, decoder, tokens)` — no joiner —
+so it can only be "streamed" by segmenting on VAD and decoding each closed utterance.
 
-The runtime already contains that shape: `asr_server/vad.py` is a Silero VAD gate
-(MIT) and `asr_server/offline_recognizer.py` is a VAD-segmented offline engine that
-emits one `final` per utterance plus a synthetic `partial` at segment close. It is
-unprovisioned — no pinned offline model, the Silero weights are not fetched by
-`scripts/fetch_model.py`, and the resolver does not expose it. Adding Whisper
-therefore means: a `from_whisper` backend branch, a joiner-less file set in the
-catalog and in `fetch_model.py`, baking the Silero VAD weights, opening the offline
-engine in the resolver, and accepting that live meetings get no true partials. The
-real-time factor of large-v3-turbo for two concurrent channels on Graviton is also
-unmeasured; Distil-Whisper small/medium is the more plausible candidate.
-
-**Pyannote segmentation 3.0** is likewise absent (an earlier prototype branch used
-pyannote + diart alongside Amazon Transcribe). Its code is MIT, but the published
-weights are access-gated on Hugging Face, so a build-time download needs a token and
-an accepted agreement — which is why the ungated, MIT Silero VAD is the segmentation
-model this runtime integrates.
+The runtime does carry that shape: `asr_server/offline_recognizer.py` is a
+VAD-segmented offline engine (Silero VAD, MIT) that emits one `final` per utterance,
+the image resolver accepts a catalog entry with `"engine": "accurate"`, and
+`scripts/fetch_model.py` fetches a bundle's VAD weights. No offline bundle ships, for
+two reasons that apply to Whisper doubly: an offline engine produces **no interim text
+while somebody is speaking**, and sherpa's Whisper export provides **no token
+timestamps**, so turn splitting and live cutting — both of which need word timings —
+would silently degrade to one speaker per VAD segment. If an offline model is ever
+wanted, Parakeet TDT (CC-BY-4.0, a transducer, reports timestamps) is the one to try;
+adding Whisper would additionally need a `from_whisper` backend branch and a
+joiner-less file set in the catalog.
 
 **The WhisperX hybrid** (Whisper for text, a separate diarizer for speakers, merged
 by word-level forced alignment) is a good architecture — for **offline** audio. Its
@@ -563,28 +387,67 @@ speaker label with the text it was derived from, so there is nothing to align.
 Where WhisperX fits is the **Upload Media / batch** path, which today uses Amazon
 Transcribe batch with `ShowSpeakerLabels`. There a second pass costs nothing, word
 alignment is available, and global clustering is correct rather than premature. That
-remains deferred (see the plan's *Deferred* section), and it is the natural home for
+remains future work, and it is the natural home for
 Whisper-quality transcription and elite DER — a deliberate split, with one engine and
 one timeline live, two passes offline.
 
-### Validating a model against a public corpus
+## Calibrating a new bundle (developers)
 
-Before adding a `measured` note to a catalog entry, measure the embedder on data
-other than one deployment's meetings. Usable corpora:
+Every `speakerThreshold` in `catalog.json` was measured, not chosen, and the tool that
+measures it ships with the runtime:
+
+```bash
+cd lma-asr-microvm-stack/source
+.venv/bin/python -m scripts.calibrate --wav two-speakers.wav \
+    --speaker-model /path/to/speaker-model.onnx
+```
+
+Input is a **two-channel 16-bit WAV with one speaker per channel** (any sample rate;
+resampled to 16 kHz). That channel separation is the ground truth: pairs within a
+channel are the same person, pairs across channels are different people, and a
+threshold has to sit between those two distributions. The tool finds stretches where
+one channel clearly dominates the other (dominance, not silence, so cross-talk is
+excluded), embeds up to 12 per channel spread across the recording, compares every
+pair, and places the threshold at the midpoint of the gap between the same-speaker
+5th percentile and the different-speaker 95th percentile — then raises it above the
+highest different-speaker score actually observed, so no measured pair would have
+merged. Overlapping distributions produce `"confidence": "unusable"` and no number,
+which is more useful than a wrong one. It also reports whether utterances under
+2.5 s embed materially worse than longer ones, which is where the 2500 ms minimum
+utterance floor came from.
+
+**Choose the two voices deliberately: the threshold can only be as demanding as the
+hardest pair in the sample.** On one real meeting a man and a woman scored −0.07 to
+0.10 against each other while two similar-sounding women scored 0.246–0.307, and the
+same-speaker floor was 0.740. Calibrating on the easy pair returns about 0.36 — too
+low to keep the two women apart. Use two people of the same gender and accent, and
+real meeting audio rather than synthetic speech where you can; a synthetic pair is a
+useful smoke test of the tool, not a measurement to ship.
+
+**Making a sample.** Play a recording of someone else through your laptop speakers
+while you talk into the microphone and capture it with **Stream Audio** — its two
+channels are exactly system audio and microphone, so the two voices land on separate
+channels. Alternate for ~20 s each, four or five times. Or merge two single-speaker
+files from a public corpus:
+
+```bash
+ffmpeg -i speakerA.wav -i speakerB.wav \
+  -filter_complex "[0:a][1:a]amerge=inputs=2" \
+  -ac 2 -ar 16000 -sample_fmt s16 calib.wav
+```
+
+Usable corpora, with one caution: **VoxCeleb is not a valid check** for TitaNet or
+WeSpeaker models, which are trained on it, so a measurement there is circular.
 
 | Corpus | Why it fits | Licence |
 |---|---|---|
-| [AMI Meeting Corpus](https://groups.inf.ed.ac.uk/ami/corpus/) | Real 3–5 person meetings with a **per-speaker headset mic**, which gives the same speaker-per-channel ground truth this calibration relies on, plus a far-field array for the harder case | CC BY 4.0 |
+| [AMI Meeting Corpus](https://groups.inf.ed.ac.uk/ami/corpus/) | Real 3–5 person meetings with a **per-speaker headset mic**, the same speaker-per-channel ground truth this tool relies on | CC BY 4.0 |
 | [VoxConverse](https://www.robots.ox.ac.uk/~vgg/data/voxconverse/) | In-the-wild multi-speaker audio with diarization labels; good for overlap and noise | CC BY 4.0 |
-| LibriSpeech-derived mixtures (LibriMix, Libri-CSS) | Synthetic, deterministic — useful as a regression test rather than a realism check | CC BY 4.0 |
-| DIHARD, CALLHOME, NIST RT | The classic DER benchmarks | LDC licence: not redistributable, so not usable in CI |
+| LibriSpeech-derived mixtures (LibriMix, Libri-CSS) | Synthetic, deterministic — a regression test rather than a realism check | CC BY 4.0 |
 
-Two cautions. **VoxCeleb is not a valid check for these models** — TitaNet and
-WeSpeaker are trained on it, so measuring their threshold there is circular and
-flattering. And a corpus result is a *prior*, not an operating point: microphone
-gain, codec, room acoustics and language all move the distributions, which is why
-per-deployment calibration stays the source of truth and why the guardrail asks for
-a local measurement rather than trusting the catalog for an unknown embedder.
+Record the result on the speaker model (`recommendedThreshold`, `measured`) and on
+its bundle (`speakerThreshold`, `minSegmentMs`), run `scripts/sync_bundles.py`, and
+validate the pairing on a live multi-speaker meeting before marking it `vetted`.
 
 ## Cost and sizing
 
@@ -606,9 +469,14 @@ The transcriber can talk to an ASR server running on your machine, with no AWS
 involved:
 
 ```bash
-# 1. Run the ASR server (from the upstream prototype, which has the local demo
-#    tooling and model download script)
-scripts/run_local_demo.sh          # serves ws://localhost:8080
+# 1. Run the ASR server on the bundle's weights. The catalog entry names the archive;
+#    the k2-fsa export ships int8 files, so point the server at them explicitly.
+cd lma-asr-microvm-stack/source
+python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
+mkdir -p models && curl -sSL <url from catalog.json> | tar xj -C models --strip-components=1
+ASR_MODEL_DIR=$PWD/models ASR_MODEL_ENCODER=$PWD/models/encoder.int8.onnx \
+  ASR_MODEL_DECODER=$PWD/models/decoder.int8.onnx ASR_MODEL_JOINER=$PWD/models/joiner.int8.onnx \
+  .venv/bin/python -m asr_server.ws_server   # serves ws://localhost:8080; no speaker model = no labels
 
 # 2. Point the transcriber at it
 cd lma-websocket-transcriber-stack/source/app
@@ -632,10 +500,10 @@ Honest state of validation, so nobody deploys this expecting known numbers:
 - **Word error rate has not been benchmarked** against Amazon Transcribe on real
   meeting audio.
 - **Diarization error rate has not been measured** end to end. The *operating point*
-  for the shipped speaker models has been measured on real meeting audio (see
+  for the shipped speaker model has been measured on real meeting audio (see
   `measured` in `catalog.json`, and
-  [Calibrating the operating point](#calibrating-the-operating-point) to measure it on
-  your own), but that is the threshold, not a DER figure.
+  [Calibrating a new bundle](#calibrating-a-new-bundle-developers) for the tool), but
+  that is the threshold, not a DER figure.
 - **MicroVM launch time and the real-time factor** of two concurrent channel
   sessions on one MicroVM have not been measured on Graviton. If a meeting's first
   transcript is slow to appear, or transcripts lag live audio, raise
@@ -691,15 +559,16 @@ it works far better when every label is distinct.
 - **Speaker identities are per session and per channel.** A reconnect mid-meeting
   starts new identities.
 - **8-hour hard ceiling** per MicroVM (service limit).
-- Applies to Stream Audio and the Desktop Capture Apps. The Virtual Participant
-  and Upload Audio paths still use Amazon Transcribe.
+- Applies to Stream Audio, the Chrome extension, the Desktop Capture Apps and the
+  Virtual Participant. The
+  Upload Audio path still uses Amazon Transcribe batch.
 
 ## Troubleshooting
 
-**The diarization checkbox is missing from Stream Audio.** The deployment either
-does not have `TranscriptionEngine=MicrovmAsr` or built the image with
-the `transcription-only` bundle. The UI reads `AsrDiarizationAvailable` from the LMA
-settings parameter.
+**The "Speakers per channel" field is missing from Stream Audio.** It is shown only
+when speaker identification is ticked for at least one channel and the
+streaming-meetings engine on **Configuration ▸ Transcription Engine** is the on-demand engine. A
+deployment without `EnableMicrovmAsr=true` never shows it.
 
 **Transcripts appear but are labelled by channel.** The image has no speaker model.
 Look for `diarization was requested but this ASR image has no speaker model baked
@@ -710,6 +579,19 @@ start` in the transcriber log; the reason from the launcher is logged with it
 (quota, region, image not ready). To make the failure loud instead, set
 `ASR_FALLBACK_TO_TRANSCRIBE=false` on the transcriber task — meetings then produce
 no transcript when the engine is unavailable.
+
+**Removing the engine fails with "the bucket you tried to delete is not empty".** A
+stack deployed before the image-source resource learned to empty its bucket left one zip
+per image rebuild behind. Empty the bucket, then retry the delete:
+
+```bash
+B=<the AsrImageSourceBucket name from the failed nested stack>
+aws s3api list-object-versions --bucket "$B" \
+  --query '{Objects: [Versions[].{Key:Key,VersionId:VersionId}, DeleteMarkers[].{Key:Key,VersionId:VersionId}][], Quiet: `true`}' \
+  --output json > /tmp/objects.json
+aws s3api delete-objects --bucket "$B" --delete file:///tmp/objects.json
+aws cloudformation delete-stack --stack-name <the nested ASR stack>
+```
 
 **The image build fails.** Check `/aws/lambda-microvms/<stack>-asr`. A `SHA256
 mismatch` means the pinned checksum does not match the download; `model file ... is
@@ -723,78 +605,42 @@ the host is having a bad day: re-run the deployment. Nothing else needs undoing,
 because a failed image build rolls the nested stack back to the previous image and
 meetings keep using it.
 
-**One person appears as several speakers.** This was the first real failure, and it
-is now measured rather than guessed. A live single-speaker meeting produced **eight**
-identities for one person; every hallucinated label was a 1.2–2.4 s utterance while
-long speech clustered correctly.
+**One person appears as several speakers.** This was the engine's first real
+failure and it is now measured rather than guessed. A live single-speaker meeting
+produced **eight** identities for one person; every hallucinated label was a
+1.2–2.4 s utterance, while long speech clustered correctly. Two causes, both now
+handled by the bundle: short utterances embed unreliably (hence the 2500 ms minimum
+utterance floor — shorter ones inherit the current speaker), and the inherited sherpa
+default threshold of 0.5 was being applied to those short, noisy embeddings. With the
+floor in place the same speaker scores 0.70–0.91 and different speakers at most 0.40 on
+every recording measured, which is where the bundle's 0.5 sits. If a single person
+still fragments on real meetings, that is a finding worth reporting with the MicroVM
+log group's per-session summary; do not expect to tune it away, because there is no
+knob — the fix is a re-measurement with `scripts/calibrate.py`.
 
-The cause was the threshold, not the model. Replaying the production registry over
-that meeting's real embeddings, with a second recording (two people, one per channel)
-as the different-speaker control:
+**Two people share one label.** The reverse failure: their voices score above the
+threshold against each other. On the measured data the hardest real pair (two
+similar-sounding women) scored 0.307 and a synthetic same-gender pair 0.402, both under
+0.5 — but a closer pair is possible. Stream Audio's **Speakers per channel** cannot
+separate them (a cap only bounds splitting); the answer is again a measurement on a
+recording of those voices.
 
-| Embedder | Same speaker | Different speakers | Operating point |
-|---|---|---|---|
-| TitaNet-small (default) | median 0.25–0.51, p5 0.099 | median −0.02, p95 0.074, **max 0.107** | **0.2** |
-| WeSpeaker CAM++_LM | median 0.27 | median 0.30, p95 0.53 | distributions overlap |
-| WeSpeaker ResNet293_LM | median 0.84–0.93 | median 0.54, p95 0.74 | ~0.8, tails still overlap |
+**Too many speakers on genuinely multi-speaker audio.** Set **Speakers per channel** in
+Stream Audio to the number of people actually sharing that microphone or tab. It is the
+one per-meeting number a user can supply that the engine cannot infer.
 
-TitaNet separates different people very well — they never exceeded 0.107 — but the
-same speaker only scores 0.25–0.5, so the sherpa default of 0.5 split constantly.
-Identities produced for that one-speaker meeting (ideal: 1):
-
-| Threshold | Min segment | Identities |
-|---|---|---|
-| 0.5 (old default) | 1200 ms | 8 |
-| 0.25 | 2500 ms | 2 |
-| **0.2 (current default)** | **2500 ms** | **2** |
-
-At 0.2 the same audio yields 2 identities instead of 8, and a two-speaker recording
-resolves to exactly 2 with 100% attribution purity.
-
-Three things follow, and they are worth internalising before changing anything:
-
-1. **The threshold belongs to the embedder.** Cosine scales differ per model — see
-   `recommendedThreshold` in `source/catalog.json`. Swapping the speaker model
-   without re-measuring will either fragment or merge speakers.
-2. **A same-speaker-only test is not evidence.** ResNet293 produced a perfect single
-   identity on one-speaker audio, which looked like the winner until the
-   different-speaker control showed it scoring 0.54 between two different people —
-   it would have merged participants.
-3. **`AsrRequireCorroboration` is off by default on purpose.** Withholding the first
-   unmatched embedding cut 8 identities to 2 at the *wrong* threshold, but with the
-   threshold right it dropped two-speaker purity to 80%, and at 0.5 it merged two
-   people into one label. Reach for it only when embeddings are known to be noisy.
-
-If a single person still fragments: run
-[Calibrate](#calibrating-the-operating-point) against one of your own recorded
-meetings — it performs exactly the measurement above, automatically. Failing that,
-lower the threshold on the ASR Config page, raise the minimum utterance length, and only then
-consider the maximum speakers per channel on the ASR Config page — a cap bounds the
-symptom but cannot fix a mis-set
-operating point. Sample sizes behind the numbers above are small (11 utterances, one
-voice pair), which is the reason calibration exists rather than a bigger table of
-defaults.
-
-**Calibration says "No usable threshold".** The same-speaker and different-speaker
+**`scripts/calibrate.py` reports "unusable".** The same-speaker and different-speaker
 scores overlap on that recording, so no threshold separates them. In order of
 likelihood: heavy cross-talk (both sides talking at once, so segments contain both
-voices), narrowband or heavily processed audio, a recording where one channel is a
-conference bridge carrying several people, or a speaker model that does not suit this
-audio. Try another meeting first; if two clean meetings both overlap, the model is the
-problem — the shipped `measured` notes in `catalog.json` show what a good and a bad
-embedder look like on the same audio.
+voices), narrowband or heavily processed audio, a channel that is a conference bridge
+carrying several people, or a speaker model that does not suit this audio. Try another
+recording first; if two clean recordings both overlap, the model is the problem.
 
-**Calibration refuses the file.** "needs the two-channel recording" means the WAV is
-mono or the header says one channel — remember the requirement is one speaker per
-channel, not just a stereo file. "unsupported recording encoding" means it is not
-16-bit PCM (an MP3, M4A or float WAV): convert it first with
+**`scripts/calibrate.py` refuses the file.** "needs a two-channel recording" means the
+WAV is mono — the requirement is one speaker per channel, not just a stereo file. "is
+not 16-bit PCM" means it is an MP3, M4A or float WAV: convert it with
 `ffmpeg -i in.m4a -ac 2 -ar 16000 -sample_fmt s16 out.wav`, which will *not* create
-channel separation on its own — the two channels have to have come from two separate
-sources.
-
-**Too many speakers detected on genuinely multi-speaker audio.** Lower
-the speaker similarity threshold, or set the maximum speakers per channel to the room
-size — both on the ASR Config page.
+channel separation on its own — the two channels have to have come from two sources.
 
 ## Licences
 
@@ -804,26 +650,17 @@ complying with their licences.**
 | Component | Licence |
 |---|---|
 | `sherpa-onnx` runtime | Apache-2.0 |
-| NVIDIA Nemotron streaming EN 0.6B (default ASR model) | **NVIDIA Open Model License** |
-| NVIDIA FastConformer streaming EN 480 ms | CC-BY-4.0 |
-| NVIDIA Parakeet TDT 0.6B v3 (offline) | CC-BY-4.0 |
-| icefall streaming Zipformer EN | Apache-2.0 |
-| NVIDIA TitaNet-small / TitaNet-large (speaker embedding) | CC-BY-4.0 |
-| WeSpeaker CAM++ / ResNet293 (speaker embedding) | Apache-2.0 |
-| 3D-Speaker CAM++ / ERes2Net (speaker embedding) | Apache-2.0 |
+| NVIDIA FastConformer streaming EN 480 ms (ASR model, both bundles) | CC-BY-4.0 |
+| NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
 | pyannote segmentation 3.0 (turn detection) | MIT |
-| Silero VAD (offline engine only) | MIT |
 
 Each model's licence file is copied into the image alongside its weights, and the
 resolved licences are reported in the ASR stack's `AsrModelLicense`, `AsrLicenceSummary`
-and `AsrRedistributable` outputs. **`AsrRedistributable` is the one to check** before
-copying an image anywhere: it is `false` whenever any weight in the bundle carries a
-licence that does not permit redistribution, which today means any bundle using the
-Nemotron default.
+and `AsrRedistributable` outputs. `AsrRedistributable` is `true` for both bundles: every
+weight is permissively licensed. CC-BY-4.0 requires attribution, which
+`THIRD-PARTY-LICENSES.txt` carries.
 
-Every checksum in `catalog.json` was verified by downloading the artifact and hashing it;
-the three speaker models added on 2026-08-20 additionally match the publisher's own
-`checksum.txt`.
+Every checksum in `catalog.json` was verified by downloading the artifact and hashing it.
 
 ## See Also
 

@@ -293,9 +293,9 @@ def test_build_reports_whether_the_speaker_model_was_measured() -> None:
         _, measured = index.build(properties)
         _, unmeasured = index.build({**properties, "BundleId": "bundle-uncalibrated"})
 
-    assert measured["SpeakerModelMeasured"] == "true"
     assert measured["SpeakerThreshold"] == "0.4"
-    assert unmeasured["SpeakerModelMeasured"] == "false"
+    names = {b["id"]: b.get("name", "") for b in CATALOG["bundles"]}
+    assert measured["BundleName"] == names[measured["BundleId"]]
     # Blank, not a guess: a wrong threshold fragments or merges speakers, which is
     # worse than the channel labels the transcriber falls back to.
     assert unmeasured["SpeakerThreshold"] == ""
@@ -427,24 +427,79 @@ def test_build_rejects_a_malformed_source_location() -> None:
         index.build({"SourceLocation": "just-a-bucket", "DestBucket": "b"})
 
 
-def test_delete_removes_the_generated_object_and_always_succeeds() -> None:
-    event = {
-        "RequestType": "Delete",
-        "PhysicalResourceId": "image-source/asr-microvm-src-abc.zip",
-        "ResourceProperties": {"DestBucket": "stack-bucket"},
-        "StackId": "s",
-        "RequestId": "r",
-        "LogicalResourceId": "l",
-        "ResponseURL": "https://example.invalid/cfn",
-    }
-    with mock.patch.object(index.s3, "delete_object") as delete, mock.patch.object(
-        index.cfn_response, "send"
-    ) as send:
-        index.lambda_handler(event, mock.Mock(log_stream_name="stream"))
+_DELETE_EVENT = {
+    "RequestType": "Delete",
+    "PhysicalResourceId": "image-source/asr-microvm-src-abc.zip",
+    "ResourceProperties": {"DestBucket": "stack-bucket"},
+    "StackId": "arn:aws:cloudformation:us-east-1:123456789012:stack/s/1",
+    "RequestId": "r",
+    "LogicalResourceId": "l",
+    "ResponseURL": "https://example.invalid/cfn",
+}
+_PAGE = {
+    "Versions": [
+        {"Key": "image-source/asr-microvm-src-abc.zip", "VersionId": "v1"},
+        {"Key": "image-source/asr-microvm-src-old.zip", "VersionId": "v2"},
+    ],
+    "DeleteMarkers": [{"Key": "image-source/asr-microvm-src-old.zip", "VersionId": "m1"}],
+}
 
-    delete.assert_called_once_with(
-        Bucket="stack-bucket", Key="image-source/asr-microvm-src-abc.zip"
+
+def _paginator(pages):
+    return mock.Mock(paginate=mock.Mock(return_value=pages))
+
+
+def test_a_stack_delete_empties_every_version_and_delete_marker() -> None:
+    # Live: 28 rebuilds left 28 zips and 28 delete markers in the versioned bucket,
+    # and the stack delete failed on "bucket is not empty".
+    paginator = _paginator([_PAGE])
+    with mock.patch.object(
+        index.cloudformation,
+        "describe_stacks",
+        return_value={"Stacks": [{"StackStatus": "DELETE_IN_PROGRESS"}]},
+    ), mock.patch.object(index.s3, "get_paginator", return_value=paginator), mock.patch.object(
+        index.s3, "delete_objects"
+    ) as delete, mock.patch.object(index.cfn_response, "send") as send:
+        index.lambda_handler(_DELETE_EVENT, mock.Mock(log_stream_name="stream"))
+
+    paginator.paginate.assert_called_once_with(Bucket="stack-bucket")
+    deleted = delete.call_args.kwargs["Delete"]["Objects"]
+    assert {(o["Key"], o["VersionId"]) for o in deleted} == {
+        ("image-source/asr-microvm-src-abc.zip", "v1"),
+        ("image-source/asr-microvm-src-old.zip", "v2"),
+        ("image-source/asr-microvm-src-old.zip", "m1"),
+    }
+    assert send.call_args[0][2] == index.cfn_response.SUCCESS
+
+
+def test_a_replacement_during_an_update_removes_only_its_own_key() -> None:
+    paginator = _paginator([{"Versions": [_PAGE["Versions"][0]]}])
+    with mock.patch.object(
+        index.cloudformation,
+        "describe_stacks",
+        return_value={"Stacks": [{"StackStatus": "UPDATE_IN_PROGRESS"}]},
+    ), mock.patch.object(index.s3, "get_paginator", return_value=paginator), mock.patch.object(
+        index.s3, "delete_objects"
+    ) as delete, mock.patch.object(index.cfn_response, "send") as send:
+        index.lambda_handler(_DELETE_EVENT, mock.Mock(log_stream_name="stream"))
+
+    paginator.paginate.assert_called_once_with(
+        Bucket="stack-bucket", Prefix="image-source/asr-microvm-src-abc.zip"
     )
+    assert delete.call_args.kwargs["Delete"]["Objects"] == [
+        {"Key": "image-source/asr-microvm-src-abc.zip", "VersionId": "v1"}
+    ]
+    assert send.call_args[0][2] == index.cfn_response.SUCCESS
+
+
+def test_a_failing_cleanup_never_blocks_the_delete() -> None:
+    with mock.patch.object(
+        index.cloudformation, "describe_stacks", side_effect=RuntimeError("denied")
+    ), mock.patch.object(
+        index.s3, "get_paginator", side_effect=RuntimeError("s3 down")
+    ), mock.patch.object(index.cfn_response, "send") as send:
+        index.lambda_handler(_DELETE_EVENT, mock.Mock(log_stream_name="stream"))
+
     assert send.call_args[0][2] == index.cfn_response.SUCCESS
 
 

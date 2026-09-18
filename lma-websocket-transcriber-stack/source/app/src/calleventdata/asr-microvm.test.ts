@@ -128,7 +128,7 @@ const newSession = (
         channelId,
         { endpointUrl: asr.url },
         new SpeakerNameRegistry(),
-        { diarize, maxSpeakers: 0, speakerThreshold: 0.5, endpointingMs: 1200 },
+        { diarize, maxSpeakers: 0 },
         async (segment) => {
             rows.push(segment);
         }

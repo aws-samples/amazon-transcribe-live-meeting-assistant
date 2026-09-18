@@ -21,6 +21,7 @@ title: "Virtual Participant"
   - [MicroVM launch type (default)](#microvm-launch-type-default)
 - [EC2 Instance Types](#ec2-instance-types)
 - [Auto-Scaling](#auto-scaling)
+- [Transcription Engine](#transcription-engine)
 - [Chat Introduction Message](#chat-introduction-message)
 - [In-meeting Chat Commands](#in-meeting-chat-commands)
 - [Troubleshooting](#troubleshooting)
@@ -229,6 +230,23 @@ In addition to the audio recording, the Virtual Participant can capture the meet
 
 **Resource cost**: capture runs at 5 fps with `libx264 -preset ultrafast` to keep CPU overhead low (~5-10%). This fits comfortably on the default `t3.medium` host for a typical VP; if you run many concurrent video-recording VPs per host, size the instance up. Tunable via the `VIDEO_FRAMERATE`, `VIDEO_RESOLUTION`, and `VIDEO_SEGMENT_DURATION` task-definition environment variables.
 
+## Transcription Engine
+
+A Virtual Participant is transcribed by Amazon Transcribe. A deployment with
+`EnableMicrovmAsr=true` can move Virtual Participants onto the on-demand MicroVM
+ASR engine instead, from **Configuration ▸ Transcription Engine** (admin only):
+
+- **Virtual Participants: engine** chooses the engine for every VP that starts after the
+  change. The VP acquires and releases its own MicroVM, and falls back to Amazon
+  Transcribe when none can be acquired.
+- **Virtual Participant voice separation** asks the on-demand engine for per-voice
+  labels, so several people behind one attendee tile (a conference room, a shared screen
+  playing a recording) come out as `Name (spk_0)`, `Name (spk_1)`. Off by default:
+  speaker names come from the meeting roster, which is the better label for a normal
+  attendee.
+
+See [MicroVM ASR](microvm-asr.md) for the engine itself.
+
 ## Chat Introduction Message
 
 The VP posts a customizable introduction message in the meeting chat when it joins. This message informs meeting participants that the VP is present and recording. You can configure the message content to suit your organization's requirements and compliance policies.
@@ -285,4 +303,5 @@ For the recommended EC2 + VSCode Remote-SSH + VNC workflow — including how to 
 - [Stream Audio](stream-audio.md) -- Browser-based audio capture alternative
 - [Voice Assistant](voice-assistant.md) -- Add a voice assistant to the Virtual Participant
 - [Simli Avatar Setup](simli-avatar-setup.md) -- Configure a visual avatar for the VP
+- [MicroVM ASR](microvm-asr.md) -- The on-demand transcription engine and its Virtual Participant switches
 

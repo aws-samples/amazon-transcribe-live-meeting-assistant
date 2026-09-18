@@ -54,14 +54,19 @@ test('the recording is written from the combined-audio stream', () => {
 
 test('the recording is NOT written from the meeting-only stream', () => {
     // The defect itself. meeting_audio.monitor exists precisely to exclude the
-    // agent, so anything recorded from it can never contain the assistant.
-    const body = methodBody('private async writeAudio');
-    assert.match(body, /meeting_audio\.monitor/, 'writeAudio should still feed Nova from meeting-only audio');
-    assert.doesNotMatch(
-        body,
-        /recordingStream\.write/,
-        'writeAudio must not write the recording — meeting_audio.monitor has no agent audio',
-    );
+    // agent, so anything recorded from it can never contain the assistant. The
+    // meeting-only capture lives in startMeetingAudioFanout(), shared by the
+    // Amazon Transcribe path (writeAudio) and the MicroVM ASR path.
+    const fanout = methodBody('private startMeetingAudioFanout');
+    assert.match(fanout, /meeting_audio\.monitor/, 'the fan-out should still feed Nova from meeting-only audio');
+    assert.match(methodBody('private async writeAudio'), /this\.startMeetingAudioFanout\(\)/);
+    for (const body of [fanout, methodBody('private async writeAudio'), methodBody('private async runMicrovmTranscription')]) {
+        assert.doesNotMatch(
+            body,
+            /recordingStream\.write/,
+            'nothing but audioStream may write the recording — meeting_audio.monitor has no agent audio',
+        );
+    }
 });
 
 test('writeAudio no longer takes a recording stream at all', () => {

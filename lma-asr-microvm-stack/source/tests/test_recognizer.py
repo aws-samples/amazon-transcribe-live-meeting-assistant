@@ -162,6 +162,11 @@ def test_evolving_partials_then_final() -> None:
     partials = [e for e in events if e.kind == "partial"]
     finals = [e for e in events if e.kind == "final"]
 
+    # A partial's end is the audio decoded so far, so a live row sorts by a time that
+    # grows rather than staying pinned at the utterance start.
+    chunk_sec = len(_tone_chunk()) / 2 / SAMPLE_RATE
+    assert [p.end for p in partials] == pytest.approx([chunk_sec * n for n in (1, 2, 3, 4)])
+
     # Evolving partials: text strictly grows across updates.
     assert [p.text for p in partials] == [
         "let",

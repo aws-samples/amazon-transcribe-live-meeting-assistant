@@ -68,13 +68,28 @@ def test_recorded_sequence_produces_exact_envelope_schema() -> None:
     # diarization is not enabled here (the engine emits no label). It still appears
     # in the envelope so the wire schema is stable whether or not diarization is on.
     assert [m.model_dump() for m in messages] == [
-        {"type": "partial", "segment": 0, "text": "let", "start": 12.44, "speaker": None},
-        {"type": "partial", "segment": 0, "text": "let's", "start": 12.44, "speaker": None},
+        {
+            "type": "partial",
+            "segment": 0,
+            "text": "let",
+            "start": 12.44,
+            "end": None,
+            "speaker": None,
+        },
+        {
+            "type": "partial",
+            "segment": 0,
+            "text": "let's",
+            "start": 12.44,
+            "end": None,
+            "speaker": None,
+        },
         {
             "type": "partial",
             "segment": 0,
             "text": "let's meet",
             "start": 12.44,
+            "end": None,
             "speaker": None,
         },
         {
@@ -82,6 +97,7 @@ def test_recorded_sequence_produces_exact_envelope_schema() -> None:
             "segment": 0,
             "text": "let's meet at noon",
             "start": 12.44,
+            "end": None,
             "speaker": None,
         },
         {
@@ -100,6 +116,14 @@ def test_recorded_sequence_produces_exact_envelope_schema() -> None:
         },
     ]
     assert adapter.segments == 1
+
+
+def test_a_partial_carries_the_audio_time_decoded_so_far() -> None:
+    adapter = ProtocolAdapter()
+
+    (partial,) = adapter.adapt([Event(kind="partial", segment=0, text="hi", start=1.0, end=3.5)])
+
+    assert partial.model_dump()["end"] == 3.5
 
 
 def test_partial_and_final_are_wire_models() -> None:

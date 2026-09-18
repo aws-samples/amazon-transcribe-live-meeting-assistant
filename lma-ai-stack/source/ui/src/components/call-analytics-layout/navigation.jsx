@@ -35,10 +35,15 @@ const defaultOnFollowHandler = (ev) => {
   console.log(ev);
 };
 
-const NAV_PATHS = [
+// Paths on which the side navigation is rendered at all. A page whose route mounts
+// <Navigation /> but whose path is missing here shows an empty navigation panel -
+// which is exactly how the Transcription Engine page shipped, because only the activeHref
+// branch below was added for it. Exported so a test can pin the two together.
+export const NAV_PATHS = [
   CALLS_PATH,
   MCP_SERVERS_PATH,
   NOVA_SONIC_CONFIG_PATH,
+  ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
   STREAM_AUDIO_PATH,

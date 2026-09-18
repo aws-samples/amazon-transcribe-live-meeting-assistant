@@ -70,9 +70,8 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 ## On-demand ASR and Diarization (MicroVM) — EXPERIMENTAL
 
 > **EXPERIMENTAL — not production ready.** Transcript quality is below Amazon
-> Transcribe's, speaker labels depend on a calibrated operating point, and defaults
-> may change between releases. Amazon Transcribe remains the recommended engine for
-> production meetings.
+> Transcribe's and defaults may change between releases. Amazon Transcribe remains the
+> recommended engine for production meetings.
 
 Alternative streaming engine to Amazon Transcribe, giving per-voice speaker labels.
 Off by default. A meeting transcribed by this engine does not go through Amazon
@@ -82,55 +81,40 @@ Lambda MicroVMs is available. See [On-demand ASR & Speaker Diarization](microvm-
 
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
-| TranscriptionEngine | Deploys the on-demand ASR + diarization stack. Meetings still use Amazon Transcribe unless a client opts in | AmazonTranscribe | AmazonTranscribe, MicrovmAsr |
+| EnableMicrovmAsr | Deploys the on-demand speech engine alongside Amazon Transcribe. Nothing changes until an admin moves meetings onto it on the Transcription Engine page | false | true, false |
 
-`TranscriptionEngine` is the only deploy-time question for this engine. Its tuning
-knobs — the model bundle, MicroVM lifetime ceiling, speaker cap, turn-cut behaviour
-and maximum open row duration — used to be parameters (`AsrModelBundle`,
-`AsrMaxMeetingSeconds`, `AsrMaxSpeakers`, `AsrLiveTurnCut`, `AsrMaxOpenSegmentMs`) and
-are now fixed in the `AsrDefaults` mapping in `lma-main.yaml`, at the same values the
-parameters defaulted to. They were withdrawn because the engine is experimental and
-its defaults are still moving, so asking five unanswerable questions at deploy time
-was worse than picking known-good values.
+`EnableMicrovmAsr` is the **only** deploy-time question for this engine. Two more
+values are fixed in the `AsrDefaults` mapping in `lma-main.yaml` rather than asked:
 
-Most of them were never deploy-time decisions anyway: **maximum speakers per
-channel**, **live turn cut** and **maximum open row duration** are all overridable at
-runtime from the ASR Config page in the LMA UI, taking effect on the next meeting with
-no stack update. Only the model bundle and the lifetime ceiling need a redeploy — edit
-the mapping. Changing the bundle rebuilds the MicroVM image (~20 minutes).
+| Mapping key | Value | Purpose |
+|---|---|---|
+| `ModelBundle` | `fastconformer-titanet-small` | Which models the MicroVM image is built from, together with their measured diarization operating point |
+| `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop if a transcriber task dies without releasing one |
 
-### Why a bundle instead of three model parameters
+Everything that used to be tunable — the similarity threshold, minimum utterance
+length, speaker cap, turn-cut behaviour, maximum open row — is now the bundle's
+measured operating point or the engine's built-in default. There is nothing for a
+deployment to calibrate: a guessed or borrowed threshold fragments one person into
+several or merges several into one, so the number ships with the model it was
+measured for.
 
-The similarity threshold is not a property of the embedder alone — utterance length
-moves it as much as the model does (CAM++ measured 0.30 on 1–2 s utterances and 0.68
-on 5–20 s ones). So an operating point is only meaningful for a stated *pairing*, and
-choosing the three models separately let a deployment assemble a combination nobody
-had measured. It also produced a concrete bug: the threshold parameter defaulted to
-`0.2` while the catalog's measured value for the default embedder was `0.4`, nothing
-reconciled them, and the deployment merged two speakers into one.
+### The two bundles
 
-A bundle now carries its own calibrated threshold and utterance floor, baked into the
-ASR image, so a deployment gets a working configuration without knowing any numbers.
+Both are permissively licensed and redistributable, and share the same ASR model.
+Selecting the other one means editing the mapping and updating the stack, which
+rebuilds the MicroVM image (~20 minutes).
 
-| Bundle | Calibrated | Redistributable | Notes |
-|--------|-----------|-----------------|-------|
-| `nemotron-titanet-small` | Yes (0.4) | No — NVIDIA OML | Default, validated on real meetings |
-| `permissive-zipformer-campplus` | Yes (0.68) | Yes — Apache-2.0 + MIT | Worse on spontaneous speech (ASR trained on read speech) |
-| `transcription-only` | n/a | No — NVIDIA OML | No diarization; labelled by audio channel |
-| `permissive-fastconformer-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Best redistributable option: same architecture as the default, trained on conversational speech, quarter the size |
-| `nemotron-titanet-large` | No | No — NVIDIA OML | The default with a larger embedder, aimed at under-splitting |
-| `apache-only-zipformer-3dspeaker` | No | Yes — Apache-2.0 + MIT | For deployments that cannot accept CC-BY-4.0 attribution |
-| `accurate-parakeet-titanet-large` | No | **Yes** — CC-BY-4.0 + MIT | Offline: highest accuracy, but **no interim text** while speaking, and may not hold real time — unmeasured |
-
-An uncalibrated bundle produces **no speaker labels** until the deployment runs a
-calibration from the ASR Config page — a threshold borrowed from another pairing
-fragments or merges speakers, so no number is shipped rather than a wrong one.
+| Bundle | Models | Licences | Speaker labels |
+|--------|--------|----------|----------------|
+| `fastconformer-titanet-small` (default) | NVIDIA FastConformer streaming EN 480 ms + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + CC-BY-4.0 + MIT | Yes — threshold 0.5, minimum utterance 2500 ms, measured on real meeting audio |
+| `fastconformer-transcription-only` | NVIDIA FastConformer streaming EN 480 ms | CC-BY-4.0 | No — labelled by audio channel, no speaker weights in the image |
 
 There are deliberately no parameters for supplying a model URL: every model is a
-curated entry in the ASR stack's `catalog.json`, with its checksum pinned and (for a
-speaker model) its operating point measured. Runtime tuning stays available on the ASR
-Config admin page without a stack update. See
-[On-demand ASR & Speaker Diarization](microvm-asr.md#changing-the-model).
+curated entry in the ASR stack's `catalog.json` with its checksum pinned and, for a
+speaker model, its operating point measured with `scripts/calibrate.py`. The three
+runtime switches (engine for streaming meetings, engine for Virtual Participants, Virtual
+Participant voice separation) live on the Transcription Engine admin page and take effect on the
+next meeting with no stack update.
 
 ## End-of-Call Summary
 

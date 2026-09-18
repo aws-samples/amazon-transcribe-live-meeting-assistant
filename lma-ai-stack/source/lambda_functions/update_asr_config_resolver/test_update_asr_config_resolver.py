@@ -22,7 +22,7 @@ with mock.patch("boto3.resource"):
     import index  # noqa: E402
 
 
-def invoke(config: dict, config_id: str = "CustomAsrConfig") -> tuple[dict, dict]:
+def invoke(config: object, config_id: str = "CustomAsrConfig") -> tuple[dict, dict]:
     """Run the resolver against a fake table; returns (response, stored item)."""
     stored: dict = {}
     table = mock.Mock()
@@ -35,62 +35,72 @@ def invoke(config: dict, config_id: str = "CustomAsrConfig") -> tuple[dict, dict
     return response, stored
 
 
-def test_valid_overrides_are_stored() -> None:
+def test_the_switches_are_stored_as_booleans() -> None:
     response, stored = invoke(
-        {"speakerThreshold": 0.2, "minSegmentMs": 2500, "maxSpeakers": 0, "endpointingMs": 1200}
+        {
+            "streamingEngineMicrovm": True,
+            "virtualParticipantEngineMicrovm": False,
+            "diarizeVirtualParticipant": False,
+        }
     )
 
     assert response == {"AsrConfigId": "CustomAsrConfig", "Success": True}
-    assert stored["speakerThreshold"] == "0.2"
-    assert stored["minSegmentMs"] == "2500"
-    assert stored["endpointingMs"] == "1200"
+    assert stored == {
+        "AsrConfigId": "CustomAsrConfig",
+        "streamingEngineMicrovm": True,
+        "virtualParticipantEngineMicrovm": False,
+        "diarizeVirtualParticipant": False,
+    }
 
 
-def test_booleans_are_stored_as_booleans() -> None:
-    _, stored = invoke({"requireCorroboration": True, "engineDefaultMicrovm": False})
+def test_string_booleans_from_an_older_client_are_parsed_not_truth_tested() -> None:
+    # bool("false") is True.
+    _, stored = invoke(
+        {
+            "streamingEngineMicrovm": "true",
+            "virtualParticipantEngineMicrovm": "false",
+            "diarizeVirtualParticipant": "FALSE",
+        }
+    )
 
-    assert stored["requireCorroboration"] is True
-    assert stored["engineDefaultMicrovm"] is False
-
-
-def test_an_empty_value_clears_the_override() -> None:
-    """Blank means "fall back to the stack parameter", not zero."""
-    _, stored = invoke({"speakerThreshold": "", "maxSpeakers": None})
-
-    assert stored["speakerThreshold"] == ""
-    assert stored["maxSpeakers"] == ""
-
-
-def test_unknown_fields_are_filtered_out() -> None:
-    _, stored = invoke({"speakerThreshold": 0.3, "modelId": "../../etc/passwd", "evil": 1})
-
-    assert "modelId" not in stored
-    assert "evil" not in stored
-    assert stored["speakerThreshold"] == "0.3"
+    assert stored["streamingEngineMicrovm"] is True
+    assert stored["virtualParticipantEngineMicrovm"] is False
+    assert stored["diarizeVirtualParticipant"] is False
 
 
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("speakerThreshold", 1.5),
-        ("speakerThreshold", -0.1),
-        ("speakerThreshold", "abc"),
-        ("minSegmentMs", 99999),
-        ("maxSpeakers", 31),
-        ("endpointingMs", 10),
-    ],
-)
-def test_out_of_range_values_are_dropped_not_stored(field: str, value: object) -> None:
-    """A bad field is dropped with a log line; the rest of the save still lands."""
-    _, stored = invoke({field: value, "requireCorroboration": True})
+def test_a_value_that_is_not_a_boolean_is_dropped_rather_than_coerced() -> None:
+    _, stored = invoke(
+        {
+            "streamingEngineMicrovm": "yes",
+            "virtualParticipantEngineMicrovm": 1,
+            "diarizeVirtualParticipant": None,
+        }
+    )
 
-    assert field not in stored
-    assert stored["requireCorroboration"] is True
+    assert stored == {"AsrConfigId": "CustomAsrConfig"}
+
+
+def test_retired_tuning_fields_are_filtered_out() -> None:
+    """The threshold and its friends live in the image now; a stale client that
+    still sends them must not be able to put a number back into the table."""
+    _, stored = invoke(
+        {
+            "streamingEngineMicrovm": True,
+            "engineDefaultMicrovm": True,
+            "speakerThreshold": 0.3,
+            "minSegmentMs": 2500,
+            "maxSpeakers": 4,
+            "liveTurnCut": False,
+            "modelId": "../../etc/passwd",
+        }
+    )
+
+    assert set(stored) == {"AsrConfigId", "streamingEngineMicrovm"}
 
 
 def test_only_the_custom_record_can_be_written() -> None:
     with pytest.raises(Exception, match="Only CustomAsrConfig"):
-        invoke({"speakerThreshold": 0.2}, config_id="DefaultAsrConfig")
+        invoke({"streamingEngineMicrovm": True}, config_id="DefaultAsrConfig")
 
 
 def test_malformed_json_is_rejected() -> None:
@@ -108,70 +118,14 @@ def test_malformed_json_is_rejected() -> None:
 
 def test_a_json_array_is_rejected() -> None:
     with pytest.raises(Exception, match="must be a JSON object"):
-        invoke([1, 2, 3])  # type: ignore[arg-type]
+        invoke([1, 2, 3])
 
 
-def test_the_threshold_range_covers_the_measured_operating_points() -> None:
-    """Catalog thresholds span 0.2 (TitaNet) to 0.8 (WeSpeaker ResNet293)."""
-    low, high, _ = index.NUMERIC_FIELDS["speakerThreshold"]
-
-    assert low <= 0.2 and high >= 0.8
-
-
-def test_the_speaker_change_split_is_stored_as_a_boolean() -> None:
-    """The knob that turns intra-utterance splitting off without an image rebuild."""
-    response, stored = invoke({"splitOnSpeakerChange": False, "requireCorroboration": True})
-
-    assert response["Success"] is True
-    assert stored["splitOnSpeakerChange"] is False
-    assert stored["requireCorroboration"] is True
-
-
-def test_the_live_speaker_change_cut_is_stored_as_a_boolean() -> None:
-    """Distinct from splitOnSpeakerChange: that splits retroactively, this one live."""
-    _, stored = invoke({"liveTurnCut": False, "splitOnSpeakerChange": True})
-
-    assert stored["liveTurnCut"] is False
-    assert stored["splitOnSpeakerChange"] is True
-
-
-def test_the_live_cut_timings_are_stored_as_strings() -> None:
-    _, stored = invoke({"turnCutIntervalMs": 1500, "maxOpenSegmentMs": 20000})
-
-    assert stored["turnCutIntervalMs"] == "1500"
-    assert stored["maxOpenSegmentMs"] == "20000"
-
-
-def test_disabling_the_open_row_bound_is_allowed() -> None:
-    """0 means "follow the engine's own utterance boundaries", so it must survive.
-
-    The minimum for the other durations is non-zero, so treating them alike would
-    silently drop the one value that turns this bound off.
-    """
-    _, stored = invoke({"maxOpenSegmentMs": 0})
-
-    assert stored["maxOpenSegmentMs"] == "0"
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("turnCutIntervalMs", 100),  # too frequent: a segmentation window per 100ms
-        ("turnCutIntervalMs", 20000),
-        ("maxOpenSegmentMs", -1),
-        ("maxOpenSegmentMs", 120000),
-    ],
-)
-def test_live_cut_timings_out_of_range_are_dropped(field: str, value: object) -> None:
-    _, stored = invoke({field: value, "liveTurnCut": True})
-
-    assert field not in stored
-    assert stored["liveTurnCut"] is True
-
-
-def test_the_open_row_bound_covers_the_transcribe_path_default() -> None:
-    """Both engines should be comparable, so 20s must be a legal value here too."""
-    low, high, _ = index.NUMERIC_FIELDS["maxOpenSegmentMs"]
-
-    assert low == 0
-    assert high >= 20000
+def test_the_allow_list_is_exactly_the_three_switches() -> None:
+    """Adding a field here means adding it to the AppSync type, the transcriber's
+    and the VP's readers and the Transcription Engine page - fail loudly if it drifts."""
+    assert index.ALLOWED_FIELDS == {
+        "streamingEngineMicrovm",
+        "virtualParticipantEngineMicrovm",
+        "diarizeVirtualParticipant",
+    }

@@ -61,6 +61,11 @@ const isLocalTest = process.env.LOCAL_TEST === 'true';
 class KinesisStreamManager {
   private kinesisClient: KinesisClient;
   private callId: string;
+
+  /** The meeting's CallId, so other services (the ASR launcher lease) can key on it. */
+  get currentCallId(): string {
+    return this.callId;
+  }
   private streamName: string;
   
   // Global speaker tracking (matching Python kds.py)
@@ -352,6 +357,36 @@ class KinesisStreamManager {
     return maxEndTime;
   }
 
+  /**
+   * One row from the MicroVM ASR engine. Unlike an Amazon Transcribe result, the
+   * engine's rows arrive already segmented - one per utterance or speaker turn, with
+   * an id a later final reuses to update the row in place - so nothing here has to
+   * split on speaker changes; the caller supplies the finished speaker name.
+   */
+  async sendAsrTranscriptSegment(segment: TranscriptSegment): Promise<void> {
+    const now = new Date().toISOString();
+    const record: any = {
+      EventType: 'ADD_TRANSCRIPT_SEGMENT',
+      CallId: this.callId,
+      Channel: segment.channel || 'CALLER',
+      SegmentId: segment.segmentId,
+      StartTime: segment.startTime,
+      EndTime: segment.endTime,
+      Transcript: segment.transcript,
+      IsPartial: segment.isPartial,
+      CreatedAt: now,
+      UpdatedAt: now,
+      Sentiment: null,
+      TranscriptEvent: null,
+      UtteranceEvent: null,
+      Speaker: segment.speaker,
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+    await this.sendRecord(record);
+  }
+
   private processTranscriptionResults(speakerName: string, result: any, timeOffsetSeconds = 0): any {
     const segments: any = {};
 
@@ -503,6 +538,8 @@ export const kinesisStreamManager = new KinesisStreamManager();
 // Convenience functions for backward compatibility with LMA Python code
 export const sendStartMeeting = () => kinesisStreamManager.sendStartMeeting();
 export const sendEndMeeting = (recordingUrl?: string) => kinesisStreamManager.sendEndMeeting(recordingUrl);
+export const sendAsrTranscriptSegment = (segment: TranscriptSegment) =>
+  kinesisStreamManager.sendAsrTranscriptSegment(segment);
 export const sendAddTranscriptSegment = (speaker: string, transcriptResult: any, timeOffsetSeconds = 0) =>
   kinesisStreamManager.sendTranscriptSegment(speaker, transcriptResult, timeOffsetSeconds);
 export const sendCallCategory = (category: string, score?: number) => 
