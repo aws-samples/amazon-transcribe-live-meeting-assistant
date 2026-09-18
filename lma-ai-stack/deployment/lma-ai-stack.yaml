@@ -315,6 +315,17 @@ Parameters:
       disconnects without sending its end-of-meeting event stays "In Progress"
       until this timeout elapses. Set to 0 to leave such meetings open.
 
+  MeetingInactivityLookbackInDays:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      How far back to look for meetings to close. A meeting that started longer
+      ago than this is never closed automatically, so raise it temporarily if you
+      are updating a deployment that has accumulated older meetings stuck in
+      progress. Higher values read more meeting records on every run.
+
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
@@ -3082,8 +3093,10 @@ Resources:
           MEETING_INACTIVITY_TIMEOUT_IN_MINUTES: !Ref MeetingInactivityTimeoutInMinutes
           # How far back a run looks for candidates. Has to exceed the longest
           # meeting a deployment expects plus the inactivity timeout, because a
-          # meeting that started before the window is not examined.
-          REAPER_LOOKBACK_IN_DAYS: 2
+          # meeting that started before the window is not examined — which is why
+          # it is a parameter: an upgrade that inherits older stuck meetings needs
+          # to widen it once without editing the template.
+          REAPER_LOOKBACK_IN_DAYS: !Ref MeetingInactivityLookbackInDays
           # Caps the meeting rows read per run. Candidates cannot be narrowed on
           # the index (it projects no Status), so each one costs part of a
           # BatchGetItem; the newest are read first and the rest wait for the
@@ -3196,7 +3209,7 @@ Resources:
       Role: !GetAtt UpdateChatButtonConfigResolverFunctionExecutionRole.Arn
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/update_chat_button_config_resolver
-      Description: Lambda resolver for updateChatButtonConfig with AF-12 Mass Assignment security fix
+      Description: Lambda resolver that applies updateChatButtonConfig against an allowed field list
       MemorySize: 256
       Timeout: 30
       Environment:
@@ -3287,7 +3300,7 @@ Resources:
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       Name: UpdateChatButtonConfigLambda
-      Description: Lambda function for updateChatButtonConfig with AF-12 security fix
+      Description: Lambda data source backing the updateChatButtonConfig mutation
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt AppSyncUpdateChatButtonConfigLambdaRole.Arn
       LambdaConfig:
