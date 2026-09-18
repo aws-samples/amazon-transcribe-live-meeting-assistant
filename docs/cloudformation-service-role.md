@@ -24,6 +24,9 @@ The template creates two resources:
 1. **CloudFormationServiceRole** — An IAM role that only `cloudformation.amazonaws.com` can assume. It has three inline policies covering all AWS services required by LMA.
 2. **PassRolePolicy** — A managed policy that grants `iam:PassRole` for the service role. Attach this to users or roles that need to deploy LMA.
 
+It takes one parameter, `PermissionsBoundaryArn`, described under
+[Permissions boundary](#permissions-boundary-recommended) below.
+
 ```
 ┌─────────────────┐     iam:PassRole     ┌───────────────────┐     sts:AssumeRole     ┌──────────────┐
 │   IAM User or   │ ──────────────────► │  CloudFormation   │ ──────────────────────► │  LMA Service │
@@ -39,12 +42,63 @@ The template creates two resources:
                                                                                      └──────────────┘
 ```
 
+## Permissions boundary (recommended)
+
+The service role creates the IAM roles that the LMA stacks need (Lambda execution roles, ECS task roles, and so on). The recommended configuration is to supply an [IAM permissions boundary](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html) so that every role created through the service role is capped by that boundary, which keeps the roles the deployment produces inside limits your security team sets once, independently of the service role's own policies.
+
+Supply it through the `PermissionsBoundaryArn` parameter. When the parameter is set, the service role's `iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy` grants carry an `iam:PermissionsBoundary` condition, so a role can only be created — and only have policies written to it — while it carries that exact boundary policy. When the parameter is left empty (the default), the template behaves as it did before and role creation is not tied to a boundary.
+
+### Setting it up
+
+1. **Create the boundary policy** (once, by an administrator). It must allow everything the LMA roles legitimately do. A practical starting point is to copy the action lists from the three inline policies in `LMA-Cloudformation-Service-Role.yaml` and narrow them to your account's resources and regions.
+
+   ```bash
+   aws iam create-policy \
+     --policy-name LMA-PermissionsBoundary \
+     --policy-document file://lma-permissions-boundary.json
+   ```
+
+2. **Deploy the service role with the boundary ARN:**
+
+   ```bash
+   BOUNDARY_ARN=arn:aws:iam::123456789012:policy/LMA-PermissionsBoundary
+
+   cd iam-roles/cloudformation-management/
+   aws cloudformation deploy \
+     --template-file LMA-Cloudformation-Service-Role.yaml \
+     --stack-name LMA-CFServiceRole \
+     --capabilities CAPABILITY_NAMED_IAM \
+     --parameter-overrides PermissionsBoundaryArn=$BOUNDARY_ARN \
+     --region <your-region>
+   ```
+
+3. **Pass the same ARN to the LMA stack.** `lma-main.yaml` has its own `PermissionsBoundaryArn` parameter (default `""`), and that is what makes each LMA stack *attach* the boundary to the roles it defines. The two parameters are two halves of one setting: the service-role parameter requires the boundary, the LMA stack parameter supplies it. **Set both to the same ARN, or neither.** If the service role requires a boundary that the LMA stack does not attach, role creation is refused and the stack operation fails.
+
+   ```bash
+   # Read the required boundary back from the service role stack
+   BOUNDARY_ARN=$(aws cloudformation describe-stacks \
+     --stack-name LMA-CFServiceRole \
+     --query 'Stacks[0].Outputs[?OutputKey==`RequiredPermissionsBoundaryArn`].OutputValue' \
+     --output text)
+
+   lma deploy --stack-name MyLMA --admin-email user@example.com \
+     --role-arn $ROLE_ARN \
+     -p PermissionsBoundaryArn=$BOUNDARY_ARN --wait
+   ```
+
+### Coverage note
+
+Not every IAM role across every LMA nested stack attaches the boundary today — the VPC stack's flow-logs role, for example, does not take the parameter. Try this on a test stack before enabling it on an existing deployment. If a stack operation stops with an authorization failure on `iam:CreateRole`, either add the `PermissionsBoundary` property to that role's definition or redeploy the service role with `PermissionsBoundaryArn=""` to return to the unconstrained behaviour.
+
+Updating a deployment *to* a boundary also rewrites existing roles, so the service role is granted `iam:PutRolePermissionsBoundary` when — and only when — a boundary is configured. The matching delete action is not granted, so the boundary can be applied through this role but not removed through it.
+
 ## Deploying the Service Role
 
 ### Prerequisites
 
 - AWS Administrator access (one-time setup)
 - AWS CLI configured with appropriate credentials
+- Optionally, a permissions boundary managed policy — see [Permissions boundary](#permissions-boundary-recommended)
 
 ### Via CLI
 
@@ -55,8 +109,11 @@ aws cloudformation deploy \
   --template-file LMA-Cloudformation-Service-Role.yaml \
   --stack-name LMA-CFServiceRole \
   --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides PermissionsBoundaryArn=<boundary-policy-arn> \
   --region <your-region>
 ```
+
+Omit `--parameter-overrides` to deploy without a boundary.
 
 ### Via Console
 
@@ -64,9 +121,10 @@ aws cloudformation deploy \
 2. Click **Create stack** → **With new resources (standard)**
 3. Select **Upload a template file** and choose `LMA-Cloudformation-Service-Role.yaml`
 4. Set **Stack name** to `LMA-CFServiceRole` (or your preferred name)
-5. Click through **Next**, acknowledge IAM capabilities, and **Submit**
-6. Wait for `CREATE_COMPLETE`
-7. Copy the **ServiceRoleArn** from the **Outputs** tab
+5. Set **PermissionsBoundaryArn** to your boundary policy ARN (leave blank to deploy without one)
+6. Click through **Next**, acknowledge IAM capabilities, and **Submit**
+7. Wait for `CREATE_COMPLETE`
+8. Copy the **ServiceRoleArn** and **RequiredPermissionsBoundaryArn** values from the **Outputs** tab
 
 ## Assigning the PassRole Policy to Users
 
@@ -146,7 +204,8 @@ The role provides access to the following AWS services required by LMA:
 ### Security Details
 
 - **Trust policy** restricts role assumption to `cloudformation.amazonaws.com` only
-- **PassRole** is constrained by `iam:PassedToService` condition to specific AWS services (Lambda, ECS, CodeBuild, AppSync, Step Functions, Bedrock, etc.)
+- **Permissions boundary** — when `PermissionsBoundaryArn` is supplied, `iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy` are conditioned on `iam:PermissionsBoundary`, so the roles created for LMA stay within that boundary policy. This is the recommended configuration; see [Permissions boundary](#permissions-boundary-recommended)
+- **PassRole** lets CloudFormation hand the roles it creates to the services that consume them (Lambda, ECS, CodeBuild, AppSync, Step Functions, Bedrock, and the other services listed above)
 - **Service-linked role creation** is limited to the ECS service
 - All CloudFormation operations using this role are logged in **CloudTrail**
 - Organizations may further restrict permissions based on their specific compliance requirements
@@ -159,6 +218,8 @@ The role provides access to the following AWS services required by LMA:
 | **Stack creation fails with capability error** | Include `CAPABILITY_NAMED_IAM` when deploying the service role template |
 | **Missing permissions during LMA deployment** | This role covers all known LMA services. If new services are added, update the template and redeploy |
 | **Role name conflicts** | The role name includes the stack name — use a unique stack name |
+| **LMA deployment fails on `iam:CreateRole` after setting a boundary** | The LMA stack must attach the same boundary it is required to carry. Set the LMA stack's `PermissionsBoundaryArn` to the value of the service role stack's `RequiredPermissionsBoundaryArn` output, or redeploy the service role with `PermissionsBoundaryArn=""` |
+| **Boundary policy too narrow** | The boundary caps what the LMA roles can do, so anything it omits is unavailable to them at runtime. Widen the boundary policy rather than removing it |
 
 ## Cleanup
 

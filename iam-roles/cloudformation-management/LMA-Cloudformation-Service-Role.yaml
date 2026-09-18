@@ -8,6 +8,27 @@ Description: >
   service role to CloudFormation. The iam:PassRole policy must be attached to
   the user or role that will be using the CloudFormation Service Role in order
   to successfully pass the role.
+
+Parameters:
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Recommended) ARN of an existing IAM managed policy to require as the permissions
+      boundary on every IAM role this service role creates. When set, iam:CreateRole,
+      iam:PutRolePolicy and iam:AttachRolePolicy are allowed only for roles that carry
+      this boundary, so the roles the LMA stacks create cannot hold more permission than
+      the boundary allows. Set the LMA stack's own PermissionsBoundaryArn parameter to the
+      same ARN so that every role the stacks define attaches it. Leave empty to keep the
+      previous behaviour, in which role creation is not constrained to a boundary.
+    AllowedPattern: '^(|arn:aws[a-zA-Z-]*:iam::\d{12}:policy/.+)$'
+    ConstraintDescription: >-
+      Must be empty, or the ARN of an IAM managed policy
+      (arn:aws:iam::<account-id>:policy/<policy-name>).
+
+Conditions:
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
 Resources:
   CloudFormationServiceRole:
     Type: AWS::IAM::Role
@@ -62,16 +83,17 @@ Resources:
                   - serverlessrepo:CreateCloudFormationChangeSet
                   - serverlessrepo:GetApplication
                 Resource: '*'
+              # Role and policy lifecycle actions that IAM does not evaluate the
+              # iam:PermissionsBoundary condition key against. The three actions
+              # that DO honour it (CreateRole, PutRolePolicy, AttachRolePolicy)
+              # are in the boundary-aware statement that follows.
               - Sid: IAMRolesAndPolicies
                 Effect: Allow
                 Action:
-                  - iam:CreateRole
                   - iam:DeleteRole
                   - iam:GetRole
                   - iam:UpdateRole
-                  - iam:AttachRolePolicy
                   - iam:DetachRolePolicy
-                  - iam:PutRolePolicy
                   - iam:DeleteRolePolicy
                   - iam:GetRolePolicy
                   - iam:ListRolePolicies
@@ -92,6 +114,40 @@ Resources:
                   - iam:RemoveRoleFromInstanceProfile
                   - iam:GetInstanceProfile
                 Resource: '*'
+              # Role creation and inline/managed policy attachment. When
+              # PermissionsBoundaryArn is supplied, the iam:PermissionsBoundary
+              # condition key ties all three actions to roles carrying that
+              # boundary: a role can only be created with it, and its policies can
+              # only be written while it still has it. The invariant this keeps is
+              # that every role reachable through this service role stays inside
+              # the boundary policy. The two branches are alternatives selected by
+              # HasPermissionsBoundary — with no boundary supplied the statement is
+              # the same as before, so the template stays usable as-is.
+              - !If
+                - HasPermissionsBoundary
+                - Sid: IAMCreateRoleAndAttachPoliciesWithinBoundary
+                  Effect: Allow
+                  Action:
+                    - iam:CreateRole
+                    - iam:PutRolePolicy
+                    - iam:AttachRolePolicy
+                    # Needed when a stack UPDATE adds the boundary to a role that
+                    # was created before it was configured; CreateRole sets the
+                    # boundary inline, so this is only reached on updates. The
+                    # matching Delete action is deliberately not granted, so the
+                    # boundary can be applied through this role but not taken off.
+                    - iam:PutRolePermissionsBoundary
+                  Resource: '*'
+                  Condition:
+                    StringEquals:
+                      iam:PermissionsBoundary: !Ref PermissionsBoundaryArn
+                - Sid: IAMCreateRoleAndAttachPolicies
+                  Effect: Allow
+                  Action:
+                    - iam:CreateRole
+                    - iam:PutRolePolicy
+                    - iam:AttachRolePolicy
+                  Resource: '*'
               - Sid: IAMCreateServiceLinkedRole
                 Effect: Allow
                 Action: iam:CreateServiceLinkedRole
@@ -296,3 +352,11 @@ Outputs:
     Value: !Ref PassRolePolicy
     Export:
       Name: !Sub '${AWS::StackName}-PassRolePolicyArn'
+  RequiredPermissionsBoundaryArn:
+    Description: >-
+      Permissions boundary required on roles created through this service role, or
+      empty if none was configured. Pass this same value as the LMA stack's
+      PermissionsBoundaryArn parameter.
+    Value: !Ref PermissionsBoundaryArn
+    Export:
+      Name: !Sub '${AWS::StackName}-RequiredPermissionsBoundaryArn'
