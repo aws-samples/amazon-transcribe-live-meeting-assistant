@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from unittest import mock
@@ -46,26 +48,23 @@ ACCEPTED_NPM_SPECIFIERS = [
     "server-everything@1.0.0",
 ]
 
-# One entry per rejection reason: a character outside the accepted set, a
-# separator between two names, a leading dash, a scheme, a path separator, more
-# than one specifier, an extras marker, an operator that is not one of the
-# accepted ones, and the empty value.
+# Values the resolver must reject. The accepted set is a fixed character class,
+# so the branches to cover are: whitespace, a character outside that class, a
+# leading dash, a scheme, one or more path separators, more than one constraint
+# or specifier, an extras marker, an operator that is not accepted, and the
+# empty value.
 REJECTED_SPECIFIERS = [
     "pkg one",
     "pkg\tname",
-    "pkg;pkg2",
-    "pkg|pkg2",
-    "pkg&pkg2",
-    "pkg$pkg2",
-    "pkg`name",
-    "pkg{name}",
-    "pkg(name)",
+    "pkg#name",
+    "pkg%name",
+    "pkg+name",
     "-pkg",
     "git+https://example.test/o/r.git",
     "file:///tmp/pkg",
     "https://example.test/pkg.tar.gz",
     "dir/pkg",
-    "../pkg",
+    "pkg/name/extra",
     "pkg\\other",
     "requests>=1.0,<2.0",
     "pkg=1.0 pkg2",
@@ -122,7 +121,22 @@ def test_rejects_a_non_string_specifier() -> None:
 def test_error_message_names_the_accepted_form() -> None:
     with pytest.raises(index.ValidationError) as excinfo:
         index.validate_package_specifier("git+https://example.test/o/r.git", "pypi")
-    assert "name==version" in str(excinfo.value)
+    assert "Accepted forms" in str(excinfo.value)
+
+
+def test_the_help_text_names_every_accepted_version_operator() -> None:
+    """The message a caller reads must list the operators the code accepts.
+
+    Both come from the same place: the operators are read back out of the pypi
+    pattern, so adding one without mentioning it in the help fails here.
+    """
+    operators = set(re.findall(r"[=<>~]=", index.PYPI_PACKAGE_PATTERN.pattern))
+
+    assert operators, "could not read the version operators out of the pypi pattern"
+    for operator in operators:
+        assert operator in index.PACKAGE_SPECIFIER_HELP, (
+            f"the accepted operator {operator!r} is not named in the help text"
+        )
 
 
 def test_remote_servers_keep_working_with_a_url_in_the_package_field() -> None:
@@ -155,19 +169,62 @@ def _find_template() -> Path:
     pytest.skip(f"{TEMPLATE_RELATIVE_PATH} not found above {Path(__file__).parent}")
 
 
-def _buildspec_pattern() -> re.Pattern:
-    """Extract the regex the MCP layer buildspec applies to each stored value.
+def _buildspec_text() -> str:
+    return _find_template().read_text(encoding="utf-8")
 
-    The buildspec uses a POSIX ERE with `grep -E`; the subset used here (anchors,
-    groups, alternation, character classes, `?`, `*`) has the same meaning under
-    Python's `re`. `grep` is line-oriented and the build loop feeds it one line
-    at a time, so `fullmatch` against a single line is the faithful comparison --
-    values containing a newline are covered by the resolver-only table above.
-    """
-    text = _find_template().read_text(encoding="utf-8")
-    match = re.search(r"PACKAGE_SPEC_REGEX='(?P<pattern>[^']+)'", text)
+
+def _buildspec_pattern() -> str:
+    """Return the POSIX ERE the MCP layer buildspec applies to each stored value."""
+    match = re.search(r"PACKAGE_SPEC_REGEX='(?P<pattern>[^']+)'", _buildspec_text())
     assert match, "buildspec no longer defines PACKAGE_SPEC_REGEX"
-    return re.compile(match.group("pattern"))
+    return match.group("pattern")
+
+
+def test_the_build_step_pattern_matches_a_whole_line() -> None:
+    """Both anchors must be present, and no Python-side check can stand in.
+
+    `re.fullmatch` anchors on its own, so a Python comparison cannot tell whether
+    the ERE itself is anchored -- and an unanchored ERE would match a specifier
+    that merely *contains* an accepted name.
+    """
+    pattern = _buildspec_pattern()
+
+    assert pattern.startswith("^"), "build step pattern must be anchored at the start of the line"
+    assert pattern.endswith("$"), "build step pattern must be anchored at the end of the line"
+
+
+def test_the_build_step_fixes_the_locale_it_matches_in() -> None:
+    """Character ranges in a POSIX ERE are locale-dependent, so the locale is pinned.
+
+    Without this, the same pattern accepts a different set of characters
+    depending on the builder image's LANG.
+    """
+    text = _buildspec_text()
+    assert "export LC_ALL=C;" in text
+    assert text.index("export LC_ALL=C;") < text.index("PACKAGE_SPEC_REGEX=")
+
+
+GREP = shutil.which("grep")
+
+
+def _build_step_accepts(specifier: str) -> bool:
+    """Whether the build step's own `grep -Eq` accepts `specifier`.
+
+    The build step is asked directly rather than modelled in Python: the two are
+    known to differ on line handling and on locale-dependent character ranges, so
+    `grep` is the only faithful oracle for what the build step does. `LC_ALL=C`
+    matches what the buildspec exports.
+    """
+    if not GREP:
+        pytest.skip("grep is not available")
+    completed = subprocess.run(
+        [GREP, "-Eq", _buildspec_pattern()],
+        input=specifier,
+        text=True,
+        env={**os.environ, "LC_ALL": "C"},
+        check=False,
+    )
+    return completed.returncode == 0
 
 
 def _resolver_accepts(specifier: str) -> bool:
@@ -191,6 +248,8 @@ AGREEMENT_PROBES = [
     "pkg,name",
     "pkg@1.0",
     "Pkg@1.0",
+    "pkg>1.0",
+    "pkg<1.0",
     "@scope/name",
     "@Scope/name",
     "@scope/name@1.0",
@@ -221,11 +280,12 @@ def test_build_step_and_resolver_accept_exactly_the_same_values(specifier: str) 
     build step has been widened; a value the resolver stores but the build step
     skips would silently drop a working server from the layer.
     """
-    buildspec_accepts = _buildspec_pattern().fullmatch(specifier) is not None
+    build_step = _build_step_accepts(specifier)
+    resolver = _resolver_accepts(specifier)
 
-    assert buildspec_accepts == _resolver_accepts(specifier), (
+    assert build_step == resolver, (
         f"build step and resolver disagree about {specifier!r}: "
-        f"build step accepts={buildspec_accepts}, resolver accepts={_resolver_accepts(specifier)}"
+        f"build step accepts={build_step}, resolver accepts={resolver}"
     )
 
 
@@ -362,6 +422,6 @@ def test_install_rejects_an_unacceptable_specifier_before_storing_anything() -> 
         result = index.handler(event, None)
 
     assert result["Success"] is False
-    assert "name==version" in result["Message"]
+    assert "Accepted forms" in result["Message"]
     table.put_item.assert_not_called()
     table.query.assert_not_called()

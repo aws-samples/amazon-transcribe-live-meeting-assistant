@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -39,22 +40,18 @@ ACCEPTED_SERVER_IDS = [
     "http://example.test:8080/mcp",
 ]
 
-# One entry per rejection reason, mirroring the resolver's table in
-# mcp_server_manager: a character outside the accepted set, a separator between
-# two names, a leading dash, more than one namespace separator, whitespace, and
-# the empty value.
+# Values the resolver must reject, mirroring the table in mcp_server_manager. The
+# accepted set is a fixed character class, so the branches to cover are:
+# whitespace, a character outside that class, a leading dash, more than one
+# namespace separator, a scheme that is not http(s), and the empty value.
 REJECTED_SERVER_IDS = [
     "server one",
     "server\tname",
-    "server;server2",
-    "server|server2",
-    "server&server2",
-    "server$server2",
-    "server`name",
-    "server{name}",
+    "server#name",
+    "server%name",
+    "server+name",
     "-server",
     "a/b/c",
-    "../server",
     "server\\other",
     "server\nserver2",
     "ftp://example.test/mcp",
@@ -155,38 +152,61 @@ def test_oauth_fields_run_for_an_admin_caller(field: str, operation: str) -> Non
     routed.assert_called_once()
 
 
+SIBLING = Path(__file__).resolve().parent.parent / "mcp_server_manager" / "index.py"
+
+
+def _sibling_source() -> str:
+    if not SIBLING.is_file():
+        pytest.skip(f"{SIBLING} not found")
+    return SIBLING.read_text(encoding="utf-8")
+
+
 def test_the_admin_check_matches_the_mcp_server_manager_copy() -> None:
     """The two functions are packaged separately, so the check is duplicated.
 
-    Nothing imports across function directories at runtime, so this asserts the
-    two copies are the same text; a change to one without the other fails here.
+    Nothing imports across function directories at runtime, so this compares the
+    two copies; a change to one without the other fails here. The comparison is
+    on the parsed tree rather than the source text, so reformatting one file or
+    rewording a comment does not turn the suite red for no behavioural reason.
     """
-    sibling = Path(__file__).resolve().parent.parent / "mcp_server_manager" / "index.py"
-    if not sibling.is_file():
-        pytest.skip(f"{sibling} not found")
+    sibling_text = _sibling_source()
 
-    def source_of(path: Path, names: tuple[str, ...]) -> Dict[str, str]:
-        text = path.read_text(encoding="utf-8")
-        tree = ast.parse(text)
+    def behaviour_of(text: str, names: tuple[str, ...]) -> Dict[str, str]:
         found = {
-            node.name: ast.get_source_segment(text, node)
-            for node in tree.body
+            node.name: ast.dump(node)
+            for node in ast.parse(text).body
             if isinstance(node, ast.FunctionDef) and node.name in names
         }
-        assert set(found) == set(names), f"{path} no longer defines {set(names) - set(found)}"
+        assert set(found) == set(names), f"missing {set(names) - set(found)}"
         return found
 
     shared = ("_get_caller_identity", "_require_admin")
-    assert source_of(Path(index.__file__), shared) == source_of(sibling, shared)
+    own_text = Path(index.__file__).read_text(encoding="utf-8")
+    assert behaviour_of(own_text, shared) == behaviour_of(sibling_text, shared)
 
 
 def test_the_per_account_server_limit_matches_the_mcp_server_manager_copy() -> None:
-    sibling = Path(__file__).resolve().parent.parent / "mcp_server_manager" / "index.py"
-    if not sibling.is_file():
-        pytest.skip(f"{sibling} not found")
+    assert f"MAX_SERVERS_PER_ACCOUNT = {index.MAX_SERVERS_PER_ACCOUNT}" in _sibling_source()
 
-    text = sibling.read_text(encoding="utf-8")
-    assert f"MAX_SERVERS_PER_ACCOUNT = {index.MAX_SERVERS_PER_ACCOUNT}" in text
+
+def test_the_length_bound_matches_the_mcp_server_manager_copy() -> None:
+    """Both values bound the same stored field, so they have to be the same number."""
+    assert f"MAX_PACKAGE_SPECIFIER_LENGTH = {index.MAX_SERVER_ID_LENGTH}" in _sibling_source()
+
+
+def test_the_endpoint_pattern_matches_the_mcp_server_manager_copy() -> None:
+    """Both validate the endpoint that ends up in the same stored field."""
+    sibling_pattern = re.search(
+        r"HTTP_ENDPOINT_PATTERN = re\.compile\(r\"(?P<pattern>[^\"]+)\"\)", _sibling_source()
+    )
+    assert sibling_pattern, "mcp_server_manager no longer defines HTTP_ENDPOINT_PATTERN"
+    assert sibling_pattern.group("pattern") == index.HTTP_ENDPOINT_PATTERN.pattern
+
+
+@pytest.mark.parametrize("control", ["\x00", "\x01", "\x1f", "\x7f", "\n", "\t", " "])
+def test_an_endpoint_holds_no_whitespace_or_control_characters(control: str) -> None:
+    with pytest.raises(index.ValidationError):
+        index.validate_server_url(f"https://example.test/mcp{control}x")
 
 
 # ---------------------------------------------------------------------------
@@ -237,10 +257,49 @@ def _init_event(**overrides: Any) -> dict:
     return _event("initOAuthFlow", ADMIN_CLAIMS, **fields)
 
 
-def test_init_stores_state_for_an_accepted_identifier() -> None:
+def _init_tables(existing_servers: list, server_exists: bool = False) -> tuple:
     state_table = mock.Mock()
+    servers_table = mock.Mock()
+    servers_table.get_item.return_value = {"Item": {"ServerId": "s"}} if server_exists else {}
+    servers_table.query.return_value = {"Items": existing_servers}
+    return state_table, servers_table
 
-    with mock.patch.object(index.dynamodb, "Table", return_value=state_table):
+
+def test_init_stores_state_for_an_accepted_identifier() -> None:
+    state_table, servers_table = _init_tables([])
+
+    with mock.patch.object(
+        index.dynamodb, "Table", side_effect=_tables(state_table, servers_table)
+    ):
+        result = index.handler(_init_event(), None)
+
+    assert "authorizationUrl" in result
+    state_table.put_item.assert_called_once()
+
+
+def test_init_refuses_when_the_account_is_at_the_server_limit() -> None:
+    """The limit is reported before the user is sent to the provider."""
+    existing = [{"ServerId": f"s{n}"} for n in range(index.MAX_SERVERS_PER_ACCOUNT)]
+    state_table, servers_table = _init_tables(existing)
+
+    with mock.patch.object(
+        index.dynamodb, "Table", side_effect=_tables(state_table, servers_table)
+    ):
+        result = index.handler(_init_event(), None)
+
+    assert result["success"] is False
+    assert str(index.MAX_SERVERS_PER_ACCOUNT) in result["error"]
+    state_table.put_item.assert_not_called()
+
+
+def test_init_allows_an_installed_server_to_be_reauthorized_at_the_limit() -> None:
+    """Configuring credentials for a server that already exists consumes no slot."""
+    existing = [{"ServerId": f"s{n}"} for n in range(index.MAX_SERVERS_PER_ACCOUNT)]
+    state_table, servers_table = _init_tables(existing, server_exists=True)
+
+    with mock.patch.object(
+        index.dynamodb, "Table", side_effect=_tables(state_table, servers_table)
+    ):
         result = index.handler(_init_event(), None)
 
     assert "authorizationUrl" in result
@@ -284,41 +343,47 @@ def _run_callback(state_row: Dict[str, Any], existing_servers: list) -> tuple:
     ):
         result = index.handler(event, None)
 
-    return result, servers_table
+    return result, servers_table, state_table
 
 
 def test_callback_creates_a_server_row_for_an_accepted_identifier() -> None:
-    result, servers_table = _run_callback(STATE_ROW, [])
+    result, servers_table, state_table = _run_callback(STATE_ROW, [])
 
     assert result["success"] is True
     servers_table.put_item.assert_called_once()
     item = servers_table.put_item.call_args.kwargs["Item"]
     assert item["ServerId"] == STATE_ROW["ServerId"]
     assert item["PackageType"] == "streamable-http"
+    state_table.delete_item.assert_called_once()
 
 
 def test_callback_honours_the_per_account_server_limit() -> None:
     existing = [{"ServerId": f"s{n}"} for n in range(index.MAX_SERVERS_PER_ACCOUNT)]
 
-    result, servers_table = _run_callback(STATE_ROW, existing)
+    result, servers_table, state_table = _run_callback(STATE_ROW, existing)
 
     assert result["success"] is False
     assert str(index.MAX_SERVERS_PER_ACCOUNT) in result["error"]
     servers_table.put_item.assert_not_called()
+    state_table.delete_item.assert_called_once()
 
 
 def test_callback_rejects_an_unacceptable_identifier_before_creating_a_row() -> None:
-    result, servers_table = _run_callback({**STATE_ROW, "ServerId": "a/b/c"}, [])
+    result, servers_table, state_table = _run_callback({**STATE_ROW, "ServerId": "a/b/c"}, [])
 
     assert result["success"] is False
     servers_table.put_item.assert_not_called()
+    state_table.delete_item.assert_called_once()
 
 
 def test_callback_rejects_a_stored_server_url_that_is_not_an_http_endpoint() -> None:
-    result, servers_table = _run_callback({**STATE_ROW, "ServerUrl": "example.test/mcp"}, [])
+    result, servers_table, state_table = _run_callback(
+        {**STATE_ROW, "ServerUrl": "example.test/mcp"}, []
+    )
 
     assert result["success"] is False
     servers_table.put_item.assert_not_called()
+    state_table.delete_item.assert_called_once()
 
 
 def test_callback_updating_an_existing_row_leaves_the_count_alone() -> None:

@@ -26,6 +26,26 @@ const client = generateClient();
 const logger = new ConsoleLogger('CustomServersTab');
 
 /**
+ * Derive a server identifier from the free-text name the user typed.
+ *
+ * The same identifier has to be used by the install mutation and by the OAuth
+ * flow: the OAuth callback keys its DynamoDB row on it, so a different value in
+ * the two places would leave the stored credential attached to a row the
+ * installed server never reads. The API accepts a name built from letters,
+ * digits, '.', '_', '-' and at most one '/', which is what this produces.
+ */
+export const customServerId = (serverName) => {
+  const slug = serverName
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, '-')
+    // A leading or trailing '-' is not part of an accepted identifier, so a name
+    // that starts or ends with a character outside the set is trimmed rather than
+    // producing an identifier the API would refuse.
+    .replace(/^-+|-+$/g, '');
+  return `custom/${slug || 'server'}`;
+};
+
+/**
  * Custom Servers Tab - Add custom HTTP MCP server endpoints
  */
 const CustomServersTab = ({ onInstall = () => {} }) => {
@@ -80,7 +100,7 @@ const CustomServersTab = ({ onInstall = () => {} }) => {
 
     try {
       // Generate a unique server ID from the name
-      const serverId = `custom/${serverName.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`;
+      const serverId = customServerId(serverName);
 
       logger.info('Installing custom MCP server:', serverId);
 
@@ -151,6 +171,10 @@ const CustomServersTab = ({ onInstall = () => {} }) => {
         onDismiss={() => setShowAuthModal(false)}
         onSubmit={handleAuthSubmit}
         server={{
+          // AuthConfigModal takes the OAuth serverId from `id` first, so this is
+          // what keys the credential row. It must be the identifier the install
+          // mutation uses, not the free-text name.
+          id: customServerId(serverName),
           name: serverName,
           serverUrl,
           requiresAuth: true,

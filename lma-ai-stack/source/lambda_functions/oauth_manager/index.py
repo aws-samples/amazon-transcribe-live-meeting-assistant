@@ -61,8 +61,11 @@ MAX_SERVERS_PER_ACCOUNT = 5
 # known. Invariant: a stored identifier is drawn from letters, digits, '.', '_',
 # '-' and at most one '/', or is a whitespace-free http(s) URL.
 SERVER_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*(/[A-Za-z0-9][A-Za-z0-9._-]*)?")
-HTTP_ENDPOINT_PATTERN = re.compile(r"https?://\S+")
+# Kept identical to the copy in mcp_server_manager/index.py, which a test asserts.
+HTTP_ENDPOINT_PATTERN = re.compile(r"https?://[^\s\x00-\x1f\x7f]+")
 
+# Same bound as MAX_PACKAGE_SPECIFIER_LENGTH in mcp_server_manager/index.py, since
+# a server identifier is stored in the same NpmPackage field.
 MAX_SERVER_ID_LENGTH = 214
 
 SERVER_ID_HELP = (
@@ -145,6 +148,21 @@ def validate_server_url(server_url: Any) -> str:
     return server_url
 
 
+SERVER_LIMIT_MESSAGE = (
+    f"Maximum {MAX_SERVERS_PER_ACCOUNT} servers allowed per account. "
+    "Please uninstall a server first."
+)
+
+
+def _at_server_limit(servers_table: Any, account_id: str) -> bool:
+    """Whether the account already holds the maximum number of MCP servers."""
+    response = servers_table.query(
+        KeyConditionExpression="AccountId = :accountId",
+        ExpressionAttributeValues={":accountId": account_id},
+    )
+    return len(response.get("Items", [])) >= MAX_SERVERS_PER_ACCOUNT
+
+
 def encrypt_token(token: str) -> str:
     """Encrypt token using KMS"""
     try:
@@ -208,6 +226,25 @@ def init_oauth_flow(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         except ValidationError as exc:
             logger.warning("Rejected OAuth flow request: %s", exc)
             return {"success": False, "error": str(exc)}
+
+        # The per-account limit is checked here, before the user is sent to the
+        # provider, as well as at the callback: the callback is what creates the
+        # server row, and refusing at that point would mean the whole consent
+        # flow had to be repeated. Configuring credentials for a server that is
+        # already installed does not consume a slot.
+        if MCP_SERVERS_TABLE:
+            servers_table = dynamodb.Table(MCP_SERVERS_TABLE)
+            already_installed = servers_table.get_item(
+                Key={"AccountId": ACCOUNT_ID, "ServerId": server_id}
+            )
+            if "Item" not in already_installed and _at_server_limit(servers_table, ACCOUNT_ID):
+                logger.warning(
+                    "Account %s is at the %s server limit; not starting OAuth for %s",
+                    ACCOUNT_ID,
+                    MAX_SERVERS_PER_ACCOUNT,
+                    server_id,
+                )
+                return {"success": False, "error": SERVER_LIMIT_MESSAGE}
 
         # Generate state for CSRF protection
         import uuid
@@ -403,26 +440,20 @@ def handle_oauth_callback(event: Dict[str, Any], context: Any) -> Dict[str, Any]
                     state_data["ServerUrl"] = validate_server_url(state_data["ServerUrl"])
             except ValidationError as exc:
                 logger.warning("Rejected OAuth server entry for '%s': %s", server_id, exc)
+                # The flow is over, so the state row is no longer needed; it would
+                # otherwise sit there until its TTL.
+                state_table.delete_item(Key={"State": state})
                 return {"success": False, "error": str(exc)}
 
-            existing = servers_table.query(
-                KeyConditionExpression="AccountId = :accountId",
-                ExpressionAttributeValues={":accountId": account_id},
-            )
-            if len(existing.get("Items", [])) >= MAX_SERVERS_PER_ACCOUNT:
+            if _at_server_limit(servers_table, account_id):
                 logger.warning(
                     "Account %s is at the %s server limit; not creating %s",
                     account_id,
                     MAX_SERVERS_PER_ACCOUNT,
                     server_id,
                 )
-                return {
-                    "success": False,
-                    "error": (
-                        f"Maximum {MAX_SERVERS_PER_ACCOUNT} servers allowed per account. "
-                        "Please uninstall a server first."
-                    ),
-                }
+                state_table.delete_item(Key={"State": state})
+                return {"success": False, "error": SERVER_LIMIT_MESSAGE}
 
             logger.info(f"Creating new server entry {server_id} with OAuth tokens")
             now = datetime.utcnow().isoformat() + "Z"

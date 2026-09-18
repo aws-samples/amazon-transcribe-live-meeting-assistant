@@ -1328,10 +1328,16 @@ Resources:
                       # Each line must be a bare distribution name with at most one
                       # version pin. The two alternatives are the pypi and npm forms
                       # the MCPServerManager function accepts on write, character for
-                      # character; a unit test compares the two definitions in both
-                      # directions so neither can be widened on its own. This build
-                      # step re-checks rather than trusting that the write-time check
-                      # ran, so neither layer is the only gate.
+                      # character; a unit test runs this same pattern through grep and
+                      # compares the two definitions in both directions, so neither can
+                      # be widened on its own. This build step re-checks rather than
+                      # trusting that the write-time check ran, so neither layer is the
+                      # only gate.
+                      #
+                      # Character ranges in a POSIX ERE follow the locale's collation
+                      # order, so the locale is fixed here: the pattern then matches the
+                      # same set of characters whatever LANG the builder image sets.
+                      export LC_ALL=C;
                       PACKAGE_SPEC_REGEX='^(([A-Za-z0-9][A-Za-z0-9._-]*((==|>=|<=|~=)[A-Za-z0-9][A-Za-z0-9.*+_-]*)?)|((@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9.*+_-]*)?))$';
                       while IFS= read -r package; do
                         if [ -n "$package" ]; then

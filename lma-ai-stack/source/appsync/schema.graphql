@@ -894,9 +894,12 @@ input InitOAuthFlowInput {
 	serverName: String
 }
 
+# authorizationUrl and state are nullable because the resolver answers a request
+# it cannot start with {success: false, error: "..."} instead; a non-null field
+# would turn that readable message into a null-field error at the client.
 type InitOAuthFlowOutput @aws_cognito_user_pools @aws_iam {
-	authorizationUrl: String!
-	state: String!
+	authorizationUrl: String
+	state: String
 	success: Boolean
 	error: String
 }

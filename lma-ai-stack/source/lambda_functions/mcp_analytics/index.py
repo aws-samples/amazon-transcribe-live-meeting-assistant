@@ -62,8 +62,8 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Routes tool calls to appropriate implementations.
     Enforces user-based access control (UBAC).
     """
-    # An event carries caller claims or authorizer context, so only its shape is
-    # logged; the identity fields that matter are logged individually below.
+    # An event carries caller claims or authorizer context, so the event body is
+    # not logged; its shape is, and the resolved caller is logged on its own below.
     logger.info(f"Event keys: {sorted(event.keys())}")
 
     try:
@@ -139,7 +139,9 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             # Default to list_meetings if we can't determine
             tool_name = "list_meetings"
 
-        logger.info(f"Inferred tool: {tool_name}, Input: {json.dumps(tool_input)}")
+        # On the gateway path `tool_input` is the event itself, which carries the
+        # caller's claims, so the argument names are logged rather than the values.
+        logger.info(f"Inferred tool: {tool_name}, Input keys: {sorted(tool_input.keys())}")
 
         # Route to appropriate tool
         if tool_name == "search_lma_meetings":

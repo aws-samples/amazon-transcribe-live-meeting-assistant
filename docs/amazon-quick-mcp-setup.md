@@ -136,8 +136,16 @@ Cognito as the identity provider:
 Also copy `MCPServerApiKeyEndpoint` while you are on this tab. That is the
 per-user API key endpoint, and it is the route to use if tool calls through
 `MCPServerEndpoint` come back with `403 Unable to determine the calling user`
-(see [Path B](#path-b-quick-desktop-api-key), which works for Quick Suite as
-well — Quick Suite sends the key as `Authorization: Bearer <key>`).
+(see [Path B](#path-b-quick-desktop-api-key)).
+
+> **To confirm on a deployed stack:** whether Quick Suite can send a static LMA
+> API key as `Authorization: Bearer <key>` has not been verified against a live
+> Quick Suite tenant. §2.3 below documents only user-authentication (OAuth) as the
+> Quick Suite auth method, and Quick Suite does not let you add arbitrary headers.
+> If your Quick Suite version has no bearer-token/API-key field for a remote MCP
+> server, use Quick Desktop (Path B) or another MCP client for the API key route.
+> LMA's endpoint itself accepts the key over `Authorization: Bearer` or
+> `x-api-key` either way.
 
 ## Step 2: Create the MCP Integration in Quick Suite
 
@@ -152,10 +160,11 @@ well — Quick Suite sends the key as `Authorization: Bearer <key>`).
 1. **Name**: `LMA Meeting Assistant`
 2. **Description**: `Access Live Meeting Assistant transcripts, summaries, and meeting data`
 3. **MCP server endpoint**: paste the `MCPServerEndpoint` value from Step 1
-   > If tool calls later return `403 Unable to determine the calling user`,
-   > change this to the `MCPServerApiKeyEndpoint` value and use **Bearer token**
-   > authentication with a personal LMA API key instead
-   > ([Path B, Step 1](#step-1-generate-an-lma-api-key)).
+   > If tool calls later return `403 Unable to determine the calling user`, change
+   > this to the `MCPServerApiKeyEndpoint` value and authenticate with a personal
+   > LMA API key instead ([Path B, Step 1](#step-1-generate-an-lma-api-key)) — if
+   > your Quick Suite version offers a bearer-token / API-key field for a remote
+   > MCP server. See the caveat under Step 1.
 4. Click **Next**
 
 ### 2.3 Configure authentication
@@ -364,13 +373,17 @@ Common parameters for the most-used tools.
 LMA scopes every tool result to the calling user, so it answers a request that
 does not resolve to a user with this error rather than serving it.
 
-Switch the integration to the per-user API key endpoint: take
+Switch the client to the per-user API key endpoint: take
 `MCPServerApiKeyEndpoint` from the stack outputs, generate a personal key on the
 **MCP Servers Configuration** page in the LMA UI (Hosted MCP Access tab), and
-supply it as `Authorization: Bearer <key>`. The tools and their behaviour are
-identical; only the endpoint and the credential change. Full steps are in
-[Path B](#path-b-quick-desktop-api-key), and the two paths are compared in
+supply it as `Authorization: Bearer <key>` or `x-api-key: <key>`. The tools and
+their behaviour are identical; only the endpoint and the credential change. Full
+steps are in [Path B](#path-b-quick-desktop-api-key), and the two paths are
+compared in
 [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
+Whether Quick Suite itself exposes a field for a static key is the unverified
+point noted under [Step 1](#step-1-gather-lma-mcp-server-configuration); Quick
+Desktop, Claude Desktop and `curl` all work on this endpoint today.
 
 **Quick Desktop (API key):**
 - Confirm the endpoint URL is the **MCP API Endpoint** (the API Gateway URL),

@@ -65,15 +65,18 @@ NPM_PACKAGE_PATTERN = re.compile(
     r"(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9.*+_-]*)?"
 )
 # Remote servers store their endpoint in NpmPackage instead of a package name;
-# nothing installs them, so they only need to be a whitespace-free http(s) URL
-# within the same length bound as a package specifier.
-HTTP_ENDPOINT_PATTERN = re.compile(r"https?://\S+")
+# nothing installs them, so they only need to be an http(s) URL within the same
+# length bound as a package specifier. Invariant: the stored endpoint holds no
+# whitespace and no control characters. Kept identical to the copy in
+# oauth_manager/index.py, which a test asserts.
+HTTP_ENDPOINT_PATTERN = re.compile(r"https?://[^\s\x00-\x1f\x7f]+")
 
 MAX_PACKAGE_SPECIFIER_LENGTH = 214
 
 PACKAGE_SPECIFIER_HELP = (
-    "Accepted forms are 'name', 'name==version' and 'name>=version' for pypi "
-    "packages, or 'name', '@scope/name' and 'name@version' for npm packages. "
+    "Accepted forms are 'name' and 'name<operator>version' -- where the operator "
+    "is '==', '>=', '<=' or '~=' -- for pypi packages, or 'name', '@scope/name' "
+    "and 'name@version' for npm packages. "
     "Names and versions may contain letters, digits, '.', '_' and '-' only. "
     "Registry URLs, local paths, VCS references and multiple specifiers are not "
     "accepted -- install the published package by name instead."
