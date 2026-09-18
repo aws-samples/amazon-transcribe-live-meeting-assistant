@@ -535,8 +535,15 @@ vp-shell: ## Open a shell inside the running local VP container
 
 ##@ Security
 # Sample Security Review Tool (https://github.com/aws-samples/sample-security-review-tool).
-# Suppressions are tracked in .srt/issues.json (committed via negative-gitignore).
+#
+# SRT reads and rewrites .srt/issues.json on every assessment, so that file is
+# generated output and is gitignored. The reviewed decisions are kept separately
+# in .srt/suppressions.json, which IS tracked: `srt-seed` restores issues.json
+# from it on a fresh checkout (CI, new clone) so a scan starts from the reviewed
+# state, and `srt-save-suppressions` refreshes it after triage.
 # See docs/security-scanning.md.
+SRT_ISSUES := .srt/issues.json
+SRT_SUPPRESSIONS := .srt/suppressions.json
 
 srt: ## Run full SRT workflow (setup, scan, then prompt to open dashboard)
 	@$(MAKE) srt-setup
@@ -547,8 +554,22 @@ srt: ## Run full SRT workflow (setup, scan, then prompt to open dashboard)
 srt-setup: ## Download and configure SRT (pin via SRT_VERSION env var)
 	$(PYTHON) scripts/srt/setup.py
 
-srt-scan: ## Run SRT assessment (non-zero exit in CI on open findings)
+srt-scan: srt-seed ## Run SRT assessment (non-zero exit in CI on open findings)
 	$(PYTHON) scripts/srt/run.py
+
+srt-seed: ## Restore .srt/issues.json from the tracked decisions (no-op if it exists)
+	@if [ -f $(SRT_ISSUES) ]; then \
+		echo "$(SRT_ISSUES) already present — leaving it as-is."; \
+	elif [ -f $(SRT_SUPPRESSIONS) ]; then \
+		mkdir -p .srt && cp $(SRT_SUPPRESSIONS) $(SRT_ISSUES); \
+		echo -e "$(GREEN)✅ Seeded $(SRT_ISSUES) from $(SRT_SUPPRESSIONS)$(NC)"; \
+	else \
+		echo -e "$(YELLOW)No $(SRT_SUPPRESSIONS) found — scanning without prior decisions.$(NC)"; \
+	fi
+
+srt-save-suppressions: ## Refresh .srt/suppressions.json from .srt/issues.json after triage (then commit it)
+	@test -f $(SRT_ISSUES) || { echo -e "$(RED)ERROR: $(SRT_ISSUES) not found. Run 'make srt-scan' first.$(NC)"; exit 1; }
+	@$(PYTHON) -c "import json; p='$(SRT_ISSUES)'; q='$(SRT_SUPPRESSIONS)'; d=json.load(open(p)); k=sorted([i for i in d if i.get('status')=='suppressed'], key=lambda i: (str(i.get('source')), str(i.get('check_id')), str(i.get('path')), str(i.get('line')))); f=open(q,'w'); json.dump(k,f,indent=2); f.write('\n'); f.close(); print('Wrote %d decisions to %s (from %d entries in %s)' % (len(k), q, len(d), p))"
 
 srt-fix: ## Open the SRT dashboard for interactive triage
 	$(PYTHON) scripts/srt/fix.py
@@ -611,21 +632,52 @@ endif
 	@echo -e "$(GREEN)✅ Version updated to $(V) in all locations$(NC)"
 
 ##@ Git Workflow
-commit: lint test ## Lint, test, auto-generate commit message, commit, and push
-	@echo "Generating commit message via Bedrock..."
-	@git add . && \
-	COMMIT_MESSAGE=$$(bash scripts/generate_commit_message.sh) && \
-	echo "Commit message: $$COMMIT_MESSAGE" && \
-	git commit -m "$$COMMIT_MESSAGE" && \
-	git push
+# Both helpers share _commit-push below. They stage modifications to tracked
+# files only (`git add -u`) and refuse to run while any untracked file is
+# present: this is a public repository and working trees here routinely contain
+# large local scratch directories, so `git add .` is the wrong default. The
+# staged diffstat and the generated message are shown and confirmed before
+# anything is committed or pushed. _commit-preflight runs those checks up front
+# too, so `make commit` fails in a second rather than after the full test run.
+.PHONY: commit fastcommit _commit-preflight _commit-push
 
-fastcommit: ## Auto-generate commit message, commit, and push (no linting)
-	@echo "Generating commit message via Bedrock..."
-	@git add . && \
-	COMMIT_MESSAGE=$$(bash scripts/generate_commit_message.sh) && \
-	echo "Commit message: $$COMMIT_MESSAGE" && \
-	git commit -m "$$COMMIT_MESSAGE" && \
-	git push
+commit: _commit-preflight lint test ## Lint, test, stage tracked changes, then review + confirm before push
+	@$(MAKE) --no-print-directory _commit-push
+
+fastcommit: ## Stage tracked changes, then review + confirm before push (no lint/test)
+	@$(MAKE) --no-print-directory _commit-push
+
+_commit-preflight:
+	@if [ ! -t 0 ]; then \
+		echo -e "$(RED)ERROR: this target needs an interactive terminal (it asks for confirmation).$(NC)"; \
+		exit 1; \
+	fi
+	@UNTRACKED=$$(git ls-files --others --exclude-standard); \
+	if [ -n "$$UNTRACKED" ]; then \
+		echo -e "$(RED)ERROR: untracked files present — refusing to commit.$(NC)"; \
+		echo "$$UNTRACKED"; \
+		echo -e "$(YELLOW)Stage them explicitly ('git add <path>'), ignore them, or remove them, then re-run.$(NC)"; \
+		exit 1; \
+	fi
+
+_commit-push: _commit-preflight
+	@git add -u; \
+	if git diff --cached --quiet; then \
+		echo -e "$(YELLOW)Nothing staged — no tracked files changed.$(NC)"; \
+		exit 0; \
+	fi; \
+	BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	echo -e "$(CYAN)Staged changes:$(NC)"; \
+	git diff --cached --stat; \
+	echo "Generating commit message via Bedrock..."; \
+	COMMIT_MESSAGE=$$(bash scripts/generate_commit_message.sh) || exit 1; \
+	echo -e "$(CYAN)Commit message:$(NC) $$COMMIT_MESSAGE"; \
+	read -r -p "Commit the above and push to '$$BRANCH'? [y/N] " REPLY; \
+	case "$$REPLY" in \
+		[yY]|[yY][eE][sS]) ;; \
+		*) echo -e "$(YELLOW)Aborted — changes left staged.$(NC)"; exit 1;; \
+	esac; \
+	git commit -m "$$COMMIT_MESSAGE" && git push
 
 ##@ Documentation
 docs: docs-build ## Build and serve the documentation site locally

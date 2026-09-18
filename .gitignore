@@ -17,16 +17,20 @@ samconfig.toml
 .ui-lint-checksum
 .claude/settings.json
 
-# DSR (legacy) — keep historical artifacts; new scans use .srt/
+# DSR (legacy) — superseded by .srt/. Scanner exports and per-machine settings
+# are generated output and stay untracked; the hand-written review document is
+# the only file here worth keeping under version control.
 .dsr/*
-!.dsr/issues.json
-!.dsr/settings.json
 !.dsr/feature-security-review-v0.1.0-to-v0.3.2.md
 
 # SRT (https://github.com/aws-samples/sample-security-review-tool)
-# Track only the suppression DB; everything else is machine-specific or ephemeral.
+# Only the hand-curated review decisions (.srt/suppressions.json) are tracked.
+# Everything else in here — the binary, its venv, per-machine config, the
+# dashboard and the full issues.json export — is generated per run and per
+# machine, so it is regenerated rather than committed. See
+# docs/security-scanning.md.
 .srt/*
-!.srt/issues.json
+!.srt/suppressions.json
 
 .ash/
 
