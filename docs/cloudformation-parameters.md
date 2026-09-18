@@ -11,6 +11,7 @@ title: "CloudFormation Parameters Reference"
 - [Meeting Assistant](#meeting-assistant)
 - [Knowledge Base](#knowledge-base)
 - [Transcription](#transcription)
+- [WebSocket Transcriber Service Scaling](#websocket-transcriber-service-scaling)
 - [On-demand ASR and Diarization (MicroVM) — EXPERIMENTAL](#on-demand-asr-and-diarization-microvm--experimental)
 - [End-of-Call Summary](#end-of-call-summary)
 - [Virtual Participant](#virtual-participant)
@@ -66,6 +67,41 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | TranscribeContentRedactionType | Type of content redaction | PII | PII |
 | ContentRedactionLanguages | Languages that support content redaction | en-US | en-US, en-AU, en-GB, es-US |
 | ShowSpeakerLabel | Default for per-channel speaker partitioning (diarization) on WebSocket streaming sessions -- the Stream Audio tab and the Desktop Capture App. Applies to both channels when used. Clients that send their own per-channel choice take precedence, so leave this false unless you want it on for clients that do not. See [Transcription & Translation](transcription-and-translation.md#speaker-identification-within-a-channel). | false | true, false |
+
+## WebSocket Transcriber Service Scaling
+
+These parameters size the Fargate service that terminates the browser and
+desktop-app WebSocket connections (the Stream Audio tab, the Desktop Capture App
+and the browser extension). They do not affect the Virtual Participant.
+
+| Parameter | Description | Default | Allowed Values |
+|-----------|-------------|---------|----------------|
+| TranscriberDesiredTaskCount | Number of transcriber tasks the service runs | 1 | 1-20 |
+| TranscriberAutoScalingEnabled | Scale the service on average CPU utilization | false | true, false |
+| TranscriberMinTaskCount | Minimum task count when auto scaling is enabled | 1 | 1-20 |
+| TranscriberMaxTaskCount | Maximum task count when auto scaling is enabled | 4 | 1-50 |
+| TranscriberScalingCpuTargetPercent | Average CPU utilization that auto scaling holds | 35 | 10-90 |
+
+Running more than one task requires `EnableVideoRecording` to be `false`. With
+video recording enabled, the desktop capture app sends meeting video over a
+second WebSocket connection, and only the task already hosting that meeting's
+audio session can attach it. The load balancer in front of the service does not
+pin a client to a task, and cookie-based stickiness is not available because the
+CloudFront distribution in front of the load balancer forwards no cookies, so
+with several tasks the video connection is refused whenever it lands on a
+different task from the audio. Audio is unaffected either way: a meeting's audio
+uses one connection for its whole lifetime.
+
+Auto scaling adds capacity but never removes it. Taking a task away would end
+the meetings it is hosting once the load balancer's deregistration delay
+elapses, and a meeting can run for hours; capacity returns to
+`TranscriberDesiredTaskCount` on the next stack update. The CPU target is kept
+below the load at which a task reports itself unhealthy to the load balancer, so
+that scaling out happens before tasks start being replaced.
+
+Deployments no longer reduce the service below its full task count while tasks
+are being replaced. A rolling deployment now briefly runs up to twice the task
+count instead.
 
 ## On-demand ASR and Diarization (MicroVM) — EXPERIMENTAL
 

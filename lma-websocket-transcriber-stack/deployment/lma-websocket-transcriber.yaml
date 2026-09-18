@@ -487,6 +487,68 @@ Parameters:
       lifecycle rule keys off this exact prefix, so a mismatched value would
       leave recordings that never expire.
 
+  # Task count and auto scaling.
+  #
+  # Running more than one task requires that any client connection for a meeting
+  # can be served by any task. That holds for audio: a meeting uses a single
+  # WebSocket connection for its lifetime. It does not hold when
+  # EnableVideoRecording is true, because the desktop capture app opens the
+  # video stream as a *second* WebSocket connection, and the task that receives
+  # it can only attach it to an audio session it is hosting itself — the load
+  # balancer has no stickiness (and cannot have cookie stickiness, because the
+  # CloudFront distribution in front of it forwards no cookies), so with several
+  # tasks that connection is rejected on whichever task did not get the audio.
+  # The defaults below therefore keep a single task; raise them only for
+  # audio-only deployments.
+  TranscriberDesiredTaskCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 20
+    Description: >-
+      Number of WebSocket transcriber tasks the service runs. Leave at 1 unless
+      EnableVideoRecording is false: with video recording enabled the desktop
+      video stream arrives as a separate connection that must reach the task
+      holding the meeting's audio session, which only a single task guarantees.
+
+  TranscriberAutoScalingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Enable CPU target-tracking auto scaling for the WebSocket transcriber
+      service. Requires EnableVideoRecording to be false, for the same reason as
+      TranscriberDesiredTaskCount.
+
+  TranscriberMinTaskCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 20
+    Description: >-
+      Minimum number of transcriber tasks when auto scaling is enabled.
+
+  TranscriberMaxTaskCount:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    MaxValue: 50
+    Description: >-
+      Maximum number of transcriber tasks when auto scaling is enabled.
+
+  TranscriberScalingCpuTargetPercent:
+    Type: Number
+    Default: 35
+    MinValue: 10
+    MaxValue: 90
+    Description: >-
+      Average service CPU utilization that auto scaling aims to hold. Keep this
+      below CpuHealthThresholdPercent, otherwise the load balancer starts
+      reporting tasks unhealthy at around the same load at which scaling out
+      begins.
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -553,6 +615,8 @@ Conditions:
   ShouldEnableVideoRecording: !Equals [!Ref EnableVideoRecording, "true"]
   ShouldEnableMicrovmAsr: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
   HasAsrConfigTable: !Not [!Equals [!Ref AsrConfigTableName, ""]]
+  ShouldEnableTranscriberAutoScaling:
+    !Equals [!Ref TranscriberAutoScalingEnabled, "true"]
 
 Outputs:
   S3BucketName:
@@ -1530,9 +1594,16 @@ Resources:
       Cluster:
         Ref: TranscribingCluster
       DeploymentConfiguration:
+        # A replacement task has to be registered and healthy before an existing
+        # one is drained, so the service keeps serving new meetings throughout a
+        # deployment. With MaximumPercent at 200 this holds at any task count,
+        # including the default of one; the cost is a brief overlap where twice
+        # the task count is running.
         MaximumPercent: 200
-        MinimumHealthyPercent: 50
-      DesiredCount: 1
+        MinimumHealthyPercent: 100
+      # A stack update sets the running count back to this value; when auto
+      # scaling is enabled it adjusts again within a few minutes.
+      DesiredCount: !Ref TranscriberDesiredTaskCount
       HealthCheckGracePeriodSeconds: 60
       EnableECSManagedTags: false
       LaunchType: FARGATE
@@ -1558,6 +1629,41 @@ Resources:
       - TranscribingWebsocketLoadBalancerListenerRule1
       - TranscribingWebsocketLoadBalancerListenerRule2
       - TranscribingWebsocketLoadBalancerListener
+
+  # Auto scaling for the transcriber service. Created only when
+  # TranscriberAutoScalingEnabled is true, because more than one task requires an
+  # audio-only deployment - see the parameter comments above. Application Auto
+  # Scaling uses its own service-linked role, so no IAM role is defined here.
+  TranscriberWebsocketServiceScalableTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Condition: ShouldEnableTranscriberAutoScaling
+    Properties:
+      MinCapacity: !Ref TranscriberMinTaskCount
+      MaxCapacity: !Ref TranscriberMaxTaskCount
+      ResourceId: !Sub "service/${TranscribingCluster}/${TranscriberWebsocketFargateService.Name}"
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  TranscriberWebsocketServiceScalingPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    Condition: ShouldEnableTranscriberAutoScaling
+    Properties:
+      PolicyName: !Sub "${AWS::StackName}-transcriber-cpu-target-tracking"
+      PolicyType: TargetTrackingScaling
+      ScalingTargetId: !Ref TranscriberWebsocketServiceScalableTarget
+      TargetTrackingScalingPolicyConfiguration:
+        PredefinedMetricSpecification:
+          PredefinedMetricType: ECSServiceAverageCPUUtilization
+        TargetValue: !Ref TranscriberScalingCpuTargetPercent
+        ScaleOutCooldown: 60
+        ScaleInCooldown: 600
+        # Capacity is added automatically but never removed automatically: a task
+        # that is taken away stops transcribing the meetings it is hosting once
+        # the target group's deregistration delay elapses, and a meeting can run
+        # for hours. Reduce capacity deliberately (a stack update returns the
+        # service to TranscriberDesiredTaskCount), or set this to false to accept
+        # automatic scale-in.
+        DisableScaleIn: true
 
   TranscriberWebsocketFargateServiceSecurityGroup:
     Type: AWS::EC2::SecurityGroup

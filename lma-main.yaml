@@ -759,6 +759,59 @@ Parameters:
     Description: >-
       Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
 
+  TranscriberDesiredTaskCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 20
+    Description: >-
+      Number of Fargate tasks running the WebSocket transcriber service (used by
+      the Stream Audio page and the desktop capture apps). Leave at 1 unless
+      EnableVideoRecording is false: with video recording enabled, the desktop
+      video stream arrives as a separate connection that must reach the task
+      holding the meeting's audio session, which only a single task guarantees.
+
+  TranscriberAutoScalingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Scale the WebSocket transcriber service on average CPU utilization.
+      Requires EnableVideoRecording to be false, for the same reason as
+      TranscriberDesiredTaskCount. Capacity is added automatically and reduced
+      only by a stack update, so that scaling never interrupts a meeting in
+      progress.
+
+  TranscriberMinTaskCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 20
+    Description: >-
+      Minimum number of WebSocket transcriber tasks when
+      TranscriberAutoScalingEnabled is true.
+
+  TranscriberMaxTaskCount:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    MaxValue: 50
+    Description: >-
+      Maximum number of WebSocket transcriber tasks when
+      TranscriberAutoScalingEnabled is true.
+
+  TranscriberScalingCpuTargetPercent:
+    Type: Number
+    Default: 35
+    MinValue: 10
+    MaxValue: 90
+    Description: >-
+      Average CPU utilization that WebSocket transcriber auto scaling aims to
+      hold. Kept below the load at which a task reports itself unhealthy to the
+      load balancer.
+
   EnableDataRetentionOnDelete:
     Type: String
     Default: "true"
@@ -856,6 +909,14 @@ Metadata:
           default: EXPERIMENTAL - On-demand ASR and Diarization (MicroVM, alternative to Amazon Transcribe)
         Parameters:
           - TranscriptionEngine
+      - Label:
+          default: WebSocket Transcriber Service Scaling
+        Parameters:
+          - TranscriberDesiredTaskCount
+          - TranscriberAutoScalingEnabled
+          - TranscriberMinTaskCount
+          - TranscriberMaxTaskCount
+          - TranscriberScalingCpuTargetPercent
       - Label:
           default: Transcript Event Processing Configuration
         Parameters:
@@ -1036,6 +1097,16 @@ Metadata:
         default: VP Minimum Warm Instances
       VPMaxInstances:
         default: VP Maximum Instances
+      TranscriberDesiredTaskCount:
+        default: WebSocket Transcriber Task Count
+      TranscriberAutoScalingEnabled:
+        default: Enable WebSocket Transcriber Auto Scaling
+      TranscriberMinTaskCount:
+        default: WebSocket Transcriber Minimum Tasks
+      TranscriberMaxTaskCount:
+        default: WebSocket Transcriber Maximum Tasks
+      TranscriberScalingCpuTargetPercent:
+        default: WebSocket Transcriber Target CPU Utilization (%)
       PermissionsBoundaryArn:
         default: Permissions Boundary ARN
       EnableDataRetentionOnDelete:
@@ -2736,6 +2807,11 @@ Resources:
         EnableAudioRecording: !Ref EnableAudioRecording
         EnableVideoRecording: !Ref EnableVideoRecording
         VideoRecordingsPrefix: "lma-video-recordings/"
+        TranscriberDesiredTaskCount: !Ref TranscriberDesiredTaskCount
+        TranscriberAutoScalingEnabled: !Ref TranscriberAutoScalingEnabled
+        TranscriberMinTaskCount: !Ref TranscriberMinTaskCount
+        TranscriberMaxTaskCount: !Ref TranscriberMaxTaskCount
+        TranscriberScalingCpuTargetPercent: !Ref TranscriberScalingCpuTargetPercent
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
