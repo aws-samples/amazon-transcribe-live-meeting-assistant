@@ -312,6 +312,10 @@ Resources:
 
   IdentityPool:
     Type: AWS::Cognito::IdentityPool
+    # Identity ids are minted per user and referenced by anything that stored
+    # data against them, so the pool is retained alongside the user pool.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       IdentityPoolName: !Sub "${AWS::StackName}-IdentityPool"
       AllowUnauthenticatedIdentities: false

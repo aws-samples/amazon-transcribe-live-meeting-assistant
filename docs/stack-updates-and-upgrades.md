@@ -105,18 +105,31 @@ removing them:
 | `VPTaskRegistry` | AI stack | Virtual participant task registry |
 | `DomSelectorCache` | AI stack | Cached meeting-platform UI selectors |
 | `VPProfilesBucket` | AI stack | Virtual participant browser profiles |
+| `CallEventProcessorDiscardedRecordsQueue` | AI stack | Transcript records the pipeline did not apply, awaiting triage |
+| `RecordingsBucket` | Main stack | Meeting audio and video recordings, and transcript files |
+| `LoggingBucket` | Main stack | S3 server access logs and load balancer logs |
+| `CustomerManagedEncryptionKey` | Main stack | The KMS key every other retained resource is encrypted with |
 | `UserPool` | Cognito stack | User accounts and group memberships |
+| `IdentityPool` | Cognito stack | Identity pool and the identity ids issued from it |
+| `LLMPromptTemplateTable` | LLM template stack | Prompt templates edited from the web UI |
+| `ChatButtonConfigTable` | Chat button stack | Chat button definitions edited from the web UI |
+| `NovaSonicConfigTable` | Nova Sonic stack | Voice assistant prompt and model settings |
+| `AsrConfigTable` | ASR MicroVM stack | Diarization operating point tuned from the ASR Config page |
+| `S3VectorBucket`, `S3VectorIndex` | Bedrock KB stack | Knowledge base vector store and its embeddings |
+
+`CustomerManagedEncryptionKey` matters more than it looks: without the key, the
+retained tables and buckets cannot be read. Keep it for as long as you keep
+anything encrypted with it.
 
 Retained resources continue to incur storage charges and must be removed by hand
 when you no longer need them — see [Cleanup](cleanup.md). Set
 `EnableDataRetentionOnDelete` to `false` if you would rather a stack deletion
 remove everything.
 
-Two stateful resources are deliberately *not* covered. The web application
-bucket holds only build artifacts that a redeployment regenerates, and is
-emptied on stack deletion regardless of this parameter. The MCP server's Cognito
-app client is configuration rather than data, and is recreated by a
-redeployment.
+Two resources are deliberately *not* covered. The web application bucket holds
+only build artifacts that a redeployment regenerates, and is emptied on stack
+deletion regardless of this parameter. The MCP server's Cognito app client is
+configuration rather than data, and is recreated by a redeployment.
 
 The retention setting is stored as a CloudFormation resource attribute, so
 changing the parameter on an existing stack only takes effect once the stack
