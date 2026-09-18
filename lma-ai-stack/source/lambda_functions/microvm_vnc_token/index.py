@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 from microvm_client import MicrovmClient, MicrovmError
+from vp_access import authorize_vp_access
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -35,54 +36,13 @@ def lambda_handler(event, context):
     args = event.get("arguments", {}) or {}
     vp_id = args.get("vpId")
     identity = event.get("identity", {}) or {}
-    claims = identity.get("claims", {}) or {}
-    # Same precedence the VP manager uses (see virtual_participant_manager), and
-    # it must include identity.username: a live call failed "Unauthenticated"
-    # because only the claims were checked and this deployment populates
-    # identity.username instead.
-    caller = claims.get("email") or claims.get("cognito:username") or identity.get("username") or ""
 
     if not vp_id:
         raise Exception("vpId is required")
-    if not caller:
-        logger.error(
-            "No caller identity; claims=%s identity keys=%s",
-            sorted(claims),
-            sorted(identity),
-        )
-        raise Exception("Unauthenticated")
 
-    vp = dynamodb.get_item(
-        TableName=os.environ["VP_TABLE_NAME"],
-        Key={"id": {"S": vp_id}},
-    ).get("Item")
-    if not vp:
-        raise Exception(f"Virtual Participant {vp_id} not found")
-
-    # Field names and semantics match the canonical subscription filter in
-    # source/appsync/subscription.js: Owner (capital O) equals identity.username,
-    # and SharedWith CONTAINS it. SharedWith is a comma-ish String, not a List —
-    # reading it as a List (and "owner" lowercase) made every request fail
-    # "Not authorized", because both lookups silently returned empty.
-    owner = vp.get("Owner", {}).get("S", "") or vp.get("owner", {}).get("S", "")
-    shared_raw = vp.get("SharedWith", {}).get("S", "")
-    shared = {v.strip() for v in shared_raw.split(",") if v.strip()}
-
-    # Admins may view any VP, matching the subscription filter's group check.
-    groups = identity.get("groups") or claims.get("cognito:groups") or []
-    if isinstance(groups, str):
-        groups = [g.strip() for g in groups.split(",") if g.strip()]
-    is_admin = "Admin" in groups
-
-    if not is_admin and caller != owner and caller not in shared:
-        logger.warning(
-            "Caller %s is not authorized for VP %s (owner=%s shared=%s)",
-            caller,
-            vp_id,
-            owner,
-            sorted(shared),
-        )
-        raise Exception("Not authorized for this Virtual Participant")
+    # Ownership/sharing check shared with the /vnc/* token minter, so both
+    # resolvers hand out VNC credentials to exactly the same set of callers.
+    authorize_vp_access(dynamodb, os.environ["VP_TABLE_NAME"], vp_id, identity, logger)
 
     registry = dynamodb.get_item(
         TableName=os.environ["VP_TASK_REGISTRY_TABLE_NAME"],
