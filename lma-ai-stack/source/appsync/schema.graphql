@@ -218,6 +218,7 @@ type Mutation @aws_iam {
 	deleteMyZoomCredentials: Boolean @aws_cognito_user_pools
 	deleteMyChromeProfile(platform: String): Boolean @aws_cognito_user_pools
 	acknowledgeVPFailure(virtualParticipantId: ID!): Boolean @aws_cognito_user_pools
+	createVncEdgeToken(vpId: ID!): VncEdgeToken @aws_cognito_user_pools
 }
 
 type OverallSentiment @aws_cognito_user_pools
@@ -802,6 +803,23 @@ type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
 # server-side. Tokens are capped at 60 minutes by the service while meetings can
 # run up to 8 hours, so the viewer mints one per session and again on reconnect
 # rather than receiving one at VP launch.
+# Short-lived access token for a Virtual Participant's /vnc/<vpId> path on the
+# CloudFront distribution (the ECS launch types).
+#
+# Minted by an authenticated resolver that first confirms the caller's access to
+# the Virtual Participant, and signed with a per-deployment key that the
+# Lambda@Edge viewer-request function checks. The payload names the one
+# participant and path the token is good for and expires within minutes, so the
+# viewer mints one per connection attempt rather than holding one.
+type VncEdgeToken @aws_cognito_user_pools {
+	token: String!
+	expiresAt: AWSDateTime!
+	# Credential for the VNC server itself, recorded per task by the VP. Returned
+	# alongside the token so an authorized viewer needs one round trip. Null for
+	# tasks that started before this was published.
+	vncPassword: String
+}
+
 type MicrovmVncToken @aws_cognito_user_pools {
 	authToken: String!
 	expiresAt: AWSDateTime!
