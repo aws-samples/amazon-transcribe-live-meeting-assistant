@@ -92,13 +92,20 @@ Resources:
                   - iam:RemoveRoleFromInstanceProfile
                   - iam:GetInstanceProfile
                 Resource: '*'
+              # Application Auto Scaling creates its own service-linked role the
+              # first time an ECS scalable target is registered, so both service
+              # principals are listed.
               - Sid: IAMCreateServiceLinkedRole
                 Effect: Allow
                 Action: iam:CreateServiceLinkedRole
-                Resource: !Sub 'arn:${AWS::Partition}:iam::*:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS'
+                Resource:
+                  - !Sub 'arn:${AWS::Partition}:iam::*:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS'
+                  - !Sub 'arn:${AWS::Partition}:iam::*:role/aws-service-role/ecs.application-autoscaling.amazonaws.com/AWSServiceRoleForApplicationAutoScaling_ECSService'
                 Condition:
                   StringEquals:
-                    iam:AWSServiceName: ecs.amazonaws.com
+                    iam:AWSServiceName:
+                      - ecs.amazonaws.com
+                      - ecs.application-autoscaling.amazonaws.com
               - Sid: IAMPassRole
                 Effect: Allow
                 Action:
@@ -147,6 +154,20 @@ Resources:
                 Effect: Allow
                 Action:
                   - sns:*
+                Resource: '*'
+              # The call event processor's Kinesis event source mapping sends the
+              # batches it could not apply to an SQS queue created by the AI stack.
+              - Sid: SQS
+                Effect: Allow
+                Action:
+                  - sqs:CreateQueue
+                  - sqs:DeleteQueue
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                  - sqs:SetQueueAttributes
+                  - sqs:TagQueue
+                  - sqs:UntagQueue
+                  - sqs:ListQueueTags
                 Resource: '*'
               - Sid: SES
                 Effect: Allow
@@ -257,6 +278,15 @@ Resources:
                 Effect: Allow
                 Action:
                   - autoscaling:*
+                Resource: '*'
+              # EC2 Auto Scaling above and Application Auto Scaling here are
+              # different services with different action prefixes. The latter
+              # backs the WebSocket transcriber service's optional scalable
+              # target and scaling policy.
+              - Sid: ApplicationAutoScaling
+                Effect: Allow
+                Action:
+                  - application-autoscaling:*
                 Resource: '*'
               - Sid: XRay
                 Effect: Allow
