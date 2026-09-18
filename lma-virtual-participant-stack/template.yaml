@@ -111,6 +111,20 @@ Parameters:
     Type: String
     Description: ARN of the VNC ALB Listener for creating dynamic routing rules
 
+  # The ARN, not the value. A secret value placed in a task definition's
+  # environment is readable by anything that can call ecs:DescribeTaskDefinition,
+  # so the task reads the value from Secrets Manager itself, once, at the point it
+  # creates its listener rule.
+  VncOriginVerifyHeaderValueSecretArn:
+    Type: String
+    Default: ""
+    Description: ARN of the secret holding the VNC origin-verify header value from AI stack
+
+  VncOriginVerifyHeaderName:
+    Type: String
+    Default: ""
+    Description: Name of the header carrying the VNC origin-verify value from AI stack
+
   VPSecurityGroupId:
     Type: String
     Description: Security Group ID for Virtual Participant ECS tasks from AI stack
@@ -512,6 +526,9 @@ Parameters:
 Conditions:
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
+  # Empty under MICROVM, where the AI stack creates no VNC load balancer and so
+  # no origin-verify secret for one.
+  HasVncOriginVerifySecret: !Not [!Equals [!Ref VncOriginVerifyHeaderValueSecretArn, ""]]
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
@@ -1193,6 +1210,28 @@ Resources:
                   - "elasticloadbalancing:ModifyRule"
                   - "elasticloadbalancing:AddTags"
                 Resource: "*"
+        # Read the origin-verify header value, so the listener rule this task
+        # creates for itself carries the same condition the template's own rule
+        # does. One secret, read-only, and absent entirely under MICROVM.
+        - !If
+          - HasVncOriginVerifySecret
+          - PolicyName: VncOriginVerifyPolicy
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action: "secretsmanager:GetSecretValue"
+                  Resource: !Ref VncOriginVerifyHeaderValueSecretArn
+                # The secret is encrypted with the customer-managed key, so
+                # GetSecretValue alone does not return a value.
+                - Effect: Allow
+                  Action:
+                    - "kms:Decrypt"
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
+          - !Ref "AWS::NoValue"
         - PolicyName: VPProfilesPolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -2247,6 +2286,12 @@ Resources:
               Value: !Ref VPC
             - Name: ALB_LISTENER_ARN
               Value: !Ref VNCALBListenerArn
+            # The ARN and the header name only; the value is fetched at run time
+            # so it never appears in this task definition.
+            - Name: VNC_ORIGIN_VERIFY_SECRET_ARN
+              Value: !Ref VncOriginVerifyHeaderValueSecretArn
+            - Name: VNC_ORIGIN_VERIFY_HEADER_NAME
+              Value: !Ref VncOriginVerifyHeaderName
             - Name: ELEVENLABS_API_KEY
               Value: !Ref ElevenLabsApiKey
             - Name: ELEVENLABS_AGENT_ID

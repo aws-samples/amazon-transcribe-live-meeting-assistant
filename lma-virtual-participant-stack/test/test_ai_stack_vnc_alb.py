@@ -424,19 +424,124 @@ def test_the_distribution_sends_the_origin_verify_header(template: dict) -> None
     assert ORIGIN_VERIFY_SECRET in json.dumps(headers[0]["HeaderValue"])
 
 
-def test_the_header_name_matches_on_both_sides(template: dict) -> None:
-    """The name is spelled in two places; the template has no shared constant.
+def test_the_header_name_matches_everywhere_it_is_spelled(template: dict) -> None:
+    """Three places, and the template has no Mappings section for a constant.
 
-    A mismatch would not fail the deploy -- the listener rule would simply never
-    match, and every viewer would get the default 403.
+    A mismatch would not fail the deploy. The listener rule would simply never
+    match, and every viewer would get the default 403. The third place is the
+    published output, which is what reaches the Virtual Participant so the rule it
+    creates for itself carries the same name.
     """
     sent = _vnc_origin(template)["OriginCustomHeaders"][0]["HeaderName"]
     rule = template["Resources"]["VNCALBListenerRule"]["Properties"]
     required = [c for c in rule["Conditions"] if c["Field"] == "http-header"][0][
         "HttpHeaderConfig"
     ]["HttpHeaderName"]
-    assert isinstance(sent, str) and isinstance(required, str)
-    assert sent.lower() == required.lower()
+    published = template["Outputs"]["VncOriginVerifyHeaderName"]["Value"]
+    names = {sent, required, published}
+    assert all(isinstance(n, str) for n in names), f"all three must be literals: {names}"
+    assert len({n.lower() for n in names}) == 1, f"header name differs between places: {names}"
+
+
+# --------------------------------------------------------------------------
+# Reaching the Virtual Participant, which creates one listener rule per
+# participant at run time and needs the same condition on it
+# --------------------------------------------------------------------------
+
+VP_TEMPLATE = TEMPLATE.parents[2] / "lma-virtual-participant-stack" / "template.yaml"
+MAIN_TEMPLATE = TEMPLATE.parents[2] / "lma-main.yaml"
+SECRET_ARN_PARAM = "VncOriginVerifyHeaderValueSecretArn"
+
+
+@pytest.fixture(scope="module")
+def vp_template() -> dict:
+    return yaml.load(VP_TEMPLATE.read_text(), Loader=_CfnLoader)
+
+
+@pytest.fixture(scope="module")
+def main_template() -> dict:
+    return yaml.load(MAIN_TEMPLATE.read_text(), Loader=_CfnLoader)
+
+
+def test_the_ai_stack_publishes_the_secret_arn_not_its_value(template: dict) -> None:
+    """A value in a task definition's environment is readable via ECS describe.
+
+    So the participant is handed the ARN and reads the value itself.
+    """
+    output = template["Outputs"][SECRET_ARN_PARAM]["Value"]
+    assert output["Fn::If"][0] == CONDITION
+    assert output["Fn::If"][1] == {"Ref": "VncOriginVerifyHeaderValueSecret"}
+    assert output["Fn::If"][2] == "", "must resolve to an empty string under MICROVM"
+
+
+def test_the_main_template_wires_both_values_to_the_vp_stack(main_template: dict) -> None:
+    params = main_template["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
+    for name in (SECRET_ARN_PARAM, "VncOriginVerifyHeaderName"):
+        assert params[name] == {"Fn::GetAtt": f"AISTACK.Outputs.{name}"}, name
+
+
+def test_the_task_definition_carries_the_arn_and_never_the_value(vp_template: dict) -> None:
+    containers = vp_template["Resources"]["TaskDefinition"]["Properties"]["ContainerDefinitions"]
+    env = {e["Name"]: e["Value"] for c in containers for e in c.get("Environment", [])}
+    assert env["VNC_ORIGIN_VERIFY_SECRET_ARN"] == {"Ref": SECRET_ARN_PARAM}
+    assert env["VNC_ORIGIN_VERIFY_HEADER_NAME"] == {"Ref": "VncOriginVerifyHeaderName"}
+    # The value itself must not be resolved anywhere in the task definition.
+    assert "resolve:secretsmanager" not in json.dumps(containers, default=str)
+
+
+def test_the_task_may_read_only_that_one_secret(vp_template: dict) -> None:
+    policies = vp_template["Resources"]["TaskRole"]["Properties"]["Policies"]
+    conditional = [p for p in policies if isinstance(p, dict) and "Fn::If" in p]
+    matching = [
+        p["Fn::If"][1]
+        for p in conditional
+        if isinstance(p["Fn::If"][1], dict)
+        and p["Fn::If"][1].get("PolicyName") == "VncOriginVerifyPolicy"
+    ]
+    assert len(matching) == 1, "the origin-verify read must be its own conditional policy"
+    statements = matching[0]["PolicyDocument"]["Statement"]
+    reads = [s for s in statements if "secretsmanager" in json.dumps(s["Action"])]
+    assert len(reads) == 1
+    assert reads[0]["Action"] == "secretsmanager:GetSecretValue"
+    assert reads[0]["Resource"] == {"Ref": SECRET_ARN_PARAM}
+
+
+def test_the_participant_is_not_granted_the_read_when_there_is_no_load_balancer(
+    vp_template: dict,
+) -> None:
+    """Under MICROVM the AI stack outputs an empty string for the ARN.
+
+    An IAM statement naming an empty resource is rejected, so the policy has to be
+    absent rather than present-and-empty.
+    """
+    condition = vp_template["Conditions"]["HasVncOriginVerifySecret"]
+    assert condition == {"Fn::Not": [{"Fn::Equals": [{"Ref": SECRET_ARN_PARAM}, ""]}]}
+    policies = vp_template["Resources"]["TaskRole"]["Properties"]["Policies"]
+    for policy in policies:
+        if isinstance(policy, dict) and "Fn::If" in policy:
+            if policy["Fn::If"][0] == "HasVncOriginVerifySecret":
+                assert policy["Fn::If"][2] == {"Ref": "AWS::NoValue"}
+
+
+def test_the_runtime_rule_requires_the_same_two_conditions(template: dict) -> None:
+    """Both rules that can reach a task must agree on the condition.
+
+    The template's own rule is asserted above; this pins the run-time one, whose
+    behaviour is covered in detail by backend/src/vnc-listener-rule.test.ts.
+    """
+    status_manager = (
+        VP_TEMPLATE.parent / "backend" / "src" / "status-manager.ts"
+    ).read_text()
+    assert "buildListenerRuleConditions" in status_manager
+    assert "'http-header'" in status_manager
+    assert "VNC_ORIGIN_VERIFY_HEADER_NAME" in status_manager
+    # The priority range must not move: the template's rule sits at 50000 so it is
+    # evaluated after these.
+    assert "1000 + Math.abs(hash % 49000)" in status_manager
+    published = template["Outputs"]["VncOriginVerifyHeaderName"]["Value"]
+    assert published not in status_manager, (
+        "the header name must come from the environment, not be duplicated in the app"
+    )
 
 
 def test_the_origin_verify_value_is_generated_not_configured(template: dict) -> None:
