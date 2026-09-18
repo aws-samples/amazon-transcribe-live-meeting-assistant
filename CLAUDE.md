@@ -112,6 +112,49 @@ Full documentation lives in `./docs/` with the master entry point at `docs/INDEX
 - Feature branches: `feature/` prefix
 - Release branches: `release/` prefix
 
+## Security Disclosure Hygiene
+
+<EXTREMELY_IMPORTANT>
+This repository is a **public** `aws-samples` repo (see also
+`docs/security-scanning.md`). Commit messages, PR/MR titles and bodies, branch
+names, CHANGELOG entries and code comments are all public and permanent.
+
+**Never describe a security weakness in any of them.** This applies to the
+weakness being fixed, to one being hardened against, and to anything removed
+or restricted. Specifically, never write:
+
+- What an attacker could do, or how ("any authenticated user can…", "allows
+  forged tokens", "unsanitized input reaches…", "privilege escalation via…").
+- The precondition or entry point that makes something reachable.
+- Which versions or deployment configurations are affected.
+- Severity language that flags the change as a security fix (`CRITICAL`,
+  `RCE`, `XSS`, `CVE`, `vulnerability`, `exploit`, `bypass`, `injection`,
+  `unauthenticated`).
+- Links to internal findings, threat-model IDs, scanner issue IDs, or tickets
+  whose contents describe the weakness.
+
+**Write the change, not the weakness.** Describe the new behaviour in neutral,
+forward-looking engineering terms:
+
+| Don't write | Write instead |
+|---|---|
+| `fix: JWT signature never verified, allows forged tokens` | `feat(vnc): verify signed access tokens at the edge` |
+| `fix: XSS — sanitize LLM output before innerHTML` | `feat(ui): sanitize rendered markdown output` |
+| `fix: any user could install arbitrary MCP packages (RCE)` | `feat(mcp): restrict server management to the Admin group` |
+| `fix: tighten CSP, current one allows arbitrary script` | `chore(ui): narrow Content-Security-Policy directives` |
+
+Tests follow the same rule: name them for the invariant they assert
+(`rejects_token_with_invalid_signature`), never for the attack
+(`test_auth_bypass`).
+
+Detailed findings, exploitability analysis and remediation write-ups belong in
+an internal Taskei task — **not** in this repo. In particular do not put them
+in `.srt/` or `.dsr/`, which are mirrored publicly.
+
+Where a user-facing behaviour change needs a CHANGELOG entry, describe the new
+behaviour and any migration step, not the prior shortcoming.
+</EXTREMELY_IMPORTANT>
+
 ## Skill Files
 
 Project-specific coding patterns, checklists, and review workflows live in
