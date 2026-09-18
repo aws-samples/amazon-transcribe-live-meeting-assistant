@@ -1326,10 +1326,13 @@ Resources:
                       echo "MCP packages to install:";
                       cat mcp-servers.txt;
                       # Each line must be a bare distribution name with at most one
-                      # version pin, matching the pattern the MCPServerManager
-                      # function applies on write. This build step re-checks rather
-                      # than trusting that it ran, so neither layer is the only gate.
-                      PACKAGE_SPEC_REGEX='^(@[a-z0-9][a-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*((==|>=|<=|~=|@)[A-Za-z0-9][A-Za-z0-9.*+_-]*)?$';
+                      # version pin. The two alternatives are the pypi and npm forms
+                      # the MCPServerManager function accepts on write, character for
+                      # character; a unit test compares the two definitions in both
+                      # directions so neither can be widened on its own. This build
+                      # step re-checks rather than trusting that the write-time check
+                      # ran, so neither layer is the only gate.
+                      PACKAGE_SPEC_REGEX='^(([A-Za-z0-9][A-Za-z0-9._-]*((==|>=|<=|~=)[A-Za-z0-9][A-Za-z0-9.*+_-]*)?)|((@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9.*+_-]*)?))$';
                       while IFS= read -r package; do
                         if [ -n "$package" ]; then
                           if ! printf '%s' "$package" | grep -Eq "$PACKAGE_SPEC_REGEX"; then
@@ -4981,6 +4984,9 @@ Resources:
           KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
           OAUTH_CALLBACK_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          # Group allowed to configure MCP server credentials. Matches
+          # UserManagementFunction.
+          ADMIN_GROUP: "Admin"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref OAuthStateTable
@@ -6000,6 +6006,9 @@ Resources:
           MCP_SERVERS_TABLE: !Ref MCPServersTable
           CODEBUILD_PROJECT: !Ref MCPLayerBuildProject
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          # Group allowed to install, update and uninstall MCP servers. Matches
+          # UserManagementFunction.
+          ADMIN_GROUP: "Admin"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MCPServersTable
@@ -6740,6 +6749,9 @@ Resources:
           # the MCP-launched VP can use the user's stored Zoom credentials.
           USER_POOL_ID: !Ref UserPoolId
           LMA_STACK_NAME: !Ref LMAStackName
+          # Group whose members see every meeting in the account rather than
+          # only their own. Matches UserManagementFunction.
+          ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup: !Ref MCPServerAnalyticsLogGroup
       Policies:

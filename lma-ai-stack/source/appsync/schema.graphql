@@ -208,8 +208,8 @@ type Mutation @aws_iam {
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	uninstallMCPServer(serverId: ID!): UninstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateMCPServer(input: UpdateMCPServerInput!): UpdateMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools
-	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools
+	initOAuthFlow(input: InitOAuthFlowInput!): InitOAuthFlowOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	handleOAuthCallback(input: OAuthCallbackInput!): OAuthCallbackOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	generateMCPApiKey: GenerateMCPApiKeyOutput @aws_cognito_user_pools
 	revokeMCPApiKey(keyPrefix: String!): Boolean @aws_cognito_user_pools
 	createUser(input: CreateUserInput!): User @aws_cognito_user_pools(cognito_groups: ["Admin"])
