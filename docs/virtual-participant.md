@@ -201,9 +201,8 @@ without the header.
 
 The load balancer's security group additionally admits only CloudFront's
 `com.amazonaws.global.cloudfront.origin-facing` managed prefix list. That is a useful coarse
-filter, but it is the address range CloudFront uses when calling any origin and the service
-shares it across the distributions it serves, so it establishes that a request came from
-CloudFront. The header establishes that it came from this deployment's distribution.
+filter, and it establishes that a request came from CloudFront. The header establishes the
+narrower property: that it came through this deployment's own distribution.
 
 > **If you are upgrading, these take effect only after the Virtual Participant container
 > image is rebuilt** — both are applied in code that runs inside the container:
@@ -218,13 +217,13 @@ CloudFront. The header establishes that it came from this deployment's distribut
 > the stack update completes.
 >
 > Virtual Participants that are already running when the stack updates keep the routing rule
-> their task created, which does not carry the header condition. Those rules are deleted when
-> each participant's meeting ends, by the same cleanup that removes its target group, so they
-> clear on their own as those meetings finish. A rule can outlive its task if that task ended
-> without the cleanup running; a participant started afterwards on the rebuilt image replaces
-> any rule it finds on its own path before creating its own, and a leftover rule for a
-> participant that no longer exists can be deleted from the load balancer's listener by hand
-> (its `VirtualParticipantId` tag names the participant it belonged to).
+> their task created; those rules are deleted when each participant's meeting ends, by the
+> same cleanup that removes its target group, so they clear on their own as those meetings
+> finish. A rule can outlive its task if that task ended without the cleanup running; a
+> participant started afterwards on the rebuilt image replaces any rule it finds on its own
+> path before creating its own, and a leftover rule for a participant that no longer exists
+> can be deleted from the load balancer's listener by hand (its `VirtualParticipantId` tag
+> names the participant it belonged to).
 
 #### Known limitations
 
@@ -257,6 +256,31 @@ secret's value therefore leaves already-warm replicas verifying against the prev
 rejecting newly minted tokens, for as long as those containers live — an interval that is
 not bounded by anything in the design. A rotation needs either a tolerated window of
 failures or a change that lets the function hold more than one key.
+
+**Rotating the origin-verify value is harder still, and needs a stack update.** Five places
+hold it: the CloudFront origin's header and the load balancer's own rule, both resolved at
+stack create/update; the in-memory copy each running task read when it started; the literal
+baked into each per-participant rule already on the listener; and Secrets Manager itself,
+which newly started tasks read live. Replacing the secret's value **without** a stack update
+leaves running participants working while every newly started one becomes unviewable — its
+rule carries the new value, the distribution still sends the old one, so requests fall
+through to the load balancer's own rule and return a 503 from the shared target group, which
+holds no targets. Doing it **with** a stack update inverts that: new participants work and
+every already-running one becomes unviewable for the remainder of its meeting. Either way a
+rotation requires a stack update and interrupts live viewing for an interval bounded only by
+how long the longest running meeting lasts. There is no rotation schedule on this secret, or
+on any secret in this solution. Live viewing is a diagnostic aid rather than part of the
+capture path, so a rotation does not affect transcription or recording.
+
+**The hop from CloudFront to the load balancer is not encrypted.** The `vnc-alb` origin is
+configured `OriginProtocolPolicy: http-only`, so the origin-verify header, the access token
+in the query string, the VNC server credential in the RFB handshake and the framebuffer
+itself all travel in clear text between the CloudFront edge and an internet-facing load
+balancer. HTTPS to this origin is not available: CloudFront requires a publicly trusted
+certificate matching the origin's domain name, and one cannot be issued for an
+`*.elb.amazonaws.com` name. Moving the load balancer behind a **CloudFront VPC origin** is
+the change that removes this along with the public DNS name, and is the recommended
+direction for this path.
 
 ## Launch Types
 
