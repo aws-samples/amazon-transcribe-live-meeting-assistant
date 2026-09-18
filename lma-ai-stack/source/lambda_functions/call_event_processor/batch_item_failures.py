@@ -26,10 +26,13 @@ so what gets reported is chosen as follows:
   on-failure destination are configured for.
 * **Records that cannot be decoded or mapped are not reported.** A payload that
   is not JSON, or is JSON of the wrong shape, will fail identically on every
-  redelivery. Reporting it would stall the shard for the full record age,
-  delaying every later meeting on that shard. Such records are logged with
-  their sequence number and skipped, so they can be found and replayed
-  deliberately.
+  redelivery, so reporting it would hold the checkpoint for the mapping's whole
+  retry budget and delay every later meeting on that shard before advancing
+  anyway. Each such record is instead copied to the discarded-records queue
+  (``DISCARDED_RECORDS_QUEUE_URL``) with its shard id, sequence number and raw
+  payload, so the skip is durably recorded and the record can be replayed
+  deliberately. The mapping's ``DestinationConfig.OnFailure`` does not cover
+  these, because the invocation that skipped them succeeded.
 * **Failures that cannot be attributed to one record are reported as the whole
   batch.** If the batch handler itself raised, or the AppSync session could not
   be opened, the earliest record in the batch is reported so the entire batch is
@@ -38,10 +41,12 @@ so what gets reported is chosen as follows:
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 # third-party imports from Lambda layer
 from aws_lambda_powertools import Logger
+from botocore.exceptions import BotoCoreError, ClientError
 
 # imports from Lambda layer
 # pylint: disable=import-error
@@ -107,6 +112,93 @@ def select_checkpoint(
         if sequence_number in failing:
             return sequence_number
     return sorted(failing, key=_sort_key)[0]
+
+
+def _shard_id(event_id: str) -> str:
+    """Extracts the shard id from a Kinesis record's ``eventID``.
+
+    Kinesis composes ``eventID`` as ``<shardId>:<sequenceNumber>``. The shard id
+    is what an operator needs to find the record again with ``GetShardIterator``,
+    so it is carried through to the log line and the queue message.
+    """
+    return event_id.split(":", 1)[0] if event_id else ""
+
+
+def discarded_record_messages(
+    event: Any,
+    sequence_numbers: Iterable[str],
+) -> List[Dict[str, str]]:
+    """Builds one queue payload per record that was skipped as undecodable.
+
+    The raw ``data`` is passed through base64-encoded exactly as Kinesis
+    delivered it, so the message is a complete record of what was skipped and
+    can be decoded or re-put by hand.
+    """
+    wanted = {number for number in sequence_numbers if number}
+    if not wanted:
+        return []
+    records = event.get("Records", []) if isinstance(event, dict) else []
+    messages: List[Dict[str, str]] = []
+    for record in records:
+        kinesis = record.get("kinesis", {}) if isinstance(record, dict) else {}
+        sequence_number = str(kinesis.get("sequenceNumber", ""))
+        if sequence_number not in wanted:
+            continue
+        event_id = str(record.get("eventID", ""))
+        messages.append(
+            {
+                "reason": "record could not be decoded or mapped",
+                "eventID": event_id,
+                "shardId": _shard_id(event_id),
+                "sequenceNumber": sequence_number,
+                "partitionKey": str(kinesis.get("partitionKey", "")),
+                "approximateArrivalTimestamp": str(kinesis.get("approximateArrivalTimestamp", "")),
+                "eventSourceARN": str(record.get("eventSourceARN", "")),
+                # Base64, as delivered — not decoded, because the reason the
+                # record is here is that decoding it did not work.
+                "data": str(kinesis.get("data", "")),
+            }
+        )
+    return messages
+
+
+def send_discarded_records(
+    sqs_client: Any,
+    queue_url: str,
+    event: Any,
+    sequence_numbers: Iterable[str],
+) -> int:
+    """Copies skipped records to the discarded-records queue. Returns the count sent.
+
+    Best effort by design: the records were already skipped, so a queue failure
+    is logged and the invocation still reports its batch item failures rather
+    than failing and redelivering records that did succeed.
+    """
+    messages = discarded_record_messages(event, sequence_numbers)
+    if not messages:
+        return 0
+    if not queue_url:
+        LOGGER.error(
+            "no discarded records queue configured; skipped records are recorded only in this log",
+            extra=dict(discarded_records=messages),
+        )
+        return 0
+
+    sent = 0
+    for message in messages:
+        try:
+            sqs_client.send_message(QueueUrl=queue_url, MessageBody=json.dumps(message))
+        except (ClientError, BotoCoreError):
+            LOGGER.exception(
+                "could not write a skipped record to the discarded records queue",
+                extra=dict(
+                    shard_id=message["shardId"],
+                    sequence_number=message["sequenceNumber"],
+                ),
+            )
+            continue
+        sent += 1
+    return sent
 
 
 def build_response(
@@ -206,7 +298,10 @@ class SequenceTrackingBatchProcessor(TranscriptBatchProcessor):
         # payloads, and each decoded payload object is unique to its record.
         for decoded, sequence_number in self._decoded_records:
             if decoded is message:
-                return sequence_number
+                # An empty sequence number would be filtered back out by
+                # select_checkpoint and the batch would report success, so treat
+                # it as unattributable and redeliver the batch instead.
+                return sequence_number or None
         return None
 
     @property

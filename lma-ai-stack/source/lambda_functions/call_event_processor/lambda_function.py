@@ -22,7 +22,7 @@ from aws_lambda_powertools import Logger
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 # local imports
-from batch_item_failures import SequenceTrackingBatchProcessor
+from batch_item_failures import SequenceTrackingBatchProcessor, send_discarded_records
 from botocore.config import Config as BotoCoreConfig
 from event_processor import execute_process_event_api_mutation
 
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from mypy_boto3_dynamodb.service_resource import Table as DynamoDbTable
     from mypy_boto3_lambda.client import LambdaClient
     from mypy_boto3_sns.client import SNSClient
+    from mypy_boto3_sqs.client import SQSClient
     from mypy_boto3_ssm.client import SSMClient
 else:
     Boto3Session = object
@@ -43,6 +44,7 @@ else:
     LambdaClient = object
     ComprehendClient = object
     SNSClient = object
+    SQSClient = object
     SSMClient = object
 
 APPSYNC_GRAPHQL_URL = environ["APPSYNC_GRAPHQL_URL"]
@@ -72,6 +74,12 @@ COMPREHEND_LANGUAGE_CODE = getenv("COMPREHEND_LANGUAGE_CODE", "en")
 
 SNS_CLIENT: SNSClient = BOTO3_SESSION.client("sns", config=CLIENT_CONFIG)
 SSM_CLIENT: SSMClient = BOTO3_SESSION.client("ssm", config=CLIENT_CONFIG)
+
+# Records that cannot be decoded are copied here instead of being reported as
+# batch item failures. The event source mapping's own on-failure destination is
+# the same queue, but it only receives batches the invocation actually failed.
+SQS_CLIENT: SQSClient = BOTO3_SESSION.client("sqs", config=CLIENT_CONFIG)
+DISCARDED_RECORDS_QUEUE_URL = getenv("DISCARDED_RECORDS_QUEUE_URL", "")
 
 LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
 
@@ -127,6 +135,22 @@ def handler(event, context: LambdaContext) -> Dict[str, List[Dict[str, str]]]:
             "event processor error: %s",
             error,
             exc_info=error if isinstance(error, BaseException) else None,
+        )
+
+    discarded = processor.discarded_sequence_numbers
+    if discarded:
+        sent = send_discarded_records(
+            sqs_client=SQS_CLIENT,
+            queue_url=DISCARDED_RECORDS_QUEUE_URL,
+            event=event,
+            sequence_numbers=discarded,
+        )
+        LOGGER.warning(
+            "skipped Kinesis records that could not be decoded",
+            extra=dict(
+                discarded_sequence_numbers=discarded,
+                copied_to_discarded_records_queue=sent,
+            ),
         )
 
     if errors and processor.has_unreportable_failure:

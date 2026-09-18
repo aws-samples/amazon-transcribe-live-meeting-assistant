@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from os import getenv
 from statistics import fmean
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional, TypedDict
 
 # third-party imports from Lambda layer
 import boto3
@@ -365,6 +365,45 @@ async def execute_update_call_status_mutation(
     LOGGER.debug("query result", extra=dict(query=query_string, result=result))
 
     return result
+
+
+async def get_call_status(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Optional[str]:
+    """Returns the meeting's current Status, or None if it could not be read.
+
+    Used to tell a first END event from a redelivered one. Deliberately
+    fail-open: if the status cannot be read the caller carries on as if the
+    meeting were still open, because doing the end-of-meeting work twice is
+    better than not doing it at all.
+    """
+    call_id = message.get("ContactId") or message.get("CallId")
+    if not call_id or not appsync_session.client.schema:
+        return None
+
+    schema = DSLSchema(appsync_session.client.schema)
+    query = dsl_gql(
+        DSLQuery(
+            schema.Query.getCall.args(CallId=call_id).select(
+                schema.Call.CallId,
+                schema.Call.Status,
+            )
+        )
+    )
+    try:
+        result = await execute_gql_query_with_retries(
+            query,
+            client_session=appsync_session,
+            logger=LOGGER,
+        )
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception("could not read current status for call %s", call_id)
+        return None
+
+    status = (result or {}).get("getCall", {}).get("Status")
+    LOGGER.debug("current call status", extra=dict(call_id=call_id, status=status))
+    return status
 
 
 async def execute_get_transcript_segments_query(
@@ -1412,6 +1451,16 @@ async def execute_process_event_api_mutation(
         "END",
     ]:
         LOGGER.debug("END Event: update status")
+        # Read the status before the mutation writes ENDED, so a redelivered END
+        # is distinguishable from the first one. The event source mapping reports
+        # partial batch failures, which means every record from a failing record
+        # onwards is redelivered; the summary orchestrator is not idempotent, so
+        # invoking it again would produce a second summary and a second
+        # ADD_SUMMARY write for the same meeting.
+        was_already_ended = (
+            await get_call_status(message=message, appsync_session=appsync_session) == "ENDED"
+        )
+
         response = await execute_update_call_status_mutation(
             message=message, appsync_session=appsync_session
         )
@@ -1420,13 +1469,19 @@ async def execute_process_event_api_mutation(
         else:
             return_value["successes"].append(response)
 
-        if IS_TRANSCRIPT_SUMMARY_ENABLED:
+        if IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended:
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN,
                 InvocationType="Event",
                 Payload=json.dumps(message),
             )
             LOGGER.debug("END Event: Invoked Async Transcript Summary Lambda")
+        elif IS_TRANSCRIPT_SUMMARY_ENABLED:
+            LOGGER.info(
+                "END event for a meeting that is already ENDED; not invoking the "
+                "transcript summary again",
+                extra=dict(call_id=message.get("CallId")),
+            )
 
         if isinstance(response, Exception):
             return_value["errors"].append(response)

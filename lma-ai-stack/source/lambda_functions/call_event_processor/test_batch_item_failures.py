@@ -163,6 +163,65 @@ def test_an_undecodable_record_does_not_mask_a_later_transient_failure() -> None
     assert response == {"batchItemFailures": [{"itemIdentifier": "300"}]}
 
 
+class _RecordingSqsClient:
+    """Captures send_message calls; optionally fails them."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.messages: List[Dict[str, str]] = []
+        self._error = error
+
+    def send_message(self, QueueUrl: str, MessageBody: str) -> Dict:  # noqa: N803
+        if self._error:
+            raise self._error
+        self.messages.append({"queue_url": QueueUrl, "body": json.loads(MessageBody)})
+        return {"MessageId": "test-message-id"}
+
+
+def test_an_undecodable_record_is_copied_to_the_discarded_records_queue() -> None:
+    """The skip is durable: the shard, sequence number and raw payload are kept."""
+    event = kinesis_event(
+        ["100", "200"],
+        payloads=[b"this is not json", {"EventType": "END", "CallId": "call-200"}],
+    )
+    sqs = _RecordingSqsClient()
+
+    with (
+        mock.patch.object(lambda_function, "SQS_CLIENT", sqs),
+        mock.patch.object(
+            lambda_function, "DISCARDED_RECORDS_QUEUE_URL", "https://sqs.invalid/queue"
+        ),
+    ):
+        response = invoke(event)
+
+    assert response == {"batchItemFailures": []}
+    assert len(sqs.messages) == 1
+    message = sqs.messages[0]
+    assert message["queue_url"] == "https://sqs.invalid/queue"
+    assert message["body"]["sequenceNumber"] == "100"
+    assert message["body"]["shardId"] == "shardId-000000000000"
+    assert base64.b64decode(message["body"]["data"]) == b"this is not json"
+
+
+def test_a_discarded_records_queue_failure_does_not_fail_the_invocation() -> None:
+    """The record was already skipped; failing here would redeliver good records."""
+    from botocore.exceptions import ClientError
+
+    event = kinesis_event(["100", "200"], payloads=[b"not json", {"CallId": "call-200"}])
+    sqs = _RecordingSqsClient(
+        error=ClientError({"Error": {"Code": "AccessDenied", "Message": "no"}}, "SendMessage")
+    )
+
+    with (
+        mock.patch.object(lambda_function, "SQS_CLIENT", sqs),
+        mock.patch.object(
+            lambda_function, "DISCARDED_RECORDS_QUEUE_URL", "https://sqs.invalid/queue"
+        ),
+    ):
+        response = invoke(event)
+
+    assert response == {"batchItemFailures": []}
+
+
 def test_a_batch_level_failure_reports_the_first_record_in_the_batch() -> None:
     """An error that belongs to no single record retries the whole batch."""
     event = kinesis_event(["100", "200", "300"])
@@ -191,8 +250,12 @@ def test_sequence_numbers_are_ordered_numerically_not_lexicographically() -> Non
 
 
 def test_delivery_order_wins_over_numeric_order() -> None:
-    """The shard's own ordering is authoritative for what to resume from."""
-    assert batch_item_failures.select_checkpoint(["30", "10", "20"], ["20", "10"]) == "10"
+    """The shard's own ordering is authoritative for what to resume from.
+
+    Delivery order picks "20" here while a numeric comparison would pick "10",
+    so the two rules disagree and the assertion discriminates between them.
+    """
+    assert batch_item_failures.select_checkpoint(["30", "20", "10"], ["20", "10"]) == "20"
 
 
 def test_no_failures_means_no_checkpoint() -> None:
