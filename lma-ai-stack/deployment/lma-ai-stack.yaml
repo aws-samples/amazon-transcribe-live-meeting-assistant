@@ -7743,9 +7743,14 @@ Resources:
             #     distribution.
             #   - media-src: meeting audio and video are played from S3 presigned
             #     URLs of the form https://<bucket>.s3.<region>.<urlsuffix>, which
-            #     is why the partition URL suffix is allowed here; blob: covers
-            #     locally generated object URLs. Partition-aware via
-            #     AWS::URLSuffix so this also resolves in GovCloud and China.
+            #     is why the URL suffix is allowed here; blob: covers locally
+            #     generated object URLs. AWS::URLSuffix is used rather than a
+            #     literal amazonaws.com so this directive does not have to change
+            #     later, but note it delivers no GovCloud or China benefit today:
+            #     the UI builds those URLs in
+            #     src/components/common/generate-s3-presigned-url.js, which still
+            #     hardcodes amazonaws.com. Playback in a non-standard partition
+            #     needs that fixed too.
             #   - font-src: 'self' and data:. The built stylesheets contain no
             #     external font references; Cloudscape uses system font stacks.
             #   - worker-src: 'self' and blob:. The audio worklet is served from
