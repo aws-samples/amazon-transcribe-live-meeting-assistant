@@ -40,6 +40,7 @@
     "react-router-dom": "^7.18.3",
     "react-use-websocket": "^4.8.1",
     "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "vuera": "^0.2.7",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz"
   },

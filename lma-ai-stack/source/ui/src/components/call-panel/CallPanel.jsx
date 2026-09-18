@@ -29,10 +29,10 @@ import {
   Textarea,
   Toggle,
 } from '@cloudscape-design/components';
-import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
 import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate';
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
+import markdownRehypePlugins from '../common/markdown-plugins';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
 import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
 import { splitDiarizationLabel } from '../common/utilities';
@@ -274,7 +274,7 @@ const CallSummary = ({ item }) => {
                   <div>
                     {/* eslint-disable-next-line react/no-array-index-key */}
                     <TextContent color="gray">
-                      <ReactMarkdown rehypePlugins={[rehypeRaw]}>
+                      <ReactMarkdown rehypePlugins={markdownRehypePlugins}>
                         {getMarkdownSummary(item.callSummaryText)}
                       </ReactMarkdown>
                     </TextContent>
@@ -405,8 +405,10 @@ const TranscriptContent = ({ segment, translateCache }) => {
       // prettier-ignore
       // eslint-disable-next-line react/no-array-index-key
       <TextContent key={`${segmentId}-text-${i}`} color="red" className={className}>
-        <ReactMarkdown rehypePlugins={[rehypeRaw]}>{text.trim()}</ReactMarkdown>
-        <ReactMarkdown className="translated-text" rehypePlugins={[rehypeRaw]}>{translatedText.trim()}</ReactMarkdown>
+        <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{text.trim()}</ReactMarkdown>
+        <ReactMarkdown className="translated-text" rehypePlugins={markdownRehypePlugins}>
+          {translatedText.trim()}
+        </ReactMarkdown>
       </TextContent>
     );
   });
@@ -1153,10 +1155,40 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           }
         >
           <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
+            {/*
+              The `sandbox` list is deliberately exactly these two tokens.
+
+              What it buys: the frame renders agent output. The omitted tokens
+              mean nothing in that output can submit a form, open a popup, raise
+              a modal, or navigate the top-level page. Those are capabilities of
+              the inert markup that reaches the DOM, not of script, so removing
+              them is worth having on its own. This is the outer of three layers
+              for the form case in particular -- renderMarkdownSafe in
+              strands-chat.html strips form controls before they are rendered,
+              and `form-action 'self'` in the distribution's CSP bounds where a
+              submission could go -- and it is the layer that does not depend on
+              the sanitizer having run.
+
+              What it does not buy: `allow-scripts` plus `allow-same-origin` lets
+              a script already running in the frame remove the sandbox attribute
+              from its own frame element, so this is not a boundary against code
+              executing inside the frame. It is a restriction on inert content.
+
+              Why `allow-same-origin` stays: the parent/frame postMessage channel
+              is pinned in both directions -- the parent only acts on messages
+              whose `event.origin` equals its own, and addresses the frame with
+              an explicit targetOrigin rather than '*'. Dropping the token would
+              move the frame to an opaque origin and force both ends back to
+              '*'/"null", trading a precise channel for a vaguer one.
+
+              Cost: none. strands-chat.html has no form, no target="_blank", no
+              window.open and no downloads of its own.
+            */}
             <iframe
               style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
               title="Meeting Assist"
               src={iframeSrc}
+              sandbox="allow-scripts allow-same-origin"
               width="100%"
             />
           </Box>

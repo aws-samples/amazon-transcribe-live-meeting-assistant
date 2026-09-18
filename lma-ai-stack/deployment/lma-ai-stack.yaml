@@ -1351,8 +1351,26 @@ Resources:
                     if [ "$PACKAGE_COUNT" -gt "0" ]; then
                       echo "MCP packages to install:";
                       cat mcp-servers.txt;
+                      # Each line must be a bare distribution name with at most one
+                      # version pin. The two alternatives are the pypi and npm forms
+                      # the MCPServerManager function accepts on write, character for
+                      # character; a unit test runs this same pattern through grep and
+                      # compares the two definitions in both directions, so neither can
+                      # be widened on its own. This build step re-checks rather than
+                      # trusting that the write-time check ran, so neither layer is the
+                      # only gate.
+                      #
+                      # Character ranges in a POSIX ERE follow the locale's collation
+                      # order, so the locale is fixed here: the pattern then matches the
+                      # same set of characters whatever LANG the builder image sets.
+                      export LC_ALL=C;
+                      PACKAGE_SPEC_REGEX='^(([A-Za-z0-9][A-Za-z0-9._-]*((==|>=|<=|~=)[A-Za-z0-9][A-Za-z0-9.*+_-]*)?)|((@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9.*+_-]*)?))$';
                       while IFS= read -r package; do
                         if [ -n "$package" ]; then
+                          if ! printf '%s' "$package" | grep -Eq "$PACKAGE_SPEC_REGEX"; then
+                            echo "SKIPPING entry that is not a plain package specifier: $package";
+                            continue;
+                          fi;
                           echo "Attempting to install: $package";
                           if python3.12 -m pip install "$package" -t . --no-cache-dir 2>&1; then
                             echo "Successfully installed $package";
@@ -5207,6 +5225,9 @@ Resources:
           KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
           OAUTH_CALLBACK_URL: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          # Group allowed to configure MCP server credentials. Matches
+          # UserManagementFunction.
+          ADMIN_GROUP: "Admin"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref OAuthStateTable
@@ -6232,6 +6253,9 @@ Resources:
           MCP_SERVERS_TABLE: !Ref MCPServersTable
           CODEBUILD_PROJECT: !Ref MCPLayerBuildProject
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
+          # Group allowed to install, update and uninstall MCP servers. Matches
+          # UserManagementFunction.
+          ADMIN_GROUP: "Admin"
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref MCPServersTable
@@ -6972,6 +6996,9 @@ Resources:
           # the MCP-launched VP can use the user's stored Zoom credentials.
           USER_POOL_ID: !Ref UserPoolId
           LMA_STACK_NAME: !Ref LMAStackName
+          # Group whose members see every meeting in the account rather than
+          # only their own. Matches UserManagementFunction.
+          ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup: !Ref MCPServerAnalyticsLogGroup
       Policies:
@@ -7964,12 +7991,43 @@ Resources:
             #     in that path). Region-scoped rather than *.on.aws to keep the
             #     allowlist tight. A missing entry here fails SILENTLY with no
             #     backend logs, which is painful to diagnose.
-            #   - script-src/style-src: 'unsafe-inline' and 'unsafe-eval' retained
+            #   - default-src: 'self'. This is the fallback for every fetch
+            #     directive not named below. Because adding it changes the
+            #     effective policy for directives that were previously absent,
+            #     the ones the app actually needs are now named explicitly
+            #     (frame-src, media-src, font-src, worker-src) so their behaviour
+            #     is unchanged. The same silent-failure caveat as connect-src
+            #     applies: a resource type that is neither 'self' nor listed just
+            #     stops loading, with nothing in the backend logs.
+            #   - script-src: 'self' only for host-sources. Every script the SPA
+            #     loads is served from this distribution -- the Vite bundles under
+            #     /assets, the vendored libraries under /js used by
+            #     strands-chat.html, and the audio worklet under /worklets -- so
+            #     no external script origin is required. 'unsafe-inline' is kept
+            #     for the inline handlers on strands-chat.html and 'unsafe-eval'
             #     for React SPA compatibility.
+            #   - frame-src: 'self'. Both <iframe> elements in the UI (CallPanel
+            #     and the embed view) point at /strands-chat.html on this same
+            #     distribution.
+            #   - media-src: meeting audio and video are played from S3 presigned
+            #     URLs of the form https://<bucket>.s3.<region>.<urlsuffix>, which
+            #     is why the URL suffix is allowed here; blob: covers locally
+            #     generated object URLs. AWS::URLSuffix is used rather than a
+            #     literal amazonaws.com so this directive does not have to change
+            #     later, but note it delivers no GovCloud or China benefit today:
+            #     the UI builds those URLs in
+            #     src/components/common/generate-s3-presigned-url.js, which still
+            #     hardcodes amazonaws.com. Playback in a non-standard partition
+            #     needs that fixed too.
+            #   - font-src: 'self' and data:. The built stylesheets contain no
+            #     external font references; Cloudscape uses system font stacks.
+            #   - worker-src: 'self' and blob:. The audio worklet is served from
+            #     this origin; blob: covers workers the AWS SDK may create.
+            #   - style-src: 'unsafe-inline' retained for React SPA compatibility.
             #   - object-src: 'none' (no plugins needed).
             #   - base-uri: 'none' (prevent base tag injection).
             #   - frame-ancestors: 'self' (prevent clickjacking).
-            ContentSecurityPolicy: !Sub "script-src 'self' 'unsafe-inline' 'unsafe-eval' https:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com https://registry.modelcontextprotocol.io wss://*.amazonaws.com wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws ws://localhost:*;"
+            ContentSecurityPolicy: !Sub "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; frame-src 'self'; form-action 'self'; img-src 'self' data: blob: https:; media-src 'self' blob: https://*.${AWS::URLSuffix} https://*.cloudfront.net; font-src 'self' data:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https:; connect-src 'self' https://*.amazonaws.com https://*.cloudfront.net https://*.amazoncognito.com https://*.s3-accelerate.amazonaws.com https://registry.modelcontextprotocol.io wss://*.amazonaws.com wss://*.cloudfront.net wss://*.lambda-microvm.${AWS::Region}.on.aws ws://localhost:*;"
           StrictTransportSecurity:
             Override: true
             AccessControlMaxAgeSec: 31536000

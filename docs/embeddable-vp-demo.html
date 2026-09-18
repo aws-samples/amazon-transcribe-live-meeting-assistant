@@ -757,15 +757,35 @@ function showMonitorIframes({ vpId, callId }) {
 /* ------------- postMessage controls + event log ------------- */
 function log(type, data = {}) {
   const logEl = document.getElementById('eventLog');
-  if (logEl.querySelector('.empty')) logEl.innerHTML = '';
-  const ts = new Date().toLocaleTimeString();
-  const pretty = Object.entries(data)
-    .filter(([k]) => k !== 'type')
-    .map(([k, v]) => `<span class="k">${k}</span>=<span class="v">${String(v).slice(0, 80)}</span>`)
-    .join(' ');
+  if (logEl.querySelector('.empty')) logEl.replaceChildren();
   const line = document.createElement('div');
   line.className = 'line';
-  line.innerHTML = `<span class="t">${ts}</span><strong>${type}</strong> ${pretty}`;
+
+  // Built from DOM nodes and textContent rather than an HTML string. Apart from
+  // the timestamp, every value written here arrives in a postMessage payload
+  // from the embedded LMA iframe -- event names, transcript text and summary
+  // text among them -- so each one is written as text and never as markup.
+  const tsSpan = document.createElement('span');
+  tsSpan.className = 't';
+  tsSpan.textContent = new Date().toLocaleTimeString();
+  line.appendChild(tsSpan);
+
+  const typeEl = document.createElement('strong');
+  typeEl.textContent = type;
+  line.appendChild(typeEl);
+
+  Object.entries(data)
+    .filter(([k]) => k !== 'type')
+    .forEach(([k, v]) => {
+      const keySpan = document.createElement('span');
+      keySpan.className = 'k';
+      keySpan.textContent = k;
+      const valSpan = document.createElement('span');
+      valSpan.className = 'v';
+      valSpan.textContent = String(v).slice(0, 80);
+      line.append(' ', keySpan, '=', valSpan);
+    });
+
   logEl.appendChild(line);
   logEl.scrollTop = logEl.scrollHeight;
 }

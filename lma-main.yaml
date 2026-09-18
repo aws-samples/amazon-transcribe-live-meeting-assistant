@@ -2579,6 +2579,10 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
+        # The cognito stack defines PermissionsBoundaryArn and attaches it to all
+        # three of its roles; without this line those properties always resolved
+        # to AWS::NoValue.
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LMAVersion: "<VERSION_TOKEN>"
         BuildDateTime: "<BUILD_DATE_TIME_TOKEN>"
 

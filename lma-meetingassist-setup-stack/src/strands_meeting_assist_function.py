@@ -46,6 +46,66 @@ APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
 EVENT_API_HTTP_URL = os.environ.get('EVENT_API_HTTP_URL', '')
 ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 
+# Optional Bedrock Guardrail, set from the BedrockGuardrailId / BedrockGuardrailVersion
+# CloudFormation parameters. Both are empty by default.
+BEDROCK_GUARDRAIL_ID = os.environ.get('BEDROCK_GUARDRAIL_ID', '').strip()
+BEDROCK_GUARDRAIL_VERSION = os.environ.get('BEDROCK_GUARDRAIL_VERSION', '').strip()
+
+# A guardrail id with no version is a half-configured deployment: the requests
+# below are built without a guardrail and the IAM role is granted no guardrail
+# permission, so say so once per cold start rather than failing closed in
+# silence. BedrockGuardrailVersion defaults to DRAFT, so reaching this needs the
+# parameter to have been explicitly blanked.
+if BEDROCK_GUARDRAIL_ID and not BEDROCK_GUARDRAIL_VERSION:
+    logger.warning(
+        "BEDROCK_GUARDRAIL_ID is set to '%s' but BEDROCK_GUARDRAIL_VERSION is empty, "
+        "so no guardrail will be applied. Set the BedrockGuardrailVersion parameter "
+        "(for example DRAFT, or a published version number) to enable it.",
+        BEDROCK_GUARDRAIL_ID,
+    )
+
+
+def get_guardrail_config() -> Dict[str, str]:
+    """
+    Return the Bedrock guardrail identifier/version, or an empty dict.
+
+    A guardrail is only usable when both the id and the version are set, so an
+    empty dict is returned unless both environment variables have a value. All
+    callers spread the result into their model configuration, which means an
+    empty dict leaves the request exactly as it was before the guardrail
+    parameters were introduced.
+    """
+    if BEDROCK_GUARDRAIL_ID and BEDROCK_GUARDRAIL_VERSION:
+        return {
+            'guardrail_id': BEDROCK_GUARDRAIL_ID,
+            'guardrail_version': BEDROCK_GUARDRAIL_VERSION,
+        }
+    return {}
+
+
+def apply_kb_guardrail(kb_input: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Attach the configured guardrail to a retrieve_and_generate request, in place.
+
+    RetrieveAndGenerate names the guardrail fields differently from the Converse
+    API: guardrailId/guardrailVersion rather than guardrailIdentifier/
+    guardrailVersion, and it nests them under the knowledge base's
+    generationConfiguration. The request is returned unmodified when no
+    guardrail is configured, so every caller keeps its previous behaviour by
+    default. None of the callers set generationConfiguration themselves.
+    """
+    guardrail_config = get_guardrail_config()
+    if not guardrail_config:
+        return kb_input
+
+    kb_config = kb_input['retrieveAndGenerateConfiguration']['knowledgeBaseConfiguration']
+    generation_config = kb_config.setdefault('generationConfiguration', {})
+    generation_config['guardrailConfiguration'] = {
+        'guardrailId': guardrail_config['guardrail_id'],
+        'guardrailVersion': guardrail_config['guardrail_version'],
+    }
+    return kb_input
+
 # Module-level reusable AppSync client (avoids recreating SigV4 auth on every call)
 _appsync_client = None
 
@@ -235,7 +295,9 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
                     'type': 'KNOWLEDGE_BASE'
                 }
             }
-            
+
+            apply_kb_guardrail(kb_input)
+
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
             result = response.get("output", {}).get("text", "No results found in knowledge base")
             
@@ -478,8 +540,10 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
                 }
             }
             
+            apply_kb_guardrail(kb_input)
+
             logger.info(f"🔍 DEBUG: KB Input: {json.dumps(kb_input, indent=2)}")
-            
+
             response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
             
             logger.info(f"🔍 DEBUG: KB Response (full): {json.dumps(response, indent=2, default=str)}")
@@ -1301,7 +1365,9 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
                 'type': 'KNOWLEDGE_BASE'
             }
         }
-        
+
+        apply_kb_guardrail(kb_input)
+
         logger.info(f"Querying KB with input: {kb_input}")
         
         response = bedrock_agent_runtime.retrieve_and_generate(**kb_input)
@@ -1623,12 +1689,25 @@ def handler(event, context):
             
             # Configure Bedrock model with streaming
             # Note: Extended thinking mode not supported by all models
+            #
+            # guardrail_id / guardrail_version are the BedrockModel keyword
+            # arguments the Strands Agents SDK uses to populate the Converse
+            # API's guardrailConfig. They are only present when both
+            # CloudFormation parameters were supplied; see get_guardrail_config().
+            guardrail_config = get_guardrail_config()
             bedrock_model = BedrockModel(
                 model_id=model_id,
                 temperature=0.3,
-                streaming=ENABLE_STREAMING
+                streaming=ENABLE_STREAMING,
+                **guardrail_config
             )
-            logger.info(f"Bedrock model configured: {model_id}")
+            if guardrail_config:
+                logger.info(
+                    f"Bedrock model configured: {model_id} "
+                    f"(guardrail {BEDROCK_GUARDRAIL_ID} version {BEDROCK_GUARDRAIL_VERSION})"
+                )
+            else:
+                logger.info(f"Bedrock model configured: {model_id} (no guardrail configured)")
             
             # Create hook provider for tracking tool usage
             thinking_hook = ThinkingStepHookProvider(call_id=call_id, message_id=message_id)
@@ -1928,6 +2007,22 @@ Please provide a helpful response based on the meeting context. Keep it concise 
             "content": [{"text": prompt}]
         }
         
+        # Apply the same optional guardrail as the Strands path, so the fallback
+        # is not a way to reach the model without it. Empty unless both
+        # CloudFormation parameters were supplied.
+        # 'trace' matches what the Strands path sends: BedrockModel defaults
+        # guardrail_trace to 'enabled', so setting it here keeps guardrail
+        # intervention visible in the response on both paths rather than only on
+        # the agent one.
+        guardrail_config = get_guardrail_config()
+        converse_kwargs = {}
+        if guardrail_config:
+            converse_kwargs['guardrailConfig'] = {
+                'guardrailIdentifier': guardrail_config['guardrail_id'],
+                'guardrailVersion': guardrail_config['guardrail_version'],
+                'trace': 'enabled',
+            }
+
         # Call Bedrock
         response = bedrock_client.converse(
             modelId=model_id,
@@ -1935,7 +2030,8 @@ Please provide a helpful response based on the meeting context. Keep it concise 
             inferenceConfig={
                 'temperature': 0.3,
                 'maxTokens': 500
-            }
+            },
+            **converse_kwargs
         )
         
         # Extract response text
