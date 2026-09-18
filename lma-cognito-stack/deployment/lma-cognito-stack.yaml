@@ -327,7 +327,8 @@ Resources:
               "ForAnyValue:StringLike":
                 "cognito-identity.amazonaws.com:amr": authenticated
       # Matches the other two roles in this template, so a deployment that sets
-      # PermissionsBoundaryArn has the boundary on every role it creates.
+      # PermissionsBoundaryArn has the boundary on all three roles this stack
+      # creates. lma-main.yaml passes the parameter down to this stack.
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
@@ -371,7 +372,7 @@ Resources:
                 Action:
                   - ssm:GetParameter
                 Resource:
-                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
+                  - !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
         - PolicyName: accessTranslateAPI
           PolicyDocument:
             Version: 2012-10-17
@@ -390,7 +391,7 @@ Resources:
                   - states:StartSyncExecution
                   - states:StartExecution
                 Resource:
-                  - !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
+                  - !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${LMAStackName}-LMAVirtualParticipantScheduler"
     Metadata:
       cfn_nag:
         rules_to_suppress:

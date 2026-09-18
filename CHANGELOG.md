@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`PermissionsBoundaryArn` parameter on the optional CloudFormation service role template.** When set, the service role's `iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy` grants are conditioned on `iam:PermissionsBoundary`, so the IAM roles created for LMA stacks carry the boundary policy you nominate. The parameter defaults to empty and the template behaves exactly as before at that default — **LMA cannot yet deploy with a non-empty value**, because not every role it creates attaches a boundary; the guide records the measured coverage and what remains to be done. No action is required for existing deployments. See the [CloudFormation service role guide](docs/cloudformation-service-role.md). ([#671](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/pull/671))
+
+### Changed
+
+- **Meeting playback credentials are scoped to the recording key prefixes.** The web UI plays a meeting recording by signing its own request to Amazon S3 with the browser's Amazon Cognito identity-pool credentials. Those credentials now grant `s3:GetObject` on the audio and video recording prefixes (`lma-audio-recordings/` and `lma-video-recordings/`) rather than on the recordings bucket as a whole; the bucket's other prefixes are reached only by the backend roles that own them. Playback is unchanged for a standard deployment, where those two prefixes are fixed. If you maintain a fork that renames them, add the new prefixes to the `accessS3RecordingsPolicy` in `lma-cognito-stack`. The playback data path is now described in the [user-based access control guide](docs/user-based-access-control.md). ([#671](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/pull/671))
+
+- **The WebSocket transcriber writes a redacted request description to its connection logs.** A connection log line now carries the request path with the query string removed, the client IP, and an allowlisted set of routing and diagnostic headers, with all other headers reduced to a count; control frames and the Kinesis records derived from them are logged with their token fields replaced by `[REDACTED]`. This holds at every log level, including `LogLevel: DEBUG`. [What the server records](docs/websocket-streaming-api.md) documents the exact content. ([#671](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/pull/671))
+
+- **The Cognito nested stack now receives `PermissionsBoundaryArn` from `lma-main.yaml`,** so a deployment that sets that parameter attaches the boundary to the three roles that stack creates. No effect at the parameter's default empty value. ([#671](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/pull/671))
+
 ## [0.3.8] - 2026-09-02
 
 ### Fixed
