@@ -260,7 +260,7 @@ class TestPathDetection(unittest.TestCase):
         )
 
     def test_bedrock_path_without_identity_is_rejected(self):
-        """A request with no caller identity is answered with 403, not admin access."""
+        """A request with no caller identity is answered with 403."""
         from tools import list_meetings
 
         list_meetings.execute = MagicMock(return_value={"meetings": []})
@@ -286,6 +286,34 @@ class TestPathDetection(unittest.TestCase):
         result = index.lambda_handler(bedrock_event({"limit": 5}), None)
 
         self.assertIn("API key", json.loads(result["body"])["error"]["message"])
+
+    def test_api_gateway_path_without_authorizer_context_is_rejected(self):
+        """Both entry paths answer 403 when the request resolves to no user."""
+        from tools import list_meetings
+
+        list_meetings.execute = MagicMock(return_value={"meetings": []})
+
+        body = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "list_meetings", "arguments": {"limit": 1}},
+        }
+        event = {"httpMethod": "POST", "body": json.dumps(body), "requestContext": {}}
+        result = index.lambda_handler(event, None)
+
+        self.assertEqual(result["statusCode"], 403)
+        list_meetings.execute.assert_not_called()
+
+    def test_api_gateway_path_with_empty_authorizer_context_is_rejected(self):
+        body = {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}
+        event = {
+            "httpMethod": "POST",
+            "body": json.dumps(body),
+            "requestContext": {"authorizer": {}},
+        }
+
+        self.assertEqual(index.lambda_handler(event, None)["statusCode"], 403)
 
 
 class TestAdminGroupClaim(unittest.TestCase):

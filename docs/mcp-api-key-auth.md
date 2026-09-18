@@ -48,12 +48,14 @@ Users generate personal API keys from the LMA UI (MCP Servers Configuration page
 
 ## Connecting with a User Identity
 
-Every tool the MCP server exposes is scoped to the calling user: a request returns that user's meetings, and the scope widens to all meetings in the account only for a member of the **Admin** group. The function therefore needs to know who is calling on every request, and both supported paths supply that:
+Every tool the MCP server exposes is scoped to the calling user: a request returns that user's meetings, and the scope widens to all meetings in the account only for a member of the **Admin** group. `MCPServerAnalyticsFunction` therefore resolves a caller from each request and refuses the request when it cannot. What it reads from the event:
 
-- **API key path** — the REQUEST authorizer resolves the key to `{ userId, username, isAdmin }` and API Gateway passes it to the function in the request context.
-- **OAuth (3LO) path** — the BedrockAgentCore Gateway validates the caller's JWT and forwards the claims, which provide `sub`, `cognito:username` and `cognito:groups`.
+- **API key path** — `requestContext.authorizer.userId`, `username` and `isAdmin`, which the REQUEST authorizer put there after resolving the API key.
+- **OAuth (3LO) path** — `requestContext.authorizer.claims`, taking the user from `sub`, the display name from `cognito:username` (or `email`) and group membership from `cognito:groups`.
 
-If a request arrives on the gateway path carrying no claims, `MCPServerAnalyticsFunction` answers `403` with a message naming the API key endpoint, rather than choosing a caller on the request's behalf. A client that gets that response should connect to the `MCPServerApiKeyEndpoint` REST endpoint with a personal API key instead — that path carries a user identity on every call. See [Key Generation Flow](#key-generation-flow) and [Connecting from Quick Suite](#connecting-from-quick-suite).
+A request on either path that does not resolve to a user is answered with `403` and a message naming the API key endpoint. A client that receives that response should connect to the `MCPServerApiKeyEndpoint` REST endpoint with a personal API key, which supplies a caller on every request. See [Key Generation Flow](#key-generation-flow) and [Connecting from Quick Suite](#connecting-from-quick-suite).
+
+> **To confirm on a deployed stack:** whether the BedrockAgentCore Gateway (`CUSTOM_JWT` authorizer, `GATEWAY_IAM_ROLE` credential provider) includes the caller's Cognito claims in the event it sends to its Lambda target has not been verified against a live deployment. Where it does not, the OAuth path returns the `403` described above and the API key endpoint is the route that works for those clients. Worth confirming before a release.
 
 Group membership is read from the `cognito:groups` claim, which Cognito supplies either as a list or as a comma-separated string; both are accepted, and the comparison is an exact match on a whole group name (a group called `Administrators`, for instance, is not the `Admin` group).
 

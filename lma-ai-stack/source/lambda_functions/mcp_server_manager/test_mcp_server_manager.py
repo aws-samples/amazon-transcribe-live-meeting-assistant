@@ -40,30 +40,44 @@ ACCEPTED_PYPI_SPECIFIERS = [
     "pkg_with_underscores",
 ]
 
+ACCEPTED_NPM_SPECIFIERS = [
+    "server-filesystem",
+    "@modelcontextprotocol/server-filesystem",
+    "server-everything@1.0.0",
+]
+
+# One entry per rejection reason: a character outside the accepted set, a
+# separator between two names, a leading dash, a scheme, a path separator, more
+# than one specifier, an extras marker, an operator that is not one of the
+# accepted ones, and the empty value.
 REJECTED_SPECIFIERS = [
-    "requests; rm -rf /tmp",
-    "requests && curl http://example.test",
-    "requests|tee /tmp/out",
-    "requests`id`",
-    "requests$(id)",
-    "requests${HOME}",
-    "-r requirements.txt",
-    "--index-url=http://example.test/simple pkg",
+    "pkg one",
+    "pkg\tname",
+    "pkg;pkg2",
+    "pkg|pkg2",
+    "pkg&pkg2",
+    "pkg$pkg2",
+    "pkg`name",
+    "pkg{name}",
+    "pkg(name)",
+    "-pkg",
     "git+https://example.test/o/r.git",
     "file:///tmp/pkg",
     "https://example.test/pkg.tar.gz",
-    "../../etc/passwd",
     "dir/pkg",
+    "../pkg",
     "pkg\\other",
-    "pkg other",
-    "pkg\npkg2",
-    "pkg\tname",
     "requests>=1.0,<2.0",
+    "pkg=1.0 pkg2",
     "pkg[extra]",
-    "pkg==1.0 --extra-index-url http://example.test",
     "pkg=1.0",
     "",
 ]
+
+# Kept apart from the table above: the build step reads `mcp-servers.txt` one
+# line at a time, so a value with an embedded newline can never reach it as a
+# single value. Only the resolver is asserted on for these.
+REJECTED_MULTILINE_SPECIFIERS = ["pkg\npkg2", "pkg\n"]
 
 
 @pytest.mark.parametrize("specifier", ACCEPTED_PYPI_SPECIFIERS)
@@ -71,22 +85,19 @@ def test_accepts_plain_pypi_specifier(specifier: str) -> None:
     assert index.validate_package_specifier(specifier, "pypi") == specifier
 
 
-@pytest.mark.parametrize("specifier", REJECTED_SPECIFIERS)
+@pytest.mark.parametrize("specifier", REJECTED_SPECIFIERS + REJECTED_MULTILINE_SPECIFIERS)
 def test_rejects_specifier_that_is_not_a_bare_name_and_version(specifier: str) -> None:
     with pytest.raises(index.ValidationError):
         index.validate_package_specifier(specifier, "pypi")
 
 
-@pytest.mark.parametrize("specifier", REJECTED_SPECIFIERS)
+@pytest.mark.parametrize("specifier", REJECTED_SPECIFIERS + REJECTED_MULTILINE_SPECIFIERS)
 def test_rejects_the_same_values_for_npm(specifier: str) -> None:
     with pytest.raises(index.ValidationError):
         index.validate_package_specifier(specifier, "npm")
 
 
-@pytest.mark.parametrize(
-    "specifier",
-    ["server-filesystem", "@modelcontextprotocol/server-filesystem", "server-everything@1.0.0"],
-)
+@pytest.mark.parametrize("specifier", ACCEPTED_NPM_SPECIFIERS)
 def test_accepts_npm_name_with_optional_scope_and_version(specifier: str) -> None:
     assert index.validate_package_specifier(specifier, "npm") == specifier
 
@@ -128,30 +139,94 @@ def test_remote_server_endpoint_must_be_an_http_url() -> None:
 # The build step applies an equivalent pattern
 # ---------------------------------------------------------------------------
 
-TEMPLATE = Path(__file__).resolve().parents[3] / "deployment" / "lma-ai-stack.yaml"
+TEMPLATE_RELATIVE_PATH = Path("deployment") / "lma-ai-stack.yaml"
+
+
+def _find_template() -> Path:
+    """Locate the AI stack template by walking up to the directory that holds it.
+
+    Walking to a marker rather than counting parent directories keeps the test
+    working if this function's directory is copied or vendored elsewhere.
+    """
+    for parent in Path(__file__).resolve().parents:
+        candidate = parent / TEMPLATE_RELATIVE_PATH
+        if candidate.is_file():
+            return candidate
+    pytest.skip(f"{TEMPLATE_RELATIVE_PATH} not found above {Path(__file__).parent}")
 
 
 def _buildspec_pattern() -> re.Pattern:
     """Extract the regex the MCP layer buildspec applies to each stored value.
 
-    The buildspec uses a POSIX ERE with `grep -E`; the subset used here has the
-    same meaning under Python's `re`, so the two can be compared directly.
+    The buildspec uses a POSIX ERE with `grep -E`; the subset used here (anchors,
+    groups, alternation, character classes, `?`, `*`) has the same meaning under
+    Python's `re`. `grep` is line-oriented and the build loop feeds it one line
+    at a time, so `fullmatch` against a single line is the faithful comparison --
+    values containing a newline are covered by the resolver-only table above.
     """
-    text = TEMPLATE.read_text(encoding="utf-8")
+    text = _find_template().read_text(encoding="utf-8")
     match = re.search(r"PACKAGE_SPEC_REGEX='(?P<pattern>[^']+)'", text)
     assert match, "buildspec no longer defines PACKAGE_SPEC_REGEX"
     return re.compile(match.group("pattern"))
 
 
-@pytest.mark.parametrize("specifier", ACCEPTED_PYPI_SPECIFIERS)
-def test_build_step_accepts_what_the_resolver_stores(specifier: str) -> None:
-    assert _buildspec_pattern().search(specifier)
+def _resolver_accepts(specifier: str) -> bool:
+    """Whether the resolver would store `specifier` under either package type."""
+    for package_type in ("pypi", "npm"):
+        try:
+            index.validate_package_specifier(specifier, package_type)
+        except index.ValidationError:
+            continue
+        return True
+    return False
 
 
-@pytest.mark.parametrize("specifier", [s for s in REJECTED_SPECIFIERS if s])
-def test_build_step_skips_what_the_resolver_would_have_rejected(specifier: str) -> None:
-    # `search` mirrors grep's line semantics; the pattern is anchored with ^...$.
-    assert not _buildspec_pattern().search(specifier)
+# Probes chosen so that widening either definition on its own fails the
+# equivalence check below: each one sits just outside the accepted set, or is
+# accepted under exactly one of the two package types.
+AGREEMENT_PROBES = [
+    "pkg~name",
+    "pkg:1",
+    "pkg!1",
+    "pkg,name",
+    "pkg@1.0",
+    "Pkg@1.0",
+    "@scope/name",
+    "@Scope/name",
+    "@scope/name@1.0",
+    "@scope/Name==1.0",
+    "@scope/name==1.0",
+    "pkg==",
+    "==1.0",
+    ".pkg",
+    "_pkg",
+    "pkg-",
+    "pkg.",
+    "a",
+    "a" * index.MAX_PACKAGE_SPECIFIER_LENGTH,
+]
+
+
+@pytest.mark.parametrize(
+    "specifier",
+    ACCEPTED_PYPI_SPECIFIERS
+    + ACCEPTED_NPM_SPECIFIERS
+    + [s for s in REJECTED_SPECIFIERS if s]
+    + AGREEMENT_PROBES,
+)
+def test_build_step_and_resolver_accept_exactly_the_same_values(specifier: str) -> None:
+    """Equivalence in both directions, so neither definition can drift alone.
+
+    A value the build step accepts but the resolver would not store means the
+    build step has been widened; a value the resolver stores but the build step
+    skips would silently drop a working server from the layer.
+    """
+    buildspec_accepts = _buildspec_pattern().fullmatch(specifier) is not None
+
+    assert buildspec_accepts == _resolver_accepts(specifier), (
+        f"build step and resolver disagree about {specifier!r}: "
+        f"build step accepts={buildspec_accepts}, resolver accepts={_resolver_accepts(specifier)}"
+    )
 
 
 # ---------------------------------------------------------------------------

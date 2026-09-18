@@ -16,7 +16,6 @@ Authorization is enforced at two independent layers, mirroring the
      resolver directive is never the only control
 """
 
-import json
 import logging
 import os
 import re
@@ -57,8 +56,8 @@ CREDENTIAL_FIELDS = ("AuthConfig",)
 # is and neither depends on the other having run.
 #
 # Invariant: a stored NpmPackage is a bare distribution name with at most one
-# version pin. It never contains whitespace, path separators, a scheme, or any
-# character a shell would treat specially.
+# version pin, drawn from letters, digits, '.', '_' and '-' (plus the single npm
+# scope separator). Anything else is rejected rather than rewritten.
 PYPI_PACKAGE_PATTERN = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._-]*((==|>=|<=|~=)[A-Za-z0-9][A-Za-z0-9.*+_-]*)?"
 )
@@ -66,7 +65,8 @@ NPM_PACKAGE_PATTERN = re.compile(
     r"(@[a-z0-9][a-z0-9._-]*/)?[a-z0-9][a-z0-9._-]*(@[A-Za-z0-9][A-Za-z0-9.*+_-]*)?"
 )
 # Remote servers store their endpoint in NpmPackage instead of a package name;
-# nothing installs them, so they only need to be a whitespace-free http(s) URL.
+# nothing installs them, so they only need to be a whitespace-free http(s) URL
+# within the same length bound as a package specifier.
 HTTP_ENDPOINT_PATTERN = re.compile(r"https?://\S+")
 
 MAX_PACKAGE_SPECIFIER_LENGTH = 214
@@ -132,10 +132,14 @@ def validate_package_specifier(package: Any, package_type: str) -> str:
     """
     if package_type == "streamable-http":
         # Remote servers are addressed by URL and are never installed.
-        if not isinstance(package, str) or not HTTP_ENDPOINT_PATTERN.fullmatch(package):
+        if (
+            not isinstance(package, str)
+            or len(package) > MAX_PACKAGE_SPECIFIER_LENGTH
+            or not HTTP_ENDPOINT_PATTERN.fullmatch(package)
+        ):
             raise ValidationError(
-                "ServerUrl must be an http:// or https:// URL with no spaces for "
-                "streamable-http servers"
+                "ServerUrl must be an http:// or https:// URL with no spaces and at most "
+                f"{MAX_PACKAGE_SPECIFIER_LENGTH} characters for streamable-http servers"
             )
         return package
 
@@ -353,7 +357,8 @@ def uninstall_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         UninstallMCPServerOutput with success status
     """
     try:
-        logger.info(f"Uninstall MCP server request: {json.dumps(event)}")
+        # The event carries the caller's claims, so only the arguments are logged.
+        logger.info("Uninstall MCP server request: %s", event.get("arguments", {}))
 
         server_id = event.get("arguments", {}).get("serverId")
 
@@ -419,11 +424,16 @@ def update_mcp_server(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         UpdateMCPServerOutput with success status and build ID
     """
+    input_data: Dict[str, Any] = {}
     try:
-        logger.info(f"Update MCP server request: {json.dumps(event)}")
-
-        # Extract input
+        # Extract input. AuthConfig is credential material and the event also
+        # carries the caller's claims, so neither is logged verbatim.
         input_data = event.get("arguments", {}).get("input", {})
+        logger.info(
+            "Update MCP server request: %s",
+            {k: v for k, v in input_data.items() if k not in CREDENTIAL_FIELDS},
+        )
+
         server_id = input_data.get("ServerId")
         new_version = input_data.get("Version")
 

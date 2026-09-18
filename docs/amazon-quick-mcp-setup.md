@@ -108,6 +108,14 @@ Cognito as the identity provider:
 4. Quick Suite exchanges the code for access and refresh tokens
 5. Quick Suite uses the access token to call LMA's MCP tools
 
+> **Each request must identify the user.** LMA scopes every tool result to the
+> calling user, so a tool call that reaches LMA without a resolvable user
+> identity is answered with `403 Unable to determine the calling user` instead
+> of being served. If you see that response on this path, use the per-user API
+> key endpoint described in [Path B](#path-b-quick-desktop-api-key) — it carries
+> the user's identity on every request and exposes the same seven tools. See
+> [MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
+
 ## Step 1: Gather LMA MCP Server Configuration
 
 1. Log into the **AWS Management Console** → **CloudFormation**
@@ -125,6 +133,12 @@ Cognito as the identity provider:
 
 > These outputs only appear when the stack was deployed with `EnableMCP=true`.
 
+Also copy `MCPServerApiKeyEndpoint` while you are on this tab. That is the
+per-user API key endpoint, and it is the route to use if tool calls through
+`MCPServerEndpoint` come back with `403 Unable to determine the calling user`
+(see [Path B](#path-b-quick-desktop-api-key), which works for Quick Suite as
+well — Quick Suite sends the key as `Authorization: Bearer <key>`).
+
 ## Step 2: Create the MCP Integration in Quick Suite
 
 ### 2.1 Add the integration
@@ -138,6 +152,10 @@ Cognito as the identity provider:
 1. **Name**: `LMA Meeting Assistant`
 2. **Description**: `Access Live Meeting Assistant transcripts, summaries, and meeting data`
 3. **MCP server endpoint**: paste the `MCPServerEndpoint` value from Step 1
+   > If tool calls later return `403 Unable to determine the calling user`,
+   > change this to the `MCPServerApiKeyEndpoint` value and use **Bearer token**
+   > authentication with a personal LMA API key instead
+   > ([Path B, Step 1](#step-1-generate-an-lma-api-key)).
 4. Click **Next**
 
 ### 2.3 Configure authentication
@@ -340,6 +358,19 @@ Common parameters for the most-used tools.
 - Confirm the `MCPServerEndpoint` is reachable: `curl -I <MCPServerEndpoint>`
 - Check that `MCPServerTokenURL` and `MCPServerAuthorizationURL` match your
   AWS region
+
+### Tool calls return `403 Unable to determine the calling user`
+
+LMA scopes every tool result to the calling user, so it answers a request that
+does not resolve to a user with this error rather than serving it.
+
+Switch the integration to the per-user API key endpoint: take
+`MCPServerApiKeyEndpoint` from the stack outputs, generate a personal key on the
+**MCP Servers Configuration** page in the LMA UI (Hosted MCP Access tab), and
+supply it as `Authorization: Bearer <key>`. The tools and their behaviour are
+identical; only the endpoint and the credential change. Full steps are in
+[Path B](#path-b-quick-desktop-api-key), and the two paths are compared in
+[MCP API Key Authentication › Connecting with a User Identity](mcp-api-key-auth.md#connecting-with-a-user-identity).
 
 **Quick Desktop (API key):**
 - Confirm the endpoint URL is the **MCP API Endpoint** (the API Gateway URL),
