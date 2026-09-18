@@ -25,22 +25,6 @@ const useCurrentSessionCreds = ({ credsIntervalInMs = DEFAULT_CREDS_REFRESH_INTE
         const session = await fetchAuthSession();
         setCurrentSession(session);
         setCurrentCredentials(session.credentials);
-
-        // Persist JWT tokens under the legacy localStorage keys that other LMA
-        // modules (VNCViewer, websocket streaming client, etc.) read directly.
-        try {
-          const idToken = session?.tokens?.idToken?.toString();
-          const accessToken = session?.tokens?.accessToken?.toString();
-          const poolClientId = session?.tokens?.accessToken?.payload?.client_id;
-          if (poolClientId) {
-            if (idToken) localStorage.setItem(`${poolClientId}idtokenjwt`, idToken);
-            if (accessToken) localStorage.setItem(`${poolClientId}accesstokenjwt`, accessToken);
-          }
-          if (idToken) localStorage.setItem('lma.idtokenjwt', idToken);
-          if (accessToken) localStorage.setItem('lma.accesstokenjwt', accessToken);
-        } catch (tokenErr) {
-          logger.warn('unable to persist JWT tokens to localStorage', tokenErr);
-        }
       } catch (error) {
         logger.error('failed to get credentials', error);
       }
