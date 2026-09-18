@@ -237,3 +237,147 @@ def test_vp_manager_alb_listener_env_tolerates_no_alb(template: dict) -> None:
     ).read_text()
     assert re.search(r'listener_arn = os\.environ\.get\("ALB_LISTENER_ARN"\)', manager)
     assert "if listener_arn:" in manager
+
+
+# --------------------------------------------------------------------------
+# The /vnc/* access token
+#
+# The viewer calls createVncEdgeToken(vpId), which checks the caller's access to
+# that VP and returns a short-lived token signed with a per-deployment key. The
+# Lambda@Edge viewer-request function on the /vnc/* behavior checks the signature
+# before CloudFront forwards to the ALB. The two halves cannot share a module --
+# Lambda@Edge supports no layers and the deployer embeds its source as a string
+# literal -- so the wiring between them is asserted here.
+# --------------------------------------------------------------------------
+
+DEPLOYER_INDEX = (
+    TEMPLATE.parents[1] / "source" / "lambda_functions" / "edge_auth_deployer" / "index.py"
+)
+MINTER_INDEX = (
+    TEMPLATE.parents[1] / "source" / "lambda_functions" / "vnc_edge_token" / "index.py"
+)
+SCHEMA = TEMPLATE.parents[1] / "source" / "appsync" / "schema.graphql"
+
+
+@pytest.fixture(scope="module")
+def edge_code() -> str:
+    """The edge function source, as the deployer will zip it."""
+    source = DEPLOYER_INDEX.read_text()
+    match = re.search(r"EDGE_FUNCTION_CODE = r?('''|\"\"\")(.*?)\1", source, re.S)
+    assert match, "EDGE_FUNCTION_CODE should be a string literal in the deployer"
+    return match.group(2)
+
+
+def test_the_signing_key_is_generated_per_deployment(template: dict) -> None:
+    """Not a parameter and not a fixed value: nothing outside the stack knows it."""
+    secret = template["Resources"]["VncEdgeTokenSigningSecret"]
+    assert secret["Type"] == "AWS::SecretsManager::Secret"
+    generate = secret["Properties"]["GenerateSecretString"]
+    assert generate["PasswordLength"] >= 32
+    assert secret["Properties"]["KmsKeyId"] == {"Ref": "CustomerManagedEncryptionKeyArn"}
+
+
+def test_the_token_resources_are_not_gated_on_the_alb_condition(template: dict) -> None:
+    """EdgeAuthFunctionRole is unconditional and reads the secret.
+
+    A gated secret would leave that role with an unresolvable reference under
+    MICROVM, which fails the stack update rather than just skipping the ALB.
+    """
+    for name in (
+        "VncEdgeTokenSigningSecret",
+        "VncEdgeTokenFunction",
+        "VncEdgeTokenFunctionRole",
+        "CreateVncEdgeTokenResolver",
+    ):
+        assert "Condition" not in template["Resources"][name], f"{name} must be unconditional"
+
+
+def test_the_edge_role_reads_only_the_one_secret(template: dict) -> None:
+    statements = template["Resources"]["EdgeAuthFunctionRole"]["Properties"]["Policies"][0][
+        "PolicyDocument"
+    ]["Statement"]
+    reads = [s for s in statements if "secretsmanager:GetSecretValue" in json.dumps(s["Action"])]
+    assert len(reads) == 1
+    assert reads[0]["Resource"] == {"Ref": "VncEdgeTokenSigningSecret"}
+
+
+def test_the_edge_function_is_told_where_to_resolve_the_secret(template: dict) -> None:
+    """Replicas run in every region; the secret exists in exactly one.
+
+    Lambda@Edge takes no environment variables, so both values are substituted
+    into the source at deploy time.
+    """
+    props = template["Resources"]["EdgeAuthFunction"]["Properties"]
+    assert props["SigningSecretArn"] == {"Ref": "VncEdgeTokenSigningSecret"}
+    assert props["SigningSecretRegion"] == {"Ref": "AWS::Region"}
+    assert "PLACEHOLDER" in props["CodeHash"], (
+        "the build substitutes CodeHash so a source change redeploys the edge function"
+    )
+
+
+def test_a_source_change_still_triggers_a_redeploy() -> None:
+    """The Makefile hashes the deployer sources into the custom resource."""
+    makefile = (TEMPLATE.parents[1] / "Makefile").read_text()
+    assert "EDGE_AUTH_CODE_HASH_PLACEHOLDER" in makefile
+    assert "edge_auth_deployer" in makefile
+
+
+def test_the_edge_function_has_no_third_party_imports(edge_code: str) -> None:
+    """Lambda@Edge cannot attach layers, so only the standard library and boto3.
+
+    boto3 ships in the Lambda Python runtime itself.
+    """
+    imports = set(re.findall(r"^\s*import (\w+)", edge_code, re.M))
+    imports |= set(re.findall(r"^\s*from (\w+)", edge_code, re.M))
+    allowed = {"base64", "hashlib", "hmac", "json", "time", "urllib", "boto3"}
+    assert imports <= allowed, f"unavailable at the edge: {sorted(imports - allowed)}"
+
+
+def test_the_edge_function_compiles(edge_code: str) -> None:
+    """It is a string literal, so nothing else would catch a syntax error."""
+    compile(edge_code, "edge_function.py", "exec")
+
+
+def test_the_edge_function_compares_signatures_in_constant_time(edge_code: str) -> None:
+    assert "compare_digest" in edge_code
+
+
+def test_the_edge_function_logs_neither_the_token_nor_the_request_uri(edge_code: str) -> None:
+    """Edge logs land in every replica region; keep request detail out of them."""
+    for printed in re.findall(r"print\((.*?)\)\s*$", edge_code, re.M):
+        assert "token" not in printed.lower(), printed
+        assert "uri" not in printed.lower(), printed
+
+
+def test_the_resolver_field_matches_the_schema(template: dict) -> None:
+    resolver = template["Resources"]["CreateVncEdgeTokenResolver"]["Properties"]
+    assert resolver["TypeName"] == "Mutation"
+    field = resolver["FieldName"]
+    schema = SCHEMA.read_text()
+    assert re.search(rf"^\s*{field}\(vpId: ID!\)", schema, re.M), (
+        f"{field} should be declared on Mutation"
+    )
+
+
+def test_the_minted_token_is_short_lived() -> None:
+    """A token that leaves the browser stops being useful quickly."""
+    minter = MINTER_INDEX.read_text()
+    match = re.search(r"TOKEN_TTL_SECONDS = (\d+)", minter)
+    assert match, "the minter should name its TTL"
+    assert 0 < int(match.group(1)) <= 900
+
+
+def test_the_minter_reads_the_vp_table_and_the_secret_only(template: dict) -> None:
+    """Least privilege: one table item read and one secret read."""
+    statements = template["Resources"]["VncEdgeTokenFunctionRole"]["Properties"]["Policies"][0][
+        "PolicyDocument"
+    ]["Statement"]
+    actions = json.dumps([s["Action"] for s in statements])
+    assert "dynamodb:GetItem" in actions
+    for write in (
+        "dynamodb:PutItem",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:Scan",
+    ):
+        assert write not in actions, f"the minter does not need {write}"

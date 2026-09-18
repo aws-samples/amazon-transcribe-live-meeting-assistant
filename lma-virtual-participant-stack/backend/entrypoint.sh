@@ -72,13 +72,69 @@ echo "Starting window manager (Fluxbox)..."
 fluxbox > /dev/null 2>&1 &
 
 echo "Starting VNC server..."
+
+# How 5900 is served depends on where this task is running.
+#
+# Deployed (ECS or MicroVM): -localhost confines the listener to the loopback
+# interface, so the only route to the framebuffer is the websockify port that the
+# ALB / MicroVM ingress targets. Previously the listener accepted connections on
+# every interface of the task.
+#
+# Deployed on ECS, additionally: x11vnc asks for a credential. It is generated
+# fresh on each boot and published on this task's own VP record, from which the
+# authenticated createVncEdgeToken resolver hands it to viewers already checked
+# against that record -- so the credential belongs to exactly one task and one
+# audience, and the ALB path is no longer sufficient on its own.
+#
+# Under MICROVM this script runs as the pre-snapshot stack at image-build time,
+# where no per-meeting identity exists yet and there is nowhere to publish a
+# credential to. There the framebuffer stays loopback-only and the noVNC port is
+# reached with a per-session, port-scoped MicroVM auth token (see
+# MicrovmVncTokenFunction), minted per viewer rather than per task.
+#
+# Local development (local-test.sh sets LOCAL_TEST=true): 5900 stays open and
+# credential-free so a desktop VNC client can attach to the published port, as
+# docs/virtual-participant-local-dev.md describes. Nothing outside the developer's
+# own machine can reach it.
+VNC_BIND_ARGS=(-localhost)
+VNC_AUTH_ARGS=(-nopw)
+if [ "$LOCAL_TEST" = "true" ]; then
+    VNC_BIND_ARGS=()
+    echo "LOCAL_TEST: leaving port 5900 open for a desktop VNC client"
+elif [ "$STACK_ONLY" != "true" ] && [ -n "$VIRTUAL_PARTICIPANT_ID" ] && [ -n "$VP_TABLE_NAME" ]; then
+    # The classic RFB scheme truncates to 8 characters, so there is no point
+    # generating more; this is a per-boot credential on an already-authorized
+    # path, not a long-lived one.
+    VNC_SECRET="$(LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 8)"
+    VNC_SECRET_FILE=/tmp/.x11vnc_auth
+    if x11vnc -storepasswd "$VNC_SECRET" "$VNC_SECRET_FILE" > /dev/null 2>&1; then
+        chmod 600 "$VNC_SECRET_FILE"
+        VNC_AUTH_ARGS=(-rfbauth "$VNC_SECRET_FILE")
+        # Publish before x11vnc starts serving, so a viewer never meets a server
+        # asking for a credential the VP record does not carry yet.
+        aws dynamodb update-item \
+            --table-name "$VP_TABLE_NAME" \
+            --key "{\"id\":{\"S\":\"$VIRTUAL_PARTICIPANT_ID\"}}" \
+            --update-expression "SET vncPassword = :p" \
+            --expression-attribute-values "{\":p\":{\"S\":\"$VNC_SECRET\"}}" \
+            --region "${AWS_REGION:-us-west-2}" \
+            > /dev/null 2>&1 \
+            && echo "✓ VNC credential generated and published for this task" \
+            || echo "⚠️  Could not publish the VNC credential; the live view will not connect" >&2
+    else
+        echo "⚠️  x11vnc -storepasswd failed; starting without a VNC credential" >&2
+    fi
+    unset VNC_SECRET
+fi
+
 # Start x11vnc on standard VNC port 5900
 x11vnc \
     -display :99 \
     -forever \
     -shared \
     -rfbport 5900 \
-    -nopw \
+    "${VNC_BIND_ARGS[@]}" \
+    "${VNC_AUTH_ARGS[@]}" \
     -xkb \
     -cursor arrow \
     -speeds lan \
