@@ -2969,6 +2969,8 @@ Resources:
         EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn
+        VncOriginVerifyHeaderValueSecretArn: !GetAtt AISTACK.Outputs.VncOriginVerifyHeaderValueSecretArn
+        VncOriginVerifyHeaderName: !GetAtt AISTACK.Outputs.VncOriginVerifyHeaderName
         VPSecurityGroupId: !GetAtt AISTACK.Outputs.VPSecurityGroupId
         VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
         VirtualParticipantTableStreamArn: !GetAtt AISTACK.Outputs.VirtualParticipantTableStreamArn
