@@ -43,6 +43,7 @@ import {
     resolveShouldRecordCall,
     describeRequest,
     stringifyCallMetaData,
+    redactTokenLike,
     PINO_REDACT_OPTIONS,
 } from './utils';
 
@@ -486,9 +487,13 @@ const onTextMessage = async (
         callMetaData = JSON.parse(data) as CallMetaData;
     } catch (parseErr) {
         // A truncated/garbled control frame is the client's problem, not grounds
-        // for tearing down every other call on this task.
+        // for tearing down every other call on this task. The serialized error can
+        // quote a fragment of the frame it failed on, so it goes through
+        // redactTokenLike() for the same reason the verifier errors do.
         server.log.error(
-            `[ON TEXT MESSAGE]: [${clientIP}] - Ignoring unparseable control frame: ${normalizeErrorForLogging(parseErr)}`
+            `[ON TEXT MESSAGE]: [${clientIP}] - Ignoring unparseable control frame: ${redactTokenLike(
+                normalizeErrorForLogging(parseErr)
+            )}`
         );
         return;
     }

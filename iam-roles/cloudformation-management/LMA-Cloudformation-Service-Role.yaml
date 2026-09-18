@@ -149,9 +149,17 @@ Resources:
                     # PermissionsBoundaryArn="" can complete instead of failing
                     # part-way through (a failed rollback here would leave the role
                     # that deploys the whole solution in UPDATE_ROLLBACK_FAILED).
-                    # Under this statement's condition the boundary can only be
-                    # removed from a role that currently carries exactly this
-                    # boundary, which is the only case the back-out needs.
+                    #
+                    # Placing it inside this statement is INTENDED to restrict
+                    # removal to a role that currently carries exactly this
+                    # boundary, which is the only case the back-out needs. That
+                    # intent is not verified against a live account: whether IAM
+                    # populates iam:PermissionsBoundary in the request context for
+                    # this particular action was not established from the published
+                    # reference. If it does not, the condition never matches and the
+                    # grant is inert — in which case move this action to the
+                    # unconditioned statement above so that the revert can still
+                    # complete. Confirm on a throwaway account before relying on it.
                     #
                     # No paired explicit Deny: this template grants no iam:*
                     # wildcard, so there is no broader grant of this action to claw

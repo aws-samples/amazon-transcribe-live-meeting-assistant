@@ -57,7 +57,7 @@ Counted by static inspection of every CloudFormation template in the repository 
 
 | | Count |
 |---|---|
-| `AWS::IAM::Role` resources declared across the LMA templates | 102 |
+| `AWS::IAM::Role` resources declared across the LMA templates | 102 (103 counting this template's own role) |
 | …of which set a `PermissionsBoundary` property | 54 |
 | …in `lma-ai-stack` alone | 51 declared, 16 with the property |
 | Roles generated implicitly by SAM (an `AWS::Serverless::Function` with no explicit `Role:` and no `PermissionsBoundary` property) | 16, none of them with a boundary |
@@ -70,6 +70,8 @@ One of those rows is a hard blocker rather than a gap to fill in later. **`lma-m
 An `AWS::Serverless::Function` *can* set a boundary on its generated role, through the function's own `PermissionsBoundary` property; none of the 16 in LMA set it today, so each needs that one property added (not a conversion to an explicit role).
 
 The eight nested stacks that do not receive the value are the LLM-template, chat-button-config, nova-sonic-config, transcript-knowledge-base, meeting-assist setup, VPC, browser-extension and desktop-capture stacks. The browser-extension, desktop-capture and meeting-assist templates define boundary properties internally but are never given the ARN. `lma-vpc-stack` has no `PermissionsBoundaryArn` parameter at all, so its flow-logs role cannot take one yet.
+
+`lma-bedrockkb-stack/template.yaml` is a special case: it is instantiated twice, once as `BEDROCKKB` — which does receive the ARN — and once as `TRANSCRIPTBEDROCKKB`, which does not. Its single boundary-carrying role therefore gets the boundary in one instantiation and not the other.
 
 ### What completing this would take
 
@@ -123,7 +125,7 @@ If you are working on the above, this is the sequence. Do it on a throwaway stac
 Both halves of the setting can be reverted, and both directions of the transition are granted:
 
 - Adding a boundary to a deployment that already has roles rewrites those roles, so the service role is granted `iam:PutRolePermissionsBoundary` when a boundary is configured.
-- Removing it requires CloudFormation to take the boundary off those roles, so `iam:DeleteRolePermissionsBoundary` is granted in the same statement, under the same condition — the boundary can only be removed from a role that currently carries exactly this boundary.
+- Removing it requires CloudFormation to take the boundary off those roles, so `iam:DeleteRolePermissionsBoundary` is granted in the same statement, under the same condition. The intent is to restrict removal to a role that currently carries exactly this boundary, which is the only case a revert needs. **That intent is unverified against a live account** — whether IAM populates `iam:PermissionsBoundary` in the request context for that specific action could not be established from the published reference. If it does not, the condition never matches and the grant does nothing, which would leave the revert unable to complete; the fix in that case is to move the action to the unconditioned statement. Confirm on a throwaway account before relying on the revert.
 
 Without that second grant the revert would fail part-way through, and the rollback of that failed update would fail too, leaving the role that deploys the whole solution in `UPDATE_ROLLBACK_FAILED`.
 

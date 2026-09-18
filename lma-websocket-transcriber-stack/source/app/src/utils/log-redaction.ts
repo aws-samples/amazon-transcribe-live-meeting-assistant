@@ -143,11 +143,11 @@ export const redactTokenLike = (text: string): string =>
  * Field names that hold token material and are never logged.
  *
  * Both spellings are listed because this package uses both: `CallMetaData` (the
- * parsed control frame) is camelCase, while the Kinesis records assembled in
- * `calleventdata/transcribe.ts` — `CallStartEvent`, `CallEndEvent`,
- * `CallRecordingEvent`, `CallVideoRecordingEvent`, `AddTranscriptSegmentEvent` —
- * are PascalCase. Keeping one list means one serializer covers every one of
- * those shapes.
+ * parsed control frame) is camelCase, while the Kinesis record types built on
+ * `CallEventBase` in `calleventdata/eventtypes.ts` are PascalCase. Redaction keys
+ * on the field name rather than on the record type, so it applies to every
+ * `CallEventBase` variant — including any added later — without this list needing
+ * to enumerate them.
  */
 export const REDACTED_CALL_METADATA_FIELDS: readonly string[] = [
     'accessToken',

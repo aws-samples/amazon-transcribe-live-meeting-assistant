@@ -310,6 +310,9 @@ test('the pino redact configuration censors token fields on object-style records
     assert.ok(emitted.includes(REDACTED), 'expected the censor placeholder in the record');
     assertNoTokenRun(emitted, DUMMY_TOKEN, 'pino redact');
     assertNoTokenRun(emitted, DUMMY_REFRESH, 'pino redact');
+    // headers.cookie is on the path list too, and is not JWT-shaped, so it needs
+    // its own check rather than being covered by assertNoTokenRun.
+    assert.ok(!emitted.includes('session=abc'), 'the cookie value should be censored');
 });
 
 test('the pino redact configuration cannot reach an interpolated message string', async () => {
