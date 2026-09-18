@@ -15,8 +15,8 @@ import {
   Popover,
 } from '@cloudscape-design/components';
 
-import rehypeRaw from 'rehype-raw';
 import ReactMarkdown from 'react-markdown';
+import markdownRehypePlugins from '../common/markdown-plugins';
 import { TableHeader } from '../common/table';
 import { CALLS_PATH } from '../../routes/constants';
 import { SentimentIndicator } from '../sentiment-icon/SentimentIcon';
@@ -81,7 +81,7 @@ export const COLUMN_DEFINITIONS_MAIN = [
           position="top"
           size="large"
           triggerType="text"
-          content={<ReactMarkdown rehypePlugins={[rehypeRaw]}>{summary ?? ''}</ReactMarkdown>}
+          content={<ReactMarkdown rehypePlugins={markdownRehypePlugins}>{summary ?? ''}</ReactMarkdown>}
         >
           {summary && summary.length > 20 ? `${summary.substring(0, 20)}...` : summary}
         </Popover>
