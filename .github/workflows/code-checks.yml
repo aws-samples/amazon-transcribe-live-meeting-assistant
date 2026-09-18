@@ -1,0 +1,134 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# GitHub Actions port of the `code_checks` job in .gitlab-ci.yml, so pull
+# requests raised against the GitHub repository get the same feedback the GitLab
+# pipeline gives: lint + unit tests + build checks that need neither AWS
+# credentials nor a Docker daemon.
+#
+# What is intentionally NOT here: the integration tests (integ-tests/) and
+# `make docker-build-check` need a live AWS account / Docker daemon and are run
+# locally — see docs/dependency-upgrade-validation-runbook.md. The security
+# review job stays GitLab-only.
+#
+# Keep the target list in sync with the `code_checks` job in .gitlab-ci.yml.
+
+name: Code Checks
+
+on:
+  pull_request:
+    branches:
+      - develop
+      - main
+  push:
+    branches:
+      - develop
+      - main
+
+permissions:
+  contents: read
+
+# One run per ref: superseded pushes to the same branch/PR are cancelled.
+concurrency:
+  group: code-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  code-checks:
+    name: Lint and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # Matches the python:3.13-bookworm image the GitLab pipeline runs on.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      # Node 22 LTS, pinned exactly (>=22.22.2 is required by jsdom 30; vite 8 /
+      # rolldown native bindings are optional deps that npm silently skips on an
+      # older engine). Keep in sync with NODE_VERSION in the root Makefile and
+      # with the version installed by .gitlab-ci.yml.
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.23.2'
+          # Caches the npm download cache, keyed on these lockfiles — the
+          # equivalent of the GitLab job's node_modules cache.
+          cache: npm
+          cache-dependency-path: |
+            lma-ai-stack/source/ui/package-lock.json
+            lma-virtual-participant-stack/backend/package-lock.json
+            lma-websocket-transcriber-stack/source/app/package-lock.json
+
+      - name: Cache pip downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-py313-${{ hashFiles('Makefile', 'lib/lma_sdk/pyproject.toml', 'lib/lma_cli_pkg/pyproject.toml', 'lma-asr-microvm-stack/source/requirements-dev.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-py313-
+
+      # Python venv + lint tools + SDK/CLI with test extras (used by all pytest
+      # suites).
+      - name: Install Python tooling
+        run: make setup-python
+
+      - name: Install LMA SDK and CLI (dev extras)
+        run: make setup-cli-dev
+
+      # CloudFormation lint (no AWS).
+      - name: Lint CloudFormation templates
+        run: make lint-cfn
+
+      # Python unit suites (all mock boto3 / use dummy env — no AWS).
+      - name: LMA SDK unit tests
+        run: make test-sdk
+
+      - name: LMA CLI unit tests
+        run: make test-cli
+
+      - name: Lambda function unit tests
+        run: make test-lambdas
+
+      # UI: lint + tests (force = ignore the local checksum cache).
+      - name: Lint React UI
+        run: make lint-ui-force
+
+      - name: React UI tests
+        run: make test-ui-force
+
+      # TypeScript build checks for the transcriber + VP stacks (tsc/eslint).
+      - name: TypeScript build checks
+        run: make lint-typescript
+
+      # Virtual Participant backend unit tests (launch modes, MicroVM hooks).
+      - name: Virtual Participant unit tests
+        run: make test-vp
+
+      # VP CloudFormation template invariants (state machine renders for each
+      # launch type; ECS paths unchanged by the MICROVM addition).
+      - name: Virtual Participant template tests
+        run: make test-vp-template
+
+      # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
+      - name: ASR MicroVM runtime tests
+        run: make test-asr
+
+      - name: WebSocket transcriber dependencies
+        working-directory: lma-websocket-transcriber-stack/source/app
+        run: npm ci
+
+      # Unit tests (tsc + eslint via `npm run build`, then node --test on dist).
+      - name: WebSocket transcriber unit tests
+        working-directory: lma-websocket-transcriber-stack/source/app
+        run: npm test
+
+      # Fastify 5 websocket smoke test (boots the server, round-trips a frame) —
+      # runtime coverage the unit tests do not provide.
+      - name: WebSocket transcriber smoke test
+        working-directory: lma-websocket-transcriber-stack/source/app
+        run: npm run smoke
