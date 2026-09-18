@@ -35,6 +35,19 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | MeetingRecordExpirationInDays | Number of days to retain meeting data before automatic deletion | 90 | Positive integer |
 | CloudWatchLogsExpirationInDays | Number of days to retain CloudWatch Logs | (varies) | Standard CloudWatch retention values |
 | EnableDataRetentionOnDelete | Retain DynamoDB tables, S3 buckets, the Cognito user pool, and KMS keys when the stack is deleted | true | true, false |
+| MeetingInactivityTimeoutInMinutes | Minutes a meeting may go without a finalized transcript segment before LMA ends it on the meeting's behalf. 0 leaves such meetings open | 240 | 0-10080 |
+
+`MeetingInactivityTimeoutInMinutes` backs the scheduled reaper that ends
+meetings whose client disconnected without sending its end-of-meeting event —
+otherwise those meetings show as "In Progress" for as long as their record is
+retained. The reaper runs every 15 minutes, so a meeting can remain in progress
+for the timeout plus one interval. Its liveness signal is the meeting record's
+last update, which a transcript segment refreshes, so a meeting that is still
+connected but has produced no finalized speech for longer than the timeout is
+also ended; keep the value comfortably longer than the longest quiet stretch
+your meetings have. Meetings still being processed by the upload pipeline are
+left to `upload_meeting_finalizer`. See
+[Troubleshooting → Meeting Stuck In Progress](troubleshooting.md#meeting-stuck-in-progress).
 
 ## Meeting Assistant
 

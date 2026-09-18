@@ -67,7 +67,38 @@ Navigate to the specific failed nested stack and check its Events tab for the ro
 
 ### Meeting Stuck In Progress
 
-The Virtual Participant ECS task may have crashed. This issue was addressed in v0.3.0 with automatic cleanup on uncaught errors. If a meeting remains stuck, you can manually end it by updating the meeting record in DynamoDB.
+A meeting leaves the "In Progress" state when an end-of-meeting event reaches
+the Call Event Processor through the Kinesis call data stream. Each meeting
+source sends that event as part of its own shutdown, and each has a backstop if
+its shutdown never runs:
+
+- **Virtual Participant**: the VP task writes the event when it leaves the
+  meeting, and the VP stack's task reaper covers a task that stops without
+  doing so (automatic cleanup on uncaught errors was added in v0.3.0).
+- **Uploaded recording**: `upload_meeting_finalizer` sends it when the Amazon
+  Transcribe batch job reaches `COMPLETED` or `FAILED`.
+- **Streamed audio** (Stream Audio tab, Desktop Capture App, browser
+  extension): the WebSocket server sends it when the connection closes. If the
+  Fargate task hosting the connection goes away without running its close
+  handler, the `StaleMeetingReaper` Lambda ends the meeting instead. It runs
+  every 15 minutes and ends meetings that have produced no finalized transcript
+  segment for longer than `MeetingInactivityTimeoutInMinutes` (default 240),
+  so a meeting can show as in progress for up to that long plus one schedule
+  interval before it closes on its own.
+
+To see what the reaper is doing, look at the
+`/<AISTACK-name>/lambda/StaleMeetingReaperFunction` log group: each run logs a
+summary with the number of candidates examined and meetings ended, and one
+record per meeting it ended with that meeting's `call_id` and last activity
+timestamp. A meeting the reaper considered but left alone is either still
+inside the timeout, already `ENDED`, or still owned by the upload pipeline (an
+in-flight Transcribe job on a long recording can easily outlast the timeout, so
+those meetings are skipped and closed by the finalizer instead).
+
+Setting `MeetingInactivityTimeoutInMinutes` to `0` disables the schedule. With
+it disabled, or to end a meeting sooner than the timeout, you can still end a
+meeting by hand by updating its record (`PK` = `SK` = `c#<CallId>`) in the event
+sourcing DynamoDB table.
 
 ### No Transcription Appearing
 

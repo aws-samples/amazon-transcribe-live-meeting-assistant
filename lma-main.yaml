@@ -592,6 +592,19 @@ Parameters:
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
 
+  MeetingInactivityTimeoutInMinutes:
+    Type: Number
+    Default: 240
+    MinValue: 0
+    MaxValue: 10080
+    Description: >-
+      Number of minutes a meeting may go without producing a finalized transcript
+      segment before LMA ends it on the meeting's behalf. A meeting whose client
+      disconnects without sending its end-of-meeting event stays "In Progress"
+      until this timeout elapses. A meeting that is still connected but silent for
+      longer than the timeout is also ended, so keep it comfortably longer than the
+      longest quiet stretch your meetings have. Set to 0 to leave such meetings open.
+
   CloudWatchLogsExpirationInDays:
     Type: Number
     Default: 90
@@ -941,6 +954,7 @@ Metadata:
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
+          - MeetingInactivityTimeoutInMinutes
           - EnableDataRetentionOnDelete
       - Label:
           default: AppSync Configuration
@@ -1073,6 +1087,8 @@ Metadata:
         default: Audio Recording Expiration In Days
       CloudWatchLogsExpirationInDays:
         default: CloudWatch Logs Expiration In Days
+      MeetingInactivityTimeoutInMinutes:
+        default: Meeting Inactivity Timeout In Minutes
       EnableAppSyncApiCache:
         default: Enable AppSync Api Cache
       AppSyncApiCacheInstanceType:
@@ -2548,6 +2564,7 @@ Resources:
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
+        MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary

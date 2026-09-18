@@ -304,6 +304,17 @@ Parameters:
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
 
+  MeetingInactivityTimeoutInMinutes:
+    Type: Number
+    Default: 240
+    MinValue: 0
+    MaxValue: 10080
+    Description: >-
+      Number of minutes a meeting may go without producing a finalized transcript
+      segment before LMA ends it on the meeting's behalf. A meeting whose client
+      disconnects without sending its end-of-meeting event stays "In Progress"
+      until this timeout elapses. Set to 0 to leave such meetings open.
+
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
@@ -609,6 +620,10 @@ Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
+  # A timeout of 0 keeps the reaper's resources in the stack but stops its
+  # schedule, so the setting can be turned back on without a resource replace.
+  ShouldReapInactiveMeetings:
+    !Not [!Equals [!Ref MeetingInactivityTimeoutInMinutes, 0]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
   HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   # Generic WAF enablement - true when WAFAllowedIPv4Ranges is restricted (not 0.0.0.0/0).
@@ -3023,6 +3038,131 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: events.amazonaws.com
       SourceArn: !GetAtt UploadMeetingFinalizerEventRule.Arn
+
+  ##########################################################################
+  # Stale Meeting Reaper — ends meetings whose client stopped sending
+  # activity without sending its end-of-meeting event. The Virtual
+  # Participant has the VP stack's task reaper and uploaded recordings have
+  # UploadMeetingFinalizer; this covers the websocket streaming clients
+  # (Stream Audio tab, desktop capture app, browser extension).
+  ##########################################################################
+
+  StaleMeetingReaperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.handler
+      Role: !GetAtt StaleMeetingReaperFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      Layers:
+        - !Ref TranscriptEnrichmentPythonLayer
+      CodeUri: ../source/lambda_functions/stale_meeting_reaper
+      Description: Ends meetings with no recent activity by emitting an END event
+      MemorySize: 256
+      Timeout: 300
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          CALL_DATA_STREAM_NAME: !Ref CallDataStream
+          MEETING_INACTIVITY_TIMEOUT_IN_MINUTES: !Ref MeetingInactivityTimeoutInMinutes
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/StaleMeetingReaperFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it runs once per schedule tick"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; the next scheduled run retries any meeting it did not close"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - StaleMeetingReaperFunctionLogGroup
+
+  StaleMeetingReaperFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/StaleMeetingReaperFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  StaleMeetingReaperFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Stale Meeting Reaper Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-StaleMeetingReaper
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Find candidate meetings through the TypeDateIndex GSI, then read
+              # the meeting and upload-job rows for each candidate.
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub "${EventSourcingTable.Arn}/index/TypeDateIndex"
+              - Effect: Allow
+                Action:
+                  - dynamodb:BatchGetItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # Emit the same END event the meeting's client would have sent;
+              # call_event_processor applies it.
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: !Ref CallDataStreamArn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+                      - !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
+
+  StaleMeetingReaperScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-StaleMeetingReaper"
+      Description: >-
+        Runs the stale meeting reaper. The interval bounds how long after
+        MeetingInactivityTimeoutInMinutes a meeting keeps showing as in progress.
+      ScheduleExpression: "rate(15 minutes)"
+      State: !If [ShouldReapInactiveMeetings, ENABLED, DISABLED]
+      Targets:
+        - Arn: !GetAtt StaleMeetingReaperFunction.Arn
+          Id: StaleMeetingReaperTarget
+
+  StaleMeetingReaperSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt StaleMeetingReaperFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt StaleMeetingReaperScheduleRule.Arn
 
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
