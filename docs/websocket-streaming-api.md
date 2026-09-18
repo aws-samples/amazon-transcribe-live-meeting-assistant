@@ -145,6 +145,31 @@ wss://<CLOUDFRONT_DOMAIN>/api/v1/ws?authorization=Bearer%20<access_token>&id_tok
 
 > **Note:** Query string parameters are useful for browser-based clients where the native `WebSocket` API does not support custom headers.
 
+### What the Server Records
+
+The transcriber's connection log lines identify the request without reproducing the tokens.
+For each connection attempt the server records the request path with the query string
+removed, the client IP taken from `X-Forwarded-For`, and a fixed set of non-sensitive
+headers; any other header is reported as a count only. The allowlisted header names are:
+
+`host`, `origin`, `referer`, `user-agent`, `content-type`, `content-length`, `connection`,
+`upgrade`, `x-forwarded-for`, `x-forwarded-proto`, `x-forwarded-port`,
+`sec-websocket-version`, `sec-websocket-extensions`.
+
+`origin` and `referer` are URLs, so their values also have the query string removed before
+they are logged.
+
+The same rule covers the control frames (`START`, `END`, `SPEAKER_CHANGE`, `START_VIDEO`,
+`END_VIDEO`) and the Kinesis records derived from them: wherever one of those objects is
+written to the log, its `accessToken` / `idToken` / `refreshToken` fields — and the
+PascalCase `AccessToken` / `IdToken` / `RefreshToken` used on the Kinesis records — appear
+as `[REDACTED]`. Everything else about the frame is logged normally, so a frame that omits
+a field still shows as omitted.
+
+This holds whichever option above you choose, so a client that passes tokens on the query
+string does not produce different log content than one using headers. It also holds at
+every log level, including `LogLevel: DEBUG`.
+
 ### Authentication Failure
 
 If authentication fails, the server responds with **HTTP 401 Unauthorized** before the WebSocket upgrade completes, and the connection is rejected. Common failure reasons:

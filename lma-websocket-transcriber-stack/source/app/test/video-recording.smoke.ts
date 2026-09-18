@@ -266,38 +266,38 @@ async function main(): Promise<void> {
         );
         console.log('PASS: websocket START_VIDEO/fMP4/END_VIDEO flow muxed and cleaned up temp files');
 
-        // ---- Part 2b: AUTHORIZATION — the cross-tenant attack must fail ----
-        // Victim starts a call; attacker (different subject) tries to attach a
-        // video stream to it. Without the ownership check the attacker's video
-        // session would adopt the victim's audio WAV at end of call and publish
-        // the victim's audio under an object the attacker can read.
-        const VICTIM_CALL = 'victim-private-meeting';
-        const victimWs = new WebSocket(`ws://${HOST}:${PORT}/api/v1/ws?user=victim`);
+        // ---- Part 2b: AUTHORIZATION — only the call's owner may add video ----
+        // One subject starts an audio call; a different subject sends START_VIDEO
+        // for the same callId. The invariant asserted here is that a video stream
+        // is admitted only to a caller whose verified subject owns the live audio
+        // session for that callId.
+        const OWNED_CALL = 'owner-only-meeting';
+        const ownerWs = new WebSocket(`ws://${HOST}:${PORT}/api/v1/ws?user=owner`);
         await new Promise<void>((res, rej) => {
-            victimWs.on('open', () => res());
-            victimWs.on('error', rej);
+            ownerWs.on('open', () => res());
+            ownerWs.on('error', rej);
         });
-        victimWs.send(JSON.stringify({ callEvent: 'START', callId: VICTIM_CALL, samplingRate: SR_UNUSED }));
+        ownerWs.send(JSON.stringify({ callEvent: 'START', callId: OWNED_CALL, samplingRate: SR_UNUSED }));
         await new Promise((r) => setTimeout(r, 100));
 
-        const attackerClosed = await attemptVideo(`ws://${HOST}:${PORT}/api/v1/ws?user=attacker`, VICTIM_CALL);
+        const otherClosed = await attemptVideo(`ws://${HOST}:${PORT}/api/v1/ws?user=other`, OWNED_CALL);
         assert.ok(
-            attackerClosed,
-            'attacker START_VIDEO on the victim\'s callId must be rejected (socket closed)'
+            otherClosed,
+            'START_VIDEO from a subject that does not own the callId must be rejected (socket closed)'
         );
         assert.ok(
-            authDenials.includes(`not-owner:${VICTIM_CALL}`),
+            authDenials.includes(`not-owner:${OWNED_CALL}`),
             `expected a not-owner denial, got: ${authDenials.join(', ')}`
         );
         assert.strictEqual(
-            getVideoSession(VICTIM_CALL),
+            getVideoSession(OWNED_CALL),
             undefined,
-            'no video session may exist for the victim call after a rejected attempt'
+            'no video session may exist for that callId after a rejected attempt'
         );
         console.log('PASS: START_VIDEO by a non-owner is rejected and creates no session');
 
-        // A callId with no live audio call at all is also refused (this is what
-        // closes the "START_VIDEO after the call ended" session leak).
+        // A callId with no live audio call at all is also refused, so a video
+        // session can only ever exist alongside a live audio session.
         const ghostClosed = await attemptVideo(`ws://${HOST}:${PORT}/api/v1/ws?user=alice`, 'no-such-call');
         assert.ok(ghostClosed, 'START_VIDEO for an unknown callId must be rejected');
         assert.ok(
@@ -307,7 +307,7 @@ async function main(): Promise<void> {
         assert.strictEqual(getVideoSession('no-such-call'), undefined, 'no session for an unknown callId');
         console.log('PASS: START_VIDEO for a callId with no live audio call is rejected');
 
-        victimWs.close();
+        ownerWs.close();
         audioWs.close();
 
         // ---- Part 2c: RECONNECT (videoResume) — parts are byte-joined ----
