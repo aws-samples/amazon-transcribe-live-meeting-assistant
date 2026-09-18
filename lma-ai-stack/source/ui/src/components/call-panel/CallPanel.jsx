@@ -1156,25 +1156,39 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
         >
           <Box style={{ height: collapseSentiment ? '34vh' : '68vh' }}>
             {/*
-              No `sandbox` attribute, deliberately. The chat page is a first-party
-              document served from this same distribution, and the parent/frame
-              channel below depends on being same-origin in both directions: the
-              parent only acts on messages whose `event.origin` equals its own
-              origin, and it addresses the frame with an explicit targetOrigin
-              rather than '*'. A `sandbox` that omitted `allow-same-origin` would
-              move the frame to an opaque origin, forcing both of those back to
-              '*'/"null" and trading a precise channel for a vaguer one. Adding
-              `sandbox="allow-scripts allow-same-origin"` instead would be purely
-              cosmetic, since that combination lets the frame remove its own
-              sandboxing. The frame renders agent output, and that content is
-              constrained where it is rendered (renderMarkdownSafe in
-              strands-chat.html) plus by the distribution's response headers, not
-              by frame flags. The frame reads no credentials from shared storage.
+              The `sandbox` list is deliberately exactly these two tokens.
+
+              What it buys: the frame renders agent output. The omitted tokens
+              mean nothing in that output can submit a form, open a popup, raise
+              a modal, or navigate the top-level page. Those are capabilities of
+              the inert markup that reaches the DOM, not of script, so removing
+              them is worth having on its own. This is the outer of three layers
+              for the form case in particular -- renderMarkdownSafe in
+              strands-chat.html strips form controls before they are rendered,
+              and `form-action 'self'` in the distribution's CSP bounds where a
+              submission could go -- and it is the layer that does not depend on
+              the sanitizer having run.
+
+              What it does not buy: `allow-scripts` plus `allow-same-origin` lets
+              a script already running in the frame remove the sandbox attribute
+              from its own frame element, so this is not a boundary against code
+              executing inside the frame. It is a restriction on inert content.
+
+              Why `allow-same-origin` stays: the parent/frame postMessage channel
+              is pinned in both directions -- the parent only acts on messages
+              whose `event.origin` equals its own, and addresses the frame with
+              an explicit targetOrigin rather than '*'. Dropping the token would
+              move the frame to an opaque origin and force both ends back to
+              '*'/"null", trading a precise channel for a vaguer one.
+
+              Cost: none. strands-chat.html has no form, no target="_blank", no
+              window.open and no downloads of its own.
             */}
             <iframe
               style={{ border: '0px', height: collapseSentiment ? '34vh' : '68vh', margin: '0' }}
               title="Meeting Assist"
               src={iframeSrc}
+              sandbox="allow-scripts allow-same-origin"
               width="100%"
             />
           </Box>

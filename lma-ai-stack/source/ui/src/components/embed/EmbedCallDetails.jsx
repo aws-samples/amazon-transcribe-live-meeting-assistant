@@ -106,10 +106,12 @@ const EmbedChatPanel = ({ item }) => {
       }
     >
       <div className="embed-chat-panel">
+        {/* Same sandbox rationale as the CallPanel frame; see the comment there. */}
         <iframe
           style={{ border: '0px', height: '60vh', margin: '0' }}
           title="Meeting Assist"
           src={iframeSrc}
+          sandbox="allow-scripts allow-same-origin"
           width="100%"
         />
       </div>
