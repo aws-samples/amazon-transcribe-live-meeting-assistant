@@ -234,7 +234,12 @@ test('an existing rule for this path is removed before the new one is created', 
     assert.equal(elb.named('CreateRuleCommand').length, 1);
 });
 
-test('rules for other participants and the default rule are left alone', async () => {
+test('rules for other participants, the load balancer rule and the default are left alone', async () => {
+    // The /vnc/* entry is the load balancer's own priority-50000 rule. Deleting it
+    // would remove the origin-verify condition from the shared target group's
+    // route, so the matcher must select this participant's path and nothing that
+    // merely covers it. The default entry carries this participant's own path, so
+    // it exercises the IsDefault guard rather than the path check.
     const { manager, elb } = harness({
         existingRules: [
             {
@@ -243,14 +248,69 @@ test('rules for other participants and the default rule are left alone', async (
                 Conditions: [{ Field: 'path-pattern', Values: ['/vnc/vp-someone-else'] }],
             },
             {
+                RuleArn: 'arn:aws:elasticloadbalancing:us-east-1:123456789012:listener-rule/template',
+                IsDefault: false,
+                Conditions: [{ Field: 'path-pattern', Values: ['/vnc/*'] }],
+            },
+            {
+                RuleArn: 'arn:aws:elasticloadbalancing:us-east-1:123456789012:listener-rule/prefix',
+                IsDefault: false,
+                Conditions: [{ Field: 'path-pattern', Values: [`${PATH}*`] }],
+            },
+            {
                 RuleArn: 'arn:aws:elasticloadbalancing:us-east-1:123456789012:listener-rule/default',
                 IsDefault: true,
-                Conditions: [],
+                Conditions: [{ Field: 'path-pattern', Values: [PATH] }],
             },
         ],
     });
     await manager.createListenerRule(TARGET_GROUP_ARN);
     assert.equal(elb.named('DeleteRuleCommand').length, 0);
+});
+
+test('a rule is matched through either form the describe call may return', async () => {
+    // The API documents Values and PathPatternConfig.Values as alternative ways to
+    // express one condition. Reading only one form would make the replacement a
+    // no-op and leave CreateRule to fail on the priority already in use.
+    for (const conditions of [
+        [{ Field: 'path-pattern', Values: [PATH] }],
+        [{ Field: 'path-pattern', PathPatternConfig: { Values: [PATH] } }],
+        [{ Field: 'path-pattern', Values: [PATH], PathPatternConfig: { Values: [PATH] } }],
+    ]) {
+        const { manager, elb } = harness({
+            existingRules: [
+                {
+                    RuleArn: 'arn:aws:elasticloadbalancing:us-east-1:123456789012:listener-rule/s',
+                    IsDefault: false,
+                    Conditions: conditions,
+                },
+            ],
+        });
+        await manager.createListenerRule(TARGET_GROUP_ARN);
+        assert.equal(
+            elb.named('DeleteRuleCommand').length,
+            1,
+            `not matched: ${JSON.stringify(conditions)}`,
+        );
+    }
+});
+
+test('a broader pattern is never treated as this participant path', async () => {
+    // Guards the matcher semantics directly: Array.prototype.includes is exact
+    // equality, not a glob or substring test.
+    for (const value of ['/vnc/*', '*', `${PATH}*`, PATH.slice(0, -1), `${PATH}/extra`, '/vnc/']) {
+        const { manager, elb } = harness({
+            existingRules: [
+                {
+                    RuleArn: 'arn:aws:elasticloadbalancing:us-east-1:123456789012:listener-rule/b',
+                    IsDefault: false,
+                    Conditions: [{ Field: 'path-pattern', Values: [value] }],
+                },
+            ],
+        });
+        await manager.createListenerRule(TARGET_GROUP_ARN);
+        assert.equal(elb.named('DeleteRuleCommand').length, 0, `${value} was deleted`);
+    }
 });
 
 test('a failure while checking for an existing rule does not omit the condition', async () => {

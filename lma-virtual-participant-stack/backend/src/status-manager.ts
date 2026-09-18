@@ -861,13 +861,17 @@ export class VirtualParticipantStatusManager {
   }
 
   /**
-   * Remove any listener rule already routing this participant's path.
+   * Remove any listener rule whose path-pattern is exactly this participant's path.
    *
    * A rule outlives the task that created it if that task ended without the
-   * manager's cleanup running, and a rule created by an earlier image carries
-   * only the path condition. Replacing rather than reusing means the rule in
+   * manager's cleanup running. Replacing rather than reusing means the rule in
    * force is always the one this code just built, and it also clears the priority
    * this participant is about to claim.
+   *
+   * The match is element-wise equality against the condition's values, so it
+   * selects only a rule written for this one path. A rule carrying a broader
+   * pattern -- `/vnc/*`, which is the load balancer's own rule, or another
+   * participant's path -- is not equal to this path and is left in place.
    */
   private async removeStaleListenerRule(listenerArn: string, pathPattern: string): Promise<void> {
     try {
@@ -875,11 +879,19 @@ export class VirtualParticipantStatusManager {
         new DescribeRulesCommand({ ListenerArn: listenerArn })
       );
       for (const rule of Rules || []) {
-        const matchesPath = (rule.Conditions || []).some(
-          (condition) =>
-            condition.Field === 'path-pattern' &&
-            (condition.Values || []).includes(pathPattern)
-        );
+        const matchesPath = (rule.Conditions || []).some((condition) => {
+          if (condition.Field !== 'path-pattern') {
+            return false;
+          }
+          // Both forms: the API documents Values and PathPatternConfig.Values as
+          // alternative ways to express the same condition, and does not state
+          // which of them a describe call populates.
+          const values = [
+            ...(condition.Values || []),
+            ...(condition.PathPatternConfig?.Values || []),
+          ];
+          return values.includes(pathPattern);
+        });
         if (!matchesPath || !rule.RuleArn || rule.IsDefault) {
           continue;
         }

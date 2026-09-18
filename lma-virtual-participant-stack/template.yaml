@@ -115,6 +115,13 @@ Parameters:
   # environment is readable by anything that can call ecs:DescribeTaskDefinition,
   # so the task reads the value from Secrets Manager itself, once, at the point it
   # creates its listener rule.
+  #
+  # Scope of what that buys: this keeps the value out of the task definition, not
+  # out of the account. The resolved value is returned by
+  # elasticloadbalancing:DescribeRules and cloudfront:GetDistributionConfig, both of
+  # which ReadOnlyAccess grants, and the task role itself holds DescribeRules. The
+  # header is a control on requests arriving from outside, not an isolation boundary
+  # between principals inside the account.
   VncOriginVerifyHeaderValueSecretArn:
     Type: String
     Default: ""
@@ -1207,7 +1214,10 @@ Resources:
                   - "elasticloadbalancing:CreateRule"
                   - "elasticloadbalancing:DeleteRule"
                   - "elasticloadbalancing:DescribeRules"
-                  - "elasticloadbalancing:ModifyRule"
+                  # No ModifyRule: the task states a rule's conditions once, when
+                  # it creates it, so leaving the action out makes "a rule's
+                  # conditions are whatever it was created with" a property IAM
+                  # holds rather than a convention the code happens to follow.
                   - "elasticloadbalancing:AddTags"
                 Resource: "*"
         # Read the origin-verify header value, so the listener rule this task
