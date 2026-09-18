@@ -8,12 +8,11 @@
  * Tests for HTTP header canonicalization and client-IP extraction.
  *
  * `getClientIP` feeds the `[AUTH]` and `[NEW CONNECTION]` log lines in index.ts
- * and nothing else — it is not consulted for authorization, so the fact that it
- * trusts the leftmost `X-Forwarded-For` entry (which a client can set freely) is a
- * log-fidelity limitation rather than a security hole. These tests pin the
- * behaviour as it is, so that stays a deliberate choice: if this value is ever
- * used for a decision, taking the leftmost entry becomes a real vulnerability and
- * these tests are where that assumption is written down.
+ * and nothing else. It returns the leftmost `X-Forwarded-For` entry, which is a
+ * log-fidelity choice and not an authorization input. These tests pin that
+ * behaviour so it stays a deliberate choice: the invariant is that this value is
+ * used for logging only, and anything that wants to make a decision from a
+ * client address needs a source it can rely on rather than this one.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
