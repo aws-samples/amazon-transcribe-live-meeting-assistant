@@ -77,14 +77,14 @@ echo "Starting VNC server..."
 #
 # Deployed (ECS or MicroVM): -localhost confines the listener to the loopback
 # interface, so the only route to the framebuffer is the websockify port that the
-# ALB / MicroVM ingress targets. Previously the listener accepted connections on
-# every interface of the task.
+# ALB / MicroVM ingress targets.
 #
 # Deployed on ECS, additionally: x11vnc asks for a credential. It is generated
 # fresh on each boot and published on this task's own VP record, from which the
 # authenticated createVncEdgeToken resolver hands it to viewers already checked
 # against that record -- so the credential belongs to exactly one task and one
-# audience, and the ALB path is no longer sufficient on its own.
+# audience, and reaching the websockify port is not by itself enough to see the
+# framebuffer.
 #
 # Under MICROVM this script runs as the pre-snapshot stack at image-build time,
 # where no per-meeting identity exists yet and there is nowhere to publish a
