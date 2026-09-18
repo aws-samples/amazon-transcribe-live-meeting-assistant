@@ -51,7 +51,9 @@ describe('markdownRehypePlugins (ReactMarkdown surfaces)', () => {
     expect(container.querySelector('em')?.textContent).toBe('emphasis');
   });
 
-  it('renders markdown tables', () => {
+  // Guards against over-stripping: table markup is on the allowlist and must
+  // survive. This asserts nothing about sanitization on its own.
+  it('keeps inline table markup that the allowlist permits', () => {
     const { container } = renderMarkdown('<table><tr><td>cell</td></tr></table>');
 
     expect(container.querySelector('td')?.textContent).toBe('cell');
@@ -166,6 +168,31 @@ describe('renderMarkdownSafe (standalone chat page)', () => {
 
     expect(host.textContent).toContain('click');
     expect(host.querySelector('a')?.getAttribute('href')).toBeNull();
+  });
+
+  it('renders links without target or rel attributes', () => {
+    const host = renderToDom('<a href="https://example.com" target="_blank" rel="opener">link</a>');
+
+    const link = host.querySelector('a');
+    expect(link?.getAttribute('href')).toBe('https://example.com');
+    expect(link?.getAttribute('target')).toBeNull();
+    expect(link?.getAttribute('rel')).toBeNull();
+  });
+
+  it('renders markdown without interactive form controls', () => {
+    const host = renderToDom('<form action="https://example.com"><input name="a"><button>go</button></form>');
+
+    expect(host.querySelector('form')).toBeNull();
+    expect(host.querySelector('input')).toBeNull();
+    expect(host.querySelector('button')).toBeNull();
+  });
+
+  it('renders markdown without style attributes', () => {
+    const host = renderToDom('<p style="position:fixed;top:0">styled</p>');
+
+    const paragraph = host.querySelector('p');
+    expect(paragraph?.textContent).toBe('styled');
+    expect(paragraph?.getAttribute('style')).toBeNull();
   });
 
   it('signals to the caller when the sanitizer is unavailable', () => {

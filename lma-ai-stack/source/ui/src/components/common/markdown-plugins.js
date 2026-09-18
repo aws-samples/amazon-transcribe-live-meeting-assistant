@@ -14,8 +14,12 @@
  * `rehype-sanitize` runs immediately after it, so the invariant across all of
  * these surfaces is that the HTML tree handed to React has already been reduced
  * to the GitHub-flavoured allowlist in `defaultSchema` -- the tags and
- * attributes markdown itself produces, plus `className` on `code`/`pre` for
- * syntax highlighting hints.
+ * attributes markdown itself produces.
+ *
+ * `defaultSchema` is used unmodified. It already permits `className` matching
+ * /^language-./ on `code` (hast-util-sanitize lib/schema.js), which is what
+ * fenced code blocks emit, so syntax-highlighting hints survive without an
+ * override here.
  *
  * Order matters: raw HTML has to be parsed into nodes before it can be filtered,
  * so `rehypeRaw` must stay first in the array.
@@ -23,19 +27,9 @@
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 
-const schema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    // Markdown fenced code blocks emit `class="language-xxx"`; keep that so
-    // existing code rendering is unchanged.
-    code: [...(defaultSchema.attributes?.code || []), ['className', /^language-./]],
-  },
-};
-
 /**
  * rehype plugin chain to spread onto <ReactMarkdown rehypePlugins={...}>.
  */
-const markdownRehypePlugins = [rehypeRaw, [rehypeSanitize, schema]];
+const markdownRehypePlugins = [rehypeRaw, [rehypeSanitize, defaultSchema]];
 
 export default markdownRehypePlugins;

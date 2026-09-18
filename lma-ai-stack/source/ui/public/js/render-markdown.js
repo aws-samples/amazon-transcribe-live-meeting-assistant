@@ -22,11 +22,27 @@
  */
 (function registerRenderMarkdownSafe(root) {
   // Restrict the sanitizer to its HTML profile: SVG and MathML are not used by
-  // markdown output, so they stay out of the allowed set entirely. `target` and
-  // `rel` are kept so markdown links continue to open in a new tab.
+  // markdown output, so they stay out of the allowed set entirely.
+  //
+  // Nothing is added to the profile. This page configures no `marked` renderer
+  // and makes no `marked.use()` call, so the default renderer's output is the
+  // whole of what has to survive, and it emits no `target`, `rel` or `style`
+  // attributes -- links render in this frame, as they already did.
+  //
+  // `target` is absent from DOMPurify's default attribute set, so it is dropped
+  // without being named. `rel` and `style` are present in that set, so they are
+  // named here: neither has a purpose in this content, and forbidding them makes
+  // "no link-targeting or styling attributes survive" an enforced invariant
+  // rather than a property of whatever the default set happens to contain.
+  //
+  // Interactive form controls are in DOMPurify's default HTML profile but are
+  // never produced by markdown, and this page builds its own controls in code
+  // rather than through this function. Forbidding them keeps the rendered
+  // conversation to inert, non-interactive content.
   var SANITIZE_CONFIG = {
     USE_PROFILES: { html: true },
-    ADD_ATTR: ['target', 'rel'],
+    FORBID_ATTR: ['rel', 'style'],
+    FORBID_TAGS: ['form', 'input', 'button', 'textarea', 'select', 'option'],
   };
 
   /**
