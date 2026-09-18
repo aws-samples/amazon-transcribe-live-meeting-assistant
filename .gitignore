@@ -32,6 +32,9 @@ samconfig.toml
 .srt/*
 !.srt/suppressions.json
 
+# Large local working directory of vendored packages — must never be committed.
+lma-aims-stack/
+
 .ash/
 
 # Node
