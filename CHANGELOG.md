@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Amazon Bedrock Guardrails apply to the Meeting Assistant.** Setting the `BedrockGuardrailId` and `BedrockGuardrailVersion` CloudFormation parameters attaches that guardrail to every path the assistant uses to reach Amazon Bedrock: the Strands agent's model, the direct `Converse` fallback, and all three Knowledge Base `RetrieveAndGenerate` queries — document search, meeting history, and the per-meeting transcript knowledge base. Create the guardrail in the same account and Region as the stack. Both parameters need a value; `BedrockGuardrailVersion` defaults to `DRAFT`. The assistant's IAM role is granted `bedrock:ApplyGuardrail` on that one guardrail ARN, and no guardrail permission is granted when `BedrockGuardrailId` is empty, which remains the default. See the [Meeting Assistant guide](docs/meeting-assistant.md). ([#672](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/pull/672))
 
+### Changed
+
+- **The web application's Content-Security-Policy now names every resource type it uses.** `default-src 'self'` is the fallback, with `frame-src`, `media-src`, `font-src` and `worker-src` listed explicitly, and `script-src` allows only this distribution's own origin. If you have customised the UI to load scripts, fonts, media or workers from another origin, add that origin to the corresponding directive in `lma-ai-stack/deployment/lma-ai-stack.yaml` — a resource that is not permitted stops loading in the browser with no server-side log entry. An unmodified deployment needs no action. ([#672](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/pull/672))
+
 ## [0.3.8] - 2026-09-02
 
 ### Fixed
