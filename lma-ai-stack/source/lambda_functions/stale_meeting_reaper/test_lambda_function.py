@@ -32,6 +32,49 @@ os.environ["CALL_DATA_STREAM_NAME"] = STREAM_NAME
 os.environ["MEETING_INACTIVITY_TIMEOUT_IN_MINUTES"] = str(TIMEOUT_MINUTES)
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
+
+class StubLogger:
+    """Stands in for aws_lambda_powertools.Logger.
+
+    The Lambda gets Powertools from the transcript enrichment layer at runtime;
+    the lint/test environment installs only the tooling in the root Makefile's
+    setup-python target, which does not include it. Stubbing keeps the suite
+    running the same way everywhere instead of depending on what happens to be
+    installed, so only logging is substituted — every line of handler logic under
+    test is the real one.
+    """
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def debug(self, *args, **kwargs):
+        pass
+
+    def info(self, *args, **kwargs):
+        pass
+
+    def warning(self, *args, **kwargs):
+        pass
+
+    def error(self, *args, **kwargs):
+        pass
+
+    def exception(self, *args, **kwargs):
+        pass
+
+    def inject_lambda_context(self, func=None, **kwargs):
+        """Identity decorator, so the handler stays callable as written."""
+        if func is None:
+            return lambda inner: inner
+        return func
+
+
+# Each dotted name needs its own entry: `from a.b.c import d` imports a, then
+# a.b, then a.b.c, and a stub for `a` alone does not satisfy the later steps.
+sys.modules["aws_lambda_powertools"] = MagicMock(Logger=StubLogger)
+sys.modules["aws_lambda_powertools.utilities"] = MagicMock()
+sys.modules["aws_lambda_powertools.utilities.typing"] = MagicMock(LambdaContext=object)
+
 with patch("boto3.resource", MagicMock()), patch("boto3.client", MagicMock()):
     import lambda_function as reaper  # noqa: E402
 
