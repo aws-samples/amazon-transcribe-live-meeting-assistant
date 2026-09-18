@@ -40,6 +40,7 @@ export default defineConfig({
               slug: "prerequisites-and-deployment",
             },
             { label: "Quick Start Guide", slug: "quick-start-guide" },
+            { label: "Custom Domain", slug: "custom-domain" },
           ],
         },
         {

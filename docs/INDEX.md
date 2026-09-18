@@ -18,6 +18,7 @@ title: "LMA Documentation"
 
 - [Prerequisites & Deployment](prerequisites-and-deployment.md) — AWS account setup, Bedrock model access, CloudFormation deployment, initial login
 - [Quick Start Guide](quick-start-guide.md) — Your first meeting in 5 minutes using Stream Audio or Virtual Participant
+- [Custom Domain](custom-domain.md) — Serve the web UI from your own domain name instead of the default CloudFront domain
 
 ### Core Features
 
