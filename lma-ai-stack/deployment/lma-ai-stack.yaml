@@ -756,6 +756,17 @@ Outputs:
     # export values cannot be changed while an importer exists. Nothing in this
     # solution imports it (the VP stack takes it as a parameter), so dropping
     # the export removes a needless update constraint.
+  # The ARN, not the value: whichever principal creates a listener rule on the
+  # VNC listener needs the origin-verify condition, and reads the value itself
+  # rather than receiving it through a stack parameter or a task environment
+  # variable. The Virtual Participant creates one rule per participant at run
+  # time (status-manager.ts), which is the consumer this is published for.
+  VncOriginVerifyHeaderValueSecretArn:
+    Description: ARN of the secret holding the VNC origin-verify header value
+    Value: !If [ShouldCreateVNCALB, !Ref VncOriginVerifyHeaderValueSecret, ""]
+  VncOriginVerifyHeaderName:
+    Description: Name of the header carrying the VNC origin-verify value
+    Value: x-lma-vnc-origin-verify
   MCPServersTableName:
     Description: Name of the MCP Servers DynamoDB table
     Value: !Ref MCPServersTable
@@ -7326,6 +7337,9 @@ Resources:
 
   VncEdgeTokenFunction:
     Type: AWS::Serverless::Function
+    # The log group is created by this stack, so it must exist before the
+    # function's first invocation could create it implicitly and collide.
+    DependsOn: VncEdgeTokenFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -7605,7 +7619,44 @@ Resources:
         - Key: Name
           Value: !Sub ${LMAStackName}-vnc-tg
 
+  # Shared value that identifies a request as having come through this
+  # deployment's own CloudFront distribution.
+  #
+  # The ALB is internet-facing, because CloudFront needs a publicly resolvable
+  # origin unless VPC origins are used. Two controls narrow who it answers, and
+  # they establish different things. The ingress rule above admits the
+  # `com.amazonaws.global.cloudfront.origin-facing` managed prefix list, which is
+  # the address range CloudFront uses when it calls an origin -- a range the
+  # service shares across the distributions it serves. This value is what ties a
+  # request to this deployment's own distribution: the distribution attaches it to
+  # every origin request (OriginCustomHeaders on the vnc-alb origin), and the
+  # listener forwards only when it matches. Keep both.
+  #
+  # Only the value is generated. The header NAME is a constant, because it
+  # travels in clear text on every origin request and so carries no secrecy --
+  # generating it would add a secret to manage without adding entropy. (The
+  # WebSocket transcriber stack generates both; the value is the part that
+  # matters in each.)
+  VncOriginVerifyHeaderValueSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: ShouldCreateVNCALB
+    # checkov:skip=CKV_AWS_149: "Encrypted with the stack's customer-managed key"
+    Properties:
+      Description: !Sub "Identifies ${AWS::StackName} CloudFront requests to the Virtual Participant VNC load balancer"
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      GenerateSecretString:
+        SecretStringTemplate: '{"header_value": "vnc_origin_verify"}'
+        GenerateStringKey: headersecret
+        PasswordLength: 32
+        ExcludeCharacters: "\"@/\\;.:+' %"
+        ExcludePunctuation: true
+
   # HTTP Listener (port 80)
+  #
+  # The default action refuses the request. Every route to a Virtual Participant
+  # is expressed as a rule that names its condition, so a request reaching the
+  # load balancer that matches none of them is answered here rather than
+  # forwarded to whichever target group happened to be the default.
   VNCALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     # checkov:skip=CKV_AWS_103: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth
@@ -7616,6 +7667,42 @@ Resources:
       Port: 80
       Protocol: HTTP
       DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: "Access denied"
+            StatusCode: "403"
+
+  # Forwards to the shared VNC target group, which the ECS service registers its
+  # tasks into, for requests carrying this deployment's origin-verify header.
+  #
+  # Priority 50000 is the lowest the service allows, so this is evaluated after
+  # the per-VP rules that the VP task creates at run time (those use priorities
+  # 1000-49999, see status-manager.ts generateRulePriority). Ordering matters:
+  # at a higher priority this rule would claim /vnc/* before the per-VP rule
+  # could route to that participant's own target group.
+  VNCALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: ShouldCreateVNCALB
+    DependsOn: VncOriginVerifyHeaderValueSecret
+    Properties:
+      ListenerArn: !Ref VNCALBListener
+      Priority: 50000
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - "/vnc/*"
+        - Field: http-header
+          HttpHeaderConfig:
+            # Must stay identical to the OriginCustomHeaders entry on the
+            # vnc-alb origin. The template has no Mappings section to hold a
+            # shared constant, so test_ai_stack_vnc_alb.py asserts the two
+            # spellings match rather than relying on them being edited together.
+            HttpHeaderName: x-lma-vnc-origin-verify
+            Values:
+              - !Sub "{{resolve:secretsmanager:${VncOriginVerifyHeaderValueSecret}::headersecret}}"
+      Actions:
         - Type: forward
           TargetGroupArn: !Ref VNCTargetGroup
 
@@ -8004,6 +8091,13 @@ Resources:
                 HTTPPort: 80
                 HTTPSPort: 443
                 OriginProtocolPolicy: http-only
+              # Identifies the request as having come through this deployment's
+              # own distribution, which the load balancer's listener rule
+              # requires. The header name must stay identical to the one in
+              # VNCALBListenerRule; test_ai_stack_vnc_alb.py pins them together.
+              OriginCustomHeaders:
+                - HeaderName: x-lma-vnc-origin-verify
+                  HeaderValue: !Sub "{{resolve:secretsmanager:${VncOriginVerifyHeaderValueSecret}::headersecret}}"
           - - Id: webapp-s3-bucket
               DomainName: !GetAtt WebAppBucket.RegionalDomainName
               S3OriginConfig:

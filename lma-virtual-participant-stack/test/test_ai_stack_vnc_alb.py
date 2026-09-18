@@ -367,6 +367,114 @@ def test_the_minted_token_is_short_lived() -> None:
     assert 0 < int(match.group(1)) <= 900
 
 
+# --------------------------------------------------------------------------
+# Tying the load balancer to this deployment's own distribution
+#
+# The VNC ALB is internet-facing, because CloudFront needs a publicly resolvable
+# origin unless VPC origins are used, and its security group admits the
+# com.amazonaws.global.cloudfront.origin-facing managed prefix list -- CloudFront's
+# shared origin-facing range, which establishes that a request came from
+# CloudFront but not from which distribution. An origin-verify header is what
+# identifies this deployment's own distribution. These tests exist so a later
+# template edit cannot quietly drop it.
+# --------------------------------------------------------------------------
+
+ORIGIN_VERIFY_SECRET = "VncOriginVerifyHeaderValueSecret"
+
+
+def _vnc_origin(template: dict) -> dict:
+    origins = template["Resources"]["WebAppCloudFrontDistribution"]["Properties"][
+        "DistributionConfig"
+    ]["Origins"]["Fn::If"][1]
+    matches = [o for o in origins if o["Id"] == "vnc-alb"]
+    assert matches, "the vnc-alb origin should exist on the ECS branch"
+    return matches[0]
+
+
+def test_the_listener_refuses_a_request_matching_no_rule(template: dict) -> None:
+    """Every route to a participant is a rule that states its condition.
+
+    The ECS service registers its tasks into VNCTargetGroup, so the default action
+    is a live route; keeping it non-forwarding is what makes "matches no rule" and
+    "reaches a task" mutually exclusive.
+    """
+    actions = template["Resources"]["VNCALBListener"]["Properties"]["DefaultActions"]
+    assert len(actions) == 1
+    assert actions[0]["Type"] == "fixed-response"
+    assert actions[0]["FixedResponseConfig"]["StatusCode"] == "403"
+
+
+def test_the_shared_target_group_is_reached_only_with_the_origin_verify_header(
+    template: dict,
+) -> None:
+    rule = template["Resources"]["VNCALBListenerRule"]["Properties"]
+    assert rule["Actions"][0]["TargetGroupArn"] == {"Ref": "VNCTargetGroup"}
+    header = [c for c in rule["Conditions"] if c["Field"] == "http-header"]
+    assert len(header) == 1, "the rule must require the origin-verify header"
+    values = header[0]["HttpHeaderConfig"]["Values"]
+    assert len(values) == 1
+    assert ORIGIN_VERIFY_SECRET in json.dumps(values), (
+        "the expected value must come from the generated secret, not a literal"
+    )
+
+
+def test_the_distribution_sends_the_origin_verify_header(template: dict) -> None:
+    headers = _vnc_origin(template)["OriginCustomHeaders"]
+    assert len(headers) == 1
+    assert ORIGIN_VERIFY_SECRET in json.dumps(headers[0]["HeaderValue"])
+
+
+def test_the_header_name_matches_on_both_sides(template: dict) -> None:
+    """The name is spelled in two places; the template has no shared constant.
+
+    A mismatch would not fail the deploy -- the listener rule would simply never
+    match, and every viewer would get the default 403.
+    """
+    sent = _vnc_origin(template)["OriginCustomHeaders"][0]["HeaderName"]
+    rule = template["Resources"]["VNCALBListenerRule"]["Properties"]
+    required = [c for c in rule["Conditions"] if c["Field"] == "http-header"][0][
+        "HttpHeaderConfig"
+    ]["HttpHeaderName"]
+    assert isinstance(sent, str) and isinstance(required, str)
+    assert sent.lower() == required.lower()
+
+
+def test_the_origin_verify_value_is_generated_not_configured(template: dict) -> None:
+    secret = template["Resources"][ORIGIN_VERIFY_SECRET]
+    assert secret["Type"] == "AWS::SecretsManager::Secret"
+    generate = secret["Properties"]["GenerateSecretString"]
+    assert generate["PasswordLength"] >= 32
+    assert secret["Properties"]["KmsKeyId"] == {"Ref": "CustomerManagedEncryptionKeyArn"}
+
+
+def test_the_header_gated_rule_is_evaluated_after_the_per_vp_rules(template: dict) -> None:
+    """Ordering is load-bearing, not cosmetic.
+
+    The Virtual Participant creates one rule per participant at run time with
+    priorities 1000-49999 (status-manager.ts generateRulePriority) to route
+    /vnc/<vpId> to that participant's own target group. A lower priority number
+    here would make this rule claim /vnc/* first and send every viewer to the
+    shared target group instead, which routes to an arbitrary running task.
+    """
+    assert template["Resources"]["VNCALBListenerRule"]["Properties"]["Priority"] == 50000
+
+
+def test_the_origin_restriction_follows_the_alb_condition(template: dict) -> None:
+    """No ALB under MICROVM, so nothing here may be created unconditionally."""
+    for name in (ORIGIN_VERIFY_SECRET, "VNCALBListenerRule"):
+        assert template["Resources"][name].get("Condition") == CONDITION
+
+
+def test_the_prefix_list_ingress_is_kept_as_a_coarse_filter(template: dict) -> None:
+    """Useful, but it is the header that identifies the distribution.
+
+    Asserted so that adding the header is not later mistaken for a reason to drop
+    the network-level restriction.
+    """
+    ingress = template["Resources"]["ALBSecurityGroup"]["Properties"]["SecurityGroupIngress"]
+    assert any("SourcePrefixListId" in rule for rule in ingress)
+
+
 def test_the_minter_reads_the_vp_table_and_the_secret_only(template: dict) -> None:
     """Least privilege: one table item read and one secret read."""
     statements = template["Resources"]["VncEdgeTokenFunctionRole"]["Properties"]["Policies"][0][
