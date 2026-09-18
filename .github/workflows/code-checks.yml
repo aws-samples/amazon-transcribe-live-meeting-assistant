@@ -40,11 +40,11 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Matches the python:3.13-bookworm image the GitLab pipeline runs on.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.13'
 
@@ -53,7 +53,7 @@ jobs:
       # older engine). Keep in sync with NODE_VERSION in the root Makefile and
       # with the version installed by .gitlab-ci.yml.
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22.23.2'
           # Caches the npm download cache, keyed on these lockfiles — the
@@ -65,7 +65,7 @@ jobs:
             lma-websocket-transcriber-stack/source/app/package-lock.json
 
       - name: Cache pip downloads
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/pip
           key: pip-${{ runner.os }}-py313-${{ hashFiles('Makefile', 'lib/lma_sdk/pyproject.toml', 'lib/lma_cli_pkg/pyproject.toml', 'lma-asr-microvm-stack/source/requirements-dev.txt') }}
