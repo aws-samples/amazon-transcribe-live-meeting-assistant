@@ -8,8 +8,11 @@
  * platforms (see VPLaunchType in the VP stack):
  *
  *   ECS (EC2/FARGATE) — the VP registers itself with an ALB behind CloudFront,
- *     and the browser connects to `wss://<cloudfront>/vnc/<vpId>` with the
- *     Cognito ID token as a `token` query parameter.
+ *     and the browser connects to `wss://<cloudfront>/vnc/<vpId>` with a
+ *     short-lived, VP-scoped access token as a `token` query parameter. The
+ *     token is minted by the `createVncEdgeToken` resolver, which checks the
+ *     caller's access to that VP first, and is verified by a Lambda@Edge
+ *     viewer-request function before CloudFront forwards to the ALB.
  *
  *   Lambda MicroVMs — each MicroVM has its own endpoint
  *     (`wss://<id>.lambda-microvm.<region>.on.aws`) and there is no path-based
@@ -42,11 +45,11 @@ export const isMicrovmEndpoint = (endpoint) => typeof endpoint === 'string' && e
  *
  * @param {object} args
  * @param {string} args.endpoint   Value published by the backend (vncEndpoint).
- * @param {string} [args.idToken]  Cognito ID token (ECS transport).
+ * @param {string} [args.edgeToken] Signed, VP-scoped edge token (ECS transport).
  * @param {string} [args.authToken] MicroVM JWE auth token (MicroVM transport).
  * @returns {{url: string, wsProtocols: string[]}}
  */
-export const buildVncConnection = ({ endpoint, idToken, authToken }) => {
+export const buildVncConnection = ({ endpoint, edgeToken, authToken }) => {
   if (!endpoint) {
     throw new Error('No VNC endpoint available');
   }
@@ -72,11 +75,13 @@ export const buildVncConnection = ({ endpoint, idToken, authToken }) => {
     };
   }
 
-  if (!idToken) {
-    throw new Error('No Cognito ID token available');
+  if (!edgeToken) {
+    // Fail loudly rather than letting CloudFront answer with a bare 401, which
+    // surfaces in the viewer as an unexplained connection failure.
+    throw new Error('No VNC access token available');
   }
   const url = new URL(endpoint);
-  url.searchParams.append('token', idToken);
+  url.searchParams.append('token', edgeToken);
   return { url: url.toString(), wsProtocols: [] };
 };
 
@@ -116,6 +121,45 @@ export const fetchMicrovmAuthToken = async (client, vpId) => {
     throw new Error('Could not mint a MicroVM auth token for the VNC viewer');
   }
   return token;
+};
+
+/**
+ * GraphQL mutation that mints a signed, VP-scoped token for `/vnc/<vpId>`.
+ *
+ * `vncPassword` is the credential the VP's own VNC server expects. It comes back
+ * with the token so an authorized viewer needs a single round trip; it is null
+ * for tasks that started before the VP began publishing it.
+ */
+export const createVncEdgeTokenMutation = `
+  mutation CreateVncEdgeToken($vpId: ID!) {
+    createVncEdgeToken(vpId: $vpId) {
+      token
+      expiresAt
+      vncPassword
+    }
+  }
+`;
+
+/**
+ * Fetch a fresh edge token (and the VNC server credential) for this VP.
+ *
+ * Signing happens in a resolver, which also confirms the caller's access to the
+ * VP, so the browser never holds the signing key.
+ *
+ * @param {object} client  Amplify GraphQL client.
+ * @param {string} vpId
+ * @returns {Promise<{token: string, vncPassword: ?string}>}
+ */
+export const fetchVncEdgeToken = async (client, vpId) => {
+  const response = await client.graphql({
+    query: createVncEdgeTokenMutation,
+    variables: { vpId },
+  });
+  const minted = response?.data?.createVncEdgeToken;
+  if (!minted?.token) {
+    throw new Error('Could not mint a VNC access token for the viewer');
+  }
+  return { token: minted.token, vncPassword: minted.vncPassword || null };
 };
 
 export default buildVncConnection;

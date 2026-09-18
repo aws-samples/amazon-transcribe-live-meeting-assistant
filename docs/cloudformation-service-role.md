@@ -237,9 +237,9 @@ The role provides access to the following AWS services required by LMA:
 | **Storage & Data** | S3, S3 Vectors, DynamoDB, Kinesis |
 | **API & Application** | AppSync, CloudFront, Elastic Load Balancing |
 | **Security & Identity** | Cognito, KMS, Secrets Manager |
-| **Messaging & Events** | SNS, SES, EventBridge, EventBridge Scheduler |
+| **Messaging & Events** | SNS, SQS, SES, EventBridge, EventBridge Scheduler |
 | **Monitoring** | CloudWatch Logs, X-Ray |
-| **Networking** | EC2/VPC, Auto Scaling |
+| **Networking** | EC2/VPC, Auto Scaling (EC2 and Application) |
 | **Marketplace** | AWS Marketplace |
 
 ### Security Details
@@ -247,7 +247,7 @@ The role provides access to the following AWS services required by LMA:
 - **Trust policy** restricts role assumption to `cloudformation.amazonaws.com` only
 - **Permissions boundary** — when `PermissionsBoundaryArn` is supplied, `iam:CreateRole`, `iam:PutRolePolicy` and `iam:AttachRolePolicy` are conditioned on `iam:PermissionsBoundary`, so the roles created for LMA would stay within that boundary policy. LMA cannot yet deploy in that configuration, so the parameter defaults to empty; see [Permissions boundary](#permissions-boundary-not-yet-supported-end-to-end)
 - **PassRole** lets CloudFormation hand the roles it creates to the services that consume them (Lambda, ECS, CodeBuild, AppSync, Step Functions, Bedrock, and the other services listed above)
-- **Service-linked role creation** is limited to the ECS service
+- **Service-linked role creation** is limited to the ECS and Application Auto Scaling (ECS) services
 - All CloudFormation operations using this role are logged in **CloudTrail**
 - Organizations may further restrict permissions based on their specific compliance requirements
 

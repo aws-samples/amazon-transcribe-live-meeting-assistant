@@ -304,6 +304,28 @@ Parameters:
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
 
+  MeetingInactivityTimeoutInMinutes:
+    Type: Number
+    Default: 240
+    MinValue: 0
+    MaxValue: 10080
+    Description: >-
+      Number of minutes a meeting may go without producing a finalized transcript
+      segment before LMA ends it on the meeting's behalf. A meeting whose client
+      disconnects without sending its end-of-meeting event stays "In Progress"
+      until this timeout elapses. Set to 0 to leave such meetings open.
+
+  MeetingInactivityLookbackInDays:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      How far back to look for meetings to close. A meeting that started longer
+      ago than this is never closed automatically, so raise it temporarily if you
+      are updating a deployment that has accumulated older meetings stuck in
+      progress. Higher values read more meeting records on every run.
+
   # NOTE: These parameters are dynamically updated during release
   BootstrapBucketBaseName:
     Type: String
@@ -609,6 +631,10 @@ Conditions:
   ShouldAllowSignUpEmailDomain:
     !Not [!Equals [!Ref AllowedSignUpEmailDomain, ""]]
   ShouldEnableGeoRestriction: !Not [!Equals [!Ref CloudFrontAllowedGeos, ""]]
+  # A timeout of 0 keeps the reaper's resources in the stack but stops its
+  # schedule, so the setting can be turned back on without a resource replace.
+  ShouldReapInactiveMeetings:
+    !Not [!Equals [!Ref MeetingInactivityTimeoutInMinutes, 0]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
   HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   # Generic WAF enablement - true when WAFAllowedIPv4Ranges is restricted (not 0.0.0.0/0).
@@ -756,6 +782,17 @@ Outputs:
     # export values cannot be changed while an importer exists. Nothing in this
     # solution imports it (the VP stack takes it as a parameter), so dropping
     # the export removes a needless update constraint.
+  # The ARN, not the value: whichever principal creates a listener rule on the
+  # VNC listener needs the origin-verify condition, and reads the value itself
+  # rather than receiving it through a stack parameter or a task environment
+  # variable. The Virtual Participant creates one rule per participant at run
+  # time (status-manager.ts), which is the consumer this is published for.
+  VncOriginVerifyHeaderValueSecretArn:
+    Description: ARN of the secret holding the VNC origin-verify header value
+    Value: !If [ShouldCreateVNCALB, !Ref VncOriginVerifyHeaderValueSecret, ""]
+  VncOriginVerifyHeaderName:
+    Description: Name of the header carrying the VNC origin-verify value
+    Value: x-lma-vnc-origin-verify
   MCPServersTableName:
     Description: Name of the MCP Servers DynamoDB table
     Value: !Ref MCPServersTable
@@ -2089,13 +2126,28 @@ Resources:
             # https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/sam-property-function-kinesis.html#sam-property-function-kinesis--examples
             BatchSize: 200
             BisectBatchOnFunctionError: true
-            # TODO Add SQS queue for discarded records
-            # DestinationConfig:
+            # Batches that remain unprocessable after the retry and record-age
+            # bounds below are described to this queue so the shard can advance.
+            DestinationConfig:
+              OnFailure:
+                Destination: !GetAtt CallEventProcessorDiscardedRecordsQueue.Arn
             Enabled: true
+            # The function answers with the Kinesis sequence numbers that need to
+            # be redelivered, so a single failing record no longer replays the
+            # records that already succeeded alongside it.
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
             MaximumRetryAttempts: 2
             MaximumBatchingWindowInSeconds: 0
             ParallelizationFactor: 10
-            # XXX MaximumRecordAgeInSeconds: 900
+            # Upper bound on how long a record may be retried before it is
+            # reported to the on-failure destination and the shard moves past
+            # it. One hour absorbs a lengthy downstream outage or throttling
+            # episode, while keeping the worst-case delay for live meeting
+            # transcripts sharing the shard well inside the stream's retention
+            # period, so a record that can never succeed cannot stall the shard
+            # for the full retention window.
+            MaximumRecordAgeInSeconds: 3600
             StartingPosition: LATEST
             Stream: !GetAtt DataStreamConsumer.ConsumerARN
             # Tumbling Window is used for aggregations over different invocations
@@ -2167,6 +2219,25 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AsyncAgentAssistOrchestrator.Arn
+            # Two senders share this grant: the event source mapping uses this
+            # role to describe unprocessable batches to the on-failure
+            # destination queue, and the function writes one message per record
+            # it skipped as undecodable.
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt CallEventProcessorDiscardedRecordsQueue.Arn
+            # The discarded records queue is encrypted with a customer-managed
+            # KMS key, so the sender needs a data key for it.
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService":
+                    - !Sub "sqs.${AWS::Region}.${AWS::URLSuffix}"
       Runtime: python3.12
       Timeout: 900
       Environment:
@@ -2201,6 +2272,10 @@ Resources:
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
           PARAMETER_STORE_NAME: !Ref LMASettingsParameterName
+          # Where records that cannot be decoded are copied. Skipping such a
+          # record does not fail the invocation, so the event source mapping's
+          # on-failure destination never sees it.
+          DISCARDED_RECORDS_QUEUE_URL: !Ref CallEventProcessorDiscardedRecordsQueue
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/CallEventProcessorFunction
@@ -2215,6 +2290,29 @@ Resources:
       RetentionInDays:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  # Destination for transcript records the pipeline did not apply, from two
+  # sources. The Kinesis event source mapping writes a description of each batch
+  # it gave up on - stream ARN, shard id and the failing sequence number range -
+  # rather than the record payloads, which remain in the Kinesis stream for the
+  # rest of its retention period and can be replayed from there. The function
+  # itself writes one message per record it skipped as undecodable, carrying that
+  # record's shard id, sequence number and raw payload, because a skipped record
+  # does not fail the invocation and so never reaches the mapping's destination.
+  CallEventProcessorDiscardedRecordsQueue:
+    Type: AWS::SQS::Queue
+    # Un-triaged skip records are data nobody has looked at yet, so they follow
+    # the same retention setting as the tables rather than disappearing with the
+    # stack. Messages still expire on their own after MessageRetentionPeriod.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      KmsMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      KmsDataKeyReusePeriodSeconds: 300
+      # 14 days, the SQS maximum. These messages are the only durable record
+      # that a batch was skipped, so they are kept long enough to survive a
+      # weekend or a holiday before an operator triages them.
+      MessageRetentionPeriod: 1209600
 
   ##########################################################################
   # Transcript Enrichment Lambda Layers
@@ -2995,6 +3093,144 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt UploadMeetingFinalizerEventRule.Arn
 
+  ##########################################################################
+  # Stale Meeting Reaper — ends meetings whose client stopped sending
+  # activity without sending its end-of-meeting event. The Virtual
+  # Participant has the VP stack's task reaper and uploaded recordings have
+  # UploadMeetingFinalizer; this covers the websocket streaming clients
+  # (Stream Audio tab, desktop capture app, browser extension).
+  ##########################################################################
+
+  StaleMeetingReaperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: lambda_function.handler
+      Role: !GetAtt StaleMeetingReaperFunctionExecutionRole.Arn
+      Runtime: python3.12
+      Architectures:
+        - arm64
+      Layers:
+        - !Ref TranscriptEnrichmentPythonLayer
+      CodeUri: ../source/lambda_functions/stale_meeting_reaper
+      Description: Ends meetings with no recent activity by emitting an END event
+      MemorySize: 256
+      Timeout: 300
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          CALL_DATA_STREAM_NAME: !Ref CallDataStream
+          MEETING_INACTIVITY_TIMEOUT_IN_MINUTES: !Ref MeetingInactivityTimeoutInMinutes
+          # How far back a run looks for candidates. Has to exceed the longest
+          # meeting a deployment expects plus the inactivity timeout, because a
+          # meeting that started before the window is not examined — which is why
+          # it is a parameter: an upgrade that inherits older stuck meetings needs
+          # to widen it once without editing the template.
+          REAPER_LOOKBACK_IN_DAYS: !Ref MeetingInactivityLookbackInDays
+          # Caps the meeting rows read per run. Candidates cannot be narrowed on
+          # the index (it projects no Status), so each one costs part of a
+          # BatchGetItem; the newest are read first and the rest wait for the
+          # next run.
+          REAPER_MAX_CANDIDATES: 500
+          # Caps the END events emitted per run.
+          REAPER_MAX_MEETINGS_PER_RUN: 100
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/StaleMeetingReaperFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it runs once per schedule tick"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; the next scheduled run retries any meeting it did not close"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
+    DependsOn:
+      - StaleMeetingReaperFunctionLogGroup
+
+  StaleMeetingReaperFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/StaleMeetingReaperFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  StaleMeetingReaperFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Stale Meeting Reaper Lambda execution role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary:
+        !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref "AWS::NoValue"]
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-StaleMeetingReaper
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Find candidate meetings through the TypeDateIndex GSI, then read
+              # the meeting and upload-job rows for each candidate.
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                Resource:
+                  - !Sub "${EventSourcingTable.Arn}/index/TypeDateIndex"
+              - Effect: Allow
+                Action:
+                  - dynamodb:BatchGetItem
+                Resource: !GetAtt EventSourcingTable.Arn
+              # Emit the same END event the meeting's client would have sent;
+              # call_event_processor applies it.
+              - Effect: Allow
+                Action:
+                  - kinesis:PutRecord
+                Resource: !Ref CallDataStreamArn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+                      - !Sub "kinesis.${AWS::Region}.${AWS::URLSuffix}"
+
+  StaleMeetingReaperScheduleRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub "${AWS::StackName}-StaleMeetingReaper"
+      Description: >-
+        Runs the stale meeting reaper. The interval bounds how long after
+        MeetingInactivityTimeoutInMinutes a meeting keeps showing as in progress.
+      ScheduleExpression: "rate(15 minutes)"
+      State: !If [ShouldReapInactiveMeetings, ENABLED, DISABLED]
+      Targets:
+        - Arn: !GetAtt StaleMeetingReaperFunction.Arn
+          Id: StaleMeetingReaperTarget
+
+  StaleMeetingReaperSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt StaleMeetingReaperFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt StaleMeetingReaperScheduleRule.Arn
+
   UpdateChatButtonConfigResolverFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -3002,7 +3238,7 @@ Resources:
       Role: !GetAtt UpdateChatButtonConfigResolverFunctionExecutionRole.Arn
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/update_chat_button_config_resolver
-      Description: Lambda resolver for updateChatButtonConfig with AF-12 Mass Assignment security fix
+      Description: Lambda resolver that applies updateChatButtonConfig against an allowed field list
       MemorySize: 256
       Timeout: 30
       Environment:
@@ -3093,7 +3329,7 @@ Resources:
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       Name: UpdateChatButtonConfigLambda
-      Description: Lambda function for updateChatButtonConfig with AF-12 security fix
+      Description: Lambda data source backing the updateChatButtonConfig mutation
       Type: AWS_LAMBDA
       ServiceRoleArn: !GetAtt AppSyncUpdateChatButtonConfigLambdaRole.Arn
       LambdaConfig:
@@ -4881,6 +5117,8 @@ Resources:
   ##########################################################################
   VirtualParticipantTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-VirtualParticipant"
       AttributeDefinitions:
@@ -4901,6 +5139,8 @@ Resources:
   # MCP Servers Table - Account-level MCP server configurations
   MCPServersTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-MCPServers"
       AttributeDefinitions:
@@ -4924,6 +5164,10 @@ Resources:
   # OAuth State Table - Temporary storage for OAuth flow state
   OAuthStateTable:
     Type: AWS::DynamoDB::Table
+    # Short-lived TTL rows only, but the policy is applied uniformly so that a
+    # stack delete never removes a table whose contents were not inspected.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-OAuthState"
       AttributeDefinitions:
@@ -4946,6 +5190,8 @@ Resources:
   # MCP API Keys Table - Per-user API keys (hashed)
   MCPApiKeysTable:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Condition: ShouldEnableMCPServer
     Properties:
       TableName: !Sub "${AWS::StackName}-MCPApiKeys"
@@ -5865,6 +6111,8 @@ Resources:
   # VP Task Registry Table - stores task ARNs for efficient termination
   VPTaskRegistry:
     Type: AWS::DynamoDB::Table
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-VPTaskRegistry"
       AttributeDefinitions:
@@ -5966,6 +6214,10 @@ Resources:
   # Entries auto-expire 30 days after lastUsedAt via the expiresAt TTL attribute.
   DomSelectorCache:
     Type: AWS::DynamoDB::Table
+    # Rebuildable cache, but the policy is applied uniformly so that a stack
+    # delete never removes a table whose contents were not inspected.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       TableName: !Sub "${AWS::StackName}-DomSelectorCache"
       AttributeDefinitions:
@@ -7135,6 +7387,25 @@ Resources:
   # Lambda@Edge for VNC Authentication
   ##########################################################################
 
+  # Key used to sign the short-lived access tokens for the /vnc/* behavior.
+  #
+  # Generated once per deployment and read by exactly two principals: the
+  # resolver that mints tokens (VncEdgeTokenFunction) and the Lambda@Edge
+  # function that checks them. Created unconditionally, matching
+  # MicrovmVncTokenFunction, so the AppSync resolver is always present.
+  VncEdgeTokenSigningSecret:
+    Type: AWS::SecretsManager::Secret
+    # checkov:skip=CKV_AWS_149: "Encrypted with the stack's customer-managed key"
+    Properties:
+      Description: !Sub "Signing key for ${AWS::StackName} Virtual Participant VNC access tokens"
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      GenerateSecretString:
+        # Punctuation excluded only so the value stays convenient to handle in
+        # shell/JSON contexts; 64 alphanumeric characters is ample for an
+        # HMAC-SHA256 key.
+        PasswordLength: 64
+        ExcludePunctuation: true
+
   # IAM Role for Lambda@Edge function (must be assumable by both lambda and edgelambda)
   EdgeAuthFunctionRole:
     Type: AWS::IAM::Role
@@ -7154,6 +7425,24 @@ Resources:
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
+      Policies:
+        # Scoped to the one secret the edge function needs, and nothing else.
+        - PolicyName: ReadVncTokenSigningSecret
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref VncEdgeTokenSigningSecret
+              # The secret is encrypted with the customer-managed key, so
+              # GetSecretValue alone is not enough to read it.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
 
   # Custom resource Lambda to deploy Lambda@Edge in us-east-1
   EdgeAuthDeployerRole:
@@ -7237,12 +7526,171 @@ Resources:
       ServiceToken: !GetAtt EdgeAuthDeployerFunction.Arn
       FunctionName: !Sub '${AWS::StackName}-VNCEdgeAuth'
       RoleArn: !GetAtt EdgeAuthFunctionRole.Arn
-      UserPoolId: !Ref UserPoolId
-      Region: !Ref AWS::Region
-      ClientId: !Ref CognitoClientId
+      # Baked into the edge source at create/update time: Lambda@Edge supports
+      # no environment variables, and the replicated function has to be told
+      # which region holds the secret.
+      SigningSecretArn: !Ref VncEdgeTokenSigningSecret
+      SigningSecretRegion: !Ref AWS::Region
       # Hash of the Lambda@Edge code - changing this forces the custom resource to update
       # This value is replaced during the build process by the Makefile
       CodeHash: "EDGE_AUTH_CODE_HASH_PLACEHOLDER"
+
+  ##########################################################################
+  # Token minting for the /vnc/* CloudFront behavior
+  #
+  # The viewer calls createVncEdgeToken(vpId) before connecting. This resolver
+  # confirms the caller's access to that Virtual Participant against the VP
+  # record, then returns a few-minute token signed with
+  # VncEdgeTokenSigningSecret and scoped to that VP's /vnc/<vpId> path, which is
+  # what the Lambda@Edge function checks.
+  #
+  # Created unconditionally (like MicrovmVncTokenFunction) so the resolver is
+  # always attached; the token is only used by the ECS launch types, where the
+  # ALB and CloudFront behavior exist.
+  ##########################################################################
+
+  VncEdgeTokenFunctionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: lambda.amazonaws.com
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: MintVncEdgeToken
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref VncEdgeTokenSigningSecret
+              - Effect: Allow
+                # Look up the caller's VP to confirm access before signing, and
+                # to read the VNC server credential the VP task recorded there.
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt VirtualParticipantTable.Arn
+              # Both the table and the secret are encrypted with the
+              # customer-managed key, so the read actions above are not
+              # sufficient on their own.
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+                      - !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
+
+  # Dedicated, KMS-encrypted log group, matching every other function in this
+  # stack. The function logs VP ids and caller identities, so its logs must not
+  # land in an unencrypted default group.
+  VncEdgeTokenFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VncEdgeTokenFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VncEdgeTokenFunction:
+    Type: AWS::Serverless::Function
+    # The log group is created by this stack, so it must exist before the
+    # function's first invocation could create it implicitly and collide.
+    DependsOn: VncEdgeTokenFunctionLogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: "Function only calls AWS public APIs; no VPC resources"
+          - id: W92
+            reason: "Reserved concurrency not required; invoked once per viewer session"
+    # checkov:skip=CKV_AWS_115: "Reserved concurrency not required"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a synchronous AppSync resolver"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; AWS public APIs only"
+    # checkov:skip=CKV_AWS_173: "Environment contains only a table name and a secret ARN"
+    Properties:
+      Handler: index.lambda_handler
+      Runtime: python3.12
+      Timeout: 15
+      MemorySize: 256
+      Role: !GetAtt VncEdgeTokenFunctionRole.Arn
+      Environment:
+        Variables:
+          VP_TABLE_NAME: !Ref VirtualParticipantTable
+          SIGNING_SECRET_ARN: !Ref VncEdgeTokenSigningSecret
+      CodeUri: ../source/lambda_functions/vnc_edge_token
+      LoggingConfig:
+        LogGroup: !Ref VncEdgeTokenFunctionLogGroup
+
+  VncEdgeTokenDataSourceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: appsync.amazonaws.com
+      Policies:
+        - PolicyName: LambdaInvokePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt VncEdgeTokenFunction.Arn
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+
+  VncEdgeTokenDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: VncEdgeTokenManager
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt VncEdgeTokenDataSourceRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VncEdgeTokenFunction.Arn
+
+  CreateVncEdgeTokenResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Mutation
+      FieldName: createVncEdgeToken
+      DataSourceName: !GetAtt VncEdgeTokenDataSource.Name
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "Invoke",
+          "payload": {
+            "arguments": $utils.toJson($context.arguments),
+            "identity": $utils.toJson($context.identity),
+            "info": {
+              "fieldName": "createVncEdgeToken"
+            }
+          }
+        }
+      ResponseMappingTemplate: |
+        #if($context.error)
+          $utils.error($context.error.message, $context.error.type)
+        #end
+        $utils.toJson($context.result)
 
   ##########################################################################
   # VNC Application Load Balancer for VNC Viewer Remove FrameBuffer Stream
@@ -7439,7 +7887,44 @@ Resources:
         - Key: Name
           Value: !Sub ${LMAStackName}-vnc-tg
 
+  # Shared value that identifies a request as having come through this
+  # deployment's own CloudFront distribution.
+  #
+  # The ALB is internet-facing, because CloudFront needs a publicly resolvable
+  # origin unless VPC origins are used. Two controls narrow who it answers, and
+  # they establish different things. The ingress rule above admits the
+  # `com.amazonaws.global.cloudfront.origin-facing` managed prefix list, which is
+  # the address range CloudFront uses when it calls an origin -- a range the
+  # service shares across the distributions it serves. This value is what ties a
+  # request to this deployment's own distribution: the distribution attaches it to
+  # every origin request (OriginCustomHeaders on the vnc-alb origin), and the
+  # listener forwards only when it matches. Keep both.
+  #
+  # Only the value is generated. The header NAME is a constant, because it
+  # travels in clear text on every origin request and so carries no secrecy --
+  # generating it would add a secret to manage without adding entropy. (The
+  # WebSocket transcriber stack generates both; the value is the part that
+  # matters in each.)
+  VncOriginVerifyHeaderValueSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: ShouldCreateVNCALB
+    # checkov:skip=CKV_AWS_149: "Encrypted with the stack's customer-managed key"
+    Properties:
+      Description: !Sub "Identifies ${AWS::StackName} CloudFront requests to the Virtual Participant VNC load balancer"
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+      GenerateSecretString:
+        SecretStringTemplate: '{"header_value": "vnc_origin_verify"}'
+        GenerateStringKey: headersecret
+        PasswordLength: 32
+        ExcludeCharacters: "\"@/\\;.:+' %"
+        ExcludePunctuation: true
+
   # HTTP Listener (port 80)
+  #
+  # The default action refuses the request. Every route to a Virtual Participant
+  # is expressed as a rule that names its condition, so a request reaching the
+  # load balancer that matches none of them is answered here rather than
+  # forwarded to whichever target group happened to be the default.
   VNCALBListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     # checkov:skip=CKV_AWS_103: ALB uses HTTP for internal traffic; TLS termination handled at CloudFront layer with Lambda@Edge auth
@@ -7450,6 +7935,42 @@ Resources:
       Port: 80
       Protocol: HTTP
       DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: text/plain
+            MessageBody: "Access denied"
+            StatusCode: "403"
+
+  # Forwards to the shared VNC target group, which the ECS service registers its
+  # tasks into, for requests carrying this deployment's origin-verify header.
+  #
+  # Priority 50000 is the lowest the service allows, so this is evaluated after
+  # the per-VP rules that the VP task creates at run time (those use priorities
+  # 1000-49999, see status-manager.ts generateRulePriority). Ordering matters:
+  # at a higher priority this rule would claim /vnc/* before the per-VP rule
+  # could route to that participant's own target group.
+  VNCALBListenerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Condition: ShouldCreateVNCALB
+    DependsOn: VncOriginVerifyHeaderValueSecret
+    Properties:
+      ListenerArn: !Ref VNCALBListener
+      Priority: 50000
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values:
+              - "/vnc/*"
+        - Field: http-header
+          HttpHeaderConfig:
+            # Must stay identical to the OriginCustomHeaders entry on the
+            # vnc-alb origin. The template has no Mappings section to hold a
+            # shared constant, so test_ai_stack_vnc_alb.py asserts the two
+            # spellings match rather than relying on them being edited together.
+            HttpHeaderName: x-lma-vnc-origin-verify
+            Values:
+              - !Sub "{{resolve:secretsmanager:${VncOriginVerifyHeaderValueSecret}::headersecret}}"
+      Actions:
         - Type: forward
           TargetGroupArn: !Ref VNCTargetGroup
 
@@ -7869,6 +8390,13 @@ Resources:
                 HTTPPort: 80
                 HTTPSPort: 443
                 OriginProtocolPolicy: http-only
+              # Identifies the request as having come through this deployment's
+              # own distribution, which the load balancer's listener rule
+              # requires. The header name must stay identical to the one in
+              # VNCALBListenerRule; test_ai_stack_vnc_alb.py pins them together.
+              OriginCustomHeaders:
+                - HeaderName: x-lma-vnc-origin-verify
+                  HeaderValue: !Sub "{{resolve:secretsmanager:${VncOriginVerifyHeaderValueSecret}::headersecret}}"
           - - Id: webapp-s3-bucket
               DomainName: !GetAtt WebAppBucket.RegionalDomainName
               S3OriginConfig:

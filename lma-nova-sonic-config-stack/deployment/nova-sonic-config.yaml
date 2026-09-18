@@ -21,11 +21,27 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Retain the Nova Sonic configuration table when the stack is deleted. The
+      system prompt and model settings in it are edited from the LMA web UI.
+
+Conditions:
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
+
 Resources:
   # DynamoDB Table for Nova Sonic Configuration
   NovaSonicConfigTable:
     Type: AWS::DynamoDB::Table
     # DDB-002: Data plane logging disabled due to cost; control plane logging via CloudTrail is sufficient for security auditing
+    # Holds the voice assistant prompt and model settings edited from the web UI.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       KeySchema:
         - AttributeName: NovaSonicConfigId

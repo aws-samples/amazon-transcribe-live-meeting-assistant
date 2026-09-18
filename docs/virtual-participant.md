@@ -17,6 +17,8 @@ title: "Virtual Participant"
 - [Meeting Scheduling](#meeting-scheduling)
 - [Meeting Invitation Parsing](#meeting-invitation-parsing)
 - [VNC Preview](#vnc-preview)
+  - [How a viewer is authorized](#how-a-viewer-is-authorized)
+    - [Known limitations](#known-limitations)
 - [Launch Types](#launch-types)
   - [MicroVM launch type (default)](#microvm-launch-type-default)
 - [EC2 Instance Types](#ec2-instance-types)
@@ -144,6 +146,141 @@ The VNC preview provides real-time browser viewing and remote control of the VP'
 - See exactly what the VP sees in the meeting
 - Interact with the VP's browser session remotely
 - Troubleshoot joining issues in real time
+
+### How a viewer is authorized
+
+Opening the viewer takes two steps, both of which happen automatically in the UI, and rests
+on a third control at the load balancer.
+
+**1. A token for the connection.** Before it opens the WebSocket, the viewer calls a
+GraphQL mutation to mint a token for the specific Virtual Participant it is about to
+watch. The resolver looks the VP up in DynamoDB and mints only for the VP's owner, a
+user it has been shared with, or a member of the `Admin` group. Which mutation it
+calls depends on the launch type:
+
+| Launch type | Mutation | Transport |
+|---|---|---|
+| `MICROVM` | `createMicrovmVncToken(vpId)` | Port-scoped auth token passed as a WebSocket subprotocol to the MicroVM's own endpoint |
+| `EC2` / `FARGATE` | `createVncEdgeToken(vpId)` | Token passed as the `token` query parameter on `wss://<cloudfront>/vnc/<vpId>` |
+
+For the ECS launch types the token is `base64url(payload).base64url(HMAC-SHA256(payload))`.
+The payload names the `vpId`, the `/vnc/<vpId>` path, the target port, and an expiry a few
+minutes out. A Lambda@Edge viewer-request function on the CloudFront `/vnc/*` behavior
+recomputes the MAC and forwards the request only when the signature matches, the expiry is
+inside the permitted window, and both the `vpId` and the path in the payload equal the ones
+in the request. The signing key is generated per deployment into AWS Secrets Manager and
+read only by the minting resolver and the edge function; the edge function fetches it once
+per cold start from the stack's home region (Lambda@Edge takes no environment variables and
+supports no layers, so the secret ARN and region are substituted into its source at deploy
+time) and refuses the request if it cannot read it. Both mutations mint on demand per viewer
+session, so the viewer's existing auto-reconnect simply mints again.
+
+This is one of three controls, not the whole of it. The edge function sees traffic that
+arrives through this deployment's CloudFront distribution, which is what step 3 below
+establishes for every route into a task; the credential in step 2 applies at the VNC server
+itself.
+
+**2. A credential for the VNC server.** On the ECS launch types the VP generates a
+random VNC credential when it boots and publishes it on its own record; the
+`createVncEdgeToken` response carries it back to the already-authorized viewer, which
+supplies it to the server. The credential belongs to one task and is replaced on every
+boot. Under `MICROVM` the VP runs as a pre-snapshot stack at image-build time, where
+there is no per-meeting record to publish a credential to and any credential would be
+captured in the snapshot and shared by every launch; there the framebuffer is bound to the
+VM's loopback interface and the port-scoped auth token is the only route in.
+
+**3. An origin-verify header on the load balancer.** The CloudFront distribution attaches a
+per-deployment header value to every request it sends to the VNC load balancer, and the load
+balancer forwards only requests carrying it — anything else gets a 403. This applies to both
+routes into a task: the rule the AI stack creates for the shared target group, and the rule
+each Virtual Participant creates for its own path at run time. The participant is given the
+secret's ARN, not its value, and reads the value from Secrets Manager once when it starts, so
+the value never appears in its task definition; if it cannot read the value it does not
+create a routing rule at all, and the participant fails to start rather than being reachable
+without the header.
+
+The load balancer's security group additionally admits only CloudFront's
+`com.amazonaws.global.cloudfront.origin-facing` managed prefix list. That is a useful coarse
+filter, and it establishes that a request came from CloudFront. The header establishes the
+narrower property: that it came through this deployment's own distribution.
+
+> **If you are upgrading, these take effect only after the Virtual Participant container
+> image is rebuilt** — both are applied in code that runs inside the container:
+>
+> - The framebuffer's loopback binding (`entrypoint.sh`). Under `MICROVM` this runs at
+>   image-build time, so it lands when the MicroVM snapshot is rebuilt; existing snapshots
+>   keep the previous binding until then.
+> - The origin-verify condition on the per-participant routing rule (`status-manager.ts`).
+>
+> Everything else in this section — the token check at the edge, the mutations, and the
+> load balancer's own rule and default response — is CloudFormation and applies as soon as
+> the stack update completes.
+>
+> Virtual Participants that are already running when the stack updates keep the routing rule
+> their task created; those rules are deleted when each participant's meeting ends, by the
+> same cleanup that removes its target group, so they clear on their own as those meetings
+> finish. A rule can outlive its task if that task ended without the cleanup running; a
+> participant started afterwards on the rebuilt image replaces any rule it finds on its own
+> path before creating its own, and a leftover rule for a participant that no longer exists
+> can be deleted from the load balancer's listener by hand (its `VirtualParticipantId` tag
+> names the participant it belonged to).
+
+#### Known limitations
+
+These are current trade-offs rather than oversights, recorded so they are visible when
+planning changes to this path.
+
+**The ECS token is a bearer credential in a URL.** Browsers cannot set headers on a
+WebSocket handshake, so the token travels as the `token` query parameter, and the `/vnc/*`
+behavior sets `ForwardedValues: QueryString: true`. It therefore appears in CloudFront
+access logs and in browser history, and it is a bearer credential — valid for whoever
+presents it, with nothing binding it to the browser it was minted for. Its few-minute
+lifetime and the VNC server credential are what bound that. The MicroVM path avoids
+carrying the token in the URL at all, by passing it as a WebSocket
+subprotocol, which is the same trick applied to a different endpoint. The same approach
+could in principle be used here, but websockify would have to be configured to accept and
+ignore the extra subprotocol, and the edge function would have to read it from the
+`Sec-WebSocket-Protocol` header instead of the query string; that has not been done.
+
+**The edge function calls Secrets Manager cross-region on a cold start.** A viewer-request
+trigger is capped at 5 seconds and 128 MB, and the signing key lives in one region while
+the function runs replicated in whichever edge region is nearest the viewer. The call is
+made once per container and cached for its lifetime, and the function refuses the request
+if it cannot complete — so the failure mode is a viewer in a distant region intermittently
+being unable to open the live view, not an unchecked request. Lambda@Edge cannot be
+pre-warmed. Worth watching after a first deployment.
+
+**Rotating the signing key requires a deliberate rollover.** The key is cached for the life
+of each edge container with no TTL, and nothing rotates it on a schedule. Replacing the
+secret's value therefore leaves already-warm replicas verifying against the previous key and
+rejecting newly minted tokens, for as long as those containers live — an interval that is
+not bounded by anything in the design. A rotation needs either a tolerated window of
+failures or a change that lets the function hold more than one key.
+
+**Rotating the origin-verify value is harder still, and needs a stack update.** Five places
+hold it: the CloudFront origin's header and the load balancer's own rule, both resolved at
+stack create/update; the in-memory copy each running task read when it started; the literal
+baked into each per-participant rule already on the listener; and Secrets Manager itself,
+which newly started tasks read live. Replacing the secret's value **without** a stack update
+leaves running participants working while every newly started one becomes unviewable — its
+rule carries the new value, the distribution still sends the old one, so requests fall
+through to the load balancer's own rule and return a 503 from the shared target group, which
+holds no targets. Doing it **with** a stack update inverts that: new participants work and
+every already-running one becomes unviewable for the remainder of its meeting. Either way a
+rotation requires a stack update and interrupts live viewing for an interval bounded only by
+how long the longest running meeting lasts. There is no rotation schedule on this secret, or
+on any secret in this solution. Live viewing is a diagnostic aid rather than part of the
+capture path, so a rotation does not affect transcription or recording.
+
+**The hop from CloudFront to the load balancer is not encrypted.** The `vnc-alb` origin is
+configured `OriginProtocolPolicy: http-only`, so the origin-verify header, the access token
+in the query string, the VNC server credential in the RFB handshake and the framebuffer
+itself all travel in clear text between the CloudFront edge and an internet-facing load
+balancer. HTTPS to this origin is not available: CloudFront requires a publicly trusted
+certificate matching the origin's domain name, and one cannot be issued for an
+`*.elb.amazonaws.com` name. Moving the load balancer behind a **CloudFront VPC origin** is
+the change that removes this along with the public DNS name, and is the recommended
+direction for this path.
 
 ## Launch Types
 
