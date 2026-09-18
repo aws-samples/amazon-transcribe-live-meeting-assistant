@@ -637,7 +637,10 @@ endif
 # present: this is a public repository and working trees here routinely contain
 # large local scratch directories, so `git add .` is the wrong default. The
 # staged diffstat and the generated message are shown and confirmed before
-# anything is committed or pushed. _commit-preflight runs those checks up front
+# anything is committed or pushed, and the prompt names the resolved upstream
+# (remote + branch) rather than just the local branch, because upstreams differ
+# per branch in this repo. Committing straight to develop or main is refused:
+# changes go through a pull request. _commit-preflight runs those checks up front
 # too, so `make commit` fails in a second rather than after the full test run.
 .PHONY: commit fastcommit _commit-preflight _commit-push
 
@@ -652,6 +655,13 @@ _commit-preflight:
 		echo -e "$(RED)ERROR: this target needs an interactive terminal (it asks for confirmation).$(NC)"; \
 		exit 1; \
 	fi
+	@BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	case "$$BRANCH" in \
+		develop|main) \
+			echo -e "$(RED)ERROR: refusing to commit directly to '$$BRANCH'.$(NC)"; \
+			echo -e "$(YELLOW)Create a branch ('git switch -c feature/<name>') and open a pull request instead.$(NC)"; \
+			exit 1;; \
+	esac
 	@UNTRACKED=$$(git ls-files --others --exclude-standard); \
 	if [ -n "$$UNTRACKED" ]; then \
 		echo -e "$(RED)ERROR: untracked files present — refusing to commit.$(NC)"; \
@@ -661,21 +671,24 @@ _commit-preflight:
 	fi
 
 _commit-push: _commit-preflight
-	@git add -u; \
-	if git diff --cached --quiet; then \
+	@git add -u
+	@if git diff --cached --quiet; then \
 		echo -e "$(YELLOW)Nothing staged — no tracked files changed.$(NC)"; \
 		exit 0; \
 	fi; \
-	BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	TARGET=$$(git rev-parse --abbrev-ref --symbolic-full-name @{upstream} 2>/dev/null); \
+	if [ -z "$$TARGET" ]; then \
+		TARGET="$$(git rev-parse --abbrev-ref HEAD) (no upstream set — 'git push' will ask for one)"; \
+	fi; \
 	echo -e "$(CYAN)Staged changes:$(NC)"; \
 	git diff --cached --stat; \
 	echo "Generating commit message via Bedrock..."; \
 	COMMIT_MESSAGE=$$(bash scripts/generate_commit_message.sh) || exit 1; \
 	echo -e "$(CYAN)Commit message:$(NC) $$COMMIT_MESSAGE"; \
-	read -r -p "Commit the above and push to '$$BRANCH'? [y/N] " REPLY; \
+	read -r -p "Commit the above and push to $$TARGET? [y/N] " REPLY; \
 	case "$$REPLY" in \
 		[yY]|[yY][eE][sS]) ;; \
-		*) echo -e "$(YELLOW)Aborted — changes left staged.$(NC)"; exit 1;; \
+		*) echo -e "$(YELLOW)Aborted — changes left staged.$(NC)"; exit 0;; \
 	esac; \
 	git commit -m "$$COMMIT_MESSAGE" && git push
 
