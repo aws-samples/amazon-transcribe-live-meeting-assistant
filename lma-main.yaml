@@ -1173,7 +1173,7 @@ Rules:
   TranscriberSingleTaskWhenVideoRecordingEnabled:
     RuleCondition: !Equals [!Ref EnableVideoRecording, "true"]
     Assertions:
-      - Assert: !Equals [!Ref TranscriberDesiredTaskCount, 1]
+      - Assert: !Equals [!Ref TranscriberDesiredTaskCount, "1"]
         AssertDescription:
           TranscriberDesiredTaskCount must be 1 when EnableVideoRecording is
           'true' — meeting video can only be attached by the task holding that
