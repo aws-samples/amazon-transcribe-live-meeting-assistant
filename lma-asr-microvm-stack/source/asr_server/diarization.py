@@ -663,6 +663,15 @@ class DiarizingRecognizer(Recognizer):
         # Audio time of the last boundary search, so the segmentation model runs about
         # once per turn_cut_interval_ms rather than on every hypothesis change.
         self._last_cut_check = 0.0
+        _LOG.info(
+            "speaker registry ready: threshold=%.2f max_speakers=%d min_segment_ms=%d "
+            "split_on_speaker_change=%s live_turn_cut=%s",
+            threshold,
+            max_speakers,
+            min_segment_ms,
+            split_on_speaker_change,
+            live_turn_cut,
+        )
 
     @property
     def registry(self) -> SpeakerRegistry:
@@ -789,9 +798,9 @@ class DiarizingRecognizer(Recognizer):
         if committed_end is None:
             return event
         if event.words:
-            # Exact: partition by time on the authoritative word list rather than by
-            # matching a string prefix that the decoder may have revised.
-            words = [word for word in event.words if word.s >= committed_end]
+            # Partition the authoritative word list by each word's END: a one-token
+            # word starts and ends on the same timestamp.
+            words = [word for word in event.words if word.e > committed_end]
             text = " ".join(word.w for word in words)
         else:
             words = []
@@ -821,8 +830,15 @@ class DiarizingRecognizer(Recognizer):
         if not self._committed or not words:
             return []
         corrections: list[Event] = []
+        lower: float | None = None
         for row in self._committed:
-            spanned = [word for word in words if word.s >= row.start and word.e <= row.end]
+            spanned = [
+                word
+                for word in words
+                if (word.s >= row.start if lower is None else word.e > lower)
+                and word.e <= row.end
+            ]
+            lower = row.end
             text = " ".join(word.w for word in spanned)
             # An empty result means the revision dropped the row's words entirely;
             # there is nothing better to show than what was already sent, and blanking
@@ -917,7 +933,12 @@ class DiarizingRecognizer(Recognizer):
 
     def _commit(self, words: list[WordTiming], start: float, cut: float) -> list[Event]:
         """Emit the open segment up to ``cut`` as a final, and record it as sent."""
-        prefix = [word for word in words if word.s >= start and word.e <= cut]
+        after = self._committed_end
+        prefix = [
+            word
+            for word in words
+            if (word.s >= start if after is None else word.e > after) and word.e <= cut
+        ]
         if not prefix:
             return []
         end = prefix[-1].e
@@ -936,8 +957,10 @@ class DiarizingRecognizer(Recognizer):
         )
         self._segment_offset += 1
         _LOG.info(
-            "live turn cut at %.2fs: emitting %d word(s) as segment %d (speaker %s)",
+            "live turn cut at %.2fs (boundary %.2fs): emitting %d word(s) as segment %d "
+            "(speaker %s)",
             end,
+            cut,
             len(prefix),
             segment,
             speaker,
@@ -959,9 +982,9 @@ class DiarizingRecognizer(Recognizer):
     def _parts(self, event: Event, segment: list[float]) -> list[_SegmentPart]:
         """One part per speaker turn in the closed segment.
 
-        Cuts snap to word boundaries, so no word is split across two rows, and a
-        cut that would leave a part too short to embed is dropped rather than
-        producing a row nobody can attribute.
+        Cuts snap to word boundaries. A part too short to embed folds into a
+        neighbour: later groups into the part before them, a leading group into the
+        part after it (alone, it would inherit the previous row's speaker).
         """
         whole = _SegmentPart(
             start=event.start,
@@ -1051,6 +1074,16 @@ class DiarizingRecognizer(Recognizer):
                     samples=samples,
                 )
             )
+        if len(parts) > 1 and len(parts[0].samples) < self._min_segment_samples:
+            head, following = parts[0], parts[1]
+            parts[1] = _SegmentPart(
+                start=head.start,
+                end=following.end,
+                text=f"{head.text} {following.text}".strip(),
+                words=head.words + following.words,
+                samples=self._sub_samples(segment, event.start, head.start, following.end),
+            )
+            del parts[0]
         _LOG.info(
             "turn detection: segment %s (%.2fs, %d words) - %d boundary(ies) at %s, "
             "%d overlap span(s), emitting %d row(s)",

@@ -79,12 +79,19 @@ code_checks:
     # VP CloudFormation template invariants (state machine renders for each
     # launch type; ECS paths unchanged by the MICROVM addition).
     - make test-vp-template
-    # Fastify 5 websocket smoke test (boots the server, round-trips a frame).
-    - cd lma-websocket-transcriber-stack/source/app && npm ci && npm run smoke
+    # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
+    - make test-asr
+    # WebSocket transcriber: unit tests (tsc + eslint via `npm run build`, then
+    # node --test on dist) followed by the Fastify 5 websocket smoke test, which
+    # boots the server and round-trips a frame — runtime coverage the unit tests
+    # do not provide.
+    - cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
 
 # ── security_review: SRT ────────────────────────────────────────────────────
-# Runs on MRs targeting `develop` only. Suppression decisions are read from the
-# committed .srt/issues.json.
+# Runs on MRs targeting `develop` only. Review decisions are read from the
+# committed .srt/suppressions.json: `make srt-scan` depends on `srt-seed`, which
+# restores .srt/issues.json (the working file SRT reads and rewrites, generated
+# output and therefore not committed) from those decisions before the scan.
 srt_security_review:
   stage: security_review
   timeout: 30m

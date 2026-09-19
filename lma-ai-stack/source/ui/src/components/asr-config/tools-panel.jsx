@@ -10,42 +10,38 @@ const DOCS_BASE = 'https://aws-samples.github.io/amazon-transcribe-live-meeting-
 
 const header = (
   <h2>
-    ASR Configuration <Badge color="severity-medium">Experimental</Badge>
+    Transcription Engine <Badge color="severity-medium">Experimental</Badge>
   </h2>
 );
 const content = (
   <>
     <p>
-      <b>This engine is experimental and not production ready.</b> Its transcript quality is below Amazon
-      Transcribe&apos;s, speaker labels require a calibrated operating point, and defaults may change between releases.
-      Amazon Transcribe remains the recommended engine for production meetings.
+      Which engine transcribes Stream Audio, Chrome extension and Desktop Capture meetings, and which transcribes
+      Virtual Participants. Both settings apply to meetings started after you save.
     </p>
+    <h3>Amazon Transcribe</h3>
+    <p>The default and the recommended engine for production: redaction, custom vocabulary, 30+ languages.</p>
+    <h3>On-demand speech engine</h3>
     <p>
-      Tune the on-demand ASR &amp; speaker diarization engine without redeploying. Every field is an optional override
-      on the deployment defaults, read at the start of each meeting.
+      Open-source models on a MicroVM launched per meeting in this account. Transcribes and identifies speakers in one
+      pass, so several people sharing one microphone come apart. English only, transcript quality below Amazon
+      Transcribe, and none of the Transcribe features above. A meeting whose engine cannot start falls back to Amazon
+      Transcribe.
     </p>
-    <h3>Tuning order when one person appears as several speakers</h3>
-    <ol>
-      <li>
-        <b>Speaker similarity threshold</b> — the usual cause. It is specific to the speaker model: measured at 0.2 for
-        the default TitaNet embedder, where different speakers scored at most 0.107 and the same speaker 0.25–0.5.
-      </li>
-      <li>
-        <b>Minimum utterance for speaker ID</b> — raise it. Embeddings from one- or two-word utterances are unreliable
-        and are where phantom speakers come from.
-      </li>
-      <li>
-        <b>Maximum speakers per channel</b> — a hard cap. It bounds the symptom rather than fixing the operating point,
-        so reach for it last, and only when the meeting size is known.
-      </li>
-    </ol>
+    <h3>Virtual Participant voice separation</h3>
+    <p>
+      Speakers are named from the meeting roster. Turn this on only when one attendee carries several people; the engine
+      then labels their voices <i>Name (spk_0)</i>, <i>Name (spk_1)</i>.
+    </p>
     <h3>Notes</h3>
     <ul>
-      <li>Each audio channel is diarized independently, so a voice on the mic is never a tab speaker.</li>
-      <li>Speaker labels are per meeting, not identities, and are least accurate in the first minute.</li>
       <li>
-        A meeting on this engine does not use Amazon Transcribe, so redaction, custom vocabulary, custom language models
-        and language identification do not apply to it.
+        The speaker similarity threshold and minimum utterance length are measured for the model bundle and baked into
+        the ASR image.
+      </li>
+      <li>Speaker labels are per meeting and per audio channel, not identities.</li>
+      <li>
+        The Desktop Capture apps can still force an engine per run with <code>--asr-engine</code>.
       </li>
     </ul>
     <h3>Documentation</h3>

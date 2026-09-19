@@ -3,19 +3,25 @@
 # See the LICENSE file in the project root for full license information.
 """AppSync Lambda resolver for the updateAsrConfig mutation.
 
-Runtime overrides for the MicroVM ASR engine's diarization operating point. These
-exist because the operating point is empirical and model-specific: the shipped
-threshold was measured on real meeting audio, and re-measuring it for a different
-embedder, language or microphone should not require a stack update.
+The on-demand ASR engine has exactly three runtime switches, all booleans, all
+read at the start of each meeting so a change needs no stack update:
 
-Only fields in ALLOWED_FIELDS are stored, each range-checked. An omitted or blank
-field means "use the stack parameter", so this table holds overrides, not a
-complete configuration — there is no default record to keep in sync.
+* streamingEngineMicrovm - streaming meetings (Stream Audio, the Chrome extension,
+  the Desktop Capture apps) use the on-demand engine instead of Amazon Transcribe.
+* virtualParticipantEngineMicrovm - Virtual Participants use the on-demand engine.
+* diarizeVirtualParticipant - a Virtual Participant on the on-demand engine asks
+  for per-voice labels, so several people behind one attendee tile come out as
+  "Name (spk_0)", "Name (spk_1)" instead of one name.
+
+There are deliberately no tuning fields. The diarization operating point (the
+similarity threshold and the minimum utterance length) is measured for the model
+bundle and baked into the ASR image; it is not something a deployment should have
+to know a number for, and a guessed value fragments or merges speakers.
 """
 
 import json
 import os
-from typing import Any
+from typing import Any, Optional
 
 import boto3
 
@@ -23,66 +29,31 @@ dynamodb = boto3.resource("dynamodb")
 
 CONFIG_ID = "CustomAsrConfig"
 
-# Numeric overrides: field -> (minimum, maximum, kind).
-NUMERIC_FIELDS = {
-    # Cosine similarity. Specific to the speaker model; 0.2 is the measured
-    # operating point for TitaNet, where different speakers scored at most 0.107.
-    "speakerThreshold": (0.0, 1.0, float),
-    # Shortest utterance worth embedding. Below this a segment inherits the current
-    # speaker instead of minting an identity from an unreliable embedding.
-    "minSegmentMs": (0, 5000, int),
-    # 0 discovers as many speakers as appear; a cap is a safety net, not a fix.
-    "maxSpeakers": (0, 30, int),
-    # Trailing silence that closes an utterance.
-    "endpointingMs": (200, 5000, int),
-    # How often to look for a speaker change inside an open utterance. Each search
-    # is one segmentation-model window, so this bounds the added inference.
-    "turnCutIntervalMs": (200, 10000, int),
-    # Close a row after this much unbroken speech even with no speaker change found.
-    # 0 follows the engine's own utterance boundaries.
-    "maxOpenSegmentMs": (0, 60000, int),
-}
-
-BOOLEAN_FIELDS = {
-    # Withhold the first unmatched embedding until a second one agrees with it.
-    # Off by default: measured to cost attribution purity when the threshold is
-    # already correct, and to merge speakers when it is too high.
-    "requireCorroboration",
-    # Split one endpointed utterance into a row per speaker turn, using the baked
-    # pyannote segmentation model. On by default when that model is present.
-    "splitOnSpeakerChange",
-    # Close a row as soon as a speaker change is confirmed, rather than waiting for
-    # endpointing silence. Endpointing is what used to separate speakers, so two
-    # people talking without a gap shared one row until somebody paused.
-    "liveTurnCut",
-    # Route every streaming meeting to the MicroVM engine, not just those that ask
-    # for diarization.
-    "engineDefaultMicrovm",
-    "diarizeByDefault",
-}
-
-ALLOWED_FIELDS = set(NUMERIC_FIELDS) | BOOLEAN_FIELDS
+BOOLEAN_FIELDS = frozenset(
+    {"streamingEngineMicrovm", "virtualParticipantEngineMicrovm", "diarizeVirtualParticipant"}
+)
+ALLOWED_FIELDS = BOOLEAN_FIELDS
 
 
-def _coerce_numeric(key: str, value: Any) -> float | int | None:
-    minimum, maximum, kind = NUMERIC_FIELDS[key]
-    try:
-        number = kind(value)
-    except (TypeError, ValueError):
-        print(f"Invalid {key} (not a {kind.__name__}): {value!r}, skipping")
-        return None
-    if not minimum <= number <= maximum:
-        print(f"Invalid {key} ({number} outside [{minimum}, {maximum}]), skipping")
-        return None
-    return number
+def _as_switch(value: Any) -> Optional[bool]:
+    """A boolean, or the strings "true"/"false" in any case; anything else is None."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            return True
+        if lowered == "false":
+            return False
+    return None
 
 
 def lambda_handler(event: dict, context: Any) -> dict:
-    """Validate and store the ASR runtime overrides.
+    """Validate and store the ASR runtime switches.
 
     Returns ``{"AsrConfigId", "Success"}``. Raises only when the request itself is
-    unusable; an individual bad field is dropped with a log line rather than
-    failing the whole save, matching the other config resolvers.
+    unusable; an unknown field is dropped with a log line rather than failing the
+    whole save, matching the other config resolvers.
     """
     try:
         table = dynamodb.Table(os.environ["ASR_CONFIG_TABLE_NAME"])
@@ -104,18 +75,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
             if key not in ALLOWED_FIELDS:
                 print(f"Filtered out non-allowed field: {key}")
                 continue
-            # An empty string means "unset this override and fall back to the
-            # stack parameter", so it is stored as-is rather than coerced to 0.
-            if value == "" or value is None:
-                item[key] = ""
+            parsed = _as_switch(value)
+            if parsed is None:
+                print(f"Filtered out non-boolean value for {key}: {value!r}")
                 continue
-            if key in NUMERIC_FIELDS:
-                number = _coerce_numeric(key, value)
-                if number is None:
-                    continue
-                item[key] = str(number)
-            else:
-                item[key] = bool(value)
+            item[key] = parsed
 
         table.put_item(Item=item)
         print(f"Updated ASR config: {json.dumps({k: str(v) for k, v in item.items()})}")

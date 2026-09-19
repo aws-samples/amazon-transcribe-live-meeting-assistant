@@ -340,20 +340,19 @@ Parameters:
       must pre-exist in your account,  match the Language Code selected above, and
       use the 'Narrow Band' base model.
 
-  TranscriptionEngine:
+  EnableMicrovmAsr:
     Type: String
-    Default: AmazonTranscribe
+    Default: "false"
     AllowedValues:
-      - AmazonTranscribe
-      - MicrovmAsr
+      - "true"
+      - "false"
     Description: >-
-      Transcription engine for Stream Audio and the Audio Capture apps. Keep
-      AmazonTranscribe unless you are evaluating the EXPERIMENTAL MicrovmAsr engine,
-      which is not production ready. MicrovmAsr is English only, needs a region with
-      AWS Lambda MicroVMs (not GovCloud), and meetings using it get no content
-      redaction, custom vocabulary, custom language model or language ID. Deploying
-      it changes nothing on its own - an admin must enable it per meeting or make it
-      the default on the ASR Config page. See docs/microvm-asr.md.
+      Deploys the EXPERIMENTAL on-demand speech engine (open-source models on AWS
+      Lambda MicroVMs in this account) alongside Amazon Transcribe. Nothing changes
+      until an admin moves Stream Audio, Chrome extension and Desktop Capture
+      meetings, or Virtual Participants, onto it on the Transcription Engine page.
+      English only; requires a region with AWS Lambda MicroVMs. See
+      docs/microvm-asr.md.
 
   ModelValidation:
     Type: String
@@ -567,7 +566,14 @@ Parameters:
       UI; for the Desktop Capture App it is a hard on/off (users opt in per
       machine in the app's Settings, and the server discards video when this is
       false). Video recordings consume additional CPU, ephemeral storage, and S3
-      storage.
+      storage. Leaving this at "true" also pins the WebSocket transcriber service
+      to a single task and forbids transcriber auto scaling, because Desktop
+      Capture App video arrives on a separate connection that must reach the task
+      holding that meeting's audio session; TranscriberDesiredTaskCount above 1
+      and TranscriberAutoScalingEnabled are rejected while this is "true". Only
+      the Desktop Capture App imposes that constraint — Virtual Participant video
+      does not — so scaling the transcriber means giving up desktop video
+      recording, not video recording in principle.
 
   AudioRecordingExpirationInDays:
     Type: Number
@@ -591,6 +597,30 @@ Parameters:
       Number of days to retain turn by turn meeting transcriptions.  Transcriptions
       will be automatically deleted from LMA after this time.
       Specify partial days like 0.5 to retain transcriptions for half a day.
+
+  MeetingInactivityTimeoutInMinutes:
+    Type: Number
+    Default: 240
+    MinValue: 0
+    MaxValue: 10080
+    Description: >-
+      Number of minutes a meeting may go without producing a finalized transcript
+      segment before LMA ends it on the meeting's behalf. A meeting whose client
+      disconnects without sending its end-of-meeting event stays "In Progress"
+      until this timeout elapses. A meeting that is still connected but silent for
+      longer than the timeout is also ended, so keep it comfortably longer than the
+      longest quiet stretch your meetings have. Set to 0 to leave such meetings open.
+
+  MeetingInactivityLookbackInDays:
+    Type: Number
+    Default: 2
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      How far back to look for meetings to close. A meeting that started longer
+      ago than this is never closed automatically, so raise it temporarily if you
+      are updating a deployment that has accumulated older meetings stuck in
+      progress. Higher values read more meeting records on every run.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
@@ -759,6 +789,60 @@ Parameters:
     Description: >-
       Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
 
+  TranscriberDesiredTaskCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 20
+    Description: >-
+      Number of Fargate tasks running the WebSocket transcriber service (used by
+      the Stream Audio page and the desktop capture apps). Leave at 1 unless
+      EnableVideoRecording is false: with video recording enabled, the desktop
+      video stream arrives as a separate connection that must reach the task
+      holding the meeting's audio session, which only a single task guarantees.
+
+  TranscriberAutoScalingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Scale the WebSocket transcriber service on average CPU utilization.
+      Requires EnableVideoRecording to be false, for the same reason as
+      TranscriberDesiredTaskCount. Capacity is only ever added automatically, so
+      that scaling never interrupts a meeting in progress; it stays at its high
+      water mark until you reduce it deliberately, or until you set this back to
+      "false" and the task count returns to TranscriberDesiredTaskCount.
+
+  TranscriberMinTaskCount:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 20
+    Description: >-
+      Minimum number of WebSocket transcriber tasks when
+      TranscriberAutoScalingEnabled is true.
+
+  TranscriberMaxTaskCount:
+    Type: Number
+    Default: 4
+    MinValue: 1
+    MaxValue: 50
+    Description: >-
+      Maximum number of WebSocket transcriber tasks when
+      TranscriberAutoScalingEnabled is true.
+
+  TranscriberScalingCpuTargetPercent:
+    Type: Number
+    Default: 35
+    MinValue: 10
+    MaxValue: 90
+    Description: >-
+      Average CPU utilization that WebSocket transcriber auto scaling aims to
+      hold. Kept below the load at which a task reports itself unhealthy to the
+      load balancer.
+
   EnableDataRetentionOnDelete:
     Type: String
     Default: "true"
@@ -853,9 +937,17 @@ Metadata:
           - CustomVocabularyName
           - CustomLanguageModelName
       - Label:
-          default: EXPERIMENTAL - On-demand ASR and Diarization (MicroVM, alternative to Amazon Transcribe)
+          default: On-demand speech engine (EXPERIMENTAL)
         Parameters:
-          - TranscriptionEngine
+          - EnableMicrovmAsr
+      - Label:
+          default: WebSocket Transcriber Service Scaling
+        Parameters:
+          - TranscriberDesiredTaskCount
+          - TranscriberAutoScalingEnabled
+          - TranscriberMinTaskCount
+          - TranscriberMaxTaskCount
+          - TranscriberScalingCpuTargetPercent
       - Label:
           default: Transcript Event Processing Configuration
         Parameters:
@@ -880,6 +972,8 @@ Metadata:
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
+          - MeetingInactivityTimeoutInMinutes
+          - MeetingInactivityLookbackInDays
           - EnableDataRetentionOnDelete
       - Label:
           default: AppSync Configuration
@@ -980,8 +1074,8 @@ Metadata:
         default: Transcription Custom Vocabulary Name
       CustomLanguageModelName:
         default: Transcription Custom Language Model Name
-      TranscriptionEngine:
-        default: Streaming Transcription Engine (EXPERIMENTAL if not AmazonTranscribe)
+      EnableMicrovmAsr:
+        default: Deploy the on-demand speech engine (EXPERIMENTAL)
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
@@ -1012,6 +1106,10 @@ Metadata:
         default: Audio Recording Expiration In Days
       CloudWatchLogsExpirationInDays:
         default: CloudWatch Logs Expiration In Days
+      MeetingInactivityTimeoutInMinutes:
+        default: Meeting Inactivity Timeout In Minutes
+      MeetingInactivityLookbackInDays:
+        default: Meeting Inactivity Lookback In Days
       EnableAppSyncApiCache:
         default: Enable AppSync Api Cache
       AppSyncApiCacheInstanceType:
@@ -1036,6 +1134,16 @@ Metadata:
         default: VP Minimum Warm Instances
       VPMaxInstances:
         default: VP Maximum Instances
+      TranscriberDesiredTaskCount:
+        default: WebSocket Transcriber Task Count
+      TranscriberAutoScalingEnabled:
+        default: Enable WebSocket Transcriber Auto Scaling
+      TranscriberMinTaskCount:
+        default: WebSocket Transcriber Minimum Tasks
+      TranscriberMaxTaskCount:
+        default: WebSocket Transcriber Maximum Tasks
+      TranscriberScalingCpuTargetPercent:
+        default: WebSocket Transcriber Target CPU Utilization (%)
       PermissionsBoundaryArn:
         default: Permissions Boundary ARN
       EnableDataRetentionOnDelete:
@@ -1055,39 +1163,41 @@ Rules:
           BedrockKnowledgeBaseId is required when MeetingAssistService
           is 'STRANDS_BEDROCK_WITH_KB (Use Existing)'
 
+  # Meeting video arrives on a second WebSocket connection that only the task
+  # already hosting that meeting's audio session can attach, and the load
+  # balancer cannot pin a client to a task, so a multi-task transcriber service
+  # refuses video whenever the two connections land on different tasks. Rejecting
+  # the combination at deploy time turns a silent per-meeting failure into an
+  # error on the parameters page. TranscriberDesiredTaskCount has MinValue 1, so
+  # asserting equality with 1 is the same as asserting it is not greater.
+  TranscriberSingleTaskWhenVideoRecordingEnabled:
+    RuleCondition: !Equals [!Ref EnableVideoRecording, "true"]
+    Assertions:
+      - Assert: !Equals [!Ref TranscriberDesiredTaskCount, "1"]
+        AssertDescription:
+          TranscriberDesiredTaskCount must be 1 when EnableVideoRecording is
+          'true' — meeting video can only be attached by the task holding that
+          meeting's audio session. Set EnableVideoRecording to 'false' to run
+          more than one transcriber task.
+      - Assert: !Equals [!Ref TranscriberAutoScalingEnabled, "false"]
+        AssertDescription:
+          TranscriberAutoScalingEnabled must be 'false' when
+          EnableVideoRecording is 'true' — scaling out would place meeting video
+          connections on tasks that do not hold the matching audio session.
+
 Mappings:
-  # Tuning defaults for the EXPERIMENTAL MicroVM ASR engine.
+  # Deploy-time values for the on-demand ASR engine that are deliberately not
+  # CloudFormation parameters: EnableMicrovmAsr is the only deploy-time question,
+  # and the bundle carries its own calibrated operating point.
   #
-  # These were five top-level CloudFormation parameters (AsrModelBundle,
-  # AsrMaxMeetingSeconds, AsrMaxSpeakers, AsrLiveTurnCut, AsrMaxOpenSegmentMs).
-  # They are fixed here instead of asked at deploy time because the engine is not
-  # production ready: exposing its operating point invites tuning a feature whose
-  # defaults are still moving, and it crowded the Parameters page with five
-  # questions almost nobody deploying LMA can answer.
-  #
-  # The values below are exactly what those parameters defaulted to, so a stack
-  # that accepted the defaults is unchanged. A stack that had OVERRIDDEN one is
-  # not: the override disappears with the parameter and this value takes over. In
-  # particular an existing stack on a non-default ModelBundle reverts to
-  # nemotron-titanet-small on the next update and rebuilds the image (~20 min).
-  # Edit the mapping before updating if you need to keep a different bundle.
-  #
-  # Nothing is lost by fixing them. MaxSpeakers, LiveTurnCut and MaxOpenSegmentMs
-  # are all overridable at runtime from the ASR Config page (maxSpeakers,
-  # liveTurnCut, maxOpenSegmentMs), which takes effect on the next meeting with no
-  # stack update. The other two genuinely need a deploy either way: ModelBundle
-  # rebuilds the MicroVM image (~20 min) and MaxMeetingSeconds is a MicroVM
-  # lifetime ceiling.
-  #
-  # ModelBundle must name a bundle in lma-asr-microvm-stack/source/catalog.json;
-  # scripts/sync_bundles.py --check enforces that.
+  # ModelBundle must name a bundle in lma-asr-microvm-stack/source/catalog.json
+  # (scripts/sync_bundles.py --check enforces it); changing it rebuilds the MicroVM
+  # image (~20 min). MaxMeetingSeconds is the per-MicroVM lifetime ceiling and the
+  # cost backstop if a transcriber task dies without releasing one (max 28800).
   AsrDefaults:
     Engine:
-      ModelBundle: nemotron-titanet-small
+      ModelBundle: fastconformer-titanet-small
       MaxMeetingSeconds: "14400"
-      MaxSpeakers: "0"
-      LiveTurnCut: "true"
-      MaxOpenSegmentMs: "20000"
 
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
@@ -1119,13 +1229,13 @@ Conditions:
   ZoomSdkEnabled: !And
     - !Not [!Equals [!Ref ZoomMeetingSdkClientId, ""]]
     - !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
-  ShouldDeployMicrovmAsr: !Equals [!Ref TranscriptionEngine, "MicrovmAsr"]
+  ShouldDeployMicrovmAsr: !Equals [!Ref EnableMicrovmAsr, "true"]
   ShouldEnableAsrDiarization: !And
     - !Condition ShouldDeployMicrovmAsr
     - !Not
       - !Equals
         - !FindInMap [AsrDefaults, Engine, ModelBundle]
-        - "transcription-only"
+        - "fastconformer-transcription-only"
 
 Resources:
   ##########################################################################
@@ -2401,6 +2511,7 @@ Resources:
         Domain: "Default"
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
   CHATBUTTONCONFIGSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2412,6 +2523,7 @@ Resources:
       Parameters:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
   NOVASONICONFIGSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2423,6 +2535,7 @@ Resources:
       Parameters:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
 
   COGNITOSTACK:
     Type: AWS::CloudFormation::Stack
@@ -2444,6 +2557,11 @@ Resources:
         LMASettingsParameterName: !Ref LMASettingsParameter
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
+        # The cognito stack defines PermissionsBoundaryArn and attaches it to all
+        # three of its roles; without this line those properties always resolved
+        # to AWS::NoValue.
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LMAVersion: "<VERSION_TOKEN>"
         BuildDateTime: "<BUILD_DATE_TIME_TOKEN>"
 
@@ -2476,6 +2594,8 @@ Resources:
         AgentAssistExistingLambdaFunctionArn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:STRANDS-${AWS::StackName}-MeetingAssist"
         MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         TranscriptionExpirationInDays: !Ref TranscriptionExpirationInDays
+        MeetingInactivityTimeoutInMinutes: !Ref MeetingInactivityTimeoutInMinutes
+        MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
         TranscriptLambdaHookFunctionArn: !Ref TranscriptLambdaHookFunctionArn
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
@@ -2649,11 +2769,11 @@ Resources:
         AsrImageSourceS3Key: <ASR_MICROVM_IMAGE_SOURCE_S3_KEY_TOKEN>
         AsrModelBundle: !FindInMap [AsrDefaults, Engine, ModelBundle]
         AsrMaxMeetingSeconds: !FindInMap [AsrDefaults, Engine, MaxMeetingSeconds]
-        AsrMaxSpeakers: !FindInMap [AsrDefaults, Engine, MaxSpeakers]
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
         LogLevel: !Ref LogLevel
 
   WEBSOCKETTRANSCRIBERSTACK:
@@ -2686,43 +2806,20 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
           - ""
-        # Deploying the engine does not silently switch meetings onto it. Both
-        # engines diarize now, so asking for speaker labels does not select one:
-        # an admin makes this the default from the ASR Config page instead.
-        AsrEngineDefault: transcribe
+        # Deploying the engine does not switch meetings onto it: the Transcription Engine
+        # page's runtime switches do, read from the config table at meeting start.
         AsrDiarizationAvailable: !If [ShouldEnableAsrDiarization, "true", "false"]
-        # A model nobody has measured gets no speaker labels until this deployment
-        # has calibrated its own operating point (or an admin sets a threshold).
-        AsrSpeakerModelMeasured: !If
-          - ShouldDeployMicrovmAsr
-          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerModelMeasured
-          - "true"
         AsrModelBundleId: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleId
           - ""
-        AsrBundleThreshold: !If
+        AsrModelBundleName: !If
           - ShouldDeployMicrovmAsr
-          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerThreshold
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrModelBundleName
           - ""
         AsrConfigTableName: !If
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
-          - ""
-        AsrMaxSpeakers: !FindInMap [AsrDefaults, Engine, MaxSpeakers]
-        AsrLiveTurnCut: !FindInMap [AsrDefaults, Engine, LiveTurnCut]
-        AsrMaxOpenSegmentMs: !FindInMap [AsrDefaults, Engine, MaxOpenSegmentMs]
-        # The calibrated operating point for the deployed bundle, resolved from
-        # catalog.json by the ASR stack. Previously a top-level parameter defaulting
-        # to 0.2 while the catalog's measured value for the default embedder was
-        # 0.4 - the disagreement merged two speakers into one on a live meeting.
-        AsrSpeakerThreshold: !If
-          - ShouldDeployMicrovmAsr
-          - !GetAtt ASRMICROVMSTACK.Outputs.SpeakerThreshold
-          - ""
-        AsrMinSegmentMs: !If
-          - ShouldDeployMicrovmAsr
-          - !GetAtt ASRMICROVMSTACK.Outputs.MinSegmentMs
           - ""
         PcaS3BucketName: ""
         PcaTranscriptsPrefix: ""
@@ -2735,6 +2832,11 @@ Resources:
         EnableAudioRecording: !Ref EnableAudioRecording
         EnableVideoRecording: !Ref EnableVideoRecording
         VideoRecordingsPrefix: "lma-video-recordings/"
+        TranscriberDesiredTaskCount: !Ref TranscriberDesiredTaskCount
+        TranscriberAutoScalingEnabled: !Ref TranscriberAutoScalingEnabled
+        TranscriberMinTaskCount: !Ref TranscriberMinTaskCount
+        TranscriberMaxTaskCount: !Ref TranscriberMaxTaskCount
+        TranscriberScalingCpuTargetPercent: !Ref TranscriberScalingCpuTargetPercent
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
         LoggingBucketName: !Ref LoggingBucket
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
@@ -2801,6 +2903,12 @@ Resources:
         TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
         TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         CustomVocabularyName: !Ref CustomVocabularyName
+        # The on-demand ASR engine, when deployed. Whether a Virtual Participant
+        # uses it is the Transcription Engine page's runtime switch, read at meeting start.
+        AsrLauncherFunctionArn: !If
+          - ShouldDeployMicrovmAsr
+          - !GetAtt ASRMICROVMSTACK.Outputs.AsrLauncherFunctionArn
+          - ""
         SourceCodeLocation: <VIRTUAL_PARTICIPANT_SRC_S3_LOCATION_TOKEN>
         # Same source, packaged with the Dockerfile at the zip ROOT, which is
         # what CreateMicrovmImage requires (codeArtifact takes only a URI, so a
@@ -2822,6 +2930,8 @@ Resources:
         EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn
+        VncOriginVerifyHeaderValueSecretArn: !GetAtt AISTACK.Outputs.VncOriginVerifyHeaderValueSecretArn
+        VncOriginVerifyHeaderName: !GetAtt AISTACK.Outputs.VncOriginVerifyHeaderName
         VPSecurityGroupId: !GetAtt AISTACK.Outputs.VPSecurityGroupId
         VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
         VirtualParticipantTableStreamArn: !GetAtt AISTACK.Outputs.VirtualParticipantTableStreamArn

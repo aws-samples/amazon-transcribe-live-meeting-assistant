@@ -126,6 +126,7 @@ class ProtocolAdapter:
             segment=event.segment,
             text=event.text,
             start=_coerce_time(event.start),
+            end=None if event.end is None else _coerce_time(event.end),
             speaker=event.speaker,
         )
 

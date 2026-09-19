@@ -7,7 +7,6 @@ import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import rehypeRaw from 'rehype-raw';
 import {
   Box,
   Button,
@@ -20,6 +19,7 @@ import {
   Link,
 } from '@cloudscape-design/components';
 import PropTypes from 'prop-types';
+import markdownRehypePlugins from '../common/markdown-plugins';
 import queryKnowledgeBase from '../../graphql/queries/queryKnowledgeBase';
 import { CALLS_PATH } from '../../routes/constants';
 import useSettingsContext from '../../contexts/settings';
@@ -181,7 +181,7 @@ export const MeetingsQueryLayout = () => {
                   </div>
                 ) : (
                   <ReactMarkdown
-                    rehypePlugins={[rehypeRaw]}
+                    rehypePlugins={markdownRehypePlugins}
                     components={{
                       callid: CustomLink,
                     }}

@@ -20,10 +20,10 @@ import { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 
-import { AsrRuntimeConfig, getAsrRuntimeConfig, isSpeakerModelMeasured } from './asr-config';
+import { AsrRuntimeConfig } from './asr-config';
 import { CallMetaData, SocketCallData } from './eventtypes';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
-import { anyChannelDiarized, diarizationEnabledFor } from './diarization';
+import { diarizationEnabledFor } from './diarization';
 import { normalizeErrorForLogging } from '../utils/common';
 import {
     ASR_CHANNEL_IDS,
@@ -78,18 +78,11 @@ export interface AsrLease {
     authToken?: string;
 }
 
+/** What a session asks of the engine; the operating point is baked into the image, not negotiable. */
 interface AsrSessionOptions {
     diarize: boolean;
+    /** Cap on distinct voices for this channel; 0 discovers as many as appear. */
     maxSpeakers: number;
-    /** Undefined leaves the bundle's calibrated value baked into the image in force. */
-    speakerThreshold?: number;
-    endpointingMs: number;
-    minSegmentMs?: number;
-    requireCorroboration?: boolean;
-    splitOnSpeakerChange?: boolean;
-    liveTurnCut?: boolean;
-    turnCutIntervalMs?: number;
-    maxOpenSegmentMs?: number;
 }
 
 export interface AsrSessionSet {
@@ -148,10 +141,8 @@ export const resolveMaxSpeakers = (
 /**
  * Which engine transcribes this meeting.
  *
- * The engine is the DEPLOYMENT's choice and diarization is the CLIENT's: both
- * engines partition speakers now, so asking for speaker labels no longer implies
- * an engine. A client may still name one explicitly. A request the deployment
- * cannot serve falls back to Amazon Transcribe rather than failing.
+ * The engine is the deployment's choice (the Transcription Engine page) and diarization the client's;
+ * a client may still name an engine (--asr-engine). Unservable requests fall back.
  */
 export const resolveAsrEngine = (
     callMetaData: CallMetaData,
@@ -159,7 +150,7 @@ export const resolveAsrEngine = (
     runtime?: AsrRuntimeConfig
 ): AsrEngineName => {
     const deploymentDefault = runtime
-        ? (runtime.engineDefaultMicrovm ? 'microvm' : 'transcribe')
+        ? (runtime.streamingEngineMicrovm ? 'microvm' : 'transcribe')
         : ASR_ENGINE_DEFAULT;
     const requested = callMetaData.asrEngine?.toLowerCase() || deploymentDefault;
     if (requested !== 'microvm') {
@@ -512,32 +503,11 @@ export class AsrChannelSession {
                 channels: 1,
                 interim_results: true,
                 word_timestamps: false,
-                endpointing_ms: this.options.endpointingMs,
                 diarize: this.options.diarize,
                 max_speakers: this.options.maxSpeakers,
-                ...(this.options.speakerThreshold === undefined
-                    ? {}
-                    : { speaker_threshold: this.options.speakerThreshold }),
-                // Omitted rather than nulled when unset, so the engine keeps
-                // whatever the image was built with.
-                ...(this.options.minSegmentMs === undefined
-                    ? {}
-                    : { min_segment_ms: this.options.minSegmentMs }),
-                ...(this.options.requireCorroboration === undefined
-                    ? {}
-                    : { require_corroboration: this.options.requireCorroboration }),
-                ...(this.options.splitOnSpeakerChange === undefined
-                    ? {}
-                    : { split_on_speaker_change: this.options.splitOnSpeakerChange }),
-                ...(this.options.liveTurnCut === undefined
-                    ? {}
-                    : { live_turn_cut: this.options.liveTurnCut }),
-                ...(this.options.turnCutIntervalMs === undefined
-                    ? {}
-                    : { turn_cut_interval_ms: this.options.turnCutIntervalMs }),
-                ...(this.options.maxOpenSegmentMs === undefined
-                    ? {}
-                    : { max_open_segment_ms: this.options.maxOpenSegmentMs }),
+                // Nothing else. The threshold, utterance floor and turn-cut
+                // behaviour are the bundle's calibrated operating point baked
+                // into the image; omitting them here is what keeps that in force.
             };
             try {
                 socket.send(JSON.stringify(config));
@@ -741,33 +711,15 @@ export const startMicrovmAsr = async (
 ): Promise<boolean> => {
     const callMetadata = socketData.callMetadata;
 
-    const runtime = await getAsrRuntimeConfig(server);
     // Unlike Amazon Transcribe, whose ShowSpeakerLabel is stream-level, this engine
     // runs an independent session per channel — so "diarize the tab but not the
     // microphone" is honoured for real rather than by discarding half the labels.
     const settings = diarizationSettingsFor(callMetadata);
-    // A threshold that was never measured against this embedder is not a default,
-    // it is a guess — and a wrong guess fragments one speaker into many or merges
-    // several into one, which is worse than the channel labels this falls back to.
-    // An admin-set threshold (typed, or applied from a calibration run) counts as
-    // the measurement.
-    const thresholdTrusted = isSpeakerModelMeasured() || runtime.speakerThresholdOverridden;
-    if (anyChannelDiarized(settings) && !thresholdTrusted) {
-        server.log.warn(
-            `[ASR]: [${callMetadata.callId}] - speaker labels withheld: this deployment's speaker model has no measured operating point. Run a calibration from the ASR Config page, or set a speaker threshold there. Transcribing with channel labels instead.`
-        );
-    }
+    // Only the person in the meeting knows how many people share their microphone,
+    // so the client's count is the only cap; blank means discover.
     const optionsFor = (channelId: AsrChannelId): AsrSessionOptions => ({
-        diarize: thresholdTrusted && diarizationEnabledFor(channelId, settings),
-        maxSpeakers: resolveMaxSpeakers(callMetadata.maxSpeakers, runtime.maxSpeakers),
-        speakerThreshold: runtime.speakerThreshold,
-        endpointingMs: runtime.endpointingMs,
-        minSegmentMs: runtime.minSegmentMs,
-        requireCorroboration: runtime.requireCorroboration,
-        splitOnSpeakerChange: runtime.splitOnSpeakerChange,
-        liveTurnCut: runtime.liveTurnCut,
-        turnCutIntervalMs: runtime.turnCutIntervalMs,
-        maxOpenSegmentMs: runtime.maxOpenSegmentMs,
+        diarize: diarizationEnabledFor(channelId, settings),
+        maxSpeakers: resolveMaxSpeakers(callMetadata.maxSpeakers, 0),
     });
     const registry = new SpeakerNameRegistry();
     const sessions = new Map<AsrChannelId, AsrChannelSession>();

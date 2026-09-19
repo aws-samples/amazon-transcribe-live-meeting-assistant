@@ -30,9 +30,6 @@ import {
     stopMicrovmAsr,
     shouldFallbackToTranscribe,
     getAsrRuntimeConfig,
-    runCalibration,
-    CalibrationError,
-    CalibrationRequest,
 } from './calleventdata';
 
 import {
@@ -41,6 +38,10 @@ import {
     normalizeErrorForLogging,
     getClientIP,
     resolveShouldRecordCall,
+    describeRequest,
+    stringifyCallMetaData,
+    redactTokenLike,
+    PINO_REDACT_OPTIONS,
 } from './utils';
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
@@ -105,6 +106,13 @@ const findAudioSessionByCallId = (
 const server = fastify({
     logger: {
         level: WS_LOG_LEVEL,
+        // Backstop for object-style log records only: pino's redact rewrites
+        // properties of the logged object and never inspects the rendered
+        // message. Every log line in this package is an interpolated string, so
+        // each one is redacted at its call site via describeRequest() /
+        // stringifyCallMetaData(); this config covers anything logged as an
+        // object, now or later.
+        redact: PINO_REDACT_OPTIONS,
         transport: {
             target: 'pino-pretty',
             options: {
@@ -120,20 +128,18 @@ const server = fastify({
 // register the @fastify/websocket plugin with the fastify server
 server.register(websocket);
 
-// Authenticate at onRequest, which runs BEFORE body parsing. As a preHandler
-// this ran after Fastify had already buffered the request body, so an
-// unauthenticated POST to the calibration route could hold its full upload
-// (up to ASR_CALIBRATION_MAX_UPLOAD_BYTES, 64 MB) in memory on a task that is
-// also transcribing live meetings. Authentication needs only the headers.
+// Authenticate at onRequest, which runs BEFORE body parsing: authentication needs
+// only the headers, and rejecting early means an unauthenticated request never
+// gets a body buffered for it on a task that is also transcribing live meetings.
 server.addHook('onRequest', async (request, reply) => {
     // A CORS preflight carries no credentials by design, so authenticating it
     // would 401 every cross-origin call before the real request is ever made.
     if (!request.url.includes('health') && request.method !== 'OPTIONS') {
         const clientIP = getClientIP(request.headers);
         server.log.debug(
-            `[AUTH]: [${clientIP}] - Received onRequest hook for authentication. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(request.headers)}`
+            `[AUTH]: [${clientIP}] - Received onRequest hook for authentication. ${describeRequest(
+                request
+            )}`
         );
 
         await jwtVerifier(request, reply);
@@ -159,102 +165,15 @@ server.after(() => {
         (socket, request) => {
             const clientIP = getClientIP(request.headers);
             server.log.debug(
-                `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. URI: <${
-                    request.url
-                }>, Headers: ${JSON.stringify(request.headers)}`
+                `[NEW CONNECTION]: [${clientIP}] - Received new connection request @ /api/v1/ws. ${describeRequest(
+                    request
+                )}`
             );
 
             registerHandlers(clientIP, socket, request); // setup the handler functions for websocket events
         }
     );
 });
-
-// The ASR Config admin page lives on the UI's CloudFront domain, not this one, so
-// its calls are cross-origin. Echoing the origin back is safe here because nothing
-// this route trusts is attached by the browser on its own: the credential is an
-// Authorization header the page sets explicitly, no cookie is read, and
-// Access-Control-Allow-Credentials is deliberately never sent. A cross-origin page
-// therefore cannot forge an authenticated request it could not already make
-// directly, and cannot read the response without a token of its own.
-// Semgrep flags this as cors-misconfiguration; the rule assumes reflection implies
-// credentialed access, which is the one thing this route never grants.
-const ASR_CALIBRATE_PATH = '/api/v1/asr/calibrate';
-const ADMIN_GROUP = 'Admin';
-
-const allowCrossOrigin = (
-    request: FastifyRequest,
-    reply: { header: (name: string, value: string) => unknown }
-): void => {
-    reply.header('Access-Control-Allow-Origin', request.headers.origin || '*');
-    reply.header('Vary', 'Origin');
-    reply.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    reply.header('Access-Control-Allow-Headers', 'authorization, content-type');
-    reply.header('Access-Control-Max-Age', '600');
-};
-
-// The calibration sample is posted as raw WAV bytes. It is never stored: the audio
-// is embedded in memory and only the resulting statistics come back, so a sample can
-// be a rehearsed recording or a clip from a public corpus without leaving a copy.
-const ASR_CALIBRATION_MAX_UPLOAD_BYTES = parseInt(
-    process.env['ASR_CALIBRATION_MAX_UPLOAD_BYTES'] || String(64 * 1024 * 1024),
-    10
-);
-
-server.addContentTypeParser(
-    ['application/octet-stream', 'audio/wav', 'audio/wave', 'audio/x-wav'],
-    { parseAs: 'buffer', bodyLimit: ASR_CALIBRATION_MAX_UPLOAD_BYTES },
-    (_request, body, done) => done(null, body)
-);
-
-server.options(ASR_CALIBRATE_PATH, { logLevel: 'warn' }, (request, reply) => {
-    allowCrossOrigin(request, reply);
-    reply.code(204).send();
-});
-
-/**
- * Measure the diarization operating point from a meeting this deployment recorded.
- *
- * Admin-only: it launches an ASR MicroVM and reads a recording. The route only
- * measures and reports — the admin decides whether to save the result — so a run
- * on unrepresentative audio cannot quietly change how meetings are transcribed.
- */
-server.post(
-    ASR_CALIBRATE_PATH,
-    { logLevel: 'info', bodyLimit: ASR_CALIBRATION_MAX_UPLOAD_BYTES },
-    async (request, reply) => {
-        allowCrossOrigin(request, reply);
-        const caller = getAuthenticatedCaller(request);
-        if (!caller?.groups.includes(ADMIN_GROUP)) {
-            server.log.warn(
-                `[ASR CALIBRATE]: refused for non-admin caller ${caller?.username || caller?.sub || 'unknown'}`
-            );
-            return reply
-                .code(403)
-                .send({ message: 'Calibration is limited to users in the Admin group.' });
-        }
-        const wav = Buffer.isBuffer(request.body) ? request.body : Buffer.alloc(0);
-        const query = request.query as Record<string, string | undefined>;
-        const perChannel = query['maxSegmentsPerChannel'];
-        try {
-            const run = await runCalibration(
-                {
-                    wav,
-                    ...(perChannel ? { maxSegmentsPerChannel: Number(perChannel) } : {}),
-                } as CalibrationRequest,
-                server
-            );
-            return reply.code(200).send(run);
-        } catch (error) {
-            const status = error instanceof CalibrationError ? error.status : 500;
-            const message =
-                error instanceof CalibrationError
-                    ? error.message
-                    : `calibration failed: ${normalizeErrorForLogging(error)}`;
-            server.log.error(`[ASR CALIBRATE]: ${status} - ${message}`);
-            return reply.code(status).send({ message });
-        }
-    }
-);
 
 type HealthCheckRemoteInfo = {
     addr: string;
@@ -275,10 +194,8 @@ server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
     const item = healthCheckStats.get(remoteIp);
     if (!item) {
         server.log.debug(
-            `[HEALTH CHECK]: [${remoteIp}] - Received First health check from load balancer. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(
-                request.headers
+            `[HEALTH CHECK]: [${remoteIp}] - Received First health check from load balancer. ${describeRequest(
+                request
             )} ==> Health Check status - CPU Usage%: ${cpuUsage}, IsHealthy: ${isHealthy}, Status: ${status}`
         );
         healthCheckStats.set(remoteIp, {
@@ -295,8 +212,8 @@ server.get('/health/check', { logLevel: 'warn' }, (request, response) => {
             server.log.debug(
                 `[HEALTH CHECK]: [${remoteIp}] - Received Health check # ${
                     item.count
-                } from load balancer. URI: <${request.url}>, Headers: ${JSON.stringify(
-                    request.headers
+                } from load balancer. ${describeRequest(
+                    request
                 )} ==> Health Check status - CPU Usage%: ${cpuUsage}, IsHealthy: ${isHealthy}, Status: ${status}`
             );
         }
@@ -420,7 +337,7 @@ const startTranscription = async (
     server_: typeof server
 ): Promise<void> => {
     // Runtime config decides the deployment default, so the engine can be switched
-    // from the ASR Config page without redeploying the task.
+    // from the Transcription Engine page without redeploying the task.
     const runtime = await getAsrRuntimeConfig(server_);
     if (resolveAsrEngine(socketData.callMetadata, server_, runtime) === 'microvm') {
         if (await startMicrovmAsr(socketData, server_)) {
@@ -478,17 +395,21 @@ const onTextMessage = async (
         callMetaData = JSON.parse(data) as CallMetaData;
     } catch (parseErr) {
         // A truncated/garbled control frame is the client's problem, not grounds
-        // for tearing down every other call on this task.
+        // for tearing down every other call on this task. The serialized error can
+        // quote a fragment of the frame it failed on, so it goes through
+        // redactTokenLike() for the same reason the verifier errors do.
         server.log.error(
-            `[ON TEXT MESSAGE]: [${clientIP}] - Ignoring unparseable control frame: ${normalizeErrorForLogging(parseErr)}`
+            `[ON TEXT MESSAGE]: [${clientIP}] - Ignoring unparseable control frame: ${redactTokenLike(
+                normalizeErrorForLogging(parseErr)
+            )}`
         );
         return;
     }
     if (!match) {
         server.log.error(
-            `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. URI: <${
-                request.url
-            }>, Headers: ${JSON.stringify(request.headers)}`
+            `[AUTH]: [${clientIP}] - No Bearer token found in header or query string. ${describeRequest(
+                request
+            )}`
         );
 
         return;
@@ -496,20 +417,14 @@ const onTextMessage = async (
 
     const accessToken = match[1];
 
-    try {
-        server.log.debug(
-            `[ON TEXT MESSAGE]: [${clientIP}][${callMetaData.callId}] - Call Metadata received from client: ${data}`
-        );
-    } catch (error) {
-        server.log.error(
-            `[ON TEXT MESSAGE]: [${clientIP}][${
-                callMetaData.callId
-            }] - Error parsing call metadata: ${data} ${normalizeErrorForLogging(
-                error
-            )}`
-        );
-        callMetaData.callId = randomUUID();
-    }
+    // The parsed frame is logged rather than the raw `data` string: a client may
+    // put token fields in the control frame as well as in the query string, and
+    // stringifyCallMetaData drops those while keeping the rest of the metadata.
+    server.log.debug(
+        `[ON TEXT MESSAGE]: [${clientIP}][${
+            callMetaData.callId
+        }] - Call Metadata received from client: ${stringifyCallMetaData(callMetaData)}`
+    );
 
     callMetaData.accessToken = accessToken;
     callMetaData.idToken = idToken;
@@ -606,7 +521,7 @@ const onTextMessage = async (
             server.log.error(
                 `[${callMetaData.callEvent}]: [${
                     callMetaData.callId
-                }] - Invalid call metadata: ${JSON.stringify(callMetaData)}`
+                }] - Invalid call metadata: ${stringifyCallMetaData(callMetaData)}`
             );
         }
     } else if (callMetaData.callEvent === 'START_VIDEO') {
@@ -619,13 +534,11 @@ const onTextMessage = async (
             );
             return;
         }
-        // AUTHORIZATION. callId comes from the client and is guessable (the web
-        // UI builds it as "<meeting topic> - <timestamp>"), so accepting it on
-        // faith would let ANY authenticated user attach video to someone else's
-        // call — and, because the mux pulls in that call's audio WAV, would
-        // publish the victim's audio under an object the attacker can read.
-        // Require a LIVE audio session for this callId, owned by the same
-        // verified Cognito subject that opened it.
+        // AUTHORIZATION. A video stream is admitted for this callId only when
+        // there is a live audio session for the same callId AND that session's
+        // owner is the same verified Cognito subject as this caller. The callId
+        // in the frame is client-supplied and is not used as evidence of
+        // anything on its own; ownership comes from the verified token.
         const caller = getAuthenticatedCaller(request);
         const audioSession = findAudioSessionByCallId(callMetaData.callId);
         if (!audioSession) {
@@ -664,7 +577,7 @@ const onTextMessage = async (
             server.log.error(
                 `[${callMetaData.callEvent}]: [${
                     callMetaData.callId
-                }] - Received END without starting a call:  ${JSON.stringify(
+                }] - Received END without starting a call:  ${stringifyCallMetaData(
                     callMetaData
                 )}`
             );
@@ -673,7 +586,7 @@ const onTextMessage = async (
         server.log.debug(
             `[${callMetaData.callEvent}]: [${
                 callMetaData.callId
-            }] - Received call end event from client, writing it to KDS:  ${JSON.stringify(
+            }] - Received call end event from client, writing it to KDS:  ${stringifyCallMetaData(
                 callMetaData
             )}`
         );
@@ -705,7 +618,7 @@ const onWsClose = async (ws: WebSocket, code: number): Promise<void> => {
         server.log.debug(
             `[ON WSCLOSE]: [${
                 socketData.callMetadata.callId
-            }] - Writing call end event due to websocket close event ${JSON.stringify(
+            }] - Writing call end event due to websocket close event ${stringifyCallMetaData(
                 socketData.callMetadata
             )}`
         );
@@ -734,7 +647,7 @@ const endCall = async (
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${
                             callMetaData.callId
-                        }] - Audio Recording enabled. Writing to S3.: ${JSON.stringify(
+                        }] - Audio Recording enabled. Writing to S3.: ${stringifyCallMetaData(
                             callMetaData
                         )}`
                     );
@@ -805,7 +718,7 @@ const endCall = async (
                     server.log.debug(
                         `[${callMetaData.callEvent}]: [${
                             callMetaData.callId
-                        }] - Audio Recording disabled. Add s3 url event is not written to KDS. : ${JSON.stringify(
+                        }] - Audio Recording disabled. Add s3 url event is not written to KDS. : ${stringifyCallMetaData(
                             callMetaData
                         )}`
                     );
@@ -823,7 +736,7 @@ const endCall = async (
                 server.log.debug(
                     `[${callMetaData.callEvent}]: [${
                         callMetaData.callId
-                    }] - Closing audio input stream:  ${JSON.stringify(callMetaData)}`
+                    }] - Closing audio input stream:  ${stringifyCallMetaData(callMetaData)}`
                 );
                 socketData.audioInputStream.end();
                 socketData.audioInputStream.destroy();
@@ -845,7 +758,7 @@ const endCall = async (
                 server.log.debug(
                     `[${callMetaData.callEvent}]: [${
                         callMetaData.callId
-                    }] - Deleting websocket from map: ${JSON.stringify(callMetaData)}`
+                    }] - Deleting websocket from map: ${stringifyCallMetaData(callMetaData)}`
                 );
                 socketMap.delete(ws);
             }
@@ -857,7 +770,7 @@ const endCall = async (
             server.log.error(
                 `[${callMetaData.callEvent}]: [${
                     callMetaData.callId
-                }] - Duplicate End call event. Already received the end call event: ${JSON.stringify(
+                }] - Duplicate End call event. Already received the end call event: ${stringifyCallMetaData(
                     callMetaData
                 )}`
             );

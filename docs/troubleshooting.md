@@ -14,6 +14,7 @@ title: "Troubleshooting"
   - [Deployment Fails on Nested Stack](#deployment-fails-on-nested-stack)
   - [Meeting Stuck In Progress](#meeting-stuck-in-progress)
   - [No Transcription Appearing](#no-transcription-appearing)
+  - [Discarded Transcript Records](#discarded-transcript-records)
   - [Meeting Assistant Not Responding](#meeting-assistant-not-responding)
   - [VP Fails to Join Meeting](#vp-fails-to-join-meeting)
   - [VP Stuck at MANUAL_ACTION_REQUIRED](#vp-stuck-at-manual_action_required)
@@ -67,13 +68,104 @@ Navigate to the specific failed nested stack and check its Events tab for the ro
 
 ### Meeting Stuck In Progress
 
-The Virtual Participant ECS task may have crashed. This issue was addressed in v0.3.0 with automatic cleanup on uncaught errors. If a meeting remains stuck, you can manually end it by updating the meeting record in DynamoDB.
+A meeting leaves the "In Progress" state when an end-of-meeting event reaches
+the Call Event Processor through the Kinesis call data stream. Each meeting
+source sends that event as part of its own shutdown, and each has a backstop if
+its shutdown never runs:
+
+- **Virtual Participant**: the VP task writes the event when it leaves the
+  meeting, and the VP stack's task reaper covers a task that stops without
+  doing so (automatic cleanup on uncaught errors was added in v0.3.0).
+- **Uploaded recording**: `upload_meeting_finalizer` sends it when the Amazon
+  Transcribe batch job reaches `COMPLETED` or `FAILED`.
+- **Streamed audio** (Stream Audio tab, Desktop Capture App, browser
+  extension): the WebSocket server sends it when the connection closes. If the
+  Fargate task hosting the connection goes away without running its close
+  handler, the `StaleMeetingReaper` Lambda ends the meeting instead. It runs
+  every 15 minutes and ends meetings that have produced no finalized transcript
+  segment for longer than `MeetingInactivityTimeoutInMinutes` (default 240),
+  so a meeting can show as in progress for up to that long plus one schedule
+  interval before it closes on its own.
+
+To see what the reaper is doing, look at the
+`/<AISTACK-name>/lambda/StaleMeetingReaperFunction` log group: each run logs a
+summary with the number of candidates examined and meetings ended, and one
+record per meeting it ended with that meeting's `call_id` and last activity
+timestamp. A meeting the reaper considered but left alone is either still
+inside the timeout, already `ENDED`, or still owned by the upload pipeline (an
+in-flight Transcribe job on a long recording can easily outlast the timeout, so
+those meetings are skipped and closed by the finalizer instead).
+
+Two bounds decide which meetings a run can reach. `MeetingInactivityLookbackInDays`
+(default 2) is how far back it looks: **a meeting that started earlier than that is
+never closed automatically**, so if you have a backlog of older meetings stuck in
+progress — for example on the update that first introduces the reaper — raise the
+parameter, let one run complete, and set it back. Each run also stops after reading
+500 candidate meetings; they are examined newest-first, so meetings that have just
+become eligible are always covered, and a run that hits the cap says so in its log.
+
+Setting `MeetingInactivityTimeoutInMinutes` to `0` disables the schedule. With
+it disabled, or to end a meeting sooner than the timeout, you can still end a
+meeting by hand by updating its record (`PK` = `SK` = `c#<CallId>`) in the event
+sourcing DynamoDB table.
 
 ### No Transcription Appearing
 
 1. Check the WebSocket Fargate task logs for errors.
 2. Verify that audio is being streamed from the client.
 3. Check Amazon Transcribe service limits to ensure you have not exceeded the concurrent stream quota.
+
+### Discarded Transcript Records
+
+Transcript events reach the Call Event Processor Lambda as Kinesis batches. When a
+record cannot be applied, the processor reports it to the event source mapping,
+which retries the shard from that record and — after the retries are exhausted or
+the record passes `MaximumRecordAgeInSeconds` (one hour) — describes the batch it
+gave up on to an SQS queue whose name contains
+`CallEventProcessorDiscardedRecordsQueue` (CloudFormation generates the full name
+from the AI stack's name). A record the processor
+could not decode at all is not retried, because it would fail the same way every
+time and hold up every later meeting on its shard; those records are copied to the
+same queue individually, since skipping one does not fail the invocation and so
+never reaches the mapping's own destination.
+
+An empty queue is the normal state. If there are messages on it, read them with
+**SQS console → the queue → Send and receive messages → Poll for messages**, or
+`aws sqs receive-message --queue-url <url> --max-number-of-messages 10`. Two
+shapes arrive:
+
+- **From the event source mapping** — a description of a failed batch: the stream
+  ARN, the shard id, and the sequence number range it covers. The payloads are not
+  included; they are still in the Kinesis stream.
+- **From the function** — one message per skipped record, carrying `shardId`,
+  `sequenceNumber`, `partitionKey`, `eventID` and the record's `data` exactly as
+  Kinesis delivered it (base64). Decoding `data` shows what the producer sent,
+  which is usually enough to identify which client emitted it. A payload too large
+  for an SQS message is cut short, with `dataTruncated: true` and the original
+  `dataLength` on the message; read the full record from the stream as below.
+
+To retrieve the original records for a failed batch, turn the shard id and the
+first sequence number into an iterator and read from it:
+
+```bash
+ITERATOR=$(aws kinesis get-shard-iterator \
+  --stream-name <CallDataStream name> \
+  --shard-id <shardId from the message> \
+  --shard-iterator-type AT_SEQUENCE_NUMBER \
+  --starting-sequence-number <sequenceNumber from the message> \
+  --query ShardIterator --output text)
+aws kinesis get-records --shard-iterator "$ITERATOR" --limit 10
+```
+
+The records come back with `Data` base64-encoded. **This is time-limited:** the call
+data stream keeps records for 24 hours, so a batch reported more than a day ago
+can no longer be read back from the stream — only the queue message and the
+function's log lines remain. Queue messages themselves are kept for 14 days.
+
+The matching log lines are in the `CallEventProcessor` log group: the function
+logs a warning naming the reporting decision (`reporting Kinesis batch item
+failures`) or the skip (`skipped Kinesis records that could not be decoded`) with
+the sequence numbers involved.
 
 ### Meeting Assistant Not Responding
 

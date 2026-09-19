@@ -1,0 +1,3 @@
+# boto3/botocore ship with the python3.12 Lambda runtime and
+# aws_lambda_powertools comes from the transcript enrichment layer;
+# no deps to pin.

@@ -505,69 +505,82 @@ Amazon Transcribe path.
 ** Speech recognition and speaker-embedding model weights (downloaded at image
    build time, NOT redistributed by this project)
 
-The on-demand ASR MicroVM image downloads the models named by the AsrModelBundle
-CloudFormation parameter from their published source and verifies each against a
-pinned SHA256. The weights are baked into that image inside the deploying AWS
-account; this project distributes no model weights. Each model's own license file is
-copied into the image next to its weights, and the deployed bundle's licences are
-reported in the ASR stack's AsrLicenceSummary and AsrRedistributable outputs.
-
-A bundle names one ASR model, one speaker-embedding model, one turn-detection model
-and (for the offline engine) a VAD. AsrRedistributable is "false" for any bundle
-containing a weight whose license does not permit redistribution.
+The on-demand ASR MicroVM image downloads the models named by the selected bundle in
+lma-asr-microvm-stack/source/catalog.json from their published source and verifies
+each against a pinned SHA256. The weights are baked into that image inside the
+deploying AWS account; this project distributes no model weights. Each model's own
+license file is copied into the image next to its weights, and the deployed bundle's
+licences are reported in the ASR stack's AsrLicenceSummary and AsrRedistributable
+outputs. Every bundle offered is permissively licensed and redistributable.
 
 Speech recognition:
 
-  * NVIDIA Nemotron speech-streaming EN 0.6B (streaming; default bundle)
-    NVIDIA Open Model License -- NOT redistributable
-    https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
-
-  * NVIDIA Parakeet unified EN 0.6B, 240/560 ms (streaming)
-    NVIDIA Open Model License -- NOT redistributable
-    https://huggingface.co/nvidia/parakeet-unified-en-0.6b
-
-  * NVIDIA FastConformer hybrid large streaming multi, EN (streaming)
+  * NVIDIA FastConformer hybrid large streaming multi, EN (streaming; both bundles)
     CC-BY-4.0
     https://huggingface.co/nvidia/stt_en_fastconformer_hybrid_large_streaming_multi
 
-  * NVIDIA Parakeet TDT 0.6B v3 (offline / "accurate" engine)
+Speaker embedding (diarization; fastconformer-titanet-small bundle only):
+
+  * NVIDIA TitaNet-small
     CC-BY-4.0
-    https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+    https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_small
 
-  * icefall streaming Zipformer EN, int8 (streaming)
-    Apache-2.0
-    https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-en-2023-06-26
-    (this archive ships no LICENSE file, so none is copied into the image; the
-    license is declared on the model page above)
-
-Speaker embedding (diarization):
-
-  * NVIDIA TitaNet-small and TitaNet-large
-    CC-BY-4.0
-    https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_large
-
-  * WeSpeaker CAM++_LM and ResNet293_LM
-    Apache-2.0
-    https://github.com/wenet-e2e/wespeaker
-
-  * 3D-Speaker CAM++ and ERes2Net, EN VoxCeleb
-    Apache-2.0
-    https://github.com/modelscope/3D-Speaker
-
-Speaker-turn detection:
+Speaker-turn detection (fastconformer-titanet-small bundle only):
 
   * pyannote segmentation 3.0, converted to ONNX and redistributed ungated by
     k2-fsa together with the upstream license file
     MIT
     https://huggingface.co/pyannote/segmentation-3.0
 
-Voice activity detection (offline engine only):
-
-  * Silero VAD
-    MIT
-    https://github.com/snakers4/silero-vad
-
 Every model is a curated entry in lma-asr-microvm-stack/source/catalog.json with a
 pinned checksum; there is no parameter for supplying an arbitrary model URL. You are
-responsible for complying with the license of whichever bundle you select. See
-docs/microvm-asr.md.
+responsible for complying with the license of whichever bundle you select (CC-BY-4.0
+requires attribution). See docs/microvm-asr.md.
+
+----------------
+
+** marked - https://github.com/markedjs/marked
+
+The MIT License (MIT)
+
+Copyright (c) 2011-2023, Christopher Jeffrey
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Version 11.1.1 is vendored verbatim into this repository at
+lma-ai-stack/source/ui/public/js/marked.min.js and is copied unmodified into the
+web application bundle served by CloudFront. The file retains its upstream
+version and license banner.
+
+----------------
+
+** DOMPurify - https://github.com/cure53/DOMPurify
+
+DOMPurify is dual-licensed under the Apache License, Version 2.0 or the Mozilla
+Public License, Version 2.0, at the recipient's option. This project elects to
+receive and redistribute it under the Apache License, Version 2.0.
+
+Apache License 2.0 - https://github.com/cure53/DOMPurify/blob/3.4.15/LICENSE
+                     https://www.apache.org/licenses/LICENSE-2.0
+
+Version 3.4.15 is vendored verbatim into this repository at
+lma-ai-stack/source/ui/public/js/purify.min.js and is copied unmodified into the
+web application bundle served by CloudFront. The file retains its upstream
+version and license banner. This project does not modify any DOMPurify source
+file; it is consumed as an unmodified library.
