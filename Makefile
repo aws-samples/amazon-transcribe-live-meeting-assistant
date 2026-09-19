@@ -643,9 +643,11 @@ endif
 # staged diffstat and the generated message are shown and confirmed before
 # anything is committed or pushed, and the prompt names the resolved upstream
 # (remote + branch) rather than just the local branch, because upstreams differ
-# per branch in this repo. Committing straight to develop or main is refused:
-# changes go through a pull request. _commit-preflight runs those checks up front
-# too, so `make commit` fails in a second rather than after the full test run.
+# per branch in this repo. Committing straight to develop or main is refused by
+# default: changes normally go through a pull request. Pass ALLOW_SHARED_BRANCH=1
+# to commit onto a shared branch deliberately. _commit-preflight runs those
+# checks up front too, so `make commit` fails in a second rather than after the
+# full test run.
 .PHONY: commit fastcommit _commit-preflight _commit-push
 
 commit: _commit-preflight lint test ## Lint, test, stage tracked changes, then review + confirm before push
@@ -664,9 +666,12 @@ _commit-preflight:
 	SHARED=; \
 	case "$$BRANCH" in develop|main) SHARED=1;; esac; \
 	case "$$UPSTREAM" in */develop|*/main) SHARED=1;; esac; \
-	if [ -n "$$SHARED" ]; then \
+	if [ -n "$$SHARED" ] && [ -n "$(ALLOW_SHARED_BRANCH)" ]; then \
+		echo -e "$(YELLOW)Committing directly onto $$BRANCH -> $${UPSTREAM:-no upstream} (ALLOW_SHARED_BRANCH set).$(NC)"; \
+	elif [ -n "$$SHARED" ]; then \
 		echo -e "$(RED)ERROR: refusing to commit onto a shared branch ($$BRANCH -> $${UPSTREAM:-no upstream}).$(NC)"; \
-		echo -e "$(YELLOW)Create a branch ('git switch -c feature/<name>') and open a pull request instead.$(NC)"; \
+		echo -e "$(YELLOW)Create a branch ('git switch -c feature/<name>') and open a pull request instead,$(NC)"; \
+		echo -e "$(YELLOW)or re-run with ALLOW_SHARED_BRANCH=1 to commit here deliberately.$(NC)"; \
 		exit 1; \
 	fi
 	@UNTRACKED=$$(git ls-files --others --exclude-standard); \
