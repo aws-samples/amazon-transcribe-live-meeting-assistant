@@ -41,6 +41,7 @@ const fresh = (): AttendeeWatchdogState => ({
     consecutiveLonely: 0,
     consecutiveMissing: 0,
     suppressedMissing: 0,
+    unreadableRun: 0,
 });
 const MISSING: AttendeeReading = { state: 'BADGE_MISSING' };
 const MISSING_IN_MEETING: AttendeeReading = { state: 'BADGE_MISSING_IN_MEETING' };
@@ -219,12 +220,78 @@ test('the in-meeting veto is SPENT, so #540 cannot come back through it', () => 
     assert.ok(ended >= maxSuppressedPolls, `ended at poll ${ended}, before the allowance was spent`);
 });
 
-test('the total time a VP can outlive an ended meeting is bounded', () => {
-    // Worst case end to end: the full veto allowance, then the whole
-    // missing-badge bound. Both are finite, so their sum must be too.
+/** Drive the state machine until it ends, returning the 1-based poll index. */
+const pollsUntilEnd = (
+    nextReading: (poll: number) => AttendeeReading,
+    limit = 5000,
+): number | null => {
+    const state = fresh();
+    for (let i = 0; i < limit; i += 1) {
+        if (decideAttendeeAction(nextReading(i), state).action === 'end') return i + 1;
+    }
+    return null;
+};
+
+test('no interleaving of unreadable readings can outlast the additive ceiling', () => {
+    // This is measured against the state machine rather than multiplied out of the
+    // constants, and the difference matters: a veto resets the miss counter, so an
+    // alternating sequence used to multiply the two bounds instead of adding them.
+    // "14 misses then 1 veto" reached 1365 polls — 7.5 hours at the default cadence,
+    // which is the #540 outcome by another route.
+    const { pollMs, maxSuppressedPolls, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    const ceiling = maxSuppressedPolls + pollsBeforeEndMissing;
+    const patterns: Array<[string, (poll: number) => AttendeeReading]> = [
+        ['every poll corroborated', () => MISSING_IN_MEETING],
+        ['every poll a bare miss', () => MISSING],
+        ['alternating miss / corroborated', (i) => (i % 2 ? MISSING : MISSING_IN_MEETING)],
+        ['one veto every other poll', (i) => (i % 2 ? MISSING_IN_MEETING : MISSING)],
+        [
+            'a veto just before each bound would fire',
+            (i) => (i % pollsBeforeEndMissing === pollsBeforeEndMissing - 1 ? MISSING_IN_MEETING : MISSING),
+        ],
+        [
+            'a miss just before the allowance is spent',
+            (i) => (i % maxSuppressedPolls === maxSuppressedPolls - 1 ? MISSING : MISSING_IN_MEETING),
+        ],
+    ];
+    for (const [label, pattern] of patterns) {
+        const ended = pollsUntilEnd(pattern);
+        assert.ok(ended !== null, `"${label}" never ended the meeting`);
+        assert.ok(
+            ended <= ceiling,
+            `"${label}" ended at poll ${ended} (${((ended * pollMs) / 60000).toFixed(1)} min), ` +
+                `past the ${ceiling}-poll ceiling`,
+        );
+    }
+});
+
+test('the worst case stays under 40 minutes at the default cadence', () => {
     const { pollMs, maxSuppressedPolls, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
     const worstCaseMinutes = ((maxSuppressedPolls + pollsBeforeEndMissing) * pollMs) / 60000;
     assert.ok(worstCaseMinutes <= 40, `worst case was ${worstCaseMinutes} minutes`);
+});
+
+test('the additive ceiling holds at every cadence, not just the default', () => {
+    // The two windows are each capped at 30 minutes, so their sum can reach an hour
+    // at the slowest cadence. That is the true ceiling to state in the docs — 35
+    // minutes is the DEFAULT-cadence figure, not the guarantee.
+    for (const cadence of ['1000', '5000', '20000', '60000', '120000']) {
+        const config = resolveAttendeeWatchdogConfig({ VP_ATTENDEE_POLL_MS: cadence });
+        const ceilingMs = (config.maxSuppressedPolls + config.pollsBeforeEndMissing) * config.pollMs;
+        assert.ok(
+            ceilingMs <= 60 * 60 * 1000,
+            `cadence ${cadence} allows ${(ceilingMs / 60000).toFixed(1)} minutes`,
+        );
+    }
+});
+
+test('a readable badge between shares still restores the full allowance', () => {
+    // The run ceiling must not turn a long meeting with several shares into a leave:
+    // it is UNREADABLE polls in a row that are bounded, not shares in a meeting.
+    const { maxSuppressedPolls } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    const cycle = maxSuppressedPolls - 1;
+    const ended = pollsUntilEnd((i) => (i % cycle === cycle - 1 ? busy : MISSING_IN_MEETING), 3000);
+    assert.equal(ended, null, `a periodically readable badge must never end the meeting (ended at ${ended})`);
 });
 
 test('a readable badge restores the veto allowance', () => {

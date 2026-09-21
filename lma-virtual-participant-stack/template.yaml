@@ -262,8 +262,9 @@ Parameters:
       attendee count nor any in-meeting controls before the Virtual Participant
       leaves. 15 polls at the default cadence is about 5 minutes. Raise
       this if participants report the Virtual Participant leaving meetings
-      that are still in progress. The total tolerance is capped at 30
-      minutes regardless of the values given here.
+      that are still in progress. A value producing a tolerance outside 4 to
+      30 minutes at the chosen cadence is adjusted into that range, so at the
+      default cadence anything below 12 is raised.
 
   ElevenLabsApiKey:
     Type: String

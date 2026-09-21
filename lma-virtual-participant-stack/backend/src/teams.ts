@@ -28,8 +28,23 @@ export type AttendeeReading =
 export interface AttendeeWatchdogState {
     consecutiveLonely: number;
     consecutiveMissing: number;
-    /** Missing-badge polls vetoed by in-meeting evidence. Diagnostics only. */
+    /**
+     * Missing-badge polls vetoed by in-meeting evidence. Load-bearing, not just
+     * diagnostic: it is what spends the veto allowance.
+     */
     suppressedMissing: number;
+    /**
+     * Consecutive polls with no readable badge, however they were classified.
+     *
+     * The backstop of last resort, and the only counter a veto cannot reset. The
+     * other two are individually bounded, but a veto clears `consecutiveMissing`,
+     * so an alternating sequence — a run of misses, then one poll where the chrome
+     * happens to be visible — multiplies the two bounds together instead of adding
+     * them: 14 misses per veto reaches 7.5 HOURS at the default cadence, which is
+     * the #540 outcome by another route. This counter makes the ceiling additive
+     * again, whatever the interleaving.
+     */
+    unreadableRun: number;
 }
 
 /** Tunables for the Teams attendee watchdog, resolved once per meeting. */
@@ -78,9 +93,10 @@ export interface AttendeeWatchdogConfig {
  *
  * `maxSuppressedPolls` then bounds the corroboration itself, because the chrome
  * is not a reliable end-of-meeting signal either — see the field docs above. The
- * worst case in either direction is therefore finite: a share is safe for
- * ~30 minutes at a stretch, and a meeting whose end Teams announces to nobody is
- * left after ~35.
+ * worst case in either direction is therefore finite: a share is safe for ~30
+ * minutes at a stretch, and a meeting whose end Teams announces to nobody is left
+ * after ~35 at the default cadence. Both windows are capped at 30 minutes
+ * independently, so the ceiling is an hour at the slowest cadence and never more.
  */
 export const DEFAULT_ATTENDEE_WATCHDOG_CONFIG: AttendeeWatchdogConfig = {
     pollMs: 20_000,
@@ -112,14 +128,26 @@ const WATCHDOG_LIMITS = {
      * the ~40s that caused GitHub #660 in the first place.
      */
     missingToleranceMs: { minimum: 4 * 60 * 1000, maximum: 30 * 60 * 1000 },
-    /** Ceiling on how long an empty-but-readable roster is tolerated. */
-    aloneToleranceMaxMs: 10 * 60 * 1000,
+    /**
+     * Bounds on how long an empty-but-readable roster is tolerated. The floor is
+     * what stops `VPPollsBeforeEnd=1` at the minimum cadence from becoming a
+     * one-second debounce — the #317/#318 shape, reachable from the parameters
+     * page.
+     */
+    aloneToleranceMs: { minimum: 30 * 1000, maximum: 10 * 60 * 1000 },
     /** Ceiling on how long in-meeting chrome may veto an absent badge. */
     maxSuppressionMs: 30 * 60 * 1000,
 } as const;
 
-/** Convert a wall-clock duration to whole polls at this cadence, at least one. */
-const pollsFor = (ms: number, pollMs: number): number => Math.max(1, Math.round(ms / pollMs));
+/**
+ * Convert a wall-clock duration to whole polls at this cadence, at least one.
+ *
+ * Rounds in the direction that keeps the stated bound true: up when the duration is
+ * a floor, down when it is a ceiling. `Math.round` for both would let a floor of
+ * four minutes resolve to 3.87 and a ceiling of thirty to 30.97.
+ */
+const pollsFor = (ms: number, pollMs: number, bound: 'floor' | 'ceiling'): number =>
+    Math.max(1, bound === 'floor' ? Math.ceil(ms / pollMs) : Math.floor(ms / pollMs));
 
 /**
  * Read one integer tunable from the environment, falling back to the default
@@ -136,18 +164,46 @@ function intFromEnv(
     raw: string | undefined,
     fallback: number,
     { minimum, maximum }: { minimum: number; maximum: number },
+    variable: string,
 ): number {
     if (raw === undefined || raw.trim() === '') return fallback;
     const trimmed = raw.trim();
     const parsed = /^\d+$/.test(trimmed) ? Number(trimmed) : NaN;
     if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
         console.log(
-            `Ignoring attendee-watchdog override "${raw}" ` +
+            `Ignoring ${variable}="${raw}" ` +
                 `(want a whole number from ${minimum} to ${maximum}) — using ${fallback}`,
         );
         return fallback;
     }
     return parsed;
+}
+
+/**
+ * Hold a poll count inside a wall-clock window, and say so when it moves.
+ *
+ * Each value is individually range-checked already; the DURATION a count produces
+ * at the configured cadence may still be out of bounds in either direction, and
+ * that duration is what actually decides the behaviour. Both directions are logged
+ * because an operator who sets 90 and gets 5 otherwise has nothing to explain it.
+ */
+function clampPolls(
+    requested: number,
+    pollMs: number,
+    window: { minimum: number; maximum: number },
+    variable: string,
+): number {
+    const resolved = Math.min(
+        Math.max(requested, pollsFor(window.minimum, pollMs, 'floor')),
+        pollsFor(window.maximum, pollMs, 'ceiling'),
+    );
+    if (resolved !== requested) {
+        console.log(
+            `Using ${resolved} polls for ${variable}, not ${requested}: at ${pollMs}ms per poll ` +
+                `that keeps the tolerance between ${window.minimum}ms and ${window.maximum}ms`,
+        );
+    }
+    return resolved;
 }
 
 /** Resolve the watchdog tunables from the VP task definition's environment. */
@@ -158,41 +214,35 @@ export function resolveAttendeeWatchdogConfig(
         env.VP_ATTENDEE_POLL_MS,
         DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs,
         WATCHDOG_LIMITS.pollMs,
+        'VP_ATTENDEE_POLL_MS',
     );
-    // Capped by wall clock for the same reason as the missing bound below: 90
-    // polls is half an hour at the default cadence and three hours at the slowest.
-    const pollsBeforeEnd = Math.min(
-        intFromEnv(
-            env.VP_POLLS_BEFORE_END,
-            DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEnd,
-            WATCHDOG_LIMITS.polls,
-        ),
-        pollsFor(WATCHDOG_LIMITS.aloneToleranceMaxMs, pollMs),
+    // Bounded by wall clock in both directions, for the same reasons as the missing
+    // bound below: 90 polls is three hours at the slowest cadence, and 1 poll is one
+    // second at the fastest.
+    const requestedAlone = intFromEnv(
+        env.VP_POLLS_BEFORE_END,
+        DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEnd,
+        WATCHDOG_LIMITS.polls,
+        'VP_POLLS_BEFORE_END',
     );
+    const pollsBeforeEnd = clampPolls(requestedAlone, pollMs, WATCHDOG_LIMITS.aloneToleranceMs, 'VP_POLLS_BEFORE_END');
     const requestedMissing = intFromEnv(
         env.VP_POLLS_BEFORE_END_MISSING,
         DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEndMissing,
         WATCHDOG_LIMITS.polls,
+        'VP_POLLS_BEFORE_END_MISSING',
     );
-    // Each value is individually in range; the wall-clock tolerance they produce
-    // together may still not be, in either direction.
-    const pollsBeforeEndMissing = Math.min(
-        Math.max(requestedMissing, pollsFor(WATCHDOG_LIMITS.missingToleranceMs.minimum, pollMs)),
-        pollsFor(WATCHDOG_LIMITS.missingToleranceMs.maximum, pollMs),
+    const pollsBeforeEndMissing = clampPolls(
+        requestedMissing,
+        pollMs,
+        WATCHDOG_LIMITS.missingToleranceMs,
+        'VP_POLLS_BEFORE_END_MISSING',
     );
-    if (pollsBeforeEndMissing !== requestedMissing) {
-        console.log(
-            `Using ${pollsBeforeEndMissing} polls before ending on an unreadable meeting, ` +
-                `not ${requestedMissing}: at ${pollMs}ms per poll that keeps the tolerance ` +
-                `between ${WATCHDOG_LIMITS.missingToleranceMs.minimum}ms and ` +
-                `${WATCHDOG_LIMITS.missingToleranceMs.maximum}ms`,
-        );
-    }
     return {
         pollMs,
         pollsBeforeEnd,
         pollsBeforeEndMissing,
-        maxSuppressedPolls: pollsFor(WATCHDOG_LIMITS.maxSuppressionMs, pollMs),
+        maxSuppressedPolls: pollsFor(WATCHDOG_LIMITS.maxSuppressionMs, pollMs, 'ceiling'),
     };
 }
 
@@ -252,6 +302,11 @@ export function sanitizeTeamsDisplayName(name: string): string {
  * it is consecutive suppression that is limited, not suppression over the whole
  * meeting.
  *
+ * `unreadableRun` closes the gap that leaves: because a veto clears
+ * `consecutiveMissing`, an alternating sequence would otherwise multiply the two
+ * bounds instead of adding them (14 misses per veto reached 7.5 hours). The run
+ * counter ends the meeting at allowance + bound however the polls are classified.
+ *
  * Note the corroboration can only ever make the watchdog more patient. If it is
  * wrong in the conservative direction — no chrome found while the meeting is in
  * fact live — the reading degrades to plain BADGE_MISSING and the wide bound
@@ -266,6 +321,25 @@ export function decideAttendeeAction(
     state: AttendeeWatchdogState,
     config: AttendeeWatchdogConfig = DEFAULT_ATTENDEE_WATCHDOG_CONFIG,
 ): AttendeeDecision {
+    if (reading.state !== 'OK') {
+        state.unreadableRun += 1;
+        // Ceiling on the whole unreadable run, regardless of how it was classified
+        // poll by poll. Without this the veto's reset of `consecutiveMissing` makes
+        // the two bounds multiply rather than add.
+        const runCeiling = config.maxSuppressedPolls + config.pollsBeforeEndMissing;
+        if (state.unreadableRun >= runCeiling) {
+            return {
+                action: 'end',
+                reason: 'removed-from-meeting',
+                trigger: 'attendee-badge-missing',
+                detail:
+                    `no readable attendee count for ${state.unreadableRun} consecutive polls ` +
+                    `(the ${config.maxSuppressedPolls}-poll in-meeting allowance is spent) — ` +
+                    'the meeting has ended or the VP was removed',
+            };
+        }
+    }
+
     if (reading.state === 'BADGE_MISSING_IN_MEETING') {
         state.suppressedMissing += 1;
         if (state.suppressedMissing <= config.maxSuppressedPolls) {
@@ -282,10 +356,14 @@ export function decideAttendeeAction(
 
     if (reading.state !== 'OK') {
         state.consecutiveMissing += 1;
+        // Any unreadable poll clears the lonely run: an unreadable badge is not
+        // evidence about how many people are present. Note this means an
+        // alternating readable-alone / unreadable sequence never reaches the lonely
+        // exit — as on develop — but `unreadableRun` above bounds it regardless.
         state.consecutiveLonely = 0;
         if (state.consecutiveMissing >= config.pollsBeforeEndMissing) {
             const vetoed = state.suppressedMissing > 0
-                ? ` (in-meeting chrome vetoed ${state.suppressedMissing} earlier polls, allowance spent)`
+                ? ` (in-meeting chrome vetoed ${Math.min(state.suppressedMissing, config.maxSuppressedPolls)} earlier polls)`
                 : '';
             return {
                 action: 'end',
@@ -299,12 +377,13 @@ export function decideAttendeeAction(
         return { action: 'continue' };
     }
 
-    // A readable badge is unambiguous, so it restores the suppression allowance
-    // as well as clearing the miss counter: a meeting with several shares in it
-    // gets a fresh allowance for each, while a single unbroken run of vetoes
-    // stays bounded.
+    // A readable badge is unambiguous, so it restores the suppression allowance and
+    // clears both miss counters: a meeting with several shares in it gets a fresh
+    // allowance for each, while a single unbroken run of unreadable polls stays
+    // bounded however those polls were classified.
     state.suppressedMissing = 0;
     state.consecutiveMissing = 0;
+    state.unreadableRun = 0;
     if (reading.count > 1) {
         state.consecutiveLonely = 0;
         return { action: 'continue' };
@@ -1201,6 +1280,7 @@ export default class Teams {
             consecutiveLonely: 0,
             consecutiveMissing: 0,
             suppressedMissing: 0,
+            unreadableRun: 0,
         };
         // setInterval does not await an async callback, so a tick that outlasts
         // the cadence would overlap the next one and each overlapping tick would
