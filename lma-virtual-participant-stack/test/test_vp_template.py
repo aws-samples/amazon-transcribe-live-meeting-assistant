@@ -785,6 +785,62 @@ def test_launcher_passes_the_watchdog_tunables_as_static_config(launcher: str) -
         )
 
 
+def test_nova_sonic_region_is_a_parameter_reaching_the_container(template: dict) -> None:
+    """Issue #508: Nova Sonic is in fewer regions than LMA, so it must be selectable.
+
+    Empty means "the stack's own region", which is what every existing deployment
+    gets, so the default must stay empty and the pattern must accept it.
+    """
+    spec = template["Parameters"]["AmazonNovaSonicRegion"]
+    assert spec["Default"] == ""
+    assert re.match(spec["AllowedPattern"], ""), "an empty value must remain valid"
+    assert re.match(spec["AllowedPattern"], "eu-north-1")
+    assert not re.match(spec["AllowedPattern"], "eu_north_1")
+
+    env = _task_definition_env(template)
+    assert env["AMAZON_NOVA_SONIC_REGION"] == {"Ref": "AmazonNovaSonicRegion"}
+
+
+def test_nova_sonic_region_is_granted_in_iam(template: dict) -> None:
+    """Pointing the client elsewhere without the matching grant just fails at run time.
+
+    The task role scopes the Nova model to the stack's region, so a cross-region
+    call is denied by IAM before it reaches Bedrock -- which surfaces as a voice
+    assistant that will not start, not as anything resembling a misconfiguration.
+    """
+    policies = template["Resources"]["TaskRole"]["Properties"]["Policies"]
+    # Some entries are Fn::If-wrapped and carry no PolicyName of their own.
+    bedrock = next(p for p in policies if p.get("PolicyName") == "BedrockPolicy")
+    resources = bedrock["PolicyDocument"]["Statement"][0]["Resource"]
+    rendered = json.dumps(resources)
+
+    # The stack's own region is still granted...
+    assert "${AWS::Region}::foundation-model/amazon.nova-*" in rendered
+    # ...and the configured region, conditionally.
+    conditional = [r for r in resources if isinstance(r, dict) and "Fn::If" in r]
+    assert any(
+        "AmazonNovaSonicRegion" in json.dumps(r) and "amazon.nova-" in json.dumps(r)
+        for r in conditional
+    ), "the Nova model must be granted in AmazonNovaSonicRegion when it is set"
+    assert "HasCustomNovaSonicRegion" in template["Conditions"]
+
+    # Partition-qualified, so the grant is not aws-partition-only.
+    assert "arn:aws:bedrock" not in rendered, "use ${AWS::Partition} rather than a literal"
+
+
+def test_nova_sonic_region_reaches_the_vp_stack_from_lma_main(template: dict) -> None:
+    """A parameter only the nested stack declares cannot be set by an operator."""
+    main = yaml.load((TEMPLATE.parents[1] / "lma-main.yaml").read_text(), Loader=_CfnLoader)
+    assert "AmazonNovaSonicRegion" in main["Parameters"]
+    passed = main["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
+    assert passed.get("AmazonNovaSonicRegion") == {"Ref": "AmazonNovaSonicRegion"}
+    for field in ("Default", "AllowedPattern"):
+        assert (
+            main["Parameters"]["AmazonNovaSonicRegion"][field]
+            == template["Parameters"]["AmazonNovaSonicRegion"][field]
+        ), f"AmazonNovaSonicRegion {field} differs between lma-main.yaml and the VP stack"
+
+
 # ---------------------------------------------------------------------------
 # Schema validation for AWS::Lambda::MicrovmImage
 #

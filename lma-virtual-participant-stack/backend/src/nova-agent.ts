@@ -20,6 +20,26 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 
+/**
+ * Which region to reach Amazon Nova Sonic in.
+ *
+ * Nova Sonic is available in fewer regions than LMA itself, so a deployment
+ * pinned to a particular region for compliance can keep everything else local and
+ * reach the voice assistant elsewhere (GitHub #508). `AMAZON_NOVA_SONIC_REGION`
+ * carries the `AmazonNovaSonicRegion` stack parameter; empty or unset means the
+ * stack's own region, which is what every existing deployment gets.
+ *
+ * An explicitly passed region still wins, so a caller that already knows where to
+ * go is not overridden by the environment.
+ */
+export function resolveNovaSonicRegion(
+    configured: string | undefined,
+    env: Record<string, string | undefined> = process.env,
+): string {
+    const fromEnv = (env.AMAZON_NOVA_SONIC_REGION || '').trim();
+    return configured || fromEnv || env.AWS_REGION || 'us-east-1';
+}
+
 export interface NovaAgentConfig {
   modelId: string;
   systemPrompt: string;
@@ -152,7 +172,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       ? config.translatorUnmutePhrases.map(normalizeForTrigger).filter(p => p.length > 0)
       : [...DEFAULT_TRANSLATOR_UNMUTE_PHRASES];
     this.defaultActivationDuration = config.activationDuration || 30;
-    this.region = config.region || process.env.AWS_REGION || 'us-east-1';
+    this.region = resolveNovaSonicRegion(config.region);
     this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
     
     // Set initial activation state based on mode
@@ -168,7 +188,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log(`  Model: ${this.modelId}`);
     console.log(`  Voice: ${this.voiceId}`);
     console.log(`  Endpointing sensitivity: ${this.endpointingSensitivity}`);
-    console.log(`  Region: ${this.region}`);
+    const stackRegion = process.env.AWS_REGION;
+    console.log(
+      `  Region: ${this.region}` +
+        (stackRegion && this.region !== stackRegion ? ` (stack region is ${stackRegion})` : ''),
+    );
     console.log(`  Activation mode: ${this.activationMode}`);
     console.log(`  Meeting mode: ${this.meetingMode}`);
     if (this.meetingMode === 'translator') {

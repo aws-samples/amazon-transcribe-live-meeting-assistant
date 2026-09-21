@@ -318,6 +318,20 @@ Parameters:
       - "amazon_nova_sonic"
     Description: Voice AI assistant provider (none, elevenlabs, amazon_nova_sonic)
 
+  AmazonNovaSonicRegion:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^[a-z]{2}(-[a-z]+)+-[0-9]$"
+    ConstraintDescription: >-
+      Must be empty, or an AWS Region name such as us-east-1.
+    Description: >-
+      Region to reach Amazon Nova Sonic in, when it differs from the region
+      this stack is deployed to. Leave empty to use the stack's own region.
+      Nova Sonic is available in fewer regions than LMA itself, so a
+      deployment constrained to a particular region for compliance reasons
+      can keep everything else local and reach the voice assistant
+      elsewhere.
+
   VoiceAssistantActivationMode:
     Type: String
     Default: "wake_phrase"
@@ -578,6 +592,9 @@ Parameters:
 
 
 Conditions:
+  # Nova Sonic reached outside the stack's own region: the task role needs the
+  # model ARN in that region too, or the client is pointed somewhere IAM denies.
+  HasCustomNovaSonicRegion: !Not [!Equals [!Ref AmazonNovaSonicRegion, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
   HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
   HasAsrLauncher: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
@@ -1355,10 +1372,16 @@ Resources:
                   - "bedrock:InvokeModelWithResponseStream"
                   - "bedrock:InvokeModelWithBidirectionalStream"
                 Resource:
-                  - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}::foundation-model/anthropic.claude-haiku-4-5*"
-                  - !Sub "arn:aws:bedrock:*::foundation-model/anthropic.claude-haiku-4-5*"
-                  - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*claude-haiku-4-5*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/amazon.nova-*"
+                  # The same model in the region AmazonNovaSonicRegion
+                  # names, when that parameter is set.
+                  - !If
+                    - HasCustomNovaSonicRegion
+                    - !Sub "arn:${AWS::Partition}:bedrock:${AmazonNovaSonicRegion}::foundation-model/amazon.nova-*"
+                    - !Ref AWS::NoValue
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-haiku-4-5*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-haiku-4-5*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*claude-haiku-4-5*"
         - PolicyName: NovaSonicConfigAccess
           PolicyDocument:
             Version: 2012-10-17
@@ -2396,6 +2419,11 @@ Resources:
               Value: !Ref SimliTransportMode
             - Name: VOICE_ASSISTANT_PROVIDER
               Value: !Ref VoiceAssistantProvider
+            # Empty means "use the stack's region", which is what the container
+            # falls back to. The MicroVM launcher skips empty values, so under
+            # that launch type the variable is simply absent -- same outcome.
+            - Name: AMAZON_NOVA_SONIC_REGION
+              Value: !Ref AmazonNovaSonicRegion
             - Name: VOICE_ASSISTANT_ACTIVATION_MODE
               Value: !Ref VoiceAssistantActivationMode
             - Name: VOICE_ASSISTANT_WAKE_PHRASES

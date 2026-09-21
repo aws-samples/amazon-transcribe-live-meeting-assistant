@@ -227,8 +227,11 @@ None of these requires user configuration. The AI fallback resolver model is con
 | VoiceAssistantActivationMode | How the voice assistant is activated | always_active | always_active, wake_phrase |
 | VoiceAssistantWakePhrase | Comma-separated wake phrases for the voice assistant | (none) | e.g., "hey alex,ok alex" |
 | VoiceAssistantActivationDuration | Duration (in seconds) the voice assistant stays active after wake phrase | 30 | 5-300 |
+| AmazonNovaSonicRegion | Region to reach Amazon Nova Sonic in, when it differs from the region the stack is deployed to. Leave empty to use the stack's own region. Nova Sonic is available in fewer regions than LMA itself, so a deployment constrained to one region for compliance can keep everything else local and reach the voice assistant elsewhere. Only used when `VoiceAssistantProvider` is `amazon_nova_sonic`. | (empty — use the stack's region) | Empty, or an AWS Region name such as `eu-north-1` |
 | ElevenLabsApiKey | API key for ElevenLabs voice assistant | (none) | Valid API key string |
 | ElevenLabsAgentId | ElevenLabs conversational agent ID | (none) | Valid agent ID |
+
+Setting `AmazonNovaSonicRegion` also grants the Virtual Participant's task role permission to invoke the Nova model in that region — without it the client would be pointed at a region IAM denies, and the voice assistant would fail to start with an access-denied error rather than anything that reads like a misconfiguration. Everything else the Virtual Participant does, including the Bedrock calls behind its self-healing DOM resolver, stays in the stack's region.
 
 ## Simli Avatar
 
