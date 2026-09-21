@@ -4,11 +4,13 @@
 """
 Unit tests for the meeting invitation parser Lambda.
 
-Focuses on validate_parsed_data — the pure post-processing step that cleans the
-meeting ID / password the LLM extracts. Bedrock is never called here (these
-tests exercise deterministic regex/cleanup logic only).
+Covers validate_parsed_data — the pure post-processing step that cleans the
+meeting ID / password the LLM extracts — and the handler's rejection of platforms
+the Virtual Participant has no handler for. Bedrock is never called here: the
+regex/cleanup logic is deterministic, and the handler tests stub the parse step.
 """
 
+import json
 import os
 import unittest
 
@@ -103,3 +105,116 @@ class TestMeetingIdGeneralCleanup(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestUnsupportedPlatformRejection(unittest.TestCase):
+    """The handler must not auto-fill the form with a platform that cannot launch.
+
+    Before this, a pasted Google Meet invitation parsed "successfully", populated
+    the create form with GOOGLE_MEET and then failed at launch with "Unsupported
+    meeting platform" — after the user had reviewed and submitted everything else.
+    See GitHub #661.
+    """
+
+    def test_supported_platforms_are_the_ones_with_handlers(self):
+        # Kept in step with the platform switch in the Virtual Participant's
+        # index.ts. GOOGLE_MEET must stay out until a handler exists.
+        self.assertEqual(sorted(index.VP_SUPPORTED_PLATFORMS), ["CHIME", "TEAMS", "WEBEX", "ZOOM"])
+
+    def test_google_meet_is_still_recognized_by_the_prompt(self):
+        """Rejecting Meet requires identifying it first.
+
+        Dropping it from the prompt's platform list would make a Meet invitation
+        fall through to the "default to Zoom" branch, which is worse: the launch
+        would fail for a reason that has nothing to do with Meet.
+        """
+        prompt = index.create_parsing_prompt("Join at https://meet.google.com/abc-defg-hij")
+        self.assertIn("GOOGLE_MEET", prompt)
+
+    def test_a_meet_invitation_is_rejected_with_an_actionable_message(self):
+        original = index.parse_meeting_invitation
+        index.parse_meeting_invitation = lambda _text: {
+            "success": True,
+            "data": {
+                "meetingName": "Design review",
+                "meetingPlatform": "GOOGLE_MEET",
+                "meetingId": "https://meet.google.com/abc-defg-hij",
+            },
+        }
+        try:
+            result = json.loads(
+                index.handler({"arguments": {"invitationText": "Join at meet.google.com"}}, None)
+            )
+        finally:
+            index.parse_meeting_invitation = original
+
+        self.assertFalse(result["success"])
+        # The message has to tell the user what to do instead, not just say no.
+        self.assertIn("Google Meet", result["error"])
+        self.assertIn("Chrome extension", result["error"])
+        self.assertNotIn("data", result)
+
+    def test_a_supported_platform_still_parses(self):
+        original = index.parse_meeting_invitation
+        index.parse_meeting_invitation = lambda _text: {
+            "success": True,
+            "data": {
+                "meetingName": "Standup",
+                "meetingPlatform": "ZOOM",
+                "meetingId": "961 8750 1703",
+            },
+        }
+        try:
+            result = json.loads(index.handler({"arguments": {"invitationText": "Join Zoom"}}, None))
+        finally:
+            index.parse_meeting_invitation = original
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["data"]["meetingPlatform"], "ZOOM")
+        # ...and the existing cleanup still runs on it.
+        self.assertEqual(result["data"]["meetingId"], "96187501703")
+
+    def test_a_meet_link_with_no_platform_is_still_rejected(self):
+        """A missing platform would otherwise skip the check.
+
+        The UI falls back to its own ZOOM default when the parser returns no
+        platform, so the user would get a Zoom form holding a Meet link and a
+        launch failure with nothing to do with Meet. The link is enough to tell.
+        """
+        original = index.parse_meeting_invitation
+        index.parse_meeting_invitation = lambda _text: {
+            "success": True,
+            "data": {
+                "meetingName": "Sync",
+                "meetingPlatform": None,
+                "meetingId": "https://MEET.GOOGLE.com/abc-defg-hij",
+            },
+        }
+        try:
+            result = json.loads(index.handler({"arguments": {"invitationText": "join"}}, None))
+        finally:
+            index.parse_meeting_invitation = original
+
+        self.assertFalse(result["success"])
+        self.assertIn("Google Meet", result["error"])
+
+    def test_a_null_platform_and_null_meeting_id_do_not_raise(self):
+        """A free-text invitation with nothing extractable must still parse.
+
+        The Meet-link check reads `meetingId`, and without the `or ""` guard a null
+        id turns a successful parse into "Internal error: 'NoneType' object has no
+        attribute 'lower'" — the worst kind of regression to introduce while adding
+        a guard, since it fires on the least informative input.
+        """
+        original = index.parse_meeting_invitation
+        index.parse_meeting_invitation = lambda _text: {
+            "success": True,
+            "data": {"meetingName": "Chat", "meetingPlatform": None, "meetingId": None},
+        }
+        try:
+            result = json.loads(index.handler({"arguments": {"invitationText": "hello"}}, None))
+        finally:
+            index.parse_meeting_invitation = original
+
+        self.assertTrue(result["success"])
+        self.assertIsNone(result["data"]["meetingPlatform"])

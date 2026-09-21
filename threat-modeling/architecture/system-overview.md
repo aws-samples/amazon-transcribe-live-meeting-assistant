@@ -127,7 +127,7 @@ flowchart TD
 | **Live Transcription** | Real-time speech-to-text with speaker labels | Transcribe, Kinesis, AppSync subscriptions |
 | **Live Translation** | 75+ language translation of transcripts | Amazon Translate |
 | **AI Meeting Assistant** | On-demand/automatic summaries, Q&A, action items | Strands Agents, Bedrock |
-| **Virtual Participant** | Headless Chromium joins Zoom/Teams/Chime/Meet/WebEx | ECS, Playwright/CloakBrowser |
+| **Virtual Participant** | Headless Chromium joins Zoom/Teams/Chime/WebEx | ECS, Playwright/CloakBrowser |
 | **Voice Assistant** | Natural voice interaction during meetings | Nova Sonic, ElevenLabs TTS |
 | **Animated Avatar** | Visual avatar for voice assistant | Simli API |
 | **Meeting Search** | Semantic search across all meeting transcripts | Bedrock KB, S3 Vectors |
@@ -213,7 +213,6 @@ flowchart TD
         ZoomAPI[Zoom Meeting Rooms]
         TeamsAPI[Microsoft Teams Meetings]
         ChimeAPI[Amazon Chime Meetings]
-        MeetAPI[Google Meet Meetings]
         WebExAPI[WebEx Meetings]
     end
 

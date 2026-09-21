@@ -611,7 +611,7 @@ of all capture options.
 | Dimension                   | Desktop Capture App                                        | [Virtual Participant](virtual-participant.md)          |
 | --------------------------- | -------------------------------------------------------- | ------------------------------------------------------ |
 | How it captures             | Runs on your computer; captures OS system audio + mic locally | Headless bot joins the meeting in the cloud       |
-| Meeting platforms           | Any native or web app that plays audio on your computer  | Only platforms it can automate (Zoom, Teams, Chime, Webex, Meet) |
+| Meeting platforms           | Any native or web app that plays audio on your computer  | Only platforms it can automate (Zoom, Teams, Chime, Webex) |
 | Speaker identification      | ❌ No per-speaker names (one "Meeting Audio" channel)    | ✅ Active-speaker names from the meeting platform      |
 | In-meeting voice assistant  | ❌ Web-UI chat assistant only                            | ✅ Optional Nova Sonic voice assistant in the meeting  |
 | Visible to others           | ✅ No bot / extra attendee                               | ❌ Visible bot joins the meeting                       |
