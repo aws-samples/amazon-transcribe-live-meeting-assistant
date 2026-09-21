@@ -370,12 +370,14 @@ test-vp: ## Run Virtual Participant backend unit tests (no AWS)
 	cd $(VP_BACKEND_DIR) && $(NPM_CI) && npm test
 	@echo -e "$(GREEN)✅ Virtual Participant unit tests passed!$(NC)"
 
+# Collects the whole directory rather than naming each file: the list used to be
+# spelled out here and a new test file only ran in CI if its author remembered to
+# append it, which twice they did not. Everything in that directory is a static
+# test needing no AWS, and the one module that is not a test suite
+# (validate_state_machine.py, a helper) is not named test_* so pytest skips it.
 test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
 	@echo "Running Virtual Participant template + MicroVM client tests..."
-	$(PYTHON) -m pytest $(VP_DIR)/test/test_vp_template.py $(VP_DIR)/test/test_microvm_client.py \
-		$(VP_DIR)/test/test_ai_stack_vnc_alb.py $(VP_DIR)/test/test_microvm_manager.py \
-		$(VP_DIR)/test/test_microvm_vnc_token.py $(VP_DIR)/test/test_audio_sample_rates.py \
-		$(VP_DIR)/test/test_audio_single_writer.py -q
+	$(PYTHON) -m pytest $(VP_DIR)/test/ -q
 	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
 
 test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
