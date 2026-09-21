@@ -228,6 +228,44 @@ Parameters:
       audio. This is the per-deployment default; each Virtual Participant can
       override it with the "Record meeting video" toggle in the LMA UI.
 
+  # Teams meeting-end detection. Defaults match
+  # DEFAULT_ATTENDEE_WATCHDOG_CONFIG in backend/src/teams.ts (which applies
+  # when these are unset, e.g. a container run locally), and the bounds
+  # match the ceilings the container enforces.
+  VPAttendeePollMs:
+    Type: Number
+    Default: 20000
+    MinValue: 1000
+    MaxValue: 120000
+    Description: >-
+      How often a Teams Virtual Participant samples the meeting UI to
+      decide whether the meeting is still running, in milliseconds.
+      Leave at the default unless advised otherwise.
+
+  VPPollsBeforeEnd:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      Consecutive polls on which a Teams meeting must show one or fewer
+      attendees before the Virtual Participant leaves. 3 polls at the default
+      cadence is about 60 seconds.
+
+  VPPollsBeforeEndMissing:
+    Type: Number
+    Default: 15
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      Consecutive polls on which a Teams meeting must show neither a readable
+      attendee count nor any in-meeting controls before the Virtual Participant
+      leaves. 15 polls at the default cadence is about 5 minutes. Raise
+      this if participants report the Virtual Participant leaving meetings
+      that are still in progress. A value producing a tolerance outside 4 to
+      30 minutes at the chosen cadence is adjusted into that range, so at the
+      default cadence anything below 12 is raised.
+
   ElevenLabsApiKey:
     Type: String
     NoEcho: true
@@ -2291,6 +2329,26 @@ Resources:
               Value: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
             - Name: VP_PROFILES_BUCKET
               Value: !Ref VPProfilesBucketName
+            # Teams meeting-end detection, adjustable on a stack update rather
+            # than by rebuilding the VP container image. The MicroVM launch type
+            # reads these from this task definition too (see the launcher
+            # Lambda in lambda_functions/microvm_launcher), which skips any
+            # variable with an empty value — so these must always resolve
+            # to a number.
+            #
+            # VP_POLLS_BEFORE_END_MISSING is deliberately much larger than
+            # VP_POLLS_BEFORE_END: a badge that is present and reads <=1
+            # is a direct measurement of an empty meeting, while an
+            # unreadable badge is only counted at all once the in-meeting
+            # controls are gone as well.
+            # !Sub, not !Ref: these are Number parameters and the ECS
+            # Environment Value must be a String.
+            - Name: VP_ATTENDEE_POLL_MS
+              Value: !Sub "${VPAttendeePollMs}"
+            - Name: VP_POLLS_BEFORE_END
+              Value: !Sub "${VPPollsBeforeEnd}"
+            - Name: VP_POLLS_BEFORE_END_MISSING
+              Value: !Sub "${VPPollsBeforeEndMissing}"
             # Overridden at task launch by Step Functions when the user opts in.
             - Name: ZOOM_CREDENTIALS_SECRET_NAME
               Value: ""

@@ -12,45 +12,255 @@ import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick, humanType } from './prejoin-actions.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 
-/** Polls before a sustained condition is believed. 3 x 20s poll = ~60s grace. */
-export const POLLS_BEFORE_END = 3;
-
 /** What one poll of the Teams roster badge told us. */
-export type AttendeeReading = { state: 'OK'; count: number } | { state: 'BADGE_MISSING' };
+export type AttendeeReading =
+    | { state: 'OK'; count: number }
+    | { state: 'BADGE_MISSING' }
+    /**
+     * The badge could not be read, but the page still shows in-meeting chrome.
+     * Evidence of a live meeting, so it vetoes the miss — for a bounded number of
+     * consecutive polls, since Teams does not reliably remove that chrome when a
+     * meeting ends. See `decideAttendeeAction`.
+     */
+    | { state: 'BADGE_MISSING_IN_MEETING' };
 
 /** Debounced counters carried across polls. */
 export interface AttendeeWatchdogState {
     consecutiveLonely: number;
     consecutiveMissing: number;
+    /**
+     * Missing-badge polls vetoed by in-meeting evidence. Load-bearing, not just
+     * diagnostic: it is what spends the veto allowance.
+     */
+    suppressedMissing: number;
+    /**
+     * Consecutive polls with no readable badge, however they were classified.
+     *
+     * The backstop of last resort, and the only counter a veto cannot reset. The
+     * other two are individually bounded, but a veto clears `consecutiveMissing`,
+     * so an alternating sequence — a run of misses, then one poll where the chrome
+     * happens to be visible — multiplies the two bounds together instead of adding
+     * them: 14 misses per veto reaches 7.5 HOURS at the default cadence, which is
+     * the #540 outcome by another route. This counter makes the ceiling additive
+     * again for any interleaving of UNREADABLE polls.
+     *
+     * It does not bound a sequence containing readable badges, because a readable
+     * badge clears it — deliberately, since a readable badge is a measurement. Note
+     * the consequence: a badge that alternates between reading <=1 and being
+     * unreadable reaches no exit at all, because each unreadable poll also clears
+     * `consecutiveLonely`. That is unchanged from before this counter existed and is
+     * tracked in GitHub #687; it is not something `unreadableRun` addresses.
+     */
+    unreadableRun: number;
+}
+
+/** Tunables for the Teams attendee watchdog, resolved once per meeting. */
+export interface AttendeeWatchdogConfig {
+    /** Cadence of the watchdog poll, in milliseconds. */
+    pollMs: number;
+    /** Consecutive genuine "<=1 attendee" readings before the meeting ends. */
+    pollsBeforeEnd: number;
+    /** Consecutive ABSENT-badge readings before the meeting ends. */
+    pollsBeforeEndMissing: number;
+    /**
+     * How many consecutive polls in-meeting chrome may veto an absent badge
+     * before the veto is spent and the absent badge counts again.
+     *
+     * The veto must be finite. Teams does not reliably remove its in-meeting
+     * controls when a meeting ends: in the incident behind GitHub #540 the
+     * hang-up button was still present and visible afterwards — that is exactly
+     * why the `HANGUP_BUTTON_HIDDEN` watch, armed for the whole meeting, never
+     * fired there. An unbounded veto would therefore restore #540, with the VP
+     * recording video and holding a voice session until the four-hour meeting
+     * timeout. Spending the veto keeps a long content share safe while leaving a
+     * real backstop behind it.
+     */
+    maxSuppressedPolls: number;
+}
+
+/**
+ * Defaults for the attendee watchdog.
+ *
+ * The two bounds are deliberately different sizes, and the asymmetry is the
+ * whole point. A badge that is PRESENT and reads <=1 is a direct measurement:
+ * ~60s of it means everyone really has gone. A badge that is ABSENT measures
+ * nothing — Teams drops the roster button (and with it the count badge) from the
+ * DOM whenever the meeting toolbar collapses, which happens routinely during
+ * content share and full-screen layouts. A ~40s bound on that reading ended live
+ * meetings mid-sentence while people were still speaking (GitHub #660), so the
+ * missing-badge bound is minutes wide by default. (An operator who raises
+ * VPPollsBeforeEnd to its maximum can invert that relationship; both remain
+ * individually bounded, so the asymmetry is the shipped default rather than an
+ * invariant.)
+ *
+ * A wide bound alone is not enough, though: nothing in the VP moves the pointer
+ * once it is in the meeting, so a toolbar that auto-hides during a share can stay
+ * hidden for as long as the share lasts — longer than any bound worth setting.
+ * That is why an unreadable badge is first corroborated against the rest of the
+ * in-meeting chrome (see `decideAttendeeAction`), and the bound below applies to
+ * the case where the badge is unreadable AND that chrome is gone too, which is the
+ * shape of a meeting that has actually ended.
+ *
+ * `maxSuppressedPolls` then bounds the corroboration itself, because the chrome
+ * is not a reliable end-of-meeting signal either — see the field docs above. The
+ * worst case in either direction is therefore finite: a share is safe for ~30
+ * minutes at a stretch, and a meeting whose end Teams announces to nobody is left
+ * after ~35 at the default cadence. Both windows are capped at 30 minutes
+ * independently, so the ceiling is an hour for any settings at all — reachable at
+ * the default cadence with the maximum count as well as at the slowest cadence.
+ */
+export const DEFAULT_ATTENDEE_WATCHDOG_CONFIG: AttendeeWatchdogConfig = {
+    pollMs: 20_000,
+    pollsBeforeEnd: 3, // ~60s
+    pollsBeforeEndMissing: 15, // ~5 min
+    maxSuppressedPolls: 90, // ~30 min of content share
+};
+
+/**
+ * Hard limits on the tunables, so no setting — mistyped or merely unwise — can be
+ * worse than either bug this watchdog exists to prevent.
+ *
+ * `pollMs` is capped well below 2^31-1 because Node clamps a `setInterval` delay
+ * above that to 1ms: an accidental extra digit would otherwise turn the watchdog
+ * into a hot loop that hammers `page.evaluate` and burns through the whole
+ * missing-badge bound in milliseconds. The poll counts are capped so that a
+ * single extra zero cannot leave the VP effectively unbounded — the #540 shape,
+ * where a VP held a voice session and uploaded video to the 8-hour ceiling.
+ */
+const WATCHDOG_LIMITS = {
+    pollMs: { minimum: 1_000, maximum: 120_000 },
+    polls: { minimum: 1, maximum: 90 },
+    /**
+     * Bounds on the WALL-CLOCK tolerance, not just on the individual values.
+     * Both counts can be in range while their product is not, and the product is
+     * what decides how long a VP outlives its meeting — or how short a share it
+     * survives. The floor matters as much as the ceiling: at the documented
+     * minimum cadence of 1000ms, 15 polls is 15 seconds, which is tighter than
+     * the ~40s that caused GitHub #660 in the first place.
+     */
+    missingToleranceMs: { minimum: 4 * 60 * 1000, maximum: 30 * 60 * 1000 },
+    /**
+     * Bounds on how long an empty-but-readable roster is tolerated. The floor is
+     * what stops `VPPollsBeforeEnd=1` at the minimum cadence from becoming a
+     * one-second debounce — the #317/#318 shape, reachable from the parameters
+     * page.
+     */
+    aloneToleranceMs: { minimum: 30 * 1000, maximum: 10 * 60 * 1000 },
+    /** Ceiling on how long in-meeting chrome may veto an absent badge. */
+    maxSuppressionMs: 30 * 60 * 1000,
+} as const;
+
+/**
+ * Convert a wall-clock duration to whole polls at this cadence, at least one.
+ *
+ * Rounds in the direction that keeps the stated bound true: up when the duration is
+ * a floor, down when it is a ceiling. `Math.round` for both would let a floor of
+ * four minutes resolve to 3.87 and a ceiling of thirty to 30.97.
+ */
+const pollsFor = (ms: number, pollMs: number, bound: 'floor' | 'ceiling'): number =>
+    Math.max(1, bound === 'floor' ? Math.ceil(ms / pollMs) : Math.floor(ms / pollMs));
+
+/**
+ * Read one integer tunable from the environment, falling back to the default
+ * when it is unset, unparseable, or out of range.
+ *
+ * Operators need to be able to adjust these on a deployment that is hitting an
+ * unusual Teams layout without rebuilding the VP container image, so they are
+ * environment variables (fed by CloudFormation parameters) rather than baked-in
+ * constants. Only plain digit strings are accepted: `Number()` alone would also
+ * take `0x10`, `2e4` and `20000.0`, and a value that silently means something
+ * other than it reads is worse here than a rejected one.
+ */
+function intFromEnv(
+    raw: string | undefined,
+    fallback: number,
+    { minimum, maximum }: { minimum: number; maximum: number },
+    variable: string,
+): number {
+    if (raw === undefined || raw.trim() === '') return fallback;
+    const trimmed = raw.trim();
+    const parsed = /^\d+$/.test(trimmed) ? Number(trimmed) : NaN;
+    if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) {
+        console.log(
+            `Ignoring ${variable}="${raw}" ` +
+                `(want a whole number from ${minimum} to ${maximum}) — using ${fallback}`,
+        );
+        return fallback;
+    }
+    return parsed;
+}
+
+/**
+ * Hold a poll count inside a wall-clock window, and say so when it moves.
+ *
+ * Each value is individually range-checked already; the DURATION a count produces
+ * at the configured cadence may still be out of bounds in either direction, and
+ * that duration is what actually decides the behaviour. Both directions are logged
+ * because an operator who sets 90 and gets 5 otherwise has nothing to explain it.
+ */
+function clampPolls(
+    requested: number,
+    pollMs: number,
+    window: { minimum: number; maximum: number },
+    variable: string,
+): number {
+    const resolved = Math.min(
+        Math.max(requested, pollsFor(window.minimum, pollMs, 'floor')),
+        pollsFor(window.maximum, pollMs, 'ceiling'),
+    );
+    if (resolved !== requested) {
+        console.log(
+            `Using ${resolved} polls for ${variable}, not ${requested}: at ${pollMs}ms per poll ` +
+                `that keeps the tolerance between ${window.minimum}ms and ${window.maximum}ms`,
+        );
+    }
+    return resolved;
+}
+
+/** Resolve the watchdog tunables from the VP task definition's environment. */
+export function resolveAttendeeWatchdogConfig(
+    env: Record<string, string | undefined> = process.env,
+): AttendeeWatchdogConfig {
+    const pollMs = intFromEnv(
+        env.VP_ATTENDEE_POLL_MS,
+        DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs,
+        WATCHDOG_LIMITS.pollMs,
+        'VP_ATTENDEE_POLL_MS',
+    );
+    // Bounded by wall clock in both directions, for the same reasons as the missing
+    // bound below: 90 polls is three hours at the slowest cadence, and 1 poll is one
+    // second at the fastest.
+    const requestedAlone = intFromEnv(
+        env.VP_POLLS_BEFORE_END,
+        DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEnd,
+        WATCHDOG_LIMITS.polls,
+        'VP_POLLS_BEFORE_END',
+    );
+    const pollsBeforeEnd = clampPolls(requestedAlone, pollMs, WATCHDOG_LIMITS.aloneToleranceMs, 'VP_POLLS_BEFORE_END');
+    const requestedMissing = intFromEnv(
+        env.VP_POLLS_BEFORE_END_MISSING,
+        DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEndMissing,
+        WATCHDOG_LIMITS.polls,
+        'VP_POLLS_BEFORE_END_MISSING',
+    );
+    const pollsBeforeEndMissing = clampPolls(
+        requestedMissing,
+        pollMs,
+        WATCHDOG_LIMITS.missingToleranceMs,
+        'VP_POLLS_BEFORE_END_MISSING',
+    );
+    return {
+        pollMs,
+        pollsBeforeEnd,
+        pollsBeforeEndMissing,
+        maxSuppressedPolls: pollsFor(WATCHDOG_LIMITS.maxSuppressionMs, pollMs, 'ceiling'),
+    };
 }
 
 export type AttendeeDecision =
     | { action: 'continue' }
     | { action: 'end'; reason: ExitReasonCode; trigger: string; detail: string };
 
-/**
- * Decide whether the meeting has ended, from one badge reading plus the running
- * counters.
- *
- * Extracted from the watchdog's setInterval so the decision is unit-testable —
- * the bug this fixes lived in a closure that no test could reach.
- *
- * BADGE_MISSING is the important case. Teams removes the roster badge when the
- * host ends the meeting, so a missing badge is the *expected* state for the very
- * event we need to detect. It was previously treated as "unknown, never leave"
- * with an unconditional early return, which meant no number of missing reads
- * could ever end the meeting: the VP kept recording video and holding a voice
- * session until the 8-hour MicroVM ceiling (GitHub #540).
- *
- * It cannot simply be treated as "alone" either — the badge legitimately
- * disappears on a collapsed roster, content share, or re-layout, and reacting to
- * a single misread ended live meetings mid-sentence (GitHub #317, #318).
- *
- * So it gets its OWN debounced counter, exactly as zoom.ts already does: a
- * transient miss is absorbed, but a sustained one is bounded and ends the
- * meeting. Note the two counters are mutually exclusive — a reading is either a
- * genuine count or a miss, never both — so each resets the other.
- */
 /**
  * Teams' pre-join display-name field validates against a fixed character set —
  * "letters, numbers, spaces, and these symbols: - ' . _ @" — and the default
@@ -70,35 +280,137 @@ export function sanitizeTeamsDisplayName(name: string): string {
     return /[A-Za-z0-9]/.test(cleaned) ? cleaned : 'LMA';
 }
 
+/**
+ * Decide whether the meeting has ended, from one badge reading plus the running
+ * counters.
+ *
+ * Extracted from the watchdog's setInterval so the decision is unit-testable —
+ * the bug this fixes lived in a closure that no test could reach.
+ *
+ * BADGE_MISSING is the important case, and it has been wrong in both directions.
+ * Teams removes the roster badge when the host ends the meeting, so a missing
+ * badge is the *expected* state for the very event the watchdog exists to detect;
+ * treating it as "unknown, never leave" meant no number of missing reads could
+ * ever end the meeting, and the VP recorded video and held a voice session to the
+ * 8-hour MicroVM ceiling (GitHub #540). But Teams also drops the badge during
+ * ordinary in-meeting layouts, so a tight bound on it ends live meetings
+ * mid-sentence (GitHub #317, #318, #660).
+ *
+ * A wider bound is not sufficient on its own, because the hidden toolbar that
+ * takes the badge with it can stay hidden for the whole of a screen share. So the
+ * caller corroborates an unreadable badge against the in-meeting chrome and
+ * reports BADGE_MISSING_IN_MEETING when it is still there. That reading is
+ * treated as evidence of a live meeting and resets the missing counter.
+ *
+ * The veto is SPENT rather than granted indefinitely, and that limit is the
+ * safeguard against the opposite failure. Teams does not reliably tear its
+ * in-meeting controls down when a meeting ends — in the incident behind #540 the
+ * hang-up button was still present and visible afterwards, which is why the
+ * `HANGUP_BUTTON_HIDDEN` watch never fired there — so "chrome is present" cannot
+ * be trusted as proof of a live meeting for an unbounded time. After
+ * `maxSuppressedPolls` consecutive vetoes the reading is treated as a plain miss
+ * and the ordinary bound applies again. A readable badge resets the allowance, so
+ * it is consecutive suppression that is limited, not suppression over the whole
+ * meeting.
+ *
+ * `unreadableRun` closes the gap that leaves: because a veto clears
+ * `consecutiveMissing`, an alternating sequence would otherwise multiply the two
+ * bounds instead of adding them (14 misses per veto reached 7.5 hours). The run
+ * counter ends the meeting at allowance + bound however the polls are classified.
+ *
+ * Note the corroboration can only ever make the watchdog more patient. If it is
+ * wrong in the conservative direction — no chrome found while the meeting is in
+ * fact live — the reading degrades to plain BADGE_MISSING and the wide bound
+ * still applies, which is no worse than having no corroboration at all.
+ *
+ * The lonely and missing counters remain mutually exclusive: a reading is a
+ * genuine count, a corroborated miss, or an uncorroborated miss, and each resets
+ * the others.
+ */
 export function decideAttendeeAction(
     reading: AttendeeReading,
     state: AttendeeWatchdogState,
-    pollsBeforeEnd: number = POLLS_BEFORE_END,
+    config: AttendeeWatchdogConfig = DEFAULT_ATTENDEE_WATCHDOG_CONFIG,
 ): AttendeeDecision {
     if (reading.state !== 'OK') {
-        state.consecutiveMissing += 1;
-        state.consecutiveLonely = 0;
-        if (state.consecutiveMissing >= pollsBeforeEnd) {
+        state.unreadableRun += 1;
+        // Ceiling on the whole unreadable run, regardless of how it was classified
+        // poll by poll. Without this the veto's reset of `consecutiveMissing` makes
+        // the two bounds multiply rather than add.
+        const runCeiling = config.maxSuppressedPolls + config.pollsBeforeEndMissing;
+        if (state.unreadableRun >= runCeiling) {
             return {
                 action: 'end',
                 reason: 'removed-from-meeting',
                 trigger: 'attendee-badge-missing',
                 detail:
-                    `attendee badge absent for ${state.consecutiveMissing} consecutive polls — ` +
+                    `no readable attendee count for ${state.unreadableRun} consecutive polls ` +
+                    `(the ${config.maxSuppressedPolls}-poll in-meeting allowance is spent) — ` +
                     'the meeting has ended or the VP was removed',
+            };
+        }
+    }
+
+    if (reading.state === 'BADGE_MISSING_IN_MEETING') {
+        state.suppressedMissing += 1;
+        if (state.suppressedMissing <= config.maxSuppressedPolls) {
+            state.consecutiveMissing = 0;
+            // No count was read, so there is nothing to say about being alone —
+            // don't let a share-hidden roster accrue toward the lonely exit either.
+            state.consecutiveLonely = 0;
+            return { action: 'continue' };
+        }
+        // Allowance spent. Chrome that has been present with no readable roster
+        // for this long is no longer good evidence of a live meeting, so fall
+        // through and count the reading as the plain miss it otherwise is.
+        //
+        // In practice the run ceiling above now fires first at every legal setting,
+        // because pollsBeforeEndMissing <= maxSuppressedPolls (both are clamped by
+        // the same 30-minute window). This branch is kept as the local statement of
+        // the rule, so the invariant does not depend on that arithmetic holding
+        // after a future edit to either window.
+    }
+
+    if (reading.state !== 'OK') {
+        state.consecutiveMissing += 1;
+        // Any unreadable poll clears the lonely run: an unreadable badge is not
+        // evidence about how many people are present. This does mean that a badge
+        // alternating between "<=1" and unreadable reaches NO exit — `unreadableRun`
+        // does not cover it either, since a readable badge clears that too. Measured:
+        // OK(1), OK(1), BADGE_MISSING repeating never ends. Unchanged from before
+        // this change and tracked in GitHub #687; decaying this counter rather than
+        // zeroing it is the likely fix.
+        state.consecutiveLonely = 0;
+        if (state.consecutiveMissing >= config.pollsBeforeEndMissing) {
+            const vetoed = state.suppressedMissing > 0
+                ? ` (in-meeting chrome vetoed ${Math.min(state.suppressedMissing, config.maxSuppressedPolls)} earlier polls)`
+                : '';
+            return {
+                action: 'end',
+                reason: 'removed-from-meeting',
+                trigger: 'attendee-badge-missing',
+                detail:
+                    `no readable attendee count for ${state.consecutiveMissing} consecutive polls` +
+                    `${vetoed} — the meeting has ended or the VP was removed`,
             };
         }
         return { action: 'continue' };
     }
 
+    // A readable badge is unambiguous, so it restores the suppression allowance and
+    // clears both miss counters: a meeting with several shares in it gets a fresh
+    // allowance for each, while a single unbroken run of unreadable polls stays
+    // bounded however those polls were classified.
+    state.suppressedMissing = 0;
     state.consecutiveMissing = 0;
+    state.unreadableRun = 0;
     if (reading.count > 1) {
         state.consecutiveLonely = 0;
         return { action: 'continue' };
     }
 
     state.consecutiveLonely += 1;
-    if (state.consecutiveLonely >= pollsBeforeEnd) {
+    if (state.consecutiveLonely >= config.pollsBeforeEnd) {
         return {
             action: 'end',
             reason: 'alone-in-meeting',
@@ -526,13 +838,27 @@ export default class Teams {
      * instead of throwing out of the poll loop.
      */
     private async isInMeeting(page: Page): Promise<boolean> {
+        return (await this.inMeetingSignal(page)) !== null;
+    }
+
+    /**
+     * As `isInMeeting`, but returns the selector that matched (or null).
+     *
+     * The attendee watchdog uses this rather than the boolean because "some
+     * in-meeting chrome is present" is the reason it keeps a VP in a meeting whose
+     * roster it cannot read, and when that turns out to be wrong the one thing
+     * needed to diagnose it is WHICH of these signals was still there. Left/right
+     * rail buttons on the full client, for instance, outlive a meeting in a way
+     * the meeting stage does not.
+     */
+    private async inMeetingSignal(page: Page): Promise<string | null> {
         return page
             .evaluate(() => {
                 // Still on the pre-join screen? Then definitely not in-meeting.
                 const onPrejoin = document.querySelector('[data-tid="prejoin-join-button"]');
                 if (onPrejoin) {
                     const r = (onPrejoin as HTMLElement).getBoundingClientRect();
-                    if (r.width > 0 && r.height > 0) return false;
+                    if (r.width > 0 && r.height > 0) return null;
                 }
 
                 const visible = (sel: string): boolean => {
@@ -561,9 +887,9 @@ export default class Teams {
                     'button[aria-label*="chat" i]',
                     'button[aria-label*="people" i]',
                 ];
-                return inMeetingSignals.some(visible);
+                return inMeetingSignals.find(visible) ?? null;
             })
-            .catch(() => false);
+            .catch(() => null);
     }
 
     public async initialize(page: Page, opts: MeetingInitOptions = {}): Promise<ExitInfo> {
@@ -952,102 +1278,151 @@ export default class Teams {
         // Fix — mirror the debounced participants-watchdog already proven on
         // Zoom (see zoom.ts):
         //   - poll on a fixed interval instead of reacting to every mutation;
-        //   - require POLLS_BEFORE_END *consecutive* genuine "<=1" reads
+        //   - require pollsBeforeEnd *consecutive* genuine "<=1" reads
         //     (~60s grace) before leaving, so transient re-renders are absorbed;
-        //   - distinguish "badge missing/empty" (UNKNOWN — never a leave signal
-        //     on Teams, where the badge legitimately disappears) from a badge
-        //     that is present and genuinely reads <=1 (alone).
+        //   - corroborate a "badge missing/empty" reading against the in-meeting
+        //     chrome, and when that chrome is present treat it as evidence of a
+        //     live meeting rather than as a strike — on Teams the badge
+        //     legitimately disappears mid-meeting, and because nothing here moves
+        //     the pointer, an auto-hidden toolbar stays hidden for the whole of a
+        //     share (GitHub #660);
+        //   - only an uncorroborated miss counts, on its own wider bound
+        //     (pollsBeforeEndMissing) — see decideAttendeeAction.
         // Audio silence is deliberately NOT a leave signal (long silent
         // document reviews are real meetings).
-        console.log("Listening for attendee changes.");
-        const POLL_MS = 20_000;
+        const watchdogConfig = resolveAttendeeWatchdogConfig();
+        console.log(
+            'Listening for attendee changes ' +
+                `(poll ${watchdogConfig.pollMs}ms, alone x${watchdogConfig.pollsBeforeEnd}, ` +
+                `badge-missing-and-not-in-meeting x${watchdogConfig.pollsBeforeEndMissing}).`,
+        );
         const watchdogState: AttendeeWatchdogState = {
             consecutiveLonely: 0,
             consecutiveMissing: 0,
+            suppressedMissing: 0,
+            unreadableRun: 0,
         };
+        // setInterval does not await an async callback, so a tick that outlasts
+        // the cadence would overlap the next one and each overlapping tick would
+        // increment the counters independently — making the wall-clock tolerance
+        // shorter than the configured number of polls. Not reachable at the 20s
+        // default, but three sequential page.evaluate round trips at the 1000ms
+        // minimum on a loaded host is a different matter.
+        let pollInFlight = false;
         const attendeeWatchdog = setInterval(async () => {
             if (page.isClosed()) {
                 clearInterval(attendeeWatchdog);
                 return;
             }
-
-            // Strongest signal first: Teams renders an unmistakable post-meeting
-            // screen ("You left the meeting" / "The meeting has ended", or a
-            // /postmeeting-style URL). Checking this before the roster badge means
-            // a genuinely-ended meeting is detected in ONE poll instead of waiting
-            // out the badge debounce (GitHub #540).
-            let ended: { ended: boolean; how?: string } = { ended: false };
+            if (pollInFlight) return;
+            pollInFlight = true;
             try {
-                ended = await page.evaluate(() => {
-                    const url = window.location.href;
-                    if (/\/postmeeting|\/meetingended|calling\/end/i.test(url)) {
-                        return { ended: true, how: `url:${url.slice(0, 120)}` };
-                    }
-                    const text = (document.body?.innerText || '').slice(0, 4000);
-                    const phrases = [
-                        /you (?:have )?left the meeting/i,
-                        /the meeting (?:has )?ended/i,
-                        /this meeting has ended/i,
-                        /you(?:'|’)?ve been removed from (?:the|this) meeting/i,
-                        /the call (?:has )?ended/i,
-                    ];
-                    for (const re of phrases) {
-                        const m = text.match(re);
-                        if (m) return { ended: true, how: `text:${m[0]}` };
-                    }
-                    return { ended: false };
-                });
-            } catch {
-                // Page closed/navigated or CDP error — fall through to the badge
-                // reading, which handles unknown state with its own debounce.
-                ended = { ended: false };
-            }
 
-            if (ended.ended) {
-                console.log(`Teams meeting has ended (${ended.how}) — leaving.`);
-                clearInterval(attendeeWatchdog);
-                details.start = false;
-                this.requestEnd({ reason: 'host-ended', trigger: 'post-meeting-screen' });
-                return;
-            }
+                // Strongest signal first: Teams renders an unmistakable post-meeting
+                // screen ("You left the meeting" / "The meeting has ended", or a
+                // /postmeeting-style URL). Checking this before the roster badge means
+                // a genuinely-ended meeting is detected in ONE poll instead of waiting
+                // out the badge debounce (GitHub #540).
+                let ended: { ended: boolean; how?: string } = { ended: false };
+                try {
+                    ended = await page.evaluate(() => {
+                        const url = window.location.href;
+                        if (/\/postmeeting|\/meetingended|calling\/end/i.test(url)) {
+                            return { ended: true, how: `url:${url.slice(0, 120)}` };
+                        }
+                        const text = (document.body?.innerText || '').slice(0, 4000);
+                        const phrases = [
+                            /you (?:have )?left the meeting/i,
+                            /the meeting (?:has )?ended/i,
+                            /this meeting has ended/i,
+                            /you(?:'|’)?ve been removed from (?:the|this) meeting/i,
+                            /the call (?:has )?ended/i,
+                        ];
+                        for (const re of phrases) {
+                            const m = text.match(re);
+                            if (m) return { ended: true, how: `text:${m[0]}` };
+                        }
+                        return { ended: false };
+                    });
+                } catch {
+                    // Page closed/navigated or CDP error — fall through to the badge
+                    // reading, which handles unknown state with its own debounce.
+                    ended = { ended: false };
+                }
 
-            let reading: AttendeeReading;
-            try {
-                reading = await page.evaluate(() => {
-                    const badgeElement = document.querySelector('span[data-tid="toolbar-item-badge"]');
-                    if (!badgeElement) return { state: 'BADGE_MISSING' as const };
-                    const text = (badgeElement.textContent || '').trim();
-                    if (text === '') return { state: 'BADGE_MISSING' as const };
-                    const n = parseInt(text, 10);
-                    return { state: 'OK' as const, count: Number.isFinite(n) ? n : 0 };
-                });
-            } catch {
-                // page.evaluate threw — page closed/navigated or CDP error.
-                reading = { state: 'BADGE_MISSING' };
-            }
+                if (ended.ended) {
+                    console.log(`Teams meeting has ended (${ended.how}) — leaving.`);
+                    clearInterval(attendeeWatchdog);
+                    details.start = false;
+                    this.requestEnd({ reason: 'host-ended', trigger: 'post-meeting-screen' });
+                    return;
+                }
 
-            const decision = decideAttendeeAction(reading, watchdogState);
-            if (reading.state === 'OK') {
-                console.log(
-                    `DEBUG: Teams attendee count: ${reading.count}, ` +
-                        `hasOthers: ${reading.count > 1}, ` +
-                        `consecutiveLonely: ${watchdogState.consecutiveLonely}/${POLLS_BEFORE_END}`,
-                );
-            } else {
-                console.log(
-                    'DEBUG: Teams attendee badge missing/empty — ' +
-                        `${watchdogState.consecutiveMissing}/${POLLS_BEFORE_END} consecutive ` +
-                        '(the badge also disappears when the meeting ends, so this is now bounded)',
-                );
-            }
+                let reading: AttendeeReading;
+                try {
+                    reading = await page.evaluate(() => {
+                        const badgeElement = document.querySelector('span[data-tid="toolbar-item-badge"]');
+                        if (!badgeElement) return { state: 'BADGE_MISSING' as const };
+                        const text = (badgeElement.textContent || '').trim();
+                        if (text === '') return { state: 'BADGE_MISSING' as const };
+                        const n = parseInt(text, 10);
+                        return { state: 'OK' as const, count: Number.isFinite(n) ? n : 0 };
+                    });
+                } catch {
+                    // page.evaluate threw — page closed/navigated or CDP error.
+                    reading = { state: 'BADGE_MISSING' };
+                }
 
-            if (decision.action === 'end') {
-                console.log(`LMA Virtual Participant is leaving: ${decision.detail}`);
-                clearInterval(attendeeWatchdog);
-                details.start = false;
-                this.requestEnd({ reason: decision.reason, trigger: decision.trigger });
+                // An unreadable badge on its own says nothing: it is equally the
+                // signature of a meeting that ended and of a toolbar that collapsed
+                // during a share. isInMeeting() tests ~18 in-meeting signals — the
+                // stage, the calling screen, the call controls — so it distinguishes
+                // the two without depending on the toolbar being expanded or on the
+                // client's UI language. Only a miss with NO in-meeting chrome behind
+                // it is allowed to count toward leaving.
+                let inMeetingVia: string | null = null;
+                if (reading.state === 'BADGE_MISSING') {
+                    inMeetingVia = await this.inMeetingSignal(page);
+                    if (inMeetingVia !== null) reading = { state: 'BADGE_MISSING_IN_MEETING' };
+                }
+
+                const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig);
+                if (reading.state === 'OK') {
+                    console.log(
+                        `DEBUG: Teams attendee count: ${reading.count}, ` +
+                            `hasOthers: ${reading.count > 1}, ` +
+                            `consecutiveLonely: ${watchdogState.consecutiveLonely}/${watchdogConfig.pollsBeforeEnd}`,
+                    );
+                } else if (reading.state === 'BADGE_MISSING_IN_MEETING') {
+                    const spent = watchdogState.suppressedMissing > watchdogConfig.maxSuppressedPolls;
+                    console.log(
+                        'DEBUG: Teams attendee badge missing/empty but in-meeting chrome is present ' +
+                            `(matched ${inMeetingVia}) — ` +
+                            `${watchdogState.suppressedMissing}/${watchdogConfig.maxSuppressedPolls} ` +
+                            (spent
+                                ? 'vetoes used, allowance SPENT: counting this as a miss from now on'
+                                : 'vetoes used, not counting toward leaving. Expected during a ' +
+                                  'content share or with a collapsed toolbar.'),
+                    );
+                } else {
+                    console.log(
+                        'DEBUG: Teams attendee badge missing/empty AND no in-meeting chrome — ' +
+                            `${watchdogState.consecutiveMissing}/${watchdogConfig.pollsBeforeEndMissing} consecutive ` +
+                            '(the shape of a meeting that has ended; the post-meeting screen, when Teams ' +
+                            'shows one, ends the meeting in a single poll instead)',
+                    );
+                }
+
+                if (decision.action === 'end') {
+                    console.log(`LMA Virtual Participant is leaving: ${decision.detail}`);
+                    clearInterval(attendeeWatchdog);
+                    details.start = false;
+                    this.requestEnd({ reason: decision.reason, trigger: decision.trigger });
+                }
+            } finally {
+                pollInFlight = false;
             }
-        }, POLL_MS);
+        }, watchdogConfig.pollMs);
         page.once('close', () => clearInterval(attendeeWatchdog));
 
         // Speaker attribution combines two signals:
