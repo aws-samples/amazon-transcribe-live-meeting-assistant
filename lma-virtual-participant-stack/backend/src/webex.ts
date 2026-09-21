@@ -83,6 +83,31 @@ export function normalizeWebexSender(raw: string | null | undefined): string | n
 }
 
 /**
+ * Is this chat message one of the VP's own?
+ *
+ * Runs on the node side, on the NORMALIZED sender, so one notion of "who sent this"
+ * serves both this check and the goodbye. Doing it in the page against the raw label
+ * let anything decorative through — a trailing colon, a leading '@', an appended
+ * timestamp — and the VP would then ingest its own intro message, or toggle itself
+ * on an operator-customised start or stop message containing START or PAUSE.
+ *
+ * Matched whole rather than as a substring: `scribeName` is the bare string "LMA",
+ * and a substring test silences any participant whose display name contains it
+ * (ALMA, SELMA, HOLMAN). "You" is matched only on its own or with a parenthesised
+ * role after it, for the same reason — "You (Host)" is us, while "Youssef Ahmed" and
+ * "You Jin Park" are participants.
+ */
+export function isOwnWebexSender(sender: string | null, identities: string[]): boolean {
+    if (!sender) return false;
+    // Drop a leading mention marker before comparing.
+    const name = sender.replace(/^@+/, '').trim();
+    if (/^You(\s*\([^)]*\))?$/i.test(name)) return true;
+    return identities.some(
+        (own) => own && (name === own || name.startsWith(`${own} `)),
+    );
+}
+
+/**
  * Chat selectors for both markups Webex serves — the Momentum (MDC) panel it uses
  * now, and the older CSS-module markup. Declared here rather than inline in the
  * observer so they are covered by webex-selectors.test.ts.
@@ -777,6 +802,8 @@ export default class Webex {
         // otherwise be split into a bogus sender and a truncated message.
         await page.exposeFunction('messageChange', async (rawSender: string | null, message: string) => {
             const sender = normalizeWebexSender(rawSender);
+            // Never act on, or transcribe, our own chat messages.
+            if (isOwnWebexSender(sender, [details.scribeIdentity, details.scribeName])) return;
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
                 // (it can emit duplicate add events) — only act on the first.
@@ -858,6 +885,12 @@ export default class Webex {
                 // element, not the row: chat UIs commonly group a run of messages
                 // from one sender into a single row, and keying on the row would
                 // drop every message in such a group after the first.
+                //
+                // Note the key is element identity, which survives a node being
+                // MOVED but not REBUILT: an innerHTML re-render of the list produces
+                // fresh elements and re-delivers, while a recycled element given new
+                // text is not delivered again. Neither is how Lit or React normally
+                // update, and the end-command path is idempotent via endHandled.
                 const seen = new WeakSet<Element>();
 
                 const callback = (mutationList: MutationRecord[]) => {
@@ -885,23 +918,49 @@ export default class Webex {
                             // row's first message — dropping an "LMA leave" sent
                             // straight after the sender's previous line, which is
                             // the very defect this observer is being fixed for.
-                            const bodyEls = el.matches(bodies)
-                                ? [el]
+                            // `closest(bodies)` covers the case where the body is an
+                            // ANCESTOR of the added node (a body filled by inserting
+                            // a child element), which a downward scan misses.
+                            const ownBody = el.matches(bodies) ? el : el.closest(bodies);
+                            const found = ownBody
+                                ? [ownBody]
                                 : Array.from(row.querySelectorAll(bodies));
+                            // Outermost matches only. `bodies` matches by class
+                            // PREFIX, and the row selector shows several classes share
+                            // it, so a mention or link span inside a message would
+                            // otherwise be delivered a second time as a fragment —
+                            // and a fragment can satisfy the end-command match where
+                            // the whole sentence does not.
+                            const bodyEls = found.filter(
+                                (b) => !found.some((other) => other !== b && other.contains(b)),
+                            );
                             for (const bodyEl of bodyEls) {
                                 // Resolve the sender from THIS body's own row, not
                                 // once for the added node. `closest` only walks up,
                                 // so when the added node contains several rows — a
-                                // bare text node appended to the chat list makes the
-                                // whole list the fallback "row", and a virtualized
-                                // list can insert a wrapper of several rows — reading
-                                // one sender for the subtree credits every message to
-                                // whoever is first in it. Since the VP's own start
+                                // bare text or comment node appended to the chat list
+                                // makes the whole LIST the fallback scope, and a
+                                // virtualized list can insert a wrapper of several
+                                // rows — one label would otherwise be credited to
+                                // every message under it. Since the VP's own start
                                 // message is the first thing in the panel, that also
-                                // meant the whole group was dropped as "ours".
-                                const sender = (bodyEl.closest(rows) ?? row)
-                                    .querySelector(senders)
-                                    ?.textContent?.trim();
+                                // meant the whole batch was discarded as "ours".
+                                //
+                                // When the body has no row of its own, a sender is
+                                // borrowed only if there is exactly one body in scope,
+                                // so it cannot be attributed across messages. An
+                                // unknown sender is delivered as null — the message
+                                // still gets through, and the goodbye falls back to
+                                // its generic wording.
+                                const scope = bodyEl.closest(rows) ?? (bodyEls.length === 1 ? row : null);
+                                // Ignore labels belonging to a NESTED row (a quoted or
+                                // replied-to message): take the one at this row's own
+                                // level, which is not necessarily the first in
+                                // document order.
+                                const label = Array.from(scope?.querySelectorAll(senders) ?? []).find(
+                                    (candidate) => (candidate.closest(rows) ?? scope) === scope,
+                                );
+                                const sender = label?.textContent?.trim();
                                 // Already delivered, or no text yet — a row shell
                                 // whose content arrives in a later mutation, an
                                 // attachment card, or a join/leave notice. Nothing
@@ -912,27 +971,13 @@ export default class Webex {
                                 const message = bodyEl.textContent?.trim();
                                 if (!message) continue;
                                 seen.add(bodyEl);
-                                // Skip the VP's own messages. 'You' and the
-                                // 'from LMA' prefix are what the two markups label
-                                // them with; the configured identity is matched as
-                                // well, since both labels are markup-specific and
-                                // the VP must not ingest its own intro message (nor
-                                // toggle itself on an operator-customised start or
-                                // stop message containing START or PAUSE). Matched
-                                // whole, not as a substring: 'LMA' inside a
-                                // participant's name — ALMA, SELMA — must not
-                                // silence them.
-                                if (
-                                    sender === 'You' ||
-                                    sender?.startsWith('from LMA') ||
-                                    ownNames.some(
-                                        (own) =>
-                                            own &&
-                                            (sender === own || sender?.startsWith(`from ${own}`)),
-                                    )
-                                ) {
-                                    continue;
-                                }
+                                // Own-message filtering happens on the NODE side,
+                                // after the label has been normalized — see
+                                // isOwnWebexSender. Doing it here meant comparing a
+                                // raw label, which any decoration defeated: a
+                                // trailing colon, an '@', or an appended timestamp
+                                // all let the VP's own messages through.
+                                //
                                 // Sender as a separate argument so a body containing
                                 // the delimiter cannot be mistaken for one.
                                 (window as any).messageChange(sender ?? null, message);

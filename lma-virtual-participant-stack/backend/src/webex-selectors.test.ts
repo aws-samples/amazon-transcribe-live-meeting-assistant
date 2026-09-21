@@ -23,12 +23,21 @@
  *    pierces open shadow roots by itself).
  *
  * These tests are string-level and need no browser, which is the point: they run
- * in the same `node --test` pass as everything else.
+ * in the same `node --test` pass as everything else. They are a heuristic, not a CSS
+ * validator: they catch the malformations that have actually occurred here — a
+ * stray bracket or quote, `>>>`, an empty alternative, a child combinator where a
+ * descendant was meant — but a genuinely invalid construct such as `[data-test=]`
+ * or `div > > span` needs a real parser and will pass.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { NAME_INPUT, WEBEX_CHAT_SELECTORS, normalizeWebexSender } from './webex.js';
+import {
+    NAME_INPUT,
+    WEBEX_CHAT_SELECTORS,
+    isOwnWebexSender,
+    normalizeWebexSender,
+} from './webex.js';
 
 /** Every quoted string literal in webex.ts, including template literals. */
 const sourceLiterals = (): string[] => {
@@ -136,9 +145,13 @@ test('every selector in webex.ts has balanced brackets and quotes', () => {
 
 test('no selector alternative is left empty by a stray comma', () => {
     // 'a, , b' parses as an error, and a trailing comma is an easy edit to make
-    // when adding a markup variant.
-    for (const selector of selectorLiterals()) {
-        if (!selector.includes(',')) continue;
+    // when adding a markup variant. Over EVERY literal, for the same reason the
+    // balance check is: a class-only selector like '.a, , .b' is not recognised by
+    // the shape classifier, so filtering first hid exactly this. The two ', ' join
+    // separators in the file are the only literals that legitimately look like an
+    // empty alternative.
+    for (const selector of [...sourceLiterals(), ...selectorLiterals()]) {
+        if (!selector.includes(',') || selector.trim() === ',') continue;
         for (const part of selector.split(',')) {
             assert.notEqual(part.trim(), '', `"${selector}" has an empty alternative`);
         }
@@ -253,4 +266,56 @@ test('a display name containing the word "to" is not truncated', () => {
 test('a sender whose own name contains "to" survives the legacy label', () => {
     // The boundary match is greedy, so the LAST " to " is the recipient boundary.
     assert.equal(normalizeWebexSender('from Toby Tolkien to everyone:'), 'Toby Tolkien');
+});
+
+test("the VP's own messages are recognized however the label is decorated", () => {
+    // The page used to compare the raw label, so anything decorative let our own
+    // messages through — and an operator-customised start/stop message containing
+    // START or PAUSE would then have made the VP toggle itself.
+    const ids = ['LMA (bob@example.com)', 'LMA'];
+    for (const own of [
+        'LMA (bob@example.com)',
+        'LMA (bob@example.com):',
+        'LMA',
+        'LMA:',
+        '@LMA (bob@example.com)',
+        'LMA (bob@example.com) 10:32',
+        'You',
+        'You:',
+        'You (Host)',
+        'from LMA (bob@example.com) to everyone:',
+    ]) {
+        assert.equal(
+            isOwnWebexSender(normalizeWebexSender(own), ids),
+            true,
+            `"${own}" should be recognized as ours`,
+        );
+    }
+});
+
+test('a participant whose name merely contains our name is not silenced', () => {
+    // The regression this replaced: a substring match dropped every message from
+    // anyone called ALMA, SELMA or HOLMAN, and ignored their LMA leave.
+    const ids = ['LMA (bob@example.com)', 'LMA'];
+    for (const other of [
+        'ALMA GARCIA',
+        'Alma Garcia',
+        'SELMA',
+        'HOLMAN',
+        'LMAO Corp',
+        'Youssef Ahmed',
+        'You Jin Park',
+        'Bob (LMA)',
+        'from ALMA GARCIA to everyone:',
+    ]) {
+        assert.equal(
+            isOwnWebexSender(normalizeWebexSender(other), ids),
+            false,
+            `"${other}" must not be treated as ours`,
+        );
+    }
+});
+
+test('an unknown sender is not mistaken for ours', () => {
+    assert.equal(isOwnWebexSender(null, ['LMA']), false);
 });
