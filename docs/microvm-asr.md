@@ -221,7 +221,7 @@ the start of each meeting, so a change needs no stack update and no image rebuil
 |---|---|---|
 | Stream Audio, Chrome extension and Desktop Capture: engine | Amazon Transcribe | Which engine those meetings use |
 | Virtual Participants: engine | Amazon Transcribe | Which engine Virtual Participants use |
-| Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off |
+| Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off. The voice assistant's own speech is never diarized: it is transcribed on its own channel |
 
 There is deliberately nothing else. The similarity threshold, minimum utterance
 length, turn-cut behaviour and speaker cap that earlier versions exposed here are the
@@ -559,6 +559,12 @@ name in the meantime.
 Labels are per meeting and per channel, and they are not identities. Mapping them onto
 real names — from the participant list, or by asking a model — is a separate step, and
 it works far better when every label is distinct.
+
+**A Virtual Participant with its voice assistant runs two sessions**, like Stream Audio's
+two channels: meeting audio on `CALLER`, named from the roster by the row's start time
+and suffixed with the voice id when voice separation is on, and the assistant's own voice
+on `AGENT` under the VP's name, never diarized. Wake phrases are detected on meeting rows
+only, so the assistant cannot wake itself.
 
 ## Known limitations
 

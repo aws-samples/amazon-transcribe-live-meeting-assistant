@@ -11,8 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Four more model bundles for the on-demand speech engine.** Nemotron 3.5 ASR streaming (OpenMDW-1.1; punctuated, multilingual, heavier), the earlier Nemotron speech streaming model (NVIDIA Open Model License, marked not redistributable), and Parakeet TDT 0.6B v3 and v2 on the offline engine (CC-BY-4.0). The default bundle is unchanged; switching is a developer change to the `AsrDefaults` mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
 
+- **On the on-demand engine, the Virtual Participant's voice assistant is its own transcript channel.** Its speech comes from a second engine session fed only the assistant's audio, appears on the `AGENT` channel under the VP's name and is never diarized, like Stream Audio's microphone and tab channels. Meeting rows are attributed to the roster by the row's start time instead of by whoever is active when the row is emitted.
+
 ### Fixed
 
+- **Pausing a Virtual Participant on the on-demand engine no longer ends its transcription.** The sessions stay up and are fed silence while paused, so the resume command continues the same transcript on every platform; a restart continues the meeting timeline and never reuses an earlier segment id.
+- **A Virtual Participant whose engine session dies mid-meeting falls back to Amazon Transcribe** for the rest of the meeting instead of stopping the transcript.
+- **The offline (Parakeet) engine loads the Silero v5 voice-activity model it expects.** The catalog had pinned the v4 export, and a mismatched model is now refused at load time.
 - **Save on the Transcription Engine page is disabled until the form has loaded**, so a click during loading can no longer write empty switches over the saved record.
 - **`lma-asr-microvm-stack/source/model.env` is generated from the catalog's default bundle** and checked for drift by `sync_bundles.py --check`.
 
