@@ -127,14 +127,27 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 |---|---|---|---|---|---|
 | `fastconformer-titanet-small` (default) | FastConformer streaming EN 480 ms | TitaNet-small | pyannote segmentation 3.0 | **0.5**, min utterance 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT |
 | `fastconformer-transcription-only` | FastConformer streaming EN 480 ms | — | — | — | CC-BY-4.0 |
+| `nemotron35-titanet-small` | Nemotron 3.5 ASR streaming 0.6B, 560 ms (punctuated, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | OpenMDW-1.1 + CC-BY-4.0 + MIT |
+| `nemotron-titanet-small` | Nemotron speech streaming EN 0.6B, 560 ms | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | NVIDIA Open Model License (not redistributable) + CC-BY-4.0 + MIT |
+| `parakeet-tdt-v3-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v2-titanet-small` | Parakeet TDT 0.6B v2 (offline engine, English) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 
-Both are permissively licensed and **redistributable** (`AsrRedistributable` is a stack
-output, and is `true` for both). The ASR model is the same cache-aware streaming
-FastConformer-RNNT architecture as NVIDIA's Nemotron speech models, but CC-BY-4.0
-rather than the NVIDIA Open Model License, and trained on NeMo ASRSET — LibriSpeech,
-**Fisher**, **Switchboard**, WSJ, MLS-EN and Common Voice — so it has seen thousands
-of hours of spontaneous conversational speech, which is what a meeting is. English
-only.
+The default stays FastConformer: the same cache-aware streaming FastConformer-RNNT
+architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, trained on NeMo ASRSET —
+LibriSpeech, **Fisher**, **Switchboard**, WSJ, MLS-EN and Common Voice — so it has
+seen thousands of hours of spontaneous conversational speech. English only, no
+punctuation, and the lightest of the five at a real-time factor of about 0.26 on a
+4-core host.
+
+The alternatives trade weight for transcript quality. Nemotron 3.5 emits punctuation
+and casing and reads far better on the same meeting audio, but ran at a real-time
+factor of 0.89 for a single session on a 4-core host, so a MicroVM carrying two
+channels may fall behind; treat it as a quality trial until measured live. The earlier
+Nemotron speech model is kept for deployments that accept the NVIDIA Open Model
+License; the catalog marks it `redistributable: false` and it is never the default.
+The Parakeet bundles run the offline engine described below. Every alternative reuses
+TitaNet-small, so the operating point carries over unchanged; each is `calibrated`
+until vetted live.
 
 **Why the threshold travels with the embedder, not the ASR model.** A speaker
 embedding is computed from raw audio samples; the ASR model contributes nothing to
@@ -170,11 +183,13 @@ duplication cannot be removed — `MinimumMemoryInMiB` needs a CloudFormation-ty
 number and a Mapping cannot be keyed on a value a custom resource resolved.
 
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
-per closed utterance, for transducer models that cannot stream — and the catalog
-schema supports a `vadModels` section for it. No offline bundle ships: it produces no
-interim text while somebody is speaking, and its real-time factor on a real meeting is
-unmeasured. See *Not included: Whisper* below for why Parakeet TDT rather than
-Whisper would be the offline model to try first.
+per closed utterance, for transducer models that cannot stream — which the two
+Parakeet bundles use. It produces no interim text while somebody is speaking: a row
+appears when the utterance closes, and continuous speech with no 1.2 s pause stays one
+utterance, so on a fast talker the first row can take a minute to appear. It decoded the
+test meeting at a real-time factor of 0.14 on a 4-core host with punctuated, cased text.
+See *Not included: Whisper* below for why Parakeet TDT rather than Whisper is the
+offline model offered.
 
 ## Choosing the engine
 
@@ -650,14 +665,18 @@ complying with their licences.**
 | Component | Licence |
 |---|---|
 | `sherpa-onnx` runtime | Apache-2.0 |
-| NVIDIA FastConformer streaming EN 480 ms (ASR model, both bundles) | CC-BY-4.0 |
+| NVIDIA FastConformer streaming EN 480 ms (ASR, default and transcription-only bundles) | CC-BY-4.0 |
+| NVIDIA Nemotron 3.5 ASR streaming 0.6B (ASR, `nemotron35-titanet-small`) | OpenMDW-1.1 |
+| NVIDIA Nemotron speech streaming EN 0.6B (ASR, `nemotron-titanet-small`) | NVIDIA Open Model License, not redistributable |
+| NVIDIA Parakeet TDT 0.6B v3 and v2 (ASR, offline bundles) | CC-BY-4.0 |
+| Silero VAD v5 (utterance segmentation, offline bundles) | MIT |
 | NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
 | pyannote segmentation 3.0 (turn detection) | MIT |
 
 Each model's licence file is copied into the image alongside its weights, and the
 resolved licences are reported in the ASR stack's `AsrModelLicense`, `AsrLicenceSummary`
-and `AsrRedistributable` outputs. `AsrRedistributable` is `true` for both bundles: every
-weight is permissively licensed. CC-BY-4.0 requires attribution, which
+and `AsrRedistributable` outputs. `AsrRedistributable` is `false` only for
+`nemotron-titanet-small`. CC-BY-4.0 requires attribution, which
 `THIRD-PARTY-LICENSES.txt` carries.
 
 Every checksum in `catalog.json` was verified by downloading the artifact and hashing it.

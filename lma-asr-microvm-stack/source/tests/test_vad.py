@@ -459,3 +459,24 @@ def test_module_import_is_dependency_free() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "OK"
+
+
+class _Session:
+    def __init__(self, names):
+        self._names = names
+
+    def get_inputs(self):
+        return [type("I", (), {"name": n})() for n in self._names]
+
+
+def test_a_v4_silero_export_is_refused_at_load() -> None:
+    from asr_server.vad import make_silero_backend
+
+    with pytest.raises(RuntimeError, match="silero_vad_v5.onnx"):
+        make_silero_backend(_Session(["x", "h", "c"]), sample_rate=16000)
+
+
+def test_a_v5_silero_export_is_accepted() -> None:
+    from asr_server.vad import make_silero_backend
+
+    make_silero_backend(_Session(["input", "state", "sr"]), sample_rate=16000)

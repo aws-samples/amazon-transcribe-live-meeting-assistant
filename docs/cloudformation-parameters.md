@@ -179,6 +179,10 @@ rebuilds the MicroVM image (~20 minutes).
 |--------|--------|----------|----------------|
 | `fastconformer-titanet-small` (default) | NVIDIA FastConformer streaming EN 480 ms + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + CC-BY-4.0 + MIT | Yes — threshold 0.5, minimum utterance 2500 ms, measured on real meeting audio |
 | `fastconformer-transcription-only` | NVIDIA FastConformer streaming EN 480 ms | CC-BY-4.0 | No — labelled by audio channel, no speaker weights in the image |
+| `nemotron35-titanet-small` | NVIDIA Nemotron 3.5 ASR streaming 0.6B (punctuated, multilingual) + TitaNet-small + pyannote segmentation 3.0 | OpenMDW-1.1 + CC-BY-4.0 + MIT | Yes |
+| `nemotron-titanet-small` | NVIDIA Nemotron speech streaming EN 0.6B + TitaNet-small + pyannote segmentation 3.0 | NVIDIA Open Model License (not redistributable) + CC-BY-4.0 + MIT | Yes |
+| `parakeet-tdt-v3-titanet-small` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + MIT + CC-BY-4.0 + MIT | Yes |
+| `parakeet-tdt-v2-titanet-small` | NVIDIA Parakeet TDT 0.6B v2 (offline engine, English) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + MIT + CC-BY-4.0 + MIT | Yes |
 
 There are deliberately no parameters for supplying a model URL: every model is a
 curated entry in the ASR stack's `catalog.json` with its checksum pinned and, for a

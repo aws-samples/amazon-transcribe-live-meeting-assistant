@@ -381,14 +381,13 @@ class _SileroBackend:
         self._session = session
         self._np = np
         self._sr = np.array(sample_rate, dtype=np.int64)
-        # Silero v5 unified recurrent state; shape [2, 1, 128]. # verify vs model.
+        # Silero v5 unified recurrent state, shape [2, 1, 128].
         self._zero_state = np.zeros((2, 1, 128), dtype=np.float32)
         self._state = self._zero_state
 
     def probability(self, frame: Sequence[float]) -> float:
         np = self._np
         x = np.asarray(frame, dtype=np.float32).reshape(1, -1)
-        # Graph output order is (probability, next_state). # verify vs model I/O.
         prob, self._state = self._session.run(
             None, {"input": x, "state": self._state, "sr": self._sr}
         )
@@ -430,12 +429,33 @@ def create_silero_session(config: SileroVadConfig) -> Any:
         ) from exc
 
 
+SILERO_V5_INPUTS = frozenset({"input", "state", "sr"})
+
+
+def require_silero_v5(session: Any) -> None:
+    """Fail at load if the model's inputs are not the v5 signature the backend feeds.
+
+    The v4 export (``x``, ``h``, ``c``) loads fine and only fails on the first frame,
+    which is too late for a MicroVM that has already accepted a meeting.
+    """
+    get_inputs = getattr(session, "get_inputs", None)
+    if get_inputs is None:
+        return
+    names = {getattr(entry, "name", "") for entry in get_inputs()}
+    if not names >= SILERO_V5_INPUTS:
+        raise RuntimeError(
+            f"Silero VAD model has inputs {sorted(names)}; the offline engine needs the "
+            f"v5 export with {sorted(SILERO_V5_INPUTS)} (silero_vad_v5.onnx)"
+        )
+
+
 def make_silero_backend(session: Any, *, sample_rate: int) -> VadBackend:
     """Wrap a (possibly shared) Silero ONNX session in a fresh per-stream backend.
 
     Each backend carries its own recurrent state (``_state``), so multiple backends
     over one shared session decode independent streams without cross-talk.
     """
+    require_silero_v5(session)
     return _SileroBackend(session, sample_rate=sample_rate)
 
 

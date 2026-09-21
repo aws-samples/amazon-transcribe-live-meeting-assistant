@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Four more model bundles for the on-demand speech engine.** Nemotron 3.5 ASR streaming (OpenMDW-1.1; punctuated, multilingual, heavier), the earlier Nemotron speech streaming model (NVIDIA Open Model License, marked not redistributable), and Parakeet TDT 0.6B v3 and v2 on the offline engine (CC-BY-4.0). The default bundle is unchanged; switching is a developer change to the `AsrDefaults` mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
+
+### Fixed
+
+- **Save on the Transcription Engine page is disabled until the form has loaded**, so a click during loading can no longer write empty switches over the saved record.
+- **`lma-asr-microvm-stack/source/model.env` is generated from the catalog's default bundle** and checked for drift by `sync_bundles.py --check`.
+
 ## [0.3.9] - 2026-09-19
 
 ### Added

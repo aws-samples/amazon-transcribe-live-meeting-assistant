@@ -1,7 +1,7 @@
 {
   "version": 3,
   "defaultBundleId": "fastconformer-titanet-small",
-  "bundleNote": "A bundle names the ASR model, the speaker embedder and the turn-detection model TOGETHER WITH the diarization operating point that goes with them, so a deployment is never asked for a threshold. Every weight here is permissively licensed and redistributable. The operating point is a property of the EMBEDDER and the segmentation policy (endpointing silence and the minimum utterance floor), not of the ASR model: the embedding is computed from raw samples, and the ASR model contributes nothing to those samples or, under a fixed endpointing configuration, to where a segment starts and ends. That is why one measured embedder can be paired with a different ASR model without re-measuring - and why a different embedder always needs its own measurement (scripts/calibrate.py).",
+  "bundleNote": "A bundle names the ASR model, the speaker embedder and the turn-detection model TOGETHER WITH the diarization operating point that goes with them, so a deployment is never asked for a threshold. The default and every bundle marked redistributable are permissively licensed; a bundle marked redistributable: false carries weights under the NVIDIA Open Model License and is offered only for deployments that accept it. The operating point is a property of the EMBEDDER and the segmentation policy (endpointing silence and the minimum utterance floor), not of the ASR model: the embedding is computed from raw samples, and the ASR model contributes nothing to those samples or, under a fixed endpointing configuration, to where a segment starts and ends. That is why one measured embedder can be paired with a different ASR model without re-measuring - and why a different embedder always needs its own measurement (scripts/calibrate.py).",
   "bundles": [
     {
       "id": "fastconformer-titanet-small",
@@ -29,6 +29,64 @@
       "redistributable": true,
       "licenceSummary": "CC-BY-4.0 (ASR)",
       "notes": "Same ASR model, no speaker or turn-detection weights. Transcripts are labelled by audio channel only, exactly as Amazon Transcribe without ShowSpeakerLabel. Pick it for a deployment that never wants per-voice labels and would rather not carry the extra weights in its image; there is nothing to calibrate."
+    },
+    {
+      "id": "nemotron35-titanet-small",
+      "name": "Nemotron 3.5 ASR streaming + TitaNet-small (punctuated multilingual ASR, OpenMDW-1.1)",
+      "status": "calibrated",
+      "modelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.5,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "OpenMDW-1.1 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "Higher transcript quality than the default; heavier (see the model note). The operating point is TitaNet-small's and carries over; not yet vetted live on this pairing."
+    },
+    {
+      "id": "nemotron-titanet-small",
+      "name": "Nemotron speech streaming + TitaNet-small (NVIDIA Open Model License)",
+      "status": "calibrated",
+      "modelId": "nemotron-streaming-en-0.6b-560ms-int8",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.5,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": false,
+      "licenceSummary": "NVIDIA Open Model License (ASR, not redistributable) + CC-BY-4.0 (speaker) + MIT (segmentation)",
+      "notes": "The previous default, kept for deployments that accept the NVIDIA Open Model License. Not redistributable, never the default."
+    },
+    {
+      "id": "parakeet-tdt-v3-titanet-small",
+      "name": "Parakeet TDT 0.6B v3 offline + TitaNet-small (CC-BY-4.0)",
+      "status": "calibrated",
+      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.5,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
+      "notes": "Offline engine: one decode per VAD-closed utterance, so no interim text while somebody speaks. Not yet vetted live."
+    },
+    {
+      "id": "parakeet-tdt-v2-titanet-small",
+      "name": "Parakeet TDT 0.6B v2 offline + TitaNet-small (CC-BY-4.0)",
+      "status": "calibrated",
+      "modelId": "parakeet-tdt-0.6b-v2-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.5,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
+      "notes": "English-only predecessor of the v3 bundle; same offline engine."
     }
   ],
   "models": [
@@ -57,6 +115,111 @@
       "approxDownloadMb": 106,
       "provenanceVerified": "2026-08-20",
       "note": "The permissive streaming choice: the same cache-aware streaming FastConformer-RNNT architecture as NVIDIA's Nemotron speech model, but CC-BY-4.0 rather than the NVIDIA Open Model License, and a quarter of the download. Trained on NeMo ASRSET - LibriSpeech, Fisher, Switchboard, WSJ, MLS-EN 2000h and Common Voice - so it has seen thousands of hours of spontaneous conversational speech, which is what meeting audio is. Source model exposes 0/480/1040ms lookaheads; 480ms trades a little accuracy for interim text that keeps up with the speaker. English only."
+    },
+    {
+      "id": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
+      "name": "NVIDIA Nemotron 3.5 ASR streaming 0.6B (560ms, int8, OpenMDW-1.1)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-3.5-asr-streaming-0.6b-560ms-int8-2026-06-11.tar.bz2",
+      "sha256": "c6bf5e0df765f9d5b43bc9e0536d4b4b3e7d40bdf5ecf13e45f134c51c05ae3a",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "multilingual"
+      ],
+      "license": "OpenMDW-1.1",
+      "licenseUrl": "https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 475,
+      "provenanceVerified": "2026-09-21",
+      "note": "Emits punctuation and casing. Loaded and decoded a test meeting on sherpa-onnx 1.13.4; real-time factor 0.89 for one session on a 4-core host, so two sessions per MicroVM may lag. English validated only."
+    },
+    {
+      "id": "nemotron-streaming-en-0.6b-560ms-int8",
+      "name": "NVIDIA Nemotron streaming English 0.6B (560ms, int8)",
+      "engine": "streaming",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemotron-speech-streaming-en-0.6b-560ms-int8-2026-04-25.tar.bz2",
+      "sha256": "78e2b79fcf7271553a74402a76b771b09ea40117a39566a79f52235b23db6358",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "NVIDIA Open Model License",
+      "licenseUrl": "https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 443,
+      "provenanceVerified": "2026-09-21"
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v3-int8",
+      "name": "NVIDIA Parakeet TDT 0.6B v3 offline (int8, CC-BY-4.0)",
+      "engine": "accurate",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2",
+      "sha256": "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 487,
+      "provenanceVerified": "2026-09-21",
+      "requiresVad": true,
+      "note": "OFFLINE, not streaming: it is driven by the accurate engine, which segments audio with Silero VAD and decodes each closed utterance. That trades latency for accuracy - there is no interim text DURING an utterance, only when it ends - so it suits accuracy-first use more than a live meeting view. Chosen over Whisper (also permissive) because TDT is a transducer and reports token timestamps: turn splitting and live cutting both need word timings, and sherpa's Whisper export provides none, which would silently reduce diarization to one speaker per VAD segment."
+    },
+    {
+      "id": "parakeet-tdt-0.6b-v2-int8",
+      "name": "NVIDIA Parakeet TDT 0.6B v2 (offline, int8, CC-BY-4.0)",
+      "engine": "accurate",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2",
+      "sha256": "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "joiner": "joiner.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en"
+      ],
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 482,
+      "provenanceVerified": "2026-09-21",
+      "requiresVad": true,
+      "note": "English-only predecessor of v3; same offline (VAD-segmented) engine."
     }
   ],
   "speakerModels": [
@@ -113,6 +276,21 @@
       "archive": "none",
       "license": "n/a",
       "approxDownloadMb": 0
+    }
+  ],
+  "vadModels": [
+    {
+      "id": "silero-vad-v5",
+      "name": "Silero VAD v5 (utterance segmentation for the offline engine)",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad_v5.onnx",
+      "sha256": "6b99cbfd39246b6706f98ec13c7c50c6b299181f2474fa05cbc8046acc274396",
+      "archive": "onnx",
+      "sampleRate": 16000,
+      "license": "MIT",
+      "licenseUrl": "https://github.com/snakers4/silero-vad",
+      "approxDownloadMb": 2,
+      "provenanceVerified": "2026-09-21",
+      "note": "Only the 'accurate' (offline) engine needs this: an offline model cannot stream, so audio is cut into utterances by VAD and each closed utterance is decoded. The v5 export: the runtime feeds its input/state/sr signature."
     }
   ]
 }
