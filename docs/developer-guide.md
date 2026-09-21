@@ -27,7 +27,7 @@ You need the following installed on your machine:
 | Dependency | Version |
 |------------|---------|
 | bash | Linux, macOS, or Windows WSL |
-| Node.js | v18, v20, or v22 |
+| Node.js | >= 22.22.2 (the exact pin is in `.nvmrc`; `make setup-node` installs it via nvm) |
 | npm | Bundled with Node.js |
 | Docker | Running (required for SAM builds). On macOS, use Docker Desktop. |
 | zip | Any version |
@@ -249,8 +249,11 @@ Two pipelines run the same set of no-AWS checks:
 | GitHub Actions `Code Checks` | `.github/workflows/code-checks.yml` | Pull requests to `develop` or `main`, and pushes to those branches |
 | GitLab `code_checks` | `.gitlab-ci.yml` | Every branch push and merge request |
 
-Both pin Node.js 22.23.2 (>= 22.22.2 is required by jsdom 30; keep the pin in
-sync with `NODE_VERSION` in the root `Makefile`) and run, in order:
+Both take the Node.js version from `.nvmrc` at the repository root (22.23.2;
+>= 22.22.2 is required by jsdom 30). That file is the single pin — GitHub
+Actions reads it via `node-version-file`, the GitLab job downloads the version
+it names, and `make setup-node` installs it with nvm. The pipelines run, in
+order:
 
 ```bash
 make setup-python && make setup-cli-dev

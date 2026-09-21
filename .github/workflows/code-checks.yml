@@ -58,14 +58,14 @@ jobs:
         with:
           python-version: '3.13'
 
-      # Node 22 LTS, pinned exactly (>=22.22.2 is required by jsdom 30; vite 8 /
-      # rolldown native bindings are optional deps that npm silently skips on an
-      # older engine). Keep in sync with NODE_VERSION in the root Makefile and
-      # with the version installed by .gitlab-ci.yml.
+      # Node 22 LTS, pinned exactly by .nvmrc (>=22.22.2 is required by jsdom 30;
+      # vite 8 / rolldown native bindings are optional deps that npm silently
+      # skips on an older engine). .nvmrc is the single source of truth, shared
+      # with `make setup-node` and .gitlab-ci.yml.
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: '22.23.2'
+          node-version-file: '.nvmrc'
           # Caches the npm download cache, keyed on these lockfiles — the
           # equivalent of the GitLab job's node_modules cache.
           cache: npm

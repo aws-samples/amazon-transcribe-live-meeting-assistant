@@ -8,6 +8,11 @@ import { defineConfig, transformWithOxc } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
+// `import.meta.dirname` rather than `__dirname`: Vite's native config loader
+// (planned to become the default) cannot provide the CommonJS globals, and
+// warns on every command when the config references them.
+const projectRoot = import.meta.dirname;
+
 // Groupings for splitting vendor code into separate chunks. Each entry maps a
 // chunk name to the set of top-level node_modules package names that belong to
 // it. Vite 8 (Rolldown) requires `manualChunks` to be a function rather than an
@@ -119,7 +124,7 @@ export default defineConfig(({ mode }) => ({
 
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
+      '@': resolve(projectRoot, './src'),
       './runtimeConfig': './runtimeConfig.browser',
     },
     extensions: ['.mjs', '.js', '.jsx', '.json'],
@@ -161,5 +166,9 @@ export default defineConfig(({ mode }) => ({
     environment: 'jsdom',
     setupFiles: './src/setupTests.js',
     include: ['src/**/*.test.{js,jsx}'],
+    // Persist transformed modules under node_modules/.vitest-cache so reruns
+    // skip the JSX transform (~57% of a cold run here). The cache lives inside
+    // node_modules, so reinstalling dependencies invalidates it.
+    fsModuleCache: true,
   },
 }));

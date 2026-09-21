@@ -84,31 +84,56 @@ help: ## Show this help message
 .DEFAULT_GOAL := all
 all: lint ## Run all linting (default)
 
-# Required Node.js version (major) - keep in sync with .gitlab-ci.yml
-NODE_VERSION := 22
+# Node.js version pinned for development and CI. `.nvmrc` is the single source
+# of truth: setup-node installs it via nvm, GitHub Actions reads it through
+# `node-version-file`, and .gitlab-ci.yml downloads the same version.
+NODE_PINNED_VERSION := $(strip $(shell cat .nvmrc 2>/dev/null))
+# Minimum acceptable version, matching the `engines` field of the UI's
+# package.json (jsdom 30 needs >= 22.22.2). Any Node at or above this works;
+# check-node reports a shortfall in one line, since NPM_CI below runs npm
+# quietly and its EBADENGINE warnings are therefore suppressed.
+NODE_MIN_VERSION := 22.22.2
+
+# npm install invocation shared by every JS target. `--loglevel=error --no-fund`
+# drops npm's notice-level output (funding summaries, transitive `deprecated`
+# notices, and peer-dependency/engine warnings for packages we do not control)
+# while still surfacing real install failures.
+NPM_CI := npm ci --prefer-offline --no-audit --no-fund --loglevel=error
 
 ##@ Setup
 setup: setup-node setup-python setup-cli-dev ## Set up dev environment (Node version, Python venv, CLI)
 	@echo ""
 	@echo -e "$(GREEN)✅ Full setup complete!$(NC)"
 
-setup-node: ## Ensure correct Node.js version via nvm (installs if needed)
-	@CURRENT=$$(node -v 2>/dev/null | sed 's/v\([0-9]*\).*/\1/'); \
-	if [ "$$CURRENT" = "$(NODE_VERSION)" ]; then \
-		echo -e "$(GREEN)✅ Node.js v$$(node -v) already active$(NC)"; \
-	else \
-		echo "Current Node.js: v$${CURRENT:-not found} (need v$(NODE_VERSION))"; \
-		if [ -s "$$HOME/.nvm/nvm.sh" ]; then \
-			echo "Using nvm to switch to Node $(NODE_VERSION)..."; \
-			source "$$HOME/.nvm/nvm.sh" && nvm install $(NODE_VERSION) && nvm use $(NODE_VERSION); \
-			echo -e "$(GREEN)✅ Switched to Node.js $$(node -v)$(NC)"; \
-			echo -e "$(YELLOW)   Run 'nvm use $(NODE_VERSION)' in your shell, or add to .zshrc/.bashrc$(NC)"; \
+setup-node: ## Install the Node.js version pinned in .nvmrc via nvm and make it the default
+	@CURRENT=$$(node -v 2>/dev/null | sed 's/^v//'); \
+	DEFAULT=$$(source "$$HOME/.nvm/nvm.sh" >/dev/null 2>&1 && nvm version default 2>/dev/null | sed 's/^v//'); \
+	OK=0; \
+	if [ -n "$$CURRENT" ] && \
+	   [ "$$(printf '%s\n%s\n' "$(NODE_MIN_VERSION)" "$$CURRENT" | sort -V | head -n1)" = "$(NODE_MIN_VERSION)" ]; then \
+		OK=1; \
+	fi; \
+	if [ $$OK -eq 1 ] && { [ -z "$$DEFAULT" ] || \
+	   [ "$$(printf '%s\n%s\n' "$(NODE_MIN_VERSION)" "$$DEFAULT" | sort -V | head -n1)" = "$(NODE_MIN_VERSION)" ]; }; then \
+		echo -e "$(GREEN)✅ Node.js v$$CURRENT already active$(NC)"; \
+	elif [ -s "$$HOME/.nvm/nvm.sh" ]; then \
+		if [ $$OK -eq 1 ]; then \
+			echo "Node.js v$$CURRENT is current, but the nvm default is v$$DEFAULT (new shells would use it)."; \
 		else \
-			echo -e "$(RED)ERROR: Node.js v$(NODE_VERSION).x is required but v$${CURRENT:-none} is active.$(NC)"; \
-			echo -e "$(YELLOW)   Install nvm: https://github.com/nvm-sh/nvm$(NC)"; \
-			echo -e "$(YELLOW)   Then run: nvm install $(NODE_VERSION) && nvm use $(NODE_VERSION)$(NC)"; \
-			exit 1; \
+			echo "Current Node.js: v$${CURRENT:-not found} (need v$(NODE_MIN_VERSION) or later)"; \
 		fi; \
+		echo "Using nvm to install Node $(NODE_PINNED_VERSION) (pinned in .nvmrc)..."; \
+		source "$$HOME/.nvm/nvm.sh" && \
+			nvm install $(NODE_PINNED_VERSION) && \
+			nvm use $(NODE_PINNED_VERSION) && \
+			nvm alias default $(NODE_PINNED_VERSION); \
+		echo -e "$(GREEN)✅ Node.js $(NODE_PINNED_VERSION) installed and set as the nvm default$(NC)"; \
+		echo -e "$(YELLOW)   This shell still has v$${CURRENT:-none} — run 'nvm use' here, or open a new shell$(NC)"; \
+	else \
+		echo -e "$(RED)ERROR: Node.js v$(NODE_MIN_VERSION) or later is required but v$${CURRENT:-none} is active.$(NC)"; \
+		echo -e "$(YELLOW)   Install nvm: https://github.com/nvm-sh/nvm$(NC)"; \
+		echo -e "$(YELLOW)   Then run: nvm install && nvm use   (both read .nvmrc)$(NC)"; \
+		exit 1; \
 	fi
 
 setup-python: ## Create .venv and install Python dev/lint dependencies
@@ -158,15 +183,24 @@ setup-cli-dev: ## Install LMA SDK and CLI with dev/test dependencies
 	$(CURDIR)/$(VENV_DIR)/bin/pip install -e "lib/lma_cli_pkg[dev]"
 	@echo -e "$(GREEN)✅ LMA SDK and CLI (with test deps) installed!$(NC)"
 
-setup-npm: ## Install npm dependencies for UI, WebSocket, and Virtual Participant
+.PHONY: check-node
+check-node: ## Warn (one line) if the active Node.js is older than NODE_MIN_VERSION
+	@CURRENT=$$(node -v 2>/dev/null | sed 's/^v//'); \
+	if [ -z "$$CURRENT" ]; then \
+		echo -e "$(RED)Node.js not found on PATH (need >= $(NODE_MIN_VERSION))$(NC)"; \
+	elif [ "$$(printf '%s\n%s\n' "$(NODE_MIN_VERSION)" "$$CURRENT" | sort -V | head -n1)" != "$(NODE_MIN_VERSION)" ]; then \
+		echo -e "$(YELLOW)Node.js v$$CURRENT is older than the required v$(NODE_MIN_VERSION) — run 'nvm use' (or 'make setup-node')$(NC)"; \
+	fi
+
+setup-npm: check-node ## Install npm dependencies for UI, WebSocket, and Virtual Participant
 	@echo "Installing UI npm dependencies..."
-	cd $(UI_DIR) && npm ci --prefer-offline --no-audit
+	cd $(UI_DIR) && $(NPM_CI)
 	@echo ""
 	@echo "Installing WebSocket transcriber npm dependencies..."
-	cd $(WEBSOCKET_APP_DIR) && npm ci --prefer-offline --no-audit
+	cd $(WEBSOCKET_APP_DIR) && $(NPM_CI)
 	@echo ""
 	@echo "Installing Virtual Participant npm dependencies..."
-	cd $(VP_BACKEND_DIR) && npm ci --prefer-offline --no-audit
+	cd $(VP_BACKEND_DIR) && $(NPM_CI)
 	@echo ""
 	@echo -e "$(GREEN)✅ npm dependencies installed!$(NC)"
 
@@ -215,14 +249,14 @@ lint-mypy: ## Run mypy type checking on Python Lambda functions
 # Checksum file for UI lint change detection
 UI_LINT_CHECKSUM_FILE := .ui-lint-checksum
 
-lint-ui: ## Lint React UI (ESLint, skips if source unchanged; use FORCE=1 to bypass cache)
+lint-ui: check-node ## Lint React UI (ESLint, skips if source unchanged; use FORCE=1 to bypass cache)
 	@NEW_CHECKSUM=$$(find $(UI_DIR)/src -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}'); \
 	OLD_CHECKSUM=$$(cat $(UI_LINT_CHECKSUM_FILE) 2>/dev/null || echo ""); \
 	if [ -z "$(FORCE)" ] && [ "$$NEW_CHECKSUM" = "$$OLD_CHECKSUM" ]; then \
 		echo -e "$(GREEN)✅ UI lint skipped — source unchanged since last run (use FORCE=1 to override)$(NC)"; \
 	else \
 		if [ -n "$(FORCE)" ]; then echo "Running UI lint (forced)..."; else echo "Running UI lint..."; fi; \
-		cd $(UI_DIR) && npm ci --prefer-offline --no-audit 2>/dev/null && npm run lint && \
+		cd $(UI_DIR) && $(NPM_CI) && npm run lint && \
 		echo "$$NEW_CHECKSUM" > $(CURDIR)/$(UI_LINT_CHECKSUM_FILE) && \
 		echo -e "$(GREEN)✅ UI lint passed!$(NC)"; \
 	fi
@@ -232,9 +266,9 @@ lint-ui-force: ## Lint React UI (ignore checksum, always run)
 
 lint-typescript: ## TypeScript build check on WebSocket and Virtual Participant stacks
 	@echo "Running TypeScript build check on WebSocket transcriber..."
-	@cd $(WEBSOCKET_APP_DIR) && npm ci --prefer-offline --no-audit 2>/dev/null && npm run build
+	@cd $(WEBSOCKET_APP_DIR) && $(NPM_CI) && npm run build
 	@echo "Running TypeScript build check on Virtual Participant..."
-	@cd $(VP_BACKEND_DIR) && npm ci --prefer-offline --no-audit 2>/dev/null && npm run build
+	@cd $(VP_BACKEND_DIR) && $(NPM_CI) && npm run build
 	@echo -e "$(GREEN)✅ All TypeScript builds succeeded!$(NC)"
 
 format: ## Format Python code with ruff
@@ -267,19 +301,19 @@ lint-cicd: ## CI/CD lint — checks only, no modifications
 ##@ Building
 build: build-ui build-websocket build-vp ## Build all stacks
 
-build-ui: ## Build React UI for production
+build-ui: check-node ## Build React UI for production
 	@echo "Building React UI..."
-	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && npm run build
+	cd $(UI_DIR) && $(NPM_CI) && npm run build
 	@echo -e "$(GREEN)✅ UI build complete!$(NC)"
 
 build-websocket: ## Build WebSocket transcriber (TypeScript)
 	@echo "Building WebSocket transcriber..."
-	cd $(WEBSOCKET_APP_DIR) && npm ci --prefer-offline --no-audit && npm run build
+	cd $(WEBSOCKET_APP_DIR) && $(NPM_CI) && npm run build
 	@echo -e "$(GREEN)✅ WebSocket transcriber build complete!$(NC)"
 
 build-vp: ## Build Virtual Participant (TypeScript)
 	@echo "Building Virtual Participant..."
-	cd $(VP_BACKEND_DIR) && npm ci --prefer-offline --no-audit && npm run build
+	cd $(VP_BACKEND_DIR) && $(NPM_CI) && npm run build
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
@@ -319,21 +353,21 @@ test-lambdas: ## Run all Lambda function unit tests (no AWS; each dir isolated)
 # Checksum file for UI test change detection
 UI_TEST_CHECKSUM_FILE := .ui-test-checksum
 
-test-ui: ## Run React UI tests (skips if source unchanged)
+test-ui: check-node ## Run React UI tests (skips if source unchanged)
 	@NEW_CHECKSUM=$$(find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}'); \
 	OLD_CHECKSUM=$$(cat $(UI_TEST_CHECKSUM_FILE) 2>/dev/null || echo ""); \
 	if [ "$$NEW_CHECKSUM" = "$$OLD_CHECKSUM" ]; then \
 		echo -e "$(GREEN)✅ UI tests skipped — source unchanged since last run$(NC)"; \
 	else \
 		echo "Running UI tests..."; \
-		cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run && \
+		cd $(UI_DIR) && $(NPM_CI) && CI=true npm test -- --run && \
 		echo "$$NEW_CHECKSUM" > $(CURDIR)/$(UI_TEST_CHECKSUM_FILE) && \
 		echo -e "$(GREEN)✅ UI tests passed!$(NC)"; \
 	fi
 
 test-vp: ## Run Virtual Participant backend unit tests (no AWS)
 	@echo "Running Virtual Participant backend unit tests..."
-	cd $(VP_BACKEND_DIR) && npm ci --prefer-offline --no-audit && npm test
+	cd $(VP_BACKEND_DIR) && $(NPM_CI) && npm test
 	@echo -e "$(GREEN)✅ Virtual Participant unit tests passed!$(NC)"
 
 test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
@@ -351,9 +385,9 @@ test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
 	cd $(ASR_SOURCE_DIR) && .venv/bin/python -m pytest -q && .venv/bin/ruff check .
 	@echo -e "$(GREEN)✅ ASR MicroVM runtime tests passed!$(NC)"
 
-test-ui-force: ## Run React UI tests (ignore checksum, always run)
+test-ui-force: check-node ## Run React UI tests (ignore checksum, always run)
 	@echo "Running UI tests (forced)..."
-	cd $(UI_DIR) && npm ci --prefer-offline --no-audit && CI=true npm test -- --run
+	cd $(UI_DIR) && $(NPM_CI) && CI=true npm test -- --run
 	@find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}' > $(UI_TEST_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
 
@@ -484,7 +518,7 @@ endif
 		exit 1; \
 	fi
 	@echo "Installing UI dependencies..."
-	cd $(UI_DIR) && npm ci --prefer-offline --no-audit
+	cd $(UI_DIR) && $(NPM_CI)
 	@echo "Starting UI development server..."
 	cd $(UI_DIR) && npm run start
 

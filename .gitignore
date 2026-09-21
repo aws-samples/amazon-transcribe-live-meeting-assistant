@@ -37,7 +37,8 @@ samconfig.toml
 
 # Node
 node_modules/
-.nvmrc
+# .nvmrc is tracked on purpose: it is the single Node.js version pin shared by
+# `make setup-node`, .github/workflows/code-checks.yml and .gitlab-ci.yml.
 
 # Python
 __pycache__/

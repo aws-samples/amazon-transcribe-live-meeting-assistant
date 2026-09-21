@@ -48,8 +48,9 @@ To send us a pull request, please:
    cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
    ```
 
-   These checks need neither AWS credentials nor Docker. Node.js 22 (>= 22.22.2)
-   is required; see `make setup-node`.
+   These checks need neither AWS credentials nor Docker. Node.js >= 22.22.2 is
+   required; the exact version CI uses is pinned in `.nvmrc`, and
+   `make setup-node` installs it via nvm.
 5. Commit to your fork using clear commit messages.
 6. Send us a pull request against `develop`, answering any default questions in the pull request interface.
 7. Pay attention to the `Code Checks` workflow result reported on the pull request, and stay involved in the conversation.
