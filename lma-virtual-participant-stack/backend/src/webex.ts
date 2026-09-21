@@ -64,15 +64,18 @@ export function normalizeWebexSender(raw: string | null | undefined): string | n
     if (!raw) return null;
     // Collapse first, so the result does not depend on the caller having trimmed.
     const label = raw.replace(/\s+/g, ' ').trim();
-    // Only the legacy markup carries a recipient clause, and it is recognisable: it
-    // starts with "from " or ends with a colon. A bare Momentum display name is
-    // returned untouched, so a surname that happens to contain the word — "To Kwok
-    // Keung", "Van To Nguyen" — is not truncated.
-    if (!/^from\s/i.test(label) && !label.endsWith(':')) return label || null;
+    // The recipient clause is only stripped from a label that carries the legacy
+    // "from " prefix — which is the form this file has always recognised, since the
+    // own-message filter matches "from LMA". Anything else is taken as a display
+    // name and left alone apart from a trailing colon, because a name is not
+    // reliably separable from a recipient: "Van To Nguyen:" would otherwise reduce
+    // to "Van", and silently shortening a participant's name is worse than leaving
+    // a label slightly long.
+    if (!/^from\s/i.test(label)) return label.replace(/:$/, '').trim() || null;
     const body = label.replace(/^from\s+/i, '').replace(/:$/, '').trim();
     // Greedy, so the LAST " to " is taken as the boundary: a sender whose own name
-    // contains it keeps it.
-    const withRecipient = /^(.+)\sto\s/i.exec(body);
+    // contains the word keeps it.
+    const withRecipient = /^(.+)\sto\s\S/i.exec(body);
     if (withRecipient) return withRecipient[1].trim() || null;
     // A recipient clause with no sender part in front of it tells us nothing.
     if (/^to(\s|$)/i.test(body)) return null;
@@ -876,10 +879,9 @@ export default class Webex {
                             // mutations, so searching only inside the added node
                             // finds neither.
                             const row = el.closest(rows) ?? el;
-                            const sender = row.querySelector(senders)?.textContent?.trim();
-                            // EVERY body in the row, not just the first. Chat UIs
-                            // commonly group a run of messages from one sender into
-                            // one row, and querySelector would return only that
+                            // EVERY body under this node, not just the first. Chat
+                            // UIs commonly group a run of messages from one sender
+                            // into one row, and querySelector would return only that
                             // row's first message — dropping an "LMA leave" sent
                             // straight after the sender's previous line, which is
                             // the very defect this observer is being fixed for.
@@ -887,6 +889,19 @@ export default class Webex {
                                 ? [el]
                                 : Array.from(row.querySelectorAll(bodies));
                             for (const bodyEl of bodyEls) {
+                                // Resolve the sender from THIS body's own row, not
+                                // once for the added node. `closest` only walks up,
+                                // so when the added node contains several rows — a
+                                // bare text node appended to the chat list makes the
+                                // whole list the fallback "row", and a virtualized
+                                // list can insert a wrapper of several rows — reading
+                                // one sender for the subtree credits every message to
+                                // whoever is first in it. Since the VP's own start
+                                // message is the first thing in the panel, that also
+                                // meant the whole group was dropped as "ours".
+                                const sender = (bodyEl.closest(rows) ?? row)
+                                    .querySelector(senders)
+                                    ?.textContent?.trim();
                                 // Already delivered, or no text yet — a row shell
                                 // whose content arrives in a later mutation, an
                                 // attachment card, or a join/leave notice. Nothing

@@ -57,7 +57,7 @@ const sourceLiterals = (): string[] => {
         (m) => m[1] ?? m[2] ?? m[3],
     );
     // Anything attempting a shadow pierce is inspected whatever shape it is in,
-    // including a concatenation the literal scan would see only in pieces.
+    // as long as the three characters are contiguous in the source.
     if (/>>>/.test(code)) literals.push('<<source contains >>> outside any single literal>>');
     return literals;
 };
@@ -118,10 +118,12 @@ test('no selector in webex.ts uses the removed >>> combinator', () => {
 });
 
 test('every selector in webex.ts has balanced brackets and quotes', () => {
-    // The literal defect this catches: a selector copied out of a bug report with
-    // a stray `"]` on the end, which threw InvalidSelectorError on every path that
-    // evaluated it.
-    for (const selector of selectorLiterals()) {
+    // Run over EVERY string literal, not just the selector-shaped ones: a
+    // malformation often destroys the shape a classifier would recognise it by
+    // ('button:has(span', 'mdc-input data-test="Name"] input'), so filtering first
+    // would hide exactly the edits this test exists to catch. Verified not to
+    // false-positive on any of the 271 literals currently in the file.
+    for (const selector of [...sourceLiterals(), ...selectorLiterals()]) {
         assert.ok(balanced(selector, '[', ']'), `"${selector}" has unbalanced [ ]`);
         assert.ok(balanced(selector, '(', ')'), `"${selector}" has unbalanced ( )`);
         assert.equal(
@@ -202,7 +204,18 @@ test('a legacy sender label is reduced to a display name', () => {
     // I'll head out now." into the meeting and store that on the meeting record.
     assert.equal(normalizeWebexSender('from Alice Smith to everyone:'), 'Alice Smith');
     assert.equal(normalizeWebexSender('from Alice to me:'), 'Alice');
-    assert.equal(normalizeWebexSender('Alice Smith to everyone:'), 'Alice Smith');
+});
+
+test('a recipient clause is stripped only behind the legacy "from " prefix', () => {
+    // Deliberate, and the safer of two imperfect options. Without the prefix a
+    // name is not reliably separable from a recipient — "Van To Nguyen:" would
+    // reduce to "Van" — and shortening a participant's name is worse than leaving
+    // a label slightly long. The prefix is the form this file has always
+    // recognised: the own-message filter matches "from LMA".
+    assert.equal(normalizeWebexSender('Van To Nguyen:'), 'Van To Nguyen');
+    assert.equal(normalizeWebexSender('To Kwok Keung:'), 'To Kwok Keung');
+    assert.equal(normalizeWebexSender('Alice Smith:'), 'Alice Smith');
+    assert.equal(normalizeWebexSender('Alice Smith to everyone:'), 'Alice Smith to everyone');
 });
 
 test('a bare sender name passes through unchanged', () => {
