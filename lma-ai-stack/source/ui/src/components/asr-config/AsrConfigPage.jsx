@@ -167,7 +167,7 @@ const AsrConfigPage = () => {
               <Button onClick={load} disabled={loading || saving}>
                 Reload
               </Button>
-              <Button variant="primary" onClick={save} loading={saving}>
+              <Button variant="primary" onClick={save} loading={saving} disabled={loading || saving}>
                 Save
               </Button>
             </SpaceBetween>
