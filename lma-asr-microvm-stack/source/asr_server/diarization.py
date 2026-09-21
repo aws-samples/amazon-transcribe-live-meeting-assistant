@@ -907,9 +907,11 @@ class DiarizingRecognizer(Recognizer):
         samples = self._slice(start, now)
         if not samples:
             return None
-        assert self._turn_detector is not None  # guarded by the caller
+        detector = self._turn_detector
+        if detector is None:
+            return None
         try:
-            detected = self._turn_detector.detect_samples(samples)
+            detected = detector.detect_samples(samples)
         except Exception:  # noqa: BLE001 - detection must never break transcription
             _LOG.warning("live turn detection failed at %.2fs", now, exc_info=True)
             return None

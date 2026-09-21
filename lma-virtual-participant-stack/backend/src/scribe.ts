@@ -775,7 +775,7 @@ export class TranscriptionService {
         capture.stderr?.on('data', (data: any) => {
             const msg = data.toString();
             if (!msg.includes('size=') && !msg.includes('time=')) {
-                console.log(`FFmpeg (${label}):`, msg.trim());
+                console.log('FFmpeg (%s): %s', label, msg.trim());
             }
         });
         return capture;
