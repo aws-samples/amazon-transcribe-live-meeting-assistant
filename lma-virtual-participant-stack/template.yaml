@@ -321,7 +321,7 @@ Parameters:
   AmazonNovaSonicRegion:
     Type: String
     Default: ""
-    AllowedPattern: "^$|^[a-z]{2}(-[a-z]+)+-[0-9]$"
+    AllowedPattern: "^$|^[a-z]{2,4}(-[a-z]+)+-[0-9]$"
     ConstraintDescription: >-
       Must be empty, or an AWS Region name such as us-east-1.
     Description: >-

@@ -231,7 +231,9 @@ None of these requires user configuration. The AI fallback resolver model is con
 | ElevenLabsApiKey | API key for ElevenLabs voice assistant | (none) | Valid API key string |
 | ElevenLabsAgentId | ElevenLabs conversational agent ID | (none) | Valid agent ID |
 
-Setting `AmazonNovaSonicRegion` also grants the Virtual Participant's task role permission to invoke the Nova model in that region — without it the client would be pointed at a region IAM denies, and the voice assistant would fail to start with an access-denied error rather than anything that reads like a misconfiguration. Everything else the Virtual Participant does, including the Bedrock calls behind its self-healing DOM resolver, stays in the stack's region.
+Setting `AmazonNovaSonicRegion` also grants the Virtual Participant's task role permission to invoke the Nova model in that region — without it the client would be pointed at a region IAM denies, and the voice assistant would fail to start with an access-denied error rather than anything that reads like a misconfiguration. Only the Nova Sonic model itself moves. The Bedrock calls behind the Virtual Participant's self-healing DOM resolver, the DynamoDB table holding the Nova Sonic configuration you set on the Nova Sonic page, and the meeting-assistant Lambda the voice assistant calls as a tool are all deployed in the stack's region and continue to be reached there.
+
+Nothing validates that Nova Sonic is actually available in the region you name — check the [Amazon Bedrock model support by region](https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html) table first. A region where the model is not enabled fails at the first voice interaction with a Bedrock validation error in the Virtual Participant's logs, not at deploy time.
 
 ## Simli Avatar
 

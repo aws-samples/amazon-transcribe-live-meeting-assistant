@@ -793,9 +793,15 @@ def test_nova_sonic_region_is_a_parameter_reaching_the_container(template: dict)
     """
     spec = template["Parameters"]["AmazonNovaSonicRegion"]
     assert spec["Default"] == ""
-    assert re.match(spec["AllowedPattern"], ""), "an empty value must remain valid"
-    assert re.match(spec["AllowedPattern"], "eu-north-1")
-    assert not re.match(spec["AllowedPattern"], "eu_north_1")
+    # fullmatch, not match: CloudFormation anchors AllowedPattern at both ends, so
+    # re.match would accept a value with trailing junk that CloudFormation rejects.
+    pattern = spec["AllowedPattern"]
+    for valid in ("", "eu-north-1", "us-gov-west-1", "ap-southeast-4", "eusc-de-east-1"):
+        assert re.fullmatch(pattern, valid), f"{valid!r} is a real region and must be accepted"
+    for invalid in ("eu_north_1", "eu-north-1 ", " eu-north-1", "*", "eu-north", "EU-NORTH-1"):
+        assert not re.fullmatch(pattern, invalid), f"{invalid!r} must be rejected"
+    # '*' in particular: it is the value that would widen the IAM grant.
+    assert not re.fullmatch(pattern, "*")
 
     env = _task_definition_env(template)
     assert env["AMAZON_NOVA_SONIC_REGION"] == {"Ref": "AmazonNovaSonicRegion"}
@@ -816,13 +822,24 @@ def test_nova_sonic_region_is_granted_in_iam(template: dict) -> None:
 
     # The stack's own region is still granted...
     assert "${AWS::Region}::foundation-model/amazon.nova-*" in rendered
-    # ...and the configured region, conditionally.
+
+    # ...and the configured region, conditionally. Asserted STRUCTURALLY, on the
+    # branches: a substring check over the rendered Fn::If passes even with the
+    # branches inverted -- granting the cross-region ARN only when the parameter is
+    # EMPTY -- which is the one state in which the feature cannot work.
     conditional = [r for r in resources if isinstance(r, dict) and "Fn::If" in r]
-    assert any(
-        "AmazonNovaSonicRegion" in json.dumps(r) and "amazon.nova-" in json.dumps(r)
-        for r in conditional
-    ), "the Nova model must be granted in AmazonNovaSonicRegion when it is set"
-    assert "HasCustomNovaSonicRegion" in template["Conditions"]
+    assert len(conditional) == 1, f"expected one conditional resource, got {len(conditional)}"
+    condition_name, when_true, when_false = conditional[0]["Fn::If"]
+    assert condition_name == "HasCustomNovaSonicRegion"
+    assert "${AmazonNovaSonicRegion}::foundation-model/amazon.nova-*" in json.dumps(when_true), (
+        "the TRUE branch must grant the Nova model in the configured region"
+    )
+    assert when_false == {"Ref": "AWS::NoValue"}, (
+        "the FALSE branch must add nothing, so an unset parameter grants nothing new"
+    )
+    assert template["Conditions"]["HasCustomNovaSonicRegion"] == {
+        "Fn::Not": [{"Fn::Equals": [{"Ref": "AmazonNovaSonicRegion"}, ""]}]
+    }
 
     # Partition-qualified, so the grant is not aws-partition-only.
     assert "arn:aws:bedrock" not in rendered, "use ${AWS::Partition} rather than a literal"
