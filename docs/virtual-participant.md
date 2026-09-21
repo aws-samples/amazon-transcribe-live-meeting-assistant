@@ -51,8 +51,9 @@ See [Meeting Sources](meeting-sources.md) for the full comparison.
 - Zoom
 - Microsoft Teams
 - Amazon Chime
-- Google Meet
 - WebEx
+
+**Google Meet is not supported by the Virtual Participant.** It is supported by the [Chrome extension](browser-extension.md), which captures a meeting you are in yourself — so Meet meetings can be transcribed, but not attended unattended or scheduled in advance. Adding Virtual Participant support is tracked in [#661](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/661).
 
 ## Joining a Meeting
 

@@ -318,6 +318,24 @@ def validate_parsed_data(data):
     return data
 
 
+# Platforms the Virtual Participant has a handler for. GOOGLE_MEET is deliberately
+# absent: the model is still asked to identify it (so a Meet invitation can be
+# rejected with something useful to read), but there is no Meet handler, so letting
+# it through would auto-fill the create form with a platform that fails at launch
+# with "Unsupported meeting platform". Meet meetings are captured with the Chrome
+# extension instead. See GitHub #661.
+VP_SUPPORTED_PLATFORMS = ["ZOOM", "TEAMS", "CHIME", "WEBEX"]
+
+UNSUPPORTED_PLATFORM_MESSAGES = {
+    "GOOGLE_MEET": (
+        "This looks like a Google Meet invitation. The Virtual Participant cannot "
+        "join Google Meet meetings. Use the LMA Chrome extension to capture a Meet "
+        "meeting you are in yourself, or enter a different meeting's details "
+        "manually."
+    ),
+}
+
+
 def handler(event, context):
     """Lambda handler for parsing meeting invitations"""
     logger.info(f"Received event: {json.dumps(event)}")
@@ -335,6 +353,23 @@ def handler(event, context):
         if result["success"]:
             # Validate and clean the parsed data
             result["data"] = validate_parsed_data(result["data"])
+
+            # Reject a platform the Virtual Participant has no handler for, rather
+            # than auto-filling the create form with it: the launch would fail with
+            # "Unsupported meeting platform" after the user had filled everything
+            # else in. The message reaches the paste-invitation dialog directly.
+            platform = result["data"].get("meetingPlatform")
+            if platform and platform not in VP_SUPPORTED_PLATFORMS:
+                logger.info("Rejecting unsupported meeting platform: %s", platform)
+                return json.dumps(
+                    {
+                        "success": False,
+                        "error": UNSUPPORTED_PLATFORM_MESSAGES.get(
+                            platform,
+                            f"The Virtual Participant cannot join {platform} meetings.",
+                        ),
+                    }
+                )
 
         logger.info(f"Returning result: {json.dumps(result)}")
         return json.dumps(result)
