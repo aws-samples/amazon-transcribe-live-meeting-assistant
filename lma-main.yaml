@@ -103,8 +103,25 @@ Parameters:
       - "elevenlabs"
       - "amazon_nova_sonic"
     Description: >-
-      Voice AI assistant provider for Virtual Participant. Choose 'none' to disable voice responses (default),
-      'elevenlabs' for ElevenLabs Conversational AI (requires API key above), or 'amazon_nova_sonic' for AWS Nova Sonic 2 (placeholder - not yet implemented).
+      Voice AI assistant provider for Virtual Participant. Choose 'none' to
+      disable voice responses (default), 'elevenlabs' for ElevenLabs
+      Conversational AI (requires API key above), or 'amazon_nova_sonic' for
+      Amazon Nova Sonic, which needs no API key and is configured on the Nova
+      Sonic page in the LMA UI.
+
+  AmazonNovaSonicRegion:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^[a-z]{2,4}(-[a-z]+)+-[0-9]+$"
+    ConstraintDescription: >-
+      Must be empty, or an AWS Region name such as us-east-1.
+    Description: >-
+      Region to reach Amazon Nova Sonic in, when it differs from the region
+      this stack is deployed to. Leave empty to use the stack's own region.
+      Nova Sonic is available in fewer regions than LMA itself, so a
+      deployment constrained to a particular region for compliance can keep
+      everything else local and reach the voice assistant elsewhere. Only
+      used when VoiceAssistantProvider is amazon_nova_sonic.
 
   VoiceAssistantActivationMode:
     Type: String
@@ -937,6 +954,7 @@ Metadata:
           - SimliApiKey
           - SimliFaceId
           - VoiceAssistantProvider
+          - AmazonNovaSonicRegion
           - VoiceAssistantActivationMode
           - VoiceAssistantWakePhrases
           - VoiceAssistantActivationDuration
@@ -1070,6 +1088,8 @@ Metadata:
         default: Azure Communication Services Connection String for Teams SDK Join (Optional)
       VoiceAssistantProvider:
         default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
+      AmazonNovaSonicRegion:
+        default: Amazon Nova Sonic Region (blank = this stack's region)
       VoiceAssistantActivationMode:
         default: Voice Assistant Activation Mode
       VoiceAssistantWakePhrases:
@@ -2936,6 +2956,7 @@ Resources:
         SimliApiKey: !Ref SimliApiKey
         SimliFaceId: !Ref SimliFaceId
         VoiceAssistantProvider: !Ref VoiceAssistantProvider
+        AmazonNovaSonicRegion: !Ref AmazonNovaSonicRegion
         VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
         VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
         VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration

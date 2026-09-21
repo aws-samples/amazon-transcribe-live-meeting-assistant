@@ -20,6 +20,38 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 
+/**
+ * Which region to reach Amazon Nova Sonic in.
+ *
+ * Nova Sonic is available in fewer regions than LMA itself, so a deployment
+ * pinned to a particular region for compliance can keep everything else local and
+ * reach the voice assistant elsewhere (GitHub #508). `AMAZON_NOVA_SONIC_REGION`
+ * carries the `AmazonNovaSonicRegion` stack parameter; empty or unset means the
+ * stack's own region, which is what every existing deployment gets.
+ *
+ * An explicitly passed region still wins, so a caller that already knows where to
+ * go is not overridden by the environment.
+ */
+export function resolveNovaSonicRegion(
+    configured: string | undefined,
+    env: Record<string, string | undefined> = process.env,
+): string {
+    const fromEnv = (env.AMAZON_NOVA_SONIC_REGION || '').trim();
+    return configured || fromEnv || stackRegion(env);
+}
+
+/**
+ * The region this stack is deployed to — where everything except the Nova Sonic
+ * model itself lives.
+ *
+ * `VP_AWS_REGION` is the fallback because `AWS_REGION` is reserved and rejected at
+ * MicroVM image-build time, so the MicroVM path stages it under the prefixed name
+ * (the same order is used in status-manager.ts and microvm-supervisor.ts).
+ */
+export function stackRegion(env: Record<string, string | undefined> = process.env): string {
+    return env.AWS_REGION || env.VP_AWS_REGION || 'us-east-1';
+}
+
 export interface NovaAgentConfig {
   modelId: string;
   systemPrompt: string;
@@ -89,7 +121,8 @@ export class NovaAgent implements VoiceAssistantProvider {
   private _isInterrupted: boolean = false; // Gate: drops all audio (voice + avatar) after barge-in until next turn
   private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
-  private region: string;
+  /** Where the Nova Sonic model is invoked. NOT the stack's region — see stackRegion(). */
+  private novaSonicRegion: string;
   private audioChunkCount: number = 0;
   
   // Persistent audio playback stream (replaces per-batch paplay spawning)
@@ -152,7 +185,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       ? config.translatorUnmutePhrases.map(normalizeForTrigger).filter(p => p.length > 0)
       : [...DEFAULT_TRANSLATOR_UNMUTE_PHRASES];
     this.defaultActivationDuration = config.activationDuration || 30;
-    this.region = config.region || process.env.AWS_REGION || 'us-east-1';
+    this.novaSonicRegion = resolveNovaSonicRegion(config.region);
     this.strandsLambdaArn = config.strandsLambdaArn || process.env.STRANDS_LAMBDA_ARN;
     
     // Set initial activation state based on mode
@@ -168,7 +201,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log(`  Model: ${this.modelId}`);
     console.log(`  Voice: ${this.voiceId}`);
     console.log(`  Endpointing sensitivity: ${this.endpointingSensitivity}`);
-    console.log(`  Region: ${this.region}`);
+    const local = stackRegion();
+    console.log(
+      `  Nova Sonic region: ${this.novaSonicRegion}` +
+        (this.novaSonicRegion !== local ? ` (stack region is ${local})` : ''),
+    );
     console.log(`  Activation mode: ${this.activationMode}`);
     console.log(`  Meeting mode: ${this.meetingMode}`);
     if (this.meetingMode === 'translator') {
@@ -193,7 +230,13 @@ export class NovaAgent implements VoiceAssistantProvider {
       if (tableName) {
         try {
           const dynamoDbClient = new DynamoDBClient({
-            region: this.region,
+            // The stack's region, NOT the Nova Sonic one: this table is created by
+            // lma-nova-sonic-config-stack locally and the task role's grant (and its
+            // kms:ViaService condition) is pinned to ${AWS::Region}. Following the
+            // Nova Sonic region here would hit a table that does not exist, and
+            // loadNovaSonicConfig would quietly fall back to its defaults —
+            // discarding the operator's configured prompt, voice and meeting mode.
+            region: stackRegion(),
             credentials: defaultProvider(),
           });
           
@@ -264,7 +307,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       });
 
       this.bedrockClient = new BedrockRuntimeClient({
-        region: this.region,
+        // The only client that follows the Nova Sonic region.
+        region: this.novaSonicRegion,
         credentials: defaultProvider(),
         requestHandler: nodeHttp2Handler,
       });
@@ -272,7 +316,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       // Initialize Lambda client if Strands Lambda ARN is configured
       if (this.strandsLambdaArn) {
         this.lambdaClient = new LambdaClient({
-          region: this.region,
+          // The stack's region, for the same reason as the config table: the Strands
+          // function is deployed locally and granted by its exact ARN, so a client in
+          // another region fails every tool call.
+          region: stackRegion(),
           credentials: defaultProvider(),
         });
         console.log('✓ Lambda client initialized for Strands agent tool');
