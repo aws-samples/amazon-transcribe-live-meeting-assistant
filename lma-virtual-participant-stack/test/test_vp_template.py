@@ -800,7 +800,8 @@ def test_nova_sonic_region_is_a_parameter_reaching_the_container(template: dict)
         assert re.fullmatch(pattern, valid), f"{valid!r} is a real region and must be accepted"
     for invalid in ("eu_north_1", "eu-north-1 ", " eu-north-1", "*", "eu-north", "EU-NORTH-1"):
         assert not re.fullmatch(pattern, invalid), f"{invalid!r} must be rejected"
-    # '*' in particular: it is the value that would widen the IAM grant.
+    # The pattern admits only region-shaped values, so the conditional grant below
+    # always resolves to a single named region.
     assert not re.fullmatch(pattern, "*")
 
     env = _task_definition_env(template)
@@ -837,7 +838,7 @@ def test_nova_sonic_region_is_granted_in_iam(template: dict) -> None:
     assert when_false == {"Ref": "AWS::NoValue"}, (
         "the FALSE branch must add nothing, so an unset parameter grants nothing new"
     )
-    assert template["Conditions"]["HasCustomNovaSonicRegion"] == {
+    assert template["Conditions"][condition_name] == {
         "Fn::Not": [{"Fn::Equals": [{"Ref": "AmazonNovaSonicRegion"}, ""]}]
     }
 

@@ -106,16 +106,32 @@ test('only the Bedrock client follows the Nova Sonic region', () => {
     // A source-level guard, because the defect this replaces was a field named
     // `region` feeding three clients with two different meanings. Assert on the
     // shipped source rather than the intent.
-    const src = readFileSync(new URL('../src/nova-agent.ts', import.meta.url), 'utf8');
+    const raw = readFileSync(new URL('../src/nova-agent.ts', import.meta.url), 'utf8');
+    // Comments discuss the variable by name — they are documentation, not a read.
+    const src = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+    // Exactly one client may follow the override...
     const novaRegionUses = [...src.matchAll(/region:\s*this\.novaSonicRegion/g)].length;
     assert.equal(novaRegionUses, 1, 'exactly one client may use the Nova Sonic region');
     assert.ok(
-        /new BedrockRuntimeClient\(\{[\s\S]{0,200}?region: this\.novaSonicRegion/.test(src),
-        'the Nova Sonic region must be the BedrockRuntimeClient\'s',
+        /new BedrockRuntimeClient\(\{[\s\S]{0,900}?region: this\.novaSonicRegion/.test(src),
+        "the Nova Sonic region must be the BedrockRuntimeClient's",
     );
+
+    // ...and the override must not be reachable by any other route. Without this,
+    // writing `region: process.env.AMAZON_NOVA_SONIC_REGION ?? stackRegion()` on a
+    // local client reintroduces the original defect while every test stays green.
+    const envReads = [...src.matchAll(/AMAZON_NOVA_SONIC_REGION/g)].length;
+    assert.equal(envReads, 1, 'the override may be read in exactly one place');
+
+    // Every construction of a client targeting a local resource, not just the first.
     for (const other of ['DynamoDBClient', 'LambdaClient']) {
-        const m = new RegExp(`new ${other}\\(\\{[\\s\\S]{0,900}?region: ([^,\\n]+)`).exec(src);
-        assert.ok(m, `${other} construction not found`);
-        assert.match(m[1], /stackRegion\(\)/, `${other} must use the stack region`);
+        const matches = [
+            ...src.matchAll(new RegExp(`new ${other}\\(\\{[\\s\\S]{0,900}?region: ([^,\\n]+)`, 'g')),
+        ];
+        assert.ok(matches.length > 0, `${other} construction not found`);
+        for (const m of matches) {
+            assert.match(m[1], /stackRegion\(\)/, `${other} must use the stack region`);
+        }
     }
 });
