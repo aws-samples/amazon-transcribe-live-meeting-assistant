@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Virtual Participant can join Webex meetings again.** Webex replaced the pre-join display-name field with a custom element whose input sits inside a shadow root, so the Virtual Participant waited for a field that no longer existed and the join failed with a selector timeout. Both the current and the previous markup are now recognized. The name is also replaced rather than appended, so a name persisted from an earlier session no longer produces a doubled display name such as `LMALMA (user@example.com)`. Contributed by [@psrebniak](https://github.com/psrebniak). ([#505](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/505))
+
+- **Webex Virtual Participants act on in-meeting chat commands again.** Webex moved its meeting chat panel onto Momentum web components, so the Virtual Participant stopped seeing chat messages and commands such as `LMA leave` were ignored. Both markups are now recognized, several messages arriving together are all read rather than only the last, a message whose row is rendered in stages is picked up once it is complete, and the Webex goodbye now names whoever asked the Virtual Participant to leave, as it already did on Zoom and Chime. If no chat panel can be found at all, the Virtual Participant now records that in its log instead of running with chat commands silently inert. Contributed by [@psrebniak](https://github.com/psrebniak). ([#507](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/507))
+
 ## [0.3.9] - 2026-09-19
 
 ### Added

@@ -10,6 +10,55 @@ import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js'
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick } from './prejoin-actions.js';
 
+/**
+ * The pre-join display-name field, in both markups Webex serves.
+ *
+ * Classic web client: a plain `input[data-test="Name (required)"]`. Newer builds:
+ * an `<mdc-input data-test="Name">` Momentum custom element whose real `<input>`
+ * lives in an open shadow root, several levels below the host — so the selector
+ * has to resolve the inner input, not the host, or `fill()` rejects the element
+ * as not being an input.
+ *
+ * Playwright's CSS engine pierces open shadow roots on its own, which is why a
+ * plain descendant selector works here. `>>>` does NOT: Playwright removed that
+ * combinator and now parses it as `>>` plus a `:scope > input` part, which matches
+ * only a direct child of the shadow root and so never reaches Momentum's nested
+ * input.
+ *
+ * Declared once because it is needed in four places, and an invalid selector in
+ * any one of them throws on sight rather than timing out — a comma list with one
+ * bad alternative poisons the whole selector, even when the other alternative is
+ * present on the page. See webex-selectors.test.ts.
+ */
+export const NAME_INPUT = 'input[data-test="Name (required)"], mdc-input[data-test="Name"] input';
+
+/** Selectors the in-page chat observer needs, passed into `frame.evaluate`. */
+export interface WebexChatSelectors {
+    /** Chat message list. `current` is preferred over `legacy` when both match. */
+    containers: { current: string; legacy: string };
+    /** Sender label within one message row. */
+    senders: string;
+    /** Message body within one message row. */
+    bodies: string;
+    /** The row itself, resolved from whichever node the observer saw added. */
+    rows: string;
+}
+
+/**
+ * Chat selectors for both markups Webex serves — the Momentum (MDC) panel it uses
+ * now, and the older CSS-module markup. Declared here rather than inline in the
+ * observer so they are covered by webex-selectors.test.ts.
+ */
+export const WEBEX_CHAT_SELECTORS: WebexChatSelectors = {
+    containers: {
+        current: '#activity-list mdc-list',
+        legacy: 'div[class^="style-chat-box"]',
+    },
+    senders: 'h3[class^="style-chat-label"], .sender-name',
+    bodies: 'span[class^="style-chat-msg"], .activity-item-message',
+    rows: '.activity-item, div[class^="style-chat-msg-container"]',
+};
+
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
     private endRequested: Promise<ExitInfo>;
@@ -255,7 +304,7 @@ export default class Webex {
         // watches for the pre-join UI itself (name/password/join controls) so we
         // don't mistake the app-download chooser page for a loaded client.
         const MAINFRAME_JOIN_UI = [
-            'input[data-test="Name (required)"]',
+            NAME_INPUT,
             'input[aria-label="Meeting password"]',
             'mdc-button[data-test="join-button"]',
         ].join(', ');
@@ -304,8 +353,7 @@ export default class Webex {
 
         const passwordCheckEl = await Promise.any([
             frame.waitForSelector('input[aria-label="Meeting password"]', { timeout: 30000 }).then((el: any) => ({ source: 'password', el })).catch(() => null),
-            frame.waitForSelector('input[data-test="Name (required)"]', { timeout: 30000 }).then((el: any) => ({ source: 'name', el })).catch(() => null),
-            frame.waitForSelector('mdc-input[data-test="Name"]', { timeout: 30000 }).then((el: any) => ({ source: 'name', el })).catch(() => null),
+            frame.waitForSelector(NAME_INPUT, { timeout: 30000 }).then((el: any) => ({ source: 'name', el })).catch(() => null),
             frame.waitForSelector('input[aria-labelledby="nameLabel"]', { timeout: 30000 }).then((el: any) => ({ source: 'enterprise-name', el })).catch(() => null)
         ]).catch(() => null);
     
@@ -343,7 +391,7 @@ export default class Webex {
                 console.log('Waiting for CAPTCHA to be solved (up to 2 minutes)...');
                 await Promise.race([
                     // Wait for name input to appear (successful CAPTCHA solve + Next click)
-                    frame.waitForSelector('input[data-test="Name (required)"], mdc-input[data-test="Name"]', {
+                    frame.waitForSelector(NAME_INPUT, {
                         timeout: 120000,
                         state: 'visible'
                     }),
@@ -427,18 +475,14 @@ export default class Webex {
                 }
             }
         } else {
-            const nameInputElement = (passwordCheckEl && passwordCheckEl.source === 'name') ? passwordCheckEl.el : await frame.waitForSelector('input[data-test="Name (required)"], mdc-input[data-test="Name"] >>> input"]',{ timeout: 30000 });
-            if (nameInputElement) {
-                // Clean input first - Webex keeps it from previous session
-                await nameInputElement.evaluate((node: HTMLInputElement) => {
-                    node.focus();
-                    node.value = '';
-                    node.dispatchEvent(new Event('input', { bubbles: true }));
-                    node.dispatchEvent(new Event('change', { bubbles: true }));
-                });
-                await new Promise(r => setTimeout(r, 0));
-                await nameInputElement.type(details.scribeIdentity);
-            }
+            const nameInputElement = (passwordCheckEl && passwordCheckEl.source === 'name')
+                ? passwordCheckEl.el
+                : await frame.waitForSelector(NAME_INPUT, { timeout: 30000 });
+            // fill(), not type(): Webex persists the guest name in the VP's own
+            // Chromium profile, so typing into a field that already holds "LMA"
+            // appends and the meeting shows "LMALMA (user)". fill() clears first
+            // and raises the input/change events the form validates on.
+            await nameInputElement?.fill(details.scribeIdentity);
         }
 
         // Wait for the meeting interface (interstitial / pre-join) to load.
@@ -751,32 +795,67 @@ export default class Webex {
         });
 
         console.log('Listening for message changes.');
-        await frame.evaluate(() => {
-                const targetNode = document.querySelector(
-                    'div[class^="style-chat-box"], #activity-list > mdc-list'
-                );
+        await frame.evaluate(
+            ({ containers, senders, bodies, rows }: WebexChatSelectors) => {
+                // Two chat markups are supported: the Momentum (MDC) panel Webex
+                // serves now, and the older CSS-module markup some variants still
+                // serve. The preference is explicit rather than a single comma
+                // list, because a selector list resolves by DOCUMENT ORDER, not by
+                // which generation we would rather have — a page carrying both
+                // would otherwise bind to whichever happens to come first.
+                const targetNode =
+                    document.querySelector(containers.current) ??
+                    document.querySelector(containers.legacy);
+                if (!targetNode) {
+                    // Failing silently here is how the previous breakage went
+                    // unnoticed until a user reported that chat commands did
+                    // nothing: there was no log either way.
+                    console.log('DEBUG: Webex chat container not found — chat commands will not work.');
+                    return;
+                }
+                console.log('DEBUG: Webex chat observer attached.');
 
-                const config = { childList: true, subtree: true };
+                // Rows can be delivered more than once (a virtualized list
+                // re-inserting a node, or two mutations touching the same row),
+                // and details.messages has no idempotence of its own.
+                const seen = new WeakSet<Element>();
 
                 const callback = (mutationList: MutationRecord[]) => {
-                    const lastMutation = mutationList[mutationList.length - 1];
-                    const addedNode = lastMutation.addedNodes[0] as Element;
-                    if (addedNode) {
-                        const sender = addedNode.querySelector(
-                            'h3[class^="style-chat-label"], .sender-name'
-                        )?.textContent;
-                        const message = addedNode.querySelector(
-                            'span[class^="style-chat-msg"], .activity-item-message'
-                        )?.textContent;
-                        if (!sender!.startsWith('from LMA') && sender !== "You") {
-                            (window as any).messageChange(message);
+                    // Every added node in every mutation: a batch can carry two
+                    // messages, and taking only the last one dropped the first —
+                    // including, in the worst case, the "LMA leave" that preceded
+                    // an ordinary message.
+                    for (const mutation of mutationList) {
+                        for (const node of Array.from(mutation.addedNodes)) {
+                            if (!(node instanceof Element)) continue;
+                            // Resolve the whole row, not just the node that was
+                            // added: a Lit-rendered list inserts the row shell
+                            // first and fills the sender and body in later
+                            // mutations, so searching only inside the added node
+                            // finds neither.
+                            const row = node.closest(rows) ?? node;
+                            if (seen.has(row)) continue;
+                            const sender = row.querySelector(senders)?.textContent?.trim();
+                            const message = row.querySelector(bodies)?.textContent?.trim();
+                            // No body yet — a row shell, an attachment card, or a
+                            // join/leave notice. There is nothing to hand to the
+                            // node side, which cannot take undefined.
+                            if (!message) continue;
+                            // Skip the VP's own messages: 'from LMA ...' in the
+                            // older markup, 'You' in the current one.
+                            if (sender?.startsWith('from LMA') || sender === 'You') continue;
+                            seen.add(row);
+                            // Pass the sender when known so the goodbye can name
+                            // whoever asked the VP to leave.
+                            (window as any).messageChange(sender ? `${sender}:::${message}` : message);
                         }
                     }
                 };
 
-                const observer = new MutationObserver(callback);
-                if (targetNode) observer.observe(targetNode, config);
-            });
+                new MutationObserver(callback).observe(targetNode, { childList: true, subtree: true });
+            },
+            WEBEX_CHAT_SELECTORS,
+        );
 
         // Start transcription if enabled
         if (details.start) {
