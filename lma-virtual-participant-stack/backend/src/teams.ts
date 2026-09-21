@@ -42,7 +42,14 @@ export interface AttendeeWatchdogState {
      * happens to be visible — multiplies the two bounds together instead of adding
      * them: 14 misses per veto reaches 7.5 HOURS at the default cadence, which is
      * the #540 outcome by another route. This counter makes the ceiling additive
-     * again, whatever the interleaving.
+     * again for any interleaving of UNREADABLE polls.
+     *
+     * It does not bound a sequence containing readable badges, because a readable
+     * badge clears it — deliberately, since a readable badge is a measurement. Note
+     * the consequence: a badge that alternates between reading <=1 and being
+     * unreadable reaches no exit at all, because each unreadable poll also clears
+     * `consecutiveLonely`. That is unchanged from before this counter existed and is
+     * tracked in GitHub #687; it is not something `unreadableRun` addresses.
      */
     unreadableRun: number;
 }
@@ -81,7 +88,10 @@ export interface AttendeeWatchdogConfig {
  * DOM whenever the meeting toolbar collapses, which happens routinely during
  * content share and full-screen layouts. A ~40s bound on that reading ended live
  * meetings mid-sentence while people were still speaking (GitHub #660), so the
- * missing-badge bound is minutes wide.
+ * missing-badge bound is minutes wide by default. (An operator who raises
+ * VPPollsBeforeEnd to its maximum can invert that relationship; both remain
+ * individually bounded, so the asymmetry is the shipped default rather than an
+ * invariant.)
  *
  * A wide bound alone is not enough, though: nothing in the VP moves the pointer
  * once it is in the meeting, so a toolbar that auto-hides during a share can stay
@@ -96,7 +106,8 @@ export interface AttendeeWatchdogConfig {
  * worst case in either direction is therefore finite: a share is safe for ~30
  * minutes at a stretch, and a meeting whose end Teams announces to nobody is left
  * after ~35 at the default cadence. Both windows are capped at 30 minutes
- * independently, so the ceiling is an hour at the slowest cadence and never more.
+ * independently, so the ceiling is an hour for any settings at all — reachable at
+ * the default cadence with the maximum count as well as at the slowest cadence.
  */
 export const DEFAULT_ATTENDEE_WATCHDOG_CONFIG: AttendeeWatchdogConfig = {
     pollMs: 20_000,
@@ -352,14 +363,23 @@ export function decideAttendeeAction(
         // Allowance spent. Chrome that has been present with no readable roster
         // for this long is no longer good evidence of a live meeting, so fall
         // through and count the reading as the plain miss it otherwise is.
+        //
+        // In practice the run ceiling above now fires first at every legal setting,
+        // because pollsBeforeEndMissing <= maxSuppressedPolls (both are clamped by
+        // the same 30-minute window). This branch is kept as the local statement of
+        // the rule, so the invariant does not depend on that arithmetic holding
+        // after a future edit to either window.
     }
 
     if (reading.state !== 'OK') {
         state.consecutiveMissing += 1;
         // Any unreadable poll clears the lonely run: an unreadable badge is not
-        // evidence about how many people are present. Note this means an
-        // alternating readable-alone / unreadable sequence never reaches the lonely
-        // exit — as on develop — but `unreadableRun` above bounds it regardless.
+        // evidence about how many people are present. This does mean that a badge
+        // alternating between "<=1" and unreadable reaches NO exit — `unreadableRun`
+        // does not cover it either, since a readable badge clears that too. Measured:
+        // OK(1), OK(1), BADGE_MISSING repeating never ends. Unchanged from before
+        // this change and tracked in GitHub #687; decaying this counter rather than
+        // zeroing it is the likely fix.
         state.consecutiveLonely = 0;
         if (state.consecutiveMissing >= config.pollsBeforeEndMissing) {
             const vetoed = state.suppressedMissing > 0

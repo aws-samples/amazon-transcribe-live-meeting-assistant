@@ -200,7 +200,7 @@ test('in-meeting chrome protects a long content share (#660)', () => {
     assert.equal(state.consecutiveMissing, 0);
 });
 
-test('the in-meeting veto is SPENT, so #540 cannot come back through it', () => {
+test('a permanently in-meeting reading still ends the meeting (the #540 guard)', () => {
     // Teams does not reliably remove its in-meeting controls when a meeting ends:
     // in the #540 incident the hang-up button was still present and visible
     // afterwards, which is why the HANGUP_BUTTON_HIDDEN watch never fired. So
@@ -275,7 +275,10 @@ test('the additive ceiling holds at every cadence, not just the default', () => 
     // The two windows are each capped at 30 minutes, so their sum can reach an hour
     // at the slowest cadence. That is the true ceiling to state in the docs — 35
     // minutes is the DEFAULT-cadence figure, not the guarantee.
-    for (const cadence of ['1000', '5000', '20000', '60000', '120000']) {
+    // 1003, 7000 and 81819 deliberately do not divide either window bound: with
+    // Math.round instead of directional rounding, those are the cadences where a
+    // stated bound is breached, and a loop of exact divisors cannot see it.
+    for (const cadence of ['1000', '1003', '5000', '7000', '20000', '60000', '81819', '120000']) {
         const config = resolveAttendeeWatchdogConfig({ VP_ATTENDEE_POLL_MS: cadence });
         const ceilingMs = (config.maxSuppressedPolls + config.pollsBeforeEndMissing) * config.pollMs;
         assert.ok(
@@ -408,6 +411,29 @@ test('a bad override falls back to the default rather than disabling the watchdo
             `"${bad}" must be ignored`,
         );
     }
+});
+
+test('the empty-roster tolerance has a floor as well as a ceiling', () => {
+    // VP_POLLS_BEFORE_END=1 at the minimum cadence was a one-second debounce on a
+    // badge that reads <=1 — the #317/#318 shape, reachable from the parameters
+    // page, where a single transient re-render ended a live meeting.
+    for (const cadence of ['1000', '1003', '5000', '7000', '20000']) {
+        const { pollMs, pollsBeforeEnd } = resolveAttendeeWatchdogConfig({
+            VP_ATTENDEE_POLL_MS: cadence,
+            VP_POLLS_BEFORE_END: '1',
+        });
+        const toleranceMs = pollMs * pollsBeforeEnd;
+        assert.ok(
+            toleranceMs >= 30_000,
+            `cadence ${cadence} with 1 poll gave a ${toleranceMs}ms debounce`,
+        );
+    }
+    // ...and the ceiling still holds from the other side.
+    const capped = resolveAttendeeWatchdogConfig({
+        VP_ATTENDEE_POLL_MS: '120000',
+        VP_POLLS_BEFORE_END: '90',
+    });
+    assert.ok(capped.pollMs * capped.pollsBeforeEnd <= 10 * 60 * 1000);
 });
 
 test('an over-large poll count is rejected, not honoured', () => {
