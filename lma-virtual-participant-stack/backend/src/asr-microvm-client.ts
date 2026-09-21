@@ -21,6 +21,7 @@ const ASR_LAUNCHER_FUNCTION_ARN = process.env.ASR_LAUNCHER_FUNCTION_ARN || '';
 const ASR_DIRECT_ENDPOINT = process.env.ASR_DIRECT_ENDPOINT || '';
 const ASR_PORT = 8080;
 export const ASR_SAMPLE_RATE = 16000;
+const BYTES_PER_SECOND = ASR_SAMPLE_RATE * 2;
 const ASR_READY_TIMEOUT_MS = parseInt(process.env.ASR_READY_TIMEOUT_MS || '30000', 10);
 const ASR_FINISH_TIMEOUT_MS = parseInt(process.env.ASR_FINISH_TIMEOUT_MS || '5000', 10);
 // Audio held while the MicroVM starts or a session reconnects: 60 s of 16 kHz mono PCM.
@@ -281,6 +282,12 @@ export interface MicrovmAsrSessionOptions {
     onSegment: SegmentHandler;
     /** False once the meeting is over, so a closed socket is not reconnected. */
     isMeetingLive: () => boolean;
+    /** Transcript channel this session feeds; tags its segment ids and log lines. */
+    channel?: 'CALLER' | 'AGENT';
+    /** Ordinal of this run within the meeting, so a restart cannot reuse earlier segment ids. */
+    run?: number;
+    /** Meeting time already covered by earlier runs; rows continue from here. */
+    timeBaseSeconds?: number;
 }
 
 /** The VP's single ASR session: a WebSocket to the MicroVM plus message-to-row mapping. */
@@ -302,10 +309,26 @@ export class MicrovmAsrSession {
     private readyResolve: ((ready: boolean) => void) | null = null;
     private terminationResolve: (() => void) | null = null;
     private diarizeEffective = false;
+    private sentBytes = 0;
     private lease: AsrLease;
+    private readonly channel: string;
+    private readonly logPrefix: string;
 
     constructor(private readonly options: MicrovmAsrSessionOptions) {
         this.lease = options.lease;
+        this.channel = options.channel ?? 'CALLER';
+        this.logPrefix = `[ASR ${this.channel}]`;
+        this.timeOffsetSeconds = options.timeBaseSeconds ?? 0;
+        this.observedMaxEnd = this.timeOffsetSeconds;
+    }
+
+    /** Engine time a row starting at the next pushed byte would carry, on the same timeline as segments. */
+    get audioSeconds(): number {
+        const queued = (this.outboundBytes + this.pendingBytes) / BYTES_PER_SECOND;
+        if (this.open) {
+            return this.timeOffsetSeconds + this.sentBytes / BYTES_PER_SECOND + queued;
+        }
+        return this.observedMaxEnd + queued;
     }
 
     get speakerLabelsActive(): boolean {
@@ -358,8 +381,9 @@ export class MicrovmAsrSession {
         if (this.open && this.ws?.readyState === WebSocket.OPEN) {
             try {
                 this.ws.send(frame);
+                this.sentBytes += frame.length;
             } catch (error: any) {
-                console.log(`[ASR] send failed: ${error?.message || error}`);
+                console.log(`${this.logPrefix} send failed: ${error?.message || error}`);
             }
             return;
         }
@@ -391,14 +415,14 @@ export class MicrovmAsrSession {
                     new Promise<void>((resolve) => setTimeout(resolve, ASR_FINISH_TIMEOUT_MS)),
                 ]);
             } catch (error: any) {
-                console.log(`[ASR] eos failed: ${error?.message || error}`);
+                console.log(`${this.logPrefix} eos failed: ${error?.message || error}`);
             }
         }
         this.terminationResolve = null;
         this.close();
         if (this.droppedBytes > 0) {
             console.warn(
-                `[ASR] dropped ${(this.droppedBytes / (ASR_SAMPLE_RATE * 2)).toFixed(1)}s of audio while disconnected`,
+                `${this.logPrefix} dropped ${(this.droppedBytes / BYTES_PER_SECOND).toFixed(1)}s of audio while disconnected`,
             );
         }
     }
@@ -433,7 +457,7 @@ export class MicrovmAsrSession {
         try {
             socket = new WebSocket(this.lease.endpointUrl, subprotocols(this.lease.authToken));
         } catch (error: any) {
-            console.error(`[ASR] could not open ${this.lease.endpointUrl}: ${error?.message || error}`);
+            console.error(`${this.logPrefix} could not open ${this.lease.endpointUrl}: ${error?.message || error}`);
             this.settleReady(false);
             void this.scheduleReconnect();
             return;
@@ -454,13 +478,15 @@ export class MicrovmAsrSession {
                 // Nothing else: the threshold, utterance floor and turn-cut
                 // behaviour are the bundle's operating point baked into the image.
             };
+            this.sentBytes = 0;
             try {
                 socket.send(JSON.stringify(config));
                 for (const frame of coalesceBacklog(this.pending)) {
                     socket.send(frame);
+                    this.sentBytes += frame.length;
                 }
             } catch (error: any) {
-                console.error(`[ASR] handshake failed: ${error?.message || error}`);
+                console.error(`${this.logPrefix} handshake failed: ${error?.message || error}`);
             }
             this.pending = [];
             this.pendingBytes = 0;
@@ -474,14 +500,14 @@ export class MicrovmAsrSession {
             try {
                 message = JSON.parse(data.toString()) as AsrServerMessage;
             } catch (error: any) {
-                console.warn(`[ASR] unparseable frame: ${error?.message || error}`);
+                console.warn(`${this.logPrefix} unparseable frame: ${error?.message || error}`);
                 return;
             }
             this.onMessage(message);
         });
 
         socket.on('error', (error: Error) => {
-            console.error(`[ASR] websocket error: ${error.message}`);
+            console.error(`${this.logPrefix} websocket error: ${error.message}`);
         });
 
         socket.on('close', (code: number, reason: Buffer) => {
@@ -489,7 +515,7 @@ export class MicrovmAsrSession {
             if (this.finished || !this.options.isMeetingLive()) {
                 return;
             }
-            console.warn(`[ASR] session closed unexpectedly (${code} ${reason?.toString() || ''}); reconnecting`);
+            console.warn(`${this.logPrefix} session closed unexpectedly (${code} ${reason?.toString() || ''}); reconnecting`);
             this.settleReady(false);
             void this.scheduleReconnect();
         });
@@ -506,7 +532,7 @@ export class MicrovmAsrSession {
         this.attempt += 1;
         if (this.attempt > ASR_MAX_RETRIES) {
             console.error(
-                `[ASR] giving up after ${ASR_MAX_RETRIES} consecutive failures; the rest of this meeting will not be transcribed by the MicroVM engine`,
+                `${this.logPrefix} giving up after ${ASR_MAX_RETRIES} consecutive failures; the rest of this meeting will not be transcribed by the MicroVM engine`,
             );
             this.gaveUp = true;
             return;
@@ -546,7 +572,7 @@ export class MicrovmAsrSession {
                     );
                 }
                 console.log(
-                    `[ASR] session ready (generation ${this.generation}, diarize=${this.diarizeEffective}, timeOffset=${this.timeOffsetSeconds.toFixed(2)}s)`,
+                    `${this.logPrefix} session ready (generation ${this.generation}, diarize=${this.diarizeEffective}, timeOffset=${this.timeOffsetSeconds.toFixed(2)}s)`,
                 );
                 this.settleReady(true);
                 break;
@@ -556,13 +582,13 @@ export class MicrovmAsrSession {
                 break;
             case 'termination':
                 console.log(
-                    `[ASR] terminated after ${message.audio_seconds?.toFixed(1) ?? '?'}s audio, ${message.segments ?? 0} segment(s)`,
+                    `${this.logPrefix} terminated after ${message.audio_seconds?.toFixed(1) ?? '?'}s audio, ${message.segments ?? 0} segment(s)`,
                 );
                 this.terminationResolve?.();
                 this.terminationResolve = null;
                 break;
             case 'error':
-                console.error(`[ASR] engine error ${message.code}: ${message.message}`);
+                console.error(`${this.logPrefix} engine error ${message.code}: ${message.message}`);
                 this.settleReady(false);
                 break;
             default:
@@ -583,7 +609,7 @@ export class MicrovmAsrSession {
         // The id excludes the speaker: a partial's provisional label can be corrected
         // by its final, and both must land on one row.
         this.options.onSegment({
-            segmentId: `vp-g${this.generation}-s${message.segment ?? 0}`,
+            segmentId: `vp-${this.channel.toLowerCase()}-r${this.options.run ?? 0}-g${this.generation}-s${message.segment ?? 0}`,
             startSec,
             endSec,
             text,
