@@ -203,8 +203,13 @@ next meeting with no stack update.
 | VPInstanceType | EC2 instance type for Virtual Participant. `t3.medium` (default) runs 1 voice + avatar VP (container capped at 3500 MB); the capacity-provider auto-scaler launches additional hosts when concurrent demand exceeds capacity. Bump to `t3.large` or a `c5.*`/`m5.*` instance for more concurrent VPs per host. | t3.medium | t3.medium, t3.large, t3.xlarge, c5.large, c5.xlarge, c5.2xlarge, m5.large, m5.xlarge |
 | VPMinInstances | Minimum warm EC2 instances always running. Set to `0` to fully scale down when idle (cold-start adds ~60-90s to the first VP). | 1 | 0-10 |
 | VPMaxInstances | Maximum EC2 instances. Capacity-provider managed scaling launches new hosts up to this cap when concurrent demand exceeds the current cluster's capacity. | 10 | 1-100 |
+| VPAttendeePollMs | How often a Teams Virtual Participant samples the meeting UI to decide whether the meeting is still running, in milliseconds. | 20000 | 1000-120000 |
+| VPPollsBeforeEnd | Consecutive polls on which a Teams meeting must show one or fewer attendees before the VP leaves — about 60 seconds at the default cadence. | 3 | 1-90 |
+| VPPollsBeforeEndMissing | Consecutive polls on which a Teams meeting must show neither a readable attendee count nor any in-meeting controls before the VP leaves — about 5 minutes at the default cadence. Raise it if participants report the VP leaving meetings that are still in progress. | 15 | 1-90 |
 
 `VPInstanceType`, `VPMinInstances` and `VPMaxInstances` apply only to `VPLaunchType=EC2`. Under `MICROVM` there are no hosts to size or scale — each meeting gets its own MicroVM, billed for its lifetime.
+
+The three meeting-end parameters apply to the **Teams browser join path** only, and no deployment should normally need to change them — see [How the VP decides a meeting has ended](virtual-participant.md#how-the-vp-decides-a-meeting-has-ended) for what each signal measures and why the two thresholds differ so much. Changing them updates the VP task definition without rebuilding the container image, so the new values apply to the next meeting.
 
 The VP stack also creates these infrastructure resources used by the auto-scaling, AI DOM resolver, and per-user persistent Chromium profile features:
 
