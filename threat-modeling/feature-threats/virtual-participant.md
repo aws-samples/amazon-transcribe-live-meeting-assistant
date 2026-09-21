@@ -40,7 +40,6 @@ flowchart TD
         Zoom[Zoom]
         Teams[Microsoft Teams]
         Chime[Amazon Chime]
-        Meet[Google Meet]
         WebEx[WebEx]
     end
 
@@ -56,7 +55,6 @@ flowchart TD
     Chrome --> Zoom
     Chrome --> Teams
     Chrome --> Chime
-    Chrome --> Meet
     Chrome --> WebEx
     AudioCapture --> WSServer
     NovaSonic --> VoiceOut

@@ -197,3 +197,24 @@ class TestUnsupportedPlatformRejection(unittest.TestCase):
 
         self.assertFalse(result["success"])
         self.assertIn("Google Meet", result["error"])
+
+    def test_a_null_platform_and_null_meeting_id_do_not_raise(self):
+        """A free-text invitation with nothing extractable must still parse.
+
+        The Meet-link check reads `meetingId`, and without the `or ""` guard a null
+        id turns a successful parse into "Internal error: 'NoneType' object has no
+        attribute 'lower'" — the worst kind of regression to introduce while adding
+        a guard, since it fires on the least informative input.
+        """
+        original = index.parse_meeting_invitation
+        index.parse_meeting_invitation = lambda _text: {
+            "success": True,
+            "data": {"meetingName": "Chat", "meetingPlatform": None, "meetingId": None},
+        }
+        try:
+            result = json.loads(index.handler({"arguments": {"invitationText": "hello"}}, None))
+        finally:
+            index.parse_meeting_invitation = original
+
+        self.assertTrue(result["success"])
+        self.assertIsNone(result["data"]["meetingPlatform"])

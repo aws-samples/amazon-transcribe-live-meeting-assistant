@@ -28,7 +28,7 @@ The Live Meeting Assistant captures and processes live meeting audio through mul
 | **ECS Fargate Services** | 2 (WebSocket server, Virtual Participant) |
 | **AI/ML Models** | Claude 4.x, Nova, Nova Sonic, Transcribe, Translate |
 | **Third-Party APIs** | 3 (ElevenLabs, Simli, Tavily) |
-| **Meeting Platforms** | 4 (Zoom, Teams, Chime, WebEx) |
+| **Meeting Platforms** | 4 via Virtual Participant (Zoom, Teams, Chime, WebEx); Google Meet via the browser extension |
 | **Auth Model** | Cognito (User Pool + Identity Pool, admin group) |
 
 ## 3. Threat Model Results
