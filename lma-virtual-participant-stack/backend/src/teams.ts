@@ -12,9 +12,6 @@ import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick, humanType } from './prejoin-actions.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 
-/** Polls before a sustained condition is believed. 3 x 20s poll = ~60s grace. */
-export const POLLS_BEFORE_END = 3;
-
 /** What one poll of the Teams roster badge told us. */
 export type AttendeeReading = { state: 'OK'; count: number } | { state: 'BADGE_MISSING' };
 
@@ -24,33 +21,91 @@ export interface AttendeeWatchdogState {
     consecutiveMissing: number;
 }
 
+/** Tunables for the Teams attendee watchdog, resolved once per meeting. */
+export interface AttendeeWatchdogConfig {
+    /** Cadence of the watchdog poll, in milliseconds. */
+    pollMs: number;
+    /** Consecutive genuine "<=1 attendee" readings before the meeting ends. */
+    pollsBeforeEnd: number;
+    /** Consecutive ABSENT-badge readings before the meeting ends. */
+    pollsBeforeEndMissing: number;
+}
+
+/**
+ * Defaults for the attendee watchdog.
+ *
+ * The two bounds are deliberately different sizes, and the asymmetry is the
+ * whole point. A badge that is PRESENT and reads <=1 is a direct measurement:
+ * ~60s of it means everyone really has gone. A badge that is ABSENT measures
+ * nothing — Teams drops the roster button (and with it the count badge) from the
+ * DOM whenever the meeting toolbar collapses, which happens routinely during
+ * content share and full-screen layouts. A ~40s bound on that reading ended live
+ * meetings mid-sentence while people were still speaking (GitHub #660), so the
+ * missing-badge bound is minutes wide.
+ *
+ * Widening it does not delay detecting a meeting that genuinely ended, because
+ * the watchdog checks Teams' post-meeting screen FIRST on every poll and ends the
+ * meeting in a single poll when it appears; `HANGUP_BUTTON_HIDDEN` is a second
+ * positive signal. The missing-badge counter is the backstop for the case where
+ * neither fires, and its only cost is a VP that lingers a few minutes (GitHub
+ * #540 is what happens when it is not bounded at all).
+ */
+export const DEFAULT_ATTENDEE_WATCHDOG_CONFIG: AttendeeWatchdogConfig = {
+    pollMs: 20_000,
+    pollsBeforeEnd: 3, // ~60s
+    pollsBeforeEndMissing: 15, // ~5 min
+};
+
+/**
+ * Read one positive-integer tunable from the environment, falling back to the
+ * default when it is unset, unparseable, or not positive.
+ *
+ * Operators need to be able to widen these on a deployment that is hitting an
+ * unusual Teams layout without rebuilding the VP container image, so they are
+ * environment variables on the VP task definition rather than baked-in
+ * constants. A bad value must never disable the watchdog (an unbounded VP holds
+ * a voice session and uploads video to its 8-hour ceiling), so anything that is
+ * not a positive integer is ignored in favour of the default.
+ */
+function positiveIntFromEnv(raw: string | undefined, fallback: number, minimum: number): number {
+    if (raw === undefined || raw.trim() === '') return fallback;
+    const parsed = Number(raw.trim());
+    if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < minimum) {
+        console.log(
+            `Ignoring attendee-watchdog override "${raw}" (want an integer >= ${minimum}) — using ${fallback}`,
+        );
+        return fallback;
+    }
+    return parsed;
+}
+
+/** Resolve the watchdog tunables from the VP task definition's environment. */
+export function resolveAttendeeWatchdogConfig(
+    env: Record<string, string | undefined> = process.env,
+): AttendeeWatchdogConfig {
+    return {
+        pollMs: positiveIntFromEnv(
+            env.VP_ATTENDEE_POLL_MS,
+            DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs,
+            1000,
+        ),
+        pollsBeforeEnd: positiveIntFromEnv(
+            env.VP_POLLS_BEFORE_END,
+            DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEnd,
+            1,
+        ),
+        pollsBeforeEndMissing: positiveIntFromEnv(
+            env.VP_POLLS_BEFORE_END_MISSING,
+            DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEndMissing,
+            1,
+        ),
+    };
+}
+
 export type AttendeeDecision =
     | { action: 'continue' }
     | { action: 'end'; reason: ExitReasonCode; trigger: string; detail: string };
 
-/**
- * Decide whether the meeting has ended, from one badge reading plus the running
- * counters.
- *
- * Extracted from the watchdog's setInterval so the decision is unit-testable —
- * the bug this fixes lived in a closure that no test could reach.
- *
- * BADGE_MISSING is the important case. Teams removes the roster badge when the
- * host ends the meeting, so a missing badge is the *expected* state for the very
- * event we need to detect. It was previously treated as "unknown, never leave"
- * with an unconditional early return, which meant no number of missing reads
- * could ever end the meeting: the VP kept recording video and holding a voice
- * session until the 8-hour MicroVM ceiling (GitHub #540).
- *
- * It cannot simply be treated as "alone" either — the badge legitimately
- * disappears on a collapsed roster, content share, or re-layout, and reacting to
- * a single misread ended live meetings mid-sentence (GitHub #317, #318).
- *
- * So it gets its OWN debounced counter, exactly as zoom.ts already does: a
- * transient miss is absorbed, but a sustained one is bounded and ends the
- * meeting. Note the two counters are mutually exclusive — a reading is either a
- * genuine count or a miss, never both — so each resets the other.
- */
 /**
  * Teams' pre-join display-name field validates against a fixed character set —
  * "letters, numbers, spaces, and these symbols: - ' . _ @" — and the default
@@ -70,15 +125,36 @@ export function sanitizeTeamsDisplayName(name: string): string {
     return /[A-Za-z0-9]/.test(cleaned) ? cleaned : 'LMA';
 }
 
+/**
+ * Decide whether the meeting has ended, from one badge reading plus the running
+ * counters.
+ *
+ * Extracted from the watchdog's setInterval so the decision is unit-testable —
+ * the bug this fixes lived in a closure that no test could reach.
+ *
+ * BADGE_MISSING is the important case, and it has been wrong in both directions.
+ * Teams removes the roster badge when the host ends the meeting, so a missing
+ * badge is the *expected* state for the very event the watchdog exists to detect;
+ * treating it as "unknown, never leave" meant no number of missing reads could
+ * ever end the meeting, and the VP recorded video and held a voice session to the
+ * 8-hour MicroVM ceiling (GitHub #540). But Teams also drops the badge during
+ * ordinary in-meeting layouts, so a tight bound on it ends live meetings
+ * mid-sentence (GitHub #317, #318, #660).
+ *
+ * So it gets its OWN counter with its OWN, much wider bound — see
+ * `DEFAULT_ATTENDEE_WATCHDOG_CONFIG` for why the asymmetry is safe. The two
+ * counters are mutually exclusive — a reading is either a genuine count or a
+ * miss, never both — so each resets the other.
+ */
 export function decideAttendeeAction(
     reading: AttendeeReading,
     state: AttendeeWatchdogState,
-    pollsBeforeEnd: number = POLLS_BEFORE_END,
+    config: AttendeeWatchdogConfig = DEFAULT_ATTENDEE_WATCHDOG_CONFIG,
 ): AttendeeDecision {
     if (reading.state !== 'OK') {
         state.consecutiveMissing += 1;
         state.consecutiveLonely = 0;
-        if (state.consecutiveMissing >= pollsBeforeEnd) {
+        if (state.consecutiveMissing >= config.pollsBeforeEndMissing) {
             return {
                 action: 'end',
                 reason: 'removed-from-meeting',
@@ -98,7 +174,7 @@ export function decideAttendeeAction(
     }
 
     state.consecutiveLonely += 1;
-    if (state.consecutiveLonely >= pollsBeforeEnd) {
+    if (state.consecutiveLonely >= config.pollsBeforeEnd) {
         return {
             action: 'end',
             reason: 'alone-in-meeting',
@@ -952,15 +1028,19 @@ export default class Teams {
         // Fix — mirror the debounced participants-watchdog already proven on
         // Zoom (see zoom.ts):
         //   - poll on a fixed interval instead of reacting to every mutation;
-        //   - require POLLS_BEFORE_END *consecutive* genuine "<=1" reads
+        //   - require pollsBeforeEnd *consecutive* genuine "<=1" reads
         //     (~60s grace) before leaving, so transient re-renders are absorbed;
-        //   - distinguish "badge missing/empty" (UNKNOWN — never a leave signal
-        //     on Teams, where the badge legitimately disappears) from a badge
-        //     that is present and genuinely reads <=1 (alone).
+        //   - count a "badge missing/empty" reading on a SEPARATE, much wider
+        //     counter (pollsBeforeEndMissing, ~5 min), because on Teams the badge
+        //     legitimately disappears mid-meeting — see decideAttendeeAction.
         // Audio silence is deliberately NOT a leave signal (long silent
         // document reviews are real meetings).
-        console.log("Listening for attendee changes.");
-        const POLL_MS = 20_000;
+        const watchdogConfig = resolveAttendeeWatchdogConfig();
+        console.log(
+            'Listening for attendee changes ' +
+                `(poll ${watchdogConfig.pollMs}ms, alone x${watchdogConfig.pollsBeforeEnd}, ` +
+                `badge-missing x${watchdogConfig.pollsBeforeEndMissing}).`,
+        );
         const watchdogState: AttendeeWatchdogState = {
             consecutiveLonely: 0,
             consecutiveMissing: 0,
@@ -1026,18 +1106,19 @@ export default class Teams {
                 reading = { state: 'BADGE_MISSING' };
             }
 
-            const decision = decideAttendeeAction(reading, watchdogState);
+            const decision = decideAttendeeAction(reading, watchdogState, watchdogConfig);
             if (reading.state === 'OK') {
                 console.log(
                     `DEBUG: Teams attendee count: ${reading.count}, ` +
                         `hasOthers: ${reading.count > 1}, ` +
-                        `consecutiveLonely: ${watchdogState.consecutiveLonely}/${POLLS_BEFORE_END}`,
+                        `consecutiveLonely: ${watchdogState.consecutiveLonely}/${watchdogConfig.pollsBeforeEnd}`,
                 );
             } else {
                 console.log(
                     'DEBUG: Teams attendee badge missing/empty — ' +
-                        `${watchdogState.consecutiveMissing}/${POLLS_BEFORE_END} consecutive ` +
-                        '(the badge also disappears when the meeting ends, so this is now bounded)',
+                        `${watchdogState.consecutiveMissing}/${watchdogConfig.pollsBeforeEndMissing} consecutive ` +
+                        '(the badge also disappears during content share and toolbar collapse, ' +
+                        'so this bound is wide; the post-meeting screen ends the meeting in one poll)',
                 );
             }
 
@@ -1047,7 +1128,7 @@ export default class Teams {
                 details.start = false;
                 this.requestEnd({ reason: decision.reason, trigger: decision.trigger });
             }
-        }, POLL_MS);
+        }, watchdogConfig.pollMs);
         page.once('close', () => clearInterval(attendeeWatchdog));
 
         // Speaker attribution combines two signals:

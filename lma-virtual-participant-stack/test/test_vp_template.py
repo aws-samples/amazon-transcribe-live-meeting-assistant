@@ -603,6 +603,79 @@ def test_microvm_image_sets_launch_type_env(template: dict) -> None:
     assert {"Key": "VP_LAUNCH_TYPE", "Value": "MICROVM"} in env
 
 
+TEAMS_WATCHDOG_DEFAULTS = {
+    "VP_ATTENDEE_POLL_MS": 20000,
+    "VP_POLLS_BEFORE_END": 3,
+    "VP_POLLS_BEFORE_END_MISSING": 15,
+}
+
+
+def _task_definition_env(template: dict) -> dict[str, object]:
+    containers = template["Resources"]["TaskDefinition"]["Properties"][
+        "ContainerDefinitions"
+    ]
+    return {item["Name"]: item["Value"] for item in containers[0]["Environment"]}
+
+
+def test_teams_watchdog_tunables_are_present_and_non_empty(template: dict) -> None:
+    """Issue #660: operators must be able to widen these without an image rebuild.
+
+    The MicroVM launcher reads static config from this task definition and skips
+    any variable with an empty value, so these must carry literal numbers rather
+    than being declared empty and overridden later.
+    """
+    env = _task_definition_env(template)
+    for name, expected in TEAMS_WATCHDOG_DEFAULTS.items():
+        assert name in env, f"{name} missing from the VP task definition"
+        assert str(env[name]).strip() != "", f"{name} must not be empty"
+        assert int(str(env[name])) == expected
+
+
+def test_missing_badge_bound_is_wider_than_the_alone_bound(template: dict) -> None:
+    """The asymmetry is the #660 fix, and it must survive edits to either value.
+
+    A roster badge that is present and reads <=1 is a direct measurement of an
+    empty meeting. An absent badge measures nothing — Teams also drops it during
+    content share and toolbar collapse — so it needs a much wider bound, and at
+    least four minutes of it, or a screen share ends a live meeting.
+    """
+    env = _task_definition_env(template)
+    poll_ms = int(str(env["VP_ATTENDEE_POLL_MS"]))
+    alone = int(str(env["VP_POLLS_BEFORE_END"]))
+    missing = int(str(env["VP_POLLS_BEFORE_END_MISSING"]))
+
+    assert missing > alone
+    assert missing * poll_ms >= 240_000, "a missing badge must be tolerated for 4+ minutes"
+
+
+def test_teams_watchdog_defaults_match_the_container(template: dict) -> None:
+    """The template restates the container's defaults; drift makes them a lie.
+
+    src/teams.ts owns the defaults (they apply when the variables are unset, e.g.
+    a locally run container), and the template repeats them so they are visible
+    and tunable on the task definition. Nothing forces the two to agree, so this
+    test does.
+    """
+    teams_src = (TEMPLATE.parent / "backend" / "src" / "teams.ts").read_text()
+    block = re.search(
+        r"DEFAULT_ATTENDEE_WATCHDOG_CONFIG\s*:\s*AttendeeWatchdogConfig\s*=\s*\{(.*?)\}",
+        teams_src,
+        re.DOTALL,
+    )
+    assert block, "DEFAULT_ATTENDEE_WATCHDOG_CONFIG not found in teams.ts"
+    body = block.group(1)
+
+    def _numeric(field: str) -> int:
+        match = re.search(rf"{field}\s*:\s*([\d_]+)", body)
+        assert match, f"{field} not found in DEFAULT_ATTENDEE_WATCHDOG_CONFIG"
+        return int(match.group(1).replace("_", ""))
+
+    env = _task_definition_env(template)
+    assert _numeric("pollMs") == int(str(env["VP_ATTENDEE_POLL_MS"]))
+    assert _numeric("pollsBeforeEnd") == int(str(env["VP_POLLS_BEFORE_END"]))
+    assert _numeric("pollsBeforeEndMissing") == int(str(env["VP_POLLS_BEFORE_END_MISSING"]))
+
+
 # ---------------------------------------------------------------------------
 # Schema validation for AWS::Lambda::MicrovmImage
 #

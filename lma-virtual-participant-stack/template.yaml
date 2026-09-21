@@ -2291,6 +2291,24 @@ Resources:
               Value: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
             - Name: VP_PROFILES_BUCKET
               Value: !Ref VPProfilesBucketName
+            # Teams attendee watchdog tunables. These are the container's own
+            # defaults, restated here so a deployment that meets an unusual Teams
+            # layout can be adjusted on the task definition instead of rebuilding
+            # the VP container image. The MicroVM launch type reads them from here
+            # too (see lambda_functions/microvm_launcher/index.py), so they must
+            # carry a non-empty value. An out-of-range value is ignored by the
+            # container in favour of its default.
+            #
+            # VP_POLLS_BEFORE_END_MISSING is deliberately much larger than
+            # VP_POLLS_BEFORE_END: Teams drops the roster badge during content
+            # share and toolbar collapse, so an absent badge is weak evidence,
+            # while a badge that is present and reads <=1 is a direct measurement.
+            - Name: VP_ATTENDEE_POLL_MS
+              Value: "20000"
+            - Name: VP_POLLS_BEFORE_END
+              Value: "3"
+            - Name: VP_POLLS_BEFORE_END_MISSING
+              Value: "15"
             # Overridden at task launch by Step Functions when the user opts in.
             - Name: ZOOM_CREDENTIALS_SECRET_NAME
               Value: ""

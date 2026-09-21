@@ -11,6 +11,7 @@ title: "Virtual Participant"
 - [Supported Platforms](#supported-platforms)
 - [Joining a Meeting](#joining-a-meeting)
 - [Status Lifecycle](#status-lifecycle)
+  - [How the VP decides a meeting has ended](#how-the-vp-decides-a-meeting-has-ended)
 - [Manual Action Required (CAPTCHA, 2FA, SSO)](#manual-action-required-captcha-2fa-sso)
 - [AI-driven self-healing](#ai-driven-self-healing)
 - [Zoom Sign-in](#zoom-sign-in)
@@ -83,6 +84,27 @@ The VP reports a granular status as it boots, joins, and runs. The UI uses these
 | `FAILED` | The VP could not join. The DDB record carries an `errorMessage` describing what went wrong (e.g. *"Meeting join failed: …"*, *"Zoom login failed: invalid credentials"*, *"ECS RunTask soft-failure: agent not connected"*) |
 
 When ECS reports a "soft failure" on RunTask (returns HTTP 200 with a non-empty `failures` array — typically the container instance agent is briefly disconnected), the state machine catches it explicitly and writes `FAILED` plus the original failure reason to the VP record, instead of leaving the VP stuck in `INITIALIZING` indefinitely.
+
+### How the VP decides a meeting has ended
+
+The VP leaves on its own so an abandoned meeting is not recorded (or billed) indefinitely. It uses several signals, in order of confidence:
+
+1. **An in-meeting chat command** — `LMA leave` and its synonyms; see [In-meeting Chat Commands](#in-meeting-chat-commands).
+2. **A positive end-of-meeting signal from the platform** — on Teams, the post-meeting screen ("You left the meeting", "The meeting has ended") or a post-meeting URL, plus the disappearance of the hang-up button. Either ends the meeting on the first poll that sees it.
+3. **A sustained empty roster** — the participant count is present and reads one or fewer for several consecutive polls.
+4. **A sustained absent roster indicator** — a backstop for the case where none of the above fires.
+
+On Teams the fourth signal is deliberately much more patient than the third. Teams removes the roster button, and with it the participant-count badge, whenever the meeting toolbar collapses — most commonly during a content share or in full-screen layouts — so an absent badge is not evidence that the meeting ended. A count that is present and reads one or fewer is a direct measurement; an absent one is not, and treating them alike ends live meetings while people are still speaking.
+
+Three environment variables on the VP task definition control the timing. They apply to both the ECS and MicroVM launch types (the MicroVM launcher reads its static configuration from the same task definition), and the defaults suit the platforms as they behave today — change them only if a deployment is consistently leaving meetings early or lingering after they end:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `VP_ATTENDEE_POLL_MS` | `20000` | How often the watchdog samples the meeting UI, in milliseconds. Minimum `1000`. |
+| `VP_POLLS_BEFORE_END` | `3` | Consecutive polls reading one or fewer attendees before the VP leaves — about 60 seconds at the default cadence. |
+| `VP_POLLS_BEFORE_END_MISSING` | `15` | Consecutive polls with no readable attendee count before the VP leaves — about 5 minutes at the default cadence. |
+
+A value that is not a positive integer (or a cadence below one second) is ignored in favour of the default, so a typo cannot leave a VP running without a backstop. The resolved values are logged once per meeting, next to `Listening for attendee changes`, and each poll logs its running counter against the applicable bound.
 
 ## Manual Action Required (CAPTCHA, 2FA, SSO)
 

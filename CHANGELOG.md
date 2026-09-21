@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Teams Virtual Participant no longer leaves a meeting that is still in progress.** Teams removes the roster button — and with it the participant-count badge the VP watches — whenever the meeting toolbar collapses, most often during a content share or in a full-screen layout. That reading shared a bound of roughly 40 seconds with the "everyone has left" check, so a routine screen share could end the VP's session mid-meeting; the exit was graceful, so the transcript and recording were saved and nothing appeared to have failed, leaving only a meeting that stopped recording part-way through. An unreadable badge is now tolerated for about five minutes, separately from the empty-roster check, which is unchanged at about 60 seconds. A meeting that genuinely ends is still detected on the first poll from Teams' post-meeting screen, so nothing lingers longer than before. The cadence and both thresholds are now `VP_ATTENDEE_POLL_MS`, `VP_POLLS_BEFORE_END` and `VP_POLLS_BEFORE_END_MISSING` on the Virtual Participant task definition, so a deployment that needs different timing can adjust them without rebuilding the container image — see [How the VP decides a meeting has ended](docs/virtual-participant.md#how-the-vp-decides-a-meeting-has-ended). ([#660](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/660))
+
 ## [0.3.9] - 2026-09-19
 
 ### Added
