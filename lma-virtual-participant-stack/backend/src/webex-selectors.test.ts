@@ -28,21 +28,68 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { NAME_INPUT, WEBEX_CHAT_SELECTORS } from './webex.js';
+import { NAME_INPUT, WEBEX_CHAT_SELECTORS, normalizeWebexSender } from './webex.js';
 
-/** Every single- or double-quoted string literal in webex.ts. */
+/** Every quoted string literal in webex.ts, including template literals. */
 const sourceLiterals = (): string[] => {
-    const src = readFileSync(new URL('../src/webex.ts', import.meta.url), 'utf8');
-    return [...src.matchAll(/'([^'\n]*)'|"([^"\n]*)"/g)].map((m) => m[1] ?? m[2]);
+    // Resolved from this module so the suite works whether it is run from dist/
+    // (the normal `node --test dist/*.test.js`) or from src/ under ts-node.
+    const here = new URL('.', import.meta.url);
+    const candidates = [new URL('../src/webex.ts', here), new URL('./webex.ts', here)];
+    const src = candidates
+        .map((url) => {
+            try {
+                return readFileSync(url, 'utf8');
+            } catch {
+                return '';
+            }
+        })
+        .find((text) => text.length > 0);
+    assert.ok(src, 'could not read webex.ts — the path in this test needs updating');
+    // Comments are stripped first: they discuss selectors (including `>>>`, which
+    // is documented here precisely because it must not be used) and markdown
+    // backticks in a comment would otherwise read as template literals.
+    const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    return [...code.matchAll(/'([^'\n]*)'|"([^"\n]*)"|`([^`\n]*)`/g)].map(
+        (m) => m[1] ?? m[2] ?? m[3],
+    );
 };
 
 /** Literals that look like CSS selectors rather than prose, ids or messages. */
-const selectorLiterals = (): string[] =>
-    sourceLiterals().filter(
+const selectorLiterals = (): string[] => {
+    const fromSource = sourceLiterals().filter(
         (lit) =>
             /\[[a-zA-Z-]+[\^~|*$]?=/.test(lit) || // an attribute selector
-            /^[.#][a-zA-Z][\w-]*$/.test(lit), // a bare class or id selector
+            /^[.#][a-zA-Z][\w-]*(\s+[.#>a-zA-Z][\w->]*)*$/.test(lit) || // class/id, possibly with descendants
+            /^[a-z][\w-]*\s+[.#a-z][\w-]*$/.test(lit) || // 'tag .child' / 'tag tag'
+            lit.includes('>>>'), // always inspect an attempted pierce
     );
+    // The selectors that live in exported constants rather than inline, so moving
+    // a selector out of the file body cannot quietly remove it from this scan.
+    const { containers, senders, bodies, rows } = WEBEX_CHAT_SELECTORS;
+    return [...fromSource, NAME_INPUT, containers.current, containers.legacy, senders, bodies, rows];
+};
+
+/**
+ * Lower bound on what the scan finds.
+ *
+ * Every scanning test below is a loop over selectorLiterals(), so an extractor
+ * that silently returned nothing would leave them all passing while checking
+ * nothing at all — the worst failure mode a guard test can have.
+ */
+test('the selector scan finds the selectors it is supposed to check', () => {
+    const found = selectorLiterals();
+    assert.ok(
+        found.length > 30,
+        `scan found only ${found.length} selectors — the extractor is probably broken`,
+    );
+    for (const expected of ['input[data-test="Name (required)"]', '#activity-list mdc-list']) {
+        assert.ok(
+            found.some((sel) => sel.includes(expected)),
+            `scan missed "${expected}"`,
+        );
+    }
+});
 
 const balanced = (selector: string, open: string, close: string): boolean => {
     let depth = 0;
@@ -135,6 +182,39 @@ test('the chat selectors cover both Webex markups', () => {
 test('the chat container selector does not require a direct child', () => {
     // '#activity-list > mdc-list' returns null the moment Webex wraps the list one
     // level deeper; the observer uses subtree:true anyway, so the descendant form
-    // costs nothing and survives a layer of DOM churn.
-    assert.ok(!WEBEX_CHAT_SELECTORS.containers.current.includes('>'));
+    // costs nothing and survives a layer of DOM churn. Checks the combinator
+    // specifically, so a '>' inside an attribute value would not trip it.
+    const outsideBrackets = WEBEX_CHAT_SELECTORS.containers.current.replace(/\[[^\]]*\]/g, '');
+    assert.ok(!/>/.test(outsideBrackets), 'chat container must not use a child combinator');
+});
+
+test('a legacy sender label is reduced to a display name', () => {
+    // The legacy markup's label is not a bare name — it reads "from Alice to
+    // everyone:", which is why the own-message filter matches a "from LMA" prefix.
+    // Passed through unmodified it would post "Thanks from Alice to everyone: —
+    // I'll head out now." into the meeting and store that on the meeting record.
+    assert.equal(normalizeWebexSender('from Alice Smith to everyone:'), 'Alice Smith');
+    assert.equal(normalizeWebexSender('from Alice to me:'), 'Alice');
+    assert.equal(normalizeWebexSender('Alice Smith to everyone:'), 'Alice Smith');
+});
+
+test('a bare sender name passes through unchanged', () => {
+    // The Momentum markup supplies just the name.
+    assert.equal(normalizeWebexSender('Alice Smith'), 'Alice Smith');
+    assert.equal(normalizeWebexSender('  Alice  Smith  '), 'Alice Smith');
+});
+
+test('an absent or empty sender normalizes to null, not to an empty name', () => {
+    // exitMessagesFor falls back to the generic goodbye on null; an empty string
+    // would produce "Thanks  — I'll head out now."
+    for (const empty of [null, undefined, '', '   ', 'from  to everyone:']) {
+        assert.equal(normalizeWebexSender(empty), null, `"${empty}" should give null`);
+    }
+});
+
+test('a name containing "to" is not truncated', () => {
+    // The suffix match is anchored at the end and requires the colon form, so an
+    // ordinary name that happens to contain the word survives.
+    assert.equal(normalizeWebexSender('Toby Tolkien'), 'Toby Tolkien');
+    assert.equal(normalizeWebexSender('from Toby Tolkien to everyone:'), 'Toby Tolkien');
 });
