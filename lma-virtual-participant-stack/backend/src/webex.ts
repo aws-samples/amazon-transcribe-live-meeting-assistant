@@ -10,6 +10,146 @@ import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js'
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { humanClick } from './prejoin-actions.js';
 
+/**
+ * The pre-join display-name field, in both markups Webex serves.
+ *
+ * Classic web client: a plain `input[data-test="Name (required)"]`. Newer builds:
+ * an `<mdc-input data-test="Name">` Momentum custom element whose real `<input>`
+ * lives in an open shadow root, several levels below the host — so the selector
+ * has to resolve the inner input, not the host, or `fill()` rejects the element
+ * as not being an input.
+ *
+ * Playwright's CSS engine pierces open shadow roots on its own, which is why a
+ * plain descendant selector works here. `>>>` does NOT: Playwright removed that
+ * combinator and now parses it as `>>` plus a `:scope > input` part, which matches
+ * only a direct child of the shadow root and so never reaches Momentum's nested
+ * input.
+ *
+ * Declared once because it is needed in four places, and an invalid selector in
+ * any one of them throws on sight rather than timing out — a comma list with one
+ * bad alternative poisons the whole selector, even when the other alternative is
+ * present on the page. See webex-selectors.test.ts.
+ */
+export const NAME_INPUT = 'input[data-test="Name (required)"], mdc-input[data-test="Name"] input';
+
+/** Selectors the in-page chat observer needs, passed into `frame.evaluate`. */
+export interface WebexChatSelectors {
+    /** Chat message list. `current` is preferred over `legacy` when both match. */
+    containers: { current: string; legacy: string };
+    /** Sender label within one message row. */
+    senders: string;
+    /** Message body within one message row. */
+    bodies: string;
+    /** The row itself, resolved from whichever node the observer saw added. */
+    rows: string;
+}
+
+/**
+ * Reduce a Webex chat sender label to a display name.
+ *
+ * The legacy markup's label is not a bare name: it reads `from Alice to everyone:`,
+ * which is why the own-message filter matches the `from LMA` prefix. Passing that
+ * through unmodified would post "Thanks from Alice to everyone: — I'll head out
+ * now." into the meeting and store the same text on the meeting record. zoom.ts
+ * strips the equivalent prefix for the same reason; the Momentum markup supplies a
+ * bare name already and passes through unchanged.
+ */
+export function normalizeWebexSender(raw: string | null | undefined): string | null {
+    if (!raw) return null;
+    // Collapse first, so the result does not depend on the caller having trimmed.
+    const label = raw.replace(/\s+/g, ' ').trim();
+    // The recipient clause is only stripped from a label that carries the legacy
+    // "from " prefix — which is the form this file has always recognised, since the
+    // own-message filter matches "from LMA". Anything else is taken as a display
+    // name and left alone apart from a trailing colon, because a name is not
+    // reliably separable from a recipient: "Van To Nguyen:" would otherwise reduce
+    // to "Van", and silently shortening a participant's name is worse than leaving
+    // a label slightly long.
+    if (!/^from\s/i.test(label)) return label.replace(/:$/, '').trim() || null;
+    const body = label.replace(/^from\s+/i, '').replace(/:$/, '').trim();
+    // Greedy, so the LAST " to " is taken as the boundary: a sender whose own name
+    // contains the word keeps it.
+    const withRecipient = /^(.+)\sto\s\S/i.exec(body);
+    if (withRecipient) return withRecipient[1].trim() || null;
+    // A recipient clause with no sender part in front of it tells us nothing.
+    if (/^to(\s|$)/i.test(body)) return null;
+    return body || null;
+}
+
+/**
+ * Is this chat message one of the VP's own?
+ *
+ * Runs on the node side, on the NORMALIZED sender, so one notion of "who sent this"
+ * serves both this check and the goodbye. Doing it in the page against the raw label
+ * let anything decorative through — a trailing colon, a leading '@', an appended
+ * timestamp — and the VP would then ingest its own intro message, or toggle itself
+ * on an operator-customised start or stop message containing START or PAUSE.
+ *
+ * Matched whole rather than as a substring: `scribeName` is the bare string "LMA",
+ * and a substring test silences any participant whose display name contains it
+ * (ALMA, SELMA, HOLMAN). "You" is matched only on its own or with a parenthesised
+ * role after it, for the same reason — "You (Host)" is us, while "Youssef Ahmed" and
+ * "You Jin Park" are participants.
+ */
+export function isOwnWebexSender(sender: string | null, identities: string[]): boolean {
+    if (!sender) return false;
+    // Drop a leading mention marker before comparing.
+    const name = sender.replace(/^@+/, '').trim();
+    if (matchesDecorated(name, 'You')) return true;
+    return identities.some((own) => own && matchesDecorated(name, own));
+}
+
+/**
+ * Is this message text one the VP itself sent?
+ *
+ * A backstop for the case where the chat markup gives no usable sender label, so the
+ * name-based check cannot fire. Compares against the configured message lists rather
+ * than guessing, so a deployment that customises them is covered too.
+ */
+export function isOwnWebexMessage(message: string): boolean {
+    const text = message.trim();
+    if (!text) return false;
+    return [
+        ...details.introMessages,
+        ...details.startMessages,
+        ...details.pauseMessages,
+        ...details.exitMessages,
+    ].some((own) => own && own.trim() === text);
+}
+
+/**
+ * Does `name` consist of exactly `base`, allowing only the decorations Webex adds?
+ *
+ * A parenthesised role ("LMA (bob@example.com)", "You (Host)") and a trailing
+ * timestamp are accepted; anything else is a different person. Deliberately NOT a
+ * prefix match: `scribeName` is the bare string "LMA", so accepting any
+ * space-delimited prefix silences a participant called "LMA Smith" — and with a
+ * short LMA_IDENTITY it gets worse ("You" would silence "You Jin Park", "Bot" would
+ * silence "Bot Smith").
+ */
+function matchesDecorated(name: string, base: string): boolean {
+    const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(
+        `^${escaped}(\\s*\\([^)]*\\))?(\\s+\\d{1,2}:\\d{2}(\\s*[AP]M)?)?$`,
+        'i',
+    ).test(name);
+}
+
+/**
+ * Chat selectors for both markups Webex serves — the Momentum (MDC) panel it uses
+ * now, and the older CSS-module markup. Declared here rather than inline in the
+ * observer so they are covered by webex-selectors.test.ts.
+ */
+export const WEBEX_CHAT_SELECTORS: WebexChatSelectors = {
+    containers: {
+        current: '#activity-list mdc-list',
+        legacy: 'div[class^="style-chat-box"]',
+    },
+    senders: 'h3[class^="style-chat-label"], .sender-name',
+    bodies: 'span[class^="style-chat-msg"], .activity-item-message',
+    rows: '.activity-item, div[class^="style-chat-msg-container"]',
+};
+
 export default class Webex {
     private readonly iframe = '#unified-webclient-iframe';
     private endRequested: Promise<ExitInfo>;
@@ -255,7 +395,7 @@ export default class Webex {
         // watches for the pre-join UI itself (name/password/join controls) so we
         // don't mistake the app-download chooser page for a loaded client.
         const MAINFRAME_JOIN_UI = [
-            'input[data-test="Name (required)"]',
+            NAME_INPUT,
             'input[aria-label="Meeting password"]',
             'mdc-button[data-test="join-button"]',
         ].join(', ');
@@ -304,7 +444,7 @@ export default class Webex {
 
         const passwordCheckEl = await Promise.any([
             frame.waitForSelector('input[aria-label="Meeting password"]', { timeout: 30000 }).then((el: any) => ({ source: 'password', el })).catch(() => null),
-            frame.waitForSelector('input[data-test="Name (required)"]', { timeout: 30000 }).then((el: any) => ({ source: 'name', el })).catch(() => null),
+            frame.waitForSelector(NAME_INPUT, { timeout: 30000 }).then((el: any) => ({ source: 'name', el })).catch(() => null),
             frame.waitForSelector('input[aria-labelledby="nameLabel"]', { timeout: 30000 }).then((el: any) => ({ source: 'enterprise-name', el })).catch(() => null)
         ]).catch(() => null);
     
@@ -342,7 +482,7 @@ export default class Webex {
                 console.log('Waiting for CAPTCHA to be solved (up to 2 minutes)...');
                 await Promise.race([
                     // Wait for name input to appear (successful CAPTCHA solve + Next click)
-                    frame.waitForSelector('input[data-test="Name (required)"]', {
+                    frame.waitForSelector(NAME_INPUT, {
                         timeout: 120000,
                         state: 'visible'
                     }),
@@ -375,7 +515,6 @@ export default class Webex {
         }
 
         console.log('Entering name (and email on enterprise)');
-        // console.log(await frame.evaluate(()=> document.querySelector('input[data-test="Name (required)"]')));
         if (frameElement && frameElement.source === 'enterprise' && passwordCheckEl.source === 'enterprise-name') {
             // Check for guest form (name/email)
             const nameInput = await frame.$('input[aria-labelledby="nameLabel"]');
@@ -426,8 +565,14 @@ export default class Webex {
                 }
             }
         } else {
-            const nameInputElement = (passwordCheckEl && passwordCheckEl.source === 'name') ? passwordCheckEl.el : await frame.waitForSelector('input[data-test="Name (required)"]',{ timeout: 30000 });
-            await nameInputElement?.type(details.scribeIdentity);
+            const nameInputElement = (passwordCheckEl && passwordCheckEl.source === 'name')
+                ? passwordCheckEl.el
+                : await frame.waitForSelector(NAME_INPUT, { timeout: 30000 });
+            // fill(), not type(): Webex persists the guest name in the VP's own
+            // Chromium profile, so typing into a field that already holds "LMA"
+            // appends and the meeting shows "LMALMA (user)". fill() selects the
+            // existing text and replaces it, raising a native input event.
+            await nameInputElement?.fill(details.scribeIdentity);
         }
 
         // Wait for the meeting interface (interstitial / pre-join) to load.
@@ -679,13 +824,24 @@ export default class Webex {
                 clearInterval(interval);
               };
             });
-        // Set up message monitoring with LMA features. Webex exposes
-        // `sender:::body` to the node bridge in some contexts; we accept
-        // both shapes.
-        await page.exposeFunction('messageChange', async (raw: string) => {
-            const idx = raw.indexOf(':::');
-            const sender = idx > 0 ? raw.slice(0, idx).trim() : null;
-            const message = idx > 0 ? raw.slice(idx + 3) : raw;
+        // Set up message monitoring with LMA features. The page passes the sender
+        // and the body as separate arguments (as chime.ts does) rather than packing
+        // them into one string: a body that happens to contain the delimiter would
+        // otherwise be split into a bogus sender and a truncated message.
+        await page.exposeFunction('messageChange', async (rawSender: string | null, message: string) => {
+            const sender = normalizeWebexSender(rawSender);
+            // Never act on, or transcribe, our own chat messages. The sender is
+            // the primary test, but it cannot fire when no label resolves — a
+            // continuation row, or the fallback where the row selector misses — so
+            // our own outgoing text is recognised as well. That matters because the
+            // start and stop messages are operator-settable and could otherwise
+            // contain the literal START or PAUSE and toggle the VP.
+            if (
+                isOwnWebexSender(sender, [details.scribeIdentity, details.scribeName]) ||
+                isOwnWebexMessage(message)
+            ) {
+                return;
+            }
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
                 // (it can emit duplicate add events) — only act on the first.
@@ -740,32 +896,160 @@ export default class Webex {
         });
 
         console.log('Listening for message changes.');
-        await frame.evaluate(() => {
-                const targetNode = document.querySelector(
-                    'div[class^="style-chat-box"], #activity-list > mdc-list'
-                );
+        // The page's own console.log does NOT reach CloudWatch under CloakBrowser
+        // (only warnings and errors do — see the note in audio-diagnostics.ts), and
+        // webex.ts installs no console listener of its own, so anything the
+        // observer needs to report has to come back as a return value and be
+        // logged here on the node side.
+        const chatObserverAttached = await frame.evaluate(
+            ({ containers, senders, bodies, rows }: WebexChatSelectors) => {
+                // Two chat markups are supported: the Momentum (MDC) panel Webex
+                // serves now, and the older CSS-module markup some variants still
+                // serve. The preference is explicit rather than a single comma
+                // list, because a selector list resolves by DOCUMENT ORDER, not by
+                // which generation we would rather have — a page carrying both
+                // would otherwise bind to whichever happens to come first.
+                const targetNode =
+                    document.querySelector(containers.current) ??
+                    document.querySelector(containers.legacy);
+                // Returning false rather than logging: failing silently here is how
+                // the previous breakage went unnoticed until a user reported that
+                // chat commands did nothing.
+                if (!targetNode) return false;
 
-                const config = { childList: true, subtree: true };
+                // Bodies can be delivered more than once (a virtualized list
+                // re-inserting a node, or two mutations touching the same row), and
+                // details.messages has no idempotence of its own. Keyed on the BODY
+                // element, not the row: chat UIs commonly group a run of messages
+                // from one sender into a single row, and keying on the row would
+                // drop every message in such a group after the first.
+                //
+                // Note the key is element identity, which survives a node being
+                // MOVED but not REBUILT: an innerHTML re-render of the list produces
+                // fresh elements and re-delivers, while a recycled element given new
+                // text is not delivered again. Neither is how Lit or React normally
+                // update, and the end-command path is idempotent via endHandled.
+                const seen = new WeakSet<Element>();
 
                 const callback = (mutationList: MutationRecord[]) => {
-                    const lastMutation = mutationList[mutationList.length - 1];
-                    const addedNode = lastMutation.addedNodes[0] as Element;
-                    if (addedNode) {
-                        const sender = addedNode.querySelector(
-                            'h3[class^="style-chat-label"], .sender-name'
-                        )?.textContent;
-                        const message = addedNode.querySelector(
-                            'span[class^="style-chat-msg"], .activity-item-message'
-                        )?.textContent;
-                        if (!sender!.startsWith('from LMA') && sender !== "You") {
-                            (window as any).messageChange(message);
+                    // Every added node in every mutation: a batch can carry two
+                    // messages, and taking only the last one dropped the first —
+                    // including, in the worst case, the "LMA leave" that preceded
+                    // an ordinary message.
+                    for (const mutation of mutationList) {
+                        for (const node of Array.from(mutation.addedNodes)) {
+                            // A text node means the body element was already there
+                            // and has only now been filled, which is how a Lit
+                            // render shows up; work from its parent in that case.
+                            const el =
+                                node instanceof Element ? node : node.parentElement;
+                            if (!el) continue;
+                            // Resolve the whole row, not just the node that was
+                            // added: a Lit-rendered list inserts the row shell
+                            // first and fills the sender and body in later
+                            // mutations, so searching only inside the added node
+                            // finds neither.
+                            const row = el.closest(rows) ?? el;
+                            // EVERY body under this node, not just the first. Chat
+                            // UIs commonly group a run of messages from one sender
+                            // into one row, and querySelector would return only that
+                            // row's first message — dropping an "LMA leave" sent
+                            // straight after the sender's previous line, which is
+                            // the very defect this observer is being fixed for.
+                            // `closest(bodies)` covers the case where the body is an
+                            // ANCESTOR of the added node (a body filled by inserting
+                            // a child element), which a downward scan misses.
+                            // Walk out to the OUTERMOST enclosing body, bounded by
+                            // the row: a mention or link chip inside a message also
+                            // matches `bodies` (they share a class prefix), and taking
+                            // the chip itself would deliver a fragment of a message
+                            // that has already been delivered whole.
+                            const outermostBody = (node: Element): Element => {
+                                let outer = node;
+                                for (let p = node.parentElement; p && p !== row; p = p.parentElement) {
+                                    if (p.matches(bodies)) outer = p;
+                                }
+                                return outer;
+                            };
+                            const nearestBody = el.matches(bodies) ? el : el.closest(bodies);
+                            const found = nearestBody
+                                ? [outermostBody(nearestBody)]
+                                : Array.from(row.querySelectorAll(bodies));
+                            // Outermost matches only. `bodies` matches by class
+                            // PREFIX, and the row selector shows several classes share
+                            // it, so a mention or link span inside a message would
+                            // otherwise be delivered a second time as a fragment —
+                            // and a fragment can satisfy the end-command match where
+                            // the whole sentence does not.
+                            const bodyEls = found.filter(
+                                (b) => !found.some((other) => other !== b && other.contains(b)),
+                            );
+                            for (const bodyEl of bodyEls) {
+                                // Resolve the sender from THIS body's own row, not
+                                // once for the added node. `closest` only walks up,
+                                // so when the added node contains several rows — a
+                                // bare text or comment node appended to the chat list
+                                // makes the whole LIST the fallback scope, and a
+                                // virtualized list can insert a wrapper of several
+                                // rows — one label would otherwise be credited to
+                                // every message under it. Since the VP's own start
+                                // message is the first thing in the panel, that also
+                                // meant the whole batch was discarded as "ours".
+                                //
+                                // When the body has no row of its own, NO sender is
+                                // taken. Borrowing from the enclosing scope was still
+                                // cross-message attribution, just narrower: a label
+                                // belonging to an earlier attachment-only row, or to
+                                // the VP's own not-yet-filled row shell, would be
+                                // applied to this message — publicly naming the wrong
+                                // person in the goodbye, or discarding the command as
+                                // "ours". An unknown sender is delivered as null: the
+                                // message still gets through and the goodbye falls
+                                // back to its generic wording.
+                                const scope = bodyEl.closest(rows);
+                                // Ignore labels belonging to a NESTED row (a quoted or
+                                // replied-to message): take the one at this row's own
+                                // level, which is not necessarily the first in
+                                // document order.
+                                const label = Array.from(scope?.querySelectorAll(senders) ?? []).find(
+                                    (candidate) => (candidate.closest(rows) ?? scope) === scope,
+                                );
+                                const sender = label?.textContent?.trim();
+                                // Already delivered, or no text yet — a row shell
+                                // whose content arrives in a later mutation, an
+                                // attachment card, or a join/leave notice. Nothing
+                                // to hand to the node side, which cannot take
+                                // undefined. Deliberately NOT marked seen, so a
+                                // staged render is read once it is complete.
+                                if (seen.has(bodyEl)) continue;
+                                const message = bodyEl.textContent?.trim();
+                                if (!message) continue;
+                                seen.add(bodyEl);
+                                // Own-message filtering happens on the NODE side,
+                                // after the label has been normalized — see
+                                // isOwnWebexSender. Doing it here meant comparing a
+                                // raw label, which any decoration defeated: a
+                                // trailing colon, an '@', or an appended timestamp
+                                // all let the VP's own messages through.
+                                //
+                                // Sender as a separate argument so a body containing
+                                // the delimiter cannot be mistaken for one.
+                                (window as any).messageChange(sender ?? null, message);
+                            }
                         }
                     }
                 };
 
-                const observer = new MutationObserver(callback);
-                if (targetNode) observer.observe(targetNode, config);
-            });
+                new MutationObserver(callback).observe(targetNode, { childList: true, subtree: true });
+                return true;
+            },
+            WEBEX_CHAT_SELECTORS,
+        );
+        console.log(
+            chatObserverAttached
+                ? 'Webex chat observer attached.'
+                : 'Webex chat container not found — in-meeting chat commands will not work.',
+        );
 
         // Start transcription if enabled
         if (details.start) {
