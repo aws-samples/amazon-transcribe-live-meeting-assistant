@@ -263,6 +263,7 @@ make test-lambdas                            # Lambda unit suites (each dir isol
 make lint-ui-force && make test-ui-force     # React UI eslint + vitest
 make lint-typescript                         # tsc + eslint (transcriber, Virtual Participant)
 make test-vp && make test-vp-template        # Virtual Participant unit + template tests
+make test-appsync                            # AppSync schema/resolver/UI-operation contract
 make test-asr                                # ASR MicroVM runtime tests + ruff
 cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
 ```

@@ -317,7 +317,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-asr ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-appsync test-asr ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -380,6 +380,13 @@ test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
 	$(PYTHON) -m pytest $(VP_DIR)/test/ -q
 	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
 
+# Collects the directory, not a file list, so a test added here runs in CI
+# without anyone having to remember to name it (see test-vp-template).
+test-appsync: ## Static AppSync schema/resolver/UI-operation contract tests (no AWS)
+	@echo "Running AppSync contract tests..."
+	$(PYTHON) -m pytest $(AI_STACK_DIR)/test/ -q
+	@echo -e "$(GREEN)✅ AppSync contract tests passed!$(NC)"
+
 test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
 	@echo "Running ASR MicroVM runtime tests..."
 	@test -d $(ASR_SOURCE_DIR)/.venv || $(PYTHON) -m venv $(ASR_SOURCE_DIR)/.venv
@@ -398,7 +405,7 @@ test-ui-force: check-node ## Run React UI tests (ignore checksum, always run)
 # declare them PHONY or make treats them as up-to-date files and skips them.
 .PHONY: docker-build-check docker-build-check-transcriber docker-build-check-vp \
         docker-build-check-all integ-tests integ-tests-live integ-deploy-and-test test-lambdas \
-        test-vp test-vp-template test-vp-microvm-e2e test-asr
+        test-vp test-vp-template test-vp-microvm-e2e test-appsync test-asr
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then

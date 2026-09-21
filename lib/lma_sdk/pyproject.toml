@@ -29,6 +29,10 @@ dev = [
     # schemas (see lma-virtual-participant-stack/test/schemas/). Needed for
     # resource types cfn-lint has no schema for yet.
     "jsonschema>=4.0",
+    # Parses source/appsync/schema.graphql and validates the UI's operations
+    # and the template's resolvers against it (see
+    # lma-ai-stack/test/test_appsync_contract.py).
+    "graphql-core>=3.2",
 ]
 
 [tool.setuptools.packages.find]

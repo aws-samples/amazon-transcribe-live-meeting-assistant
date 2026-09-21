@@ -124,6 +124,12 @@ jobs:
       - name: Virtual Participant template tests
         run: make test-vp-template
 
+      # AppSync contract: every resolver in lma-ai-stack.yaml attaches to a
+      # field schema.graphql declares, and every GraphQL operation in the UI
+      # validates against that schema.
+      - name: AppSync contract tests
+        run: make test-appsync
+
       # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
       - name: ASR MicroVM runtime tests
         run: make test-asr

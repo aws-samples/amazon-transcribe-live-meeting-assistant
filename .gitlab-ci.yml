@@ -81,6 +81,10 @@ code_checks:
     # VP CloudFormation template invariants (state machine renders for each
     # launch type; ECS paths unchanged by the MICROVM addition).
     - make test-vp-template
+    # AppSync contract: every resolver in lma-ai-stack.yaml attaches to a field
+    # schema.graphql declares, and every GraphQL operation in the UI validates
+    # against that schema.
+    - make test-appsync
     # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
     - make test-asr
     # WebSocket transcriber: unit tests (tsc + eslint via `npm run build`, then
