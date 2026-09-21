@@ -177,22 +177,66 @@ test('the two counters do not contaminate each other', () => {
     }
 });
 
-test('in-meeting chrome vetoes an unreadable badge indefinitely (#660)', () => {
+test('in-meeting chrome protects a long content share (#660)', () => {
     // The mechanism the wide bound alone does not cover: nothing in the VP moves
     // the pointer, so a toolbar that auto-hides during a share stays hidden for
-    // the whole share — an hour-long presentation would exhaust any bound. While
-    // the in-meeting controls are still there, a missing badge must never count.
+    // the whole share, which outlasts any bound worth setting. While the
+    // in-meeting controls are still there, a missing badge must not count.
     const state = fresh();
-    const pollsInTwoHours = Math.floor((2 * 60 * 60 * 1000) / DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs);
-    for (let i = 0; i < pollsInTwoHours; i += 1) {
+    const { pollMs, maxSuppressedPolls } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    assert.ok(
+        (maxSuppressedPolls * pollMs) / 1000 >= 25 * 60,
+        'a share of at least 25 minutes must be survivable',
+    );
+    for (let i = 0; i < maxSuppressedPolls; i += 1) {
         assert.equal(
             decideAttendeeAction(MISSING_IN_MEETING, state).action,
             'continue',
-            `a corroborated miss at poll ${i} must never end the meeting`,
+            `a corroborated miss at poll ${i} must not end the meeting`,
         );
     }
-    assert.equal(state.suppressedMissing, pollsInTwoHours, 'suppressions must be counted for diagnostics');
+    assert.equal(state.suppressedMissing, maxSuppressedPolls, 'vetoes must be counted');
     assert.equal(state.consecutiveMissing, 0);
+});
+
+test('the in-meeting veto is SPENT, so #540 cannot come back through it', () => {
+    // Teams does not reliably remove its in-meeting controls when a meeting ends:
+    // in the #540 incident the hang-up button was still present and visible
+    // afterwards, which is why the HANGUP_BUTTON_HIDDEN watch never fired. So
+    // "chrome is present" cannot hold a VP in a meeting indefinitely, or that
+    // incident recurs — a VP recording video and holding a voice session until the
+    // four-hour meeting timeout.
+    const state = fresh();
+    const { maxSuppressedPolls, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    let ended = -1;
+    for (let i = 0; i < maxSuppressedPolls + pollsBeforeEndMissing + 10; i += 1) {
+        if (decideAttendeeAction(MISSING_IN_MEETING, state).action === 'end') {
+            ended = i;
+            break;
+        }
+    }
+    assert.notEqual(ended, -1, 'a permanent in-meeting reading must still end the meeting');
+    assert.ok(ended >= maxSuppressedPolls, `ended at poll ${ended}, before the allowance was spent`);
+});
+
+test('the total time a VP can outlive an ended meeting is bounded', () => {
+    // Worst case end to end: the full veto allowance, then the whole
+    // missing-badge bound. Both are finite, so their sum must be too.
+    const { pollMs, maxSuppressedPolls, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    const worstCaseMinutes = ((maxSuppressedPolls + pollsBeforeEndMissing) * pollMs) / 60000;
+    assert.ok(worstCaseMinutes <= 40, `worst case was ${worstCaseMinutes} minutes`);
+});
+
+test('a readable badge restores the veto allowance', () => {
+    // A meeting with several shares in it should get a fresh allowance for each;
+    // it is an unbroken run of vetoes that has to stay bounded, not their total.
+    const state = fresh();
+    for (let i = 0; i < DEFAULT_ATTENDEE_WATCHDOG_CONFIG.maxSuppressedPolls; i += 1) {
+        decideAttendeeAction(MISSING_IN_MEETING, state);
+    }
+    assert.equal(decideAttendeeAction(busy, state).action, 'continue');
+    assert.equal(state.suppressedMissing, 0, 'a readable badge must reset the allowance');
+    assert.equal(decideAttendeeAction(MISSING_IN_MEETING, state).action, 'continue');
 });
 
 test('in-meeting chrome resets a run of uncorroborated misses', () => {
@@ -279,7 +323,7 @@ test('an operator can widen the bounds from the environment', () => {
             VP_POLLS_BEFORE_END: '4',
             VP_POLLS_BEFORE_END_MISSING: '40',
         }),
-        { pollMs: 30000, pollsBeforeEnd: 4, pollsBeforeEndMissing: 40 },
+        { pollMs: 30000, pollsBeforeEnd: 4, pollsBeforeEndMissing: 40, maxSuppressedPolls: 60 },
     );
 });
 
@@ -335,6 +379,54 @@ test('an over-large poll interval cannot become a 1ms hot loop', () => {
     }
     // Whatever is accepted must stay inside the signed 32-bit timer range.
     assert.ok(resolveAttendeeWatchdogConfig({ VP_ATTENDEE_POLL_MS: '120000' }).pollMs < 2 ** 31 - 1);
+});
+
+test('lowering the cadence cannot narrow the tolerance below the floor', () => {
+    // 1000 is the DOCUMENTED minimum, not a typo: an operator investigating an
+    // early leave might reasonably lower the cadence for more frequent logging.
+    // Before the floor existed that produced a 15-second tolerance — twenty times
+    // tighter than the ~40s that caused #660 in the first place.
+    const { pollMs, pollsBeforeEndMissing } = resolveAttendeeWatchdogConfig({
+        VP_ATTENDEE_POLL_MS: '1000',
+    });
+    assert.equal(pollMs, 1000);
+    const toleranceMs = pollMs * pollsBeforeEndMissing;
+    assert.ok(
+        toleranceMs >= 4 * 60 * 1000,
+        `tolerance was ${toleranceMs}ms, below the four-minute floor`,
+    );
+});
+
+test('the floor holds at every cadence in range, for any requested count', () => {
+    for (const cadence of ['1000', '5000', '20000', '60000', '120000']) {
+        for (const requested of ['1', '3', '15', '90']) {
+            const config = resolveAttendeeWatchdogConfig({
+                VP_ATTENDEE_POLL_MS: cadence,
+                VP_POLLS_BEFORE_END_MISSING: requested,
+            });
+            const toleranceMs = config.pollMs * config.pollsBeforeEndMissing;
+            assert.ok(
+                toleranceMs >= 4 * 60 * 1000,
+                `cadence ${cadence} with ${requested} polls gave ${toleranceMs}ms`,
+            );
+            assert.ok(
+                toleranceMs <= 30 * 60 * 1000,
+                `cadence ${cadence} with ${requested} polls gave ${toleranceMs}ms`,
+            );
+            assert.ok(config.maxSuppressedPolls >= 1);
+        }
+    }
+});
+
+test('the empty-roster bound is capped by wall clock too', () => {
+    // 90 polls is half an hour at the default cadence and three hours at the
+    // slowest, which is not a "grace period" by any reading.
+    const { pollMs, pollsBeforeEnd } = resolveAttendeeWatchdogConfig({
+        VP_ATTENDEE_POLL_MS: '120000',
+        VP_POLLS_BEFORE_END: '90',
+    });
+    assert.ok(pollMs * pollsBeforeEnd <= 10 * 60 * 1000, 'alone tolerance must cap at ten minutes');
+    assert.ok(pollsBeforeEnd >= 1);
 });
 
 test('a sub-second poll interval is rejected', () => {

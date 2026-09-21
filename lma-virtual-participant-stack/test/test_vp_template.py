@@ -610,13 +610,37 @@ TEAMS_WATCHDOG_PARAMS = {
     "VP_POLLS_BEFORE_END_MISSING": "VPPollsBeforeEndMissing",
 }
 
-# Ceilings enforced by WATCHDOG_LIMITS in backend/src/teams.ts. The template's
-# MaxValue must not let through a value the container would reject anyway.
-TEAMS_WATCHDOG_MAXIMA = {
-    "VPAttendeePollMs": 120_000,
-    "VPPollsBeforeEnd": 90,
-    "VPPollsBeforeEndMissing": 90,
+# Which WATCHDOG_LIMITS entry in backend/src/teams.ts bounds each parameter. The
+# template's MinValue/MaxValue must not let through a value the container would
+# reject anyway, and the limits are parsed from the source rather than restated
+# here so that lowering one there cannot silently leave the template permissive.
+TEAMS_WATCHDOG_LIMIT_KEYS = {
+    "VPAttendeePollMs": "pollMs",
+    "VPPollsBeforeEnd": "polls",
+    "VPPollsBeforeEndMissing": "polls",
 }
+
+
+def _container_watchdog_limits() -> dict[str, dict[str, int]]:
+    """{'pollMs': {'minimum': 1000, 'maximum': 120000}, 'polls': {...}} from teams.ts.
+
+    NOTE: coupled to the `name: { minimum: N, maximum: N }` shape of
+    WATCHDOG_LIMITS. If that declaration is restructured this raises "not found"
+    rather than drifting silently -- update the pattern instead of assuming the
+    limits disappeared.
+    """
+    teams_src = (TEMPLATE.parent / "backend" / "src" / "teams.ts").read_text()
+    block = re.search(r"WATCHDOG_LIMITS\s*=\s*\{(.*?)\n\}", teams_src, re.DOTALL)
+    assert block, "WATCHDOG_LIMITS not found in teams.ts"
+    limits = {
+        name: {"minimum": int(lo.replace("_", "")), "maximum": int(hi.replace("_", ""))}
+        for name, lo, hi in re.findall(
+            r"(\w+)\s*:\s*\{\s*minimum\s*:\s*([\d_]+)\s*,\s*maximum\s*:\s*([\d_]+)\s*\}",
+            block.group(1),
+        )
+    }
+    assert "pollMs" in limits and "polls" in limits, f"parsed only {sorted(limits)}"
+    return limits
 
 
 def _task_definition_env(template: dict) -> dict[str, object]:
@@ -654,13 +678,19 @@ def test_teams_watchdog_parameters_are_bounded(template: dict) -> None:
     container defends itself too, but failing parameter validation is a much
     better experience than a silently ignored setting.
     """
-    for parameter, maximum in TEAMS_WATCHDOG_MAXIMA.items():
+    limits = _container_watchdog_limits()
+    for parameter, key in TEAMS_WATCHDOG_LIMIT_KEYS.items():
         spec = template["Parameters"][parameter]
         assert spec["Type"] == "Number"
-        assert "MinValue" in spec and spec["MinValue"] >= 1
+        assert "MinValue" in spec, f"{parameter} needs a MinValue"
         assert "MaxValue" in spec, f"{parameter} needs a MaxValue"
-        assert spec["MaxValue"] <= maximum, (
-            f"{parameter} MaxValue {spec['MaxValue']} exceeds the container ceiling {maximum}"
+        assert spec["MinValue"] >= limits[key]["minimum"], (
+            f"{parameter} MinValue {spec['MinValue']} is below the container floor "
+            f"{limits[key]['minimum']}"
+        )
+        assert spec["MaxValue"] <= limits[key]["maximum"], (
+            f"{parameter} MaxValue {spec['MaxValue']} exceeds the container ceiling "
+            f"{limits[key]['maximum']}"
         )
 
 
@@ -745,9 +775,13 @@ def test_launcher_passes_the_watchdog_tunables_as_static_config(launcher: str) -
     per-meeting field, so listing any of these in FIELD_MAP would silently drop
     them and leave the default compiled into the image in force.
     """
+    block = re.search(r"FIELD_MAP\s*=\s*\{(.*?)\n\}", launcher, re.DOTALL)
+    assert block, "FIELD_MAP not found in the launcher"
+    per_meeting_keys = set(re.findall(r'"([A-Z0-9_]+)"\s*:', block.group(1)))
+    assert per_meeting_keys, "parsed no FIELD_MAP keys — the regex needs updating"
     for name in TEAMS_WATCHDOG_PARAMS:
-        assert f'"{name}"' not in launcher.split("SECRET_KEYS")[0], (
-            f"{name} must not be a per-meeting FIELD_MAP key"
+        assert name not in per_meeting_keys, (
+            f"{name} is a per-meeting FIELD_MAP key, so _static_config() would drop it"
         )
 
 

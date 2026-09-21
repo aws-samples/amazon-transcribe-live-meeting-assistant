@@ -915,6 +915,9 @@ Metadata:
           - VPInstanceType
           - VPMinInstances
           - VPMaxInstances
+      - Label:
+          default: Virtual Participant Meeting-End Detection (Teams)
+        Parameters:
           - VPAttendeePollMs
           - VPPollsBeforeEnd
           - VPPollsBeforeEndMissing
