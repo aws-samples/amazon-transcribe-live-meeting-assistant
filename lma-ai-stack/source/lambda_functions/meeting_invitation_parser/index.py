@@ -359,6 +359,12 @@ def handler(event, context):
             # "Unsupported meeting platform" after the user had filled everything
             # else in. The message reaches the paste-invitation dialog directly.
             platform = result["data"].get("meetingPlatform")
+            # A missing platform would skip the check, and the UI then falls back to
+            # its own default of ZOOM — handing the user a Zoom form holding a Meet
+            # link, which fails for a reason that has nothing to do with Meet. The
+            # link itself is enough to tell.
+            if not platform and "meet.google" in (result["data"].get("meetingId") or "").lower():
+                platform = "GOOGLE_MEET"
             if platform and platform not in VP_SUPPORTED_PLATFORMS:
                 logger.info("Rejecting unsupported meeting platform: %s", platform)
                 return json.dumps(

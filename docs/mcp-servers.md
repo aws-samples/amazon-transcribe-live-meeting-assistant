@@ -89,7 +89,7 @@ The following tools are available to the Strands agent without installing any ad
 | `search_lma_meetings` | Semantic search across meetings |
 | `get_meeting_summary` | Get summary for a specific meeting |
 | `get_meeting_transcript` | Get transcript for a specific meeting |
-| `start_meeting_now` | Launch a Virtual Participant into a meeting now (Zoom, Teams, Webex, Chime, Google Meet). Defaults to using stored Zoom credentials when present so the VP signs in to Zoom rather than joining as a guest. |
+| `start_meeting_now` | Launch a Virtual Participant into a meeting now (Zoom, Teams, Webex, Chime). Defaults to using stored Zoom credentials when present so the VP signs in to Zoom rather than joining as a guest. |
 | `get_virtual_participant_status` | Poll the status of a VP launched via `start_meeting_now`. Returns the granular status (e.g. `JOINING`, `MANUAL_ACTION_REQUIRED`, `ACTIVE`, `FAILED`), a human-readable summary, the live VNC viewer URL, the meeting URL, and any `errorMessage` or `manualActionMessage`. Designed to be polled by the agent after a `start_meeting_now` call so it can verbalize *"the VP is in the meeting"* — or surface a CAPTCHA/2FA challenge to the user with the viewer URL — without further prompting. |
 | `schedule_meeting` | Schedule a future VP meeting |
 

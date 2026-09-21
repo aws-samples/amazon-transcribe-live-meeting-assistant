@@ -4,9 +4,10 @@
 """
 Unit tests for the meeting invitation parser Lambda.
 
-Focuses on validate_parsed_data — the pure post-processing step that cleans the
-meeting ID / password the LLM extracts. Bedrock is never called here (these
-tests exercise deterministic regex/cleanup logic only).
+Covers validate_parsed_data — the pure post-processing step that cleans the
+meeting ID / password the LLM extracts — and the handler's rejection of platforms
+the Virtual Participant has no handler for. Bedrock is never called here: the
+regex/cleanup logic is deterministic, and the handler tests stub the parse step.
 """
 
 import json
@@ -118,9 +119,7 @@ class TestUnsupportedPlatformRejection(unittest.TestCase):
     def test_supported_platforms_are_the_ones_with_handlers(self):
         # Kept in step with the platform switch in the Virtual Participant's
         # index.ts. GOOGLE_MEET must stay out until a handler exists.
-        self.assertEqual(
-            sorted(index.VP_SUPPORTED_PLATFORMS), ["CHIME", "TEAMS", "WEBEX", "ZOOM"]
-        )
+        self.assertEqual(sorted(index.VP_SUPPORTED_PLATFORMS), ["CHIME", "TEAMS", "WEBEX", "ZOOM"])
 
     def test_google_meet_is_still_recognized_by_the_prompt(self):
         """Rejecting Meet requires identifying it first.
@@ -166,9 +165,7 @@ class TestUnsupportedPlatformRejection(unittest.TestCase):
             },
         }
         try:
-            result = json.loads(
-                index.handler({"arguments": {"invitationText": "Join Zoom"}}, None)
-            )
+            result = json.loads(index.handler({"arguments": {"invitationText": "Join Zoom"}}, None))
         finally:
             index.parse_meeting_invitation = original
 
@@ -176,3 +173,27 @@ class TestUnsupportedPlatformRejection(unittest.TestCase):
         self.assertEqual(result["data"]["meetingPlatform"], "ZOOM")
         # ...and the existing cleanup still runs on it.
         self.assertEqual(result["data"]["meetingId"], "96187501703")
+
+    def test_a_meet_link_with_no_platform_is_still_rejected(self):
+        """A missing platform would otherwise skip the check.
+
+        The UI falls back to its own ZOOM default when the parser returns no
+        platform, so the user would get a Zoom form holding a Meet link and a
+        launch failure with nothing to do with Meet. The link is enough to tell.
+        """
+        original = index.parse_meeting_invitation
+        index.parse_meeting_invitation = lambda _text: {
+            "success": True,
+            "data": {
+                "meetingName": "Sync",
+                "meetingPlatform": None,
+                "meetingId": "https://MEET.GOOGLE.com/abc-defg-hij",
+            },
+        }
+        try:
+            result = json.loads(index.handler({"arguments": {"invitationText": "join"}}, None))
+        finally:
+            index.parse_meeting_invitation = original
+
+        self.assertFalse(result["success"])
+        self.assertIn("Google Meet", result["error"])

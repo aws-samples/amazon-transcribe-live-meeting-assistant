@@ -172,7 +172,7 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
 
 ### Virtual Participant (ECS Fargate + Playwright)
 
-- **Strengths**: Headless Chromium provides cross-platform meeting support (Zoom, Teams, Chime, Meet, WebEx); Step Functions scheduler manages lifecycle.
+- **Strengths**: Headless Chromium provides cross-platform meeting support (Zoom, Teams, Chime, WebEx); Step Functions scheduler manages lifecycle.
 - **Considerations**: Monitor warm pool costs; implement auto-shutdown for idle VP instances; consider Graviton-based tasks for cost reduction.
 
 ### MCP Server Integration (API Gateway)
