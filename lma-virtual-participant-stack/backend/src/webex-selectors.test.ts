@@ -35,9 +35,11 @@ import { readFileSync } from 'node:fs';
 import {
     NAME_INPUT,
     WEBEX_CHAT_SELECTORS,
+    isOwnWebexMessage,
     isOwnWebexSender,
     normalizeWebexSender,
 } from './webex.js';
+import { details } from './details.js';
 
 /** Every quoted string literal in webex.ts, including template literals. */
 const sourceLiterals = (): string[] => {
@@ -70,6 +72,23 @@ const sourceLiterals = (): string[] => {
     if (/>>>/.test(code)) literals.push('<<source contains >>> outside any single literal>>');
     return literals;
 };
+
+/**
+ * Does this literal look like a regular-expression source rather than a selector?
+ *
+ * A regex source legitimately contains unbalanced-looking brackets and quantifier
+ * parens, so the balance check below has to skip them. Detected by the escape
+ * sequences and anchors that a CSS selector never contains.
+ */
+const looksLikeRegexSource = (lit: string): boolean =>
+    /\\[sdwSDWbB]|\(\?|^\^|\$$/.test(lit);
+
+/** Does this literal look like a CSS selector rather than prose? */
+const looksLikeSelector = (lit: string): boolean =>
+    /\[[a-zA-Z-]+[\^~|*$]?=/.test(lit) ||
+    /^[.#][a-zA-Z][\w-]*(\s+[.#>a-zA-Z][\w->]*)*$/.test(lit) ||
+    /^[a-z][\w-]*\s+[.#a-z][\w-]*$/.test(lit) ||
+    lit.includes('>>>');
 
 /** Literals that look like CSS selectors rather than prose, ids or messages. */
 const selectorLiterals = (): string[] => {
@@ -133,6 +152,7 @@ test('every selector in webex.ts has balanced brackets and quotes', () => {
     // would hide exactly the edits this test exists to catch. Verified not to
     // false-positive on any of the 271 literals currently in the file.
     for (const selector of [...sourceLiterals(), ...selectorLiterals()]) {
+        if (looksLikeRegexSource(selector)) continue;
         assert.ok(balanced(selector, '[', ']'), `"${selector}" has unbalanced [ ]`);
         assert.ok(balanced(selector, '(', ')'), `"${selector}" has unbalanced ( )`);
         assert.equal(
@@ -150,11 +170,14 @@ test('no selector alternative is left empty by a stray comma', () => {
     // the shape classifier, so filtering first hid exactly this. The two ', ' join
     // separators in the file are the only literals that legitimately look like an
     // empty alternative.
-    for (const selector of [...sourceLiterals(), ...selectorLiterals()]) {
-        if (!selector.includes(',') || selector.trim() === ',') continue;
-        for (const part of selector.split(',')) {
-            assert.notEqual(part.trim(), '', `"${selector}" has an empty alternative`);
-        }
+    // Looks for the malformation itself — a doubled comma, or one at either end —
+    // rather than splitting every literal, so ordinary prose that happens to end in
+    // a comma does not fail a selector guard with a confusing message.
+    for (const literal of [...sourceLiterals(), ...selectorLiterals()]) {
+        if (literal.trim() === ',' || literal.trim() === ', ') continue;
+        assert.ok(!/,\s*,/.test(literal), `"${literal}" has an empty alternative`);
+        assert.ok(!/^\s*,/.test(literal), `"${literal}" starts with a comma`);
+        assert.ok(!/,\s*$/.test(literal) || !looksLikeSelector(literal), `"${literal}" ends with a comma`);
     }
 });
 
@@ -318,4 +341,40 @@ test('a participant whose name merely contains our name is not silenced', () => 
 
 test('an unknown sender is not mistaken for ours', () => {
     assert.equal(isOwnWebexSender(null, ['LMA']), false);
+});
+
+test('a participant whose name merely STARTS with ours is not silenced', () => {
+    // A space-delimited prefix match silenced "LMA Smith", the same false-positive
+    // class as matching our name as a substring, just narrower. Only the
+    // decorations Webex actually adds — a parenthesised role, a trailing timestamp
+    // — are accepted around our own name.
+    const ids = ['LMA (bob@example.com)', 'LMA'];
+    for (const other of ['LMA Smith', 'LMA Team', 'LMA Bot Services', 'You Jin Park', 'Youssef']) {
+        assert.equal(isOwnWebexSender(other, ids), false, `"${other}" must not be treated as ours`);
+    }
+    // ...while the decorated forms of our own name still are.
+    for (const own of ['LMA', 'LMA (bob@example.com)', 'LMA 10:32', 'LMA (bob@example.com) 10:32 AM']) {
+        assert.equal(isOwnWebexSender(own, ids), true, `"${own}" should be ours`);
+    }
+});
+
+test('a short or generic configured identity does not silence participants', () => {
+    // LMA_IDENTITY is operator-settable, so it can be short. A prefix match would
+    // make "Bot" silence "Bot Smith" and "A" silence "A Team".
+    assert.equal(isOwnWebexSender('Bot Smith', ['Bot']), false);
+    assert.equal(isOwnWebexSender('A Team', ['A']), false);
+    assert.equal(isOwnWebexSender('Bot', ['Bot']), true);
+    assert.equal(isOwnWebexSender('Bot (Host)', ['Bot']), true);
+});
+
+test("the VP's own messages are recognized by text when no label resolves", () => {
+    // The sender check cannot fire on a continuation row or in the fallback where
+    // the row selector misses, so our own outgoing text is a second line of
+    // defence — the start and stop messages are operator-settable and could
+    // otherwise contain the literal START or PAUSE and toggle the VP.
+    assert.equal(isOwnWebexMessage(details.startMessages[0]), true);
+    assert.equal(isOwnWebexMessage(details.exitMessages[0]), true);
+    assert.equal(isOwnWebexMessage(`  ${details.startMessages[0]}  `), true);
+    assert.equal(isOwnWebexMessage('LMA leave'), false);
+    assert.equal(isOwnWebexMessage(''), false);
 });

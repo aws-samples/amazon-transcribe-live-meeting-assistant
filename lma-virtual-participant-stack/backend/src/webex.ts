@@ -44,12 +44,6 @@ export interface WebexChatSelectors {
     rows: string;
 }
 
-/** What the in-page chat observer is given: selectors plus our own identities. */
-export interface WebexChatObserverArgs extends WebexChatSelectors {
-    /** Names that mean "this message is ours" — never acted on as a command. */
-    ownNames: string[];
-}
-
 /**
  * Reduce a Webex chat sender label to a display name.
  *
@@ -101,10 +95,44 @@ export function isOwnWebexSender(sender: string | null, identities: string[]): b
     if (!sender) return false;
     // Drop a leading mention marker before comparing.
     const name = sender.replace(/^@+/, '').trim();
-    if (/^You(\s*\([^)]*\))?$/i.test(name)) return true;
-    return identities.some(
-        (own) => own && (name === own || name.startsWith(`${own} `)),
-    );
+    if (matchesDecorated(name, 'You')) return true;
+    return identities.some((own) => own && matchesDecorated(name, own));
+}
+
+/**
+ * Is this message text one the VP itself sent?
+ *
+ * A backstop for the case where the chat markup gives no usable sender label, so the
+ * name-based check cannot fire. Compares against the configured message lists rather
+ * than guessing, so a deployment that customises them is covered too.
+ */
+export function isOwnWebexMessage(message: string): boolean {
+    const text = message.trim();
+    if (!text) return false;
+    return [
+        ...details.introMessages,
+        ...details.startMessages,
+        ...details.pauseMessages,
+        ...details.exitMessages,
+    ].some((own) => own && own.trim() === text);
+}
+
+/**
+ * Does `name` consist of exactly `base`, allowing only the decorations Webex adds?
+ *
+ * A parenthesised role ("LMA (bob@example.com)", "You (Host)") and a trailing
+ * timestamp are accepted; anything else is a different person. Deliberately NOT a
+ * prefix match: `scribeName` is the bare string "LMA", so accepting any
+ * space-delimited prefix silences a participant called "LMA Smith" — and with a
+ * short LMA_IDENTITY it gets worse ("You" would silence "You Jin Park", "Bot" would
+ * silence "Bot Smith").
+ */
+function matchesDecorated(name: string, base: string): boolean {
+    const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(
+        `^${escaped}(\\s*\\([^)]*\\))?(\\s+\\d{1,2}:\\d{2}(\\s*[AP]M)?)?$`,
+        'i',
+    ).test(name);
 }
 
 /**
@@ -802,8 +830,18 @@ export default class Webex {
         // otherwise be split into a bogus sender and a truncated message.
         await page.exposeFunction('messageChange', async (rawSender: string | null, message: string) => {
             const sender = normalizeWebexSender(rawSender);
-            // Never act on, or transcribe, our own chat messages.
-            if (isOwnWebexSender(sender, [details.scribeIdentity, details.scribeName])) return;
+            // Never act on, or transcribe, our own chat messages. The sender is
+            // the primary test, but it cannot fire when no label resolves — a
+            // continuation row, or the fallback where the row selector misses — so
+            // our own outgoing text is recognised as well. That matters because the
+            // start and stop messages are operator-settable and could otherwise
+            // contain the literal START or PAUSE and toggle the VP.
+            if (
+                isOwnWebexSender(sender, [details.scribeIdentity, details.scribeName]) ||
+                isOwnWebexMessage(message)
+            ) {
+                return;
+            }
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
                 // (it can emit duplicate add events) — only act on the first.
@@ -864,7 +902,7 @@ export default class Webex {
         // observer needs to report has to come back as a return value and be
         // logged here on the node side.
         const chatObserverAttached = await frame.evaluate(
-            ({ containers, senders, bodies, rows, ownNames }: WebexChatObserverArgs) => {
+            ({ containers, senders, bodies, rows }: WebexChatSelectors) => {
                 // Two chat markups are supported: the Momentum (MDC) panel Webex
                 // serves now, and the older CSS-module markup some variants still
                 // serve. The preference is explicit rather than a single comma
@@ -921,9 +959,21 @@ export default class Webex {
                             // `closest(bodies)` covers the case where the body is an
                             // ANCESTOR of the added node (a body filled by inserting
                             // a child element), which a downward scan misses.
-                            const ownBody = el.matches(bodies) ? el : el.closest(bodies);
-                            const found = ownBody
-                                ? [ownBody]
+                            // Walk out to the OUTERMOST enclosing body, bounded by
+                            // the row: a mention or link chip inside a message also
+                            // matches `bodies` (they share a class prefix), and taking
+                            // the chip itself would deliver a fragment of a message
+                            // that has already been delivered whole.
+                            const outermostBody = (node: Element): Element => {
+                                let outer = node;
+                                for (let p = node.parentElement; p && p !== row; p = p.parentElement) {
+                                    if (p.matches(bodies)) outer = p;
+                                }
+                                return outer;
+                            };
+                            const nearestBody = el.matches(bodies) ? el : el.closest(bodies);
+                            const found = nearestBody
+                                ? [outermostBody(nearestBody)]
                                 : Array.from(row.querySelectorAll(bodies));
                             // Outermost matches only. `bodies` matches by class
                             // PREFIX, and the row selector shows several classes share
@@ -946,13 +996,17 @@ export default class Webex {
                                 // message is the first thing in the panel, that also
                                 // meant the whole batch was discarded as "ours".
                                 //
-                                // When the body has no row of its own, a sender is
-                                // borrowed only if there is exactly one body in scope,
-                                // so it cannot be attributed across messages. An
-                                // unknown sender is delivered as null — the message
-                                // still gets through, and the goodbye falls back to
-                                // its generic wording.
-                                const scope = bodyEl.closest(rows) ?? (bodyEls.length === 1 ? row : null);
+                                // When the body has no row of its own, NO sender is
+                                // taken. Borrowing from the enclosing scope was still
+                                // cross-message attribution, just narrower: a label
+                                // belonging to an earlier attachment-only row, or to
+                                // the VP's own not-yet-filled row shell, would be
+                                // applied to this message — publicly naming the wrong
+                                // person in the goodbye, or discarding the command as
+                                // "ours". An unknown sender is delivered as null: the
+                                // message still gets through and the goodbye falls
+                                // back to its generic wording.
+                                const scope = bodyEl.closest(rows);
                                 // Ignore labels belonging to a NESTED row (a quoted or
                                 // replied-to message): take the one at this row's own
                                 // level, which is not necessarily the first in
@@ -989,7 +1043,7 @@ export default class Webex {
                 new MutationObserver(callback).observe(targetNode, { childList: true, subtree: true });
                 return true;
             },
-            { ...WEBEX_CHAT_SELECTORS, ownNames: [details.scribeIdentity, details.scribeName] },
+            WEBEX_CHAT_SELECTORS,
         );
         console.log(
             chatObserverAttached
