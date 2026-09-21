@@ -789,6 +789,39 @@ Parameters:
     Description: >-
       Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
 
+  VPAttendeePollMs:
+    Type: Number
+    Default: 20000
+    MinValue: 1000
+    MaxValue: 120000
+    Description: >-
+      How often a Teams Virtual Participant samples the meeting UI to
+      decide whether the meeting is still running, in milliseconds.
+      Leave at the default unless advised otherwise.
+
+  VPPollsBeforeEnd:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      Consecutive polls on which a Teams meeting must show one or fewer
+      attendees before the Virtual Participant leaves. 3 polls at the default
+      cadence is about 60 seconds.
+
+  VPPollsBeforeEndMissing:
+    Type: Number
+    Default: 15
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      Consecutive polls on which a Teams meeting must show neither a readable
+      attendee count nor any in-meeting controls before the Virtual Participant
+      leaves. 15 polls at the default cadence is about 5 minutes. Raise
+      this if participants report the Virtual Participant leaving meetings
+      that are still in progress. The total tolerance is capped at 30
+      minutes regardless of the values given here.
+
   TranscriberDesiredTaskCount:
     Type: Number
     Default: 1
@@ -882,6 +915,9 @@ Metadata:
           - VPInstanceType
           - VPMinInstances
           - VPMaxInstances
+          - VPAttendeePollMs
+          - VPPollsBeforeEnd
+          - VPPollsBeforeEndMissing
       - Label:
           default: Meeting Assist Options
         Parameters:
@@ -1134,6 +1170,12 @@ Metadata:
         default: VP Minimum Warm Instances
       VPMaxInstances:
         default: VP Maximum Instances
+      VPAttendeePollMs:
+        default: VP Teams Meeting-End Poll Interval (ms)
+      VPPollsBeforeEnd:
+        default: VP Teams Polls Before Leaving An Empty Meeting
+      VPPollsBeforeEndMissing:
+        default: VP Teams Polls Before Leaving An Unreadable Meeting
       TranscriberDesiredTaskCount:
         default: WebSocket Transcriber Task Count
       TranscriberAutoScalingEnabled:
@@ -2882,6 +2924,9 @@ Resources:
         ZoomMeetingSdkClientSecret: !Ref ZoomMeetingSdkClientSecret
         AcsConnectionString: !Ref AcsConnectionString
         EnableVideoRecording: !Ref EnableVideoRecording
+        VPAttendeePollMs: !Ref VPAttendeePollMs
+        VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
+        VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
         ElevenLabsApiKey: !Ref ElevenLabsApiKey
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
         SimliApiKey: !Ref SimliApiKey

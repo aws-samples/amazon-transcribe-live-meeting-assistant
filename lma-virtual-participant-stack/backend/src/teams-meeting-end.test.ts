@@ -37,8 +37,13 @@ import {
     type AttendeeWatchdogState,
 } from './teams.js';
 
-const fresh = (): AttendeeWatchdogState => ({ consecutiveLonely: 0, consecutiveMissing: 0 });
+const fresh = (): AttendeeWatchdogState => ({
+    consecutiveLonely: 0,
+    consecutiveMissing: 0,
+    suppressedMissing: 0,
+});
 const MISSING: AttendeeReading = { state: 'BADGE_MISSING' };
+const MISSING_IN_MEETING: AttendeeReading = { state: 'BADGE_MISSING_IN_MEETING' };
 const busy: AttendeeReading = { state: 'OK', count: 3 };
 const alone: AttendeeReading = { state: 'OK', count: 1 };
 
@@ -172,11 +177,75 @@ test('the two counters do not contaminate each other', () => {
     }
 });
 
-test('the alone grace period is ~60s, matching the Zoom watchdog', () => {
-    // Long enough to absorb re-renders, short enough that an abandoned meeting
-    // is not billed for long.
+test('in-meeting chrome vetoes an unreadable badge indefinitely (#660)', () => {
+    // The mechanism the wide bound alone does not cover: nothing in the VP moves
+    // the pointer, so a toolbar that auto-hides during a share stays hidden for
+    // the whole share — an hour-long presentation would exhaust any bound. While
+    // the in-meeting controls are still there, a missing badge must never count.
+    const state = fresh();
+    const pollsInTwoHours = Math.floor((2 * 60 * 60 * 1000) / DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs);
+    for (let i = 0; i < pollsInTwoHours; i += 1) {
+        assert.equal(
+            decideAttendeeAction(MISSING_IN_MEETING, state).action,
+            'continue',
+            `a corroborated miss at poll ${i} must never end the meeting`,
+        );
+    }
+    assert.equal(state.suppressedMissing, pollsInTwoHours, 'suppressions must be counted for diagnostics');
+    assert.equal(state.consecutiveMissing, 0);
+});
+
+test('in-meeting chrome resets a run of uncorroborated misses', () => {
+    // A share that starts part-way through a run of bare misses must not inherit
+    // the strikes accrued before the chrome was seen.
+    const state = fresh();
+    for (let i = 0; i < MISSING_BOUND - 1; i += 1) decideAttendeeAction(MISSING, state);
+    assert.equal(decideAttendeeAction(MISSING_IN_MEETING, state).action, 'continue');
+    assert.equal(state.consecutiveMissing, 0);
+    // ...and the next bare miss starts counting from scratch.
+    for (let i = 0; i < MISSING_BOUND - 1; i += 1) {
+        assert.equal(decideAttendeeAction(MISSING, state).action, 'continue');
+    }
+});
+
+test('a corroborated miss does not accrue toward the lonely exit either', () => {
+    // No count was read, so there is no evidence about being alone. Letting these
+    // polls feed the lonely counter would eject the VP from a busy meeting whose
+    // roster is merely hidden.
+    const state = fresh();
+    for (let i = 0; i < ALONE_BOUND - 1; i += 1) decideAttendeeAction(alone, state);
+    decideAttendeeAction(MISSING_IN_MEETING, state);
+    assert.equal(state.consecutiveLonely, 0);
+    assert.equal(decideAttendeeAction(alone, state).action, 'continue');
+});
+
+test('an UNcorroborated miss is still bounded — the #540 guard survives', () => {
+    // With no badge and no in-meeting chrome, the meeting really has gone. This
+    // is the path that must remain finite, or a VP holds a voice session and
+    // uploads video to the 8-hour ceiling.
+    const state = fresh();
+    const actions = new Set<string>();
+    for (let i = 0; i < MISSING_BOUND * 4; i += 1) actions.add(decideAttendeeAction(MISSING, state).action);
+    assert.ok(actions.has('end'));
+});
+
+test('the missing-badge tolerance is bounded ABOVE as well as below', () => {
+    // The file's own promise is a test in both directions. Without this, raising
+    // the default to 100000 would leave every other test green while restoring
+    // the #540 failure.
+    const { pollMs, pollsBeforeEndMissing } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
+    assert.ok(
+        (pollsBeforeEndMissing * pollMs) / 1000 <= 600,
+        'an ended meeting must not be tolerated for more than ten minutes',
+    );
+});
+
+test('the alone grace period is long enough to absorb a re-render, short enough to bill', () => {
+    // A range rather than an exact equality: the point is the property, not the
+    // specific number, so a deliberate cadence change should not fail this.
     const { pollMs, pollsBeforeEnd } = DEFAULT_ATTENDEE_WATCHDOG_CONFIG;
-    assert.equal((pollsBeforeEnd * pollMs) / 1000, 60);
+    const seconds = (pollsBeforeEnd * pollMs) / 1000;
+    assert.ok(seconds >= 30 && seconds <= 180, `alone grace was ${seconds}s`);
 });
 
 test('a caller can shorten either bound for testing without touching prod', () => {
@@ -217,7 +286,7 @@ test('an operator can widen the bounds from the environment', () => {
 test('a bad override falls back to the default rather than disabling the watchdog', () => {
     // An unbounded or zero-length watchdog is the #540 failure mode, so a
     // nonsense value must never be honoured.
-    for (const bad of ['', '   ', '0', '-1', 'abc', '1.5', 'NaN', 'Infinity', '3; rm -rf /']) {
+    for (const bad of ['', '   ', '0', '-1', 'abc', '1.5', 'NaN', 'Infinity', '3 4', '0x10', '2e4']) {
         assert.deepEqual(
             resolveAttendeeWatchdogConfig({
                 VP_ATTENDEE_POLL_MS: bad,
@@ -228,6 +297,44 @@ test('a bad override falls back to the default rather than disabling the watchdo
             `"${bad}" must be ignored`,
         );
     }
+});
+
+test('an over-large poll count is rejected, not honoured', () => {
+    // One extra zero is the likeliest typo of all, and honouring it would mean a
+    // VP that outlives its meeting by most of an hour — the #540 shape again.
+    const { pollsBeforeEndMissing, pollsBeforeEnd } = resolveAttendeeWatchdogConfig({
+        VP_POLLS_BEFORE_END_MISSING: '150',
+        VP_POLLS_BEFORE_END: '300',
+    });
+    assert.equal(pollsBeforeEndMissing, DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEndMissing);
+    assert.equal(pollsBeforeEnd, DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollsBeforeEnd);
+});
+
+test('the total missing-badge tolerance is capped however the values combine', () => {
+    // Both values can be individually in range while their product is not; what
+    // decides how long a VP outlives its meeting is the product.
+    const { pollMs, pollsBeforeEndMissing } = resolveAttendeeWatchdogConfig({
+        VP_ATTENDEE_POLL_MS: '120000',
+        VP_POLLS_BEFORE_END_MISSING: '90',
+    });
+    assert.equal(pollMs, 120000);
+    assert.ok(pollMs * pollsBeforeEndMissing <= 30 * 60 * 1000, 'tolerance must cap at 30 minutes');
+    assert.ok(pollsBeforeEndMissing >= 1, 'the cap must never reach zero polls');
+});
+
+test('an over-large poll interval cannot become a 1ms hot loop', () => {
+    // Node clamps a setInterval delay above 2^31-1 to 1ms, so an accidentally
+    // huge cadence would spin on page.evaluate and burn the whole missing bound
+    // in milliseconds — the opposite of what the operator asked for.
+    for (const huge of ['2147483648', '20000000000', '99999999999999999999']) {
+        assert.equal(
+            resolveAttendeeWatchdogConfig({ VP_ATTENDEE_POLL_MS: huge }).pollMs,
+            DEFAULT_ATTENDEE_WATCHDOG_CONFIG.pollMs,
+            `"${huge}" must be ignored`,
+        );
+    }
+    // Whatever is accepted must stay inside the signed 32-bit timer range.
+    assert.ok(resolveAttendeeWatchdogConfig({ VP_ATTENDEE_POLL_MS: '120000' }).pollMs < 2 ** 31 - 1);
 });
 
 test('a sub-second poll interval is rejected', () => {

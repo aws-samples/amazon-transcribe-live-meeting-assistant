@@ -603,10 +603,19 @@ def test_microvm_image_sets_launch_type_env(template: dict) -> None:
     assert {"Key": "VP_LAUNCH_TYPE", "Value": "MICROVM"} in env
 
 
-TEAMS_WATCHDOG_DEFAULTS = {
-    "VP_ATTENDEE_POLL_MS": 20000,
-    "VP_POLLS_BEFORE_END": 3,
-    "VP_POLLS_BEFORE_END_MISSING": 15,
+# Env var on the VP task definition -> CloudFormation parameter backing it.
+TEAMS_WATCHDOG_PARAMS = {
+    "VP_ATTENDEE_POLL_MS": "VPAttendeePollMs",
+    "VP_POLLS_BEFORE_END": "VPPollsBeforeEnd",
+    "VP_POLLS_BEFORE_END_MISSING": "VPPollsBeforeEndMissing",
+}
+
+# Ceilings enforced by WATCHDOG_LIMITS in backend/src/teams.ts. The template's
+# MaxValue must not let through a value the container would reject anyway.
+TEAMS_WATCHDOG_MAXIMA = {
+    "VPAttendeePollMs": 120_000,
+    "VPPollsBeforeEnd": 90,
+    "VPPollsBeforeEndMissing": 90,
 }
 
 
@@ -617,44 +626,74 @@ def _task_definition_env(template: dict) -> dict[str, object]:
     return {item["Name"]: item["Value"] for item in containers[0]["Environment"]}
 
 
-def test_teams_watchdog_tunables_are_present_and_non_empty(template: dict) -> None:
-    """Issue #660: operators must be able to widen these without an image rebuild.
+def test_teams_watchdog_tunables_come_from_parameters(template: dict) -> None:
+    """Issue #660: an operator must be able to change these on a stack update.
 
-    The MicroVM launcher reads static config from this task definition and skips
-    any variable with an empty value, so these must carry literal numbers rather
-    than being declared empty and overridden later.
+    Both launch types consume the revision-pinned `!Ref TaskDefinition` ARN, so a
+    task-definition revision registered by hand is never used -- the only route
+    that takes effect is a CloudFormation parameter. `!Sub` rather than `!Ref`
+    because these are Number parameters and an ECS environment Value must be a
+    String. The MicroVM launcher also skips any variable whose value is empty, so
+    each of these must resolve to a number on every deploy.
     """
     env = _task_definition_env(template)
-    for name, expected in TEAMS_WATCHDOG_DEFAULTS.items():
+    for name, parameter in TEAMS_WATCHDOG_PARAMS.items():
         assert name in env, f"{name} missing from the VP task definition"
-        assert str(env[name]).strip() != "", f"{name} must not be empty"
-        assert int(str(env[name])) == expected
+        assert env[name] == {"Fn::Sub": f"${{{parameter}}}"}, (
+            f"{name} must be substituted from the {parameter} parameter, got {env[name]!r}"
+        )
+        assert parameter in template["Parameters"], f"{parameter} is not declared"
+
+
+def test_teams_watchdog_parameters_are_bounded(template: dict) -> None:
+    """A mistyped value must be rejected at the parameters page, not at run time.
+
+    An extra zero on the missing-badge count would otherwise leave a Virtual
+    Participant outliving its meeting by most of an hour, and a huge poll interval
+    is clamped by Node to a 1 ms timer -- the opposite of what was asked for. The
+    container defends itself too, but failing parameter validation is a much
+    better experience than a silently ignored setting.
+    """
+    for parameter, maximum in TEAMS_WATCHDOG_MAXIMA.items():
+        spec = template["Parameters"][parameter]
+        assert spec["Type"] == "Number"
+        assert "MinValue" in spec and spec["MinValue"] >= 1
+        assert "MaxValue" in spec, f"{parameter} needs a MaxValue"
+        assert spec["MaxValue"] <= maximum, (
+            f"{parameter} MaxValue {spec['MaxValue']} exceeds the container ceiling {maximum}"
+        )
 
 
 def test_missing_badge_bound_is_wider_than_the_alone_bound(template: dict) -> None:
-    """The asymmetry is the #660 fix, and it must survive edits to either value.
+    """The asymmetry is part of the #660 fix and must survive edits to either value.
 
     A roster badge that is present and reads <=1 is a direct measurement of an
-    empty meeting. An absent badge measures nothing — Teams also drops it during
-    content share and toolbar collapse — so it needs a much wider bound, and at
-    least four minutes of it, or a screen share ends a live meeting.
+    empty meeting. An absent badge measures nothing -- Teams also drops it during
+    content share and toolbar collapse -- so it needs a much wider bound. Bounded
+    on both sides: at least four minutes, or a screen share ends a live meeting;
+    at most ten, or an ended meeting keeps recording and holding a voice session.
     """
-    env = _task_definition_env(template)
-    poll_ms = int(str(env["VP_ATTENDEE_POLL_MS"]))
-    alone = int(str(env["VP_POLLS_BEFORE_END"]))
-    missing = int(str(env["VP_POLLS_BEFORE_END_MISSING"]))
+    params = template["Parameters"]
+    poll_ms = params["VPAttendeePollMs"]["Default"]
+    alone = params["VPPollsBeforeEnd"]["Default"]
+    missing = params["VPPollsBeforeEndMissing"]["Default"]
 
     assert missing > alone
     assert missing * poll_ms >= 240_000, "a missing badge must be tolerated for 4+ minutes"
+    assert missing * poll_ms <= 600_000, "an ended meeting must not linger past ten minutes"
 
 
 def test_teams_watchdog_defaults_match_the_container(template: dict) -> None:
-    """The template restates the container's defaults; drift makes them a lie.
+    """The parameter defaults restate the container's; drift makes one of them a lie.
 
-    src/teams.ts owns the defaults (they apply when the variables are unset, e.g.
-    a locally run container), and the template repeats them so they are visible
-    and tunable on the task definition. Nothing forces the two to agree, so this
-    test does.
+    src/teams.ts owns the defaults -- they apply when the variables are unset, as
+    in a container run locally -- and the template repeats them as parameter
+    defaults. Nothing forces the two to agree, so this test does.
+
+    NOTE: the regex is coupled to the `: AttendeeWatchdogConfig` annotation on the
+    declaration. Rewriting it as `satisfies AttendeeWatchdogConfig`, or moving the
+    defaults to another module, fails here with "not found" even though the
+    constant still exists -- update the pattern rather than assuming it drifted.
     """
     teams_src = (TEMPLATE.parent / "backend" / "src" / "teams.ts").read_text()
     block = re.search(
@@ -670,10 +709,46 @@ def test_teams_watchdog_defaults_match_the_container(template: dict) -> None:
         assert match, f"{field} not found in DEFAULT_ATTENDEE_WATCHDOG_CONFIG"
         return int(match.group(1).replace("_", ""))
 
-    env = _task_definition_env(template)
-    assert _numeric("pollMs") == int(str(env["VP_ATTENDEE_POLL_MS"]))
-    assert _numeric("pollsBeforeEnd") == int(str(env["VP_POLLS_BEFORE_END"]))
-    assert _numeric("pollsBeforeEndMissing") == int(str(env["VP_POLLS_BEFORE_END_MISSING"]))
+    params = template["Parameters"]
+    assert _numeric("pollMs") == params["VPAttendeePollMs"]["Default"]
+    assert _numeric("pollsBeforeEnd") == params["VPPollsBeforeEnd"]["Default"]
+    assert _numeric("pollsBeforeEndMissing") == params["VPPollsBeforeEndMissing"]["Default"]
+
+
+def test_teams_watchdog_parameters_reach_the_vp_stack_from_lma_main(template: dict) -> None:
+    """A parameter only the nested stack knows about cannot be set by an operator.
+
+    lma-main.yaml is what a deployment actually launches, so each of these has to
+    exist there with the same default and bounds and be passed through to
+    VIRTUALPARTICIPANTSTACK.
+    """
+    main = yaml.load((TEMPLATE.parents[1] / "lma-main.yaml").read_text(), Loader=_CfnLoader)
+    passed = main["Resources"]["VIRTUALPARTICIPANTSTACK"]["Properties"]["Parameters"]
+
+    for parameter in TEAMS_WATCHDOG_PARAMS.values():
+        assert parameter in main["Parameters"], f"{parameter} missing from lma-main.yaml"
+        assert passed.get(parameter) == {"Ref": parameter}, (
+            f"{parameter} is not passed through to the VP stack"
+        )
+        nested = template["Parameters"][parameter]
+        top = main["Parameters"][parameter]
+        for field in ("Default", "MinValue", "MaxValue"):
+            assert top[field] == nested[field], (
+                f"{parameter} {field} differs between lma-main.yaml and the VP stack"
+            )
+
+
+def test_launcher_passes_the_watchdog_tunables_as_static_config(launcher: str) -> None:
+    """The MicroVM path must inherit these, and MICROVM is the default launch type.
+
+    `_static_config()` keeps every task-definition variable that is NOT a
+    per-meeting field, so listing any of these in FIELD_MAP would silently drop
+    them and leave the default compiled into the image in force.
+    """
+    for name in TEAMS_WATCHDOG_PARAMS:
+        assert f'"{name}"' not in launcher.split("SECRET_KEYS")[0], (
+            f"{name} must not be a per-meeting FIELD_MAP key"
+        )
 
 
 # ---------------------------------------------------------------------------

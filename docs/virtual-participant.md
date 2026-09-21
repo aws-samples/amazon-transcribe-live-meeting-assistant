@@ -90,21 +90,23 @@ When ECS reports a "soft failure" on RunTask (returns HTTP 200 with a non-empty 
 The VP leaves on its own so an abandoned meeting is not recorded (or billed) indefinitely. It uses several signals, in order of confidence:
 
 1. **An in-meeting chat command** — `LMA leave` and its synonyms; see [In-meeting Chat Commands](#in-meeting-chat-commands).
-2. **A positive end-of-meeting signal from the platform** — on Teams, the post-meeting screen ("You left the meeting", "The meeting has ended") or a post-meeting URL, plus the disappearance of the hang-up button. Either ends the meeting on the first poll that sees it.
+2. **A positive end-of-meeting signal from the platform** — on Teams, the post-meeting screen ("You left the meeting", "The meeting has ended") or a post-meeting URL, checked before anything else on every poll, so a meeting Teams announces as over is detected on the first poll. The hang-up button disappearing is a second such signal, watched continuously rather than on the poll cycle.
 3. **A sustained empty roster** — the participant count is present and reads one or fewer for several consecutive polls.
-4. **A sustained absent roster indicator** — a backstop for the case where none of the above fires.
+4. **A sustained absence of the whole meeting UI** — neither a readable participant count nor any in-meeting controls. This is the backstop for the case where none of the above fires.
 
-On Teams the fourth signal is deliberately much more patient than the third. Teams removes the roster button, and with it the participant-count badge, whenever the meeting toolbar collapses — most commonly during a content share or in full-screen layouts — so an absent badge is not evidence that the meeting ended. A count that is present and reads one or fewer is a direct measurement; an absent one is not, and treating them alike ends live meetings while people are still speaking.
+The distinction between the third and fourth signals matters, and getting it wrong is what caused [#660](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/660). Teams removes the roster button, and with it the participant-count badge, whenever the meeting toolbar collapses — most commonly during a content share or in full-screen layouts. An unreadable badge therefore says nothing on its own: it is equally the signature of a meeting that ended and of a meeting where someone is presenting. So before an unreadable count counts towards leaving at all, the VP checks whether the rest of the in-meeting interface (the stage, the calling screen, the call controls) is still present. While it is, the VP stays, however long the badge remains unreadable — which matters because nothing in the VP moves the pointer, so a toolbar that auto-hides during a share can stay hidden for the whole presentation.
 
-Three environment variables on the VP task definition control the timing. They apply to both the ECS and MicroVM launch types (the MicroVM launcher reads its static configuration from the same task definition), and the defaults suit the platforms as they behave today — change them only if a deployment is consistently leaving meetings early or lingering after they end:
+Three CloudFormation parameters control the timing. They apply to the **Teams browser join path** only — Zoom has its own equivalent, and the Teams ACS SDK join path (used when `AcsConnectionString` is configured) gets deterministic roster events instead and needs none of this. Both the ECS and MicroVM launch types honour them. The defaults suit Teams as it behaves today; change them only if a deployment is consistently leaving meetings early, or lingering after they end:
 
-| Variable | Default | Meaning |
+| Parameter | Default | Meaning |
 | --- | --- | --- |
-| `VP_ATTENDEE_POLL_MS` | `20000` | How often the watchdog samples the meeting UI, in milliseconds. Minimum `1000`. |
-| `VP_POLLS_BEFORE_END` | `3` | Consecutive polls reading one or fewer attendees before the VP leaves — about 60 seconds at the default cadence. |
-| `VP_POLLS_BEFORE_END_MISSING` | `15` | Consecutive polls with no readable attendee count before the VP leaves — about 5 minutes at the default cadence. |
+| `VPAttendeePollMs` | `20000` | How often the VP samples the meeting UI, in milliseconds. Range 1000–120000. |
+| `VPPollsBeforeEnd` | `3` | Consecutive polls reading one or fewer attendees before the VP leaves — about 60 seconds at the default cadence. Range 1–90. |
+| `VPPollsBeforeEndMissing` | `15` | Consecutive polls with neither a readable attendee count nor any in-meeting controls before the VP leaves — about 5 minutes at the default cadence. Range 1–90. |
 
-A value that is not a positive integer (or a cadence below one second) is ignored in favour of the default, so a typo cannot leave a VP running without a backstop. The resolved values are logged once per meeting, next to `Listening for attendee changes`, and each poll logs its running counter against the applicable bound.
+Editing the VP task definition by hand does not work: both launch types reference a specific task-definition revision, so a revision registered outside CloudFormation is never used. Change the parameters and update the stack instead. That does not rebuild the VP container image, so it takes effect on the next meeting.
+
+The values reach the container as the `VP_ATTENDEE_POLL_MS`, `VP_POLLS_BEFORE_END` and `VP_POLLS_BEFORE_END_MISSING` environment variables, which is also how they can be set when [running the container locally](virtual-participant-local-dev.md). The container clamps them again on its own: a value that is not a whole number in range is ignored in favour of the built-in default, and the total tolerance for an unreadable meeting is capped at 30 minutes however the two values combine, so no combination of settings can leave a VP running without a backstop. The resolved values are logged once per meeting next to `Listening for attendee changes`, each poll logs its running counter against the bound that applies to it, and a poll suppressed by in-meeting evidence says so explicitly.
 
 ## Manual Action Required (CAPTCHA, 2FA, SSO)
 
