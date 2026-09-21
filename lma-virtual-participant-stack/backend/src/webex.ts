@@ -44,11 +44,6 @@ export interface WebexChatSelectors {
     rows: string;
 }
 
-/**
- * Chat selectors for both markups Webex serves — the Momentum (MDC) panel it uses
- * now, and the older CSS-module markup. Declared here rather than inline in the
- * observer so they are covered by webex-selectors.test.ts.
- */
 /** What the in-page chat observer is given: selectors plus our own identities. */
 export interface WebexChatObserverArgs extends WebexChatSelectors {
     /** Names that mean "this message is ours" — never acted on as a command. */
@@ -67,19 +62,28 @@ export interface WebexChatObserverArgs extends WebexChatSelectors {
  */
 export function normalizeWebexSender(raw: string | null | undefined): string | null {
     if (!raw) return null;
-    const name = raw
-        .replace(/^from\s+/i, '')
-        // Anchored to the start OR to whitespace, so a label whose sender part is
-        // empty ('from  to everyone:') reduces to nothing rather than to the
-        // recipient. A name is not truncated by this: the 'to' must be a whole
-        // word followed by whitespace, so 'Toby Tolkien' is untouched.
-        .replace(/(^|\s+)to\s+[^:]*:?\s*$/i, '')
-        .replace(/:\s*$/, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-    return name || null;
+    // Collapse first, so the result does not depend on the caller having trimmed.
+    const label = raw.replace(/\s+/g, ' ').trim();
+    // Only the legacy markup carries a recipient clause, and it is recognisable: it
+    // starts with "from " or ends with a colon. A bare Momentum display name is
+    // returned untouched, so a surname that happens to contain the word — "To Kwok
+    // Keung", "Van To Nguyen" — is not truncated.
+    if (!/^from\s/i.test(label) && !label.endsWith(':')) return label || null;
+    const body = label.replace(/^from\s+/i, '').replace(/:$/, '').trim();
+    // Greedy, so the LAST " to " is taken as the boundary: a sender whose own name
+    // contains it keeps it.
+    const withRecipient = /^(.+)\sto\s/i.exec(body);
+    if (withRecipient) return withRecipient[1].trim() || null;
+    // A recipient clause with no sender part in front of it tells us nothing.
+    if (/^to(\s|$)/i.test(body)) return null;
+    return body || null;
 }
 
+/**
+ * Chat selectors for both markups Webex serves — the Momentum (MDC) panel it uses
+ * now, and the older CSS-module markup. Declared here rather than inline in the
+ * observer so they are covered by webex-selectors.test.ts.
+ */
 export const WEBEX_CHAT_SELECTORS: WebexChatSelectors = {
     containers: {
         current: '#activity-list mdc-list',
@@ -768,9 +772,8 @@ export default class Webex {
         // and the body as separate arguments (as chime.ts does) rather than packing
         // them into one string: a body that happens to contain the delimiter would
         // otherwise be split into a bogus sender and a truncated message.
-        await page.exposeFunction('messageChange', async (rawSender: string | null, body: string) => {
+        await page.exposeFunction('messageChange', async (rawSender: string | null, message: string) => {
             const sender = normalizeWebexSender(rawSender);
-            const message = body;
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
                 // (it can emit duplicate add events) — only act on the first.
@@ -861,40 +864,64 @@ export default class Webex {
                     // an ordinary message.
                     for (const mutation of mutationList) {
                         for (const node of Array.from(mutation.addedNodes)) {
-                            if (!(node instanceof Element)) continue;
+                            // A text node means the body element was already there
+                            // and has only now been filled, which is how a Lit
+                            // render shows up; work from its parent in that case.
+                            const el =
+                                node instanceof Element ? node : node.parentElement;
+                            if (!el) continue;
                             // Resolve the whole row, not just the node that was
                             // added: a Lit-rendered list inserts the row shell
                             // first and fills the sender and body in later
                             // mutations, so searching only inside the added node
                             // finds neither.
-                            const row = node.closest(rows) ?? node;
-                            const bodyEl = row.querySelector(bodies);
-                            // No body yet — a row shell whose content arrives in a
-                            // later mutation, an attachment card, or a join/leave
-                            // notice. Nothing to hand to the node side, which cannot
-                            // take undefined. The row is deliberately NOT marked
-                            // seen here, so a staged render is read once complete.
-                            if (!bodyEl || seen.has(bodyEl)) continue;
-                            const message = bodyEl.textContent?.trim();
-                            if (!message) continue;
+                            const row = el.closest(rows) ?? el;
                             const sender = row.querySelector(senders)?.textContent?.trim();
-                            // Skip the VP's own messages. 'You' and the 'from LMA'
-                            // prefix are what the two markups label them with, but
-                            // both are markup-specific, so also match the configured
-                            // identity — otherwise the VP could ingest its own intro
-                            // message, and an operator-customised start/stop message
-                            // containing START or PAUSE could toggle it.
-                            if (
-                                sender === 'You' ||
-                                ownNames.some((own) => own && sender?.includes(own))
-                            ) {
+                            // EVERY body in the row, not just the first. Chat UIs
+                            // commonly group a run of messages from one sender into
+                            // one row, and querySelector would return only that
+                            // row's first message — dropping an "LMA leave" sent
+                            // straight after the sender's previous line, which is
+                            // the very defect this observer is being fixed for.
+                            const bodyEls = el.matches(bodies)
+                                ? [el]
+                                : Array.from(row.querySelectorAll(bodies));
+                            for (const bodyEl of bodyEls) {
+                                // Already delivered, or no text yet — a row shell
+                                // whose content arrives in a later mutation, an
+                                // attachment card, or a join/leave notice. Nothing
+                                // to hand to the node side, which cannot take
+                                // undefined. Deliberately NOT marked seen, so a
+                                // staged render is read once it is complete.
+                                if (seen.has(bodyEl)) continue;
+                                const message = bodyEl.textContent?.trim();
+                                if (!message) continue;
                                 seen.add(bodyEl);
-                                continue;
+                                // Skip the VP's own messages. 'You' and the
+                                // 'from LMA' prefix are what the two markups label
+                                // them with; the configured identity is matched as
+                                // well, since both labels are markup-specific and
+                                // the VP must not ingest its own intro message (nor
+                                // toggle itself on an operator-customised start or
+                                // stop message containing START or PAUSE). Matched
+                                // whole, not as a substring: 'LMA' inside a
+                                // participant's name — ALMA, SELMA — must not
+                                // silence them.
+                                if (
+                                    sender === 'You' ||
+                                    sender?.startsWith('from LMA') ||
+                                    ownNames.some(
+                                        (own) =>
+                                            own &&
+                                            (sender === own || sender?.startsWith(`from ${own}`)),
+                                    )
+                                ) {
+                                    continue;
+                                }
+                                // Sender as a separate argument so a body containing
+                                // the delimiter cannot be mistaken for one.
+                                (window as any).messageChange(sender ?? null, message);
                             }
-                            seen.add(bodyEl);
-                            // Sender as a separate argument so a body containing the
-                            // delimiter cannot be mistaken for one.
-                            (window as any).messageChange(sender ?? null, message);
                         }
                     }
                 };

@@ -50,9 +50,16 @@ const sourceLiterals = (): string[] => {
     // is documented here precisely because it must not be used) and markdown
     // backticks in a comment would otherwise read as template literals.
     const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    return [...code.matchAll(/'([^'\n]*)'|"([^"\n]*)"|`([^`\n]*)`/g)].map(
+    // The backtick alternative deliberately allows newlines: a selector written as
+    // a multi-line template literal would otherwise be invisible to every scan
+    // below. Safe because comments are already gone.
+    const literals = [...code.matchAll(/'([^'\n]*)'|"([^"\n]*)"|`([^`]*)`/g)].map(
         (m) => m[1] ?? m[2] ?? m[3],
     );
+    // Anything attempting a shadow pierce is inspected whatever shape it is in,
+    // including a concatenation the literal scan would see only in pieces.
+    if (/>>>/.test(code)) literals.push('<<source contains >>> outside any single literal>>');
+    return literals;
 };
 
 /** Literals that look like CSS selectors rather than prose, ids or messages. */
@@ -216,5 +223,21 @@ test('a name containing "to" is not truncated', () => {
     // The suffix match is anchored at the end and requires the colon form, so an
     // ordinary name that happens to contain the word survives.
     assert.equal(normalizeWebexSender('Toby Tolkien'), 'Toby Tolkien');
+    assert.equal(normalizeWebexSender('from Toby Tolkien to everyone:'), 'Toby Tolkien');
+});
+
+test('a display name containing the word "to" is not truncated', () => {
+    // The recipient clause is only stripped from a label that actually looks like
+    // one (a "from " prefix or a trailing colon), because these are real surnames
+    // and silently shortening or dropping a participant's name is worse than
+    // leaving a legacy label slightly long.
+    assert.equal(normalizeWebexSender('To Kwok Keung'), 'To Kwok Keung');
+    assert.equal(normalizeWebexSender('Van To Nguyen'), 'Van To Nguyen');
+    assert.equal(normalizeWebexSender('from To Kwok Keung to everyone:'), 'To Kwok Keung');
+    assert.equal(normalizeWebexSender('from Van To Nguyen to me:'), 'Van To Nguyen');
+});
+
+test('a sender whose own name contains "to" survives the legacy label', () => {
+    // The boundary match is greedy, so the LAST " to " is the recipient boundary.
     assert.equal(normalizeWebexSender('from Toby Tolkien to everyone:'), 'Toby Tolkien');
 });
