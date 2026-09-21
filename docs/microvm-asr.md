@@ -131,6 +131,8 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `nemotron-titanet-small` | Nemotron speech streaming EN 0.6B, 560 ms | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | NVIDIA Open Model License (not redistributable) + CC-BY-4.0 + MIT |
 | `parakeet-tdt-v3-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v2-titanet-small` | Parakeet TDT 0.6B v2 (offline engine, English) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `qwen3-asr-titanet-small` | Qwen3-ASR 0.6B (offline engine, LLM decoder, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `qwen3-asr-transcription-only` | Qwen3-ASR 0.6B (offline engine) | — | — | — | Apache-2.0 + MIT (VAD) |
 
 The default stays FastConformer: the same cache-aware streaming FastConformer-RNNT
 architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, trained on NeMo ASRSET —
@@ -145,9 +147,11 @@ factor of 0.89 for a single session on a 4-core host, so a MicroVM carrying two
 channels may fall behind; treat it as a quality trial until measured live. The earlier
 Nemotron speech model is kept for deployments that accept the NVIDIA Open Model
 License; the catalog marks it `redistributable: false` and it is never the default.
-The Parakeet bundles run the offline engine described below. Every alternative reuses
-TitaNet-small, so the operating point carries over unchanged; each is `calibrated`
-until vetted live.
+The Parakeet and Qwen3-ASR bundles run the offline engine described below. Qwen3-ASR
+gave the best transcript of everything measured (real-time factor 0.38, punctuated,
+"WACC" where every other model wrote "whack") but returns no word timings, so its speaker
+labels are one per utterance rather than per turn. Every alternative reuses TitaNet-small,
+so the operating point carries over unchanged; each is `calibrated` until vetted live.
 
 **Why the threshold travels with the embedder, not the ASR model.** A speaker
 embedding is computed from raw audio samples; the ASR model contributes nothing to
@@ -184,7 +188,7 @@ number and a Mapping cannot be keyed on a value a custom resource resolved.
 
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
 per closed utterance, for transducer models that cannot stream — which the two
-Parakeet bundles use. It produces no interim text while somebody is speaking: a row
+Parakeet and Qwen3-ASR bundles use. It produces no interim text while somebody is speaking: a row
 appears when the utterance closes, and continuous speech with no 1.2 s pause stays one
 utterance, so on a fast talker the first row can take a minute to appear. It decoded the
 test meeting at a real-time factor of 0.14 on a 4-core host with punctuated, cased text.
@@ -405,6 +409,12 @@ alignment is available, and global clustering is correct rather than premature. 
 remains future work, and it is the natural home for
 Whisper-quality transcription and elite DER — a deliberate split, with one engine and
 one timeline live, two passes offline.
+
+Qwen3-ASR has Whisper's shape — an LLM decoder, a different constructor, no word
+timings — and it is offered anyway, on the offline engine, as a transcription-quality
+bundle whose speaker labels are one per utterance. The runtime grew a second offline
+model kind for it (`ASR_MODEL_KIND=qwen3_asr`), which is the route a Whisper bundle would
+take if one were ever wanted.
 
 ## Calibrating a new bundle (developers)
 
@@ -675,6 +685,7 @@ complying with their licences.**
 | NVIDIA Nemotron 3.5 ASR streaming 0.6B (ASR, `nemotron35-titanet-small`) | OpenMDW-1.1 |
 | NVIDIA Nemotron speech streaming EN 0.6B (ASR, `nemotron-titanet-small`) | NVIDIA Open Model License, not redistributable |
 | NVIDIA Parakeet TDT 0.6B v3 and v2 (ASR, offline bundles) | CC-BY-4.0 |
+| Qwen3-ASR 0.6B (ASR, offline Qwen bundles; third-party ONNX export re-hosted by k2-fsa) | Apache-2.0 |
 | Silero VAD v5 (utterance segmentation, offline bundles) | MIT |
 | NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
 | pyannote segmentation 3.0 (turn detection) | MIT |

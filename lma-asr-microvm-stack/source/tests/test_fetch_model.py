@@ -458,3 +458,46 @@ def test_a_corrupt_vad_download_fails_the_build(tmp_path: Path) -> None:
 
     with mock.patch.object(fetch_model, "download", side_effect=fake_download):
         assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 1
+
+
+def test_run_lays_out_a_qwen3_asr_model_with_its_tokenizer_directory(tmp_path: Path) -> None:
+    staging = tmp_path / "sherpa-onnx-qwen3-asr-0.6B-int8"
+    (staging / "tokenizer").mkdir(parents=True)
+    (staging / "tokenizer" / "tokenizer.json").write_text("{}")
+    (staging / "conv_frontend.onnx").write_bytes(b"frontend")
+    (staging / "encoder.int8.onnx").write_bytes(b"encoder")
+    (staging / "decoder.int8.onnx").write_bytes(b"decoder")
+    archive = tmp_path / "model.tar.bz2"
+    with tarfile.open(archive, "w:bz2") as tar:
+        tar.add(staging, arcname=staging.name)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    transducer_only = ("ASR_MODEL_JOINER_FILE", "ASR_MODEL_TOKENS_FILE")
+    env = {k: v for k, v in ENV_TEMPLATE.items() if k not in transducer_only}
+    env.update(
+        {
+            "ASR_MODEL_SHA256": digest,
+            "ASR_MODEL_KIND": "qwen3_asr",
+            "ASR_MODEL_CONV_FRONTEND_FILE": "conv_frontend.onnx",
+            "ASR_MODEL_TOKENIZER_FILE": "tokenizer",
+        }
+    )
+    env_path = write_env(tmp_path / "model.env", env)
+    dest = tmp_path / "opt-models"
+
+    def fake_download(url: str, target: Path) -> str:
+        target.write_bytes(archive.read_bytes())
+        return digest
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+
+    assert (dest / "conv_frontend.onnx").read_bytes() == b"frontend"
+    assert (dest / "encoder.onnx").read_bytes() == b"encoder"
+    assert (dest / "decoder.onnx").read_bytes() == b"decoder"
+    assert (dest / "tokenizer" / "tokenizer.json").is_file()
+    assert not (dest / "joiner.onnx").exists()
+
+
+def test_an_unknown_model_kind_fails_the_build(tmp_path: Path) -> None:
+    env_path = write_env(tmp_path / "model.env", {**ENV_TEMPLATE, "ASR_MODEL_KIND": "whisper"})
+    assert fetch_model.run(["--env-file", str(env_path), "--dest", str(tmp_path / "d")]) == 1

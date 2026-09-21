@@ -87,6 +87,35 @@
       "redistributable": true,
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
       "notes": "English-only predecessor of the v3 bundle; same offline engine."
+    },
+    {
+      "id": "qwen3-asr-titanet-small",
+      "name": "Qwen3-ASR 0.6B offline + TitaNet-small (Apache-2.0)",
+      "status": "calibrated",
+      "modelId": "qwen3-asr-0.6b-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.5,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "Apache-2.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
+      "notes": "Speaker labels are one per utterance: the model returns no word timings, so an utterance holding two speakers is not split. Prefer the FastConformer or Nemotron bundles when per-turn labels matter more than text quality."
+    },
+    {
+      "id": "qwen3-asr-transcription-only",
+      "name": "Qwen3-ASR 0.6B offline, transcription only (Apache-2.0)",
+      "status": "calibrated",
+      "modelId": "qwen3-asr-0.6b-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "none",
+      "segmentationModelId": "none",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "Apache-2.0 (ASR) + MIT (VAD)",
+      "notes": "Highest transcript quality; rows appear when an utterance closes; labelled by audio channel only."
     }
   ],
   "models": [
@@ -220,6 +249,34 @@
       "provenanceVerified": "2026-09-21",
       "requiresVad": true,
       "note": "English-only predecessor of v3; same offline (VAD-segmented) engine."
+    },
+    {
+      "id": "qwen3-asr-0.6b-int8",
+      "name": "Qwen3-ASR 0.6B (offline, int8, Apache-2.0)",
+      "engine": "accurate",
+      "modelKind": "qwen3_asr",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2",
+      "sha256": "393f8a14e2f5fb96746aaab342997a40641001fbd5bf9592a080a8329178ee96",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "conv_frontend": "conv_frontend.onnx",
+        "encoder": "encoder.int8.onnx",
+        "decoder": "decoder.int8.onnx",
+        "tokenizer": "tokenizer"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "multilingual"
+      ],
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 879,
+      "provenanceVerified": "2026-09-21",
+      "requiresVad": true,
+      "note": "LLM-decoder ASR: the best transcript quality measured here, punctuated and cased, real-time factor 0.38 on a 4-core host. Returns no word timings, so speaker labels are one per utterance. The ONNX export is third-party work re-hosted in the k2-fsa release."
     }
   ],
   "speakerModels": [

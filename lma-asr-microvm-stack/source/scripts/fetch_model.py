@@ -33,6 +33,23 @@ CANONICAL_NAMES = {
     "ASR_MODEL_JOINER_FILE": "joiner.onnx",
     "ASR_MODEL_TOKENS_FILE": "tokens.txt",
 }
+# Qwen3-ASR ships a convolution frontend, encoder, LLM decoder and a tokenizer directory.
+QWEN3_CANONICAL_NAMES = {
+    "ASR_MODEL_CONV_FRONTEND_FILE": "conv_frontend.onnx",
+    "ASR_MODEL_ENCODER_FILE": "encoder.onnx",
+    "ASR_MODEL_DECODER_FILE": "decoder.onnx",
+    "ASR_MODEL_TOKENIZER_FILE": "tokenizer",
+}
+KIND_FILES = {"transducer": CANONICAL_NAMES, "qwen3_asr": QWEN3_CANONICAL_NAMES}
+
+
+def model_files_for(env: dict[str, str]) -> dict[str, str]:
+    kind = env.get("ASR_MODEL_KIND", "transducer")
+    if kind not in KIND_FILES:
+        raise ModelFetchError(
+            f"unknown ASR_MODEL_KIND {kind!r}; expected one of {sorted(KIND_FILES)}"
+        )
+    return KIND_FILES[kind]
 
 SPEAKER_MODEL_NAME = "speaker_embedding.onnx"
 SEGMENTATION_MODEL_NAME = "segmentation.onnx"
@@ -152,10 +169,10 @@ def extract(archive: Path, kind: str, strip_components: int, dest: Path) -> Path
 
 
 def place_model(extracted: Path, env: dict[str, str], dest: Path) -> None:
-    for env_key, canonical in CANONICAL_NAMES.items():
+    for env_key, canonical in model_files_for(env).items():
         source_name = env[env_key]
         source = extracted / source_name
-        if not source.is_file():
+        if not source.exists():
             available = sorted(child.name for child in extracted.iterdir())
             raise ModelFetchError(
                 f"model file {source_name!r} is not in the archive. Present: {available}"
@@ -191,7 +208,12 @@ def run(argv: list[str]) -> int:
         log(f"ERROR: cannot read {env_path}: {exc}")
         return 1
 
-    missing = [key for key in CANONICAL_NAMES if key not in env]
+    try:
+        model_files = model_files_for(env)
+    except ModelFetchError as exc:
+        log(f"ERROR: {exc}")
+        return 1
+    missing = [key for key in model_files if key not in env]
     if missing:
         log(f"ERROR: {env_path} is missing {missing}")
         return 1

@@ -536,6 +536,12 @@ Speech recognition:
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
 
+  * Qwen3-ASR 0.6B (offline; qwen3-asr-titanet-small, qwen3-asr-transcription-only).
+    The ONNX export is third-party work (https://github.com/Wasser1462/Qwen3-ASR-onnx)
+    re-hosted in the k2-fsa sherpa-onnx release.
+    Apache-2.0
+    https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf
+
 Utterance segmentation (offline bundles only):
 
   * Silero VAD v5, redistributed by k2-fsa

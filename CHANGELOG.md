@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Four more model bundles for the on-demand speech engine.** Nemotron 3.5 ASR streaming (OpenMDW-1.1; punctuated, multilingual, heavier), the earlier Nemotron speech streaming model (NVIDIA Open Model License, marked not redistributable), and Parakeet TDT 0.6B v3 and v2 on the offline engine (CC-BY-4.0). The default bundle is unchanged; switching is a developer change to the `AsrDefaults` mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
+- **Six more model bundles for the on-demand speech engine.** Nemotron 3.5 ASR streaming (OpenMDW-1.1; punctuated, multilingual, heavier), the earlier Nemotron speech streaming model (NVIDIA Open Model License, marked not redistributable), Parakeet TDT 0.6B v3 and v2 on the offline engine (CC-BY-4.0), and Qwen3-ASR 0.6B on the offline engine (Apache-2.0; the best transcript quality measured, but no word timings, so speaker labels are one per utterance). The default bundle is unchanged; switching is a developer change to the `AsrDefaults` mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
 
 - **On the on-demand engine, the Virtual Participant's voice assistant is its own transcript channel.** Its speech comes from a second engine session fed only the assistant's audio, appears on the `AGENT` channel under the VP's name and is never diarized, like Stream Audio's microphone and tab channels. Meeting rows are attributed to the roster by the row's start time instead of by whoever is active when the row is emitted.
 

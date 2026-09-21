@@ -63,6 +63,10 @@ cloudformation = boto3.client("cloudformation")
 CATALOG_MEMBER = "catalog.json"
 MODEL_ENV_MEMBER = "model.env"
 FILE_KEYS = ("encoder", "decoder", "joiner", "tokens")
+MODEL_KIND_FILE_KEYS = {
+    "transducer": FILE_KEYS,
+    "qwen3_asr": ("conv_frontend", "encoder", "decoder", "tokenizer"),
+}
 
 
 class ResolutionError(Exception):
@@ -144,7 +148,17 @@ def resolve(properties: dict, catalog: dict) -> dict:
             f"model {model.get('id')!r} has no pinned SHA256. Pin it in catalog.json; "
             "unverified weights are never baked into an image."
         )
-    missing = [key for key in FILE_KEYS if not files.get(key)]
+    kind = model.get("modelKind", "transducer")
+    if kind not in MODEL_KIND_FILE_KEYS:
+        raise ResolutionError(
+            f"model {model.get('id')!r} has modelKind {kind!r}; expected one of "
+            f"{sorted(MODEL_KIND_FILE_KEYS)}"
+        )
+    if kind == "qwen3_asr" and engine != "accurate":
+        raise ResolutionError(
+            f"model {model.get('id')!r} is a Qwen3-ASR model, which cannot stream"
+        )
+    missing = [key for key in MODEL_KIND_FILE_KEYS[kind] if not files.get(key)]
     if missing:
         raise ResolutionError(f"model {model.get('id')!r} is missing file names: {missing}")
     if not model.get("sherpaOnnx") or not model.get("onnxruntime"):
@@ -227,10 +241,13 @@ def render_model_env(selection: dict) -> str:
         f"ASR_MODEL_SHA256={model['sha256']}",
         f"ASR_MODEL_ARCHIVE={model.get('archive', 'tar.bz2')}",
         f"ASR_MODEL_STRIP_COMPONENTS={model.get('stripComponents', 1)}",
+        f"ASR_MODEL_KIND={model.get('modelKind', 'transducer')}",
         f"ASR_MODEL_ENCODER_FILE={files['encoder']}",
         f"ASR_MODEL_DECODER_FILE={files['decoder']}",
-        f"ASR_MODEL_JOINER_FILE={files['joiner']}",
-        f"ASR_MODEL_TOKENS_FILE={files['tokens']}",
+        f"ASR_MODEL_JOINER_FILE={files.get('joiner', '')}",
+        f"ASR_MODEL_TOKENS_FILE={files.get('tokens', '')}",
+        f"ASR_MODEL_CONV_FRONTEND_FILE={files.get('conv_frontend', '')}",
+        f"ASR_MODEL_TOKENIZER_FILE={files.get('tokenizer', '')}",
         # BOTH names, deliberately. The runtime selects its engine from $ASR_ENGINE
         # (warmup.py, ws_server.py); ASR_MODEL_ENGINE is only descriptive. Writing the
         # descriptive one alone meant an 'accurate' bundle still warmed the STREAMING

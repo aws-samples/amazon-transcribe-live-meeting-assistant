@@ -52,6 +52,8 @@ Parameters:
       - nemotron-titanet-small
       - parakeet-tdt-v3-titanet-small
       - parakeet-tdt-v2-titanet-small
+      - qwen3-asr-titanet-small
+      - qwen3-asr-transcription-only
     Description: >-
       Which model bundle the MicroVM ASR engine is built from. A bundle names the
       ASR model, the speaker-embedding model and the turn-detection model TOGETHER
@@ -149,6 +151,10 @@ Mappings:
     parakeet-tdt-v3-titanet-small:
       MiB: 8192
     parakeet-tdt-v2-titanet-small:
+      MiB: 8192
+    qwen3-asr-titanet-small:
+      MiB: 8192
+    qwen3-asr-transcription-only:
       MiB: 8192
 
 Resources:

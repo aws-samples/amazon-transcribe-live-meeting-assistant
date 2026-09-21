@@ -687,3 +687,55 @@ def test_every_shipped_bundle_names_the_engine_its_model_uses() -> None:
         selection = index.resolve({"BundleId": bundle["id"]}, catalog)
         engine = selection["model"].get("engine", "streaming")
         assert f"ASR_ENGINE={engine}" in index.render_model_env(selection)
+
+
+def _catalog_with_qwen(engine: str = "accurate") -> dict:
+    catalog = json.loads(json.dumps(CATALOG))
+    catalog["models"].append(
+        {
+            **catalog["models"][1],
+            "id": "qwen",
+            "engine": engine,
+            "modelKind": "qwen3_asr",
+            "files": {
+                "conv_frontend": "conv_frontend.onnx",
+                "encoder": "encoder.int8.onnx",
+                "decoder": "decoder.int8.onnx",
+                "tokenizer": "tokenizer",
+            },
+        }
+    )
+    offline = next(b for b in catalog["bundles"] if b["id"] == "bundle-offline")
+    catalog["bundles"].append(
+        {**offline, "id": "bundle-qwen", "modelId": "qwen", "vadModelId": "silero"}
+    )
+    catalog["vadModels"] = [
+        {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}
+    ]
+    return catalog
+
+
+def test_a_qwen3_asr_model_declares_its_own_file_set() -> None:
+    selection = index.resolve({"BundleId": "bundle-qwen"}, _catalog_with_qwen())
+    rendered = index.render_model_env(selection)
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+
+    assert values["ASR_MODEL_KIND"] == "qwen3_asr"
+    assert values["ASR_MODEL_CONV_FRONTEND_FILE"] == "conv_frontend.onnx"
+    assert values["ASR_MODEL_TOKENIZER_FILE"] == "tokenizer"
+    assert values["ASR_MODEL_JOINER_FILE"] == ""
+    assert values["ASR_MODEL_TOKENS_FILE"] == ""
+
+
+def test_a_qwen3_asr_model_needs_its_tokenizer_and_cannot_stream() -> None:
+    incomplete = _catalog_with_qwen()
+    del incomplete["models"][-1]["files"]["tokenizer"]
+    with pytest.raises(index.ResolutionError, match="missing file names"):
+        index.resolve({"BundleId": "bundle-qwen"}, incomplete)
+
+    with pytest.raises(index.ResolutionError, match="cannot stream"):
+        index.resolve({"BundleId": "bundle-qwen"}, _catalog_with_qwen(engine="streaming"))
