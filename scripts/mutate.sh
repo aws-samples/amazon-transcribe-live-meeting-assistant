@@ -53,6 +53,18 @@ MEM_LIMIT_KB="${LMA_MUTATE_MEM_KB:-4194304}"
 
 [ -f "$MUTATION_FILE" ] || { echo "no such mutation file: $MUTATION_FILE" >&2; exit 2; }
 
+# Pre-flight: the worst case is JOBS workers each allowed MEM_LIMIT_KB, so refuse
+# to start when that could exhaust the machine. This run has taken a host down
+# once; the bound should come from arithmetic rather than from whoever sets JOBS.
+AVAIL_KB=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo 2>/dev/null || echo 0)
+WORST_KB=$(( JOBS * MEM_LIMIT_KB ))
+if [ "$AVAIL_KB" -gt 0 ] && [ "$WORST_KB" -gt $(( AVAIL_KB / 2 )) ]; then
+  echo "Refusing to start: $JOBS workers x $((MEM_LIMIT_KB/1048576))GiB could use" >&2
+  echo "$((WORST_KB/1048576))GiB, more than half the $((AVAIL_KB/1048576))GiB available." >&2
+  echo "Lower LMA_MUTATE_JOBS or LMA_MUTATE_MEM_KB." >&2
+  exit 2
+fi
+
 WORK="$(mktemp -d -t lma-mutate-XXXXXX)"
 TREES="$WORK/trees"
 mkdir -p "$TREES"
