@@ -8,6 +8,9 @@
 # a numpy-only wrapper that the tests construct directly.
 pytest==9.1.1
 pytest-asyncio==1.4.0
+# Line coverage for `make test-coverage` (scripts/coverage_report.py). Not used
+# by `make test-asr`, which stays a plain test run.
+pytest-cov==7.1.0
 pydantic==2.13.5
 websockets==17.1
 numpy==2.4.6

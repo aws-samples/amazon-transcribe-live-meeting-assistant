@@ -91,3 +91,9 @@ utilities/load-simulator/examples/bobmeetings.yaml
 # JUnit report written by `make integ-tests-nightly` (collected as a CI
 # artifact by the nightly_integ_tests job, never committed).
 integ-tests-report.xml
+# Coverage artifacts. `make test-coverage` writes everything to a temp dir and
+# leaves nothing behind, but a coverage tool invoked by hand will not.
+.coverage
+.coverage.*
+coverage/
+coverage-summary.json

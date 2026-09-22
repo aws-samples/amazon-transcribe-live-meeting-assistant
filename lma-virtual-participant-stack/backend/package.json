@@ -58,6 +58,7 @@
     "@types/react-dom": "^18.2.0",
     "@types/uuid": "^9.0.8",
     "@types/ws": "^8.5.13",
+    "c8": "^12.0.0",
     "esbuild": "^0.28.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

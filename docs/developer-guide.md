@@ -275,7 +275,13 @@ None of these need AWS credentials or Docker. The local image builds
 do too, and run on a nightly GitLab schedule against a long-lived stack —
 `make integ-tests` remains the way to run them by hand, and
 [Scheduled Integration Tests](scheduled-integration-tests.md) covers the
-scheduled run and the one-time setup it needs. The GitLab pipeline additionally
+scheduled run and the one-time setup it needs.
+
+Line coverage is measured by `make test-coverage`, which is deliberately not part
+of this pipeline — it reports numbers rather than enforcing a threshold, and runs
+every suite. See [Test Coverage](test-coverage.md).
+
+The GitLab pipeline additionally
 runs the security review job on merge requests targeting `develop` — see
 [Security Scanning](security-scanning.md).
 

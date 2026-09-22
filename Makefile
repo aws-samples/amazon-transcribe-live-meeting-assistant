@@ -408,6 +408,29 @@ test-ui-force: check-node ## Run React UI tests (ignore checksum, always run)
 	@find $(UI_DIR)/src $(UI_DIR)/public -type f \( -name '*.js' -o -name '*.jsx' -o -name '*.ts' -o -name '*.tsx' -o -name '*.css' -o -name '*.json' -o -name '*.html' \) 2>/dev/null | sort | xargs cat 2>/dev/null | sha256sum | awk '{print $$1}' > $(UI_TEST_CHECKSUM_FILE)
 	@echo -e "$(GREEN)✅ UI tests passed!$(NC)"
 
+##@ Coverage
+# Measurement only. There is deliberately no threshold and this cannot fail a
+# build: the point of the first step is a baseline a threshold can be argued
+# from. scripts/coverage_report.py explains how the numbers are arrived at, and
+# in particular how source files that no test imports are accounted for rather
+# than dropped from the denominator.
+#
+# Slower than `make test` — it runs every suite, and the Node ones compile first.
+test-coverage: check-node ## Measure line coverage for every suite and print a table (no AWS)
+	@echo "Measuring coverage across all components..."
+	@test -d $(ASR_SOURCE_DIR)/.venv || $(PYTHON) -m venv $(ASR_SOURCE_DIR)/.venv
+	@$(ASR_SOURCE_DIR)/.venv/bin/pip install -q -r $(ASR_SOURCE_DIR)/requirements-dev.txt
+	@cd $(VP_BACKEND_DIR) && $(NPM_CI)
+	@cd $(WEBSOCKET_APP_DIR) && $(NPM_CI)
+	@cd $(UI_DIR) && $(NPM_CI)
+	$(PYTHON) scripts/coverage_report.py $(if $(JSON),--json $(JSON),)
+
+test-coverage-python: ## Coverage for the Python suites only (faster; no npm)
+	@test -d $(ASR_SOURCE_DIR)/.venv || $(PYTHON) -m venv $(ASR_SOURCE_DIR)/.venv
+	@$(ASR_SOURCE_DIR)/.venv/bin/pip install -q -r $(ASR_SOURCE_DIR)/requirements-dev.txt
+	$(PYTHON) scripts/coverage_report.py --only "LMA SDK" --only "LMA CLI" \
+		--only "Lambda" --only "ASR"
+
 ##@ Docker Build Checks
 # These target names collide with real paths (e.g. the integ-tests/ dir), so
 # declare them PHONY or make treats them as up-to-date files and skips them.
@@ -415,7 +438,7 @@ test-ui-force: check-node ## Run React UI tests (ignore checksum, always run)
         docker-build-check-all integ-tests integ-tests-live integ-tests-nightly \
         integ-deploy-and-test test-lambdas \
         test-vp test-vp-template test-vp-microvm-e2e test-appsync \
-        test-integ-plumbing test-asr
+        test-integ-plumbing test-coverage test-coverage-python test-asr
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then
