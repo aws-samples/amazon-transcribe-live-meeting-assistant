@@ -162,7 +162,9 @@ def test_every_condition_named_anywhere_is_declared(template: dict, resources: d
     declared = set(template.get("Conditions", {}))
     unknown = {
         target
-        for kind, target, _ in _walk({"Resources": resources, "Outputs": template.get("Outputs", {})})
+        for kind, target, _ in _walk(
+            {"Resources": resources, "Outputs": template.get("Outputs", {})}
+        )
         if kind == "Condition" and target not in declared
     }
     unknown |= {
