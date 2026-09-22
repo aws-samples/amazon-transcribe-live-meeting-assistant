@@ -46,6 +46,7 @@ To send us a pull request, please:
    make lint-typescript                      # tsc + eslint (transcriber, Virtual Participant)
    make test-vp test-vp-template test-asr    # Virtual Participant + ASR MicroVM suites
    make test-appsync                         # AppSync schema/resolver/UI-operation contract
+   make test-integ-plumbing                  # Scheduled integ-run machinery (no AWS)
    cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
    ```
 

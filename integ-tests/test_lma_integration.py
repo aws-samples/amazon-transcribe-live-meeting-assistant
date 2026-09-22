@@ -22,11 +22,13 @@ Test tiers:
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from lma_sdk import LMAClient
+
+# Needs only boto3, so it is imported here rather than lazily like the probes
+# (which pull in pycognito / websockets from integ-tests/requirements.txt).
+import cognito_test_user
 
 # ── Expected stack outputs (a subset that must always be present) ──────────
 REQUIRED_OUTPUTS = [
@@ -211,8 +213,8 @@ def test_ws_stream_transcribes_to_meeting(client: LMAClient) -> None:
     stack's pool) and pycognito + websockets (integ-tests/requirements.txt).
     Self-cleaning. Skips if creds or deps are absent.
     """
-    if not (os.environ.get("LMA_TEST_USERNAME") and os.environ.get("LMA_TEST_PASSWORD")):
-        pytest.skip("set LMA_TEST_USERNAME / LMA_TEST_PASSWORD to run the WS audio test")
+    if not cognito_test_user.available(client.region):
+        pytest.skip(f"no Cognito test user — {cognito_test_user.describe_sources()}")
     try:
         import pycognito  # noqa: F401
         import websockets  # noqa: F401

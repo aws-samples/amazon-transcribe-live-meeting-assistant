@@ -50,6 +50,55 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=os.environ.get("LMA_TEST_MEETING_PASSWORD", ""),
         help="Meeting password for the opt-in live VP join test.",
     )
+    parser.addoption(
+        "--no-skips",
+        action="store_true",
+        default=os.environ.get("LMA_INTEG_NO_SKIP", "") not in ("", "0", "false"),
+        help=(
+            "Treat a skipped test as a failure. For the scheduled pipeline, where "
+            "the opt-in tests are the point of the run and a silent skip would "
+            "report green having checked nothing."
+        ),
+    )
+
+
+@pytest.hookimpl(hookwrapper=True)
+# `call` is unused but its name and position are fixed by pytest's hookspec.
+def pytest_runtest_makereport(  # pylint: disable=unused-argument
+    item: pytest.Item, call: pytest.CallInfo[None]
+):
+    """Under ``--no-skips``, rewrite a skipped outcome into a failure.
+
+    The opt-in tests skip themselves when their credentials or optional
+    dependencies are absent, which is right for a local run and wrong for the
+    scheduled pipeline: a missing secret or a dropped requirement would produce a
+    green run that exercised none of the audio path. Rewriting the outcome here
+    rather than in each test means a skip added later is covered too.
+
+    ``pytest.importorskip`` and ``@pytest.mark.skipif`` raise at different points,
+    so both the call and setup phases are handled.
+    """
+    outcome = yield
+    if not item.config.getoption("--no-skips"):
+        return
+    report = outcome.get_result()
+    if report.skipped and not _is_deselected_by_marker(item):
+        reason = getattr(report, "longrepr", None)
+        report.outcome = "failed"
+        report.longrepr = (
+            f"skipped under --no-skips, which this run forbids: {reason}"
+        )
+
+
+def _is_deselected_by_marker(item: pytest.Item) -> bool:
+    """Whether the skip came from ``-m``/``--vp-meeting-id`` gating, not a gap.
+
+    ``make integ-tests`` passes ``-m "not live"``, which *deselects* rather than
+    skips, so it does not reach here. An explicit ``live`` marker still might if
+    the suite is invoked another way, and a run that has deliberately excluded
+    real-meeting tests should not fail because of them.
+    """
+    return item.get_closest_marker("live") is not None
 
 
 @pytest.fixture(scope="session")

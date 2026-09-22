@@ -10,7 +10,9 @@
 # What is intentionally NOT here: the integration tests (integ-tests/) and
 # `make docker-build-check` need a live AWS account / Docker daemon and are run
 # locally — see docs/dependency-upgrade-validation-runbook.md. The security
-# review job stays GitLab-only.
+# review job and the nightly integration run stay GitLab-only: the latter needs
+# credentials for an account whose id cannot be committed to this public
+# repository (see docs/scheduled-integration-tests.md).
 #
 # Keep the target list in sync with the `code_checks` job in .gitlab-ci.yml.
 #
@@ -129,6 +131,12 @@ jobs:
       # validates against that schema.
       - name: AppSync contract tests
         run: make test-appsync
+      # Unit tests for the scheduled integration run's own machinery (credential
+      # resolution, the --no-skips hook). Covered here rather than only in the
+      # nightly, because it is what keeps a nightly from reporting green after
+      # skipping everything.
+      - name: Integration-test plumbing tests
+        run: make test-integ-plumbing
 
       # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
       - name: ASR MicroVM runtime tests

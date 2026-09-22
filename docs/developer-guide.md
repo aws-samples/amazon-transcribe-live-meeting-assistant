@@ -248,6 +248,7 @@ Two pipelines run the same set of no-AWS checks:
 |----------|------|----------|
 | GitHub Actions `Code Checks` | `.github/workflows/code-checks.yml` | Pull requests to `develop` or `main`, and pushes to those branches |
 | GitLab `code_checks` | `.gitlab-ci.yml` | Every branch push and merge request |
+| GitLab `nightly_integ_tests` | `.gitlab-ci.yml` | A pipeline schedule only — see [Scheduled Integration Tests](scheduled-integration-tests.md) |
 
 Both take the Node.js version from `.nvmrc` at the repository root (22.23.2;
 >= 22.22.2 is required by jsdom 30). That file is the single pin — GitHub
@@ -264,13 +265,17 @@ make lint-ui-force && make test-ui-force     # React UI eslint + vitest
 make lint-typescript                         # tsc + eslint (transcriber, Virtual Participant)
 make test-vp && make test-vp-template        # Virtual Participant unit + template tests
 make test-appsync                            # AppSync schema/resolver/UI-operation contract
+make test-integ-plumbing                     # Scheduled integ-run machinery (no AWS)
 make test-asr                                # ASR MicroVM runtime tests + ruff
 cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
 ```
 
-None of these need AWS credentials or Docker. The integration tests
-(`make integ-tests`) and the local image builds (`make docker-build-check`) do,
-so they are run manually rather than in CI. The GitLab pipeline additionally
+None of these need AWS credentials or Docker. The local image builds
+(`make docker-build-check`) do, so they are run manually. The integration tests
+do too, and run on a nightly GitLab schedule against a long-lived stack —
+`make integ-tests` remains the way to run them by hand, and
+[Scheduled Integration Tests](scheduled-integration-tests.md) covers the
+scheduled run and the one-time setup it needs. The GitLab pipeline additionally
 runs the security review job on merge requests targeting `develop` — see
 [Security Scanning](security-scanning.md).
 

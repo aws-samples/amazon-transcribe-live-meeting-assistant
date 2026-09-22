@@ -84,6 +84,7 @@ title: "LMA Documentation"
 ### Development
 
 - [Developer Guide](developer-guide.md) — Building from source, LMA CLI, local UI development, contributing
+- [Scheduled Integration Tests](scheduled-integration-tests.md) — The nightly end-to-end run against a live stack: what it covers, how failures surface, and the one-time GitLab schedule / OIDC role / test-user setup it needs
 - [Virtual Participant Local Development](virtual-participant-local-dev.md) — Run the VP locally on EC2 via `make vp-start` with VSCode Remote-SSH + VNC
 - [LMA CLI Reference](lma-cli.md) — Command-line interface for deploy, publish, status, logs, Virtual Participant, and the `lma load` plugin
 - [LMA SDK Reference](lma-sdk.md) — Python SDK for programmatic LMA operations (stack, publish, AppSync, Virtual Participant)

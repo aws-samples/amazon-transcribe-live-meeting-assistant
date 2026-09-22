@@ -317,7 +317,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-appsync test-asr ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-appsync test-integ-plumbing test-asr ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -386,6 +386,14 @@ test-appsync: ## Static AppSync schema/resolver/UI-operation contract tests (no 
 	@echo "Running AppSync contract tests..."
 	$(PYTHON) -m pytest $(AI_STACK_DIR)/test/ -q
 	@echo -e "$(GREEN)✅ AppSync contract tests passed!$(NC)"
+# Everything else under integ-tests/ needs a deployed stack. This one file does
+# not, and it runs in the fast pipeline because it covers the machinery that
+# decides whether a scheduled integration run can report success without having
+# tested anything — credential resolution and the --no-skips hook.
+test-integ-plumbing: ## Unit tests for the scheduled integ-test machinery (no AWS)
+	@echo "Running integration-test plumbing unit tests..."
+	$(PYTHON) -m pytest integ-tests/test_ci_plumbing.py -q
+	@echo -e "$(GREEN)✅ Integration-test plumbing tests passed!$(NC)"
 
 test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
 	@echo "Running ASR MicroVM runtime tests..."
@@ -404,8 +412,10 @@ test-ui-force: check-node ## Run React UI tests (ignore checksum, always run)
 # These target names collide with real paths (e.g. the integ-tests/ dir), so
 # declare them PHONY or make treats them as up-to-date files and skips them.
 .PHONY: docker-build-check docker-build-check-transcriber docker-build-check-vp \
-        docker-build-check-all integ-tests integ-tests-live integ-deploy-and-test test-lambdas \
-        test-vp test-vp-template test-vp-microvm-e2e test-appsync test-asr
+        docker-build-check-all integ-tests integ-tests-live integ-tests-nightly \
+        integ-deploy-and-test test-lambdas \
+        test-vp test-vp-template test-vp-microvm-e2e test-appsync \
+        test-integ-plumbing test-asr
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then
@@ -461,6 +471,37 @@ integ-tests: ## Run integration tests vs a live stack (Usage: make integ-tests S
 	fi
 	$(PYTHON) -m pytest integ-tests/ --stack-name "$(INTEG_STACK)" -m "not live"
 	@echo -e "$(GREEN)✅ Integration tests passed against '$(INTEG_STACK)'!$(NC)"
+
+# The scheduled-pipeline entry point (nightly_integ_tests in .gitlab-ci.yml).
+# Differs from integ-tests in exactly two ways, both about a run nobody is
+# watching:
+#   --no-skips  a skipped test fails the run. The opt-in audio test is the whole
+#               reason the schedule exists, and it skips itself when its
+#               credentials or optional dependencies are missing, so without this
+#               a lapsed secret reports green having tested none of the pipeline.
+#   --junit-xml a report the CI UI can show per test, since nobody reads the log
+#               of a run that passed.
+# The Cognito user comes from LMA_TEST_USER_SECRET_ID (Secrets Manager) rather
+# than LMA_TEST_PASSWORD, so the password is never a CI variable — see
+# integ-tests/cognito_test_user.py.
+INTEG_JUNIT ?= integ-tests-report.xml
+integ-tests-nightly: ## Integration tests for the scheduled pipeline: skips fail, JUnit report (Usage: make integ-tests-nightly STACK=<name>)
+	@echo -e "$(CYAN)Running scheduled LMA integration tests against '$(INTEG_STACK)'...$(NC)"
+	@if ! $(PYTHON) -c "import lma_sdk" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: lma_sdk not importable. Run 'make setup-cli-dev' first.$(NC)"; exit 1; \
+	fi
+	@if ! $(PYTHON) -c "import pycognito, websockets" 2>/dev/null; then \
+		echo -e "$(RED)ERROR: pycognito / websockets missing — the audio test would skip.$(NC)"; \
+		echo -e "$(YELLOW)   Run: $(PIP) install -r integ-tests/requirements.txt$(NC)"; exit 1; \
+	fi
+	@if [ -z "$$LMA_TEST_USER_SECRET_ID" ] && [ -z "$$LMA_TEST_USERNAME" ]; then \
+		echo -e "$(RED)ERROR: no Cognito test user configured — the audio test would skip.$(NC)"; \
+		echo -e "$(YELLOW)   Set LMA_TEST_USER_SECRET_ID (preferred) or LMA_TEST_USERNAME/LMA_TEST_PASSWORD.$(NC)"; \
+		exit 1; \
+	fi
+	$(PYTHON) -m pytest integ-tests/ --stack-name "$(INTEG_STACK)" -m "not live" \
+		--no-skips --junit-xml="$(INTEG_JUNIT)"
+	@echo -e "$(GREEN)✅ Scheduled integration tests passed against '$(INTEG_STACK)'!$(NC)"
 
 integ-tests-live: ## Integration tests INCLUDING a real VP meeting join (Usage: make integ-tests-live STACK=<name> PLATFORM=ZOOM MEETING_ID=<id> [MEETING_PASSWORD=<pw>])
 ifndef MEETING_ID

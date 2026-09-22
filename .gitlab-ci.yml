@@ -3,17 +3,21 @@
 #
 # LMA GitLab CI/CD pipeline.
 #
-# Two stages:
-#   fast_checks     — no-AWS lint + unit tests + build checks. Runs on every
-#                     push and MR so developers get feedback without a deploy.
-#   security_review — SRT (Sample Security Review Tool). See docs/security-scanning.md.
+# Three stages:
+#   fast_checks            — no-AWS lint + unit tests + build checks. Runs on
+#                            every push and MR so developers get feedback
+#                            without a deploy.
+#   security_review        — SRT (Sample Security Review Tool). See
+#                            docs/security-scanning.md.
+#   scheduled_integration  — the end-to-end suite against a live stack. Runs
+#                            ONLY from a pipeline schedule, never on a push or
+#                            an MR, because it needs AWS credentials and a
+#                            deployed stack. One-time setup is required; see
+#                            docs/scheduled-integration-tests.md.
 #
-# What is intentionally NOT here: the integration tests (integ-tests/) and
-# docker-build-check need a live AWS account / Docker daemon and are run locally
-# via `make integ-tests STACK=<name>` / `make docker-build-check`. See the
-# 'integ-tests' skill and docs/dependency-upgrade-validation-runbook.md. A gated
-# integration stage could be added later (idp1-style, with a resource_group
-# mutex) if a CI deploy target becomes available.
+# What is intentionally NOT here: docker-build-check needs a Docker daemon and
+# is run locally via `make docker-build-check`. See the 'integ-tests' skill and
+# docs/dependency-upgrade-validation-runbook.md.
 
 image: public.ecr.aws/docker/library/python:3.13-bookworm
 
@@ -23,11 +27,16 @@ default:
 stages:
   - fast_checks
   - security_review
+  - scheduled_integration
 
 # Avoid duplicate (branch + MR) pipelines: prefer the MR pipeline when an MR is
 # open for the branch.
 workflow:
   rules:
+    # Listed first and unconditionally: a scheduled pipeline runs on a branch
+    # ref, so without this the `$CI_OPEN_MERGE_REQUESTS` rule below could
+    # cancel the nightly whenever an MR happens to be open for that branch.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
       when: never
@@ -41,6 +50,11 @@ code_checks:
   tags:
     - size:large
   rules:
+    # Excluded from schedules so a nightly pipeline's red/green means one thing:
+    # whether the integration suite passed. The fast checks already run on every
+    # push and MR.
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+      when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH
   # Cache UI deps across runs, keyed on the lockfile.
@@ -85,6 +99,11 @@ code_checks:
     # schema.graphql declares, and every GraphQL operation in the UI validates
     # against that schema.
     - make test-appsync
+    # Unit tests for the scheduled integration run's own machinery (credential
+    # resolution, the --no-skips hook). Covered here rather than only in the
+    # nightly, because it is what keeps a nightly from reporting green after
+    # skipping everything.
+    - make test-integ-plumbing
     # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
     - make test-asr
     # WebSocket transcriber: unit tests (tsc + eslint via `npm run build`, then
@@ -140,3 +159,108 @@ srt_security_review:
       - srt-syft-summary.json
       - srt-project-summary.md
     expire_in: 1 week
+
+# ── scheduled_integration: end-to-end suite against a live stack ────────────
+# Runs ONLY from a pipeline schedule. The suite in integ-tests/ is the only
+# thing in this repository that exercises the WebSocket transcriber, Amazon
+# Transcribe, Kinesis, the Call Event Processor and AppSync together, and until
+# this job existed it ran only when someone remembered to.
+#
+# ONE-TIME SETUP IS REQUIRED — this job does nothing until it is done, and fails
+# rather than passing quietly if it is half-done. See
+# docs/scheduled-integration-tests.md for the full procedure:
+#
+#   1. A pipeline schedule (Build > Pipeline schedules), on `develop`, with
+#      `NIGHTLY_INTEG` = `true`.
+#   2. CI/CD variables on the schedule or the project:
+#        LMA_INTEG_ROLE_ARN        the IAM role to assume (masked; it contains
+#                                  the account id, which must not be committed
+#                                  to this public repository)
+#        LMA_TEST_USER_SECRET_ID   Secrets Manager secret holding the Cognito
+#                                  test user, as {"username":…, "password":…}
+#        LMA_INTEG_STACK           optional; defaults to lma-integtest1
+#        AWS_DEFAULT_REGION        optional; defaults to us-west-2, where
+#                                  lma-integtest1 lives
+#   3. An IAM role trusting this GitLab instance as an OIDC provider, with the
+#      audience below.
+#
+# Failures surface three ways, so a red nightly cannot go unnoticed: GitLab's
+# own "pipeline failed" notification for scheduled pipelines goes to the
+# schedule's owner by email; the JUnit report is attached to the pipeline so the
+# failing test is visible without opening the log; and `--no-skips` (see
+# integ-tests/conftest.py) turns a skipped test into a failure, so a lapsed
+# secret or a dropped dependency reports red rather than green having run
+# nothing.
+nightly_integ_tests:
+  stage: scheduled_integration
+  needs: []
+  # ~40 min of wall time is expected; the cap leaves room for a slow Transcribe
+  # stream without letting a wedged run hold the schedule all day.
+  timeout: 50m
+  # Never cancelled mid-run: the suite creates a meeting row and a Virtual
+  # Participant registry entry and cleans them up in a `finally`, which a
+  # cancellation would skip.
+  interruptible: false
+  # Two runs against one stack would race on those same rows.
+  resource_group: integ-stack-$LMA_INTEG_STACK
+
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule" && $NIGHTLY_INTEG == "true"
+    - when: never
+
+  # GitLab mints this JWT for the job; integ-tests/ci_assume_role.py exchanges
+  # it for short-lived AWS credentials. No long-lived access key is stored.
+  # $CI_SERVER_URL is the GitLab instance's own URL, which is the audience the
+  # IAM role's trust policy should require. Using the predefined variable keeps
+  # the instance hostname out of this file, which is published publicly.
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: $CI_SERVER_URL
+
+  variables:
+    LMA_INTEG_STACK: lma-integtest1
+    # lma-integtest1 is in us-west-2, not the us-east-1 that a bare profile
+    # resolves to. A wrong region here reports the stack as non-existent.
+    AWS_DEFAULT_REGION: us-west-2
+    # Outside the checkout, so the assumed-role credentials cannot be collected
+    # as a job artifact.
+    AWS_SHARED_CREDENTIALS_FILE: /tmp/lma-ci-aws-credentials
+
+  before_script:
+    - apt-get update -y
+    - apt-get install -y make git
+    - make setup-python
+    - make setup-cli-dev
+    # pycognito + websockets, needed by the audio streaming test. If these are
+    # missing that test skips, which --no-skips then turns into a failure.
+    - .venv/bin/pip install -r integ-tests/requirements.txt
+    - |
+      if [ -z "$LMA_INTEG_ROLE_ARN" ]; then
+        echo "LMA_INTEG_ROLE_ARN is not set." >&2
+        echo "See docs/scheduled-integration-tests.md" >&2
+        exit 1
+      fi
+    # Writes a profile to $AWS_SHARED_CREDENTIALS_FILE. Prints the path, never
+    # the credentials.
+    - >
+      .venv/bin/python integ-tests/ci_assume_role.py
+      --role-arn "$LMA_INTEG_ROLE_ARN"
+      --token "$GITLAB_OIDC_TOKEN"
+      --profile lma-ci
+    - export AWS_PROFILE=lma-ci
+    # Fail here, with the identity in the log, rather than inside a test.
+    - >
+      .venv/bin/python -c "import boto3;
+      print(boto3.client('sts').get_caller_identity()['Arn'])"
+
+  script:
+    - export AWS_PROFILE=lma-ci
+    - make integ-tests-nightly STACK="$LMA_INTEG_STACK"
+
+  artifacts:
+    when: always
+    reports:
+      junit: integ-tests-report.xml
+    paths:
+      - integ-tests-report.xml
+    expire_in: 1 month
