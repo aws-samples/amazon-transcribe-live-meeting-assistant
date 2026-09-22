@@ -43,6 +43,13 @@ JOBS="${LMA_MUTATE_JOBS:-6}"
 # Per-mutation cap on the test command. A mutation that makes the code loop
 # forever is a legitimate result to report, not a reason to hang.
 TEST_TIMEOUT="${LMA_MUTATE_TEST_TIMEOUT:-120}"
+# Hard address-space cap per mutation, in KiB (default 4 GiB). A wall-clock
+# timeout is NOT enough on its own: a mutation that turns a loop into an
+# unbounded one usually grows a list as it spins, and one here reached 67 GiB in
+# 22 minutes -- taking the host down long before any sane timeout would fire.
+# 4 GiB comfortably runs every suite in this repo, Python and Node alike
+# (verified); raise it if a suite legitimately needs more.
+MEM_LIMIT_KB="${LMA_MUTATE_MEM_KB:-4194304}"
 
 [ -f "$MUTATION_FILE" ] || { echo "no such mutation file: $MUTATION_FILE" >&2; exit 2; }
 
@@ -121,15 +128,30 @@ run_one() {
   # Run the suite. It is expected to FAIL; a pass means the mutation survived.
   local out rc
   out="$WORK/$id.out"
-  # Bounded: a mutation can turn a loop into an infinite one, and an unbounded
-  # run would then hang the whole harness rather than reporting that mutation.
-  ( cd "$tree" && timeout --kill-after=15s "$TEST_TIMEOUT" bash -c "$TEST_CMD" ) >"$out" 2>&1
+  # Bounded three ways, because each of these has actually gone wrong here:
+  #   ulimit -v  a mutation that makes a loop unbounded also grows memory
+  #              unboundedly; one reached 67 GiB and took the host down.
+  #   timeout    so a spinning mutation is reported rather than hanging the run.
+  #   setsid +   kill the whole process group. Killing only the direct child
+  #   group kill leaves grandchildren running, which is how the 67 GiB process
+  #              survived the driver being killed.
+  (
+    ulimit -v "$MEM_LIMIT_KB"
+    cd "$tree" || exit 1
+    setsid timeout --kill-after=15s --signal=TERM "$TEST_TIMEOUT" \
+      bash -c "$TEST_CMD" &
+    child=$!
+    trap 'kill -9 -"$child" 2>/dev/null' EXIT TERM INT
+    wait "$child"
+  ) >"$out" 2>&1
   rc=$?
 
   if [ "$rc" -eq 0 ]; then
     echo "$id|$name|SURVIVED|$rc" >> "$WORK/results"
   elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
     echo "$id|$name|HUNG|$rc" >> "$WORK/results"
+  elif grep -qE 'MemoryError|Cannot allocate memory|out of memory|JavaScript heap' "$out"; then
+    echo "$id|$name|OUT-OF-MEMORY|$rc" >> "$WORK/results"
   elif grep -qE 'SyntaxError|IndentationError|ImportError|ModuleNotFoundError|error TS[0-9]|Cannot find module|Failed to compile|Unexpected token|command not found|not recognized|Cannot find package' "$out"; then
     # The suite failed, but because the code stopped loading rather than because
     # a test noticed. That is a bad mutation, not a caught one.
@@ -150,7 +172,7 @@ UNTRACKED="$WORK/untracked.list"
 git -C "$REPO" ls-files --others --exclude-standard > "$UNTRACKED"
 
 export -f run_one
-export REPO WORK TREES TEST_CMD PATCH UNTRACKED TEST_TIMEOUT
+export REPO WORK TREES TEST_CMD PATCH UNTRACKED TEST_TIMEOUT MEM_LIMIT_KB
 
 ls "$WORK/specs"/*.json | xargs -P "$JOBS" -I{} bash -c 'run_one "$@"' _ {}
 
@@ -185,6 +207,9 @@ if [ "$problems" != "0" ]; then
   echo "  HUNG             the mutated code did not terminate within"
   echo "                   ${TEST_TIMEOUT}s. Often a real finding: the code under"
   echo "                   test has an unbounded loop the mutation exposed."
+  echo "  OUT-OF-MEMORY    the mutated code exceeded ${MEM_LIMIT_KB}KiB. Also"
+  echo "                   usually a real finding: unbounded growth, not a test"
+  echo "                   noticing anything."
   exit 1
 fi
 echo "Every mutation was caught by a failing assertion."
