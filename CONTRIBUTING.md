@@ -51,6 +51,15 @@ To send us a pull request, please:
    cd lma-browser-extension-stack && npm install && CI=true npm test   # extension
    ```
 
+   Or run all of it locally in parallel, which takes about a minute rather
+   than three:
+
+   ```bash
+   ./scripts/verify.sh              # all four groups at once, one summary table
+   ./scripts/verify.sh python       # just the Python/cfn-lint group
+   ./scripts/verify.sh --clean-install   # reinstall node deps as CI does
+   ```
+
    These checks need neither AWS credentials nor Docker. Node.js >= 22.22.2 is
    required; the exact version CI uses is pinned in `.nvmrc`, and
    `make setup-node` installs it via nvm.
