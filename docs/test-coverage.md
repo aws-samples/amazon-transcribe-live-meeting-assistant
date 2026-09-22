@@ -33,7 +33,7 @@ Component              Lang    Lines  Covered  Total  Files  No data
 LMA SDK                python  19.8%  564      2854   15     15
 LMA CLI                python  14.9%  229      1536   8      8
 Lambda functions       python  20.6%  1116     5416   27     37
-Lambda layers          python  0.0%   0        492    0      18
+Lambda layers          python  48.8%  240      492    18     0
 ASR MicroVM            python  43.6%  2101     4816   16     16
 VP backend             node    37.9%  6160     16270  24     14*
 WebSocket transcriber  node    70.1%  2383     3399   11     4*
@@ -72,12 +72,24 @@ number by being large.
 
 Two rows deserve comment:
 
-`Lambda layers` is at **0.0%** over 492 statements because
-`lma-ai-stack/source/lambda_layers/` has no test suite at all. That is the
-largest wholly untested Python surface in the repository, and it holds
-`normalize_transcript_segments` and the transcript TTL handling — code that has
-misbehaved in production before. It is listed rather than omitted precisely so
-its absence is not invisible.
+`Lambda layers` was at **0.0%** when coverage was first measured — the shared
+code every Lambda imports had no suite at all, despite holding
+`normalize_transcript_segments` and the transcript TTL handling, which have
+misbehaved in production before. It now sits just under half, with the remaining
+gap concentrated in four packages that are still untouched:
+
+| Layer package | Lines |
+|---|---|
+| `eventprocessor_utils` | 75% |
+| `graphql_helpers` | 100% |
+| `sentiment` | 100% |
+| `appsync_utils` | 0% |
+| `lambda_utils` | 0% |
+| `sns_utils` | 0% |
+| `transcript_batch_processor` | 0% |
+
+`transcript_batch_processor` needs `aws_lambda_powertools` installed as a test
+dependency before it can be imported at all, which is why it is still at zero.
 
 `WebSocket transcriber` at **70.1%** is the best-covered component and shows what
 the others could look like.
@@ -88,7 +100,7 @@ the others could look like.
 |---|---|---|
 | LMA SDK, LMA CLI | `pytest-cov` | Straightforward: suite beside an installed package. |
 | Lambda functions | `pytest-cov`, accumulated | Each function's tests import their module as a sibling, so a single pytest over the tree collides on duplicate module names — the same reason `make test-lambdas` loops one directory at a time. Coverage accumulates into one data file across those runs. |
-| Lambda layers | parsed only | No suite exists, so every file is counted at zero. |
+| Lambda layers | `pytest-cov`, accumulated | Its suites sit beside the packages they cover and need the layer root importable (`from sentiment import ...`), so pytest runs from that root rather than from each test's own directory. A package with no suite still appears, at zero. |
 | ASR MicroVM | `pytest-cov` | Uses the component's own `.venv`; `pytest-cov` is pinned in its `requirements-dev.txt`. |
 | VP backend, WebSocket transcriber | `c8` | Wraps the same `node --test` the suite normally runs. Both projects emit source maps, so results land on `src/*.ts` rather than on the compiled output. |
 | React UI | `vitest --coverage` | v8 provider. Reports all files, so its `No data` count is small. |

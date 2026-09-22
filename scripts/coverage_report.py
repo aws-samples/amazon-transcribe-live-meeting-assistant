@@ -228,18 +228,71 @@ def measure_lambda_functions() -> Result:
 
 
 def measure_lambda_layers() -> Result:
-    """The shared Lambda layer, which has no test suite of its own.
+    """The shared Lambda layer: the code every Lambda imports.
 
-    Included on purpose: it holds `normalize_transcript_segments` and the
-    transcript TTL handling, and leaving it out of the table would hide the
-    largest untested Python surface in the repository behind its absence.
+    Measured rather than merely parsed, so the figure moves when tests are added.
+    Its suites live beside the packages they cover and rely on the layer root
+    being importable (`from sentiment import ...`), so pytest is run from that
+    root rather than from each test's own directory.
+
+    A layer with no tests at all still gets a row: every file is then counted at
+    zero, so the gap shows as a number instead of as an absence.
     """
-    root = REPO / "lma-ai-stack" / "source" / "lambda_layers"
     result = Result(name="Lambda layers", language="python")
-    sources = _python_sources([root])
-    result.files_unimported = len(sources)
-    result.unimported_counted_in_total = True
-    result.total = sum(_statements_in(path) for path in sources)
+    root = REPO / "lma-ai-stack" / "source" / "lambda_layers"
+    layer_roots = sorted(p for p in root.iterdir() if p.is_dir()) if root.exists() else []
+    if not layer_roots:
+        result.failed = f"no layer directories under {root}"
+        return result
+
+    rcfile = _WORK / "layers.coveragerc"
+    rcfile.write_text(
+        "[run]\n"
+        "branch = True\n"
+        "omit =\n"
+        "    */test_*.py\n"
+        "    */__pycache__/*\n"
+    )
+    data_file = _WORK / ".coverage-layers"
+    report = _WORK / "layers.json"
+
+    ran_any = False
+    for layer in layer_roots:
+        if not list(layer.rglob("test_*.py")):
+            continue
+        ran_any = True
+        code, output = _run(
+            [
+                str(VENV_PYTHON), "-m", "pytest", "-q", ".",
+                f"--cov={layer}", "--cov-append", "--cov-report=",
+                f"--cov-config={rcfile}",
+            ],
+            cwd=layer,
+            env={"COVERAGE_FILE": str(data_file)},
+        )
+        if code != 0:
+            result.failed = f"{layer.name}: {output.strip().splitlines()[-1]}"
+            return result
+
+    if not ran_any:
+        # No suite anywhere in the layer: score every file zero rather than
+        # leaving the component out of the table.
+        sources = _python_sources([root])
+        result.files_unimported = len(sources)
+        result.unimported_counted_in_total = True
+        result.total = sum(_statements_in(path) for path in sources)
+        return result
+
+    code, output = _run(
+        [str(VENV_PYTHON), "-m", "coverage", "json", f"--rcfile={rcfile}",
+         "-o", str(report), "--quiet"],
+        cwd=REPO,
+        env={"COVERAGE_FILE": str(data_file)},
+    )
+    if code != 0 or not report.exists():
+        result.failed = f"coverage json failed: {output.strip()[-200:]}"
+        return result
+    _summarize_python(report, [root], result)
     return result
 
 

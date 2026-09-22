@@ -38,6 +38,13 @@ dev = [
     # without this. A runtime dependency of the layer itself — see
     # lma-ai-stack/source/lambda_layers/transcript_enrichment_layer/requirements.txt.
     "pyjwt>=2.0",
+    # gql's DSL, so the layer's graphql_helpers field selectors can be resolved
+    # against the real source/appsync/schema.graphql. Version-matched to the
+    # layer's own pin (gql~=3.5.3) so the test exercises the same DSL the Lambda
+    # runs; the extras it declares there (botocore, aiohttp, requests) are the
+    # transports and are not needed to build a query. Caps graphql-core below
+    # 3.2.7, which the entry above allows.
+    "gql>=3.5,<4",
 ]
 
 [tool.setuptools.packages.find]
