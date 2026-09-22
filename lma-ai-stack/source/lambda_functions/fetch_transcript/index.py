@@ -26,6 +26,13 @@ ddb = boto3.resource("dynamodb")
 ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
 
 
+# Upper bound on Query pages for one meeting's transcript. A 1 MB page holds a
+# great many segments, so this is far above any real meeting; it exists so that a
+# table which keeps handing back a continuation key cannot spin this Lambda for
+# its whole timeout.
+MAX_TRANSCRIPT_PAGES = 100
+
+
 def get_call_metadata(callid):
     pk = "c#" + callid
     print(f"Call metadata PK: {pk}")
@@ -43,24 +50,55 @@ def get_call_metadata(callid):
 
 
 def get_transcripts(callid):
+    """Every final transcript segment for a meeting, across all result pages.
+
+    DynamoDB caps a Query response at 1 MB of items *read*, and applies
+    FilterExpression only after that cap. Partial segments are filtered here and
+    are numerous, so they consume the budget without appearing in the result --
+    which means even a moderately long meeting is spread over several pages. A
+    single query returns a silently truncated transcript, and the summary, the
+    knowledge base export and the assistant then all describe a partial meeting
+    as though it were the whole one. So follow LastEvaluatedKey to the end.
+    """
     pk = "trs#" + callid
     print(f"Call transcripts PK: {pk}")
-    try:
-        response = ddbTable.query(
-            KeyConditionExpression=Key("PK").eq(pk),
-            FilterExpression=(Attr("Channel").eq("AGENT") | Attr("Channel").eq("CALLER"))
+    items = []
+    start_key = None
+    pages = 0
+    while pages < MAX_TRANSCRIPT_PAGES:
+        query_args = {
+            "KeyConditionExpression": Key("PK").eq(pk),
+            "FilterExpression": (Attr("Channel").eq("AGENT") | Attr("Channel").eq("CALLER"))
             & Attr("IsPartial").eq(False),
+        }
+        if start_key:
+            query_args["ExclusiveStartKey"] = start_key
+        try:
+            response = ddbTable.query(**query_args)
+        except ClientError as err:
+            logger.error(
+                "Error getting transcripts from LCA Call Events table %s: %s",
+                err.response["Error"]["Code"],
+                err.response["Error"]["Message"],
+            )
+            raise
+        items.extend(response.get("Items", []))
+        pages += 1
+        next_key = response.get("LastEvaluatedKey")
+        if not next_key or next_key == start_key:
+            # A key identical to the one just used would ask for the same page
+            # again forever. Stop rather than spin.
+            break
+        start_key = next_key
+    if pages >= MAX_TRANSCRIPT_PAGES:
+        logger.warning(
+            "Stopped reading transcript for %s at the %d page limit; "
+            "the transcript may be incomplete",
+            callid,
+            MAX_TRANSCRIPT_PAGES,
         )
-        # response = ddbTable.query(KeyConditionExpression=Key('PK').eq(pk))
-    except ClientError as err:
-        logger.error(
-            "Error getting transcripts from LCA Call Events table %s: %s",
-            err.response["Error"]["Code"],
-            err.response["Error"]["Message"],
-        )
-        raise
-    else:
-        return response["Items"]
+    print(f"Read {len(items)} final segments for {callid} over {pages} page(s)")
+    return items
 
 
 def preprocess_transcripts(transcripts, condense, includeSpeaker):

@@ -40,6 +40,9 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MUTATION_FILE="${1:?usage: mutate.sh <mutation-file> <test-command>}"
 TEST_CMD="${2:?usage: mutate.sh <mutation-file> <test-command>}"
 JOBS="${LMA_MUTATE_JOBS:-6}"
+# Per-mutation cap on the test command. A mutation that makes the code loop
+# forever is a legitimate result to report, not a reason to hang.
+TEST_TIMEOUT="${LMA_MUTATE_TEST_TIMEOUT:-120}"
 
 [ -f "$MUTATION_FILE" ] || { echo "no such mutation file: $MUTATION_FILE" >&2; exit 2; }
 
@@ -80,6 +83,19 @@ run_one() {
     return
   fi
 
+  # Replay the parent's uncommitted state so the mutation sees the code as it
+  # currently stands, not as it was last committed.
+  if [ -s "$PATCH" ] && ! git -C "$tree" apply "$PATCH" 2>>"$WORK/$id.wt"; then
+    echo "$id|$name|PATCH-FAILED|0" >> "$WORK/results"
+    git -C "$REPO" worktree remove --force "$tree" >/dev/null 2>&1
+    return
+  fi
+  while IFS= read -r u; do
+    [ -n "$u" ] || continue
+    mkdir -p "$tree/$(dirname "$u")"
+    cp "$REPO/$u" "$tree/$u"
+  done < "$UNTRACKED"
+
   # A worktree is a clean checkout, so every gitignored dependency directory is
   # absent -- and a suite that cannot find its dependencies fails for that reason,
   # which reads as a caught mutation. Link them in from the main checkout. Safe to
@@ -105,11 +121,15 @@ run_one() {
   # Run the suite. It is expected to FAIL; a pass means the mutation survived.
   local out rc
   out="$WORK/$id.out"
-  ( cd "$tree" && eval "$TEST_CMD" ) >"$out" 2>&1
+  # Bounded: a mutation can turn a loop into an infinite one, and an unbounded
+  # run would then hang the whole harness rather than reporting that mutation.
+  ( cd "$tree" && timeout --kill-after=15s "$TEST_TIMEOUT" bash -c "$TEST_CMD" ) >"$out" 2>&1
   rc=$?
 
   if [ "$rc" -eq 0 ]; then
     echo "$id|$name|SURVIVED|$rc" >> "$WORK/results"
+  elif [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; then
+    echo "$id|$name|HUNG|$rc" >> "$WORK/results"
   elif grep -qE 'SyntaxError|IndentationError|ImportError|ModuleNotFoundError|error TS[0-9]|Cannot find module|Failed to compile|Unexpected token|command not found|not recognized|Cannot find package' "$out"; then
     # The suite failed, but because the code stopped loading rather than because
     # a test noticed. That is a bad mutation, not a caught one.
@@ -119,8 +139,18 @@ run_one() {
   fi
   git -C "$REPO" worktree remove --force "$tree" >/dev/null 2>&1
 }
+# A worktree is checked out from HEAD, so uncommitted work would be invisible and
+# every mutation pattern touching it would report NOT-APPLIED. Carry the working
+# tree across: tracked edits as a patch, plus any untracked file. This is what
+# makes it possible to mutation-test a change *before* committing it, which is
+# when you actually want to know.
+PATCH="$WORK/uncommitted.patch"
+git -C "$REPO" diff HEAD > "$PATCH"
+UNTRACKED="$WORK/untracked.list"
+git -C "$REPO" ls-files --others --exclude-standard > "$UNTRACKED"
+
 export -f run_one
-export REPO WORK TREES TEST_CMD
+export REPO WORK TREES TEST_CMD PATCH UNTRACKED TEST_TIMEOUT
 
 ls "$WORK/specs"/*.json | xargs -P "$JOBS" -I{} bash -c 'run_one "$@"' _ {}
 
@@ -152,6 +182,9 @@ if [ "$problems" != "0" ]; then
   echo "  SURVIVED         the suite passed with broken code — the test is blind."
   echo "  NOT-APPLIED      the pattern did not match, so nothing was tested."
   echo "  BROKEN-MUTATION  the code stopped loading; rewrite the mutation."
+  echo "  HUNG             the mutated code did not terminate within"
+  echo "                   ${TEST_TIMEOUT}s. Often a real finding: the code under"
+  echo "                   test has an unbounded loop the mutation exposed."
   exit 1
 fi
 echo "Every mutation was caught by a failing assertion."

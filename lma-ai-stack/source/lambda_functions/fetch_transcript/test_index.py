@@ -93,11 +93,14 @@ def segment(transcript, end_time, channel="CALLER", speaker=None, **extra):
 class FakeTable:
     """Stands in for the call-events table and records every request."""
 
-    def __init__(self, items=None, metadata=None, query_error=None, metadata_error=None):
+    def __init__(
+        self, items=None, metadata=None, query_error=None, metadata_error=None, page_size=None
+    ):
         self.items = [] if items is None else items
         self.metadata = METADATA if metadata is None else metadata
         self.query_error = query_error
         self.metadata_error = metadata_error
+        self.page_size = page_size
         self.queries = []
         self.lookups = []
 
@@ -105,9 +108,21 @@ class FakeTable:
         self.queries.append(kwargs)
         if self.query_error is not None:
             raise self.query_error
-        # Copy, so a test can tell an in-place sort of the stored rows apart from
-        # the ordering of the returned transcript.
-        return {"Items": [dict(row) for row in self.items]}
+        # Page the way DynamoDB does when `page_size` is set: hand back a slice
+        # plus a LastEvaluatedKey while rows remain. Without this a caller that
+        # forgot to follow the key looks identical to one that follows it.
+        rows = [dict(row) for row in self.items]
+        if self.page_size is None:
+            return {"Items": rows}
+        start = 0
+        if "ExclusiveStartKey" in kwargs:
+            resume = kwargs["ExclusiveStartKey"]["SK"]
+            start = next(i for i, r in enumerate(rows) if r["SK"] == resume) + 1
+        page = rows[start:start + self.page_size]
+        response = {"Items": page}
+        if start + self.page_size < len(rows):
+            response["LastEvaluatedKey"] = {"PK": page[-1]["PK"], "SK": page[-1]["SK"]}
+        return response
 
     def get_item(self, **kwargs):
         self.lookups.append(kwargs)
@@ -520,3 +535,112 @@ def test_the_stored_segments_are_read_once_per_request(
     _, table = run(monkeypatch, [segment("hello", 1), segment("again", 2)])
     assert len(table.queries) == 1
     assert len(table.lookups) == 1
+
+
+# --------------------------------------------------------------------------
+# Reading every page
+#
+# DynamoDB caps a Query response at 1 MB of items *read* and applies
+# FilterExpression only afterwards. Partial segments are filtered here and are
+# numerous, so they consume that budget without appearing in the result -- which
+# means even a moderately long meeting spans several pages. A caller that reads
+# only the first page returns a truncated transcript with nothing to indicate it,
+# and the summary, the knowledge-base export and the assistant then each describe
+# a partial meeting as if it were the whole one.
+# --------------------------------------------------------------------------
+
+
+def test_segments_from_every_page_are_returned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Twelve segments over pages of five must all reach the transcript."""
+    segments = [segment(f"line {i}", i) for i in range(1, 13)]
+    table = install(monkeypatch, items=segments, page_size=5)
+    result = index.lambda_handler({"CallId": CALL_ID}, None)
+    for i in range(1, 13):
+        assert f"line {i}" in result["transcript"], f"line {i} missing from the transcript"
+    assert len(table.queries) == 3
+
+
+def test_paging_follows_the_key_the_table_hands_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each continuation must resume from the last row of the previous page."""
+    segments = [segment(f"line {i}", i) for i in range(1, 8)]
+    table = install(monkeypatch, items=segments, page_size=3)
+    index.lambda_handler({"CallId": CALL_ID}, None)
+    resumed = [q["ExclusiveStartKey"]["SK"] for q in table.queries if "ExclusiveStartKey" in q]
+    assert resumed == [f"{3}#CALLER", f"{6}#CALLER"]
+
+
+def test_no_segment_is_returned_twice_when_paging(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A resume key that is off by one would repeat or drop a line."""
+    segments = [segment(f"line {i}", i) for i in range(1, 10)]
+    install(monkeypatch, items=segments, page_size=4)
+    transcript = index.lambda_handler({"CallId": CALL_ID}, None)["transcript"]
+    for i in range(1, 10):
+        assert transcript.count(f"line {i}") == 1, f"line {i} appears more than once"
+
+
+def test_a_single_page_meeting_issues_one_query(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The common case must not pay for a second round trip."""
+    table = install(monkeypatch, items=[segment("only", 1)], page_size=5)
+    index.lambda_handler({"CallId": CALL_ID}, None)
+    assert len(table.queries) == 1
+    assert "ExclusiveStartKey" not in table.queries[0]
+
+
+def test_the_filter_is_reapplied_on_every_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A continuation that dropped the filter would admit partial segments."""
+    segments = [segment(f"line {i}", i) for i in range(1, 8)]
+    table = install(monkeypatch, items=segments, page_size=3)
+    index.lambda_handler({"CallId": CALL_ID}, None)
+    assert len(table.queries) > 1
+    for query in table.queries:
+        assert "FilterExpression" in query
+        assert query["FilterExpression"] == table.queries[0]["FilterExpression"]
+        assert query["KeyConditionExpression"] == table.queries[0]["KeyConditionExpression"]
+
+
+def test_a_repeated_resume_key_does_not_loop_forever(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A table handing back the same continuation key must stop the read.
+
+    Found by mutation testing: removing the resume-key assignment made every
+    query return page one with a continuation key still set, and the loop spun
+    until the Lambda timed out. A key identical to the one just used cannot make
+    progress, so it ends the read instead.
+    """
+
+    class StuckTable(FakeTable):
+        """Always reports more to come, always from the same key."""
+
+        def query(self, **kwargs):
+            self.queries.append(kwargs)
+            row = dict(self.items[0])
+            return {"Items": [row], "LastEvaluatedKey": {"PK": row["PK"], "SK": row["SK"]}}
+
+    table = StuckTable(items=[segment("stuck", 1)])
+    monkeypatch.setattr(index, "ddbTable", table)
+    index.lambda_handler({"CallId": CALL_ID}, None)
+    # Two queries: the first page, then one attempt that repeats the key.
+    assert len(table.queries) == 2
+
+
+def test_the_read_is_bounded_by_a_page_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Even with an always-advancing key, the read cannot run without limit."""
+
+    class EndlessTable(FakeTable):
+        """Hands back a fresh key every time, so the read never ends on its own."""
+
+        def __init__(self, **kwargs):
+            super().__init__(**kwargs)
+            self.page = 0
+
+        def query(self, **kwargs):
+            self.queries.append(kwargs)
+            self.page += 1
+            return {
+                "Items": [segment(f"line {self.page}", self.page)],
+                "LastEvaluatedKey": {"PK": f"trs#{CALL_ID}", "SK": f"{self.page}#CALLER"},
+            }
+
+    table = EndlessTable()
+    monkeypatch.setattr(index, "ddbTable", table)
+    index.lambda_handler({"CallId": CALL_ID}, None)
+    assert len(table.queries) == index.MAX_TRANSCRIPT_PAGES
