@@ -386,18 +386,16 @@ def test_a_full_page_with_more_to_come_carries_a_token(install) -> None:
     assert index._decode_token(result["nextToken"])["SK"].endswith("#id#call-004")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="known defect: the resume key advances past rows dropped by the "
-    "entitlement filter once the page is full, so those meetings are never "
-    "returned on any page (see report)",
-)
 def test_paging_returns_every_meeting_exactly_once_when_some_are_filtered(install) -> None:
     """Paging must be complete for a caller who shares the range with others.
 
     A caller whose page contains other people's meetings gets a short first
     page; once a later page fills the limit mid-way, the rows after the cut
     must still be reachable through the token.
+
+    This was a real defect: the token handed back was the page's
+    LastEvaluatedKey, which is past every row in the page including the ones
+    after the cut, so those meetings appeared on no page at all.
     """
     rows, details = day_of_calls(9, owners={"call-007": ALICE})
     install(rows, details)
@@ -835,3 +833,66 @@ def test_an_admin_count_has_a_higher_page_cap(install) -> None:
     result = index.handler(event(field="getCallCount", groups=["Admin"]), None)
     assert result == {"count": index.MAX_COUNT_PAGES_ADMIN, "truncated": True}
     assert len(env.table.queries) == index.MAX_COUNT_PAGES_ADMIN
+
+
+def test_a_cut_on_the_last_row_of_the_final_page_ends_the_listing(install) -> None:
+    """Filling the limit on the very last available row must not emit a token.
+
+    The boundary between the two paging rules. Rows after a mid-page cut have to
+    stay reachable, but when the cut lands on the final row of the final page
+    there is nothing after it — and a token there makes the UI's loader spin
+    forever on a listing that has actually finished. An early version of the fix
+    got this wrong in exactly that direction.
+    """
+    rows, details = day_of_calls(5, owners={"call-002": ALICE})
+    install(rows, details)
+    # Four of the five are visible, and the limit is met on the last row read.
+    result = index.handler(event(limit=4), None)
+    assert len(result["Calls"]) == 4
+    assert result["nextToken"] is None
+
+
+def test_a_cut_before_the_end_of_a_page_keeps_the_remainder_reachable(install) -> None:
+    """The other side of that boundary: rows after the cut must be resumable."""
+    rows, details = day_of_calls(9, owners={"call-007": ALICE})
+    install(rows, details)
+    first = index.handler(event(limit=3), None)
+    assert len(first["Calls"]) == 3
+    assert first["nextToken"] is not None
+    # The token must name a row that was actually returned, not one beyond it.
+    resumed = index._decode_token(first["nextToken"])
+    assert resumed["SK"].endswith(f"#id#{first['Calls'][-1]['CallId']}")
+
+
+def test_the_resume_key_carries_every_key_attribute_the_index_needs(install) -> None:
+    """TypeDateIndex is keyed on (ItemType, SK); the table on (PK, SK).
+
+    A resume key missing any of the three is rejected by DynamoDB at query time,
+    which would turn a paged listing into an error rather than a short list.
+    """
+    rows, details = day_of_calls(9, owners={"call-007": ALICE})
+    install(rows, details)
+    token = index.handler(event(limit=3), None)["nextToken"]
+    resumed = index._decode_token(token)
+    assert set(resumed) >= {"ItemType", "PK", "SK"}
+
+
+def test_a_cut_on_the_penultimate_row_still_reaches_the_last_one(install) -> None:
+    """The narrow case between the two paging rules.
+
+    When the limit is met on the second-to-last row of a page, exactly one row
+    remains unreturned. That is the only position where an off-by-one in the
+    "are there rows left?" check is observable, and mutation testing found it
+    uncovered: comparing against len - 2 instead of len - 1 lets that single
+    meeting fall through the gap, and because it is the final page the listing
+    reports no token at all, so nothing ever fetches it.
+
+    Rows are newest-first, so with a limit of four and eight meetings the pages
+    are 007-004 then 003-000. Filtering three of the first page leaves the limit
+    to be met on 001, the third of four rows in page two, with 000 still to come.
+    """
+    rows, details = day_of_calls(
+        8, owners={"call-006": ALICE, "call-005": ALICE, "call-004": ALICE}
+    )
+    install(rows, details)
+    assert page_through(limit=4) == ["call-007", "call-003", "call-002", "call-001", "call-000"]
