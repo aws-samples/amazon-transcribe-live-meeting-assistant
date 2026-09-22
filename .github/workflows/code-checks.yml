@@ -126,11 +126,14 @@ jobs:
       - name: Virtual Participant template tests
         run: make test-vp-template
 
-      # AppSync contract: every resolver in lma-ai-stack.yaml attaches to a
-      # field schema.graphql declares, and every GraphQL operation in the UI
-      # validates against that schema.
-      - name: AppSync contract tests
-        run: make test-appsync
+      # Static AI stack tests: the AppSync contract (every resolver attaches to
+      # a field schema.graphql declares, every UI operation validates against
+      # it) and the CloudFormation template's invariants (every Ref/GetAtt
+      # resolves, lma-main.yaml's expected outputs are still declared). Both are
+      # deploy-time or run-time failures otherwise.
+      - name: AI stack static tests
+        run: make test-ai-stack
+
       # Unit tests for the scheduled integration run's own machinery (credential
       # resolution, the --no-skips hook). Covered here rather than only in the
       # nightly, because it is what keeps a nightly from reporting green after

@@ -317,7 +317,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-appsync test-integ-plumbing test-asr ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -385,12 +385,16 @@ test-vp-template: ## Static tests on the VP template + MicroVM client (no AWS)
 	$(PYTHON) -m pytest $(VP_DIR)/test/ -q
 	@echo -e "$(GREEN)✅ Virtual Participant template tests passed!$(NC)"
 
-# Collects the directory, not a file list, so a test added here runs in CI
-# without anyone having to remember to name it (see test-vp-template).
-test-appsync: ## Static AppSync schema/resolver/UI-operation contract tests (no AWS)
-	@echo "Running AppSync contract tests..."
+# One target for every static AI stack test, collecting the directory rather than
+# naming files: the AppSync schema/resolver/UI-operation contract and the
+# CloudFormation template's invariants both live in $(AI_STACK_DIR)/test/, and a
+# test added there should run in CI without anyone having to remember to name it
+# (the same reason test-vp-template collects its directory).
+test-ai-stack: ## Static AppSync contract + AI stack template tests (no AWS)
+	@echo "Running AI stack static tests..."
 	$(PYTHON) -m pytest $(AI_STACK_DIR)/test/ -q
-	@echo -e "$(GREEN)✅ AppSync contract tests passed!$(NC)"
+	@echo -e "$(GREEN)✅ AI stack static tests passed!$(NC)"
+
 # Everything else under integ-tests/ needs a deployed stack. This one file does
 # not, and it runs in the fast pipeline because it covers the machinery that
 # decides whether a scheduled integration run can report success without having
@@ -442,7 +446,7 @@ test-coverage-python: ## Coverage for the Python suites only (faster; no npm)
 .PHONY: docker-build-check docker-build-check-transcriber docker-build-check-vp \
         docker-build-check-all integ-tests integ-tests-live integ-tests-nightly \
         integ-deploy-and-test test-lambdas \
-        test-vp test-vp-template test-vp-microvm-e2e test-appsync \
+        test-vp test-vp-template test-vp-microvm-e2e test-ai-stack \
         test-integ-plumbing test-coverage test-coverage-python test-asr
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
