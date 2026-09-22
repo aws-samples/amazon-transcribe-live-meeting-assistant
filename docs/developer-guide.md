@@ -268,6 +268,7 @@ make test-ai-stack                           # AppSync contract + AI stack CFN i
 make test-integ-plumbing                     # Scheduled integ-run machinery (no AWS)
 make test-asr                                # ASR MicroVM runtime tests + ruff
 cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
+cd lma-browser-extension-stack && npm install && CI=true npm test && CI=false npm run build
 ```
 
 None of these need AWS credentials or Docker. The local image builds

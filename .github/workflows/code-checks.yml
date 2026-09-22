@@ -154,6 +154,34 @@ jobs:
         working-directory: lma-websocket-transcriber-stack/source/app
         run: npm test
 
+      # Browser extension. Deliberately `npm install` and not `npm ci`: the
+      # in-stack CodeBuild project builds it with `npm install` (see the
+      # BuildSpec in lma-browser-extension-stack/template.yaml), and its
+      # lockfile has repeatedly drifted such that `npm ci` fails where the real
+      # build succeeds. Matching CodeBuild is the point of this job.
+      - name: Browser extension dependencies
+        working-directory: lma-browser-extension-stack
+        run: npm install --no-audit --no-fund
+
+      # CI=true keeps react-scripts out of interactive watch mode.
+      - name: Browser extension tests
+        working-directory: lma-browser-extension-stack
+        env:
+          CI: 'true'
+        run: npm test
+
+      # CI=false is required, not an oversight: GitHub Actions sets CI=true for
+      # every step, which makes react-scripts treat lint warnings as errors. The
+      # extension carries pre-existing warnings in six files, so a warnings-as-
+      # errors build fails here while the CodeBuild one (which sets no CI var)
+      # succeeds — the opposite of what this job is for. Clearing those warnings
+      # would let this be tightened.
+      - name: Browser extension build
+        working-directory: lma-browser-extension-stack
+        env:
+          CI: 'false'
+        run: npm run build
+
       # Fastify 5 websocket smoke test (boots the server, round-trips a frame) —
       # runtime coverage the unit tests do not provide.
       - name: WebSocket transcriber smoke test

@@ -26,7 +26,6 @@ function Capture() {
   const [agentName, setAgentName] = React.useState("");
   const [nameErrorText, setNameErrorText] = React.useState("");
   const [meetingTopicErrorText, setMeetingTopicErrorText] = React.useState("");
-  const [formError, setFormError] = React.useState(false);
   const [showDisclaimer, setShowDisclaimer] = React.useState(false);
 
   // componentDidMount:

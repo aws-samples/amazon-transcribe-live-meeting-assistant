@@ -9,6 +9,7 @@ import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
+import { applyMuteAndPause, formatTimestamp, platformFromBaseUrl, UNKNOWN_PLATFORM } from '../lib/capture';
 
 type Call = {
   callEvent: string,
@@ -86,40 +87,17 @@ function IntegrationProvider({ children }: any) {
   const dataUrlToBytes = async (dataUrl: string, isMuted: boolean, isPaused: boolean) => {
     const res = await fetch(dataUrl);
     const dataArray = new Uint8Array(await res.arrayBuffer());
-    if (isPaused) {
-      // mute all channels by sending just zeroes
-      return new Uint8Array(dataArray.length);
-    } else if (isMuted) {
-      // mute only the one channel by mutating the zeroes of only one channel (channel 1)
-      for (let i = 2; i < dataArray.length; i += 4) {
-        dataArray[i] = 0;
-        dataArray[i + 1] = 0;
-      }
-    }
-    return dataArray;
+    return applyMuteAndPause(dataArray, isMuted, isPaused);
   }
 
   const updateMetadata = useCallback((newMetadata: any) => {
-    console.log("newMetadata.baseUrl" + newMetadata.baseUrl);
-    if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.zoom.us") {
-      setPlatform("Zoom");
-    } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://app.chime.aws") {
-      setPlatform("Amazon Chime");
-    } else if (
-      newMetadata && newMetadata.baseUrl && (
-        newMetadata.baseUrl.includes("teams.microsoft.com") ||
-        newMetadata.baseUrl.includes("teams.live.com") ||
-        newMetadata.baseUrl.includes("teams.microsoft.us") ||
-        newMetadata.baseUrl.includes("teams.cloud.microsoft")
-      )
-    ) {
-      setPlatform("Microsoft Teams");
-    } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl.includes("webex.com")) {
-      setPlatform("Cisco Webex");
-    } else if (newMetadata && newMetadata.baseUrl && newMetadata.baseUrl === "https://meet.google.com") {
-        setPlatform("Google Meet");
+    const detected = platformFromBaseUrl(newMetadata && newMetadata.baseUrl);
+    // Left as-is when unrecognised, so a tab change away from a meeting does not
+    // clear a platform that is still being captured.
+    if (detected !== UNKNOWN_PLATFORM) {
+      setPlatform(detected);
     }
-    
+
     setMetadata(newMetadata);
   }, [metadata, setMetadata, platform, setPlatform]);
 
@@ -149,19 +127,6 @@ function IntegrationProvider({ children }: any) {
     return {};
   }, [settings]);
 
-  const getTimestampStr = () => {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0'); // JavaScript months start at 0
-    const day = String(now.getDate()).padStart(2, '0');
-    const hour = String(now.getHours()).padStart(2, '0');
-    const minute = String(now.getMinutes()).padStart(2, '0');
-    const second = String(now.getSeconds()).padStart(2, '0');
-    const millisecond = String(now.getMilliseconds()).padStart(3, '0');
-    const formattedDate = `${year}-${month}-${day}-${hour}:${minute}:${second}.${millisecond}`;
-    return formattedDate;
-  }
-
   const startTranscription = useCallback(async (user: any, userName: string, meetingTopic: string) => {
     if (await checkTokenExpired(user)) {
       login();
@@ -174,7 +139,7 @@ function IntegrationProvider({ children }: any) {
       agentId: userName,
       fromNumber: '+9165551234',
       toNumber: '+8001112222',
-      callId: `${meetingTopic} - ${getTimestampStr()}`,
+      callId: `${meetingTopic} - ${formatTimestamp(new Date())}`,
       samplingRate: 8000,
       activeSpeaker: 'n/a'
     }

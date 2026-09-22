@@ -48,6 +48,7 @@ To send us a pull request, please:
    make test-ai-stack                        # AppSync contract + AI stack CFN invariants
    make test-integ-plumbing                  # Scheduled integ-run machinery (no AWS)
    cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
+   cd lma-browser-extension-stack && npm install && CI=true npm test   # extension
    ```
 
    These checks need neither AWS credentials nor Docker. Node.js >= 22.22.2 is

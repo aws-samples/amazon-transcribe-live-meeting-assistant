@@ -112,6 +112,21 @@ code_checks:
     # boots the server and round-trips a frame — runtime coverage the unit tests
     # do not provide.
     - cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
+    # Browser extension. `npm install`, not `npm ci`: the in-stack CodeBuild
+    # project builds it that way (see the BuildSpec in
+    # lma-browser-extension-stack/template.yaml) and its lockfile has repeatedly
+    # drifted such that `npm ci` fails where the real build succeeds.
+    # CI=true keeps react-scripts out of watch mode for the tests. CI=false for
+    # the build is required rather than an oversight: GitLab sets CI=true, which
+    # makes react-scripts treat lint warnings as errors, and the extension
+    # carries pre-existing warnings in six files — so that build would fail
+    # here while the CodeBuild one succeeds. Clearing those warnings would let
+    # this be tightened.
+    - |
+      cd "$CI_PROJECT_DIR/lma-browser-extension-stack"
+      npm install --no-audit --no-fund
+      CI=true npm test
+      CI=false npm run build
 
 # ── security_review: SRT ────────────────────────────────────────────────────
 # Runs on MRs targeting `develop` only. Review decisions are read from the
