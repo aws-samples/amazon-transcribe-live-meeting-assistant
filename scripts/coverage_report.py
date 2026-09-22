@@ -4,10 +4,16 @@
 # See the LICENSE file in the project root for full license information.
 """Measure line coverage for every test suite in the repository and print a table.
 
-Run via `make test-coverage`. This **reports**; it does not enforce. There is
-deliberately no threshold and the exit code reflects only whether the suites
-themselves ran — the point of this first step is to establish a baseline that a
-threshold can later be argued from, not to fail anyone's build today.
+Run via `make test-coverage`. This **reports**; it does not enforce. Each
+component has a recorded floor in `scripts/coverage_floors.json` and the table
+says whether it is met, but the exit code still reflects only whether the suites
+themselves ran. `--enforce` makes a breach exit non-zero and no make target
+passes it — adding it to one is the single change that turns these numbers into a
+gate, once they are trusted enough to gate on.
+
+The floors exist so a regression is *visible* rather than punished: each is the
+measured figure rounded down to a whole percent, so they catch coverage going
+backwards without demanding that anyone improve it first.
 
 Two things it takes care to get right, because a coverage number that flatters
 the codebase is worse than none at all:
@@ -388,13 +394,60 @@ def build_node_first(suite: NodeSuite) -> str | None:
 # ── output ──────────────────────────────────────────────────────────────────
 
 
-def print_table(results: list[Result]) -> None:
-    """Print the per-component table, the two language totals, and the caveats."""
-    headers = ("Component", "Lang", "Lines", "Covered", "Total", "Files", "No data")
-    rows = []
+FLOORS_FILE = REPO / "scripts" / "coverage_floors.json"
+
+# How far above its floor a component has to climb before the report suggests
+# raising it. Below this the slack is treated as ordinary measurement jitter.
+_RAISE_SUGGESTION_MARGIN = 2.0
+
+
+def load_floors() -> dict[str, int]:
+    """Per-component floors, or an empty mapping if the file is absent."""
+    if not FLOORS_FILE.exists():
+        return {}
+    return json.loads(FLOORS_FILE.read_text()).get("floors", {})
+
+
+def verdict_for(item: Result, floors: dict[str, int]) -> tuple[str, str]:
+    """Return (label, note) comparing a component against its floor."""
+    if item.failed:
+        return "n/a", ""
+    if item.name not in floors:
+        return "—", f"{item.name}: no floor recorded in {FLOORS_FILE.name}"
+    floor = floors[item.name]
+    if item.percent < floor:
+        return "BELOW", (
+            f"{item.name}: {item.percent:.1f}% is below its floor of {floor}% — "
+            f"coverage has regressed since the floor was set"
+        )
+    if item.percent >= floor + _RAISE_SUGGESTION_MARGIN:
+        return "OK", (
+            f"{item.name}: {item.percent:.1f}% is well above its floor of {floor}% — "
+            f"raise the floor in {FLOORS_FILE.name} to hold the gain"
+        )
+    return "OK", ""
+
+
+TABLE_HEADERS = (
+    "Component", "Lang", "Lines", "Covered", "Total", "Files", "No data",
+    "Floor", "",
+)
+
+
+def _build_rows(
+    results: list[Result], floors: dict[str, int]
+) -> tuple[list[tuple[str, ...]], list[str]]:
+    """One display row per component, plus any notes the verdicts produced."""
+    rows: list[tuple[str, ...]] = []
+    notes: list[str] = []
     for item in results:
+        label, note = verdict_for(item, floors)
+        if note:
+            notes.append(note)
+        floor_text = f"{floors[item.name]}%" if item.name in floors else "—"
         if item.failed:
-            rows.append((item.name, item.language, "n/a", "—", "—", "—", "—"))
+            rows.append((item.name, item.language, "n/a", "—", "—", "—", "—",
+                         floor_text, label))
             continue
         rows.append((
             item.name,
@@ -404,7 +457,17 @@ def print_table(results: list[Result]) -> None:
             f"{item.total}",
             f"{item.files_measured}",
             f"{item.files_unimported}{'' if item.unimported_counted_in_total else '*'}",
+            floor_text,
+            label,
         ))
+    return rows, notes
+
+
+def print_table(results: list[Result], floors: dict[str, int] | None = None) -> None:
+    """Print the per-component table, the two language totals, and the caveats."""
+    floors = floors if floors is not None else {}
+    headers = TABLE_HEADERS
+    rows, notes = _build_rows(results, floors)
 
     # The two footer labels are wider than some component names, so they have to
     # be in the width calculation or the separator rules come out ragged.
@@ -432,22 +495,41 @@ def print_table(results: list[Result]) -> None:
     if python_total:
         print(line((
             "Python (all)", "python", f"{100 * python_covered / python_total:.1f}%",
-            python_covered, python_total, "", "",
+            python_covered, python_total, "", "", "", "",
         )))
     if node_total:
         print(line((
             "Node (all)", "node", f"{100 * node_covered / node_total:.1f}%",
-            node_covered, node_total, "", "",
+            node_covered, node_total, "", "", "", "",
         )))
 
+    _print_footer(results, floors, notes)
+
+
+def _print_footer(results: list[Result], floors: dict[str, int], notes: list[str]) -> None:
+    """The column key, the per-component notes, and the advisory verdict."""
     print()
     print("Lines  = line (statement) coverage. Files = files the suite loaded.")
     print("No data = source files no test imported. These are counted as zero in")
     print("          the Python totals; for Node (*) they are excluded from the")
     print("          percentage, which is therefore optimistic.")
+    print(f"Floor  = the recorded floor from {FLOORS_FILE.name}.")
+
+    if notes:
+        print()
+        print("Notes:")
+        for note in notes:
+            print(f"  {note}")
+
+    below = [r for r in results if verdict_for(r, floors)[0] == "BELOW"]
     print()
-    print("Reported, not enforced: there is no threshold and this cannot fail a")
-    print("build. Establishing the baseline comes first.")
+    if below:
+        print(f"{len(below)} component(s) are below their recorded floor. This is")
+        print("ADVISORY: the run still succeeds. Pass --enforce to make a breach")
+        print("exit non-zero (no make target does yet).")
+    else:
+        print("Every measured component is at or above its recorded floor. Floors")
+        print("are advisory — nothing here can fail a build without --enforce.")
 
     failures = [r for r in results if r.failed]
     if failures:
@@ -472,7 +554,17 @@ def main(argv: list[str] | None = None) -> int:
         metavar="PATH",
         help="Also write the measurements to PATH as JSON.",
     )
+    parser.add_argument(
+        "--enforce",
+        action="store_true",
+        help=(
+            "Exit non-zero when a component is below its floor in "
+            "scripts/coverage_floors.json. Off by default: the floors are "
+            "advisory, and no make target passes this yet."
+        ),
+    )
     args = parser.parse_args(argv)
+    floors = load_floors()
 
     def wanted(name: str) -> bool:
         return not args.only or any(f.lower() in name.lower() for f in args.only)
@@ -504,7 +596,7 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             results.append(measure_node(suite))
 
-        print_table(results)
+        print_table(results, floors)
 
         if args.json:
             Path(args.json).write_text(json.dumps(
@@ -518,6 +610,8 @@ def main(argv: list[str] | None = None) -> int:
                         "files_measured": r.files_measured,
                         "files_without_data": r.files_unimported,
                         "unimported_in_total": r.unimported_counted_in_total,
+                        "floor": floors.get(r.name),
+                        "verdict": verdict_for(r, floors)[0],
                         "failed": r.failed,
                     }
                     for r in results
@@ -527,8 +621,14 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         shutil.rmtree(_WORK, ignore_errors=True)
 
-    # Non-zero only when a suite could not be measured — never on a low number.
-    return 1 if any(r.failed for r in results) else 0
+    # Non-zero when a suite could not be measured at all. A component merely
+    # below its floor only counts under --enforce, which nothing passes yet:
+    # the floors are there to be read, not yet to stop a build.
+    if any(r.failed for r in results):
+        return 1
+    if args.enforce and any(verdict_for(r, floors)[0] == "BELOW" for r in results):
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

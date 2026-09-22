@@ -19,11 +19,10 @@ Until this existed the repository had no coverage measurement at all, so
 "coverage" was a count of test files rather than of lines. `make test-coverage`
 runs every suite under a coverage tool and prints one table.
 
-**It reports; it does not enforce.** There is deliberately no threshold, and a
-low number cannot fail a build. Establishing a baseline comes first, so that a
-threshold — when one is proposed — can be argued from measured numbers rather
-than from a guess. The target is not part of the pull-request pipeline either:
-it runs every suite and compiles the TypeScript ones first, which would roughly
+**It reports; it does not enforce.** Each component has a recorded floor and the
+table says whether it is met, but a component below its floor still exits 0 — see
+[Floors](#floors). The target is not part of the pull-request pipeline either: it
+runs every suite and compiles the TypeScript ones first, which would roughly
 double the time developers wait for feedback they cannot yet act on.
 
 ## Reading the table
@@ -102,14 +101,39 @@ component whose source roots match nothing on disk, is reported as `n/a` with a
 reason and exits non-zero — a misconfigured root would otherwise look like a
 component whose every file is covered.
 
-## Proposing a threshold later
+## Floors
 
-The sequence is deliberate: measure, agree, then enforce. When thresholds are
-proposed, per-component floors set just under the current numbers are the usual
-approach — they prevent regression without demanding new tests up front — and
-`make test-coverage JSON=...` gives the machine-readable numbers to set them
-from. A scheduled pipeline, rather than the pull-request one, is the natural
-place to track the trend, since nothing there is waiting on the result.
+`scripts/coverage_floors.json` records a floor per component, and the `Floor`
+column reports whether each is met:
+
+```
+Component         Lang    Lines  Covered  Total  Files  No data  Floor
+LMA SDK           python  19.8%  564      2854   15     15       19%    OK
+```
+
+**The floors are advisory.** A component below its floor is reported as `BELOW`
+and explained under `Notes:`, and the run still exits 0 — nothing here can fail a
+build. `--enforce` makes a breach exit non-zero, and no `make` target passes it;
+adding it to one is the single change that turns this from reporting into a gate.
+
+Each floor is the figure measured on 2026-09-22 rounded down to a whole percent,
+so there is under a point of headroom. They are set to catch coverage going
+*backwards*, not to demand that anyone improve it first. Three things follow:
+
+- A component that drops below its floor has regressed. Find out what stopped
+  being covered rather than lowering the number.
+- A component that climbs more than two points above its floor gets a note
+  suggesting you raise it, so a gain is held rather than banked as slack.
+- A component with no entry at all is reported as `—` with a note, not silently
+  treated as passing.
+
+`make test-coverage JSON=path` writes the same numbers, each component's floor,
+and its verdict as JSON, for anything that wants to track the trend over time.
+
+The sequence is deliberate: measure, record, then enforce. Turning on `--enforce`
+is worth doing once the numbers have been watched long enough to be trusted —
+a scheduled pipeline is the natural place for that, since nothing there is
+waiting on the result.
 
 ## See also
 

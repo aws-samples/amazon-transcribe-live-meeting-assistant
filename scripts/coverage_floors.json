@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Per-component line-coverage floors, in percent. Read by",
+    "scripts/coverage_report.py; see docs/test-coverage.md.",
+    "",
+    "ADVISORY ONLY. A component below its floor is reported as BELOW and",
+    "explained in the summary, but the run still exits 0 -- nothing here can fail",
+    "a build today. `--enforce` turns a breach into a non-zero exit, and no make",
+    "target passes it yet; adding it to one is the single change that flips this",
+    "from reporting to gating, once the numbers are trusted enough to gate on.",
+    "",
+    "Each floor is the measured figure on 2026-09-22 rounded down to a whole",
+    "percent, which leaves under a point of headroom. They are set to catch a",
+    "regression, not to demand improvement -- so when a component rises, raise its",
+    "floor rather than banking the slack. The report says so when it notices.",
+    "",
+    "The three Node figures are optimistic: their tools report only files a test",
+    "loaded, so files nothing imports are excluded from the percentage rather than",
+    "counted as zero. Compare like with like when moving them."
+  ],
+  "floors": {
+    "LMA SDK": 19,
+    "LMA CLI": 14,
+    "Lambda functions": 20,
+    "Lambda layers": 0,
+    "ASR MicroVM": 43,
+    "VP backend": 37,
+    "WebSocket transcriber": 70,
+    "React UI": 14
+  }
+}
