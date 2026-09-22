@@ -399,14 +399,19 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
         else:
             segment_id = str(uuid.uuid4())
 
-        if message.get("BeginOffsetMillis", None):
+        # Compared against None rather than tested for truth: a timestamp of 0 is
+        # a real value -- the first segment of a meeting begins at 0.0 -- and
+        # StartTime/EndTime are non-nullable in the schema, so leaving one unset
+        # loses the segment. StartTime/EndTime still take precedence over the
+        # millisecond offsets when a producer sends both.
+        if message.get("BeginOffsetMillis") is not None:
             start_time = message["BeginOffsetMillis"]
-        if message.get("StartTime", None):
+        if message.get("StartTime") is not None:
             start_time = message["StartTime"]
 
-        if message.get("EndOffsetMillis", None):
+        if message.get("EndOffsetMillis") is not None:
             end_time = message["EndOffsetMillis"]
-        if message.get("EndTime", None):
+        if message.get("EndTime") is not None:
             end_time = message["EndTime"]
 
         speaker = message.get("Speaker", None)

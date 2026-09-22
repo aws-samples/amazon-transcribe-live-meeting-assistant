@@ -334,10 +334,15 @@ test-cli: ## Run LMA CLI unit tests
 # top-level `pytest lambda_functions/` collides on duplicate module names. This
 # target discovers every dir containing test_*.py and runs pytest from within
 # it. No AWS required (the suites mock boto3 / set dummy env).
-test-lambdas: ## Run all Lambda function unit tests (no AWS; each dir isolated)
+#
+# LAMBDA_LAYERS_DIR is searched too. The layer holds the code the Lambdas share
+# (transcript normalisation, the TTLs, the AppSync helpers), so a test there
+# covers every function at once; it was previously outside this glob, which meant
+# a test placed beside the layer would have been collected by nothing.
+test-lambdas: ## Run all Lambda function + layer unit tests (no AWS; each dir isolated)
 	@echo "Running Lambda function unit tests..."
 	@FAILED=0; RAN=0; \
-	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(ASR_DIR)/lambda_functions -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
+	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(LAMBDA_LAYERS_DIR) $(ASR_DIR)/lambda_functions -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
 		files=$$(cd "$$d" && ls test_*.py 2>/dev/null); \
 		[ -z "$$files" ] && continue; \
 		RAN=$$((RAN+1)); \

@@ -33,6 +33,11 @@ dev = [
     # and the template's resolvers against it (see
     # lma-ai-stack/test/test_appsync_contract.py).
     "graphql-core>=3.2",
+    # The transcript_enrichment_layer imports jwt at module scope (it resolves a
+    # meeting's owner from a Cognito token), so its tests cannot import it
+    # without this. A runtime dependency of the layer itself — see
+    # lma-ai-stack/source/lambda_layers/transcript_enrichment_layer/requirements.txt.
+    "pyjwt>=2.0",
 ]
 
 [tool.setuptools.packages.find]
