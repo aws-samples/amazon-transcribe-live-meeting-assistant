@@ -1,1 +1,1 @@
-aws-sam-cli~=1.166.1
+aws-sam-cli~=1.166.2
