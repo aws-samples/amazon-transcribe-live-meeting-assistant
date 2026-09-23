@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 issue_remover = re.compile("<span class='issue-pill'>Issue Detected</span>")
 html_remover = re.compile("<[^>]*>")
-filler_remover = re.compile("(^| )([Uu]m|[Uu]h|[Ll]ike|[Mm]hm)[,]?")
 
 ddb = boto3.resource("dynamodb")
 ddbTable = ddb.Table(LCA_CALL_EVENTS_TABLE)
@@ -119,9 +118,10 @@ def preprocess_transcripts(transcripts, condense, includeSpeaker):
                     transcript = speakerName.strip() + ": " + transcript
 
         if condense:
+            # Strips UI markup only. Filler words are deliberately left in: see
+            # the note on remove_html below.
             transcript = remove_issues(transcript)
-            transcript = remove_html(transcript)
-            transcript = remove_filler_words(transcript).strip()
+            transcript = remove_html(transcript).strip()
             if len(transcript) > 1:
                 transcript = "\n" + transcript
         else:
@@ -135,11 +135,22 @@ def remove_issues(transcript_string):
 
 
 def remove_html(transcript_string):
+    """Strip the HTML the web UI renders, which is noise in a prompt.
+
+    Condensing removes *markup*, not speech. A filler-word pass used to run here
+    too, deleting "um", "uh", "mhm" and "like" -- but the models these transcripts
+    are summarised by are untroubled by disfluent speech, so the pass bought
+    nothing a model cared about while corrupting real words: the pattern had no
+    trailing word boundary, so "umbrella" became "brella" and "Likewise" became
+    "wise". Worse, most of its saving came from deleting every "like", including
+    the meaning-bearing ones -- "looks like it needs sign-off" lost its verb.
+
+    There is also no token pressure for it to relieve: TOKEN_COUNT defaults to 0
+    (no truncation) and the model's maxTokens bounds the output, not the input.
+    If transcript quality needs improving, that belongs in the ASR
+    configuration, not in a regex over its output.
+    """
     return re.sub(html_remover, "", transcript_string)
-
-
-def remove_filler_words(transcript_string):
-    return re.sub(filler_remover, "", transcript_string)
 
 
 def truncate_number_of_words(transcript_string, truncateLength):

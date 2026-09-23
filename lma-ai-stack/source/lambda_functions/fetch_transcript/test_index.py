@@ -400,20 +400,38 @@ def test_a_single_segment_meeting_yields_just_that_segment(
 # --------------------------------------------------------------------------
 
 
-def test_processing_strips_issue_markers_html_and_filler_words() -> None:
+def test_processing_strips_issue_markers_and_html() -> None:
     """The stored text carries UI markup that is meaningless to a model.
 
     Segments are rendered in the web UI, so they hold an issue-detected pill and
     other HTML; both reach the prompt verbatim unless processing is requested.
     """
     data = index.preprocess_transcripts(
-        [segment("Um, the <span class='issue-pill'>Issue Detected</span>budget <b>is</b> fine", 1)],
+        [segment("the <span class='issue-pill'>Issue Detected</span>budget <b>is</b> fine", 1)],
         True,
         False,
     )
-    # The filler word takes its trailing comma with it, so no stray punctuation
-    # is left where "Um," stood.
     assert data == ["\nthe budget is fine"]
+
+
+def test_processing_leaves_spoken_words_alone() -> None:
+    """Condensing removes markup, not speech.
+
+    Filler words stay: the models these transcripts are summarised by are
+    untroubled by disfluent speech, and the pass that used to strip them
+    corrupted real words ("umbrella" -> "brella") and deleted every
+    meaning-bearing "like" along with the filler ones.
+    """
+    spoken = "Um, I would like the umbrella policy reviewed. Likewise the contract."
+    assert index.preprocess_transcripts([segment(spoken, 1)], True, False) == [f"\n{spoken}"]
+
+
+def test_processing_does_not_truncate_words_that_begin_with_a_filler() -> None:
+    """The specific corruption the removed pass caused, pinned so it cannot return."""
+    for word in ("umbrella", "Likewise", "umbrage", "uhlan", "likelihood"):
+        assert word in index.preprocess_transcripts(
+            [segment(f"the {word} matters", 1)], True, False
+        )[0]
 
 
 def test_segment_text_is_left_exactly_as_stored_when_processing_is_not_requested() -> None:
@@ -432,13 +450,13 @@ def test_processing_is_off_unless_the_event_asks_for_it(
 def test_a_segment_that_processes_away_to_nothing_adds_no_blank_line(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A segment of nothing but filler leaves no trace in the transcript.
+    """A segment of nothing but markup leaves no trace in the transcript.
 
     An empty line between two turns reads as a pause that did not happen, and
     wastes a token in every prompt.
     """
     data = index.preprocess_transcripts(
-        [segment("Um", 1), segment("the budget is fine", 2)], True, False
+        [segment("<b></b>", 1), segment("the budget is fine", 2)], True, False
     )
     assert data == ["", "\nthe budget is fine"]
     assert "".join(data) == "\nthe budget is fine"
@@ -644,3 +662,19 @@ def test_the_read_is_bounded_by_a_page_limit(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(index, "ddbTable", table)
     index.lambda_handler({"CallId": CALL_ID}, None)
     assert len(table.queries) == index.MAX_TRANSCRIPT_PAGES
+
+
+def test_markup_at_the_start_of_a_segment_leaves_no_leading_space() -> None:
+    """Stripping markup can expose whitespace that was behind it.
+
+    Each segment is prefixed with a newline, so a surviving leading space would
+    indent that turn in every prompt. Mutation testing found this unasserted:
+    removing the strip() changed nothing any test could see.
+    """
+    data = index.preprocess_transcripts(
+        [segment("<span class='issue-pill'>Issue Detected</span> the budget is fine", 1)],
+        True,
+        False,
+    )
+    assert data == ["\nthe budget is fine"]
+    assert not data[0].startswith("\n ")
