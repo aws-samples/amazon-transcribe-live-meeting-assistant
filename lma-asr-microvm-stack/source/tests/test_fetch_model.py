@@ -535,3 +535,52 @@ def test_run_keeps_a_cohere_encoder_data_file_under_its_archive_name(tmp_path: P
     assert (dest / "encoder.int8.onnx.data").read_bytes() == b"weights"
     assert (dest / "tokens.txt").is_file()
     assert not (dest / "joiner.onnx").exists()
+
+
+def test_run_places_a_preview_model_beside_the_authority(tmp_path: Path) -> None:
+    main_archive = make_archive(tmp_path)
+    staging = tmp_path / "sherpa-onnx-preview-int8"
+    staging.mkdir()
+    for name, payload in (
+        ("encoder.int8.onnx", b"p-encoder"),
+        ("decoder.int8.onnx", b"p-decoder"),
+        ("joiner.int8.onnx", b"p-joiner"),
+        ("tokens.txt", b"p\n"),
+    ):
+        (staging / name).write_bytes(payload)
+    preview_archive = tmp_path / "preview.tar.bz2"
+    with tarfile.open(preview_archive, "w:bz2") as tar:
+        tar.add(staging, arcname=staging.name)
+    digests = {
+        "main": hashlib.sha256(main_archive.read_bytes()).hexdigest(),
+        "preview": hashlib.sha256(preview_archive.read_bytes()).hexdigest(),
+    }
+    env = dict(ENV_TEMPLATE)
+    env.update(
+        {
+            "ASR_MODEL_SHA256": digests["main"],
+            "ASR_PREVIEW_MODEL_ID": "preview-model",
+            "ASR_PREVIEW_MODEL_URL": "https://example.invalid/preview.tar.bz2",
+            "ASR_PREVIEW_MODEL_SHA256": digests["preview"],
+            "ASR_PREVIEW_MODEL_ARCHIVE": "tar.bz2",
+            "ASR_PREVIEW_MODEL_STRIP_COMPONENTS": "1",
+            "ASR_PREVIEW_MODEL_ENCODER_FILE": "encoder.int8.onnx",
+            "ASR_PREVIEW_MODEL_DECODER_FILE": "decoder.int8.onnx",
+            "ASR_PREVIEW_MODEL_JOINER_FILE": "joiner.int8.onnx",
+            "ASR_PREVIEW_MODEL_TOKENS_FILE": "tokens.txt",
+        }
+    )
+    env_path = write_env(tmp_path / "model.env", env)
+    dest = tmp_path / "opt-models"
+
+    def fake_download(url: str, target: Path) -> str:
+        source = preview_archive if "preview" in url else main_archive
+        target.write_bytes(source.read_bytes())
+        return digests["preview" if "preview" in url else "main"]
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+    assert (dest / "preview" / "encoder.onnx").read_bytes() == b"p-encoder"
+    assert (dest / "preview" / "joiner.onnx").read_bytes() == b"p-joiner"
+    assert (dest / "preview" / "tokens.txt").read_bytes() == b"p\n"
+    assert (dest / "encoder.onnx").read_bytes() != b"p-encoder"

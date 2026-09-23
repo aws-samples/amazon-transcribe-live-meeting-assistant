@@ -33,6 +33,7 @@ import os
 import struct
 import sys
 from collections.abc import Callable, Sequence
+from typing import cast
 
 from asr_protocol import Config as _Config
 
@@ -49,6 +50,7 @@ from asr_server.recognizer import (
     SherpaOnlineRecognizer,
     build_model_config,
 )
+from asr_server.two_pass import TwoPassRecognizer, UtteranceRecognizer, preview_model_dir
 
 __all__ = [
     "RecognizerFactory",
@@ -206,7 +208,7 @@ def _parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--engine",
-        choices=("streaming", "accurate"),
+        choices=("streaming", "accurate", "two_pass"),
         default=os.environ.get("ASR_ENGINE", "streaming"),
         help="engine to warm (default: $ASR_ENGINE or streaming)",
     )
@@ -289,6 +291,24 @@ def _build_recognizer(
     offline_recognizer_factory: OfflineRecognizerFactory,
 ) -> Recognizer:
     """Resolve the config and build the recognizer for the selected engine."""
+    if args.engine == "two_pass":
+        offline_config = offline_config_from_args(args)
+        preview_config = build_model_config(
+            model_dir=preview_model_dir(args.model),
+            sample_rate=args.sample_rate,
+            num_threads=args.num_threads,
+        )
+        _LOG.info(
+            "warming 'two_pass' engine: authority=%s preview=%s",
+            offline_config.encoder,
+            preview_config.encoder,
+        )
+        preview = recognizer_factory(preview_config)
+        return TwoPassRecognizer(
+            cast("UtteranceRecognizer", offline_recognizer_factory(offline_config)),
+            lambda: preview,
+            sample_rate=offline_config.sample_rate,
+        )
     if args.engine == "accurate":
         offline_config = offline_config_from_args(args)
         _LOG.info(

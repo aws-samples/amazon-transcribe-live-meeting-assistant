@@ -134,6 +134,8 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `qwen3-asr-titanet-small` | Qwen3-ASR 0.6B (offline engine, LLM decoder, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `qwen3-asr-transcription-only` | Qwen3-ASR 0.6B (offline engine) | — | — | — | Apache-2.0 + MIT (VAD) |
 | `cohere-transcribe-titanet-small` | Cohere Transcribe 2B (offline engine, 14 languages, one baked) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-live-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-live-nemotron35-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a punctuated Nemotron 3.5 live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + OpenMDW-1.1 + CC-BY-4.0 + MIT + MIT (VAD) |
 
 The default stays FastConformer: the same cache-aware streaming FastConformer-RNNT
 architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, trained on NeMo ASRSET —
@@ -199,6 +201,14 @@ utterance has run 10 s, or 20 s of speech at the latest, so a row arrives within
 test meeting at a real-time factor of 0.14 on a 4-core host with punctuated, cased text.
 See *Not included: Whisper* below for why Parakeet TDT rather than Whisper is the
 offline model offered.
+
+**Two-pass bundles.** `parakeet-tdt-v3-live-titanet-small` and
+`parakeet-tdt-v3-live-nemotron35-titanet-small` pair Parakeet with a streaming model that
+previews the open utterance: the live row shows the streaming text as it is spoken, and
+Parakeet's decode replaces it under the same segment when the utterance closes. Rows,
+word timings and speaker labels are Parakeet's. The preview adds the streaming model's
+CPU per session, about 0.26 real time for FastConformer and 0.6 to 0.9 for Nemotron 3.5,
+so the Nemotron variant suits one session per MicroVM. Neither has run live yet.
 
 ## Choosing the engine
 
@@ -692,8 +702,8 @@ complying with their licences.**
 | Component | Licence |
 |---|---|
 | `sherpa-onnx` runtime | Apache-2.0 |
-| NVIDIA FastConformer streaming EN 480 ms (ASR, default and transcription-only bundles) | CC-BY-4.0 |
-| NVIDIA Nemotron 3.5 ASR streaming 0.6B (ASR, `nemotron35-titanet-small`) | OpenMDW-1.1 |
+| NVIDIA FastConformer streaming EN 480 ms (ASR, FastConformer bundles and the Parakeet v3 live preview) | CC-BY-4.0 |
+| NVIDIA Nemotron 3.5 ASR streaming 0.6B (ASR, `nemotron35-titanet-small` and the Nemotron 3.5 live preview) | OpenMDW-1.1 |
 | NVIDIA Nemotron speech streaming EN 0.6B (ASR, `nemotron-titanet-small`) | NVIDIA Open Model License, not redistributable |
 | NVIDIA Parakeet TDT 0.6B v3 and v2 (ASR, offline bundles) | CC-BY-4.0 |
 | Qwen3-ASR 0.6B (ASR, offline Qwen bundles; third-party ONNX export re-hosted by k2-fsa) | Apache-2.0 |

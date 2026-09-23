@@ -789,3 +789,60 @@ def test_a_cohere_transcribe_model_needs_its_data_file_and_cannot_stream() -> No
         index.resolve({"BundleId": "bundle-cohere"}, incomplete)
     with pytest.raises(index.ResolutionError, match="cannot stream"):
         index.resolve({"BundleId": "bundle-cohere"}, _catalog_with_cohere(engine="streaming"))
+
+
+def _catalog_with_preview(main_engine: str = "accurate", preview_engine: str = "streaming") -> dict:
+    catalog = json.loads(json.dumps(CATALOG))
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["engine"] = main_engine
+    preview_model = next(m for m in catalog["models"] if m["id"] == "model-a")
+    preview_model["engine"] = preview_engine
+    offline = next(b for b in catalog["bundles"] if b["id"] == "bundle-offline")
+    offline["vadModelId"] = "silero"
+    catalog["bundles"].append(
+        {
+            **offline,
+            "id": "bundle-two-pass",
+            "previewModelId": "model-a",
+            "vadModelId": "none" if main_engine == "streaming" else "silero",
+        }
+    )
+    catalog["vadModels"] = [
+        {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}
+    ]
+    return catalog
+
+
+def test_a_two_pass_bundle_selects_the_two_pass_engine_and_names_its_preview() -> None:
+    selection = index.resolve({"BundleId": "bundle-two-pass"}, _catalog_with_preview())
+    rendered = index.render_model_env(selection)
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert values["ASR_ENGINE"] == "two_pass"
+    assert values["ASR_MODEL_ENGINE"] == "accurate"
+    assert values["ASR_PREVIEW_MODEL_ID"] == "model-a"
+    assert values["ASR_PREVIEW_MODEL_ENCODER_FILE"] == "encoder.int8.onnx"
+    assert values["ASR_PREVIEW_MODEL_SHA256"] == "a" * 64
+
+
+def test_a_bundle_without_a_preview_renders_empty_preview_entries() -> None:
+    selection = index.resolve({"BundleId": "bundle-offline"}, _catalog_with_preview())
+    rendered = index.render_model_env(selection)
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert values["ASR_ENGINE"] == "accurate"
+    assert values["ASR_PREVIEW_MODEL_ID"] == ""
+    assert values["ASR_PREVIEW_MODEL_URL"] == ""
+
+
+def test_a_preview_needs_an_offline_authority_and_a_streaming_transducer() -> None:
+    with pytest.raises(index.ResolutionError, match="only an offline"):
+        index.resolve({"BundleId": "bundle-two-pass"}, _catalog_with_preview(main_engine="streaming"))
+    with pytest.raises(index.ResolutionError, match="streaming transducer"):
+        index.resolve({"BundleId": "bundle-two-pass"}, _catalog_with_preview(preview_engine="accurate"))

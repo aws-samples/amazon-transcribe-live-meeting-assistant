@@ -55,6 +55,8 @@ Parameters:
       - qwen3-asr-titanet-small
       - qwen3-asr-transcription-only
       - cohere-transcribe-titanet-small
+      - parakeet-tdt-v3-live-titanet-small
+      - parakeet-tdt-v3-live-nemotron35-titanet-small
     Description: >-
       Which model bundle the MicroVM ASR engine is built from. A bundle names the
       ASR model, the speaker-embedding model and the turn-detection model TOGETHER
@@ -159,6 +161,10 @@ Mappings:
     qwen3-asr-transcription-only:
       MiB: 8192
     cohere-transcribe-titanet-small:
+      MiB: 8192
+    parakeet-tdt-v3-live-titanet-small:
+      MiB: 8192
+    parakeet-tdt-v3-live-nemotron35-titanet-small:
       MiB: 8192
 
 Resources:
@@ -598,6 +604,9 @@ Outputs:
   AsrModelId:
     Description: Model baked into the image.
     Value: !GetAtt AsrImageSource.ModelId
+  AsrPreviewModelId:
+    Description: Streaming model previewing the open utterance in a two-pass bundle, or none.
+    Value: !GetAtt AsrImageSource.PreviewModelId
 
   AsrModelLicense:
     Description: Licence of the model baked into the image.

@@ -186,6 +186,8 @@ rebuilds the MicroVM image (~20 minutes).
 | `qwen3-asr-titanet-small` | Qwen3-ASR 0.6B (offline engine, multilingual) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | Apache-2.0 + MIT + CC-BY-4.0 + MIT | Per utterance only |
 | `qwen3-asr-transcription-only` | Qwen3-ASR 0.6B (offline engine) + Silero VAD | Apache-2.0 + MIT | No |
 | `cohere-transcribe-titanet-small` | Cohere Transcribe 2B (offline engine, 14 languages, one baked at build) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | Apache-2.0 + MIT + CC-BY-4.0 + MIT | Per utterance only |
+| `parakeet-tdt-v3-live-titanet-small` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + CC-BY-4.0 + MIT + CC-BY-4.0 + MIT | Yes |
+| `parakeet-tdt-v3-live-nemotron35-titanet-small` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + OpenMDW-1.1 + MIT + CC-BY-4.0 + MIT | Yes |
 
 There are deliberately no parameters for supplying a model URL: every model is a
 curated entry in the ASR stack's `catalog.json` with its checksum pinned and, for a

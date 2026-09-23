@@ -253,6 +253,12 @@ class SherpaOfflineRecognizer(Recognizer):
         # and resets the gate; decode that trailing utterance so it is not dropped.
         return self._handle_vad_events(self._vad.flush())
 
+    def current_segment(self) -> int:
+        return self._segment
+
+    def open_segment_start(self) -> float | None:
+        return self._seg_start_t
+
     def _handle_vad_events(self, vad_events: Sequence[Any]) -> list[Event]:
         events: list[Event] = []
         for ve in vad_events:

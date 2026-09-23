@@ -56,6 +56,17 @@ KIND_FILES = {
 }
 
 
+def preview_env_for(env: dict[str, str]) -> dict[str, str]:
+    """The preview model's entries, renamed so the shared helpers can place them."""
+    preview = {
+        "ASR_MODEL_" + key[len(PREVIEW_PREFIX) :]: value
+        for key, value in env.items()
+        if key.startswith(PREVIEW_PREFIX)
+    }
+    preview.setdefault("ASR_MODEL_KIND", "transducer")
+    return preview
+
+
 def model_files_for(env: dict[str, str]) -> dict[str, str]:
     kind = env.get("ASR_MODEL_KIND", "transducer")
     if kind not in KIND_FILES:
@@ -64,6 +75,8 @@ def model_files_for(env: dict[str, str]) -> dict[str, str]:
         )
     return KIND_FILES[kind]
 
+PREVIEW_PREFIX = "ASR_PREVIEW_MODEL_"
+PREVIEW_SUBDIR = "preview"
 SPEAKER_MODEL_NAME = "speaker_embedding.onnx"
 SEGMENTATION_MODEL_NAME = "segmentation.onnx"
 # Only the offline ("accurate") engine loads this: an offline model cannot stream, so
@@ -250,6 +263,28 @@ def run(argv: list[str]) -> int:
                 dest,
             )
             place_model(extracted, env, dest)
+            preview_env = preview_env_for(env)
+            if preview_env.get("ASR_MODEL_URL"):
+                preview_dest = dest / PREVIEW_SUBDIR
+                preview_dest.mkdir(parents=True, exist_ok=True)
+                missing = [key for key in model_files_for(preview_env) if key not in preview_env]
+                if missing:
+                    raise ModelFetchError(f"{env_path} preview entries are missing {missing}")
+                preview_kind = preview_env.get("ASR_MODEL_ARCHIVE", "tar.bz2")
+                preview_archive = tmpdir / f"preview.{preview_kind}"
+                fetch_verified(
+                    preview_env.get("ASR_MODEL_URL", ""),
+                    preview_env.get("ASR_MODEL_SHA256", ""),
+                    preview_archive,
+                    f"preview model {preview_env.get('ASR_MODEL_ID', '?')}",
+                )
+                preview_extracted = extract(
+                    preview_archive,
+                    preview_kind,
+                    int(preview_env.get("ASR_MODEL_STRIP_COMPONENTS", "1")),
+                    preview_dest,
+                )
+                place_model(preview_extracted, preview_env, preview_dest)
 
             speaker_url = env.get("ASR_SPEAKER_MODEL_URL", "")
             if speaker_url:

@@ -1422,3 +1422,32 @@ def test_split_on_speaker_change_reaches_the_session_config() -> None:
     assert config.split_on_speaker_change is False
     assert Config(sample_rate=16000).split_on_speaker_change is None
 
+
+
+def test_engine_factory_builds_the_two_pass_engine_from_both_configs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pathlib import Path
+
+    import asr_server.ws_server as ws_server_mod
+
+    monkeypatch.setenv("ASR_ENGINE", "two_pass")
+    monkeypatch.delenv("ASR_MODEL_DIR", raising=False)
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(ws_server_mod, "build_offline_model_config", lambda: "offline-cfg")
+
+    def _preview(**kwargs: object) -> str:
+        calls["preview"] = kwargs
+        return "preview-cfg"
+
+    def _engine(offline: object, preview: object) -> str:
+        calls["engine"] = (offline, preview)
+        return "engine"
+
+    monkeypatch.setattr(ws_server_mod, "build_model_config", _preview)
+    monkeypatch.setattr(ws_server_mod, "create_two_pass_engine", _engine)
+    monkeypatch.setattr(ws_server_mod, "diarization_enabled", lambda: False)
+
+    assert ws_server_mod._default_engine_factory() == "engine"
+    assert calls["preview"] == {"model_dir": Path("/opt/models/preview")}
+    assert calls["engine"] == ("offline-cfg", "preview-cfg")

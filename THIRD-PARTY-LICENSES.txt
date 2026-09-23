@@ -517,12 +517,14 @@ is offered only for deployments that accept that licence.
 
 Speech recognition:
 
-  * NVIDIA FastConformer hybrid large streaming multi, EN (streaming; default bundle
-    and fastconformer-transcription-only)
+  * NVIDIA FastConformer hybrid large streaming multi, EN (streaming;
+    fastconformer-titanet-small, fastconformer-transcription-only and the preview in
+    parakeet-tdt-v3-live-titanet-small)
     CC-BY-4.0
     https://huggingface.co/nvidia/stt_en_fastconformer_hybrid_large_streaming_multi
 
-  * NVIDIA Nemotron 3.5 ASR streaming 0.6B (streaming; nemotron35-titanet-small)
+  * NVIDIA Nemotron 3.5 ASR streaming 0.6B (streaming; nemotron35-titanet-small and the
+    preview in parakeet-tdt-v3-live-nemotron35-titanet-small)
     OpenMDW-1.1
     https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b
 

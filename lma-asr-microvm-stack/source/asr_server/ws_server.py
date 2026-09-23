@@ -87,6 +87,7 @@ from asr_server.recognizer import (
     build_model_config,
     create_sherpa_engine,
 )
+from asr_server.two_pass import create_two_pass_engine, preview_model_dir
 
 __all__ = [
     "DEFAULT_PORT",
@@ -972,6 +973,8 @@ def _default_engine_factory() -> RecognizerEngine:
       ``endpointing_ms`` maps onto the backend's rule2 trailing silence.
     * ``accurate`` → the VAD-segmented offline :class:`SherpaOfflineEngine`
       (Parakeet TDT, R4.4); ``endpointing_ms`` maps onto the VAD trailing silence.
+    * ``two_pass`` → the offline engine for segmentation and finals, plus a streaming
+      engine whose text previews the open utterance (``preview/`` beside the model).
 
     Model paths and thread count come from the environment (no hardcoded absolute
     paths). Config resolution is delegated to the shared ``build_*_model_config``
@@ -989,6 +992,10 @@ def _default_engine_factory() -> RecognizerEngine:
     if engine == "accurate":
         offline_config = build_offline_model_config()
         inner: RecognizerEngine = create_sherpa_offline_engine(offline_config)
+    elif engine == "two_pass":
+        offline_config = build_offline_model_config()
+        preview_config = build_model_config(model_dir=preview_model_dir())
+        inner = create_two_pass_engine(offline_config, preview_config)
     else:
         model_config = build_model_config()
         inner = create_sherpa_engine(model_config)

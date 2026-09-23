@@ -131,6 +131,38 @@
       "redistributable": true,
       "licenceSummary": "Apache-2.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
       "notes": "Not yet run live. Speaker labels are one per utterance (no word timings). Decodes English as baked; set decodeLanguage on the model for another of its 14 languages."
+    },
+    {
+      "id": "parakeet-tdt-v3-live-titanet-small",
+      "name": "Parakeet TDT 0.6B v3 offline with a FastConformer live preview + TitaNet-small (CC-BY-4.0)",
+      "status": "calibrated",
+      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.5,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "previewModelId": "fastconformer-streaming-en-480ms-int8",
+      "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (preview ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
+      "notes": "Two-pass: FastConformer streams a live preview of the open utterance and Parakeet v3 replaces it when the utterance closes. Rows and speaker labels are Parakeet's. Not yet run live."
+    },
+    {
+      "id": "parakeet-tdt-v3-live-nemotron35-titanet-small",
+      "name": "Parakeet TDT 0.6B v3 offline with a Nemotron 3.5 live preview + TitaNet-small (CC-BY-4.0 + OpenMDW-1.1)",
+      "status": "calibrated",
+      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.5,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "previewModelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
+      "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (preview ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
+      "notes": "Two-pass with a punctuated, cased preview from Nemotron 3.5; Parakeet v3 replaces it when the utterance closes. Heavier: the preview alone ran at a real-time factor of 0.6-0.9 for one session on a 4-core host, so two sessions per MicroVM may lag. Not yet run live."
     }
   ],
   "models": [

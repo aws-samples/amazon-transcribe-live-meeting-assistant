@@ -407,3 +407,27 @@ def test_warmup_fails_closed_when_wheel_present_but_model_files_missing(
     assert not any(
         "resident and warm" in r.getMessage() for r in caplog.records
     )
+
+
+def test_run_warms_two_pass_engine_through_both_factories() -> None:
+    streaming_calls: list[SherpaModelConfig] = []
+    offline_calls: list[OfflineModelConfig] = []
+    streaming = _factory([("hello", True)])
+    offline = _offline_factory([("hi there", "hi there")])
+
+    def _streaming(config: SherpaModelConfig) -> Recognizer:
+        streaming_calls.append(config)
+        return streaming(config)
+
+    def _offline(config: OfflineModelConfig) -> Recognizer:
+        offline_calls.append(config)
+        return offline(config)
+
+    code = run(
+        ["--model", "/opt/models", "--engine", "two_pass", "--duration-ms", "100"],
+        recognizer_factory=_streaming,
+        offline_recognizer_factory=_offline,
+    )
+    assert code == 0
+    assert [str(c.encoder) for c in streaming_calls] == ["/opt/models/preview/encoder.onnx"]
+    assert [str(c.encoder) for c in offline_calls] == ["/opt/models/encoder.onnx"]
