@@ -209,6 +209,8 @@ patterns.
 | `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud rules |
 | `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
 | `.claude/skills/pr-review.md` | Reviewing a GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+| `.claude/skills/dependabot-prs.md` | Triaging, verifying and merging Dependabot dependency PRs |
+| `.claude/skills/prepare-changelog.md` | Writing or updating CHANGELOG entries for a release |
 | `.claude/skills/integ-tests.md` | Running end-to-end integration tests against a live deployed stack (`make integ-tests`) |
 
 When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and
