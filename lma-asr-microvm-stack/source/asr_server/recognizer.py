@@ -162,6 +162,7 @@ class SessionConfig:
     live_turn_cut: bool | None = None
     turn_cut_interval_ms: int | None = None
     max_open_segment_ms: int | None = None
+    diarize: bool | None = None
 
 
 class SessionConfigError(ValueError):
@@ -500,7 +501,7 @@ class SherpaModelConfig:
     # Endpointing rules in seconds, derived from ``Config.endpointing_ms``.
     rule1_min_trailing_silence: float = 2.4
     rule2_min_trailing_silence: float = 1.2
-    rule3_min_utterance_length: float = 20.0
+    rule3_min_utterance_length: float = 60.0
     model_files: list[Path] = field(default_factory=list)
 
 

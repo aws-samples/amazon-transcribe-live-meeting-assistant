@@ -168,7 +168,7 @@ def test_from_endpointing_ms_maps_to_rule2() -> None:
     cfg = EndpointingConfig.from_endpointing_ms(800)
     assert cfg.rule2_min_trailing_silence_s == pytest.approx(0.8)
     assert cfg.rule1_min_trailing_silence_s == pytest.approx(2.4)  # default kept
-    assert cfg.rule3_min_utterance_length_s == pytest.approx(20.0)  # default kept
+    assert cfg.rule3_min_utterance_length_s == pytest.approx(60.0)  # default kept
 
 
 def test_default_thresholds_match_recognizer_presets() -> None:
@@ -176,7 +176,7 @@ def test_default_thresholds_match_recognizer_presets() -> None:
     cfg = EndpointingConfig()
     assert cfg.rule1_min_trailing_silence_s == pytest.approx(2.4)
     assert cfg.rule2_min_trailing_silence_s == pytest.approx(1.2)
-    assert cfg.rule3_min_utterance_length_s == pytest.approx(20.0)
+    assert cfg.rule3_min_utterance_length_s == pytest.approx(60.0)
 
 
 def test_from_endpointing_ms_zero_is_allowed() -> None:

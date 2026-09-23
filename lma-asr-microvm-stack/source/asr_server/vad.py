@@ -158,6 +158,9 @@ class VadGate:
         min_silence_ms: int = 100,
         min_speech_ms: int = 250,
         speech_pad_ms: int = 30,
+        max_speech_ms: int = 0,
+        long_speech_ms: int = 0,
+        long_speech_silence_ms: int = 0,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
@@ -170,6 +173,12 @@ class VadGate:
             raise ValueError("threshold must be in [0, 1]")
         if min_silence_ms < 0 or min_speech_ms < 0 or speech_pad_ms < 0:
             raise ValueError("min_silence_ms, min_speech_ms and speech_pad_ms must be >= 0")
+        if min(max_speech_ms, long_speech_ms, long_speech_silence_ms) < 0:
+            raise ValueError(
+                "max_speech_ms, long_speech_ms and long_speech_silence_ms must be >= 0"
+            )
+        if max_speech_ms and long_speech_ms and long_speech_ms > max_speech_ms:
+            raise ValueError("long_speech_ms must not exceed max_speech_ms")
 
         resolved_neg = threshold - _NEG_THRESHOLD_MARGIN if neg_threshold is None else neg_threshold
         if not 0.0 <= resolved_neg <= threshold:
@@ -183,6 +192,9 @@ class VadGate:
         self._min_silence_s = min_silence_ms / 1000.0
         self._min_speech_s = min_speech_ms / 1000.0
         self._speech_pad_s = speech_pad_ms / 1000.0
+        self._max_speech_s = max_speech_ms / 1000.0
+        self._long_speech_s = long_speech_ms / 1000.0
+        self._long_speech_silence_s = long_speech_silence_ms / 1000.0
 
         self._buffer: list[float] = []
         self._processed_samples = 0  # samples pulled into frames (drives timestamps)
@@ -207,6 +219,9 @@ class VadGate:
             min_silence_ms=config.min_silence_ms,
             min_speech_ms=config.min_speech_ms,
             speech_pad_ms=config.speech_pad_ms,
+            max_speech_ms=config.max_speech_ms,
+            long_speech_ms=config.long_speech_ms,
+            long_speech_silence_ms=config.long_speech_silence_ms,
         )
 
     @property
@@ -270,6 +285,12 @@ class VadGate:
     def _on_speech_frame(self, frame_start_t: float, frame_end_t: float) -> list[VadEvent]:
         self._silence_start_t = None  # speech (re)confirmed: cancel pending end
         if self._triggered:
+            if self._max_speech_s and frame_end_t - self._seg_start_t >= self._max_speech_s:
+                self._seg_start_t = frame_end_t
+                return [
+                    VadEvent(kind="speech_end", t=frame_end_t),
+                    VadEvent(kind="speech_start", t=frame_end_t),
+                ]
             return []
         # Accumulating a candidate run: record its true onset on the first frame.
         if self._candidate_start_t is None:
@@ -296,7 +317,7 @@ class VadGate:
                 return []
             if self._silence_start_t is None:
                 self._silence_start_t = frame_start_t
-            if frame_end_t - self._silence_start_t >= self._min_silence_s:
+            if frame_end_t - self._silence_start_t >= self._required_silence_s():
                 end = self._silence_start_t + self._speech_pad_s
                 self._triggered = False
                 self._silence_start_t = None
@@ -306,6 +327,15 @@ class VadGate:
         # open (pending silence timer keeps running); an unconfirmed candidate also
         # holds, since its run has not cleanly dropped below the negative threshold.
         return []
+
+    def _required_silence_s(self) -> float:
+        if (
+            self._long_speech_s
+            and self._silence_start_t is not None
+            and self._silence_start_t - self._seg_start_t >= self._long_speech_s
+        ):
+            return min(self._min_silence_s, self._long_speech_silence_s)
+        return self._min_silence_s
 
 
 def to_segments(events: Sequence[VadEvent]) -> list[SpeechSegment]:
@@ -345,6 +375,9 @@ class SileroVadConfig:
     min_silence_ms: int = 100
     min_speech_ms: int = 250
     speech_pad_ms: int = 30
+    max_speech_ms: int = 20000
+    long_speech_ms: int = 10000
+    long_speech_silence_ms: int = 300
     num_threads: int = 1
     provider: str = "cpu"
 

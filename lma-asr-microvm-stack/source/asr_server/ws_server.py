@@ -476,6 +476,7 @@ class AsrSession:
                 session_config = SessionConfig(
                     sample_rate=config.sample_rate,
                     endpointing_ms=config.endpointing_ms,
+                    diarize=config.diarize,
                     # Diarization knobs live in the per-session speaker registry
                     # (not the shared graph), so they can be honoured per session.
                     speaker_threshold=config.speaker_threshold,

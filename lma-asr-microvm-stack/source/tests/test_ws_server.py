@@ -964,6 +964,7 @@ async def test_negotiated_config_is_threaded_into_new_session() -> None:
             # override it for every client that does not send the field.
             speaker_threshold=None,
             max_speakers=0,
+            diarize=False,
         )
     ]
 

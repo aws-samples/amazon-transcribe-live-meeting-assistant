@@ -611,6 +611,7 @@ class DiarizingRecognizer(Recognizer):
         turn_cut_interval_ms: int = 1000,
         max_open_segment_ms: int = 20000,
         min_turn_ms: int = 700,
+        label_speakers: bool = True,
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
@@ -641,7 +642,10 @@ class DiarizingRecognizer(Recognizer):
         # Most recently identified speaker: labels provisional partials and covers
         # segments too short to embed.
         self._current_speaker: str | None = None
-        self._turn_detector = turn_detector if split_on_speaker_change else None
+        self._label_speakers = label_speakers
+        self._turn_detector = (
+            turn_detector if split_on_speaker_change and label_speakers else None
+        )
         # Splitting one inner segment into several finals consumes extra wire
         # segment numbers, so outbound numbering runs ahead of the inner
         # recogniser's by this much. Partials are renumbered with it too, which is
@@ -663,15 +667,18 @@ class DiarizingRecognizer(Recognizer):
         # Audio time of the last boundary search, so the segmentation model runs about
         # once per turn_cut_interval_ms rather than on every hypothesis change.
         self._last_cut_check = 0.0
-        _LOG.info(
-            "speaker registry ready: threshold=%.2f max_speakers=%d min_segment_ms=%d "
-            "split_on_speaker_change=%s live_turn_cut=%s",
-            threshold,
-            max_speakers,
-            min_segment_ms,
-            split_on_speaker_change,
-            live_turn_cut,
-        )
+        if label_speakers:
+            _LOG.info(
+                "speaker registry ready: threshold=%.2f max_speakers=%d min_segment_ms=%d "
+                "split_on_speaker_change=%s live_turn_cut=%s",
+                threshold,
+                max_speakers,
+                min_segment_ms,
+                split_on_speaker_change,
+                live_turn_cut,
+            )
+        else:
+            _LOG.info("speaker labels off: rows cut at %d ms", max_open_segment_ms)
 
     @property
     def registry(self) -> SpeakerRegistry:
@@ -733,12 +740,13 @@ class DiarizingRecognizer(Recognizer):
             return corrections
 
         segment = self._slice(event.start, event.end)
+        origin = max(event.start or 0.0, self._buffer_base / self._sample_rate)
         # Consume the segment's audio: segments are monotonic and non-overlapping,
         # so nothing at or before this end can be needed again (bounds memory).
         if event.end is not None:
             self._prune_before(event.end)
 
-        parts = self._parts(event, segment)
+        parts = self._parts(event, segment, origin=origin)
         labelled: list[Event] = []
         for index, part in enumerate(parts):
             speaker = self._identify(part.samples)
@@ -877,7 +885,7 @@ class DiarizingRecognizer(Recognizer):
         it is using to decode, and text quality is already the weaker half of this
         engine. Cutting here leaves the decode untouched.
         """
-        if not self._live_turn_cut or self._turn_detector is None:
+        if not self._live_turn_cut:
             return []
         words = self._inner.current_words()
         if len(words) < 2:
@@ -908,22 +916,22 @@ class DiarizingRecognizer(Recognizer):
         if not samples:
             return None
         detector = self._turn_detector
-        if detector is None:
-            return None
-        try:
-            detected = detector.detect_samples(samples)
-        except Exception:  # noqa: BLE001 - detection must never break transcription
-            _LOG.warning("live turn detection failed at %.2fs", now, exc_info=True)
-            return None
+        usable: list[float] = []
+        if detector is not None:
+            try:
+                detected = detector.detect_samples(samples)
+            except Exception:  # noqa: BLE001 - detection must never break transcription
+                _LOG.warning("live turn detection failed at %.2fs", now, exc_info=True)
+                return None
 
-        # A boundary is only actionable once enough audio has followed it to show the
-        # change persisted, and once enough precedes it to embed. Take the LATEST such
-        # boundary so as much as possible settles in one row.
-        usable = [
-            boundary
-            for boundary in detected.boundaries
-            if boundary >= min_segment_sec and (open_sec - boundary) >= self._min_turn
-        ]
+            # A boundary is only actionable once enough audio has followed it to show the
+            # change persisted, and once enough precedes it to embed. Take the LATEST such
+            # boundary so as much as possible settles in one row.
+            usable = [
+                boundary
+                for boundary in detected.boundaries
+                if boundary >= min_segment_sec and (open_sec - boundary) >= self._min_turn
+            ]
         if usable:
             return start + max(usable)
 
@@ -981,8 +989,13 @@ class DiarizingRecognizer(Recognizer):
 
 
 
-    def _parts(self, event: Event, segment: list[float]) -> list[_SegmentPart]:
+    def _parts(
+        self, event: Event, segment: list[float], *, origin: float | None = None
+    ) -> list[_SegmentPart]:
         """One part per speaker turn in the closed segment.
+
+        ``origin`` is the audio time of ``segment[0]``; it is later than the event's
+        start when the retained audio no longer reaches back that far.
 
         Cuts snap to word boundaries. A part too short to embed folds into a
         neighbour: later groups into the part before them, a leading group into the
@@ -1016,6 +1029,7 @@ class DiarizingRecognizer(Recognizer):
             )
             return [whole]
 
+        base = event.start if origin is None else origin
         try:
             detected = self._turn_detector.detect_samples(segment)
         except Exception:  # noqa: BLE001 - detection must never break transcription
@@ -1023,9 +1037,11 @@ class DiarizingRecognizer(Recognizer):
             return [whole]
         if not detected.boundaries:
             _LOG.info(
-                "turn detection: segment %s (%.2fs, %d words) - one speaker, %d overlap span(s)",
+                "turn detection: segment %s (%.2fs analysed from %.2fs, %d words) - "
+                "one speaker, %d overlap span(s)",
                 span,
                 len(segment) / self._sample_rate,
+                base,
                 len(words),
                 len(detected.overlaps),
             )
@@ -1033,7 +1049,7 @@ class DiarizingRecognizer(Recognizer):
 
         cuts: list[int] = []
         for boundary in detected.boundaries:
-            absolute = event.start + boundary
+            absolute = base + boundary
             index = min(
                 range(1, len(words)),
                 key=lambda position: abs(words[position].s - absolute),
@@ -1055,7 +1071,7 @@ class DiarizingRecognizer(Recognizer):
                 continue
             start = event.start if index == 0 else group[0].s
             end = event.end if index == len(groups) - 1 else group[-1].e
-            samples = self._sub_samples(segment, event.start, start, end)
+            samples = self._sub_samples(segment, base, start, end)
             too_short = len(samples) < self._min_segment_samples and len(groups) > 1
             if too_short and parts:
                 merged = parts[-1]
@@ -1064,7 +1080,7 @@ class DiarizingRecognizer(Recognizer):
                     end=end,
                     text=f"{merged.text} {' '.join(word.w for word in group)}".strip(),
                     words=merged.words + group,
-                    samples=self._sub_samples(segment, event.start, merged.start, end),
+                    samples=self._sub_samples(segment, base, merged.start, end),
                 )
                 continue
             parts.append(
@@ -1087,10 +1103,11 @@ class DiarizingRecognizer(Recognizer):
             )
             del parts[0]
         _LOG.info(
-            "turn detection: segment %s (%.2fs, %d words) - %d boundary(ies) at %s, "
-            "%d overlap span(s), emitting %d row(s)",
+            "turn detection: segment %s (%.2fs analysed from %.2fs, %d words) - "
+            "%d boundary(ies) at %s, %d overlap span(s), emitting %d row(s)",
             span,
             len(segment) / self._sample_rate,
+            base,
             len(words),
             len(detected.boundaries),
             [round(value, 2) for value in detected.boundaries],
@@ -1109,6 +1126,8 @@ class DiarizingRecognizer(Recognizer):
 
     def _identify(self, samples: list[float]) -> str | None:
         """Embed one span's audio and resolve it to a speaker label."""
+        if not self._label_speakers:
+            return None
         if len(samples) < self._min_segment_samples:
             # Too short for a trustworthy embedding: keep the conversation's
             # current speaker rather than inventing one from noise.
@@ -1239,6 +1258,7 @@ class DiarizingEngine(RecognizerEngine):
                 turn_cut_interval_ms = config.turn_cut_interval_ms
             if config.max_open_segment_ms is not None:
                 max_open_segment_ms = config.max_open_segment_ms
+        label_speakers = config is None or config.diarize is not False
         return DiarizingRecognizer(
             inner_session,
             self._embedder,
@@ -1247,12 +1267,13 @@ class DiarizingEngine(RecognizerEngine):
             max_speakers=max_speakers,
             min_segment_ms=min_segment_ms,
             require_corroboration=require_corroboration,
-            turn_detector=self._turn_detector,
+            turn_detector=self._turn_detector if label_speakers else None,
             split_on_speaker_change=split_on_speaker_change,
             live_turn_cut=live_turn_cut,
             turn_cut_interval_ms=turn_cut_interval_ms,
             max_open_segment_ms=max_open_segment_ms,
             min_turn_ms=self._config.min_turn_ms,
+            label_speakers=label_speakers,
         )
 
 

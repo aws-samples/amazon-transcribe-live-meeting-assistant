@@ -19,7 +19,7 @@ The three rules are config-driven:
   rule, driven by the wire ``Config.endpointing_ms`` field
   (see :meth:`EndpointingConfig.from_endpointing_ms`).
 * **rule3** — fire once the utterance reaches ``rule3_min_utterance_length_s``
-  (e.g. 20 s) *regardless of silence*, forcing a cut so a run-on segment can't grow
+  (e.g. 60 s) *regardless of silence*, forcing a cut so a run-on segment can't grow
   unbounded.
 
 Like :mod:`asr_server.vad` and :mod:`asr_server.recognizer` these are
@@ -93,7 +93,7 @@ class EndpointingConfig:
 
     rule1_min_trailing_silence_s: float = 2.4
     rule2_min_trailing_silence_s: float = 1.2
-    rule3_min_utterance_length_s: float = 20.0
+    rule3_min_utterance_length_s: float = 60.0
 
     @classmethod
     def from_endpointing_ms(cls, endpointing_ms: int) -> EndpointingConfig:
