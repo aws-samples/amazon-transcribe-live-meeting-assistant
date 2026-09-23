@@ -115,7 +115,8 @@ def test_acquire_terminates_a_microvm_that_never_reaches_running() -> None:
 
     assert result["ok"] is False
     assert "state=FAILED" in result["reason"]
-    client.terminate_microvm.assert_called_once_with("mvm-1")
+    assert client.run_microvm.call_count == 2
+    assert client.terminate_microvm.call_args_list == [mock.call("mvm-1"), mock.call("mvm-1")]
 
 
 def test_acquire_terminates_the_microvm_when_the_token_cannot_be_minted() -> None:
@@ -246,3 +247,50 @@ def test_the_minted_token_asks_for_the_clamped_ttl() -> None:
         index.lambda_handler({"action": "token", "microvmId": "mvm-1"}, None)
 
     assert client.create_microvm_auth_token.call_args.kwargs["expiration_in_minutes"] <= 60
+
+
+def test_acquire_starts_another_microvm_when_the_platform_terminates_the_first() -> None:
+    client = fake_microvms()
+    client.run_microvm.side_effect = [
+        {"microvmId": "mvm-1", "endpoint": "e1", "state": "PENDING"},
+        {"microvmId": "mvm-2", "endpoint": "e2", "state": "RUNNING"},
+    ]
+    client.get_microvm.side_effect = [{"state": "TERMINATED", "stateReason": "Internal service error."}]
+    with mock.patch.object(index, "microvms", client):
+        result = index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+
+    assert result["ok"] is True
+    assert result["microvmId"] == "mvm-2"
+    client.terminate_microvm.assert_called_once_with("mvm-1")
+    tokens = [call.kwargs["clientToken"] for call in client.run_microvm.call_args_list]
+    assert len(tokens) == 2 and tokens[0] != tokens[1]
+
+
+def test_acquire_gives_up_after_the_second_terminated_microvm() -> None:
+    client = fake_microvms()
+    client.run_microvm.side_effect = [
+        {"microvmId": "mvm-1", "endpoint": "e1", "state": "PENDING"},
+        {"microvmId": "mvm-2", "endpoint": "e2", "state": "PENDING"},
+    ]
+    client.get_microvm.side_effect = [
+        {"state": "TERMINATED", "stateReason": "Internal service error."},
+        {"state": "TERMINATED", "stateReason": "Internal service error."},
+    ]
+    with mock.patch.object(index, "microvms", client):
+        result = index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+
+    assert result["ok"] is False
+    assert "Internal service error" in result["reason"]
+    assert client.run_microvm.call_count == 2
+    assert client.terminate_microvm.call_args_list == [mock.call("mvm-1"), mock.call("mvm-2")]
+
+
+def test_acquire_does_not_start_another_microvm_once_the_deadline_has_passed() -> None:
+    client = fake_microvms()
+    client.run_microvm.return_value = {"microvmId": "mvm-1", "endpoint": "e1", "state": "PENDING"}
+    with mock.patch.object(index, "microvms", client), mock.patch.object(index, "ACQUIRE_TIMEOUT_SECONDS", 0):
+        result = index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+
+    assert result["ok"] is False
+    assert client.run_microvm.call_count == 1
+    client.terminate_microvm.assert_called_once_with("mvm-1")

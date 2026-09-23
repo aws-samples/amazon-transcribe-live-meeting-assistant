@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Speaker turns inside a long utterance are placed where the voice actually changes.** The diarizer keeps 30 s of audio and had measured turn boundaries from the utterance's start rather than from the start of the audio it analysed, so an utterance longer than 30 s could be split mid-sentence.
 - **A channel that declines speaker labels gets none.** The engine had labelled every session; a session negotiated without labels now skips voice embedding and turn detection, its rows carry no `(spk_N)` suffix, and they are still cut at 20 s.
 - **Transcript rows containing a colon are shown in full.** The call panel dropped everything before the first colon of a caller or agent row, a rule kept from LCA for prefixed speaker labels that no LMA transcript carries, so a row reading "the question is: …" lost its earlier sentences.
+- **A MicroVM the platform terminates before it starts is replaced once.** The ASR launcher starts a second MicroVM within the same acquisition deadline and falls back to Amazon Transcribe only if that one fails too.
 
 ## [0.3.9] - 2026-09-19
 
