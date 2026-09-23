@@ -542,6 +542,11 @@ Speech recognition:
     Apache-2.0
     https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf
 
+  * Cohere Transcribe 03-2026 2B (offline; cohere-transcribe-titanet-small), ONNX export
+    by k2-fsa in the sherpa-onnx release.
+    Apache-2.0
+    https://huggingface.co/CohereLabs/cohere-transcribe-03-2026
+
 Utterance segmentation (offline bundles only):
 
   * Silero VAD v5, redistributed by k2-fsa

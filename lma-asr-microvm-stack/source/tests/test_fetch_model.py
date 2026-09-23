@@ -501,3 +501,37 @@ def test_run_lays_out_a_qwen3_asr_model_with_its_tokenizer_directory(tmp_path: P
 def test_an_unknown_model_kind_fails_the_build(tmp_path: Path) -> None:
     env_path = write_env(tmp_path / "model.env", {**ENV_TEMPLATE, "ASR_MODEL_KIND": "whisper"})
     assert fetch_model.run(["--env-file", str(env_path), "--dest", str(tmp_path / "d")]) == 1
+
+
+def test_run_keeps_a_cohere_encoder_data_file_under_its_archive_name(tmp_path: Path) -> None:
+    staging = tmp_path / "sherpa-onnx-cohere-transcribe-14-lang-int8"
+    staging.mkdir()
+    (staging / "encoder.int8.onnx").write_bytes(b"encoder")
+    (staging / "encoder.int8.onnx.data").write_bytes(b"weights")
+    (staging / "decoder.int8.onnx").write_bytes(b"decoder")
+    (staging / "tokens.txt").write_text("a\n")
+    archive = tmp_path / "model.tar.bz2"
+    with tarfile.open(archive, "w:bz2") as tar:
+        tar.add(staging, arcname=staging.name)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    env = {k: v for k, v in ENV_TEMPLATE.items() if k != "ASR_MODEL_JOINER_FILE"}
+    env.update(
+        {
+            "ASR_MODEL_SHA256": digest,
+            "ASR_MODEL_KIND": "cohere_transcribe",
+            "ASR_MODEL_ENCODER_DATA_FILE": "encoder.int8.onnx.data",
+        }
+    )
+    env_path = write_env(tmp_path / "model.env", env)
+    dest = tmp_path / "opt-models"
+
+    def fake_download(url: str, target: Path) -> str:
+        target.write_bytes(archive.read_bytes())
+        return digest
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+    assert (dest / "encoder.onnx").read_bytes() == b"encoder"
+    assert (dest / "encoder.int8.onnx.data").read_bytes() == b"weights"
+    assert (dest / "tokens.txt").is_file()
+    assert not (dest / "joiner.onnx").exists()

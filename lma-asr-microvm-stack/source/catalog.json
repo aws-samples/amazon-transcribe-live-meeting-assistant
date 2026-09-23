@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "defaultBundleId": "fastconformer-titanet-small",
+  "defaultBundleId": "parakeet-tdt-v3-titanet-small",
   "bundleNote": "A bundle names the ASR model, the speaker embedder and the turn-detection model TOGETHER WITH the diarization operating point that goes with them, so a deployment is never asked for a threshold. The default and every bundle marked redistributable are permissively licensed; a bundle marked redistributable: false carries weights under the NVIDIA Open Model License and is offered only for deployments that accept it. The operating point is a property of the EMBEDDER and the segmentation policy (endpointing silence and the minimum utterance floor), not of the ASR model: the embedding is computed from raw samples, and the ASR model contributes nothing to those samples or, under a fixed endpointing configuration, to where a segment starts and ends. That is why one measured embedder can be paired with a different ASR model without re-measuring - and why a different embedder always needs its own measurement (scripts/calibrate.py).",
   "bundles": [
     {
@@ -42,7 +42,7 @@
       "baselineMemoryMiB": 8192,
       "redistributable": true,
       "licenceSummary": "OpenMDW-1.1 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
-      "notes": "Higher transcript quality than the default; heavier (see the model note). The operating point is TitaNet-small's and carries over; not yet vetted live on this pairing."
+      "notes": "Punctuated, cased, multilingual streaming text with the weakest accuracy in the catalog (leaderboard WER 8.72; frequent merged or dropped words in live runs). Prefer parakeet-tdt-v3-titanet-small unless live partial text matters more."
     },
     {
       "id": "nemotron-titanet-small",
@@ -61,7 +61,7 @@
     {
       "id": "parakeet-tdt-v3-titanet-small",
       "name": "Parakeet TDT 0.6B v3 offline + TitaNet-small (CC-BY-4.0)",
-      "status": "calibrated",
+      "status": "vetted",
       "modelId": "parakeet-tdt-0.6b-v3-int8",
       "vadModelId": "silero-vad-v5",
       "speakerModelId": "titanet-small",
@@ -71,7 +71,7 @@
       "baselineMemoryMiB": 8192,
       "redistributable": true,
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
-      "notes": "Offline engine: one decode per VAD-closed utterance, so no interim text while somebody speaks. Not yet vetted live."
+      "notes": "Default. Vetted live on 2026-09-22: two voices and an advert narrator labelled correctly on every turn of 2.5 s or more, rows within about 20 s of speech, no dropped words. Offline engine: no live partial text while somebody is speaking."
     },
     {
       "id": "parakeet-tdt-v2-titanet-small",
@@ -101,7 +101,7 @@
       "baselineMemoryMiB": 8192,
       "redistributable": true,
       "licenceSummary": "Apache-2.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
-      "notes": "Speaker labels are one per utterance: the model returns no word timings, so an utterance holding two speakers is not split. Prefer the FastConformer or Nemotron bundles when per-turn labels matter more than text quality."
+      "notes": "Speaker labels are one per utterance: the model returns no word timings, so an utterance holding two speakers is not split. Prefer the FastConformer or Nemotron bundles when per-turn labels matter more than text quality. Memory: the engine peaked at 9.6 GB resident in a two-session, two-minute live run (2026-09-22) on a MicroVM with the 8 GiB minimum, so watch memory on long meetings."
     },
     {
       "id": "qwen3-asr-transcription-only",
@@ -116,6 +116,21 @@
       "redistributable": true,
       "licenceSummary": "Apache-2.0 (ASR) + MIT (VAD)",
       "notes": "Highest transcript quality; rows appear when an utterance closes; labelled by audio channel only."
+    },
+    {
+      "id": "cohere-transcribe-titanet-small",
+      "name": "Cohere Transcribe 2B offline + TitaNet-small (Apache-2.0)",
+      "status": "calibrated",
+      "modelId": "cohere-transcribe-14-lang-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "titanet-small",
+      "segmentationModelId": "pyannote-segmentation-3-0",
+      "speakerThreshold": 0.5,
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "Apache-2.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
+      "notes": "Not yet run live. Speaker labels are one per utterance (no word timings). Decodes English as baked; set decodeLanguage on the model for another of its 14 languages."
     }
   ],
   "models": [
@@ -169,7 +184,7 @@
       "onnxruntime": "1.27.0",
       "approxDownloadMb": 475,
       "provenanceVerified": "2026-09-21",
-      "note": "Emits punctuation and casing. Loaded and decoded a test meeting on sherpa-onnx 1.13.4; real-time factor 0.89 for one session on a 4-core host, so two sessions per MicroVM may lag. English validated only."
+      "note": "Emits punctuation and casing; multilingual. Live runs on 2026-09-22 showed eight or nine merged or dropped words per two minutes and a real-time factor of 0.6-0.9 for one session on a 4-core host. Open ASR Leaderboard average WER 8.72 (rank 46, 2026-09), the weakest ASR model in this catalog. English validated only."
     },
     {
       "id": "nemotron-streaming-en-0.6b-560ms-int8",
@@ -277,6 +292,48 @@
       "provenanceVerified": "2026-09-21",
       "requiresVad": true,
       "note": "LLM-decoder ASR: the best transcript quality measured here, punctuated and cased, real-time factor 0.38 on a 4-core host. Returns no word timings, so speaker labels are one per utterance. The ONNX export is third-party work re-hosted in the k2-fsa release."
+    },
+    {
+      "id": "cohere-transcribe-14-lang-int8",
+      "name": "Cohere Transcribe 03-2026 2B (offline, int8, Apache-2.0)",
+      "engine": "accurate",
+      "modelKind": "cohere_transcribe",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-cohere-transcribe-14-lang-int8-2026-04-01.tar.bz2",
+      "sha256": "bd582588d50685a795dcd2807ab77e11361b8312d96c53884682def45ab4206d",
+      "archive": "tar.bz2",
+      "stripComponents": 1,
+      "files": {
+        "encoder": "encoder.int8.onnx",
+        "encoder_data": "encoder.int8.onnx.data",
+        "decoder": "decoder.int8.onnx",
+        "tokens": "tokens.txt"
+      },
+      "sampleRate": 16000,
+      "languages": [
+        "en",
+        "fr",
+        "de",
+        "it",
+        "es",
+        "pt",
+        "el",
+        "nl",
+        "pl",
+        "zh",
+        "ja",
+        "ko",
+        "vi",
+        "ar"
+      ],
+      "decodeLanguage": "en",
+      "license": "Apache-2.0",
+      "licenseUrl": "https://huggingface.co/CohereLabs/cohere-transcribe-03-2026",
+      "sherpaOnnx": "1.13.4",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 1621,
+      "provenanceVerified": "2026-09-23",
+      "requiresVad": true,
+      "note": "Offline 2B model covering 14 languages, decoded in the one language baked from decodeLanguage (it has no language detection). Returns no word timings, so speaker labels are one per utterance. Not yet run live; 2.6 GB of int8 weights, so watch memory. Open ASR Leaderboard average WER 5.40 (rank 7, 2026-09)."
     }
   ],
   "speakerModels": [

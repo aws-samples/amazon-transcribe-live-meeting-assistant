@@ -66,7 +66,9 @@ FILE_KEYS = ("encoder", "decoder", "joiner", "tokens")
 MODEL_KIND_FILE_KEYS = {
     "transducer": FILE_KEYS,
     "qwen3_asr": ("conv_frontend", "encoder", "decoder", "tokenizer"),
+    "cohere_transcribe": ("encoder", "encoder_data", "decoder", "tokens"),
 }
+OFFLINE_ONLY_KINDS = ("qwen3_asr", "cohere_transcribe")
 
 
 class ResolutionError(Exception):
@@ -154,9 +156,9 @@ def resolve(properties: dict, catalog: dict) -> dict:
             f"model {model.get('id')!r} has modelKind {kind!r}; expected one of "
             f"{sorted(MODEL_KIND_FILE_KEYS)}"
         )
-    if kind == "qwen3_asr" and engine != "accurate":
+    if kind in OFFLINE_ONLY_KINDS and engine != "accurate":
         raise ResolutionError(
-            f"model {model.get('id')!r} is a Qwen3-ASR model, which cannot stream"
+            f"model {model.get('id')!r} is a {kind} model, which cannot stream"
         )
     missing = [key for key in MODEL_KIND_FILE_KEYS[kind] if not files.get(key)]
     if missing:
@@ -248,6 +250,8 @@ def render_model_env(selection: dict) -> str:
         f"ASR_MODEL_TOKENS_FILE={files.get('tokens', '')}",
         f"ASR_MODEL_CONV_FRONTEND_FILE={files.get('conv_frontend', '')}",
         f"ASR_MODEL_TOKENIZER_FILE={files.get('tokenizer', '')}",
+        f"ASR_MODEL_ENCODER_DATA_FILE={files.get('encoder_data', '')}",
+        f"ASR_MODEL_LANGUAGE={model.get('decodeLanguage', '')}",
         # BOTH names, deliberately. The runtime selects its engine from $ASR_ENGINE
         # (warmup.py, ws_server.py); ASR_MODEL_ENGINE is only descriptive. Writing the
         # descriptive one alone meant an 'accurate' bundle still warmed the STREAMING

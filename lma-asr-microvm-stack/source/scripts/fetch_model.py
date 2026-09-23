@@ -40,7 +40,20 @@ QWEN3_CANONICAL_NAMES = {
     "ASR_MODEL_DECODER_FILE": "decoder.onnx",
     "ASR_MODEL_TOKENIZER_FILE": "tokenizer",
 }
-KIND_FILES = {"transducer": CANONICAL_NAMES, "qwen3_asr": QWEN3_CANONICAL_NAMES}
+# Cohere Transcribe stores its encoder weights in an external-data file whose name is
+# recorded inside the ONNX graph, so that file keeps its archive name.
+KEEP_SOURCE_NAME = None
+COHERE_CANONICAL_NAMES = {
+    "ASR_MODEL_ENCODER_FILE": "encoder.onnx",
+    "ASR_MODEL_ENCODER_DATA_FILE": KEEP_SOURCE_NAME,
+    "ASR_MODEL_DECODER_FILE": "decoder.onnx",
+    "ASR_MODEL_TOKENS_FILE": "tokens.txt",
+}
+KIND_FILES = {
+    "transducer": CANONICAL_NAMES,
+    "qwen3_asr": QWEN3_CANONICAL_NAMES,
+    "cohere_transcribe": COHERE_CANONICAL_NAMES,
+}
 
 
 def model_files_for(env: dict[str, str]) -> dict[str, str]:
@@ -177,8 +190,9 @@ def place_model(extracted: Path, env: dict[str, str], dest: Path) -> None:
             raise ModelFetchError(
                 f"model file {source_name!r} is not in the archive. Present: {available}"
             )
-        shutil.move(str(source), str(dest / canonical))
-        log(f"placed {source_name} -> {canonical}")
+        target_name = Path(source_name).name if canonical is None else canonical
+        shutil.move(str(source), str(dest / target_name))
+        log(f"placed {source_name} -> {target_name}")
 
     for license_file in sorted(extracted.glob("LICENSE*")):
         shutil.move(str(license_file), str(dest / license_file.name))

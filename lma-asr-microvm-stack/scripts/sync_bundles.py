@@ -61,7 +61,7 @@ PARAM = "AsrModelBundle"
 MAPPING = "BundleMemory"
 
 # The single bundle id in lma-main.yaml's AsrDefaults mapping, e.g.
-#       ModelBundle: fastconformer-titanet-small
+#       ModelBundle: parakeet-tdt-v3-titanet-small
 MAIN_BUNDLE_RE = re.compile(r"^ {6}ModelBundle: *(\S+) *$", re.MULTILINE)
 
 

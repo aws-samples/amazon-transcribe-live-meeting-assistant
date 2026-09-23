@@ -739,3 +739,53 @@ def test_a_qwen3_asr_model_needs_its_tokenizer_and_cannot_stream() -> None:
 
     with pytest.raises(index.ResolutionError, match="cannot stream"):
         index.resolve({"BundleId": "bundle-qwen"}, _catalog_with_qwen(engine="streaming"))
+
+
+def _catalog_with_cohere(engine: str = "accurate") -> dict:
+    catalog = json.loads(json.dumps(CATALOG))
+    catalog["models"].append(
+        {
+            **catalog["models"][1],
+            "id": "cohere",
+            "engine": engine,
+            "modelKind": "cohere_transcribe",
+            "decodeLanguage": "en",
+            "files": {
+                "encoder": "encoder.int8.onnx",
+                "encoder_data": "encoder.int8.onnx.data",
+                "decoder": "decoder.int8.onnx",
+                "tokens": "tokens.txt",
+            },
+        }
+    )
+    offline = next(b for b in catalog["bundles"] if b["id"] == "bundle-offline")
+    catalog["bundles"].append(
+        {**offline, "id": "bundle-cohere", "modelId": "cohere", "vadModelId": "silero"}
+    )
+    catalog["vadModels"] = [
+        {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}
+    ]
+    return catalog
+
+
+def test_a_cohere_transcribe_model_declares_its_data_file_and_language() -> None:
+    selection = index.resolve({"BundleId": "bundle-cohere"}, _catalog_with_cohere())
+    rendered = index.render_model_env(selection)
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert values["ASR_MODEL_KIND"] == "cohere_transcribe"
+    assert values["ASR_MODEL_ENCODER_DATA_FILE"] == "encoder.int8.onnx.data"
+    assert values["ASR_MODEL_LANGUAGE"] == "en"
+    assert values["ASR_MODEL_JOINER_FILE"] == ""
+
+
+def test_a_cohere_transcribe_model_needs_its_data_file_and_cannot_stream() -> None:
+    incomplete = _catalog_with_cohere()
+    del incomplete["models"][-1]["files"]["encoder_data"]
+    with pytest.raises(index.ResolutionError, match="missing file names"):
+        index.resolve({"BundleId": "bundle-cohere"}, incomplete)
+    with pytest.raises(index.ResolutionError, match="cannot stream"):
+        index.resolve({"BundleId": "bundle-cohere"}, _catalog_with_cohere(engine="streaming"))

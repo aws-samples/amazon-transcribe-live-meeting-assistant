@@ -110,7 +110,7 @@ deployer should have to answer:
 
 | Mapping key | Value | Purpose |
 |---|---|---|
-| `ModelBundle` | `fastconformer-titanet-small` | Which models the image is built from, with their measured diarization operating point |
+| `ModelBundle` | `parakeet-tdt-v3-titanet-small` | Which models the image is built from, with their measured diarization operating point |
 | `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
 
 To change either, edit the mapping and update the stack. `scripts/sync_bundles.py
@@ -125,14 +125,15 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 
 | Bundle | ASR | Embedder | Turn detection | Threshold | Licences |
 |---|---|---|---|---|---|
-| `fastconformer-titanet-small` (default) | FastConformer streaming EN 480 ms | TitaNet-small | pyannote segmentation 3.0 | **0.5**, min utterance 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT |
+| `fastconformer-titanet-small` | FastConformer streaming EN 480 ms | TitaNet-small | pyannote segmentation 3.0 | **0.5**, min utterance 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT |
 | `fastconformer-transcription-only` | FastConformer streaming EN 480 ms | — | — | — | CC-BY-4.0 |
 | `nemotron35-titanet-small` | Nemotron 3.5 ASR streaming 0.6B, 560 ms (punctuated, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | OpenMDW-1.1 + CC-BY-4.0 + MIT |
 | `nemotron-titanet-small` | Nemotron speech streaming EN 0.6B, 560 ms | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | NVIDIA Open Model License (not redistributable) + CC-BY-4.0 + MIT |
-| `parakeet-tdt-v3-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-titanet-small` (default) | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v2-titanet-small` | Parakeet TDT 0.6B v2 (offline engine, English) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `qwen3-asr-titanet-small` | Qwen3-ASR 0.6B (offline engine, LLM decoder, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `qwen3-asr-transcription-only` | Qwen3-ASR 0.6B (offline engine) | — | — | — | Apache-2.0 + MIT (VAD) |
+| `cohere-transcribe-titanet-small` | Cohere Transcribe 2B (offline engine, 14 languages, one baked) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 
 The default stays FastConformer: the same cache-aware streaming FastConformer-RNNT
 architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, trained on NeMo ASRSET —
@@ -152,6 +153,9 @@ gave the best transcript of everything measured (real-time factor 0.38, punctuat
 "WACC" where every other model wrote "whack") but returns no word timings, so its speaker
 labels are one per utterance rather than per turn. Every alternative reuses TitaNet-small,
 so the operating point carries over unchanged; each is `calibrated` until vetted live.
+Parakeet v3 is `vetted` and the default after the live runs of 2026-09-22: text on a par with
+Qwen3-ASR, every speaker turn of 2.5 s or more labelled correctly, and rows within about 20 s
+of speech.
 
 **Why the threshold travels with the embedder, not the ASR model.** A speaker
 embedding is computed from raw audio samples; the ASR model contributes nothing to
@@ -187,10 +191,11 @@ duplication cannot be removed — `MinimumMemoryInMiB` needs a CloudFormation-ty
 number and a Mapping cannot be keyed on a value a custom resource resolved.
 
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
-per closed utterance, for transducer models that cannot stream — which the two
-Parakeet and Qwen3-ASR bundles use. It produces no interim text while somebody is speaking: a row
-appears when the utterance closes, and continuous speech with no 1.2 s pause stays one
-utterance, so on a fast talker the first row can take a minute to appear. It decoded the
+per closed utterance, for transducer models that cannot stream — which the
+Parakeet, Qwen3-ASR and Cohere Transcribe bundles use. It produces no interim text while somebody is speaking: a row
+appears when the utterance closes, which is a 1.2 s pause, the first 300 ms dip once the
+utterance has run 10 s, or 20 s of speech at the latest, so a row arrives within about
+20 s of speech plus the decode time. It decoded the
 test meeting at a real-time factor of 0.14 on a 4-core host with punctuated, cased text.
 See *Not included: Whisper* below for why Parakeet TDT rather than Whisper is the
 offline model offered.
@@ -306,6 +311,9 @@ engine; `ASR_LIVE_TURN_CUT=0` in the image environment turns it off) the speaker
 change becomes the *primary* boundary and
 endpointing silence is only a backstop — which is the right way round, because a pause
 is not what separates people, taking turns is.
+The recogniser's own forced cut, which resets the decoder and drops the word in flight,
+comes only once an utterance reaches 60 s; the diarizer's 20 s row bound keeps rows
+readable without a reset.
 
 While a segment is open the engine re-runs the detector over the audio since the last
 cut, about once per second of audio (`ASR_TURN_CUT_INTERVAL_MS`), and closes a row as
@@ -372,6 +380,9 @@ Partials now carry no speaker at all, so the row shows the plain channel name un
 label is actually known, and the `(spk_N)` suffix appears when there is something true
 to put in it. This matches the Amazon Transcribe path, which never had speaker labels on
 partials to begin with (they only arrive on final results).
+A channel that asks for no labels, such as Stream Audio's microphone or the Virtual
+Participant's assistant, gets none: the engine skips voice embedding for it, and its rows
+still close at 20 s.
 
 ### Not included: Whisper, Distil-Whisper, and the WhisperX hybrid
 
@@ -686,6 +697,7 @@ complying with their licences.**
 | NVIDIA Nemotron speech streaming EN 0.6B (ASR, `nemotron-titanet-small`) | NVIDIA Open Model License, not redistributable |
 | NVIDIA Parakeet TDT 0.6B v3 and v2 (ASR, offline bundles) | CC-BY-4.0 |
 | Qwen3-ASR 0.6B (ASR, offline Qwen bundles; third-party ONNX export re-hosted by k2-fsa) | Apache-2.0 |
+| Cohere Transcribe 03-2026 2B (ASR, `cohere-transcribe-titanet-small`) | Apache-2.0 |
 | Silero VAD v5 (utterance segmentation, offline bundles) | MIT |
 | NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
 | pyannote segmentation 3.0 (turn detection) | MIT |
