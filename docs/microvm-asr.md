@@ -219,7 +219,7 @@ embedder, the pyannote turn detector and the threshold registry with NVIDIA's Ne
 Diarization, a Sortformer model that labels every 10 ms frame with the activity of up to
 eight speakers per channel and keeps identities through a speaker cache carried across the
 session. The engine runs one diarizer step each time the offline engine closes an
-utterance, over the audio since the previous step, and gives each Parakeet word the speaker
+utterance, over the audio since the previous step in pieces of at most 10 s, and gives each Parakeet word the speaker
 active under it, so a row is split wherever the speaker changes, however short the turn. A
 run of fewer than three words shorter than 0.5 s stays with its neighbour. There is no
 threshold or minimum utterance to calibrate. Labels restart for every meeting, as with the

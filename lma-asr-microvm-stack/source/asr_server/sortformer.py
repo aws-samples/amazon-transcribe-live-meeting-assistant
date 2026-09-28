@@ -5,6 +5,7 @@ import logging
 import math
 import os
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -18,7 +19,6 @@ from asr_server.recognizer import (
     RecognizerEngine,
     SessionConfig,
     WordTiming,
-    _pcm16_to_float32,
 )
 
 _LOG = logging.getLogger(__name__)
@@ -300,11 +300,12 @@ class OnnxSortformerBackend:
 @dataclass
 class SortformerConfig:
     lookahead_frames: int = 4
-    max_chunk_frames: int = 250
-    idle_step_frames: int = 250
+    max_chunk_frames: int = 125
+    idle_step_frames: int = 125
     history_seconds: float = 120.0
     min_turn_seconds: float = 0.5
     num_threads: int = 1
+    slow_step_seconds: float = 2.0
 
 
 class SortformerSession:
@@ -369,6 +370,7 @@ class SortformerSession:
         return int(mean.argmax()) if mean.max() > 0.2 else None
 
     def _step(self, chunk_frames: int, lookahead: int) -> None:
+        began = time.monotonic()
         total_embeds = min(chunk_frames + lookahead, math.ceil(len(self._pending) / SUBSAMPLING))
         mel = self._pending[: total_embeds * SUBSAMPLING]
         chunk_frames = min(chunk_frames, total_embeds)
@@ -384,6 +386,15 @@ class SortformerSession:
         self._pending = self._pending[chunk_mel:]
         self._pending_base += chunk_mel
         self.steps += 1
+        elapsed = time.monotonic() - began
+        if elapsed > self._config.slow_step_seconds:
+            _LOG.warning(
+                "sortformer step %d took %.1fs for %d frames (%d cached)",
+                self.steps,
+                elapsed,
+                chunk_frames,
+                len(cached),
+            )
         excess = len(self._probs) - int(self._config.history_seconds / FRAME_SEC)
         if excess > 0:
             self._probs = self._probs[excess:]
@@ -409,7 +420,7 @@ class SortformerRecognizer(Recognizer):
         self._labels: dict[int, str] = {}
 
     def accept_pcm(self, pcm: bytes) -> list[Event]:
-        samples = np.asarray(_pcm16_to_float32(pcm), dtype=np.float32)
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
         self._diarizer.push(samples)
         events = self._inner.accept_pcm(pcm)
         return self._label_all(events)

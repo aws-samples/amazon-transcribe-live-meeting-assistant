@@ -293,3 +293,11 @@ def test_labels_land_on_the_frames_the_front_end_timestamps() -> None:
     active = session.activity(0.0, 2.0)[:, 0] > 0.5
     onset = int(np.argmax(active)) * FRAME_SEC
     assert onset == pytest.approx(1.0, abs=0.05)
+
+
+def test_a_slow_step_is_logged_with_its_size(caplog: pytest.LogCaptureFixture) -> None:
+    session = SortformerSession(EnergyBackend(), SortformerConfig(slow_step_seconds=0.0))
+    with caplog.at_level("WARNING", logger="asr_server.sortformer"):
+        session.push(np.zeros(RATE, dtype=np.float32))
+        session.finish()
+    assert any("sortformer step 1 took" in r.getMessage() for r in caplog.records)
