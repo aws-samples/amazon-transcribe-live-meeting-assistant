@@ -57,6 +57,9 @@ Parameters:
       - cohere-transcribe-titanet-small
       - parakeet-tdt-v3-live-titanet-small
       - parakeet-tdt-v3-live-nemotron35-titanet-small
+      - parakeet-tdt-v3-sortformer
+      - parakeet-tdt-v3-live-sortformer
+      - parakeet-tdt-v3-live-nemotron35-sortformer
     Description: >-
       Which model bundle the MicroVM ASR engine is built from. A bundle names the
       ASR model, the speaker-embedding model and the turn-detection model TOGETHER
@@ -165,6 +168,12 @@ Mappings:
     parakeet-tdt-v3-live-titanet-small:
       MiB: 8192
     parakeet-tdt-v3-live-nemotron35-titanet-small:
+      MiB: 8192
+    parakeet-tdt-v3-sortformer:
+      MiB: 8192
+    parakeet-tdt-v3-live-sortformer:
+      MiB: 8192
+    parakeet-tdt-v3-live-nemotron35-sortformer:
       MiB: 8192
 
 Resources:
@@ -607,6 +616,9 @@ Outputs:
   AsrPreviewModelId:
     Description: Streaming model previewing the open utterance in a two-pass bundle, or none.
     Value: !GetAtt AsrImageSource.PreviewModelId
+  AsrDiarizerModelId:
+    Description: End-to-end diarization model labelling the offline engine's words, or none.
+    Value: !GetAtt AsrImageSource.DiarizerModelId
 
   AsrModelLicense:
     Description: Licence of the model baked into the image.

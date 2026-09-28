@@ -686,7 +686,10 @@ def test_every_shipped_bundle_names_the_engine_its_model_uses() -> None:
     for bundle in catalog["bundles"]:
         selection = index.resolve({"BundleId": bundle["id"]}, catalog)
         engine = selection["model"].get("engine", "streaming")
-        assert f"ASR_ENGINE={engine}" in index.render_model_env(selection)
+        rendered = index.render_model_env(selection)
+        assert f"ASR_MODEL_ENGINE={engine}" in rendered
+        expected = "two_pass" if bundle.get("previewModelId") else engine
+        assert f"ASR_ENGINE={expected}\n" in rendered + "\n"
 
 
 def _catalog_with_qwen(engine: str = "accurate") -> dict:
@@ -846,3 +849,89 @@ def test_a_preview_needs_an_offline_authority_and_a_streaming_transducer() -> No
         index.resolve({"BundleId": "bundle-two-pass"}, _catalog_with_preview(main_engine="streaming"))
     with pytest.raises(index.ResolutionError, match="streaming transducer"):
         index.resolve({"BundleId": "bundle-two-pass"}, _catalog_with_preview(preview_engine="accurate"))
+
+
+def _catalog_with_diarizer(
+    engine: str = "accurate", speaker: str = "none", kind: str = "sortformer"
+) -> dict:
+    catalog = json.loads(json.dumps(CATALOG))
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["engine"] = engine
+    offline = next(b for b in catalog["bundles"] if b["id"] == "bundle-offline")
+    offline["vadModelId"] = "silero"
+    catalog["bundles"].append(
+        {
+            **offline,
+            "id": "bundle-sortformer",
+            "speakerModelId": speaker,
+            "diarizerModelId": "sortformer",
+            "vadModelId": "none" if engine == "streaming" else "silero",
+        }
+    )
+    catalog["vadModels"] = [
+        {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}
+    ]
+    catalog["diarizerModels"] = [
+        {
+            "id": "sortformer",
+            "kind": kind,
+            "license": "OpenMDW-1.1",
+            "files": {
+                "model": {
+                    "path": "onnx/model.onnx",
+                    "url": "https://x.invalid/m.onnx",
+                    "sha256": "d" * 64,
+                },
+                "data": {
+                    "path": "onnx/model.onnx_data",
+                    "url": "https://x.invalid/m.data",
+                    "sha256": "e" * 64,
+                },
+            },
+        }
+    ]
+    return catalog
+
+
+def _env_values(selection: dict) -> dict:
+    return dict(
+        line.split("=", 1)
+        for line in index.render_model_env(selection).splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+
+
+def test_a_diarizer_bundle_bakes_both_pinned_files_and_its_kind() -> None:
+    values = _env_values(index.resolve({"BundleId": "bundle-sortformer"}, _catalog_with_diarizer()))
+    assert values["ASR_DIARIZER_KIND"] == "sortformer"
+    assert values["ASR_DIARIZER_MODEL_FILE"] == "onnx/model.onnx"
+    assert values["ASR_DIARIZER_DATA_SHA256"] == "e" * 64
+    assert values["ASR_SPEAKER_MODEL_URL"] == ""
+
+
+def test_a_bundle_without_a_diarizer_renders_empty_diarizer_entries() -> None:
+    values = _env_values(index.resolve({"BundleId": "bundle-offline"}, _catalog_with_diarizer()))
+    assert values["ASR_DIARIZER_KIND"] == ""
+    assert values["ASR_DIARIZER_MODEL_URL"] == ""
+
+
+def test_a_diarizer_needs_an_offline_model_no_speaker_model_and_a_known_kind() -> None:
+    with pytest.raises(index.ResolutionError, match="offline"):
+        index.resolve(
+            {"BundleId": "bundle-sortformer"}, _catalog_with_diarizer(engine="streaming")
+        )
+    with pytest.raises(index.ResolutionError, match="one or the other"):
+        index.resolve(
+            {"BundleId": "bundle-sortformer"}, _catalog_with_diarizer(speaker="spk-a")
+        )
+    with pytest.raises(index.ResolutionError, match="supports 'sortformer'"):
+        index.resolve(
+            {"BundleId": "bundle-sortformer"}, _catalog_with_diarizer(kind="pyannote")
+        )
+
+
+def test_a_diarizer_file_without_a_checksum_is_refused() -> None:
+    catalog = _catalog_with_diarizer()
+    del catalog["diarizerModels"][0]["files"]["data"]["sha256"]
+    with pytest.raises(index.ResolutionError, match="data file is missing"):
+        index.resolve({"BundleId": "bundle-sortformer"}, catalog)

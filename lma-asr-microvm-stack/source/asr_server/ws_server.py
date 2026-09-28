@@ -87,6 +87,7 @@ from asr_server.recognizer import (
     build_model_config,
     create_sherpa_engine,
 )
+from asr_server.sortformer import SortformerEngine, create_sortformer_engine, sortformer_enabled
 from asr_server.two_pass import create_two_pass_engine, preview_model_dir
 
 __all__ = [
@@ -642,7 +643,7 @@ class AsrSession:
         diarization on a non-diarizing build is therefore a documented no-op, not
         an error: transcription still works, just without speaker labels.
         """
-        if config.diarize and not isinstance(self._engine, DiarizingEngine):
+        if config.diarize and not isinstance(self._engine, DiarizingEngine | SortformerEngine):
             _LOG.warning(
                 "session %s requested diarize=true but this server has no speaker "
                 "model baked in (set ASR_DIARIZE + bake the embedding model); "
@@ -1006,6 +1007,8 @@ def _default_engine_factory() -> RecognizerEngine:
     # ``$ASR_DIARIZE`` gates it because the speaker-embedding model must have been
     # baked into the image; building it here (once, at startup) keeps the weights
     # resident and off the per-connection path.
+    if sortformer_enabled():
+        return create_sortformer_engine(inner)
     if diarization_enabled():
         diarization_config = build_diarization_config()
         _LOG.info(

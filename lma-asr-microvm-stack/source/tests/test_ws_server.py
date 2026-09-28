@@ -1451,3 +1451,35 @@ def test_engine_factory_builds_the_two_pass_engine_from_both_configs(
     assert ws_server_mod._default_engine_factory() == "engine"
     assert calls["preview"] == {"model_dir": Path("/opt/models/preview")}
     assert calls["engine"] == ("offline-cfg", "preview-cfg")
+
+
+async def test_a_sortformer_build_honours_a_request_for_speaker_labels() -> None:
+    from asr_server.sortformer import SortformerEngine
+
+    from tests.test_sortformer import EnergyBackend
+
+    engine = SortformerEngine(ScriptedEngine(ScriptedRecognizer()), EnergyBackend())
+    conn = FakeConnection(['{"type":"eos"}'])
+    await AsrSession(conn, path="/?diarize=true", engine=engine).run()
+
+    ready = next(m for m in conn.messages() if m["type"] == "ready")
+    assert ready["effective_config"]["diarize"] is True
+
+
+def test_engine_factory_attaches_the_sortformer_diarizer_when_the_image_bakes_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asr_server.ws_server as ws_server_mod
+
+    monkeypatch.setenv("ASR_ENGINE", "accurate")
+    monkeypatch.setenv("ASR_DIARIZER_KIND", "sortformer")
+    monkeypatch.setattr(ws_server_mod, "build_offline_model_config", lambda: "offline-cfg")
+    monkeypatch.setattr(ws_server_mod, "create_sherpa_offline_engine", lambda cfg: "offline-engine")
+    monkeypatch.setattr(
+        ws_server_mod, "create_sortformer_engine", lambda inner: ("sortformer", inner)
+    )
+    monkeypatch.setattr(
+        ws_server_mod, "diarization_enabled", lambda: pytest.fail("embedder chain consulted")
+    )
+
+    assert ws_server_mod._default_engine_factory() == ("sortformer", "offline-engine")

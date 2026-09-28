@@ -431,3 +431,28 @@ def test_run_warms_two_pass_engine_through_both_factories() -> None:
     assert code == 0
     assert [str(c.encoder) for c in streaming_calls] == ["/opt/models/preview/encoder.onnx"]
     assert [str(c.encoder) for c in offline_calls] == ["/opt/models/encoder.onnx"]
+
+
+def test_run_warms_the_diarizer_after_the_recogniser_and_fails_the_build_when_it_cannot() -> None:
+    calls: list[tuple[str, int]] = []
+
+    def _warmer(model: str, threads: int) -> int:
+        calls.append((model, threads))
+        return 2
+
+    ok = run(
+        ["--model", "/opt/models", "--engine", "accurate", "--duration-ms", "100"],
+        offline_recognizer_factory=_offline_factory([("hi", "hi")]),
+        diarizer_warmer=_warmer,
+    )
+
+    def _broken(model: str, threads: int) -> int:
+        raise RuntimeError("diarization model not found")
+
+    failed = run(
+        ["--model", "/opt/models", "--engine", "accurate", "--duration-ms", "100"],
+        offline_recognizer_factory=_offline_factory([("hi", "hi")]),
+        diarizer_warmer=_broken,
+    )
+    assert ok == 0 and failed == 1
+    assert [model for model, _ in calls] == ["/opt/models"]

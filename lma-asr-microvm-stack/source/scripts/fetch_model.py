@@ -83,6 +83,7 @@ SEGMENTATION_MODEL_NAME = "segmentation.onnx"
 # audio is cut into utterances by VAD and each closed utterance is decoded. The name
 # matches asr_server.offline_recognizer's default.
 VAD_MODEL_NAME = "silero_vad.onnx"
+DIARIZER_SUBDIR = "diarizer"
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 # Model weights come from a public release host, and a single 503 from it used to
@@ -343,6 +344,23 @@ def run(argv: list[str]) -> int:
                 log(f"placed segmentation model -> {SEGMENTATION_MODEL_NAME}")
             else:
                 log("no segmentation model selected: one speaker per endpointed utterance")
+
+            diarizer_url = env.get("ASR_DIARIZER_MODEL_URL", "")
+            if diarizer_url:
+                diarizer_dest = dest / DIARIZER_SUBDIR
+                diarizer_dest.mkdir(parents=True, exist_ok=True)
+                label = f"diarization model {env.get('ASR_DIARIZER_MODEL_ID', '?')}"
+                for part in ("MODEL", "DATA"):
+                    url = env.get(f"ASR_DIARIZER_{part}_URL", "")
+                    name = Path(env.get(f"ASR_DIARIZER_{part}_FILE", "")).name
+                    if not url or not name:
+                        raise ModelFetchError(f"{label}: {part.lower()} file is not pinned")
+                    target = tmpdir / name
+                    fetch_verified(
+                        url, env.get(f"ASR_DIARIZER_{part}_SHA256", ""), target, f"{label} {name}"
+                    )
+                    shutil.move(str(target), str(diarizer_dest / name))
+                    log(f"placed {name} -> {DIARIZER_SUBDIR}/{name}")
 
             vad_url = env.get("ASR_VAD_MODEL_URL", "")
             if vad_url:

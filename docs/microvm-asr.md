@@ -136,6 +136,9 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `cohere-transcribe-titanet-small` | Cohere Transcribe 2B (offline engine, 14 languages, one baked) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v3-live-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v3-live-nemotron35-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a punctuated Nemotron 3.5 live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + OpenMDW-1.1 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-sortformer` | Parakeet TDT 0.6B v3 (offline engine) | Nemotron 3 Diarization (end to end) | built in | none to tune; up to 8 speakers per channel | CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
+| `parakeet-tdt-v3-live-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
+| `parakeet-tdt-v3-live-nemotron35-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
 
 The default stays FastConformer: the same cache-aware streaming FastConformer-RNNT
 architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, trained on NeMo ASRSET —
@@ -208,7 +211,22 @@ previews the open utterance: the live row shows the streaming text as it is spok
 Parakeet's decode replaces it under the same segment when the utterance closes. Rows,
 word timings and speaker labels are Parakeet's. The preview adds the streaming model's
 CPU per session, about 0.26 real time for FastConformer and 0.6 to 0.9 for Nemotron 3.5,
-so the Nemotron variant suits one session per MicroVM. Neither has run live yet.
+so the Nemotron variant is the heavier one. Both ran live on 2026-09-22 and 2026-09-23 with
+two sessions and no dropped audio, including a 49-minute meeting on the Nemotron variant.
+
+**End-to-end diarization bundles.** The three `-sortformer` bundles replace the TitaNet
+embedder, the pyannote turn detector and the threshold registry with NVIDIA's Nemotron 3
+Diarization, a Sortformer model that labels every 10 ms frame with the activity of up to
+eight speakers per channel and keeps identities through a speaker cache carried across the
+session. The engine runs one diarizer step each time the offline engine closes an
+utterance, over the audio since the previous step, and gives each Parakeet word the speaker
+active under it, so a row is split wherever the speaker changes, however short the turn. A
+run of fewer than three words shorter than 0.5 s stays with its neighbour. There is no
+threshold or minimum utterance to calibrate. Labels restart for every meeting, as with the
+other bundles. The model is the int8 ONNX export published by onnx-community, pinned to a
+commit. On a 4-core x86 host the diarizer adds about 0.09 real time to the diarized channel,
+and its streamed labels agree with the full-precision offline reference on more than 99 % of
+speech frames. None of the three has run live yet.
 
 ## Choosing the engine
 
@@ -708,6 +726,7 @@ complying with their licences.**
 | NVIDIA Parakeet TDT 0.6B v3 and v2 (ASR, offline bundles) | CC-BY-4.0 |
 | Qwen3-ASR 0.6B (ASR, offline Qwen bundles; third-party ONNX export re-hosted by k2-fsa) | Apache-2.0 |
 | Cohere Transcribe 03-2026 2B (ASR, `cohere-transcribe-titanet-small`) | Apache-2.0 |
+| NVIDIA Nemotron 3 Diarization (diarization, `-sortformer` bundles; third-party ONNX export by onnx-community) | OpenMDW-1.1 |
 | Silero VAD v5 (utterance segmentation, offline bundles) | MIT |
 | NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
 | pyannote segmentation 3.0 (turn detection) | MIT |

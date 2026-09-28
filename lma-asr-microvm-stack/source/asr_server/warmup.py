@@ -259,6 +259,7 @@ def run(
     offline_recognizer_factory: OfflineRecognizerFactory = (
         _default_offline_recognizer_factory
     ),
+    diarizer_warmer: Callable[[str, int], int] | None = None,
 ) -> int:
     """CLI body: build the selected engine's recogniser and warm it.
 
@@ -278,6 +279,9 @@ def run(
             duration_ms=args.duration_ms,
             sample_rate=args.sample_rate,
         )
+        if diarizer_warmer is not None:
+            steps = diarizer_warmer(args.model, args.num_threads or 1)
+            _LOG.info("warmed the sortformer diarizer in %d step(s)", steps)
     except Exception:  # noqa: BLE001 - any load/decode failure must fail the build
         _LOG.exception("warmup failed: model did not load or dummy inference errored")
         return 1
@@ -348,7 +352,14 @@ def main() -> None:
     # image build comes from the baked model.env (an 'accurate' bundle must warm
     # the offline engine, or the build fails loading offline weights).
     load_model_env()
-    sys.exit(run(sys.argv[1:]))
+    warmer = None
+    if os.environ.get("ASR_DIARIZER_KIND", "") == "sortformer":
+        from asr_server.sortformer import warm_sortformer
+
+        def warmer(model: str, threads: int) -> int:
+            return warm_sortformer(model, num_threads=threads)
+
+    sys.exit(run(sys.argv[1:], diarizer_warmer=warmer))
 
 
 if __name__ == "__main__":  # pragma: no cover - process entrypoint

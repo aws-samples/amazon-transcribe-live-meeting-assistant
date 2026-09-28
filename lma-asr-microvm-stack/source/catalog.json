@@ -163,6 +163,53 @@
       "previewModelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
       "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (preview ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
       "notes": "Two-pass with a punctuated, cased preview from Nemotron 3.5; Parakeet v3 replaces it when the utterance closes. Heavier: the preview alone ran at a real-time factor of 0.6-0.9 for one session on a 4-core host, so two sessions per MicroVM may lag. Not yet run live."
+    },
+    {
+      "id": "parakeet-tdt-v3-sortformer",
+      "name": "Parakeet TDT 0.6B v3 offline + Nemotron 3 Diarization (CC-BY-4.0 + OpenMDW-1.1)",
+      "status": "experimental",
+      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "none",
+      "segmentationModelId": "none",
+      "diarizerModelId": "nemotron-3-diarization-int8",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
+      "notes": "Every word labelled from the diarizer's frame activity, so short turns and overlaps keep their own speaker. Up to eight speakers per channel. Not yet run live."
+    },
+    {
+      "id": "parakeet-tdt-v3-live-sortformer",
+      "name": "Parakeet TDT 0.6B v3 offline with a FastConformer live preview + Nemotron 3 Diarization (CC-BY-4.0 + OpenMDW-1.1)",
+      "status": "experimental",
+      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "none",
+      "segmentationModelId": "none",
+      "diarizerModelId": "nemotron-3-diarization-int8",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "previewModelId": "fastconformer-streaming-en-480ms-int8",
+      "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (preview ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
+      "notes": "Two-pass with a FastConformer preview; Parakeet's finals labelled per word by the diarizer. Not yet run live."
+    },
+    {
+      "id": "parakeet-tdt-v3-live-nemotron35-sortformer",
+      "name": "Parakeet TDT 0.6B v3 offline with a Nemotron 3.5 live preview + Nemotron 3 Diarization (CC-BY-4.0 + OpenMDW-1.1)",
+      "status": "experimental",
+      "modelId": "parakeet-tdt-0.6b-v3-int8",
+      "vadModelId": "silero-vad-v5",
+      "speakerModelId": "none",
+      "segmentationModelId": "none",
+      "diarizerModelId": "nemotron-3-diarization-int8",
+      "minSegmentMs": 2500,
+      "baselineMemoryMiB": 8192,
+      "redistributable": true,
+      "previewModelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
+      "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (preview ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
+      "notes": "Two-pass with a punctuated Nemotron 3.5 preview; Parakeet's finals labelled per word by the diarizer. Heaviest bundle: watch CPU with two sessions. Not yet run live."
     }
   ],
   "models": [
@@ -437,6 +484,33 @@
       "approxDownloadMb": 2,
       "provenanceVerified": "2026-09-21",
       "note": "Only the 'accurate' (offline) engine needs this: an offline model cannot stream, so audio is cut into utterances by VAD and each closed utterance is decoded. The v5 export: the runtime feeds its input/state/sr signature."
+    }
+  ],
+  "diarizerModels": [
+    {
+      "id": "nemotron-3-diarization-int8",
+      "name": "NVIDIA Nemotron 3 Diarization (Sortformer, 100M, int8 ONNX, OpenMDW-1.1)",
+      "kind": "sortformer",
+      "files": {
+        "model": {
+          "path": "onnx/model_quantized.onnx",
+          "url": "https://huggingface.co/onnx-community/Nemotron-3-Diarization-ONNX/resolve/353b6f8ad2cac3580e982d7fbdf0a010786b0406/onnx/model_quantized.onnx",
+          "sha256": "fff7d18c7439c9fdc1c6c4dfec924cb42d3344264ca879780dfaf7ee886e6c1e"
+        },
+        "data": {
+          "path": "onnx/model_quantized.onnx_data",
+          "url": "https://huggingface.co/onnx-community/Nemotron-3-Diarization-ONNX/resolve/353b6f8ad2cac3580e982d7fbdf0a010786b0406/onnx/model_quantized.onnx_data",
+          "sha256": "002d7483e1c865c35c82220fdb378f185ff213c6d35922b38ae421c8ec72c338"
+        }
+      },
+      "maxSpeakers": 8,
+      "sampleRate": 16000,
+      "license": "OpenMDW-1.1",
+      "licenseUrl": "https://huggingface.co/nvidia/Nemotron-3-Diarization",
+      "onnxruntime": "1.27.0",
+      "approxDownloadMb": 121,
+      "provenanceVerified": "2026-09-28",
+      "note": "End-to-end diarizer labelling every 10 ms frame for up to eight speakers per channel, arrival-ordered, with a speaker cache carried across a session. ONNX export by onnx-community (third-party) pinned to commit 353b6f8. Replayed through the runtime on 2026-09-28: 99.4-99.8% frame agreement with the fp32 reference, real-time factor about 0.09 on a 4-core x86 host with steps at each utterance close. Not yet run live."
     }
   ]
 }

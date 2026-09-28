@@ -584,3 +584,58 @@ def test_run_places_a_preview_model_beside_the_authority(tmp_path: Path) -> None
     assert (dest / "preview" / "joiner.onnx").read_bytes() == b"p-joiner"
     assert (dest / "preview" / "tokens.txt").read_bytes() == b"p\n"
     assert (dest / "encoder.onnx").read_bytes() != b"p-encoder"
+
+
+def test_run_places_both_diarizer_files_under_their_own_names(tmp_path: Path) -> None:
+    main_archive = make_archive(tmp_path)
+    payloads = {"model.onnx": b"graph", "model.onnx_data": b"weights"}
+    digests = {name: hashlib.sha256(data).hexdigest() for name, data in payloads.items()}
+    digests["main"] = hashlib.sha256(main_archive.read_bytes()).hexdigest()
+    env = dict(ENV_TEMPLATE)
+    env.update(
+        {
+            "ASR_MODEL_SHA256": digests["main"],
+            "ASR_DIARIZER_MODEL_ID": "sortformer",
+            "ASR_DIARIZER_MODEL_URL": "https://example.invalid/r/abc/onnx/model.onnx",
+            "ASR_DIARIZER_MODEL_SHA256": digests["model.onnx"],
+            "ASR_DIARIZER_MODEL_FILE": "onnx/model.onnx",
+            "ASR_DIARIZER_DATA_URL": "https://example.invalid/r/abc/onnx/model.onnx_data",
+            "ASR_DIARIZER_DATA_SHA256": digests["model.onnx_data"],
+            "ASR_DIARIZER_DATA_FILE": "onnx/model.onnx_data",
+        }
+    )
+    env_path = write_env(tmp_path / "model.env", env)
+    dest = tmp_path / "opt-models"
+
+    def fake_download(url: str, target: Path) -> str:
+        name = url.rsplit("/", 1)[-1]
+        data = payloads.get(name, main_archive.read_bytes())
+        target.write_bytes(data)
+        return hashlib.sha256(data).hexdigest()
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(dest)]) == 0
+    assert (dest / "diarizer" / "model.onnx").read_bytes() == b"graph"
+    assert (dest / "diarizer" / "model.onnx_data").read_bytes() == b"weights"
+
+
+def test_run_refuses_a_diarizer_whose_data_file_is_not_pinned(tmp_path: Path) -> None:
+    main_archive = make_archive(tmp_path)
+    env = dict(ENV_TEMPLATE)
+    env.update(
+        {
+            "ASR_MODEL_SHA256": hashlib.sha256(main_archive.read_bytes()).hexdigest(),
+            "ASR_DIARIZER_MODEL_URL": "https://example.invalid/model.onnx",
+            "ASR_DIARIZER_MODEL_SHA256": hashlib.sha256(b"graph").hexdigest(),
+            "ASR_DIARIZER_MODEL_FILE": "model.onnx",
+        }
+    )
+    env_path = write_env(tmp_path / "model.env", env)
+
+    def fake_download(url: str, target: Path) -> str:
+        data = b"graph" if url.endswith("model.onnx") else main_archive.read_bytes()
+        target.write_bytes(data)
+        return hashlib.sha256(data).hexdigest()
+
+    with mock.patch.object(fetch_model, "download", side_effect=fake_download):
+        assert fetch_model.run(["--env-file", str(env_path), "--dest", str(tmp_path / "d")]) == 1

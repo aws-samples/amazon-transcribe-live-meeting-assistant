@@ -188,6 +188,9 @@ rebuilds the MicroVM image (~20 minutes).
 | `cohere-transcribe-titanet-small` | Cohere Transcribe 2B (offline engine, 14 languages, one baked at build) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | Apache-2.0 + MIT + CC-BY-4.0 + MIT | Per utterance only |
 | `parakeet-tdt-v3-live-titanet-small` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + CC-BY-4.0 + MIT + CC-BY-4.0 + MIT | Yes |
 | `parakeet-tdt-v3-live-nemotron35-titanet-small` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + OpenMDW-1.1 + MIT + CC-BY-4.0 + MIT | Yes |
+| `parakeet-tdt-v3-sortformer` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) + Silero VAD + NVIDIA Nemotron 3 Diarization | CC-BY-4.0 + MIT + OpenMDW-1.1 | Yes, per word, up to 8 speakers per channel |
+| `parakeet-tdt-v3-live-sortformer` | As above with a FastConformer live preview | CC-BY-4.0 + CC-BY-4.0 + MIT + OpenMDW-1.1 | Yes, per word |
+| `parakeet-tdt-v3-live-nemotron35-sortformer` | As above with a Nemotron 3.5 live preview | CC-BY-4.0 + OpenMDW-1.1 + MIT + OpenMDW-1.1 | Yes, per word |
 
 There are deliberately no parameters for supplying a model URL: every model is a
 curated entry in the ASR stack's `catalog.json` with its checksum pinned and, for a
