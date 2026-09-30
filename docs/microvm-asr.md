@@ -521,6 +521,11 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   with video recording): inference happens in the MicroVM, not in the task.
 - One MicroVM serves both audio channels of a meeting. The default 8 GiB baseline
   gives 4 vCPU, which both channels share.
+- The engine logs its CPU use once a minute while a meeting is open, as
+  `engine load: 2.10 of 4 cores (53%) over the last 60s, 2 session(s), rss=2488MB`,
+  in `/aws/lambda-microvms/<stack>-asr`. The size is billed whatever the load, so
+  this line is what tells you whether a bundle would fit a smaller size.
+  `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
 - `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
   bounds what a single
   MicroVM can cost. The transcriber terminates the MicroVM on meeting end and on

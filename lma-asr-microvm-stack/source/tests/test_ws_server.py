@@ -1483,3 +1483,20 @@ def test_engine_factory_attaches_the_sortformer_diarizer_when_the_image_bakes_on
     )
 
     assert ws_server_mod._default_engine_factory() == ("sortformer", "offline-engine")
+
+
+def test_load_reporter_reports_cores_used_since_the_last_sample() -> None:
+    from asr_server.ws_server import LoadReporter
+
+    readings = iter([10.0, 70.0, 70.5])
+    clock = iter([100.0, 130.0, 160.0])
+    reporter = LoadReporter(cpu_seconds=lambda: next(readings), clock=lambda: next(clock), cores=4)
+    reporter.active_sessions = 2
+
+    busy = reporter.line()
+    reporter.active_sessions = 0
+    idle = reporter.line()
+
+    assert busy is not None
+    assert busy.startswith("engine load: 2.00 of 4 cores (50%) over the last 30s, 2 session(s)")
+    assert idle is None

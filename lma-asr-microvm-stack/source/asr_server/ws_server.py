@@ -47,6 +47,7 @@ import logging
 import os
 import resource
 import sys
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import NamedTuple, Protocol
@@ -1021,6 +1022,52 @@ def _default_engine_factory() -> RecognizerEngine:
     return inner
 
 
+class LoadReporter:
+    def __init__(
+        self,
+        *,
+        cpu_seconds: Callable[[], float] | None = None,
+        clock: Callable[[], float] | None = None,
+        cores: int | None = None,
+    ) -> None:
+        self._cpu_seconds = cpu_seconds or _process_cpu_seconds
+        self._clock = clock or time.monotonic
+        self.cores = cores or os.cpu_count() or 1
+        self.active_sessions = 0
+        self._last_cpu = self._cpu_seconds()
+        self._last_wall = self._clock()
+
+    def sample(self) -> tuple[float, float]:
+        cpu, wall = self._cpu_seconds(), self._clock()
+        elapsed = max(wall - self._last_wall, 1e-9)
+        used = (cpu - self._last_cpu) / elapsed
+        self._last_cpu, self._last_wall = cpu, wall
+        return used, elapsed
+
+    def line(self) -> str | None:
+        used, elapsed = self.sample()
+        if self.active_sessions == 0 and used < 0.05:
+            return None
+        return (
+            f"engine load: {used:.2f} of {self.cores} cores ({100.0 * used / self.cores:.0f}%) "
+            f"over the last {elapsed:.0f}s, {self.active_sessions} session(s), "
+            f"rss={_read_rss_mb().current_mb:.0f}MB"
+        )
+
+
+def _process_cpu_seconds() -> float:
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    return usage.ru_utime + usage.ru_stime
+
+
+async def _report_load(reporter: LoadReporter, interval_s: float) -> None:
+    while True:
+        await asyncio.sleep(interval_s)
+        line = reporter.line()
+        if line:
+            _LOG.info(line)
+
+
 async def serve_asr(
     server_config: ServerConfig | None = None,
     engine_factory: EngineFactory = _default_engine_factory,
@@ -1071,6 +1118,9 @@ async def serve_asr(
         floor.peak_mb,
     )
 
+    reporter = LoadReporter()
+    interval_s = float(os.environ.get("ASR_LOAD_LOG_INTERVAL_S", "60"))
+
     async def handler(conn: ServerConnection) -> None:
         request = conn.request
         path = request.path if request is not None else "/"
@@ -1080,7 +1130,11 @@ async def serve_asr(
             engine=engine,
             server_config=cfg,
         )
-        await session.run()
+        reporter.active_sessions += 1
+        try:
+            await session.run()
+        finally:
+            reporter.active_sessions -= 1
 
     async with serve(
         handler,
@@ -1089,7 +1143,16 @@ async def serve_asr(
         ping_interval=cfg.keepalive_interval_s,
         ping_timeout=cfg.keepalive_timeout_s,
     ) as server:
-        await server.serve_forever()
+        load_task = (
+            asyncio.create_task(_report_load(reporter, interval_s)) if interval_s > 0 else None
+        )
+        try:
+            await server.serve_forever()
+        finally:
+            if load_task is not None:
+                load_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await load_task
 
 
 def main() -> None:
