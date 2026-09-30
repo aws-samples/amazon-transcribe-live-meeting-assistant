@@ -1,5 +1,5 @@
 # Pinned: the agent passes guardrail_id / guardrail_version to BedrockModel,
 # which is the documented configuration mechanism in this version.
-strands-agents==1.56.0
+strands-agents==1.57.1
 boto3
 tavily-python>=0.7.26
