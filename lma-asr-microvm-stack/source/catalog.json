@@ -15,7 +15,7 @@
       "baselineMemoryMiB": 8192,
       "redistributable": true,
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation)",
-      "notes": "The default. Threshold placed by the midpoint rule scripts/calibrate.py implements, on TitaNet-small measurements under this bundle's segmentation policy (1200 ms endpointing, 2500 ms minimum utterance). Real meetings: different speakers scored at most 0.107 in one and 0.307 in another (two similar-sounding women), while the same speaker at utterances of 2.5 s and longer scored 0.74-0.91 - midpoint 0.52. Corroborated 2026-09-03 with a synthetic same-gender pair (two male neural TTS voices, 101 s, 81 same/72 different pairs): different max 0.402, same-speaker p5 0.701, recommendation 0.539. The previously shipped 0.4 sat only 0.09 above the hardest real pair and would have merged the synthetic pair's closest utterances; 0.5 clears every observed different-speaker score with margin and stays 0.2 below every observed same-speaker floor. Those measurements were taken with a different (NVIDIA-licensed) ASR model in front of the same embedder; the ASR model does not touch the samples the embedder sees, so the operating point carries over. Status becomes 'vetted' once this exact pairing has been validated on a live multi-speaker meeting."
+      "notes": "The previous default. Threshold placed by the midpoint rule scripts/calibrate.py implements, on TitaNet-small measurements under this bundle's segmentation policy (1200 ms endpointing, 2500 ms minimum utterance). Real meetings: different speakers scored at most 0.107 in one and 0.307 in another (two similar-sounding women), while the same speaker at utterances of 2.5 s and longer scored 0.74-0.91 - midpoint 0.52. Corroborated 2026-09-03 with a synthetic same-gender pair (two male neural TTS voices, 101 s, 81 same/72 different pairs): different max 0.402, same-speaker p5 0.701, recommendation 0.539. The previously shipped 0.4 sat only 0.09 above the hardest real pair and would have merged the synthetic pair's closest utterances; 0.5 clears every observed different-speaker score with margin and stays 0.2 below every observed same-speaker floor. Those measurements were taken with a different (NVIDIA-licensed) ASR model in front of the same embedder; the ASR model does not touch the samples the embedder sees, so the operating point carries over. Status becomes 'vetted' once this exact pairing has been validated on a live multi-speaker meeting."
     },
     {
       "id": "fastconformer-transcription-only",
@@ -146,7 +146,7 @@
       "redistributable": true,
       "previewModelId": "fastconformer-streaming-en-480ms-int8",
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (preview ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
-      "notes": "Two-pass: FastConformer streams a live preview of the open utterance and Parakeet v3 replaces it when the utterance closes. Rows and speaker labels are Parakeet's. Not yet run live."
+      "notes": "Two-pass: FastConformer streams a live preview of the open utterance and Parakeet v3 replaces it when the utterance closes. Rows and speaker labels are Parakeet's. Ran live on 2026-09-22 and 2026-09-23 with two sessions and no dropped audio."
     },
     {
       "id": "parakeet-tdt-v3-live-nemotron35-titanet-small",
@@ -162,7 +162,7 @@
       "redistributable": true,
       "previewModelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
       "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (preview ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
-      "notes": "Two-pass with a punctuated, cased preview from Nemotron 3.5; Parakeet v3 replaces it when the utterance closes. Heavier: the preview alone ran at a real-time factor of 0.6-0.9 for one session on a 4-core host, so two sessions per MicroVM may lag. Not yet run live."
+      "notes": "Two-pass with a punctuated, cased preview from Nemotron 3.5; Parakeet v3 replaces it when the utterance closes. Heavier: the preview alone ran at a real-time factor of 0.6-0.9 for one session on a 4-core host, so two sessions per MicroVM may lag. Ran live on 2026-09-22 and 2026-09-23 with two sessions and no dropped audio."
     },
     {
       "id": "parakeet-tdt-v3-sortformer",
@@ -193,7 +193,7 @@
       "redistributable": true,
       "previewModelId": "fastconformer-streaming-en-480ms-int8",
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (preview ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
-      "notes": "Two-pass with a FastConformer preview; Parakeet's finals labelled per word by the diarizer. Not yet run live."
+      "notes": "Two-pass with a FastConformer preview; Parakeet's finals labelled per word by the diarizer. Ran live on 2026-09-28 and 2026-09-30 with two sessions and kept up."
     },
     {
       "id": "parakeet-tdt-v3-live-nemotron35-sortformer",
@@ -209,7 +209,7 @@
       "redistributable": true,
       "previewModelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
       "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (preview ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
-      "notes": "Two-pass with a punctuated Nemotron 3.5 preview; Parakeet's finals labelled per word by the diarizer. Heaviest bundle: watch CPU with two sessions. Not yet run live."
+      "notes": "Two-pass with a punctuated Nemotron 3.5 preview; Parakeet's finals labelled per word by the diarizer. Heaviest bundle: watch CPU with two sessions. Ran live on 2026-09-28 and 2026-09-30 with two sessions and kept up."
     }
   ],
   "models": [
@@ -510,7 +510,7 @@
       "onnxruntime": "1.27.0",
       "approxDownloadMb": 121,
       "provenanceVerified": "2026-09-28",
-      "note": "End-to-end diarizer labelling every 10 ms frame for up to eight speakers per channel, arrival-ordered, with a speaker cache carried across a session. ONNX export by onnx-community (third-party) pinned to commit 353b6f8. Replayed through the runtime on 2026-09-28: 99.4-99.8% frame agreement with the fp32 reference, real-time factor about 0.09 on a 4-core x86 host with steps at each utterance close. Not yet run live."
+      "note": "End-to-end diarizer labelling every 10 ms frame for up to eight speakers per channel, arrival-ordered, with a speaker cache carried across a session. ONNX export by onnx-community (third-party) pinned to commit 353b6f8. Replayed through the runtime on 2026-09-28: 99.4-99.8% frame agreement with the fp32 reference, real-time factor about 0.09 on a 4-core x86 host with steps at each utterance close. Ran live on 2026-09-28 and 2026-09-30."
     }
   ]
 }

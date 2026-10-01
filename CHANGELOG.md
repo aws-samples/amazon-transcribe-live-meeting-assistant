@@ -9,27 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Seven more model bundles for the on-demand speech engine.** Nemotron 3.5 ASR streaming (OpenMDW-1.1; punctuated, multilingual, heavier), the earlier Nemotron speech streaming model (NVIDIA Open Model License, marked not redistributable), Parakeet TDT 0.6B v3 and v2 on the offline engine (CC-BY-4.0), and Qwen3-ASR 0.6B on the offline engine (Apache-2.0; the best transcript quality measured, but no word timings, so speaker labels are one per utterance), and Cohere Transcribe 2B on the offline engine (Apache-2.0; 14 languages, one baked at build time, no word timings; not yet run live). **The default bundle is now `parakeet-tdt-v3-titanet-small`**, the most accurate model tested live and the only one that labelled every speaker turn correctly: on update the image is rebuilt (about 20 minutes) and rows appear when an utterance closes rather than as live partial text. Switching is a developer change to the `AsrDefaults` mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
-
-- **End-to-end diarization bundles.** `parakeet-tdt-v3-sortformer`, `parakeet-tdt-v3-live-sortformer` (FastConformer preview) and `parakeet-tdt-v3-live-nemotron35-sortformer` (Nemotron 3.5 preview) label every Parakeet word with NVIDIA's Nemotron 3 Diarization (OpenMDW-1.1), so short turns and quick exchanges get their own rows and speakers, with nothing to calibrate. Up to eight speakers per channel. Not yet run live.
-- **The on-demand engine logs its CPU use once a minute** during a meeting, as cores used out of those available, so a bundle's load can be read from the engine log.
-- **Two-pass bundles give the offline engine live text.** `parakeet-tdt-v3-live-titanet-small` (FastConformer preview) and `parakeet-tdt-v3-live-nemotron35-titanet-small` (punctuated Nemotron 3.5 preview) stream a preview of the open utterance and replace it with Parakeet's decode when the utterance closes; rows and speaker labels are Parakeet's. Not yet run live.
-
-- **On the on-demand engine, the Virtual Participant's voice assistant is its own transcript channel.** Its speech comes from a second engine session fed only the assistant's audio, appears on the `AGENT` channel under the VP's name and is never diarized, like Stream Audio's microphone and tab channels. Meeting rows are attributed to the roster by the row's start time instead of by whoever is active when the row is emitted.
+- **The default on-demand speech bundle is now `parakeet-tdt-v3-titanet-small`** (Parakeet TDT 0.6B v3 on the offline engine, CC-BY-4.0), the most accurate model tested live and the only one that labelled every speaker turn of 2.5 s or more correctly. On update the MicroVM image is rebuilt (about 20 minutes), and rows appear when an utterance closes, within about 20 s of speech, rather than as live partial text. Switching bundles is a developer change to the `AsrDefaults` mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
+- **Seven more model bundles.** Nemotron 3.5 ASR streaming (OpenMDW-1.1), the earlier Nemotron speech streaming model (NVIDIA Open Model License, not redistributable), Parakeet TDT 0.6B v3 and v2, Qwen3-ASR 0.6B (Apache-2.0; no word timings, so labels are one per utterance) and Cohere Transcribe 2B (Apache-2.0; one language baked at build time; not yet run live).
+- **Two-pass bundles add live text to the offline engine.** `parakeet-tdt-v3-live-titanet-small` (FastConformer preview) and `parakeet-tdt-v3-live-nemotron35-titanet-small` (punctuated Nemotron 3.5 preview) show a streaming preview while someone speaks and replace it with Parakeet's text when the utterance closes.
+- **End-to-end diarization bundles.** `parakeet-tdt-v3-sortformer`, `parakeet-tdt-v3-live-sortformer` and `parakeet-tdt-v3-live-nemotron35-sortformer` label every Parakeet word with NVIDIA's Nemotron 3 Diarization (OpenMDW-1.1), so short replies get rows and speakers of their own, with nothing to calibrate; up to eight speakers per channel.
+- **On the on-demand engine, the Virtual Participant's voice assistant is its own `AGENT` channel**, under the VP's name and never diarized; meeting rows take the roster speaker active at the row's start.
+- **The on-demand engine logs its CPU use once a minute** during a meeting.
 
 ### Fixed
 
-- **Pausing a Virtual Participant on the on-demand engine no longer ends its transcription.** The sessions stay up and are fed silence while paused, so the resume command continues the same transcript on every platform; a restart continues the meeting timeline and never reuses an earlier segment id.
-- **A Virtual Participant whose engine session dies mid-meeting falls back to Amazon Transcribe** for the rest of the meeting instead of stopping the transcript.
-- **The offline (Parakeet) engine loads the Silero v5 voice-activity model it expects.** The catalog had pinned the v4 export, and a mismatched model is now refused at load time.
-- **Save on the Transcription Engine page is disabled until the form has loaded**, so a click during loading can no longer write empty switches over the saved record.
-- **`lma-asr-microvm-stack/source/model.env` is generated from the catalog's default bundle** and checked for drift by `sync_bundles.py --check`.
-- **Streaming-engine rows no longer lose a word every 20 s of pause-free conversation.** The engine forced a decoder reset once an utterance reached 20 s, and each reset dropped the word in flight; the forced reset now comes at 60 s, while the diarizer's own 20 s row cut, which keeps the decoder running, still bounds displayed rows.
-- **Offline-engine rows (Parakeet, Qwen3-ASR) arrive within about 20 s of speech.** An utterance closed only at a 1.2 s pause, so a long answer produced nothing until it ended; it now also closes at the first 300 ms dip after 10 s of speech and at 20 s at the latest.
-- **Speaker turns inside a long utterance are placed where the voice actually changes.** The diarizer keeps 30 s of audio and had measured turn boundaries from the utterance's start rather than from the start of the audio it analysed, so an utterance longer than 30 s could be split mid-sentence.
-- **A channel that declines speaker labels gets none.** The engine had labelled every session; a session negotiated without labels now skips voice embedding and turn detection, its rows carry no `(spk_N)` suffix, and they are still cut at 20 s.
-- **Transcript rows containing a colon are shown in full.** The call panel dropped everything before the first colon of a caller or agent row, a rule kept from LCA for prefixed speaker labels that no LMA transcript carries, so a row reading "the question is: …" lost its earlier sentences.
-- **A MicroVM the platform terminates before it starts is replaced once.** The ASR launcher starts a second MicroVM within the same acquisition deadline and falls back to Amazon Transcribe only if that one fails too.
+- **Streaming-engine rows no longer lose a word every 20 s of pause-free speech.** The engine's forced decoder reset moves from 20 s to 60 s; on bundles with speaker labels the diarizer still closes rows at 20 s without a reset.
+- **A channel that asks for no speaker labels gets none.** The microphone channel no longer carries a `(spk_0)` suffix or runs voice embedding.
+- **Transcript rows containing a colon are shown in full** in the call panel and the embedded call view; text before the first colon of a caller or agent row was dropped.
+- **Pausing a Virtual Participant on the on-demand engine no longer ends its transcription**, and a VP whose engine session dies mid-meeting continues on Amazon Transcribe.
+- **A MicroVM the platform terminates before it starts is replaced once** before the meeting falls back to Amazon Transcribe.
+- **Save on the Transcription Engine page waits for the form to load.**
 
 ## [0.3.9] - 2026-09-19
 

@@ -518,13 +518,14 @@ is offered only for deployments that accept that licence.
 Speech recognition:
 
   * NVIDIA FastConformer hybrid large streaming multi, EN (streaming;
-    fastconformer-titanet-small, fastconformer-transcription-only and the preview in
-    parakeet-tdt-v3-live-titanet-small)
+    fastconformer-titanet-small, fastconformer-transcription-only, and the preview in
+    parakeet-tdt-v3-live-titanet-small and parakeet-tdt-v3-live-sortformer)
     CC-BY-4.0
     https://huggingface.co/nvidia/stt_en_fastconformer_hybrid_large_streaming_multi
 
-  * NVIDIA Nemotron 3.5 ASR streaming 0.6B (streaming; nemotron35-titanet-small and the
-    preview in parakeet-tdt-v3-live-nemotron35-titanet-small)
+  * NVIDIA Nemotron 3.5 ASR streaming 0.6B (streaming; nemotron35-titanet-small, and the
+    preview in parakeet-tdt-v3-live-nemotron35-titanet-small and
+    parakeet-tdt-v3-live-nemotron35-sortformer)
     OpenMDW-1.1
     https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b
 
@@ -532,8 +533,8 @@ Speech recognition:
     NVIDIA Open Model License -- NOT redistributable
     https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
 
-  * NVIDIA Parakeet TDT 0.6B v3 and v2 (offline; parakeet-tdt-v3-titanet-small,
-    parakeet-tdt-v2-titanet-small)
+  * NVIDIA Parakeet TDT 0.6B v3 and v2 (offline; v2 in parakeet-tdt-v2-titanet-small, v3 in
+    every other bundle whose id starts with parakeet-tdt-v3)
     CC-BY-4.0
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
     https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
@@ -563,13 +564,13 @@ Utterance segmentation (offline bundles only):
     MIT
     https://github.com/snakers4/silero-vad
 
-Speaker embedding (diarization; every bundle except fastconformer-transcription-only):
+Speaker embedding (every bundle whose id ends in -titanet-small):
 
   * NVIDIA TitaNet-small
     CC-BY-4.0
     https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_small
 
-Speaker-turn detection (every bundle except fastconformer-transcription-only):
+Speaker-turn detection (every bundle whose id ends in -titanet-small):
 
   * pyannote segmentation 3.0, converted to ONNX and redistributed ungated by
     k2-fsa together with the upstream license file

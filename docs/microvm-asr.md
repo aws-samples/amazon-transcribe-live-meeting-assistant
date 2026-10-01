@@ -140,17 +140,18 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `parakeet-tdt-v3-live-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
 | `parakeet-tdt-v3-live-nemotron35-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
 
-The default stays FastConformer: the same cache-aware streaming FastConformer-RNNT
-architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, trained on NeMo ASRSET —
-LibriSpeech, **Fisher**, **Switchboard**, WSJ, MLS-EN and Common Voice — so it has
-seen thousands of hours of spontaneous conversational speech. English only, no
-punctuation, and the lightest of the five at a real-time factor of about 0.26 on a
-4-core host.
+The default is Parakeet TDT 0.6B v3 on the offline engine (CC-BY-4.0): punctuated,
+cased, 25 languages, and in the live runs of 2026-09-22 the most accurate model with the
+only per-turn speaker labels that were right throughout. FastConformer, the previous
+default, is the lightest streaming option: the same cache-aware FastConformer-RNNT
+architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, English only, no punctuation,
+at a real-time factor of about 0.26 on a 4-core host.
 
 The alternatives trade weight for transcript quality. Nemotron 3.5 emits punctuation
 and casing and reads far better on the same meeting audio, but ran at a real-time
-factor of 0.89 for a single session on a 4-core host, so a MicroVM carrying two
-channels may fall behind; treat it as a quality trial until measured live. The earlier
+factor of 0.89 for a single session on a 4-core host; on a MicroVM it kept up with two
+channels in the live runs, but it drops or merges more words than any other model in the
+catalog. The earlier
 Nemotron speech model is kept for deployments that accept the NVIDIA Open Model
 License; the catalog marks it `redistributable: false` and it is never the default.
 The Parakeet and Qwen3-ASR bundles run the offline engine described below. Qwen3-ASR
@@ -226,7 +227,8 @@ threshold or minimum utterance to calibrate. Labels restart for every meeting, a
 other bundles. The model is the int8 ONNX export published by onnx-community, pinned to a
 commit. On a 4-core x86 host the diarizer adds about 0.09 real time to the diarized channel,
 and its streamed labels agree with the full-precision offline reference on more than 99 % of
-speech frames. None of the three has run live yet.
+speech frames. The two live-preview variants ran live on 2026-09-28 and 2026-09-30 with
+two sessions and kept up; the plain bundle has not run live.
 
 ## Choosing the engine
 
@@ -519,10 +521,11 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   always-on ASR capacity.
 - **The transcriber task is unchanged** (`256` CPU / `1024` MB, or `1024`/`2048`
   with video recording): inference happens in the MicroVM, not in the task.
-- One MicroVM serves both audio channels of a meeting. The default 8 GiB baseline
-  gives 4 vCPU, which both channels share.
+- One MicroVM serves both audio channels of a meeting. An 8 GiB MicroVM exposed 16 CPUs
+  in the live runs of 2026-09-30, which both channels share; the image still sizes its
+  inference threads for 4.
 - The engine logs its CPU use once a minute while a meeting is open, as
-  `engine load: 2.10 of 4 cores (53%) over the last 60s, 2 session(s), rss=2488MB`,
+  `engine load: 5.57 of 16 cores (35%) over the last 60s, 2 session(s), rss=2340MB`,
   in `/aws/lambda-microvms/<stack>-asr`. The size is billed whatever the load, so
   this line is what tells you whether a bundle would fit a smaller size.
   `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
@@ -578,7 +581,7 @@ Honest state of validation, so nobody deploys this expecting known numbers:
   transcript is slow to appear, or transcripts lag live audio, raise
   the bundle's `baselineMemoryMiB` in `catalog.json` and re-run
   `scripts/sync_bundles.py`. Note the ceiling: the `al2023-1` base MicroVM image
-  accepts only **512, 1024, 2048, 4096 or 8192 MiB**, so 8192 (4 vCPU) is as large as
+  accepts only **512, 1024, 2048, 4096 or 8192 MiB**, so 8192 is as large as
   a MicroVM gets and there is no headroom above the default. The image resolver
   refuses anything else up front rather than letting the stack fail minutes later at
   `AWS::Lambda::MicrovmImage`.
