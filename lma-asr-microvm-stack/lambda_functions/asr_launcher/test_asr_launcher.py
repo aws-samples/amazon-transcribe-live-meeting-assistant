@@ -311,3 +311,17 @@ def test_each_retry_starts_from_a_fresh_client_token() -> None:
 
     assert tokens[0][0] == tokens[1][0]
     assert tokens[0][1] != tokens[1][1]
+
+
+def test_acquire_does_not_retry_without_a_minute_left_before_the_deadline() -> None:
+    client = fake_microvms()
+    client.run_microvm.return_value = {"microvmId": "mvm-1", "endpoint": "e1", "state": "PENDING"}
+    client.get_microvm.return_value = {"state": "TERMINATED", "stateReason": "Internal service error."}
+    with mock.patch.object(index, "microvms", client), mock.patch.object(
+        index, "ACQUIRE_TIMEOUT_SECONDS", 30
+    ):
+        result = index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+
+    assert result["ok"] is False
+    assert "Internal service error" in result["reason"]
+    assert client.run_microvm.call_count == 1

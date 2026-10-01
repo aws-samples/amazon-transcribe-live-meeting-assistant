@@ -409,6 +409,7 @@ test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
 	@test -d $(ASR_SOURCE_DIR)/.venv || $(PYTHON) -m venv $(ASR_SOURCE_DIR)/.venv
 	@$(ASR_SOURCE_DIR)/.venv/bin/pip install -q -r $(ASR_SOURCE_DIR)/requirements-dev.txt
 	cd $(ASR_SOURCE_DIR) && .venv/bin/python -m pytest -q && .venv/bin/ruff check .
+	$(ASR_SOURCE_DIR)/.venv/bin/python $(ASR_DIR)/scripts/sync_bundles.py --check
 	@echo -e "$(GREEN)✅ ASR MicroVM runtime tests passed!$(NC)"
 
 test-ui-force: check-node ## Run React UI tests (ignore checksum, always run)

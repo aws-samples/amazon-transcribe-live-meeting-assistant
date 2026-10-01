@@ -957,3 +957,16 @@ def test_a_preview_pinned_to_another_runtime_is_refused() -> None:
     preview["onnxruntime"] = "9.9.9"
     with pytest.raises(index.ResolutionError, match="pins onnxruntime"):
         index.resolve({"BundleId": "bundle-two-pass"}, catalog)
+
+
+def test_a_two_pass_bundle_reports_the_two_pass_engine() -> None:
+    source = make_source_zip(_catalog_with_preview())
+    with mock.patch.object(
+        index.s3, "get_object", side_effect=lambda **kw: {"Body": io.BytesIO(source)}
+    ), mock.patch.object(index.s3, "put_object"):
+        properties = {"SourceLocation": "artifacts/src.zip", "DestBucket": "stack-bucket"}
+        _, two_pass = index.build({**properties, "BundleId": "bundle-two-pass"})
+        _, offline = index.build({**properties, "BundleId": "bundle-offline"})
+
+    assert two_pass["AsrEngine"] == "two_pass"
+    assert offline["AsrEngine"] == "accurate"

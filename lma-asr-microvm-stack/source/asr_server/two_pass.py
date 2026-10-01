@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Two-pass engine: a streaming preview of the open utterance, replaced at its close.
 
 The offline ("accurate") recogniser owns segmentation and the final text. While an
@@ -82,6 +85,7 @@ class TwoPassRecognizer(Recognizer):
         self._total_bytes = 0
         self._preview: Recognizer | None = None
         self._preview_start: float | None = None
+        self._preview_failed = False
         self._preview_finals: list[str] = []
         self._preview_partial = ""
         self._preview_text = ""
@@ -97,14 +101,24 @@ class TwoPassRecognizer(Recognizer):
         if open_start is None:
             self._drop_preview()
             return events
+        if self._preview_failed:
+            return events
         if self._preview is not None and open_start != self._preview_start:
             self._drop_preview()
-        if self._preview is None:
-            self._preview = self._preview_factory()
-            self._preview_start = open_start
-            preview_events = self._preview.accept_pcm(self._since(open_start))
-        else:
-            preview_events = self._preview.accept_pcm(pcm)
+        try:
+            if self._preview is None:
+                self._preview = self._preview_factory()
+                self._preview_start = open_start
+                preview_events = self._preview.accept_pcm(self._since(open_start))
+            else:
+                preview_events = self._preview.accept_pcm(pcm)
+        except Exception:
+            self._preview_failed = True
+            self._drop_preview()
+            _LOG.exception(
+                "live preview failed; rows appear when each utterance closes from here on"
+            )
+            return events
         for event in preview_events:
             if event.kind == "final":
                 self._preview_finals.append(event.text)

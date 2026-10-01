@@ -436,7 +436,9 @@ def build(properties: dict) -> tuple[str, dict]:
         "NumThreads": str(selection["numThreads"]),
         "SegmentationModelId": selection["segmentation"].get("id", "none"),
         "TurnDetectionAvailable": "true" if selection["segmentation"].get("url") else "false",
-        "AsrEngine": selection["model"].get("engine", "streaming"),
+        "AsrEngine": (
+            "two_pass" if selection.get("preview") else selection["model"].get("engine", "streaming")
+        ),
         "VadModelId": selection["vad"].get("id", "none"),
     }
 

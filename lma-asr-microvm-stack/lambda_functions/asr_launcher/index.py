@@ -48,6 +48,7 @@ TOKEN_TTL_MINUTES = min(
 MAX_MEETING_SECONDS = min(int(os.environ.get("MAX_MEETING_SECONDS", "14400")), 28800)
 ACQUIRE_TIMEOUT_SECONDS = int(os.environ.get("ACQUIRE_TIMEOUT_SECONDS", "240"))
 ACQUIRE_ATTEMPTS = 2
+RETRY_MIN_REMAINING_SECONDS = 60
 POLL_INTERVAL_SECONDS = 2
 
 _REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -82,7 +83,8 @@ def _acquire(call_id: str) -> dict:
     outcome: dict = {}
     for attempt in range(ACQUIRE_ATTEMPTS):
         outcome = _start_microvm(call_id, attempt, deadline)
-        if outcome.get("ok") or not outcome.get("retryable") or time.time() >= deadline:
+        remaining = deadline - time.time()
+        if outcome.get("ok") or not outcome.get("retryable") or remaining < RETRY_MIN_REMAINING_SECONDS:
             break
         logger.warning(
             "ASR MicroVM %s ended in state %s (%s); starting another",

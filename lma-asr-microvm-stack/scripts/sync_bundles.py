@@ -87,7 +87,7 @@ def bundles() -> tuple[list[str], dict[str, int]]:
 def render_default_model_env() -> str:
     """The model.env the deploy would write for the default bundle, via the Lambda's renderer."""
     try:
-        import boto3  # noqa: F401  # the renderer is pure; the Lambda creates clients at import
+        import boto3  # noqa: F401
 
         os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
     except ImportError:

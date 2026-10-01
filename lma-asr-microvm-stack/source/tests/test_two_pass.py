@@ -1,3 +1,6 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
 """Unit tests for the two-pass recogniser: streaming previews, offline finals."""
 
 from __future__ import annotations
@@ -210,3 +213,35 @@ def test_a_new_utterance_without_a_final_for_the_last_one_starts_a_fresh_preview
     assert [e.text for e in events] == ["second"]
     assert events[0].start == pytest.approx(0.6)
     assert len(factory.created) == 2
+
+
+class FailingPreview(Recognizer):
+    def accept_pcm(self, pcm: bytes) -> list[Event]:
+        raise RuntimeError("preview decode failed")
+
+    def flush(self) -> list[Event]:
+        return []
+
+
+def test_a_preview_failure_keeps_the_offline_finals_and_stops_previews(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    authority = ScriptedAuthority([[], [_final(0, "Hello.", 0.0, 0.6)], []], [0.0, None, 0.9])
+    made: list[Recognizer] = []
+
+    def factory() -> Recognizer:
+        preview = FailingPreview()
+        made.append(preview)
+        return preview
+
+    rec = TwoPassRecognizer(authority, factory, sample_rate=RATE)
+    with caplog.at_level("ERROR", logger="asr_server.two_pass"):
+        first = rec.accept_pcm(_pcm(1))
+        closing = rec.accept_pcm(_pcm(2))
+        later = rec.accept_pcm(_pcm(3))
+
+    assert first == []
+    assert closing == [_final(0, "Hello.", 0.0, 0.6)]
+    assert later == []
+    assert len(made) == 1
+    assert sum("live preview failed" in r.getMessage() for r in caplog.records) == 1
