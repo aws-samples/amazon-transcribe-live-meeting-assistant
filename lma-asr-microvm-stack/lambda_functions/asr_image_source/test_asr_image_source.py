@@ -935,3 +935,25 @@ def test_a_diarizer_file_without_a_checksum_is_refused() -> None:
     del catalog["diarizerModels"][0]["files"]["data"]["sha256"]
     with pytest.raises(index.ResolutionError, match="data file is missing"):
         index.resolve({"BundleId": "bundle-sortformer"}, catalog)
+
+
+def test_a_diarizer_bundle_reports_speaker_labels_as_available() -> None:
+    source = make_source_zip(_catalog_with_diarizer())
+    with mock.patch.object(
+        index.s3, "get_object", side_effect=lambda **kw: {"Body": io.BytesIO(source)}
+    ), mock.patch.object(index.s3, "put_object"):
+        properties = {"SourceLocation": "artifacts/src.zip", "DestBucket": "stack-bucket"}
+        _, sortformer = index.build({**properties, "BundleId": "bundle-sortformer"})
+        _, plain = index.build({**properties, "BundleId": "bundle-no-speaker"})
+
+    assert sortformer["DiarizationAvailable"] == "true"
+    assert sortformer["DiarizerModelId"] == "sortformer"
+    assert plain["DiarizationAvailable"] == "false"
+
+
+def test_a_preview_pinned_to_another_runtime_is_refused() -> None:
+    catalog = _catalog_with_preview()
+    preview = next(m for m in catalog["models"] if m["id"] == "model-a")
+    preview["onnxruntime"] = "9.9.9"
+    with pytest.raises(index.ResolutionError, match="pins onnxruntime"):
+        index.resolve({"BundleId": "bundle-two-pass"}, catalog)

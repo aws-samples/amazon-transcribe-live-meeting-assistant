@@ -27,7 +27,7 @@ Returns:
     ModelId              resolved model id
     SpeakerModelId       resolved speaker model id
     SegmentationModelId  resolved speaker-turn detection model id
-    DiarizationAvailable "true" when a speaker model is baked into the image
+    DiarizationAvailable "true" when a speaker model or a diarization model is baked into the image
     TurnDetectionAvailable "true" when a segmentation model is baked into the image
     SpeakerThreshold     the bundle's calibrated threshold, or "" when uncalibrated
     MinSegmentMs         shortest utterance worth embedding, for this bundle
@@ -95,8 +95,7 @@ def _find(entries: list, entry_id: str) -> dict:
 # because the old AsrBaselineMemoryMiB parameter offered it; the service does not.
 _SUPPORTED_MEMORY_MIB = (512, 1024, 2048, 4096, 8192)
 
-# Memory is allocated at 2 GiB per vCPU, and inference threads are matched to the
-# vCPU count. Kept here rather than as a CloudFormation Mapping because the memory
+# Inference threads per memory size. Kept here rather than as a CloudFormation Mapping because the memory
 # now comes from the bundle, and a Mapping cannot be keyed on a resolved value.
 _THREADS_BY_MEMORY_MIB = {512: 1, 1024: 1, 2048: 1, 4096: 2, 8192: 4}
 
@@ -209,6 +208,11 @@ def resolve(properties: dict, catalog: dict) -> dict:
         for key in ("url", "sha256", "sherpaOnnx", "onnxruntime"):
             if not preview.get(key):
                 raise ResolutionError(f"preview model {preview.get('id')!r} has no {key}")
+            if key in ("sherpaOnnx", "onnxruntime") and preview[key] != model.get(key):
+                raise ResolutionError(
+                    f"preview model {preview.get('id')!r} pins {key} {preview[key]}, but the "
+                    f"image runs {model.get(key)} for {model.get('id')!r}"
+                )
         preview_files = preview.get("files") or {}
         absent = [key for key in FILE_KEYS if not preview_files.get(key)]
         if absent:
@@ -423,7 +427,7 @@ def build(properties: dict) -> tuple[str, dict]:
         "DiarizerModelId": (selection.get("diarizer") or {}).get("id", "none"),
         "ModelLicense": selection["model"].get("license", "unknown"),
         "SpeakerModelId": selection["speaker"].get("id", "none"),
-        "DiarizationAvailable": "true" if speaker_url else "false",
+        "DiarizationAvailable": "true" if speaker_url or selection.get("diarizer") else "false",
         # Blank when this pairing has no calibrated operating point; a guessed
         # threshold fragments or merges speakers.
         "SpeakerThreshold": "" if threshold is None else str(threshold),

@@ -25,6 +25,7 @@ import hashlib
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from microvm_client import MicrovmClient, MicrovmError
@@ -94,7 +95,7 @@ def _acquire(call_id: str) -> dict:
 
 
 def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
-    token_seed = call_id if attempt == 0 else f"{call_id}#{attempt}"
+    token_seed = call_id if attempt == 0 else f"{call_id}#{uuid.uuid4().hex}"
     try:
         response = microvms.run_microvm(
             imageIdentifier=os.environ["MICROVM_IMAGE_ARN"],

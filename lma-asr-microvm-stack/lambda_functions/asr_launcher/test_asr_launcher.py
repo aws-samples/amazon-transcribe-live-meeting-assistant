@@ -294,3 +294,20 @@ def test_acquire_does_not_start_another_microvm_once_the_deadline_has_passed() -
     assert result["ok"] is False
     assert client.run_microvm.call_count == 1
     client.terminate_microvm.assert_called_once_with("mvm-1")
+
+
+def test_each_retry_starts_from_a_fresh_client_token() -> None:
+    tokens = []
+    for _ in range(2):
+        client = fake_microvms()
+        client.run_microvm.side_effect = [
+            {"microvmId": "mvm-1", "endpoint": "e1", "state": "PENDING"},
+            {"microvmId": "mvm-2", "endpoint": "e2", "state": "RUNNING"},
+        ]
+        client.get_microvm.side_effect = [{"state": "TERMINATED"}]
+        with mock.patch.object(index, "microvms", client):
+            assert index.lambda_handler({"action": "acquire", "callId": "c"}, None)["ok"] is True
+        tokens.append([call.kwargs["clientToken"] for call in client.run_microvm.call_args_list])
+
+    assert tokens[0][0] == tokens[1][0]
+    assert tokens[0][1] != tokens[1][1]
