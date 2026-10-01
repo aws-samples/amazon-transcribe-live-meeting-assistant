@@ -195,3 +195,18 @@ def test_the_engine_composes_an_offline_session_with_lazily_made_previews() -> N
     assert preview_engine.configs == []
     assert session.accept_pcm(_pcm()) == [_partial(0, "hi", 0.0, pytest.approx(0.32))]
     assert preview_engine.configs == [SessionConfig(sample_rate=RATE)]
+
+
+def test_a_new_utterance_without_a_final_for_the_last_one_starts_a_fresh_preview() -> None:
+    authority = ScriptedAuthority([[], []], [0.0, 0.6])
+    factory = PreviewFactory(
+        [[[_partial(0, "first", 0.0, 0.3)]], [[_partial(0, "second", 0.0, 0.1)]]]
+    )
+    rec = TwoPassRecognizer(authority, factory, sample_rate=RATE)
+
+    rec.accept_pcm(_pcm(1))
+    events = rec.accept_pcm(_pcm(2))
+
+    assert [e.text for e in events] == ["second"]
+    assert events[0].start == pytest.approx(0.6)
+    assert len(factory.created) == 2

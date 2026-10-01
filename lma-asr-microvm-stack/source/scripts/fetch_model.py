@@ -286,6 +286,7 @@ def run(argv: list[str]) -> int:
                     preview_dest,
                 )
                 place_model(preview_extracted, preview_env, preview_dest)
+                shutil.rmtree(preview_dest / "_staging", ignore_errors=True)
 
             speaker_url = env.get("ASR_SPEAKER_MODEL_URL", "")
             if speaker_url:

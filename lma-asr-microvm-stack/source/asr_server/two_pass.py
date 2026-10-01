@@ -81,6 +81,7 @@ class TwoPassRecognizer(Recognizer):
         self._recent_base = 0
         self._total_bytes = 0
         self._preview: Recognizer | None = None
+        self._preview_start: float | None = None
         self._preview_finals: list[str] = []
         self._preview_partial = ""
         self._preview_text = ""
@@ -96,8 +97,11 @@ class TwoPassRecognizer(Recognizer):
         if open_start is None:
             self._drop_preview()
             return events
+        if self._preview is not None and open_start != self._preview_start:
+            self._drop_preview()
         if self._preview is None:
             self._preview = self._preview_factory()
+            self._preview_start = open_start
             preview_events = self._preview.accept_pcm(self._since(open_start))
         else:
             preview_events = self._preview.accept_pcm(pcm)
@@ -149,6 +153,7 @@ class TwoPassRecognizer(Recognizer):
 
     def _drop_preview(self) -> None:
         self._preview = None
+        self._preview_start = None
         self._preview_finals = []
         self._preview_partial = ""
         self._preview_text = ""

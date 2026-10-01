@@ -418,16 +418,29 @@ class SortformerRecognizer(Recognizer):
         self._min_turn = min_turn_seconds
         self._offset = 0
         self._labels: dict[int, str] = {}
+        self._failed = False
 
     def accept_pcm(self, pcm: bytes) -> list[Event]:
-        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
-        self._diarizer.push(samples)
         events = self._inner.accept_pcm(pcm)
+        samples = np.frombuffer(pcm, dtype="<i2").astype(np.float32) / 32768.0
+        self._diarize(self._diarizer.push, samples)
         return self._label_all(events)
 
     def flush(self) -> list[Event]:
-        self._diarizer.finish()
-        return self._label_all(self._inner.flush())
+        events = self._inner.flush()
+        self._diarize(self._diarizer.finish)
+        return self._label_all(events)
+
+    def _diarize(self, step: Any, *args: Any) -> None:
+        if self._failed:
+            return
+        try:
+            step(*args)
+        except Exception:
+            self._failed = True
+            _LOG.exception(
+                "sortformer diarizer failed; rows carry no speaker labels from here on"
+            )
 
     def current_segment(self) -> int:
         return self._inner.current_segment() + self._offset
@@ -441,8 +454,18 @@ class SortformerRecognizer(Recognizer):
             if event.kind != "final":
                 out.append(replace(event, segment=event.segment + self._offset, speaker=None))
                 continue
-            self._diarizer.process_available()
-            out.extend(self._label_final(event))
+            self._diarize(self._diarizer.process_available)
+            if self._failed:
+                out.append(replace(event, segment=event.segment + self._offset, speaker=None))
+                continue
+            try:
+                out.extend(self._label_final(event))
+            except Exception:
+                self._failed = True
+                _LOG.exception(
+                    "sortformer labelling failed; rows carry no speaker labels from here on"
+                )
+                out.append(replace(event, segment=event.segment + self._offset, speaker=None))
         return out
 
     def _label(self, index: int | None) -> str | None:

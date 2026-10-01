@@ -584,6 +584,7 @@ def test_run_places_a_preview_model_beside_the_authority(tmp_path: Path) -> None
     assert (dest / "preview" / "joiner.onnx").read_bytes() == b"p-joiner"
     assert (dest / "preview" / "tokens.txt").read_bytes() == b"p\n"
     assert (dest / "encoder.onnx").read_bytes() != b"p-encoder"
+    assert not (dest / "preview" / "_staging").exists()
 
 
 def test_run_places_both_diarizer_files_under_their_own_names(tmp_path: Path) -> None:

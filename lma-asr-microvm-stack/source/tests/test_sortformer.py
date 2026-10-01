@@ -301,3 +301,30 @@ def test_a_slow_step_is_logged_with_its_size(caplog: pytest.LogCaptureFixture) -
         session.push(np.zeros(RATE, dtype=np.float32))
         session.finish()
     assert any("sortformer step 1 took" in r.getMessage() for r in caplog.records)
+
+
+class BrokenDiarizer(ScriptedDiarizer):
+    def process_available(self) -> None:
+        raise RuntimeError("onnxruntime failure")
+
+
+def test_a_diarizer_failure_leaves_transcription_running_without_labels(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    words = [_word("hello", 0.0, 0.4), _word("there", 0.5, 0.9)]
+    inner = ScriptedRecognizer(
+        [[_final(0, 0.0, 1.0, words)], [_final(1, 1.5, 2.0, [_word("again", 1.6, 1.9)])]]
+    )
+    rec = SortformerRecognizer(inner, BrokenDiarizer([(0.0, 5.0, 0)]))
+    silence = _pcm(np.zeros(160, dtype=np.float32))
+
+    with caplog.at_level("ERROR", logger="asr_server.sortformer"):
+        first = rec.accept_pcm(silence)
+        second = rec.accept_pcm(silence)
+
+    assert [(r.segment, r.text, r.speaker) for r in first + second] == [
+        (0, "hello there", None),
+        (1, "again", None),
+    ]
+    assert sum("sortformer diarizer failed" in r.getMessage() for r in caplog.records) == 1
+    assert len(inner.chunks) == 2
