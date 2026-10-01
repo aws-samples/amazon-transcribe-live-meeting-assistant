@@ -544,7 +544,11 @@ export class MicrovmAsrSession {
 
         // Segment numbering and the engine clock restart on a new connection.
         this.generation += 1;
-        this.timeOffsetSeconds = this.observedMaxEnd;
+        this.timeOffsetSeconds = Math.max(
+            this.observedMaxEnd,
+            this.timeOffsetSeconds + this.sentBytes / BYTES_PER_SECOND,
+        );
+        this.sentBytes = 0;
 
         // Mint a fresh token: a long meeting outlives the one that opened the first connection.
         if (this.lease.microvmId) {

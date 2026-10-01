@@ -67,3 +67,16 @@ test('meeting rows are attributed by start time and drive wake phrases; assistan
     assert.match(methodBody('async speakerChange'), /rosterTimeline\.record\(/);
     assert.match(methodBody('private teardownSessionProcesses'), /agentAudioProcess/);
 });
+
+test('the assistant session never holds up the meeting audio and is not started for a translator', () => {
+    const run = methodBody('private async runMicrovmTranscription');
+    assert.doesNotMatch(run, /Promise\.all\(\[\s*meetingSession\.start\(\)/);
+    assert.match(run, /const meetingReady = await meetingSession\.start\(\)/);
+    assert.match(run, /voiceAssistant\.isEnabled\(\) && details\.meetingMode !== 'translator'/);
+    assert.doesNotMatch(run, /this\.agentSession = null/);
+});
+
+test('a later engine run starts after any time Amazon Transcribe already covered', () => {
+    const run = methodBody('private async runMicrovmTranscription');
+    assert.match(run, /timeBaseSeconds: Math\.max\(this\.engineTimeBase, this\.transcribeTimeOffsetSeconds\)/);
+});

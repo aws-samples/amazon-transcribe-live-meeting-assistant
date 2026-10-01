@@ -206,7 +206,7 @@ const TranscriptContent = ({ segment, translateCache }) => {
 
     let className = '';
     let text = t;
-    let translatedText = result;
+    const translatedText = result;
 
     switch (channel) {
       case 'AGENT_ASSISTANT':
@@ -215,8 +215,6 @@ const TranscriptContent = ({ segment, translateCache }) => {
         break;
       case 'AGENT':
       case 'CALLER':
-        text = text.substring(text.indexOf(':') + 1).trim();
-        translatedText = translatedText.substring(translatedText.indexOf(':') + 1).trim();
         break;
       case 'CATEGORY_MATCH':
         if (text.match(regex)) {

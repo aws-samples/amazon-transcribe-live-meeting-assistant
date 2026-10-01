@@ -410,3 +410,39 @@ test('a later run continues the meeting timeline and never reuses an earlier seg
         await asr.close();
     }
 });
+
+test('rows after a reconnect start where the audio sent before it left off, not at the last row', async () => {
+    let received = 0;
+    const asr = await startFakeAsr((socket, connection) => {
+        ready(socket);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            if (connection === 1) {
+                received += (data as Buffer).length;
+                if (received === 3200) {
+                    socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'early', start: 0.0, end: 0.1 }));
+                }
+                if (received >= 64000) socket.close(1011, 'engine restart');
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'after', start: 0.0, end: 0.5 }));
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows);
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await until(() => rows.length === 1);
+        session.pushPcm(Buffer.alloc(64000 - 3200));
+        await until(() => asr.connections === 2);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        session.pushPcm(Buffer.alloc(3200));
+        await until(() => rows.length === 2);
+        assert.equal(rows[1].startSec, 64000 / 32000);
+        assert.ok(rows[1].startSec > rows[0].endSec);
+        await session.finish();
+    } finally {
+        await asr.close();
+    }
+});

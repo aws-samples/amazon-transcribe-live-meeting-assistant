@@ -606,7 +606,7 @@ export class TranscriptionService {
             callId,
             lease,
             run,
-            timeBaseSeconds: this.engineTimeBase,
+            timeBaseSeconds: Math.max(this.engineTimeBase, this.transcribeTimeOffsetSeconds),
             // A paused meeting is not over: the sessions stay up and are fed silence.
             isMeetingLive: () => this.isTranscribing,
         };
@@ -616,7 +616,7 @@ export class TranscriptionService {
             diarize,
             onSegment: (segment) => this.handleMeetingAsrSegment(segment),
         });
-        const agentSession = voiceAssistant.isEnabled()
+        const agentSession = voiceAssistant.isEnabled() && details.meetingMode !== 'translator'
             ? new MicrovmAsrSession({
                   ...common,
                   channel: 'AGENT',
@@ -626,10 +626,8 @@ export class TranscriptionService {
             : null;
         this.meetingSession = meetingSession;
         this.agentSession = agentSession;
-        const [meetingReady, agentReady] = await Promise.all([
-            meetingSession.start(),
-            agentSession ? agentSession.start() : Promise.resolve(true),
-        ]);
+        const agentReady = agentSession ? agentSession.start() : Promise.resolve(true);
+        const meetingReady = await meetingSession.start();
         if (!meetingReady) {
             console.error('[ASR] MicroVM ASR session never became ready');
             // Finish first, or the sessions keep reconnecting against a released MicroVM.
@@ -637,11 +635,11 @@ export class TranscriptionService {
             await this.releaseMicrovm(meetingSession);
             return false;
         }
-        if (agentSession && !agentReady) {
-            console.warn("[ASR AGENT] session never became ready; the assistant's replies will not be transcribed this meeting");
-            await agentSession.finish();
-            this.agentSession = null;
-        }
+        void agentReady.then((ready) => {
+            if (!ready && this.agentSession === agentSession) {
+                console.warn('[ASR AGENT] session not ready yet; it keeps reconnecting in the background');
+            }
+        });
         const agent = this.agentSession;
         console.log(
             `[ASR] MicroVM ASR active for ${callId} (speaker labels: ${meetingSession.speakerLabelsActive}, assistant channel: ${agent ? 'AGENT' : 'none'})`,
