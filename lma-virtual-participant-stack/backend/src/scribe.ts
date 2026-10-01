@@ -137,6 +137,7 @@ export class TranscriptionService {
     private agentAudioProcess: ChildProcess | null = null;  // FFmpeg: agent_output.monitor → assistant session
     private engineRuns = 0;
     private engineTimeBase = 0;
+    private sessionsFinishing: Promise<void> = Promise.resolve();
     private readonly rosterTimeline = new RosterTimeline([details.lmaIdentity, details.scribeIdentity]);
     private isTranscribing = false;
     private mockTranscriptionInterval: NodeJS.Timeout | null = null;
@@ -637,7 +638,7 @@ export class TranscriptionService {
         }
         void agentReady.then((ready) => {
             if (!ready && this.agentSession === agentSession) {
-                console.warn('[ASR AGENT] session not ready yet; it keeps reconnecting in the background');
+                console.warn("[ASR AGENT] session not ready at start; the assistant's replies appear once it connects");
             }
         });
         const agent = this.agentSession;
@@ -675,7 +676,11 @@ export class TranscriptionService {
             console.error(`[ASR] audio stream error: ${error?.message || error}`);
         } finally {
             this.teardownSessionProcesses();
-            this.engineTimeBase = Math.max(this.engineTimeBase, meetingSession.audioSeconds);
+            this.engineTimeBase = Math.max(
+                this.engineTimeBase,
+                meetingSession.audioSeconds,
+                agent?.audioSeconds ?? 0,
+            );
             await this.finishMicrovmSessions();
             await this.releaseMicrovm(meetingSession);
         }
@@ -692,7 +697,7 @@ export class TranscriptionService {
         );
         this.meetingSession = null;
         this.agentSession = null;
-        await Promise.all(
+        const finishing = Promise.all(
             sessions.map(async (session) => {
                 try {
                     await session.finish();
@@ -701,6 +706,8 @@ export class TranscriptionService {
                 }
             }),
         );
+        this.sessionsFinishing = Promise.all([this.sessionsFinishing, finishing]).then(() => undefined);
+        await this.sessionsFinishing;
     }
 
     private async releaseMicrovm(session: MicrovmAsrSession): Promise<void> {
@@ -740,12 +747,6 @@ export class TranscriptionService {
 
     /** The assistant's own voice from its own session: labelled as the VP, never diarized, never a wake phrase. */
     private handleAgentAsrSegment(segment: AsrSegment): void {
-        if (details.meetingMode === 'translator') {
-            if (!segment.isPartial) {
-                console.log(`🌐 Translator mode: suppressing agent-origin transcript segment: "${segment.text}"`);
-            }
-            return;
-        }
         sendAsrTranscriptSegment({
             channel: 'AGENT',
             segmentId: segment.segmentId,

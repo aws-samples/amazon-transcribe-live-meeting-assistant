@@ -24,6 +24,7 @@ export const ASR_SAMPLE_RATE = 16000;
 const BYTES_PER_SECOND = ASR_SAMPLE_RATE * 2;
 const ASR_READY_TIMEOUT_MS = parseInt(process.env.ASR_READY_TIMEOUT_MS || '30000', 10);
 const ASR_FINISH_TIMEOUT_MS = parseInt(process.env.ASR_FINISH_TIMEOUT_MS || '5000', 10);
+const ASR_HANDSHAKE_TIMEOUT_MS = parseInt(process.env.ASR_HANDSHAKE_TIMEOUT_MS || '15000', 10);
 // Audio held while the MicroVM starts or a session reconnects: 60 s of 16 kHz mono PCM.
 const ASR_MAX_PENDING_BYTES = parseInt(process.env.ASR_MAX_PENDING_BYTES || String(16000 * 2 * 60), 10);
 // Outbound frame: 100 ms. Backlog frame when flushing after a (re)connect: 5 s.
@@ -310,6 +311,7 @@ export class MicrovmAsrSession {
     private terminationResolve: (() => void) | null = null;
     private diarizeEffective = false;
     private sentBytes = 0;
+    private finishing: Promise<void> | null = null;
     private lease: AsrLease;
     private readonly channel: string;
     private readonly logPrefix: string;
@@ -325,10 +327,8 @@ export class MicrovmAsrSession {
     /** Engine time a row starting at the next pushed byte would carry, on the same timeline as segments. */
     get audioSeconds(): number {
         const queued = (this.outboundBytes + this.pendingBytes) / BYTES_PER_SECOND;
-        if (this.open) {
-            return this.timeOffsetSeconds + this.sentBytes / BYTES_PER_SECOND + queued;
-        }
-        return this.observedMaxEnd + queued;
+        const sent = this.timeOffsetSeconds + this.sentBytes / BYTES_PER_SECOND;
+        return Math.max(this.observedMaxEnd, sent) + queued;
     }
 
     get speakerLabelsActive(): boolean {
@@ -398,10 +398,14 @@ export class MicrovmAsrSession {
     }
 
     /** Flush the tail utterance, then close. */
-    async finish(): Promise<void> {
-        if (this.finished) {
-            return;
+    finish(): Promise<void> {
+        if (!this.finishing) {
+            this.finishing = this.finishOnce();
         }
+        return this.finishing;
+    }
+
+    private async finishOnce(): Promise<void> {
         this.finished = true;
         this.flushOutbound();
         if (this.open && this.ws?.readyState === WebSocket.OPEN) {
@@ -455,7 +459,9 @@ export class MicrovmAsrSession {
         }
         let socket: WebSocket;
         try {
-            socket = new WebSocket(this.lease.endpointUrl, subprotocols(this.lease.authToken));
+            socket = new WebSocket(this.lease.endpointUrl, subprotocols(this.lease.authToken), {
+                handshakeTimeout: ASR_HANDSHAKE_TIMEOUT_MS,
+            });
         } catch (error: any) {
             console.error(`${this.logPrefix} could not open ${this.lease.endpointUrl}: ${error?.message || error}`);
             this.settleReady(false);

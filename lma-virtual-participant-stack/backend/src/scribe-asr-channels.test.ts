@@ -62,7 +62,6 @@ test('meeting rows are attributed by start time and drive wake phrases; assistan
     const agent = methodBody('private handleAgentAsrSegment');
     assert.match(agent, /channel: 'AGENT'/);
     assert.match(agent, /lmaIdentity/);
-    assert.match(agent, /translator/);
     assert.doesNotMatch(agent, /processTranscriptResult/);
     assert.match(methodBody('async speakerChange'), /rosterTimeline\.record\(/);
     assert.match(methodBody('private teardownSessionProcesses'), /agentAudioProcess/);
@@ -79,4 +78,10 @@ test('the assistant session never holds up the meeting audio and is not started 
 test('a later engine run starts after any time Amazon Transcribe already covered', () => {
     const run = methodBody('private async runMicrovmTranscription');
     assert.match(run, /timeBaseSeconds: Math\.max\(this\.engineTimeBase, this\.transcribeTimeOffsetSeconds\)/);
+});
+
+test('the run loop waits for a finish already in flight before releasing the MicroVM', () => {
+    const finish = methodBody('private async finishMicrovmSessions');
+    assert.match(finish, /this\.sessionsFinishing = Promise\.all\(\[this\.sessionsFinishing, finishing\]\)/);
+    assert.match(finish, /await this\.sessionsFinishing/);
 });

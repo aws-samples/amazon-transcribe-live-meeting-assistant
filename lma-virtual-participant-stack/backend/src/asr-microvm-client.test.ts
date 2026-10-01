@@ -10,6 +10,7 @@ process.env.ASR_MIN_BACKOFF_MS = '20';
 process.env.ASR_MAX_RETRIES = '2';
 process.env.ASR_READY_TIMEOUT_MS = '5000';
 process.env.ASR_FINISH_TIMEOUT_MS = '500';
+process.env.ASR_HANDSHAKE_TIMEOUT_MS = '200';
 process.env.ASR_MAX_PENDING_BYTES = '64000'; // 2 s, so a drop is reachable in a test
 process.env.AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 delete process.env.ASR_ENGINE;
@@ -444,5 +445,85 @@ test('rows after a reconnect start where the audio sent before it left off, not 
         await session.finish();
     } finally {
         await asr.close();
+    }
+});
+
+test('a second finish waits for the engine to deliver the last row', async () => {
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: true } }));
+            }
+            if (message.type === 'eos') {
+                setTimeout(() => {
+                    socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'last words', start: 0, end: 0.5 }));
+                    socket.send(JSON.stringify({ type: 'termination', audio_seconds: 1, segments: 1 }));
+                }, 200);
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows);
+    try {
+        assert.equal(await session.start(), true);
+        const first = session.finish();
+        await session.finish();
+        assert.deepEqual(
+            rows.map((row) => row.text),
+            ['last words'],
+        );
+        await first;
+    } finally {
+        await asr.close();
+    }
+});
+
+test('the audio clock does not drop back while the socket is down', async () => {
+    let upgrades = 0;
+    let received = 0;
+    const wss = new WebSocketServer({ port: 0, verifyClient: () => ++upgrades === 1 });
+    wss.on('connection', (socket) => {
+        ready(socket);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            received += (data as Buffer).length;
+            if (received === 3200) {
+                socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'early', start: 0.0, end: 0.1 }));
+            }
+            if (received >= 64000) socket.close(1011, 'engine restart');
+        });
+    });
+    await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
+    const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}`;
+    const rows: AsrSegment[] = [];
+    const session = newSession({ url, connections: 0, audioBytes: 0, close: async () => {} }, rows);
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await until(() => rows.length === 1);
+        session.pushPcm(Buffer.alloc(64000 - 3200));
+        await until(() => upgrades >= 2);
+        assert.equal(session.audioSeconds, 64000 / 32000);
+        await session.finish();
+    } finally {
+        for (const client of wss.clients) client.terminate();
+        await new Promise<void>((resolve) => wss.close(() => resolve()));
+    }
+});
+
+test('a reconnect whose upgrade never completes still counts against the retry budget', async () => {
+    const server = (await import('node:net')).createServer((socket) => socket.on('data', () => undefined));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const rows: AsrSegment[] = [];
+    const session = newSession({ url, connections: 0, audioBytes: 0, close: async () => {} }, rows);
+    try {
+        assert.equal(await session.start(), false);
+        await until(() => session.hasGivenUp, 5000);
+    } finally {
+        await session.finish();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
     }
 });
