@@ -16,7 +16,9 @@ This exercises, in one shot, every regression this batch hit:
   * fastify 5 boot / audio handling
   * gql 3.5 <-> AppSync (a gql-4 break => no meeting / no segments written)
 
-Requires a Cognito user's credentials via env: LMA_TEST_USERNAME / LMA_TEST_PASSWORD.
+Requires a Cognito user's credentials, from LMA_TEST_USERNAME / LMA_TEST_PASSWORD
+or from a Secrets Manager secret named by LMA_TEST_USER_SECRET_ID — see
+cognito_test_user.py.
 Uses a bundled real WAV (utilities/load-simulator/lma_load/fixtures/stereo-16k-30s.wav)
 by default; override with LMA_TEST_WAV.
 
@@ -40,6 +42,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import boto3
+
+import cognito_test_user
 
 # Default real audio fixture: a two-speaker call recording (8 kHz stereo) that
 # Amazon Transcribe turns into real transcript segments. NB the sibling
@@ -164,8 +168,12 @@ def run_probe(stack_name: str, region: str | None = None,
     if not pool_id:
         pool_id = outs.get("CognitoUserPoolTokenIssuerUrl", "").rsplit("/", 1)[-1]
 
-    username = os.environ["LMA_TEST_USERNAME"]
-    password = os.environ["LMA_TEST_PASSWORD"]
+    credentials = cognito_test_user.resolve(region)
+    if credentials is None:
+        raise cognito_test_user.CredentialsUnavailable(
+            f"no Cognito test user configured — {cognito_test_user.describe_sources()}"
+        )
+    username, password = credentials
     tokens = _mint_tokens(region, pool_id, client_id, username, password)
 
     wav = Path(wav_path or os.environ.get("LMA_TEST_WAV") or _DEFAULT_WAV)

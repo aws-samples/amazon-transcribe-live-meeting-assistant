@@ -19,7 +19,7 @@ Open source | Your AWS account | Your data
 ## Why Live Meeting Assistant?
 
 - **Your AWS account, your data** — nothing leaves your cloud
-- **Multi-platform** — Zoom, Teams, Chime, Meet, WebEx
+- **Multi-platform** — Zoom, Teams, Chime, WebEx (plus Google Meet via the Chrome extension)
 - **Live AI assistant** — summarize, fact-check, search — by text or voice
 - **Extensible via MCP** — connect Salesforce, web search, and more
 - **Open source** — deploy, customize, contribute

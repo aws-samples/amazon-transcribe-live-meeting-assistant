@@ -10,7 +10,9 @@
 # What is intentionally NOT here: the integration tests (integ-tests/) and
 # `make docker-build-check` need a live AWS account / Docker daemon and are run
 # locally — see docs/dependency-upgrade-validation-runbook.md. The security
-# review job stays GitLab-only.
+# review job and the nightly integration run stay GitLab-only: the latter needs
+# credentials for an account whose id cannot be committed to this public
+# repository (see docs/scheduled-integration-tests.md).
 #
 # Keep the target list in sync with the `code_checks` job in .gitlab-ci.yml.
 #
@@ -58,14 +60,14 @@ jobs:
         with:
           python-version: '3.13'
 
-      # Node 22 LTS, pinned exactly (>=22.22.2 is required by jsdom 30; vite 8 /
-      # rolldown native bindings are optional deps that npm silently skips on an
-      # older engine). Keep in sync with NODE_VERSION in the root Makefile and
-      # with the version installed by .gitlab-ci.yml.
+      # Node 22 LTS, pinned exactly by .nvmrc (>=22.22.2 is required by jsdom 30;
+      # vite 8 / rolldown native bindings are optional deps that npm silently
+      # skips on an older engine). .nvmrc is the single source of truth, shared
+      # with `make setup-node` and .gitlab-ci.yml.
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          node-version: '22.23.2'
+          node-version-file: '.nvmrc'
           # Caches the npm download cache, keyed on these lockfiles — the
           # equivalent of the GitLab job's node_modules cache.
           cache: npm
@@ -124,6 +126,21 @@ jobs:
       - name: Virtual Participant template tests
         run: make test-vp-template
 
+      # Static AI stack tests: the AppSync contract (every resolver attaches to
+      # a field schema.graphql declares, every UI operation validates against
+      # it) and the CloudFormation template's invariants (every Ref/GetAtt
+      # resolves, lma-main.yaml's expected outputs are still declared). Both are
+      # deploy-time or run-time failures otherwise.
+      - name: AI stack static tests
+        run: make test-ai-stack
+
+      # Unit tests for the scheduled integration run's own machinery (credential
+      # resolution, the --no-skips hook). Covered here rather than only in the
+      # nightly, because it is what keeps a nightly from reporting green after
+      # skipping everything.
+      - name: Integration-test plumbing tests
+        run: make test-integ-plumbing
+
       # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
       - name: ASR MicroVM runtime tests
         run: make test-asr
@@ -136,6 +153,34 @@ jobs:
       - name: WebSocket transcriber unit tests
         working-directory: lma-websocket-transcriber-stack/source/app
         run: npm test
+
+      # Browser extension. Deliberately `npm install` and not `npm ci`: the
+      # in-stack CodeBuild project builds it with `npm install` (see the
+      # BuildSpec in lma-browser-extension-stack/template.yaml), and its
+      # lockfile has repeatedly drifted such that `npm ci` fails where the real
+      # build succeeds. Matching CodeBuild is the point of this job.
+      - name: Browser extension dependencies
+        working-directory: lma-browser-extension-stack
+        run: npm install --no-audit --no-fund
+
+      # CI=true keeps react-scripts out of interactive watch mode.
+      - name: Browser extension tests
+        working-directory: lma-browser-extension-stack
+        env:
+          CI: 'true'
+        run: npm test
+
+      # CI=false is required, not an oversight: GitHub Actions sets CI=true for
+      # every step, which makes react-scripts treat lint warnings as errors. The
+      # extension carries pre-existing warnings in six files, so a warnings-as-
+      # errors build fails here while the CodeBuild one (which sets no CI var)
+      # succeeds — the opposite of what this job is for. Clearing those warnings
+      # would let this be tightened.
+      - name: Browser extension build
+        working-directory: lma-browser-extension-stack
+        env:
+          CI: 'false'
+        run: npm run build
 
       # Fastify 5 websocket smoke test (boots the server, round-trips a frame) —
       # runtime coverage the unit tests do not provide.

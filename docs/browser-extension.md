@@ -6,6 +6,8 @@ title: "Browser Extension"
 
 > **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
 
+The extension adds a side panel to meeting tabs on **Zoom, Microsoft Teams, Amazon Chime, Cisco Webex and Google Meet**, capturing both your microphone and the other participants' audio from the tab without adding a bot to the meeting. Google Meet is supported here and **not** by the [Virtual Participant](virtual-participant.md#supported-platforms), so the extension is the route for Meet meetings.
+
 ### Download and unzip the extension
 
 During the LMA stack deployment, the nested stack, BROWSEREXTENSIONSTACK, builds a pre-configured browser extension package which is ready to be downloaded and installed in your browser.

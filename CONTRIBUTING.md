@@ -45,11 +45,24 @@ To send us a pull request, please:
    make lint-ui-force test-ui-force          # React UI lint + vitest
    make lint-typescript                      # tsc + eslint (transcriber, Virtual Participant)
    make test-vp test-vp-template test-asr    # Virtual Participant + ASR MicroVM suites
+   make test-ai-stack                        # AppSync contract + AI stack CFN invariants
+   make test-integ-plumbing                  # Scheduled integ-run machinery (no AWS)
    cd lma-websocket-transcriber-stack/source/app && npm ci && npm test && npm run smoke
+   cd lma-browser-extension-stack && npm install && CI=true npm test   # extension
    ```
 
-   These checks need neither AWS credentials nor Docker. Node.js 22 (>= 22.22.2)
-   is required; see `make setup-node`.
+   Or run all of it locally in parallel, which takes about a minute rather
+   than three:
+
+   ```bash
+   ./scripts/verify.sh              # all four groups at once, one summary table
+   ./scripts/verify.sh python       # just the Python/cfn-lint group
+   ./scripts/verify.sh --clean-install   # reinstall node deps as CI does
+   ```
+
+   These checks need neither AWS credentials nor Docker. Node.js >= 22.22.2 is
+   required; the exact version CI uses is pinned in `.nvmrc`, and
+   `make setup-node` installs it via nvm.
 5. Commit to your fork using clear commit messages.
 6. Send us a pull request against `develop`, answering any default questions in the pull request interface.
 7. Pay attention to the `Code Checks` workflow result reported on the pull request, and stay involved in the conversation.

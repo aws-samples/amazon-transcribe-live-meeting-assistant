@@ -8,7 +8,7 @@ Live Meeting Assistant (LMA) -- an AWS-based solution for real-time meeting tran
 
 ## Build & Publish
 
-**Prerequisites:** bash, node v22 (>=22.22.2; required by jsdom 30 in the UI test stack), npm, docker (running), zip, python3, pip3, virtualenv, aws cli, sam cli (>=1.118.0).
+**Prerequisites:** bash, node >=22.22.2 (required by jsdom 30 in the UI test stack; exact pin in `.nvmrc`, installed by `make setup-node`), npm, docker (running), zip, python3, pip3, virtualenv, aws cli, sam cli (>=1.118.0).
 
 **AWS profile:** Always use `AWS_PROFILE=default` for build/deploy/test commands in this repo unless the user explicitly tells you otherwise. Other profiles (e.g. `bedrock`) point at unrelated accounts and will fail with `AccessDenied` on S3/CloudFormation.
 
@@ -209,6 +209,8 @@ patterns.
 | `.claude/skills/infrastructure.md` | CloudFormation / SAM templates, nested stacks, GovCloud rules |
 | `.claude/skills/code-review.md` | Pre-commit self-review checklist for your own changes |
 | `.claude/skills/pr-review.md` | Reviewing a GitHub PR or GitLab MR at a URL (e.g. `review <url>`) |
+| `.claude/skills/dependabot-prs.md` | Triaging, verifying and merging Dependabot dependency PRs |
+| `.claude/skills/prepare-changelog.md` | Writing or updating CHANGELOG entries for a release |
 | `.claude/skills/integ-tests.md` | Running end-to-end integration tests against a live deployed stack (`make integ-tests`) |
 
 When asked to `review <PR/MR URL>`, follow `.claude/skills/pr-review.md` and

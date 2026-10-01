@@ -46,6 +46,15 @@ make integ-tests-live STACK=lma-integtest1 PLATFORM=ZOOM \
 
 Stack resolution: `STACK=` → `$LMA_STACK_NAME` → `lma-integtest1` (deploy) / `LMA` (test-only).
 
+**On a schedule.** A nightly GitLab pipeline (`nightly_integ_tests`) runs
+`make integ-tests-nightly` against `lma-integtest1`, which is in **us-west-2** —
+not the region a default profile resolves to. That target tests an existing stack
+and never deploys one, and a *skipped* test fails it (`--no-skips`), so a lapsed
+secret cannot report green. It takes the Cognito user from Secrets Manager via
+`LMA_TEST_USER_SECRET_ID` rather than from the environment. See
+`docs/scheduled-integration-tests.md`. When asked to debug a failing nightly,
+start from the JUnit report on the pipeline, not the job log.
+
 ## Prerequisites
 
 1. `make setup-cli-dev` — LMA SDK + CLI + test deps in `.venv`.

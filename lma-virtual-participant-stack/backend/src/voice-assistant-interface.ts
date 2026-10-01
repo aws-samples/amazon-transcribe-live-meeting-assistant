@@ -12,6 +12,15 @@ export interface VoiceAssistantConfig {
   activationMode: ActivationMode;
   wakePhrase?: string;
   activationDuration?: number;
+  /**
+   * AWS region for the provider's own API calls.
+   *
+   * Unset by createVoiceAssistantFromEnv, which is the only production caller: each
+   * provider resolves its own region instead. For Nova Sonic that is
+   * resolveNovaSonicRegion, which may differ from the stack's region — everything
+   * else the Virtual Participant talks to stays local. Passing a value here
+   * overrides that resolution.
+   */
   region?: string;
   strandsLambdaArn?: string;
 }
