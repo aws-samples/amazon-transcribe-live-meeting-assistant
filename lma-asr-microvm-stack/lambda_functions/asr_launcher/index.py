@@ -25,6 +25,7 @@ import hashlib
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from microvm_client import MicrovmClient, MicrovmError
@@ -46,6 +47,8 @@ TOKEN_TTL_MINUTES = min(
 )
 MAX_MEETING_SECONDS = min(int(os.environ.get("MAX_MEETING_SECONDS", "14400")), 28800)
 ACQUIRE_TIMEOUT_SECONDS = int(os.environ.get("ACQUIRE_TIMEOUT_SECONDS", "240"))
+ACQUIRE_ATTEMPTS = 2
+RETRY_MIN_REMAINING_SECONDS = 60
 POLL_INTERVAL_SECONDS = 2
 
 _REGION = os.environ.get("AWS_REGION", "us-east-1")
@@ -76,7 +79,25 @@ def _mint_token(microvm_id: str) -> dict:
 def _acquire(call_id: str) -> dict:
     if not call_id:
         return {"ok": False, "reason": "callId is required to acquire an ASR MicroVM"}
+    deadline = time.time() + ACQUIRE_TIMEOUT_SECONDS
+    outcome: dict = {}
+    for attempt in range(ACQUIRE_ATTEMPTS):
+        outcome = _start_microvm(call_id, attempt, deadline)
+        remaining = deadline - time.time()
+        if outcome.get("ok") or not outcome.get("retryable") or remaining < RETRY_MIN_REMAINING_SECONDS:
+            break
+        logger.warning(
+            "ASR MicroVM %s ended in state %s (%s); starting another",
+            outcome.get("microvmId"),
+            outcome.get("state"),
+            outcome.get("stateReason") or "no reason given",
+        )
+    outcome.pop("retryable", None)
+    return outcome
 
+
+def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
+    token_seed = call_id if attempt == 0 else f"{call_id}#{uuid.uuid4().hex}"
     try:
         response = microvms.run_microvm(
             imageIdentifier=os.environ["MICROVM_IMAGE_ARN"],
@@ -91,7 +112,7 @@ def _acquire(call_id: str) -> dict:
                 "suspendedDurationSeconds": 0,
             },
             maximumDurationInSeconds=MAX_MEETING_SECONDS,
-            clientToken=_client_token(call_id),
+            clientToken=_client_token(token_seed),
         )
     except MicrovmError as exc:
         logger.error("RunMicrovm failed: %s", exc)
@@ -99,28 +120,33 @@ def _acquire(call_id: str) -> dict:
     except Exception as exc:  # noqa: BLE001 - the transcriber falls back on any reason
         logger.exception("RunMicrovm failed")
         return {"ok": False, "reason": f"RunMicrovm failed: {exc}"}
-
     microvm_id = response["microvmId"]
     endpoint = response.get("endpoint", "")
     state = response.get("state", "PENDING")
-    logger.info("Started ASR MicroVM %s state=%s endpoint=%s", microvm_id, state, endpoint)
-
-    deadline = time.time() + ACQUIRE_TIMEOUT_SECONDS
+    state_reason = response.get("stateReason", "")
+    logger.info(
+        "Started ASR MicroVM %s state=%s endpoint=%s attempt=%d",
+        microvm_id, state, endpoint, attempt + 1,
+    )
     while state in ("PENDING", "STARTING") and time.time() < deadline:
         time.sleep(POLL_INTERVAL_SECONDS)
         try:
-            state = microvms.get_microvm(microvm_id).get("state", state)
+            record = microvms.get_microvm(microvm_id)
+            state = record.get("state", state)
+            state_reason = record.get("stateReason", state_reason)
         except MicrovmError as exc:
             logger.warning("GetMicrovm failed while waiting: %s", exc)
-
     if state != "RUNNING":
         _release(microvm_id)
+        detail = f"state={state}" + (f", {state_reason}" if state_reason else "")
         return {
             "ok": False,
-            "reason": f"ASR MicroVM did not reach RUNNING (state={state})",
+            "reason": f"ASR MicroVM did not reach RUNNING ({detail})",
             "microvmId": microvm_id,
+            "state": state,
+            "stateReason": state_reason,
+            "retryable": state == "TERMINATED",
         }
-
     if not endpoint:
         try:
             endpoint = microvms.get_microvm(microvm_id).get("endpoint", "")

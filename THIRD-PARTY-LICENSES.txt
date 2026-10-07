@@ -497,8 +497,7 @@ Exhibit B - "Incompatible With Secondary Licenses" Notice
 Apache License 2.0 - https://github.com/k2-fsa/sherpa-onnx/blob/master/LICENSE
 
 Installed into the on-demand ASR MicroVM image (lma-asr-microvm-stack) when the
-TranscriptionEngine parameter is set to MicrovmAsr. Not used by the default
-Amazon Transcribe path.
+EnableMicrovmAsr parameter is true. Not used by the default Amazon Transcribe path.
 
 ----------------
 
@@ -511,21 +510,67 @@ each against a pinned SHA256. The weights are baked into that image inside the
 deploying AWS account; this project distributes no model weights. Each model's own
 license file is copied into the image next to its weights, and the deployed bundle's
 licences are reported in the ASR stack's AsrLicenceSummary and AsrRedistributable
-outputs. Every bundle offered is permissively licensed and redistributable.
+outputs. The default bundle and every bundle the catalog marks redistributable are
+permissively licensed. One bundle (nemotron-titanet-small) carries weights under the
+NVIDIA Open Model License; it is marked not redistributable, is never the default, and
+is offered only for deployments that accept that licence.
 
 Speech recognition:
 
-  * NVIDIA FastConformer hybrid large streaming multi, EN (streaming; both bundles)
+  * NVIDIA FastConformer hybrid large streaming multi, EN (streaming;
+    fastconformer-titanet-small, fastconformer-transcription-only, and the preview in
+    parakeet-tdt-v3-live-titanet-small and parakeet-tdt-v3-live-sortformer)
     CC-BY-4.0
     https://huggingface.co/nvidia/stt_en_fastconformer_hybrid_large_streaming_multi
 
-Speaker embedding (diarization; fastconformer-titanet-small bundle only):
+  * NVIDIA Nemotron 3.5 ASR streaming 0.6B (streaming; nemotron35-titanet-small, and the
+    preview in parakeet-tdt-v3-live-nemotron35-titanet-small and
+    parakeet-tdt-v3-live-nemotron35-sortformer)
+    OpenMDW-1.1
+    https://huggingface.co/nvidia/nemotron-3.5-asr-streaming-0.6b
+
+  * NVIDIA Nemotron speech streaming EN 0.6B (streaming; nemotron-titanet-small)
+    NVIDIA Open Model License -- NOT redistributable
+    https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b
+
+  * NVIDIA Parakeet TDT 0.6B v3 and v2 (offline; v2 in parakeet-tdt-v2-titanet-small, v3 in
+    every other bundle whose id starts with parakeet-tdt-v3)
+    CC-BY-4.0
+    https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3
+    https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2
+
+  * Qwen3-ASR 0.6B (offline; qwen3-asr-titanet-small, qwen3-asr-transcription-only).
+    The ONNX export is third-party work (https://github.com/Wasser1462/Qwen3-ASR-onnx)
+    re-hosted in the k2-fsa sherpa-onnx release.
+    Apache-2.0
+    https://huggingface.co/Qwen/Qwen3-ASR-0.6B-hf
+
+  * Cohere Transcribe 03-2026 2B (offline; cohere-transcribe-titanet-small), ONNX export
+    by k2-fsa in the sherpa-onnx release.
+    Apache-2.0
+    https://huggingface.co/CohereLabs/cohere-transcribe-03-2026
+
+Speaker diarization (parakeet-tdt-v3-sortformer, parakeet-tdt-v3-live-sortformer,
+parakeet-tdt-v3-live-nemotron35-sortformer):
+
+  * NVIDIA Nemotron 3 Diarization, int8 ONNX export. The export is third-party work by
+    onnx-community (https://huggingface.co/onnx-community/Nemotron-3-Diarization-ONNX).
+    OpenMDW-1.1
+    https://huggingface.co/nvidia/Nemotron-3-Diarization
+
+Utterance segmentation (offline bundles only):
+
+  * Silero VAD v5, redistributed by k2-fsa
+    MIT
+    https://github.com/snakers4/silero-vad
+
+Speaker embedding (every bundle whose id ends in -titanet-small):
 
   * NVIDIA TitaNet-small
     CC-BY-4.0
     https://catalog.ngc.nvidia.com/orgs/nvidia/teams/nemo/models/titanet_small
 
-Speaker-turn detection (fastconformer-titanet-small bundle only):
+Speaker-turn detection (every bundle whose id ends in -titanet-small):
 
   * pyannote segmentation 3.0, converted to ONNX and redistributed ungated by
     k2-fsa together with the upstream license file

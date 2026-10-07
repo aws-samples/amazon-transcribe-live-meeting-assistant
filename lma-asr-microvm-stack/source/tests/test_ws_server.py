@@ -964,6 +964,7 @@ async def test_negotiated_config_is_threaded_into_new_session() -> None:
             # override it for every client that does not send the field.
             speaker_threshold=None,
             max_speakers=0,
+            diarize=False,
         )
     ]
 
@@ -1421,3 +1422,81 @@ def test_split_on_speaker_change_reaches_the_session_config() -> None:
     assert config.split_on_speaker_change is False
     assert Config(sample_rate=16000).split_on_speaker_change is None
 
+
+
+def test_engine_factory_builds_the_two_pass_engine_from_both_configs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pathlib import Path
+
+    import asr_server.ws_server as ws_server_mod
+
+    monkeypatch.setenv("ASR_ENGINE", "two_pass")
+    monkeypatch.delenv("ASR_MODEL_DIR", raising=False)
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(ws_server_mod, "build_offline_model_config", lambda: "offline-cfg")
+
+    def _preview(**kwargs: object) -> str:
+        calls["preview"] = kwargs
+        return "preview-cfg"
+
+    def _engine(offline: object, preview: object) -> str:
+        calls["engine"] = (offline, preview)
+        return "engine"
+
+    monkeypatch.setattr(ws_server_mod, "build_model_config", _preview)
+    monkeypatch.setattr(ws_server_mod, "create_two_pass_engine", _engine)
+    monkeypatch.setattr(ws_server_mod, "diarization_enabled", lambda: False)
+
+    assert ws_server_mod._default_engine_factory() == "engine"
+    assert calls["preview"] == {"model_dir": Path("/opt/models/preview")}
+    assert calls["engine"] == ("offline-cfg", "preview-cfg")
+
+
+async def test_a_sortformer_build_honours_a_request_for_speaker_labels() -> None:
+    from asr_server.sortformer import SortformerEngine
+
+    from tests.test_sortformer import EnergyBackend
+
+    engine = SortformerEngine(ScriptedEngine(ScriptedRecognizer()), EnergyBackend())
+    conn = FakeConnection(['{"type":"eos"}'])
+    await AsrSession(conn, path="/?diarize=true", engine=engine).run()
+
+    ready = next(m for m in conn.messages() if m["type"] == "ready")
+    assert ready["effective_config"]["diarize"] is True
+
+
+def test_engine_factory_attaches_the_sortformer_diarizer_when_the_image_bakes_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asr_server.ws_server as ws_server_mod
+
+    monkeypatch.setenv("ASR_ENGINE", "accurate")
+    monkeypatch.setenv("ASR_DIARIZER_KIND", "sortformer")
+    monkeypatch.setattr(ws_server_mod, "build_offline_model_config", lambda: "offline-cfg")
+    monkeypatch.setattr(ws_server_mod, "create_sherpa_offline_engine", lambda cfg: "offline-engine")
+    monkeypatch.setattr(
+        ws_server_mod, "create_sortformer_engine", lambda inner: ("sortformer", inner)
+    )
+    monkeypatch.setattr(
+        ws_server_mod, "diarization_enabled", lambda: pytest.fail("embedder chain consulted")
+    )
+
+    assert ws_server_mod._default_engine_factory() == ("sortformer", "offline-engine")
+
+
+def test_load_reporter_reports_cores_used_since_the_last_sample() -> None:
+    from asr_server.ws_server import LoadReporter
+
+    readings = iter([10.0, 70.0, 70.5])
+    clock = iter([100.0, 130.0, 160.0])
+    reporter = LoadReporter(cpu_seconds=lambda: next(readings), clock=lambda: next(clock), cores=4)
+    reporter.active_sessions = 2
+
+    busy = reporter.line()
+    reporter.active_sessions = 0
+    idle = reporter.line()
+
+    assert busy is not None
+    assert busy.startswith("engine load: 2.00 of 4 cores (50%) over the last 30s, 2 session(s)")
+    assert idle is None

@@ -13,6 +13,7 @@ when its page-sampling exercise fails, because failing it fails the image build.
 from __future__ import annotations
 
 import signal
+from pathlib import Path
 
 import pytest
 from asr_microvm.hook_server import (
@@ -229,3 +230,16 @@ def test_warm_pcm_falls_back_to_a_deterministic_tone_without_a_wav() -> None:
     assert len(pcm) > 0
     assert len(pcm) % 2 == 0
     assert pcm == warm_pcm()
+
+
+def test_the_warm_exercise_asks_for_speaker_labels_when_a_diarizer_is_baked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import asr_microvm.hook_server as hook_server
+
+    monkeypatch.setattr(hook_server, "SPEAKER_MODEL", tmp_path / "speaker_embedding.onnx")
+    monkeypatch.setattr(hook_server, "DIARIZER_DIR", tmp_path / "diarizer")
+    assert hook_server.speaker_labels_baked() is False
+    (tmp_path / "diarizer").mkdir()
+    (tmp_path / "diarizer" / "model_quantized.onnx").write_bytes(b"graph")
+    assert hook_server.speaker_labels_baked() is True

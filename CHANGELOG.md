@@ -9,13 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Seven more model bundles.** Nemotron 3.5 ASR streaming (OpenMDW-1.1), the earlier Nemotron speech streaming model (NVIDIA Open Model License, not redistributable), Parakeet TDT 0.6B v3 and v2, Qwen3-ASR 0.6B (Apache-2.0; no word timings, so labels are one per utterance) and Cohere Transcribe 2B (Apache-2.0; one language baked at build time; not yet run live).
+
+- **Two-pass bundles add live text to the offline engine.** `parakeet-tdt-v3-live-titanet-small` (FastConformer preview) and `parakeet-tdt-v3-live-nemotron35-titanet-small` (punctuated Nemotron 3.5 preview) show a streaming preview while someone speaks and replace it with Parakeet's text when the utterance closes.
+
+- **End-to-end diarization bundles.** `parakeet-tdt-v3-sortformer`, `parakeet-tdt-v3-live-sortformer` and `parakeet-tdt-v3-live-nemotron35-sortformer` label every Parakeet word with NVIDIA's Nemotron 3 Diarization (OpenMDW-1.1), so short replies get rows and speakers of their own, with nothing to calibrate; up to eight speakers per channel.
+
+- **On the on-demand engine, the Virtual Participant's voice assistant is its own `AGENT` channel**, under the VP's name and never diarized; meeting rows take the roster speaker covering most of the row, allowing for the platform's delay in reporting a speaker change.
+
+- **The on-demand engine logs its CPU use once a minute** during a meeting.
+
 - **Amazon Nova Sonic can be reached in a different region from the rest of the stack.** Nova Sonic is available in fewer regions than LMA itself, so a deployment constrained to a particular region — for data-residency or compliance reasons — previously could not use the Nova Sonic voice assistant at all. The new **`AmazonNovaSonicRegion`** parameter names the region to reach it in; leave it empty, the default, to use the stack's own region, which is what every existing deployment gets. Setting it also grants the Virtual Participant's task role permission to invoke the Nova model in that region, without which the call would be denied by IAM. Only the Nova Sonic model moves: the Bedrock calls behind the Virtual Participant's self-healing DOM resolver, the DynamoDB table holding the Nova Sonic configuration, and the meeting-assistant Lambda the voice assistant calls as a tool all stay in the stack's region, where they are deployed. Only used when `VoiceAssistantProvider` is `amazon_nova_sonic`. See [CloudFormation Parameters](docs/cloudformation-parameters.md#voice-assistant). ([#508](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/508))
 
 ### Changed
 
+- **The default on-demand speech bundle is now `parakeet-tdt-v3-titanet-small`** (Parakeet TDT 0.6B v3 on the offline engine, CC-BY-4.0), the most accurate model tested live and the only one that labelled every speaker turn of 2.5 s or more correctly. On update the MicroVM image is rebuilt (about 20 minutes), and rows appear when an utterance closes, within about 20 s of speech, rather than as live partial text. To keep live text while someone speaks, set the `AsrDefaults` mapping to a `-live-` bundle or to `fastconformer-titanet-small`; switching bundles is a developer change to that mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
+
+- **Updating from 0.3.8 or earlier:** a deployment that had switched streaming meetings onto the on-demand engine selects it again on the Transcription Engine page, because the saved setting was renamed in 0.3.9.
+
 - **Dependency updates across every stack**, landed as weekly grouped Dependabot batches — the web UI, WebSocket transcriber, Virtual Participant backend, browser extension, docs-site, the Python Lambda requirements and layers, and the boto3/botocore/boto3-stubs/aws-lambda-powertools/cfn-lint/aws-sam-cli/phonenumbers/ruff tooling family — with no build regressions. Two moves are worth noting. `dotenv` went from the 17.x to the 18.x line in the transcriber and the `utilities/websocket-client` helper; 18.0.0 drops preloading (`-r dotenv/config`) and `.env.vault`, neither of which this repository uses, so the `dotenv.config()` calls are unchanged. `@zoom/meetingsdk` moved to 6.5.0 in the Virtual Participant, and because it declares exact `react` and `react-dom` peers rather than a range, `react` and `react-dom` move with it from 18.2.0 to exactly 18.3.1 — the two are only ever bumped together, which is now what `.github/dependabot.yml` records. React 19 stays held back by `@azure/communication-react`'s peer range. No parameters change and no action is needed beyond the usual stack update, though the Virtual Participant and transcriber changes take effect once their container images are rebuilt.
 
 ### Fixed
+
+- **Streaming-engine rows no longer lose a word every 20 s of pause-free speech.** The engine's forced decoder reset moves from 20 s to 60 s; on bundles with speaker labels the diarizer still closes rows at 20 s without a reset.
+
+- **A channel that asks for no speaker labels gets none.** The microphone channel no longer carries a `(spk_0)` suffix or runs voice embedding.
+
+- **Transcript rows containing a colon are shown in full** in the call panel and the embedded call view; text before the first colon of a caller or agent row was dropped.
+
+- **Pausing a Virtual Participant on the on-demand engine no longer ends its transcription**, and a VP whose engine session dies mid-meeting continues on Amazon Transcribe.
+
+- **A MicroVM the platform terminates before it starts is replaced once** before the meeting falls back to Amazon Transcribe.
+
+- **Saving the Transcription Engine page before it finished loading reset the switches.** Save is now disabled until the form has loaded.
 
 - **The meetings list no longer omits meetings from a shared date range.** When a user could see only some of the meetings in a range — the normal case wherever several people record meetings around the same time — paging past the first page could skip meetings entirely, so they appeared on no page at all. The list asks DynamoDB for a page, drops the meetings the user is not entitled to see, and stops once it has filled the requested page size; but the continuation marker it handed back pointed at the end of the underlying page rather than at the meeting it had stopped on, so anything between the two was never returned. With the default page size of 50, a single meeting belonging to someone else could hide up to 49 others. The meeting count shown alongside the list is computed separately and was always right, so the count could exceed the number of rows displayed. Administrators, who see every meeting and therefore have nothing filtered out, were unaffected. Paging now resumes from the last meeting actually returned, and still reports the end of the listing correctly when a page happens to fill on its final row. No action is needed beyond the usual stack update, and no meeting data was lost — the meetings were always stored, just not listed.
 

@@ -23,7 +23,18 @@ import {
     speakerNameFor,
 } from './asr-microvm-client.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { RosterTimeline } from './roster-timeline.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
+
+const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
+
+export function rosterLagSeconds(platform: string = details.invite.meetingPlatform): number {
+    const configured = Number.parseFloat(process.env.ASR_ROSTER_LAG_SECONDS ?? '');
+    if (Number.isFinite(configured) && configured >= 0) {
+        return configured;
+    }
+    return platform.toUpperCase() === 'ZOOM' ? 2.0 : 0.75;
+}
 
 // Global current speaker (matching Python)
 let currentSpeaker = "none";
@@ -129,8 +140,16 @@ export class TranscriptionService {
     private readonly channels = 1;
     private readonly sampleRate = 16000; // in hertz
     private transcribeClient: TranscribeStreamingClient;
-    // Live only while this meeting is transcribed by the on-demand MicroVM engine.
-    private microvmSession: MicrovmAsrSession | null = null;
+    // Live only while this meeting is transcribed by the on-demand MicroVM engine: one
+    // session per audio source, like Stream Audio's two channels.
+    private meetingSession: MicrovmAsrSession | null = null;
+    private agentSession: MicrovmAsrSession | null = null;
+    private agentAudioProcess: ChildProcess | null = null;  // FFmpeg: agent_output.monitor → assistant session
+    private engineRuns = 0;
+    private engineTimeBase = 0;
+    private sessionsFinishing: Promise<void> = Promise.resolve();
+    private microvmRun: Promise<boolean> | null = null;
+    private readonly rosterTimeline = new RosterTimeline([details.lmaIdentity, details.scribeIdentity]);
     private isTranscribing = false;
     private mockTranscriptionInterval: NodeJS.Timeout | null = null;
     
@@ -325,7 +344,7 @@ export class TranscriptionService {
                 this.finishMeeting(recordingStream);
                 return;
             }
-            console.warn('[ASR] MicroVM ASR could not start; falling back to Amazon Transcribe for this meeting');
+            console.warn('[ASR] MicroVM ASR unavailable; Amazon Transcribe takes over for the rest of this meeting');
         }
 
         // Loop over Transcribe sessions for the life of the meeting. Each
@@ -588,57 +607,144 @@ export class TranscriptionService {
         recordingStream: NodeJS.WritableStream,
         diarize: boolean,
     ): Promise<boolean> {
+        const run = this.runMicrovmTranscriptionOnce(recordingStream, diarize);
+        this.microvmRun = run;
+        try {
+            return await run;
+        } finally {
+            if (this.microvmRun === run) {
+                this.microvmRun = null;
+            }
+        }
+    }
+
+    private async runMicrovmTranscriptionOnce(
+        recordingStream: NodeJS.WritableStream,
+        diarize: boolean,
+    ): Promise<boolean> {
         const callId = kinesisStreamManager.currentCallId;
         const lease = await acquireLease(callId);
         if (!lease) {
             return false;
         }
-        const session = new MicrovmAsrSession({
+        if (!this.isTranscribing) {
+            if (lease.microvmId) {
+                await releaseLease(lease.microvmId).catch(() => undefined);
+            }
+            return true;
+        }
+        const run = this.engineRuns;
+        this.engineRuns += 1;
+        const common = {
             callId,
             lease,
+            run,
+            timeBaseSeconds: Math.max(this.engineTimeBase, this.transcribeTimeOffsetSeconds),
+            // A paused meeting is not over: the sessions stay up and are fed silence.
+            isMeetingLive: () => this.isTranscribing,
+        };
+        const meetingSession = new MicrovmAsrSession({
+            ...common,
+            channel: 'CALLER',
             diarize,
-            onSegment: (segment) => this.handleAsrSegment(segment),
-            isMeetingLive: () => this.isTranscribing && details.start,
+            onSegment: (segment) => this.handleMeetingAsrSegment(segment),
         });
-        this.microvmSession = session;
-        if (!(await session.start())) {
+        const agentSession = voiceAssistant.isEnabled() && details.meetingMode !== 'translator'
+            ? new MicrovmAsrSession({
+                  ...common,
+                  channel: 'AGENT',
+                  diarize: false,
+                  onSegment: (segment) => this.handleAgentAsrSegment(segment),
+              })
+            : null;
+        this.meetingSession = meetingSession;
+        this.agentSession = agentSession;
+        const agentReady = agentSession ? agentSession.start() : Promise.resolve(true);
+        const meetingReady = await meetingSession.start();
+        if (!meetingReady && !this.isTranscribing) {
+            await this.finishMicrovmSessions();
+            await this.releaseMicrovm(meetingSession);
+            return true;
+        }
+        if (!meetingReady) {
             console.error('[ASR] MicroVM ASR session never became ready');
-            // Finish first, or the session keeps reconnecting against a released MicroVM.
-            await session.finish();
-            await this.releaseMicrovm(session);
-            this.microvmSession = null;
+            // Finish first, or the sessions keep reconnecting against a released MicroVM.
+            await this.finishMicrovmSessions();
+            await this.releaseMicrovm(meetingSession);
             return false;
         }
-        console.log(`[ASR] MicroVM ASR active for ${callId} (speaker labels: ${session.speakerLabelsActive})`);
+        void agentReady.then((ready) => {
+            if (!ready && this.agentSession === agentSession) {
+                console.warn("[ASR AGENT] session not ready at start; the assistant's replies appear once it connects");
+            }
+        });
+        const agent = this.agentSession;
+        console.log(
+            `[ASR] MicroVM ASR active for ${callId} (speaker labels: ${meetingSession.speakerLabelsActive}, assistant channel: ${agent ? 'AGENT' : 'none'})`,
+        );
         await this.markActive();
 
-        // Meeting audio still has to reach combined_audio and the voice assistant;
-        // that fan-out is the same regardless of which engine consumes the result.
-        this.startMeetingAudioFanout();
+        // Both feeds start together so the two engine clocks share one meeting timeline.
+        this.startMeetingAudioFanout((chunk) => meetingSession.pushPcm(chunk));
+        if (agent) {
+            this.startAgentAudioCapture((chunk) => agent.pushPcm(chunk));
+        }
+        let fellBack = false;
+        let agentGaveUpLogged = false;
         try {
-            for await (const event of this.audioStream(recordingStream)) {
-                if (!this.isTranscribing || !details.start) {
+            // The combined stream is consumed only for the recording tee and liveness;
+            // the engine hears the two separate sources above.
+            for await (const frame of this.audioStream(recordingStream)) {
+                void frame;
+                if (!this.isTranscribing) {
                     break;
                 }
-                if (session.hasGivenUp) {
-                    console.error('[ASR] MicroVM ASR session gave up; the rest of this meeting will not be transcribed');
+                if (meetingSession.hasGivenUp) {
+                    console.error('[ASR] MicroVM ASR session gave up; Amazon Transcribe takes over for the rest of this meeting');
+                    fellBack = true;
                     break;
                 }
-                session.pushPcm(event.AudioEvent.AudioChunk);
+                if (agent?.hasGivenUp && !agentGaveUpLogged) {
+                    console.error("[ASR AGENT] session gave up; the assistant's replies are no longer transcribed");
+                    agentGaveUpLogged = true;
+                }
             }
         } catch (error: any) {
             console.error(`[ASR] audio stream error: ${error?.message || error}`);
         } finally {
             this.teardownSessionProcesses();
-            try {
-                await session.finish();
-            } catch (error: any) {
-                console.error(`[ASR] error finishing MicroVM session: ${error?.message || error}`);
-            }
-            await this.releaseMicrovm(session);
-            this.microvmSession = null;
+            this.engineTimeBase = Math.max(
+                this.engineTimeBase,
+                meetingSession.audioSeconds,
+                agent?.audioSeconds ?? 0,
+            );
+            await this.finishMicrovmSessions();
+            await this.releaseMicrovm(meetingSession);
+        }
+        if (fellBack) {
+            this.transcribeTimeOffsetSeconds = Math.max(this.transcribeTimeOffsetSeconds, this.engineTimeBase);
+            return false;
         }
         return true;
+    }
+
+    private async finishMicrovmSessions(): Promise<void> {
+        const sessions = [this.meetingSession, this.agentSession].filter(
+            (session): session is MicrovmAsrSession => session !== null,
+        );
+        this.meetingSession = null;
+        this.agentSession = null;
+        const finishing = Promise.all(
+            sessions.map(async (session) => {
+                try {
+                    await session.finish();
+                } catch (error: any) {
+                    console.error(`[ASR] error finishing MicroVM session: ${error?.message || error}`);
+                }
+            }),
+        );
+        this.sessionsFinishing = Promise.all([this.sessionsFinishing, finishing]).then(() => undefined);
+        await this.sessionsFinishing;
     }
 
     private async releaseMicrovm(session: MicrovmAsrSession): Promise<void> {
@@ -653,25 +759,10 @@ export class TranscriptionService {
         }
     }
 
-    /** One engine row; the speaker is the roster name plus the voice id when per-voice labels are on. */
-    private handleAsrSegment(segment: AsrSegment): void {
-        const rosterName = currentSpeaker && currentSpeaker !== 'none' ? currentSpeaker : 'Unknown';
-        const speaker = speakerNameFor(rosterName, segment.speaker);
-
-        const lmaIdentity = (details.lmaIdentity || '').trim();
-        const scribeIdentity = (details.scribeIdentity || '').trim();
-        const speakerIsVp =
-            !!currentSpeaker &&
-            currentSpeaker !== 'none' &&
-            ((lmaIdentity.length > 0 && currentSpeaker === lmaIdentity) ||
-                (scribeIdentity.length > 0 && currentSpeaker === scribeIdentity));
-        if (details.meetingMode === 'translator' && (agentSpeakingDetector.isSpeaking() || speakerIsVp)) {
-            if (!segment.isPartial) {
-                console.log(`🌐 Translator mode: suppressing agent-origin transcript segment: "${segment.text}"`);
-            }
-            return;
-        }
-
+    /** A meeting row: the roster name at the row's START, plus the voice id when per-voice labels are on. */
+    private handleMeetingAsrSegment(segment: AsrSegment): void {
+        const roster = this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, rosterLagSeconds());
+        const speaker = speakerNameFor(roster, segment.speaker);
         sendAsrTranscriptSegment({
             channel: 'CALLER',
             segmentId: segment.segmentId,
@@ -692,8 +783,57 @@ export class TranscriptionService {
         });
     }
 
-    /** Meeting audio to combined_audio and the voice assistant; killed by teardownSessionProcesses(). */
-    private startMeetingAudioFanout(): void {
+    /** The assistant's own voice from its own session: labelled as the VP, never diarized, never a wake phrase. */
+    private handleAgentAsrSegment(segment: AsrSegment): void {
+        sendAsrTranscriptSegment({
+            channel: 'AGENT',
+            segmentId: segment.segmentId,
+            startTime: segment.startSec,
+            endTime: segment.endSec,
+            transcript: segment.text,
+            isPartial: segment.isPartial,
+            speaker: (details.lmaIdentity || details.scribeIdentity || 'LMA').trim(),
+        }).catch((error) => {
+            console.error('Failed to send transcript to Kinesis:', error);
+        });
+    }
+
+    private spawnPcmCapture(source: string, label: string): ChildProcess {
+        const capture = spawn('ffmpeg', [
+            '-f', 'pulse',
+            '-i', source,
+            '-ac', '1',
+            '-ar', '16000',
+            '-acodec', 'pcm_s16le',
+            '-f', 's16le',
+            '-loglevel', 'warning',
+            '-',
+        ]);
+        capture.stderr?.on('data', (data: any) => {
+            const msg = data.toString();
+            if (!msg.includes('size=') && !msg.includes('time=')) {
+                console.log('FFmpeg (%s): %s', label, msg.trim());
+            }
+        });
+        return capture;
+    }
+
+    /** The assistant's own voice (agent_output.monitor) for its transcript session; silence while paused. */
+    private startAgentAudioCapture(onPcm: (chunk: Buffer) => void): void {
+        this.agentAudioProcess = this.spawnPcmCapture('agent_output.monitor', 'assistant audio');
+        this.agentAudioProcess.on('error', (error: any) => {
+            console.error(`FFmpeg (assistant audio) process error: ${error.message}`);
+        });
+        this.agentAudioProcess.stdout?.on('data', (chunk: Buffer) => {
+            if (!this.isTranscribing) {
+                return;
+            }
+            onPcm(details.start ? chunk : Buffer.alloc(chunk.length));
+        });
+    }
+
+    /** Meeting audio to combined_audio, the voice assistant and, on the engine path, the meeting session. */
+    private startMeetingAudioFanout(onMeetingPcm?: (chunk: Buffer) => void): void {
         // The only writer of meeting audio on combined_audio (entrypoint.sh has no
         // loopback for it); an active pacat stream also keeps the null sink from
         // suspending (#542, #569).
@@ -716,17 +856,7 @@ export class TranscriptionService {
             if (msg) console.log(`pacat (meeting→combined): ${msg}`);
         });
 
-        // Capture meeting-only audio for Nova and recording
-        this.novaAudioProcess = spawn('ffmpeg', [
-            '-f', 'pulse',
-            '-i', 'meeting_audio.monitor',  // Meeting audio only (no agent feedback)
-            '-ac', '1',
-            '-ar', '16000',
-            '-acodec', 'pcm_s16le',
-            '-f', 's16le',
-            '-loglevel', 'warning',
-            '-'
-        ]);
+        this.novaAudioProcess = this.spawnPcmCapture('meeting_audio.monitor', 'meeting audio');
 
         // Add error handlers for the process
         this.novaAudioProcess.on('error', (error: any) => {
@@ -739,35 +869,35 @@ export class TranscriptionService {
             }
         });
 
-        this.novaAudioProcess.stderr?.on('data', (data: any) => {
-            const msg = data.toString();
-            if (!msg.includes('size=') && !msg.includes('time=')) {
-                console.log('FFmpeg:', msg.trim());
-            }
-        });
-
         // Process audio chunks from meeting_audio.monitor
         this.novaAudioProcess.stdout?.on('data', async (chunk: Buffer) => {
-            if (details.start && this.isTranscribing) {
-                try {
-                    // Not written to the recording: this stream is meeting-only (Nova
-                    // must not hear itself); audioStream() tees the recording from
-                    // combined_audio.monitor. Sole route into combined_audio (#542).
-                    if (this.meetingToCombinedPipe?.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
-                        this.meetingToCombinedPipe.stdin.write(chunk);
-                    }
+            if (!this.isTranscribing) {
+                return;
+            }
+            if (!details.start) {
+                // Paused: nothing is forwarded, but the engine clock keeps meeting time.
+                onMeetingPcm?.(Buffer.alloc(chunk.length));
+                return;
+            }
+            try {
+                // Not written to the recording: this stream is meeting-only (Nova
+                // must not hear itself); audioStream() tees the recording from
+                // combined_audio.monitor. Sole route into combined_audio (#542).
+                if (this.meetingToCombinedPipe?.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
+                    this.meetingToCombinedPipe.stdin.write(chunk);
+                }
 
-                    if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
-                        voiceAssistant.sendAudioChunk(chunk);
-                    }
-                } catch (error: any) {
-                    const msg = `Audio chunk processing error: ${error.message}`;
-                    if (isLocalTest) {
-                        console.log(msg + ' (non-fatal in local test)');
-                    } else {
-                        console.error(msg);
-                        throw error;
-                    }
+                if (voiceAssistant.isEnabled() && voiceAssistant.isActive() && voiceAssistant.isActivated()) {
+                    voiceAssistant.sendAudioChunk(chunk);
+                }
+                onMeetingPcm?.(chunk);
+            } catch (error: any) {
+                const msg = `Audio chunk processing error: ${error.message}`;
+                if (isLocalTest) {
+                    console.log(msg + ' (non-fatal in local test)');
+                } else {
+                    console.error(msg);
+                    throw error;
                 }
             }
         });
@@ -877,6 +1007,10 @@ export class TranscriptionService {
             try { this.novaAudioProcess.kill(); } catch (_) { /* ignore */ }
             this.novaAudioProcess = null;
         }
+        if (this.agentAudioProcess) {
+            try { this.agentAudioProcess.kill(); } catch (_) { /* ignore */ }
+            this.agentAudioProcess = null;
+        }
         if (this.meetingToCombinedPipe) {
             try {
                 if (this.meetingToCombinedPipe.stdin && !this.meetingToCombinedPipe.stdin.destroyed) {
@@ -896,12 +1030,13 @@ export class TranscriptionService {
 
         // Flush the engine's tail utterance now; the run loop's own teardown releases
         // the MicroVM once the capture process above has ended its audio stream.
-        if (this.microvmSession) {
-            try {
-                await this.microvmSession.finish();
-            } catch (error: any) {
-                console.error(`[ASR] error finishing MicroVM session: ${error?.message || error}`);
-            }
+        await this.finishMicrovmSessions();
+        const run = this.microvmRun;
+        if (run) {
+            await Promise.race([
+                run.catch(() => false),
+                new Promise<void>((resolve) => setTimeout(resolve, ASR_STOP_RELEASE_TIMEOUT_MS).unref()),
+            ]);
         }
 
         // Stop voice assistant if running
@@ -932,6 +1067,7 @@ export class TranscriptionService {
         
         const timestamp = Date.now();
         details.speakers.push({ name: speaker, timestamp });
+        this.rosterTimeline.record(this.meetingSession?.audioSeconds ?? this.engineTimeBase, speaker);
         
         const formattedTime = this.formatTimestamp(timestamp);
         console.log(`[${formattedTime}] Speaker changed to: ${speaker}`);

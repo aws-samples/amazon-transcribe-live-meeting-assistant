@@ -410,6 +410,13 @@ ASR engine instead, from **Configuration ▸ Transcription Engine** (admin only)
   playing a recording) come out as `Name (spk_0)`, `Name (spk_1)`. Off by default:
   speaker names come from the meeting roster, which is the better label for a normal
   attendee.
+- **The voice assistant is its own channel.** With the assistant enabled, its speech is
+  transcribed from a second engine session on the same MicroVM and appears on the `AGENT`
+  channel under the VP's own name, never diarized, exactly as Stream Audio separates the
+  microphone from the tab. Meeting rows are attributed to the roster by when they start.
+- **Pausing keeps the engine session.** The chat pause command stops feeding meeting audio
+  but leaves both sessions up, so the resume command continues the same transcript. If the
+  engine dies mid-meeting, Amazon Transcribe takes over for the rest of it.
 
 See [MicroVM ASR](microvm-asr.md) for the engine itself.
 

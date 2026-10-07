@@ -1262,7 +1262,7 @@ Mappings:
   # cost backstop if a transcriber task dies without releasing one (max 28800).
   AsrDefaults:
     Engine:
-      ModelBundle: fastconformer-titanet-small
+      ModelBundle: parakeet-tdt-v3-titanet-small
       MaxMeetingSeconds: "14400"
 
 Conditions:

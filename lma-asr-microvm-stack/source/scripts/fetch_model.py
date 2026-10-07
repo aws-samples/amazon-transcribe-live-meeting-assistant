@@ -33,13 +33,57 @@ CANONICAL_NAMES = {
     "ASR_MODEL_JOINER_FILE": "joiner.onnx",
     "ASR_MODEL_TOKENS_FILE": "tokens.txt",
 }
+# Qwen3-ASR ships a convolution frontend, encoder, LLM decoder and a tokenizer directory.
+QWEN3_CANONICAL_NAMES = {
+    "ASR_MODEL_CONV_FRONTEND_FILE": "conv_frontend.onnx",
+    "ASR_MODEL_ENCODER_FILE": "encoder.onnx",
+    "ASR_MODEL_DECODER_FILE": "decoder.onnx",
+    "ASR_MODEL_TOKENIZER_FILE": "tokenizer",
+}
+# Cohere Transcribe stores its encoder weights in an external-data file whose name is
+# recorded inside the ONNX graph, so that file keeps its archive name.
+KEEP_SOURCE_NAME = None
+COHERE_CANONICAL_NAMES = {
+    "ASR_MODEL_ENCODER_FILE": "encoder.onnx",
+    "ASR_MODEL_ENCODER_DATA_FILE": KEEP_SOURCE_NAME,
+    "ASR_MODEL_DECODER_FILE": "decoder.onnx",
+    "ASR_MODEL_TOKENS_FILE": "tokens.txt",
+}
+KIND_FILES = {
+    "transducer": CANONICAL_NAMES,
+    "qwen3_asr": QWEN3_CANONICAL_NAMES,
+    "cohere_transcribe": COHERE_CANONICAL_NAMES,
+}
 
+
+def preview_env_for(env: dict[str, str]) -> dict[str, str]:
+    """The preview model's entries, renamed so the shared helpers can place them."""
+    preview = {
+        "ASR_MODEL_" + key[len(PREVIEW_PREFIX) :]: value
+        for key, value in env.items()
+        if key.startswith(PREVIEW_PREFIX)
+    }
+    preview.setdefault("ASR_MODEL_KIND", "transducer")
+    return preview
+
+
+def model_files_for(env: dict[str, str]) -> dict[str, str]:
+    kind = env.get("ASR_MODEL_KIND", "transducer")
+    if kind not in KIND_FILES:
+        raise ModelFetchError(
+            f"unknown ASR_MODEL_KIND {kind!r}; expected one of {sorted(KIND_FILES)}"
+        )
+    return KIND_FILES[kind]
+
+PREVIEW_PREFIX = "ASR_PREVIEW_MODEL_"
+PREVIEW_SUBDIR = "preview"
 SPEAKER_MODEL_NAME = "speaker_embedding.onnx"
 SEGMENTATION_MODEL_NAME = "segmentation.onnx"
 # Only the offline ("accurate") engine loads this: an offline model cannot stream, so
 # audio is cut into utterances by VAD and each closed utterance is decoded. The name
 # matches asr_server.offline_recognizer's default.
 VAD_MODEL_NAME = "silero_vad.onnx"
+DIARIZER_SUBDIR = "diarizer"
 DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 
 # Model weights come from a public release host, and a single 503 from it used to
@@ -152,16 +196,17 @@ def extract(archive: Path, kind: str, strip_components: int, dest: Path) -> Path
 
 
 def place_model(extracted: Path, env: dict[str, str], dest: Path) -> None:
-    for env_key, canonical in CANONICAL_NAMES.items():
+    for env_key, canonical in model_files_for(env).items():
         source_name = env[env_key]
         source = extracted / source_name
-        if not source.is_file():
+        if not source.exists():
             available = sorted(child.name for child in extracted.iterdir())
             raise ModelFetchError(
                 f"model file {source_name!r} is not in the archive. Present: {available}"
             )
-        shutil.move(str(source), str(dest / canonical))
-        log(f"placed {source_name} -> {canonical}")
+        target_name = Path(source_name).name if canonical is None else canonical
+        shutil.move(str(source), str(dest / target_name))
+        log(f"placed {source_name} -> {target_name}")
 
     for license_file in sorted(extracted.glob("LICENSE*")):
         shutil.move(str(license_file), str(dest / license_file.name))
@@ -191,7 +236,12 @@ def run(argv: list[str]) -> int:
         log(f"ERROR: cannot read {env_path}: {exc}")
         return 1
 
-    missing = [key for key in CANONICAL_NAMES if key not in env]
+    try:
+        model_files = model_files_for(env)
+    except ModelFetchError as exc:
+        log(f"ERROR: {exc}")
+        return 1
+    missing = [key for key in model_files if key not in env]
     if missing:
         log(f"ERROR: {env_path} is missing {missing}")
         return 1
@@ -214,6 +264,29 @@ def run(argv: list[str]) -> int:
                 dest,
             )
             place_model(extracted, env, dest)
+            preview_env = preview_env_for(env)
+            if preview_env.get("ASR_MODEL_URL"):
+                preview_dest = dest / PREVIEW_SUBDIR
+                preview_dest.mkdir(parents=True, exist_ok=True)
+                missing = [key for key in model_files_for(preview_env) if key not in preview_env]
+                if missing:
+                    raise ModelFetchError(f"{env_path} preview entries are missing {missing}")
+                preview_kind = preview_env.get("ASR_MODEL_ARCHIVE", "tar.bz2")
+                preview_archive = tmpdir / f"preview.{preview_kind}"
+                fetch_verified(
+                    preview_env.get("ASR_MODEL_URL", ""),
+                    preview_env.get("ASR_MODEL_SHA256", ""),
+                    preview_archive,
+                    f"preview model {preview_env.get('ASR_MODEL_ID', '?')}",
+                )
+                preview_extracted = extract(
+                    preview_archive,
+                    preview_kind,
+                    int(preview_env.get("ASR_MODEL_STRIP_COMPONENTS", "1")),
+                    preview_dest,
+                )
+                place_model(preview_extracted, preview_env, preview_dest)
+                shutil.rmtree(preview_dest / "_staging", ignore_errors=True)
 
             speaker_url = env.get("ASR_SPEAKER_MODEL_URL", "")
             if speaker_url:
@@ -272,6 +345,23 @@ def run(argv: list[str]) -> int:
                 log(f"placed segmentation model -> {SEGMENTATION_MODEL_NAME}")
             else:
                 log("no segmentation model selected: one speaker per endpointed utterance")
+
+            diarizer_url = env.get("ASR_DIARIZER_MODEL_URL", "")
+            if diarizer_url:
+                diarizer_dest = dest / DIARIZER_SUBDIR
+                diarizer_dest.mkdir(parents=True, exist_ok=True)
+                label = f"diarization model {env.get('ASR_DIARIZER_MODEL_ID', '?')}"
+                for part in ("MODEL", "DATA"):
+                    url = env.get(f"ASR_DIARIZER_{part}_URL", "")
+                    name = Path(env.get(f"ASR_DIARIZER_{part}_FILE", "")).name
+                    if not url or not name:
+                        raise ModelFetchError(f"{label}: {part.lower()} file is not pinned")
+                    target = tmpdir / name
+                    fetch_verified(
+                        url, env.get(f"ASR_DIARIZER_{part}_SHA256", ""), target, f"{label} {name}"
+                    )
+                    shutil.move(str(target), str(diarizer_dest / name))
+                    log(f"placed {name} -> {DIARIZER_SUBDIR}/{name}")
 
             vad_url = env.get("ASR_VAD_MODEL_URL", "")
             if vad_url:

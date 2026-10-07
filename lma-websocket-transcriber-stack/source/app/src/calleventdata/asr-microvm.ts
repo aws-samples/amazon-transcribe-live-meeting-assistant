@@ -39,7 +39,7 @@ const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const ASR_ENGINE_DEFAULT = (process.env['ASR_ENGINE_DEFAULT'] || 'transcribe').toLowerCase();
 const ASR_LAUNCHER_FUNCTION_ARN = process.env['ASR_LAUNCHER_FUNCTION_ARN'] || '';
 // The diarization knobs and the deployment default engine come from asr-config.ts,
-// which layers the ASR Config table's overrides over these same env defaults.
+// which layers the AsrConfig table's overrides over these same env defaults.
 // Development escape hatch: connect straight to a locally running ASR server
 // (ws://host:8080) instead of launching a MicroVM.
 const ASR_DIRECT_ENDPOINT = process.env['ASR_DIRECT_ENDPOINT'] || '';
