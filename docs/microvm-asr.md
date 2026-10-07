@@ -159,6 +159,8 @@ gave the best transcript of everything measured (real-time factor 0.38, punctuat
 "WACC" where every other model wrote "whack") but returns no word timings, so its speaker
 labels are one per utterance rather than per turn. Every alternative reuses TitaNet-small,
 so the operating point carries over unchanged; each is `calibrated` until vetted live.
+The `-sortformer` bundles have no threshold to measure and are `experimental` until vetted;
+a bundle with no status in the catalog reports `uncalibrated`.
 Parakeet v3 is `vetted` and the default after the live runs of 2026-09-22: text on a par with
 Qwen3-ASR, every speaker turn of 2.5 s or more labelled correctly, and rows within about 20 s
 of speech.

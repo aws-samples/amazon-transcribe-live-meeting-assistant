@@ -9,21 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **The default on-demand speech bundle is now `parakeet-tdt-v3-titanet-small`** (Parakeet TDT 0.6B v3 on the offline engine, CC-BY-4.0), the most accurate model tested live and the only one that labelled every speaker turn of 2.5 s or more correctly. On update the MicroVM image is rebuilt (about 20 minutes), and rows appear when an utterance closes, within about 20 s of speech, rather than as live partial text. Switching bundles is a developer change to the `AsrDefaults` mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
-
 - **Seven more model bundles.** Nemotron 3.5 ASR streaming (OpenMDW-1.1), the earlier Nemotron speech streaming model (NVIDIA Open Model License, not redistributable), Parakeet TDT 0.6B v3 and v2, Qwen3-ASR 0.6B (Apache-2.0; no word timings, so labels are one per utterance) and Cohere Transcribe 2B (Apache-2.0; one language baked at build time; not yet run live).
 
 - **Two-pass bundles add live text to the offline engine.** `parakeet-tdt-v3-live-titanet-small` (FastConformer preview) and `parakeet-tdt-v3-live-nemotron35-titanet-small` (punctuated Nemotron 3.5 preview) show a streaming preview while someone speaks and replace it with Parakeet's text when the utterance closes.
 
 - **End-to-end diarization bundles.** `parakeet-tdt-v3-sortformer`, `parakeet-tdt-v3-live-sortformer` and `parakeet-tdt-v3-live-nemotron35-sortformer` label every Parakeet word with NVIDIA's Nemotron 3 Diarization (OpenMDW-1.1), so short replies get rows and speakers of their own, with nothing to calibrate; up to eight speakers per channel.
 
-- **On the on-demand engine, the Virtual Participant's voice assistant is its own `AGENT` channel**, under the VP's name and never diarized; meeting rows take the roster speaker active at the row's start.
+- **On the on-demand engine, the Virtual Participant's voice assistant is its own `AGENT` channel**, under the VP's name and never diarized; meeting rows take the roster speaker covering most of the row, allowing for the platform's delay in reporting a speaker change.
 
 - **The on-demand engine logs its CPU use once a minute** during a meeting.
 
 - **Amazon Nova Sonic can be reached in a different region from the rest of the stack.** Nova Sonic is available in fewer regions than LMA itself, so a deployment constrained to a particular region — for data-residency or compliance reasons — previously could not use the Nova Sonic voice assistant at all. The new **`AmazonNovaSonicRegion`** parameter names the region to reach it in; leave it empty, the default, to use the stack's own region, which is what every existing deployment gets. Setting it also grants the Virtual Participant's task role permission to invoke the Nova model in that region, without which the call would be denied by IAM. Only the Nova Sonic model moves: the Bedrock calls behind the Virtual Participant's self-healing DOM resolver, the DynamoDB table holding the Nova Sonic configuration, and the meeting-assistant Lambda the voice assistant calls as a tool all stay in the stack's region, where they are deployed. Only used when `VoiceAssistantProvider` is `amazon_nova_sonic`. See [CloudFormation Parameters](docs/cloudformation-parameters.md#voice-assistant). ([#508](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/508))
 
 ### Changed
+
+- **The default on-demand speech bundle is now `parakeet-tdt-v3-titanet-small`** (Parakeet TDT 0.6B v3 on the offline engine, CC-BY-4.0), the most accurate model tested live and the only one that labelled every speaker turn of 2.5 s or more correctly. On update the MicroVM image is rebuilt (about 20 minutes), and rows appear when an utterance closes, within about 20 s of speech, rather than as live partial text. To keep live text while someone speaks, set the `AsrDefaults` mapping to a `-live-` bundle or to `fastconformer-titanet-small`; switching bundles is a developer change to that mapping. See [MicroVM ASR](docs/microvm-asr.md#model-bundles).
 
 - **Updating from 0.3.8 or earlier:** a deployment that had switched streaming meetings onto the on-demand engine selects it again on the Transcription Engine page, because the saved setting was renamed in 0.3.9.
 
@@ -41,7 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **A MicroVM the platform terminates before it starts is replaced once** before the meeting falls back to Amazon Transcribe.
 
-- **Save on the Transcription Engine page waits for the form to load.**
+- **Saving the Transcription Engine page before it finished loading reset the switches.** Save is now disabled until the form has loaded.
 
 - **The meetings list no longer omits meetings from a shared date range.** When a user could see only some of the meetings in a range — the normal case wherever several people record meetings around the same time — paging past the first page could skip meetings entirely, so they appeared on no page at all. The list asks DynamoDB for a page, drops the meetings the user is not entitled to see, and stops once it has filled the requested page size; but the continuation marker it handed back pointed at the end of the underlying page rather than at the meeting it had stopped on, so anything between the two was never returned. With the default page size of 50, a single meeting belonging to someone else could hide up to 49 others. The meeting count shown alongside the list is computed separately and was always right, so the count could exceed the number of rows displayed. Administrators, who see every meeting and therefore have nothing filtered out, were unaffected. Paging now resumes from the last meeting actually returned, and still reports the end of the listing correctly when a page happens to fill on its final row. No action is needed beyond the usual stack update, and no meeting data was lost — the meetings were always stored, just not listed.
 
