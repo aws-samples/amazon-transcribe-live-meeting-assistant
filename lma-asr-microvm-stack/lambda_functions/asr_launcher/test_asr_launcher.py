@@ -115,8 +115,8 @@ def test_acquire_terminates_a_microvm_that_never_reaches_running() -> None:
 
     assert result["ok"] is False
     assert "state=FAILED" in result["reason"]
-    assert client.run_microvm.call_count == 2
-    assert client.terminate_microvm.call_args_list == [mock.call("mvm-1"), mock.call("mvm-1")]
+    assert client.run_microvm.call_count == 1
+    client.terminate_microvm.assert_called_once_with("mvm-1")
 
 
 def test_acquire_terminates_the_microvm_when_the_token_cannot_be_minted() -> None:

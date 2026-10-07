@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -86,6 +87,8 @@ class TwoPassRecognizer(Recognizer):
         self._preview: Recognizer | None = None
         self._preview_start: float | None = None
         self._preview_failed = False
+        self._shown: tuple[int, float, str] | None = None
+        self._offset = 0
         self._preview_finals: list[str] = []
         self._preview_partial = ""
         self._preview_text = ""
@@ -94,10 +97,11 @@ class TwoPassRecognizer(Recognizer):
         if not pcm:
             return []
         self._remember(pcm)
-        events = [event for event in self._authority.accept_pcm(pcm) if event.kind == "final"]
-        if events:
-            self._drop_preview()
+        finals = [event for event in self._authority.accept_pcm(pcm) if event.kind == "final"]
         open_start = self._authority.open_segment_start()
+        events = self._close_shown(finals, open_start)
+        if finals:
+            self._drop_preview()
         if open_start is None:
             self._drop_preview()
             return events
@@ -130,24 +134,53 @@ class TwoPassRecognizer(Recognizer):
         ).strip()
         if text and text != self._preview_text:
             self._preview_text = text
+            self._shown = (self._authority.current_segment(), open_start, text)
             events.append(
                 Event(
                     kind="partial",
-                    segment=self._authority.current_segment(),
+                    segment=self.current_segment(),
                     text=text,
                     start=open_start,
-                    end=self._total_bytes / _BYTES_PER_SAMPLE / self._sample_rate,
+                    end=self._now(),
                 )
             )
         return events
 
     def flush(self) -> list[Event]:
-        events = [event for event in self._authority.flush() if event.kind == "final"]
+        finals = [event for event in self._authority.flush() if event.kind == "final"]
+        events = self._close_shown(finals, None)
         self._drop_preview()
         return events
 
     def current_segment(self) -> int:
-        return self._authority.current_segment()
+        return self._authority.current_segment() + self._offset
+
+    def _now(self) -> float:
+        return self._total_bytes / _BYTES_PER_SAMPLE / self._sample_rate
+
+    def _close_shown(self, finals: list[Event], open_start: float | None) -> list[Event]:
+        out = [replace(event, segment=event.segment + self._offset) for event in finals]
+        if self._shown is None:
+            return out
+        segment, start, text = self._shown
+        if any(event.segment == segment for event in finals):
+            self._shown = None
+            return out
+        if open_start is not None and open_start == start:
+            return out
+        self._shown = None
+        out.insert(
+            0,
+            Event(
+                kind="final",
+                segment=segment + self._offset,
+                text=text,
+                start=start,
+                end=self._now(),
+            ),
+        )
+        self._offset += 1
+        return [out[0]] + [replace(event, segment=event.segment + 1) for event in out[1:]]
 
     def current_words(self) -> list[WordTiming]:
         return []

@@ -597,7 +597,9 @@ Outputs:
       "calibrated" when the bundle carries an operating point measured for its
       speaker model under this engine's segmentation policy; "vetted" when this
       exact pairing has additionally been validated end to end on a live
-      multi-speaker meeting.
+      multi-speaker meeting; "experimental" for a bundle whose diarizer has no
+      operating point to measure and is still being validated live;
+      "uncalibrated" when the catalog states no status.
     Value: !GetAtt AsrImageSource.BundleStatus
 
   AsrLicenceSummary:

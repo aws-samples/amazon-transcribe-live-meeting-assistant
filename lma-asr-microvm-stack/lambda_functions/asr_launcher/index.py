@@ -145,7 +145,7 @@ def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
             "microvmId": microvm_id,
             "state": state,
             "stateReason": state_reason,
-            "retryable": state not in ("PENDING", "STARTING"),
+            "retryable": state == "TERMINATED",
         }
     if not endpoint:
         try:

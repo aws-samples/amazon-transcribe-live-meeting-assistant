@@ -200,7 +200,7 @@ def test_the_engine_composes_an_offline_session_with_lazily_made_previews() -> N
     assert preview_engine.configs == [SessionConfig(sample_rate=RATE)]
 
 
-def test_a_new_utterance_without_a_final_for_the_last_one_starts_a_fresh_preview() -> None:
+def test_a_preview_row_whose_utterance_closed_without_a_final_is_finalized_with_its_text() -> None:
     authority = ScriptedAuthority([[], []], [0.0, 0.6])
     factory = PreviewFactory(
         [[[_partial(0, "first", 0.0, 0.3)]], [[_partial(0, "second", 0.0, 0.1)]]]
@@ -210,8 +210,12 @@ def test_a_new_utterance_without_a_final_for_the_last_one_starts_a_fresh_preview
     rec.accept_pcm(_pcm(1))
     events = rec.accept_pcm(_pcm(2))
 
-    assert [e.text for e in events] == ["second"]
-    assert events[0].start == pytest.approx(0.6)
+    assert [(e.kind, e.segment, e.text) for e in events] == [
+        ("final", 0, "first"),
+        ("partial", 1, "second"),
+    ]
+    assert events[1].start == pytest.approx(0.6)
+    assert rec.current_segment() == 1
     assert len(factory.created) == 2
 
 
@@ -245,3 +249,27 @@ def test_a_preview_failure_keeps_the_offline_finals_and_stops_previews(
     assert later == []
     assert len(made) == 1
     assert sum("live preview failed" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_a_preview_row_left_open_at_the_end_of_the_stream_is_finalized() -> None:
+    authority = ScriptedAuthority([[]], [0.1], on_flush=[])
+    factory = PreviewFactory([[[_partial(0, "uh", 0.0, 0.2)]]])
+    rec = TwoPassRecognizer(authority, factory, sample_rate=RATE)
+    rec.accept_pcm(_pcm())
+
+    closing = rec.flush()
+
+    assert [(e.kind, e.segment, e.text) for e in closing] == [("final", 0, "uh")]
+
+
+def test_later_offline_finals_are_renumbered_after_a_finalized_preview() -> None:
+    authority = ScriptedAuthority([[], [], [_final(0, "Real words.", 0.9, 1.5)]], [0.0, None, None])
+    factory = PreviewFactory([[[_partial(0, "uh", 0.0, 0.2)]]])
+    rec = TwoPassRecognizer(authority, factory, sample_rate=RATE)
+
+    rec.accept_pcm(_pcm(1))
+    closed = rec.accept_pcm(_pcm(2))
+    later = rec.accept_pcm(_pcm(3))
+
+    assert [(e.kind, e.segment, e.text) for e in closed] == [("final", 0, "uh")]
+    assert [(e.kind, e.segment, e.text) for e in later] == [("final", 1, "Real words.")]

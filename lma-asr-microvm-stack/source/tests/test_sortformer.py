@@ -165,6 +165,9 @@ class ScriptedDiarizer:
     def process_available(self) -> None:
         self.processed += 1
 
+    def process_through(self, until: float) -> None:
+        self.process_available()
+
     def finish(self) -> None:
         self.finished = True
 
@@ -249,12 +252,18 @@ def test_later_partials_and_finals_are_renumbered_after_a_split() -> None:
 
 
 def test_a_final_without_word_timings_takes_the_dominant_speaker() -> None:
-    inner = ScriptedRecognizer([[_final(0, 0.0, 10.0, None)]])
-    rec = SortformerRecognizer(inner, ScriptedDiarizer([(0.0, 3.0, 4), (3.0, 10.0, 6)]))
+    inner = ScriptedRecognizer(
+        [[_final(0, 0.0, 1.0, [_word("hi", 0.1, 0.5)])], [_final(1, 2.0, 12.0, None)]]
+    )
+    turns = [(0.0, 1.5, 4), (2.0, 5.0, 4), (5.0, 12.0, 6)]
+    rec = SortformerRecognizer(inner, ScriptedDiarizer(turns))
+    silence = _pcm(np.zeros(160, dtype=np.float32))
 
-    rows = rec.accept_pcm(_pcm(np.zeros(160, dtype=np.float32)))
+    first = rec.accept_pcm(silence)
+    second = rec.accept_pcm(silence)
 
-    assert [(r.text, r.speaker) for r in rows] == [("no timings here", "spk_0")]
+    assert [r.speaker for r in first] == ["spk_0"]
+    assert [(r.text, r.speaker) for r in second] == [("no timings here", "spk_1")]
 
 
 def test_the_diarizer_is_fed_the_audio_and_caught_up_before_each_final() -> None:
@@ -307,7 +316,7 @@ def test_a_slow_step_is_logged_with_its_size(caplog: pytest.LogCaptureFixture) -
 
 
 class BrokenDiarizer(ScriptedDiarizer):
-    def process_available(self) -> None:
+    def process_through(self, until: float) -> None:
         raise RuntimeError("onnxruntime failure")
 
 
@@ -331,3 +340,16 @@ def test_a_diarizer_failure_leaves_transcription_running_without_labels(
     ]
     assert sum("sortformer diarizer failed" in r.getMessage() for r in caplog.records) == 1
     assert len(inner.chunks) == 2
+
+
+
+def test_a_final_ending_inside_the_lookahead_is_labelled_without_waiting() -> None:
+    backend = EnergyBackend()
+    session = SortformerSession(backend)
+    session.push(_tone(2.0, 0.5))
+    session.process_available()
+    held_back = session.labelled_until
+    session.process_through(2.0)
+    assert held_back < 1.8
+    assert session.labelled_until >= 1.9
+    assert session.speaker_between(1.7, 1.9) == 0

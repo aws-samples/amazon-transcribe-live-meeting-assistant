@@ -345,6 +345,16 @@ class SortformerSession:
                 return
             self._step(min(chunk, self._config.max_chunk_frames), lookahead)
 
+    def process_through(self, until: float) -> None:
+        self.process_available()
+        missing = until - self.labelled_until
+        if missing <= 0:
+            return
+        wanted = math.ceil(missing / FRAME_SEC / SUBSAMPLING)
+        available = len(self._pending) // SUBSAMPLING
+        if min(wanted, available) > 0:
+            self._step(min(wanted, available, self._config.max_chunk_frames), 0)
+
     def finish(self) -> None:
         mel = self._front_end.flush()
         if len(mel):
@@ -457,7 +467,7 @@ class SortformerRecognizer(Recognizer):
             if event.kind != "final":
                 out.append(replace(event, segment=event.segment + self._offset, speaker=None))
                 continue
-            self._diarize(self._diarizer.process_available)
+            self._diarize(self._diarizer.process_through, event.end or 0.0)
             if self._failed:
                 out.append(replace(event, segment=event.segment + self._offset, speaker=None))
                 continue
