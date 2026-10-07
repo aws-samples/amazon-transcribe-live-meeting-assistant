@@ -26,7 +26,7 @@ function methodBody(name: string): string {
 }
 
 test('every MicroVM release in the ASR path is preceded by finishing the sessions', () => {
-    const body = methodBody('private async runMicrovmTranscription');
+    const body = methodBody('private async runMicrovmTranscriptionOnce');
     const releases = [...body.matchAll(/this\.releaseMicrovm\(meetingSession\)/g)].map((m) => m.index ?? -1);
     assert.ok(releases.length >= 2, 'expected the not-ready branch and the normal end to release');
     let from = 0;

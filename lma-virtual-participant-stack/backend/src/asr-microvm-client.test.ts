@@ -327,7 +327,7 @@ test('two sessions on one engine never share a segment id', async () => {
     }
 });
 
-test('audioSeconds follows the audio the engine has been given, not what was dropped', async () => {
+test('audioSeconds follows meeting time, including audio dropped while the engine was away', async () => {
     const asr = await startFakeAsr((socket) => ready(socket));
     const session = newSession(asr, []);
     try {
@@ -348,8 +348,8 @@ test('audioSeconds follows the audio the engine has been given, not what was dro
         onSegment: () => {},
         isMeetingLive: () => true,
     });
-    for (let i = 0; i < 3; i += 1) orphan.pushPcm(Buffer.alloc(32000)); // 64000 buffered, 32000 dropped
-    assert.equal(orphan.audioSeconds, 2.0);
+    for (let i = 0; i < 3; i += 1) orphan.pushPcm(Buffer.alloc(32000));
+    assert.equal(orphan.audioSeconds, 3.0);
     await orphan.finish();
 });
 
@@ -525,5 +525,50 @@ test('a reconnect whose upgrade never completes still counts against the retry b
     } finally {
         await session.finish();
         await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+});
+
+test('finishing a session that is still waiting for the engine settles its start at once', async () => {
+    const server = (await import('node:net')).createServer((socket) => socket.on('data', () => undefined));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const session = newSession({ url, connections: 0, audioBytes: 0, close: async () => {} }, []);
+    try {
+        const started = Date.now();
+        const ready = session.start();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await session.finish();
+        assert.equal(await ready, false);
+        assert.ok(Date.now() - started < 1000, `start took ${Date.now() - started} ms`);
+    } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+});
+
+test('after an outage longer than the buffer, the newest audio is kept and rows keep meeting time', async () => {
+    const asr = await startFakeAsr((socket) => {
+        ready(socket);
+        let got = 0;
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            got += (data as Buffer).length;
+            if (got >= 64000) {
+                socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'newest', start: 1.0, end: 1.5 }));
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows);
+    try {
+        for (let i = 0; i < 3; i += 1) session.pushPcm(Buffer.alloc(32000, i + 1));
+        assert.equal(session.audioSeconds, 3.0);
+        assert.equal(await session.start(), true);
+        await until(() => asr.audioBytes >= 64000);
+        assert.equal(asr.audioBytes, 64000);
+        await until(() => rows.length === 1);
+        assert.equal(rows[0].startSec, 2.0);
+        await session.finish();
+    } finally {
+        await asr.close();
     }
 });

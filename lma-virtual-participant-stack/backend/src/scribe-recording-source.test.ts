@@ -63,7 +63,7 @@ test('the recording is NOT written from the meeting-only stream', () => {
     for (const body of [
         fanout,
         methodBody('private async writeAudio'),
-        methodBody('private async runMicrovmTranscription'),
+        methodBody('private async runMicrovmTranscriptionOnce'),
         methodBody('private startAgentAudioCapture'),
         methodBody('private spawnPcmCapture'),
     ]) {

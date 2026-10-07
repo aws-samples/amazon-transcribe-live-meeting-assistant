@@ -26,6 +26,16 @@ import { voiceAssistant } from './voice-assistant.js';
 import { RosterTimeline } from './roster-timeline.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 
+const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
+
+export function rosterLagSeconds(platform: string = details.invite.meetingPlatform): number {
+    const configured = Number.parseFloat(process.env.ASR_ROSTER_LAG_SECONDS ?? '');
+    if (Number.isFinite(configured) && configured >= 0) {
+        return configured;
+    }
+    return platform.toUpperCase() === 'ZOOM' ? 2.0 : 0.75;
+}
+
 // Global current speaker (matching Python)
 let currentSpeaker = "none";
 
@@ -138,6 +148,7 @@ export class TranscriptionService {
     private engineRuns = 0;
     private engineTimeBase = 0;
     private sessionsFinishing: Promise<void> = Promise.resolve();
+    private microvmRun: Promise<boolean> | null = null;
     private readonly rosterTimeline = new RosterTimeline([details.lmaIdentity, details.scribeIdentity]);
     private isTranscribing = false;
     private mockTranscriptionInterval: NodeJS.Timeout | null = null;
@@ -596,10 +607,31 @@ export class TranscriptionService {
         recordingStream: NodeJS.WritableStream,
         diarize: boolean,
     ): Promise<boolean> {
+        const run = this.runMicrovmTranscriptionOnce(recordingStream, diarize);
+        this.microvmRun = run;
+        try {
+            return await run;
+        } finally {
+            if (this.microvmRun === run) {
+                this.microvmRun = null;
+            }
+        }
+    }
+
+    private async runMicrovmTranscriptionOnce(
+        recordingStream: NodeJS.WritableStream,
+        diarize: boolean,
+    ): Promise<boolean> {
         const callId = kinesisStreamManager.currentCallId;
         const lease = await acquireLease(callId);
         if (!lease) {
             return false;
+        }
+        if (!this.isTranscribing) {
+            if (lease.microvmId) {
+                await releaseLease(lease.microvmId).catch(() => undefined);
+            }
+            return true;
         }
         const run = this.engineRuns;
         this.engineRuns += 1;
@@ -629,6 +661,11 @@ export class TranscriptionService {
         this.agentSession = agentSession;
         const agentReady = agentSession ? agentSession.start() : Promise.resolve(true);
         const meetingReady = await meetingSession.start();
+        if (!meetingReady && !this.isTranscribing) {
+            await this.finishMicrovmSessions();
+            await this.releaseMicrovm(meetingSession);
+            return true;
+        }
         if (!meetingReady) {
             console.error('[ASR] MicroVM ASR session never became ready');
             // Finish first, or the sessions keep reconnecting against a released MicroVM.
@@ -724,7 +761,8 @@ export class TranscriptionService {
 
     /** A meeting row: the roster name at the row's START, plus the voice id when per-voice labels are on. */
     private handleMeetingAsrSegment(segment: AsrSegment): void {
-        const speaker = speakerNameFor(this.rosterTimeline.speakerAt(segment.startSec), segment.speaker);
+        const roster = this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, rosterLagSeconds());
+        const speaker = speakerNameFor(roster, segment.speaker);
         sendAsrTranscriptSegment({
             channel: 'CALLER',
             segmentId: segment.segmentId,
@@ -993,6 +1031,13 @@ export class TranscriptionService {
         // Flush the engine's tail utterance now; the run loop's own teardown releases
         // the MicroVM once the capture process above has ended its audio stream.
         await this.finishMicrovmSessions();
+        const run = this.microvmRun;
+        if (run) {
+            await Promise.race([
+                run.catch(() => false),
+                new Promise<void>((resolve) => setTimeout(resolve, ASR_STOP_RELEASE_TIMEOUT_MS).unref()),
+            ]);
+        }
 
         // Stop voice assistant if running
         if (voiceAssistant.isEnabled()) {

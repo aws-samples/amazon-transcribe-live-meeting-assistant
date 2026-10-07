@@ -46,3 +46,30 @@ test('equal times keep the latest entry; a step back in the clock is clamped for
     assert.equal(timeline.speakerAt(4), 'Unknown');
     assert.equal(timeline.speakerAt(5), 'C');
 });
+
+test('a row takes the speaker covering most of it once late stamps are moved back by the lag', () => {
+    const timeline = new RosterTimeline(['LMA']);
+    timeline.record(0, 'Alice');
+    timeline.record(12.5, 'Bob');
+    assert.equal(timeline.speakerFor(10.0, 14.0, 0), 'Alice');
+    assert.equal(timeline.speakerFor(10.0, 14.0, 2.0), 'Bob');
+    assert.equal(timeline.speakerFor(2.0, 8.0, 2.0), 'Alice');
+});
+
+test('a short reply reported late is still named after the person who gave it', () => {
+    const timeline = new RosterTimeline(['LMA']);
+    timeline.record(0, 'Alice');
+    timeline.record(12.5, 'Bob');
+    timeline.record(13.5, 'Alice');
+    assert.equal(timeline.speakerAt(10.0), 'Alice');
+    assert.equal(timeline.speakerFor(10.0, 11.0, 2.0), 'Bob');
+});
+
+test('overlap attribution has the same edges as the start-time lookup', () => {
+    const timeline = new RosterTimeline(['LMA']);
+    assert.equal(timeline.speakerFor(1, 2, 2), 'Unknown');
+    timeline.record(5, 'Alice');
+    assert.equal(timeline.speakerFor(0, 1, 0), 'Alice');
+    timeline.record(6, 'LMA');
+    assert.equal(timeline.speakerFor(5, 9, 0), 'Alice');
+});

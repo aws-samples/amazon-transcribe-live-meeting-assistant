@@ -312,6 +312,7 @@ export class MicrovmAsrSession {
     private diarizeEffective = false;
     private sentBytes = 0;
     private finishing: Promise<void> | null = null;
+    private unsentDroppedBytes = 0;
     private lease: AsrLease;
     private readonly channel: string;
     private readonly logPrefix: string;
@@ -328,7 +329,7 @@ export class MicrovmAsrSession {
     get audioSeconds(): number {
         const queued = (this.outboundBytes + this.pendingBytes) / BYTES_PER_SECOND;
         const sent = this.timeOffsetSeconds + this.sentBytes / BYTES_PER_SECOND;
-        return Math.max(this.observedMaxEnd, sent) + queued;
+        return Math.max(this.observedMaxEnd, sent) + this.unsentDroppedBytes / BYTES_PER_SECOND + queued;
     }
 
     get speakerLabelsActive(): boolean {
@@ -389,11 +390,13 @@ export class MicrovmAsrSession {
         }
         // Not connected yet (the MicroVM is still starting) or reconnecting: buffer,
         // so the opening seconds of a meeting are not lost while it boots.
-        if (this.pendingBytes + frame.length <= ASR_MAX_PENDING_BYTES) {
-            this.pending.push(frame);
-            this.pendingBytes += frame.length;
-        } else {
-            this.droppedBytes += frame.length;
+        this.pending.push(frame);
+        this.pendingBytes += frame.length;
+        while (this.pendingBytes > ASR_MAX_PENDING_BYTES && this.pending.length > 1) {
+            const oldest = this.pending.shift()!;
+            this.pendingBytes -= oldest.length;
+            this.droppedBytes += oldest.length;
+            this.unsentDroppedBytes += oldest.length;
         }
     }
 
@@ -407,6 +410,7 @@ export class MicrovmAsrSession {
 
     private async finishOnce(): Promise<void> {
         this.finished = true;
+        this.settleReady(false);
         this.flushOutbound();
         if (this.open && this.ws?.readyState === WebSocket.OPEN) {
             const terminated = new Promise<void>((resolve) => {
@@ -414,10 +418,14 @@ export class MicrovmAsrSession {
             });
             try {
                 this.ws.send(JSON.stringify({ type: 'eos' }));
+                let timer: NodeJS.Timeout | undefined;
                 await Promise.race([
                     terminated,
-                    new Promise<void>((resolve) => setTimeout(resolve, ASR_FINISH_TIMEOUT_MS)),
+                    new Promise<void>((resolve) => {
+                        timer = setTimeout(resolve, ASR_FINISH_TIMEOUT_MS);
+                    }),
                 ]);
+                clearTimeout(timer);
             } catch (error: any) {
                 console.log(`${this.logPrefix} eos failed: ${error?.message || error}`);
             }
@@ -440,6 +448,7 @@ export class MicrovmAsrSession {
         if (socket) {
             try {
                 socket.removeAllListeners();
+                socket.on('error', () => undefined);
                 socket.close();
             } catch {
                 // already gone
@@ -485,6 +494,8 @@ export class MicrovmAsrSession {
                 // behaviour are the bundle's operating point baked into the image.
             };
             this.sentBytes = 0;
+            this.timeOffsetSeconds += this.unsentDroppedBytes / BYTES_PER_SECOND;
+            this.unsentDroppedBytes = 0;
             try {
                 socket.send(JSON.stringify(config));
                 for (const frame of coalesceBacklog(this.pending)) {
