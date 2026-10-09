@@ -23,7 +23,10 @@
 import {
   applyMuteAndPause,
   formatTimestamp,
+  mergeMetadata,
+  mergeMetadataForTab,
   platformFromBaseUrl,
+  prefillField,
   UNKNOWN_PLATFORM,
 } from './capture';
 
@@ -132,10 +135,29 @@ describe('platformFromBaseUrl', () => {
     'https://teams.live.com',
     'https://teams.microsoft.us',
     'https://teams.cloud.microsoft',
+    'https://teams.microsoft.com/v2/?meetingjoin=true',
+    'https://teams.cloud.microsoft/v2/',
   ])('recognises Teams at %s', (baseUrl) => {
     // Teams serves meetings from four hostnames; missing one means the UI shows
     // no platform for a meeting it is nonetheless capturing.
     expect(platformFromBaseUrl(baseUrl)).toBe('Microsoft Teams');
+  });
+
+  it.each([
+    ['https://us02web.zoom.us', 'Zoom'],
+    ['https://zoom.us', 'Zoom'],
+    ['https://acme.teams.cloud.microsoft', 'Microsoft Teams'],
+  ])('recognises %s by subdomain as %s', (baseUrl, expected) => {
+    // Zoom routes the web client through numbered regional hosts, and the
+    // manifest registers the reader for all of `*.zoom.us`, so the platform
+    // label has to cover the same range the reader does.
+    expect(platformFromBaseUrl(baseUrl)).toBe(expected);
+  });
+
+  it('names the platform from a bare hostname with no scheme', () => {
+    // Every reader but Zoom reports `window.location.origin`; Zoom's value comes
+    // out of Zoom's own MeetingConfig object, whose format is not ours to fix.
+    expect(platformFromBaseUrl('app.zoom.us')).toBe('Zoom');
   });
 
   it.each([
@@ -161,9 +183,228 @@ describe('platformFromBaseUrl', () => {
   });
 
   it('does not mistake a lookalike host for Zoom or Chime', () => {
-    // Those two are matched exactly, unlike Teams and Webex.
+    // Matching is on the parsed hostname, so a host that merely ends with or
+    // contains a platform's name is not attributed to it.
     expect(platformFromBaseUrl('https://app.zoom.us.example.com')).toBe(UNKNOWN_PLATFORM);
     expect(platformFromBaseUrl('https://notapp.chime.aws')).toBe(UNKNOWN_PLATFORM);
+    expect(platformFromBaseUrl('https://teams.microsoft.com.example.com')).toBe(UNKNOWN_PLATFORM);
+    expect(platformFromBaseUrl('https://notzoom.us')).toBe(UNKNOWN_PLATFORM);
+    expect(platformFromBaseUrl('https://example.com/?next=https://teams.cloud.microsoft'))
+      .toBe(UNKNOWN_PLATFORM);
+  });
+});
+
+describe('mergeMetadata', () => {
+  it('keeps fields the update does not mention', () => {
+    // The readers report whatever they have found so far, and with `all_frames`
+    // enabled several frames of one tab report independently — so an update
+    // carrying only `baseUrl` can arrive after one that carried the name.
+    const merged = mergeMetadata(
+      { userName: 'Ada Lovelace', meetingTopic: 'Weekly', baseUrl: 'https://teams.cloud.microsoft' },
+      { baseUrl: 'https://teams.cloud.microsoft' },
+    );
+    expect(merged.userName).toBe('Ada Lovelace');
+    expect(merged.meetingTopic).toBe('Weekly');
+  });
+
+  it('does not let a blank field overwrite a known one', () => {
+    const merged = mergeMetadata(
+      { userName: 'Ada Lovelace' },
+      { userName: '   ', meetingTopic: 'Weekly' },
+    );
+    expect(merged.userName).toBe('Ada Lovelace');
+    expect(merged.meetingTopic).toBe('Weekly');
+  });
+
+  it('applies non-blank fields from the update', () => {
+    const merged = mergeMetadata({ userName: 'Stale Name' }, { userName: 'Ada Lovelace' });
+    expect(merged.userName).toBe('Ada Lovelace');
+  });
+
+  it('treats a missing side as empty rather than throwing', () => {
+    expect(mergeMetadata(undefined, { userName: 'Ada Lovelace' })).toEqual({ userName: 'Ada Lovelace' });
+    expect(mergeMetadata({ userName: 'Ada Lovelace' }, null)).toEqual({ userName: 'Ada Lovelace' });
+    expect(mergeMetadata(null, undefined)).toEqual({});
+  });
+
+  it('does not mutate either argument', () => {
+    const previous = { userName: 'Ada Lovelace' };
+    const incoming = { meetingTopic: 'Weekly' };
+    mergeMetadata(previous, incoming);
+    expect(previous).toEqual({ userName: 'Ada Lovelace' });
+    expect(incoming).toEqual({ meetingTopic: 'Weekly' });
+  });
+
+  it('keeps a false or zero value, which are not blank', () => {
+    // Only undefined, null and whitespace-only strings count as "nothing found".
+    const merged = mergeMetadata({ muted: true }, { muted: false, samplingRate: 0 });
+    expect(merged.muted).toBe(false);
+    expect(merged.samplingRate).toBe(0);
+  });
+});
+
+describe('mergeMetadataForTab', () => {
+  const MEETING_A = 'https://app.zoom.us/wc/81111111111/join';
+  const MEETING_B = 'https://app.zoom.us/wc/82222222222/join';
+  const onMeetingA = {
+    source: { tabId: 1, url: MEETING_A },
+    metadata: { userName: 'Ada Lovelace', meetingTopic: 'Monday standup' },
+  };
+
+  it('merges a report from the same page', () => {
+    const known = mergeMetadataForTab(
+      onMeetingA,
+      { baseUrl: 'https://app.zoom.us' },
+      { tabId: 1, url: MEETING_A },
+    );
+    expect(known.metadata.meetingTopic).toBe('Monday standup');
+    expect(known.metadata.baseUrl).toBe('https://app.zoom.us');
+    expect(known.source.tabId).toBe(1);
+  });
+
+  it('does not carry a topic from one tab into another', () => {
+    // The topic becomes the meeting's name in LMA. A meeting whose own reader
+    // found no topic must not be recorded under the previous meeting's name.
+    const known = mergeMetadataForTab(
+      onMeetingA,
+      { baseUrl: 'https://teams.cloud.microsoft' },
+      { tabId: 2, url: 'https://teams.cloud.microsoft/v2/' },
+    );
+    expect(known.metadata.meetingTopic).toBeUndefined();
+    expect(known.metadata.userName).toBeUndefined();
+    expect(known.metadata.baseUrl).toBe('https://teams.cloud.microsoft');
+    expect(known.source.tabId).toBe(2);
+  });
+
+  it('does not carry a topic into a second meeting held in the same tab', () => {
+    // A tab keeps its id across navigation, so the tab id alone would treat a
+    // succession of meetings in one tab as a single meeting — and the second
+    // one would be recorded under the first one's name whenever its own reader
+    // found no topic, which on Zoom is whenever MeetingConfig does not appear.
+    const known = mergeMetadataForTab(
+      onMeetingA,
+      { baseUrl: 'https://app.zoom.us' },
+      { tabId: 1, url: MEETING_B },
+    );
+    expect(known.metadata.meetingTopic).toBeUndefined();
+    expect(known.metadata.userName).toBeUndefined();
+    expect(known.source.url).toBe(MEETING_B);
+  });
+
+  it('ignores a query string or fragment change within one meeting', () => {
+    // Both platforms rewrite these while a meeting is in progress, and a reset
+    // would throw away fields the panel is already showing.
+    const known = mergeMetadataForTab(
+      { source: { tabId: 1, url: MEETING_A }, metadata: { meetingTopic: 'Monday standup' } },
+      { baseUrl: 'https://app.zoom.us' },
+      { tabId: 1, url: `${MEETING_A}?from=join&pwd=xyz#success` },
+    );
+    expect(known.metadata.meetingTopic).toBe('Monday standup');
+  });
+
+  it('does not distinguish meetings that differ only in the fragment', () => {
+    // Documents the known limit rather than claiming more than the code does:
+    // Teams keeps the meeting id at `/v2/#/meet/<id>`, so two Teams meetings in
+    // one tab look like one page here. What covers that case instead is the
+    // Teams reader re-reading the page title on every report.
+    const known = mergeMetadataForTab(
+      {
+        source: { tabId: 1, url: 'https://teams.cloud.microsoft/v2/#/meet/19:aaa' },
+        metadata: { meetingTopic: 'Monday standup' },
+      },
+      { baseUrl: 'https://teams.cloud.microsoft' },
+      { tabId: 1, url: 'https://teams.cloud.microsoft/v2/#/meet/19:bbb' },
+    );
+    expect(known.metadata.meetingTopic).toBe('Monday standup');
+  });
+
+  it('treats a report with no source as belonging to the page in hand', () => {
+    // Nothing better to assume, and discarding would blank fields the panel has
+    // already shown.
+    const known = mergeMetadataForTab(onMeetingA, { baseUrl: 'https://teams.cloud.microsoft' });
+    expect(known.metadata.meetingTopic).toBe('Monday standup');
+    expect(known.source.tabId).toBe(1);
+  });
+
+  it('adopts the first page it hears from', () => {
+    const known = mergeMetadataForTab(
+      { source: {}, metadata: {} },
+      { userName: 'Ada Lovelace' },
+      { tabId: 7, url: MEETING_A },
+    );
+    expect(known.source.tabId).toBe(7);
+    expect(known.source.url).toBe(MEETING_A);
+    expect(known.metadata.userName).toBe('Ada Lovelace');
+  });
+
+  it('does not treat an unparseable address as a page change on its own', () => {
+    const known = mergeMetadataForTab(
+      { source: { tabId: 1, url: 'not a url' }, metadata: { meetingTopic: 'Monday standup' } },
+      { baseUrl: 'https://app.zoom.us' },
+      { tabId: 1, url: 'not a url' },
+    );
+    expect(known.metadata.meetingTopic).toBe('Monday standup');
+  });
+
+  it('does not mutate what it was given', () => {
+    mergeMetadataForTab(onMeetingA, { meetingTopic: 'Tuesday review' }, { tabId: 2, url: MEETING_B });
+    expect(onMeetingA.metadata.meetingTopic).toBe('Monday standup');
+    expect(onMeetingA.source.tabId).toBe(1);
+  });
+});
+
+describe('prefillField', () => {
+  it('fills a field the user has not filled', () => {
+    expect(prefillField('', '', 'Monday standup')).toBe('Monday standup');
+  });
+
+  it('leaves a value the user typed alone', () => {
+    // The readers report on page load, on every request from the panel, and
+    // again when a late source such as Zoom's MeetingConfig turns up — so this
+    // is what stops a report landing two seconds after the user started typing
+    // from eating what they typed.
+    expect(prefillField('Budget review', '', 'Monday standup')).toBe('Budget review');
+  });
+
+  it('refreshes a field that still holds our own prefill', () => {
+    // How switching the panel to a different meeting tab updates the field.
+    expect(prefillField('Monday standup', 'Monday standup', 'Tuesday review'))
+      .toBe('Tuesday review');
+  });
+
+  it('leaves a field the user emptied empty', () => {
+    // Backspacing to nothing is how someone starts retyping a topic. Refilling
+    // it under them would make the field impossible to clear.
+    expect(prefillField('', 'Monday standup', 'Tuesday review')).toBe('');
+  });
+
+  it('keeps the current value when nothing was reported', () => {
+    expect(prefillField('Budget review', '', undefined)).toBe('Budget review');
+    expect(prefillField('Budget review', '', null)).toBe('Budget review');
+    expect(prefillField('Budget review', '', '')).toBe('Budget review');
+    expect(prefillField('Budget review', '', '   ')).toBe('Budget review');
+  });
+
+  it('distinguishes a never-filled field from one the user emptied', () => {
+    // Both are empty; what separates them is whether anything was prefilled.
+    expect(prefillField('', '', 'Monday standup')).toBe('Monday standup');
+    expect(prefillField('', 'Monday standup', 'Monday standup')).toBe('');
+  });
+
+  it('does not blank a prefilled field when nothing is reported', () => {
+    // A thinner later report must not clear what an earlier one supplied.
+    expect(prefillField('Monday standup', 'Monday standup', undefined)).toBe('Monday standup');
+  });
+
+  it('ignores a non-string report rather than stringifying it', () => {
+    // Zoom's MeetingConfig is Zoom's shape, not ours; a number would render as
+    // a meeting name.
+    expect(prefillField('', '', 1234567890)).toBe('');
+    expect(prefillField('', '', { topic: 'Monday standup' })).toBe('');
+  });
+
+  it('trims the reported value', () => {
+    expect(prefillField('', '', '  Monday standup  ')).toBe('Monday standup');
   });
 });
 

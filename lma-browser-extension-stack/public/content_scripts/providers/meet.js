@@ -51,10 +51,36 @@ const sendChatMessage = function (message)
     }
 };
 
+/**
+ * Report whatever is known about the meeting, however little that is.
+ *
+ * `baseUrl` is set the moment this script loads, so the panel can always name
+ * the platform even when a name or topic selector finds nothing.
+ */
+const reportMetadata = function () {
+  console.log("Sending Metadata:", metadata);
+  // The side panel may not be open, in which case there is no receiver. That is
+  // not a failure worth surfacing: the panel asks again when it opens.
+  try {
+    const sent = chrome.runtime.sendMessage({
+      action: "UpdateMetadata",
+      metadata: metadata
+    });
+    if (sent && typeof sent.catch === 'function') {
+      sent.catch(() => { });
+    }
+  } catch (error) {
+    console.log("Unable to send metadata; the panel is not listening.");
+  }
+}
+
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse)
 {
     if (request.action === "FetchMetadata")
     {
+        // Answer straight away with what is already known: the scrape below is
+        // asynchronous, and an unanswered request leaves the panel with nothing.
+        sendResponse(metadata);
         checkForMeetingMetadata();
     }
     if (request.action === "SendChatMessage")
@@ -99,14 +125,11 @@ const checkForMeetingMetadata = function ()
 
         console.log("Sending Metadata:", metadata);
 
-        chrome.runtime.sendMessage({
-            action: "UpdateMetadata",
-            metadata: metadata
-        });
+        reportMetadata();
     }, 2000);
 }
 
-window.onload = function ()
+const onPageReady = function ()
 {
     // Mute Observer
     let currentMuteState = false; // to avoid duplicate messages
@@ -204,3 +227,12 @@ window.onload = function ()
 
     checkForMeetingMetadata();
 };
+
+// Registered `run_at: "document_idle"`, which Chrome defines as after the load
+// event, so waiting on `load` alone never runs on a tab that was already loaded
+// when the script injected. See the same note in teams.js.
+if (document.readyState === 'loading') {
+  window.addEventListener('load', onPageReady);
+} else {
+  onPageReady();
+}
