@@ -197,13 +197,18 @@ srt_security_review:
 #        LMA_INTEG_STACK           optional; defaults to lma-integtest1
 #        AWS_DEFAULT_REGION        optional; defaults to us-west-2, where
 #                                  lma-integtest1 lives
+#        SLACK_WEBHOOK_URL         optional; a Slack Workflow Builder webhook.
+#                                  MASKED and NOT PROTECTED — see the
+#                                  after_script below. Absent, the post is
+#                                  skipped with one log line.
 #   3. An IAM role trusting this GitLab instance as an OIDC provider, with the
 #      audience below.
 #
-# Failures surface three ways, so a red nightly cannot go unnoticed: GitLab's
-# own "pipeline failed" notification for scheduled pipelines goes to the
-# schedule's owner by email; the JUnit report is attached to the pipeline so the
-# failing test is visible without opening the log; and `--no-skips` (see
+# Failures surface four ways, so a red nightly cannot go unnoticed: the
+# after_script below posts the result to Slack; GitLab's own "pipeline failed"
+# notification for scheduled pipelines goes to the schedule's owner by email;
+# the JUnit report is attached to the pipeline so the failing test is visible
+# without opening the log; and `--no-skips` (see
 # integ-tests/conftest.py) turns a skipped test into a failure, so a lapsed
 # secret or a dropped dependency reports red rather than green having run
 # nothing.
@@ -244,7 +249,9 @@ nightly_integ_tests:
 
   before_script:
     - apt-get update -y
-    - apt-get install -y make git
+    # curl is used by the after_script's Slack post, and is installed here (not
+    # there) so an after_script never has to install anything.
+    - apt-get install -y make git curl
     - make setup-python
     - make setup-cli-dev
     # pycognito + websockets, needed by the audio streaming test. If these are
@@ -273,10 +280,74 @@ nightly_integ_tests:
     - export AWS_PROFILE=lma-ci
     - make integ-tests-nightly STACK="$LMA_INTEG_STACK"
 
+  # Post the result to Slack. In after_script, so it runs on a pass, a failure
+  # and a job that died in before_script alike — the cases where nobody is
+  # watching are exactly the ones worth reporting.
+  #
+  # ⚠️ WHY THIS IS HERE AND NOT GitLab's OWN SLACK INTEGRATION. That integration
+  # fires on `pipeline_events` for a branch and, like the pipeline BADGE, cannot
+  # filter by pipeline SOURCE — so it would post every push pipeline to
+  # `develop` as well, which is most of them and is not what anybody subscribed
+  # for. This job is the only place that knows the run was the scheduled one,
+  # and the only place with the JUnit report to summarise.
+  #
+  # SLACK_WEBHOOK_URL is a MASKED CI variable, never a committed value: this
+  # repository is public and a webhook URL is a bearer credential that lets
+  # anyone post to the channel. Absent, this prints one line and exits 0.
+  #
+  # ⚠️ The variable must be MASKED and **NOT PROTECTED**. A protected variable
+  # is absent from pipelines on unprotected branches, so unless `develop` is a
+  # protected branch here the block would log "not set" forever and look like it
+  # was working.
+  #
+  # ⚠️ PAYLOAD SHAPE is a contract with the Slack workflow, and getting it wrong
+  # posts a message with a blank variable rather than failing. The four keys and
+  # the reason the target is a Workflow Builder webhook rather than an incoming
+  # one are documented in integ-tests/junit_summary.py — read that before
+  # changing either side.
+  after_script:
+    # The payload is built unconditionally, even when no webhook is configured:
+    # it costs nothing, it prints the run's result to the end of the log (the
+    # script puts the readable form on stderr and the JSON on stdout), and it
+    # means the declared artifact always exists rather than emitting a "no
+    # matching files" warning on runs that post nothing.
+    #
+    # python3 from the image, not .venv/bin/python: junit_summary is stdlib-only,
+    # and this has to work even when the failure being reported is
+    # `make setup-python` itself. The webhook URL is never passed to it.
+    - >
+      python3 integ-tests/junit_summary.py
+      --report integ-tests-report.xml
+      --status "$CI_JOB_STATUS"
+      --job-url "$CI_JOB_URL"
+      --commit "$CI_COMMIT_SHA"
+      --stack "$LMA_INTEG_STACK"
+      --region "$AWS_DEFAULT_REGION" > slack-payload.json
+    - |
+      if [ -z "$SLACK_WEBHOOK_URL" ]; then
+        echo "ℹ️ SLACK_WEBHOOK_URL not set — skipping the Slack post"
+      elif [ "$CI_PIPELINE_SOURCE" != "schedule" ]; then
+        echo "ℹ️ Not the scheduled run (source=$CI_PIPELINE_SOURCE) — skipping the Slack post"
+      else
+        # --fail so a 4xx from Slack is visible rather than silently discarded,
+        # but the `else` branch keeps a notification problem from changing the
+        # job's verdict: the test result is what this job reports.
+        if curl -sS --fail -X POST -H 'Content-type: application/json' \
+             --data @slack-payload.json "$SLACK_WEBHOOK_URL" >/dev/null; then
+          echo "💬 Nightly result posted to Slack"
+        else
+          echo "⚠️ Slack post failed (HTTP error, bad webhook, or curl missing)"
+          echo "   The test result above is unaffected."
+        fi
+      fi
+
   artifacts:
     when: always
     reports:
       junit: integ-tests-report.xml
     paths:
       - integ-tests-report.xml
+      # The posted message, so "what did Slack get told" is answerable from the
+      # pipeline when the channel post looks wrong. Contains no credentials.
+      - slack-payload.json
     expire_in: 1 month

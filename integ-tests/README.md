@@ -49,12 +49,16 @@ a **skipped test fails the run** (`--no-skips`), so a lapsed secret or a dropped
 dependency cannot report green having streamed no audio; and it writes a JUnit
 report for the CI UI. It tests an existing stack and does not deploy one.
 
-See [Scheduled Integration Tests](../docs/scheduled-integration-tests.md) for the
-one-time GitLab schedule, OIDC role and test-user setup it needs.
+Afterwards the job summarises its JUnit report with `junit_summary.py` and posts
+the result to Slack, on a pass as well as a failure.
 
-The machinery those two behaviours rest on — `cognito_test_user.py` and the
-`--no-skips` hook in `conftest.py` — is unit-tested in `test_ci_plumbing.py`,
-which needs no AWS and runs in the fast pipeline via `make test-integ-plumbing`.
+See [Scheduled Integration Tests](../docs/scheduled-integration-tests.md) for the
+one-time GitLab schedule, OIDC role, test-user and Slack-webhook setup it needs.
+
+The machinery those behaviours rest on — `cognito_test_user.py`, the `--no-skips`
+hook in `conftest.py`, and `junit_summary.py` — is unit-tested in
+`test_ci_plumbing.py`, which needs no AWS and runs in the fast pipeline via
+`make test-integ-plumbing`.
 
 Or invoke pytest directly:
 ```bash

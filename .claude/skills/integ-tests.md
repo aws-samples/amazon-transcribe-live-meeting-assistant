@@ -55,6 +55,17 @@ secret cannot report green. It takes the Cognito user from Secrets Manager via
 `docs/scheduled-integration-tests.md`. When asked to debug a failing nightly,
 start from the JUnit report on the pipeline, not the job log.
 
+The job's `after_script` summarises that report with `integ-tests/junit_summary.py`
+and posts it to Slack via a masked `SLACK_WEBHOOK_URL`, on a pass as well as a
+failure; the payload is also printed in the log and kept as `slack-payload.json`.
+Two things to know before changing it: the four payload keys (`status`, `commit`,
+`job_url`, `summary`) are a contract with a Slack **Workflow Builder** trigger,
+which silently ignores keys it does not declare, so a rename posts a blank
+variable rather than failing; and the summary must stay free of Slack's
+`<url|label>` syntax, backticks and asterisks, which Workflow Builder renders
+literally. `junit_summary.py` must never raise — it runs after a job that may
+have died anywhere — and its cases are covered in `test_ci_plumbing.py`.
+
 ## Prerequisites
 
 1. `make setup-cli-dev` — LMA SDK + CLI + test deps in `.venv`.
