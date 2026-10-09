@@ -686,4 +686,287 @@ def test_every_shipped_bundle_names_the_engine_its_model_uses() -> None:
     for bundle in catalog["bundles"]:
         selection = index.resolve({"BundleId": bundle["id"]}, catalog)
         engine = selection["model"].get("engine", "streaming")
-        assert f"ASR_ENGINE={engine}" in index.render_model_env(selection)
+        rendered = index.render_model_env(selection)
+        assert f"ASR_MODEL_ENGINE={engine}" in rendered
+        expected = "two_pass" if bundle.get("previewModelId") else engine
+        assert f"ASR_ENGINE={expected}\n" in rendered + "\n"
+
+
+def _catalog_with_qwen(engine: str = "accurate") -> dict:
+    catalog = json.loads(json.dumps(CATALOG))
+    catalog["models"].append(
+        {
+            **catalog["models"][1],
+            "id": "qwen",
+            "engine": engine,
+            "modelKind": "qwen3_asr",
+            "files": {
+                "conv_frontend": "conv_frontend.onnx",
+                "encoder": "encoder.int8.onnx",
+                "decoder": "decoder.int8.onnx",
+                "tokenizer": "tokenizer",
+            },
+        }
+    )
+    offline = next(b for b in catalog["bundles"] if b["id"] == "bundle-offline")
+    catalog["bundles"].append(
+        {**offline, "id": "bundle-qwen", "modelId": "qwen", "vadModelId": "silero"}
+    )
+    catalog["vadModels"] = [
+        {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}
+    ]
+    return catalog
+
+
+def test_a_qwen3_asr_model_declares_its_own_file_set() -> None:
+    selection = index.resolve({"BundleId": "bundle-qwen"}, _catalog_with_qwen())
+    rendered = index.render_model_env(selection)
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+
+    assert values["ASR_MODEL_KIND"] == "qwen3_asr"
+    assert values["ASR_MODEL_CONV_FRONTEND_FILE"] == "conv_frontend.onnx"
+    assert values["ASR_MODEL_TOKENIZER_FILE"] == "tokenizer"
+    assert values["ASR_MODEL_JOINER_FILE"] == ""
+    assert values["ASR_MODEL_TOKENS_FILE"] == ""
+
+
+def test_a_qwen3_asr_model_needs_its_tokenizer_and_cannot_stream() -> None:
+    incomplete = _catalog_with_qwen()
+    del incomplete["models"][-1]["files"]["tokenizer"]
+    with pytest.raises(index.ResolutionError, match="missing file names"):
+        index.resolve({"BundleId": "bundle-qwen"}, incomplete)
+
+    with pytest.raises(index.ResolutionError, match="cannot stream"):
+        index.resolve({"BundleId": "bundle-qwen"}, _catalog_with_qwen(engine="streaming"))
+
+
+def _catalog_with_cohere(engine: str = "accurate") -> dict:
+    catalog = json.loads(json.dumps(CATALOG))
+    catalog["models"].append(
+        {
+            **catalog["models"][1],
+            "id": "cohere",
+            "engine": engine,
+            "modelKind": "cohere_transcribe",
+            "decodeLanguage": "en",
+            "files": {
+                "encoder": "encoder.int8.onnx",
+                "encoder_data": "encoder.int8.onnx.data",
+                "decoder": "decoder.int8.onnx",
+                "tokens": "tokens.txt",
+            },
+        }
+    )
+    offline = next(b for b in catalog["bundles"] if b["id"] == "bundle-offline")
+    catalog["bundles"].append(
+        {**offline, "id": "bundle-cohere", "modelId": "cohere", "vadModelId": "silero"}
+    )
+    catalog["vadModels"] = [
+        {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}
+    ]
+    return catalog
+
+
+def test_a_cohere_transcribe_model_declares_its_data_file_and_language() -> None:
+    selection = index.resolve({"BundleId": "bundle-cohere"}, _catalog_with_cohere())
+    rendered = index.render_model_env(selection)
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert values["ASR_MODEL_KIND"] == "cohere_transcribe"
+    assert values["ASR_MODEL_ENCODER_DATA_FILE"] == "encoder.int8.onnx.data"
+    assert values["ASR_MODEL_LANGUAGE"] == "en"
+    assert values["ASR_MODEL_JOINER_FILE"] == ""
+
+
+def test_a_cohere_transcribe_model_needs_its_data_file_and_cannot_stream() -> None:
+    incomplete = _catalog_with_cohere()
+    del incomplete["models"][-1]["files"]["encoder_data"]
+    with pytest.raises(index.ResolutionError, match="missing file names"):
+        index.resolve({"BundleId": "bundle-cohere"}, incomplete)
+    with pytest.raises(index.ResolutionError, match="cannot stream"):
+        index.resolve({"BundleId": "bundle-cohere"}, _catalog_with_cohere(engine="streaming"))
+
+
+def _catalog_with_preview(main_engine: str = "accurate", preview_engine: str = "streaming") -> dict:
+    catalog = json.loads(json.dumps(CATALOG))
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["engine"] = main_engine
+    preview_model = next(m for m in catalog["models"] if m["id"] == "model-a")
+    preview_model["engine"] = preview_engine
+    offline = next(b for b in catalog["bundles"] if b["id"] == "bundle-offline")
+    offline["vadModelId"] = "silero"
+    catalog["bundles"].append(
+        {
+            **offline,
+            "id": "bundle-two-pass",
+            "previewModelId": "model-a",
+            "vadModelId": "none" if main_engine == "streaming" else "silero",
+        }
+    )
+    catalog["vadModels"] = [
+        {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}
+    ]
+    return catalog
+
+
+def test_a_two_pass_bundle_selects_the_two_pass_engine_and_names_its_preview() -> None:
+    selection = index.resolve({"BundleId": "bundle-two-pass"}, _catalog_with_preview())
+    rendered = index.render_model_env(selection)
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert values["ASR_ENGINE"] == "two_pass"
+    assert values["ASR_MODEL_ENGINE"] == "accurate"
+    assert values["ASR_PREVIEW_MODEL_ID"] == "model-a"
+    assert values["ASR_PREVIEW_MODEL_ENCODER_FILE"] == "encoder.int8.onnx"
+    assert values["ASR_PREVIEW_MODEL_SHA256"] == "a" * 64
+
+
+def test_a_bundle_without_a_preview_renders_empty_preview_entries() -> None:
+    selection = index.resolve({"BundleId": "bundle-offline"}, _catalog_with_preview())
+    rendered = index.render_model_env(selection)
+    values = dict(
+        line.split("=", 1)
+        for line in rendered.splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+    assert values["ASR_ENGINE"] == "accurate"
+    assert values["ASR_PREVIEW_MODEL_ID"] == ""
+    assert values["ASR_PREVIEW_MODEL_URL"] == ""
+
+
+def test_a_preview_needs_an_offline_authority_and_a_streaming_transducer() -> None:
+    with pytest.raises(index.ResolutionError, match="only an offline"):
+        index.resolve({"BundleId": "bundle-two-pass"}, _catalog_with_preview(main_engine="streaming"))
+    with pytest.raises(index.ResolutionError, match="streaming transducer"):
+        index.resolve({"BundleId": "bundle-two-pass"}, _catalog_with_preview(preview_engine="accurate"))
+
+
+def _catalog_with_diarizer(
+    engine: str = "accurate", speaker: str = "none", kind: str = "sortformer"
+) -> dict:
+    catalog = json.loads(json.dumps(CATALOG))
+    main = next(m for m in catalog["models"] if m["id"] == "offline-model")
+    main["engine"] = engine
+    offline = next(b for b in catalog["bundles"] if b["id"] == "bundle-offline")
+    offline["vadModelId"] = "silero"
+    catalog["bundles"].append(
+        {
+            **offline,
+            "id": "bundle-sortformer",
+            "speakerModelId": speaker,
+            "diarizerModelId": "sortformer",
+            "vadModelId": "none" if engine == "streaming" else "silero",
+        }
+    )
+    catalog["vadModels"] = [
+        {"id": "silero", "url": "https://x.invalid/v.onnx", "sha256": "f" * 64}
+    ]
+    catalog["diarizerModels"] = [
+        {
+            "id": "sortformer",
+            "kind": kind,
+            "license": "OpenMDW-1.1",
+            "files": {
+                "model": {
+                    "path": "onnx/model.onnx",
+                    "url": "https://x.invalid/m.onnx",
+                    "sha256": "d" * 64,
+                },
+                "data": {
+                    "path": "onnx/model.onnx_data",
+                    "url": "https://x.invalid/m.data",
+                    "sha256": "e" * 64,
+                },
+            },
+        }
+    ]
+    return catalog
+
+
+def _env_values(selection: dict) -> dict:
+    return dict(
+        line.split("=", 1)
+        for line in index.render_model_env(selection).splitlines()
+        if "=" in line and not line.startswith("#")
+    )
+
+
+def test_a_diarizer_bundle_bakes_both_pinned_files_and_its_kind() -> None:
+    values = _env_values(index.resolve({"BundleId": "bundle-sortformer"}, _catalog_with_diarizer()))
+    assert values["ASR_DIARIZER_KIND"] == "sortformer"
+    assert values["ASR_DIARIZER_MODEL_FILE"] == "onnx/model.onnx"
+    assert values["ASR_DIARIZER_DATA_SHA256"] == "e" * 64
+    assert values["ASR_SPEAKER_MODEL_URL"] == ""
+
+
+def test_a_bundle_without_a_diarizer_renders_empty_diarizer_entries() -> None:
+    values = _env_values(index.resolve({"BundleId": "bundle-offline"}, _catalog_with_diarizer()))
+    assert values["ASR_DIARIZER_KIND"] == ""
+    assert values["ASR_DIARIZER_MODEL_URL"] == ""
+
+
+def test_a_diarizer_needs_an_offline_model_no_speaker_model_and_a_known_kind() -> None:
+    with pytest.raises(index.ResolutionError, match="offline"):
+        index.resolve(
+            {"BundleId": "bundle-sortformer"}, _catalog_with_diarizer(engine="streaming")
+        )
+    with pytest.raises(index.ResolutionError, match="one or the other"):
+        index.resolve(
+            {"BundleId": "bundle-sortformer"}, _catalog_with_diarizer(speaker="spk-a")
+        )
+    with pytest.raises(index.ResolutionError, match="supports 'sortformer'"):
+        index.resolve(
+            {"BundleId": "bundle-sortformer"}, _catalog_with_diarizer(kind="pyannote")
+        )
+
+
+def test_a_diarizer_file_without_a_checksum_is_refused() -> None:
+    catalog = _catalog_with_diarizer()
+    del catalog["diarizerModels"][0]["files"]["data"]["sha256"]
+    with pytest.raises(index.ResolutionError, match="data file is missing"):
+        index.resolve({"BundleId": "bundle-sortformer"}, catalog)
+
+
+def test_a_diarizer_bundle_reports_speaker_labels_as_available() -> None:
+    source = make_source_zip(_catalog_with_diarizer())
+    with mock.patch.object(
+        index.s3, "get_object", side_effect=lambda **kw: {"Body": io.BytesIO(source)}
+    ), mock.patch.object(index.s3, "put_object"):
+        properties = {"SourceLocation": "artifacts/src.zip", "DestBucket": "stack-bucket"}
+        _, sortformer = index.build({**properties, "BundleId": "bundle-sortformer"})
+        _, plain = index.build({**properties, "BundleId": "bundle-no-speaker"})
+
+    assert sortformer["DiarizationAvailable"] == "true"
+    assert sortformer["DiarizerModelId"] == "sortformer"
+    assert plain["DiarizationAvailable"] == "false"
+
+
+def test_a_preview_pinned_to_another_runtime_is_refused() -> None:
+    catalog = _catalog_with_preview()
+    preview = next(m for m in catalog["models"] if m["id"] == "model-a")
+    preview["onnxruntime"] = "9.9.9"
+    with pytest.raises(index.ResolutionError, match="pins onnxruntime"):
+        index.resolve({"BundleId": "bundle-two-pass"}, catalog)
+
+
+def test_a_two_pass_bundle_reports_the_two_pass_engine() -> None:
+    source = make_source_zip(_catalog_with_preview())
+    with mock.patch.object(
+        index.s3, "get_object", side_effect=lambda **kw: {"Body": io.BytesIO(source)}
+    ), mock.patch.object(index.s3, "put_object"):
+        properties = {"SourceLocation": "artifacts/src.zip", "DestBucket": "stack-bucket"}
+        _, two_pass = index.build({**properties, "BundleId": "bundle-two-pass"})
+        _, offline = index.build({**properties, "BundleId": "bundle-offline"})
+
+    assert two_pass["AsrEngine"] == "two_pass"
+    assert offline["AsrEngine"] == "accurate"

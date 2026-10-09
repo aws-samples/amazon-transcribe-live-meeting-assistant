@@ -47,6 +47,11 @@ WARM_WAV = MODEL_DIR / "test_wavs" / "warm.wav"
 SPEAKER_MODEL = Path(
     os.environ.get("ASR_SPEAKER_MODEL", str(MODEL_DIR / "speaker_embedding.onnx"))
 )
+DIARIZER_DIR = MODEL_DIR / "diarizer"
+
+
+def speaker_labels_baked() -> bool:
+    return SPEAKER_MODEL.is_file() or any(DIARIZER_DIR.glob("*.onnx"))
 
 BOOT_TIMEOUT_S = float(os.environ.get("ASR_BOOT_TIMEOUT_S", "540"))
 EXERCISE_TIMEOUT_S = float(os.environ.get("ASR_EXERCISE_TIMEOUT_S", "180"))
@@ -109,7 +114,7 @@ def exercise_asr(timeout_s: float = EXERCISE_TIMEOUT_S) -> bool:
         "sample_rate": SAMPLE_RATE,
         "channels": 1,
         "interim_results": True,
-        "diarize": SPEAKER_MODEL.is_file(),
+        "diarize": speaker_labels_baked(),
     }
     started = time.monotonic()
     finals = 0

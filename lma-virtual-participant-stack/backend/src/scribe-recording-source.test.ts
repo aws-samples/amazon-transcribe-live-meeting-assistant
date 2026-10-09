@@ -60,7 +60,13 @@ test('the recording is NOT written from the meeting-only stream', () => {
     const fanout = methodBody('private startMeetingAudioFanout');
     assert.match(fanout, /meeting_audio\.monitor/, 'the fan-out should still feed Nova from meeting-only audio');
     assert.match(methodBody('private async writeAudio'), /this\.startMeetingAudioFanout\(\)/);
-    for (const body of [fanout, methodBody('private async writeAudio'), methodBody('private async runMicrovmTranscription')]) {
+    for (const body of [
+        fanout,
+        methodBody('private async writeAudio'),
+        methodBody('private async runMicrovmTranscriptionOnce'),
+        methodBody('private startAgentAudioCapture'),
+        methodBody('private spawnPcmCapture'),
+    ]) {
         assert.doesNotMatch(
             body,
             /recordingStream\.write/,

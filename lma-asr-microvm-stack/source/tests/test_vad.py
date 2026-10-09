@@ -459,3 +459,85 @@ def test_module_import_is_dependency_free() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "OK"
+
+
+class _Session:
+    def __init__(self, names):
+        self._names = names
+
+    def get_inputs(self):
+        return [type("I", (), {"name": n})() for n in self._names]
+
+
+def test_a_v4_silero_export_is_refused_at_load() -> None:
+    from asr_server.vad import make_silero_backend
+
+    with pytest.raises(RuntimeError, match="silero_vad_v5.onnx"):
+        make_silero_backend(_Session(["x", "h", "c"]), sample_rate=16000)
+
+
+def test_a_v5_silero_export_is_accepted() -> None:
+    from asr_server.vad import make_silero_backend
+
+    make_silero_backend(_Session(["input", "state", "sr"]), sample_rate=16000)
+
+
+def test_max_speech_closes_the_segment_and_reopens_it_on_the_same_frame() -> None:
+    gate, _ = _gate([0.9] * 12, min_speech_ms=0, max_speech_ms=150)
+    events: list[VadEvent] = []
+    for _ in range(12):
+        events.extend(gate.accept_pcm(_frames(1)))
+    assert [e.kind for e in events] == [
+        "speech_start", "speech_end", "speech_start", "speech_end", "speech_start",
+    ]
+    assert events[1].t == events[2].t == pytest.approx(5 * FRAME_MS / 1000.0)
+    assert events[3].t == events[4].t == pytest.approx(10 * FRAME_MS / 1000.0)
+    assert gate.is_speech
+    assert [(s.start, s.end) for s in to_segments(events)] == [
+        (0.0, pytest.approx(0.16)),
+        (pytest.approx(0.16), pytest.approx(0.32)),
+    ]
+
+
+def test_long_speech_closes_on_a_dip_shorter_than_min_silence() -> None:
+    gate, _ = _gate(
+        [0.9] * 5 + [0.0] * 2,
+        min_speech_ms=0,
+        min_silence_ms=200,
+        long_speech_ms=100,
+        long_speech_silence_ms=40,
+    )
+    events: list[VadEvent] = []
+    for _ in range(7):
+        events.extend(gate.accept_pcm(_frames(1)))
+    assert [e.kind for e in events] == ["speech_start", "speech_end"]
+    assert not gate.is_speech
+
+
+def test_short_speech_still_needs_the_full_min_silence() -> None:
+    gate, _ = _gate(
+        [0.9] * 2 + [0.0] * 2,
+        min_speech_ms=0,
+        min_silence_ms=200,
+        long_speech_ms=100,
+        long_speech_silence_ms=40,
+    )
+    events: list[VadEvent] = []
+    for _ in range(4):
+        events.extend(gate.accept_pcm(_frames(1)))
+    assert [e.kind for e in events] == ["speech_start"]
+    assert gate.is_speech
+
+
+def test_offline_config_caps_an_utterance_at_twenty_seconds() -> None:
+    cfg = SileroVadConfig(model=Path("silero_vad_v5.onnx"))
+    assert (cfg.max_speech_ms, cfg.long_speech_ms, cfg.long_speech_silence_ms) == (
+        20000, 10000, 300,
+    )
+
+
+def test_long_speech_threshold_must_not_exceed_the_cap() -> None:
+    with pytest.raises(ValueError, match="long_speech_ms"):
+        _gate([0.9], max_speech_ms=100, long_speech_ms=200)
+    with pytest.raises(ValueError, match="must be >= 0"):
+        _gate([0.9], max_speech_ms=-1)

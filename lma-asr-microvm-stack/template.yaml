@@ -44,19 +44,32 @@ Parameters:
 
   AsrModelBundle:
     Type: String
-    Default: fastconformer-titanet-small
+    Default: parakeet-tdt-v3-titanet-small
     AllowedValues:
       - fastconformer-titanet-small
       - fastconformer-transcription-only
+      - nemotron35-titanet-small
+      - nemotron-titanet-small
+      - parakeet-tdt-v3-titanet-small
+      - parakeet-tdt-v2-titanet-small
+      - qwen3-asr-titanet-small
+      - qwen3-asr-transcription-only
+      - cohere-transcribe-titanet-small
+      - parakeet-tdt-v3-live-titanet-small
+      - parakeet-tdt-v3-live-nemotron35-titanet-small
+      - parakeet-tdt-v3-sortformer
+      - parakeet-tdt-v3-live-sortformer
+      - parakeet-tdt-v3-live-nemotron35-sortformer
     Description: >-
       Which model bundle the MicroVM ASR engine is built from. A bundle names the
       ASR model, the speaker-embedding model and the turn-detection model TOGETHER
       WITH the diarization operating point measured for them, so nothing has to be
-      tuned. Both bundles are permissively licensed and redistributable and share
-      the same CC-BY-4.0 FastConformer ASR model; fastconformer-titanet-small adds
-      per-voice speaker labels, fastconformer-transcription-only labels by audio
-      channel and carries no speaker weights. Set from the AsrDefaults mapping in
-      lma-main.yaml. Changing it rebuilds the MicroVM image (~20 minutes).
+      tuned. The default pairs the Parakeet TDT 0.6B v3 offline model (CC-BY-4.0)
+      with TitaNet-small speaker labels; every bundle except nemotron-titanet-small
+      is permissively licensed and redistributable, and the transcription-only
+      bundles label by audio channel and carry no speaker weights. Set from the
+      AsrDefaults mapping in lma-main.yaml. Changing it rebuilds the MicroVM image
+      (~20 minutes).
 
   AsrMaxMeetingSeconds:
     Type: Number
@@ -137,6 +150,30 @@ Mappings:
     fastconformer-titanet-small:
       MiB: 8192
     fastconformer-transcription-only:
+      MiB: 8192
+    nemotron35-titanet-small:
+      MiB: 8192
+    nemotron-titanet-small:
+      MiB: 8192
+    parakeet-tdt-v3-titanet-small:
+      MiB: 8192
+    parakeet-tdt-v2-titanet-small:
+      MiB: 8192
+    qwen3-asr-titanet-small:
+      MiB: 8192
+    qwen3-asr-transcription-only:
+      MiB: 8192
+    cohere-transcribe-titanet-small:
+      MiB: 8192
+    parakeet-tdt-v3-live-titanet-small:
+      MiB: 8192
+    parakeet-tdt-v3-live-nemotron35-titanet-small:
+      MiB: 8192
+    parakeet-tdt-v3-sortformer:
+      MiB: 8192
+    parakeet-tdt-v3-live-sortformer:
+      MiB: 8192
+    parakeet-tdt-v3-live-nemotron35-sortformer:
       MiB: 8192
 
 Resources:
@@ -560,7 +597,9 @@ Outputs:
       "calibrated" when the bundle carries an operating point measured for its
       speaker model under this engine's segmentation policy; "vetted" when this
       exact pairing has additionally been validated end to end on a live
-      multi-speaker meeting.
+      multi-speaker meeting; "experimental" for a bundle whose diarizer has no
+      operating point to measure and is still being validated live;
+      "uncalibrated" when the catalog states no status.
     Value: !GetAtt AsrImageSource.BundleStatus
 
   AsrLicenceSummary:
@@ -576,6 +615,12 @@ Outputs:
   AsrModelId:
     Description: Model baked into the image.
     Value: !GetAtt AsrImageSource.ModelId
+  AsrPreviewModelId:
+    Description: Streaming model previewing the open utterance in a two-pass bundle, or none.
+    Value: !GetAtt AsrImageSource.PreviewModelId
+  AsrDiarizerModelId:
+    Description: End-to-end diarization model labelling the offline engine's words, or none.
+    Value: !GetAtt AsrImageSource.DiarizerModelId
 
   AsrModelLicense:
     Description: Licence of the model baked into the image.

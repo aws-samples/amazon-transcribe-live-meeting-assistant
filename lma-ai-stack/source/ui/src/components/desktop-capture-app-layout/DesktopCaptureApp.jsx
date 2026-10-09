@@ -85,7 +85,7 @@ const COMPARISON = [
   {
     dimension: 'Meeting platforms',
     app: 'Any native or web app that plays audio on your computer (Zoom, Teams, Webex, Slack, phone bridges, etc.).',
-    vp: 'Only supported platforms it can automate (Zoom, Teams, Chime, Webex, Meet).',
+    vp: 'Only supported platforms it can automate (Zoom, Teams, Chime, Webex).',
   },
   {
     dimension: 'Speaker identification',

@@ -25,14 +25,18 @@ function methodBody(name: string): string {
     return end === -1 ? rest : rest.slice(0, end + 1);
 }
 
-test('every MicroVM release in the ASR path is preceded by finishing the session', () => {
-    const body = methodBody('private async runMicrovmTranscription');
-    const releases = [...body.matchAll(/this\.releaseMicrovm\(session\)/g)].map((m) => m.index ?? -1);
+test('every MicroVM release in the ASR path is preceded by finishing the sessions', () => {
+    const body = methodBody('private async runMicrovmTranscriptionOnce');
+    const releases = [...body.matchAll(/this\.releaseMicrovm\(meetingSession\)/g)].map((m) => m.index ?? -1);
     assert.ok(releases.length >= 2, 'expected the not-ready branch and the normal end to release');
     let from = 0;
     for (const at of releases) {
         const before = body.slice(from, at);
-        assert.match(before, /session\.finish\(\)/, `a release at offset ${at} is not preceded by session.finish()`);
+        assert.match(before, /finishMicrovmSessions\(\)/, `a release at offset ${at} is not preceded by finishMicrovmSessions()`);
         from = at;
     }
+});
+
+test('stopping transcription finishes every engine session', () => {
+    assert.match(methodBody('async stopTranscription'), /finishMicrovmSessions\(\)/);
 });

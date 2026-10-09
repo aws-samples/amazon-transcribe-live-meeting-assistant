@@ -32,7 +32,12 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
 1. Go to AWS Bedrock console
 2. Navigate to **Model access** in the left sidebar
 3. Verify **AWS Nova Sonic 2** is available in your region
-4. If not available, request access or use a supported region
+4. If it is not available there, you do not have to move the whole deployment: set
+   the **`AmazonNovaSonicRegion`** stack parameter to a region where it is, and
+   only the voice assistant's model calls go there. Everything else — the
+   transcript store, the meeting assistant, the Nova Sonic configuration you set in
+   the LMA UI — stays in the stack's own region. See
+   [CloudFormation Parameters](cloudformation-parameters.md#voice-assistant).
 
 ### 1.2 Enable Model Access
 
@@ -399,13 +404,17 @@ View logs in CloudWatch:
 
 ### Issue: "Model Access Denied"
 
-**Cause:** AWS Nova Sonic 2 model access not enabled
+**Cause:** AWS Nova Sonic 2 model access not enabled, or enabled in the wrong region
 
 **Solution:**
 - Go to Bedrock console → Model access
 - Enable AWS Nova Sonic 2 model
 - Wait for access to be granted
-- Verify your region supports Nova Sonic 2
+- Verify the model is available and enabled in the region the Virtual Participant
+  is actually calling. If **`AmazonNovaSonicRegion`** is set, that is the region to
+  check — not the stack's. The Virtual Participant logs the one it is using at
+  startup, on the `Nova Sonic region:` line, which also names the stack's region
+  when the two differ.
 
 ### Issue: Tool Execution Timeout
 

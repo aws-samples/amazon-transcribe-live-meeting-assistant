@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
+from asr_server import offline_recognizer
 from asr_server.offline_recognizer import (
     OfflineDecoderBackend,
     OfflineModelConfig,
@@ -327,6 +328,9 @@ def _clear_model_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "ASR_MODEL_ENCODER",
         "ASR_MODEL_DECODER",
         "ASR_MODEL_JOINER",
+        "ASR_MODEL_KIND",
+        "ASR_MODEL_CONV_FRONTEND",
+        "ASR_MODEL_TOKENIZER",
         "ASR_VAD_MODEL",
         "ASR_NUM_THREADS",
     ):
@@ -530,3 +534,140 @@ def test_module_import_is_dependency_free() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "OK"
+
+
+def test_build_offline_config_for_qwen3_asr_resolves_its_own_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_model_env(monkeypatch)
+    monkeypatch.setenv("ASR_MODEL_KIND", "qwen3_asr")
+    config = build_offline_model_config(model_dir=tmp_path)
+    assert config.model_kind == "qwen3_asr"
+    assert config.conv_frontend == tmp_path / "conv_frontend.onnx"
+    assert config.tokenizer == tmp_path / "tokenizer"
+
+
+def test_a_transducer_config_carries_no_qwen3_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_model_env(monkeypatch)
+    config = build_offline_model_config(model_dir=tmp_path)
+    assert config.model_kind == "transducer"
+    assert config.conv_frontend is None and config.tokenizer is None
+
+
+def test_an_unknown_model_kind_is_refused(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _clear_model_env(monkeypatch)
+    with pytest.raises(ValueError, match="whisper"):
+        build_offline_model_config(model_dir=tmp_path, model_kind="whisper")
+
+
+def test_qwen3_asr_requires_its_frontend_and_tokenizer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_model_env(monkeypatch)
+    for name in ("encoder.onnx", "decoder.onnx", "silero_vad.onnx"):
+        (tmp_path / name).write_bytes(b"x")
+    config = build_offline_model_config(model_dir=tmp_path, model_kind="qwen3_asr")
+    with pytest.raises(RuntimeError, match="conv_frontend") as excinfo:
+        _require_offline_model_files(config)
+    assert "tokenizer" in str(excinfo.value)
+    assert "joiner" not in str(excinfo.value)
+
+
+def test_qwen3_asr_is_built_through_its_own_constructor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_model_env(monkeypatch)
+    for name in ("conv_frontend.onnx", "encoder.onnx", "decoder.onnx", "silero_vad.onnx"):
+        (tmp_path / name).write_bytes(b"x")
+    (tmp_path / "tokenizer").mkdir()
+    calls: dict[str, object] = {}
+
+    class _Recognizer:
+        @staticmethod
+        def from_qwen3_asr(**kwargs: object) -> str:
+            calls.update(kwargs)
+            return "qwen"
+
+        @staticmethod
+        def from_transducer(**kwargs: object) -> str:
+            raise AssertionError("transducer constructor used for a Qwen3-ASR model")
+
+    fake_sherpa = type("Sherpa", (), {"OfflineRecognizer": _Recognizer})
+    monkeypatch.setattr(offline_recognizer, "_load_sherpa", lambda: fake_sherpa)
+    config = build_offline_model_config(model_dir=tmp_path, model_kind="qwen3_asr", num_threads=2)
+    assert offline_recognizer._build_offline_recognizer(config) == "qwen"
+    assert str(calls["tokenizer"]).endswith("tokenizer")
+    assert str(calls["conv_frontend"]).endswith("conv_frontend.onnx")
+    assert calls["num_threads"] == 2 and calls["max_new_tokens"] == 1024
+
+
+def test_offline_session_gate_caps_an_utterance_at_twenty_seconds() -> None:
+    engine = _offline_engine(min_silence_ms=1200)
+    rec = engine.new_session(SessionConfig(sample_rate=SAMPLE_RATE, endpointing_ms=1200))
+    assert isinstance(rec, SherpaOfflineRecognizer)
+    assert rec._vad._max_speech_s == pytest.approx(20.0)
+    assert rec._vad._long_speech_s == pytest.approx(10.0)
+    assert rec._vad._long_speech_silence_s == pytest.approx(0.3)
+
+
+def test_build_offline_config_for_cohere_transcribe_resolves_its_data_file_and_language(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_model_env(monkeypatch)
+    monkeypatch.setenv("ASR_MODEL_KIND", "cohere_transcribe")
+    monkeypatch.setenv("ASR_MODEL_LANGUAGE", "en")
+    config = build_offline_model_config(model_dir=tmp_path)
+    assert config.model_kind == "cohere_transcribe"
+    assert config.encoder_data == tmp_path / "encoder.int8.onnx.data"
+    assert config.language == "en"
+    assert config.conv_frontend is None and config.tokenizer is None
+
+
+def test_cohere_transcribe_requires_its_encoder_data_and_tokens(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_model_env(monkeypatch)
+    for name in ("encoder.onnx", "decoder.onnx", "silero_vad.onnx"):
+        (tmp_path / name).write_bytes(b"x")
+    config = build_offline_model_config(model_dir=tmp_path, model_kind="cohere_transcribe")
+    with pytest.raises(RuntimeError, match="encoder_data") as excinfo:
+        _require_offline_model_files(config)
+    assert "tokens" in str(excinfo.value)
+    assert "joiner" not in str(excinfo.value)
+
+
+def test_cohere_transcribe_is_built_through_its_own_constructor_with_its_language(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _clear_model_env(monkeypatch)
+    for name in (
+        "encoder.onnx",
+        "encoder.int8.onnx.data",
+        "decoder.onnx",
+        "tokens.txt",
+        "silero_vad.onnx",
+    ):
+        (tmp_path / name).write_bytes(b"x")
+    calls: dict[str, object] = {}
+
+    class _Recognizer:
+        @staticmethod
+        def from_cohere_transcribe(**kwargs: object) -> str:
+            calls.update(kwargs)
+            return "cohere"
+
+        @staticmethod
+        def from_transducer(**kwargs: object) -> str:
+            raise AssertionError("transducer constructor used for a Cohere Transcribe model")
+
+    fake_sherpa = type("Sherpa", (), {"OfflineRecognizer": _Recognizer})
+    monkeypatch.setattr(offline_recognizer, "_load_sherpa", lambda: fake_sherpa)
+    config = build_offline_model_config(
+        model_dir=tmp_path, model_kind="cohere_transcribe", language="de", num_threads=2
+    )
+    assert offline_recognizer._build_offline_recognizer(config) == "cohere"
+    assert calls["language"] == "de"
+    assert calls["tokens"] == str(tmp_path / "tokens.txt")
+    assert "joiner" not in calls

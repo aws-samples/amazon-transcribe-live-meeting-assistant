@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lma-sdk"
-version = "0.3.9"
+version = "0.3.10"
 description = "Python SDK for AWS Live Meeting Assistant (LMA)"
 readme = "README.md"
 license = {text = "MIT"}
@@ -29,6 +29,22 @@ dev = [
     # schemas (see lma-virtual-participant-stack/test/schemas/). Needed for
     # resource types cfn-lint has no schema for yet.
     "jsonschema>=4.0",
+    # Parses source/appsync/schema.graphql and validates the UI's operations
+    # and the template's resolvers against it (see
+    # lma-ai-stack/test/test_appsync_contract.py).
+    "graphql-core>=3.2",
+    # The transcript_enrichment_layer imports jwt at module scope (it resolves a
+    # meeting's owner from a Cognito token), so its tests cannot import it
+    # without this. A runtime dependency of the layer itself — see
+    # lma-ai-stack/source/lambda_layers/transcript_enrichment_layer/requirements.txt.
+    "pyjwt>=2.0",
+    # gql's DSL, so the layer's graphql_helpers field selectors can be resolved
+    # against the real source/appsync/schema.graphql. Version-matched to the
+    # layer's own pin (gql~=3.5.3) so the test exercises the same DSL the Lambda
+    # runs; the extras it declares there (botocore, aiohttp, requests) are the
+    # transports and are not needed to build a query. Caps graphql-core below
+    # 3.2.7, which the entry above allows.
+    "gql>=3.5,<4",
 ]
 
 [tool.setuptools.packages.find]

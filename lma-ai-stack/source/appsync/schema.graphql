@@ -750,7 +750,7 @@ type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
 	Success: Boolean!
 }
 
-# Runtime switches for the on-demand ASR engine, edited from the ASR Config admin
+# Runtime switches for the on-demand ASR engine, edited from the Transcription Engine
 # page and read at the start of each meeting (transcriber and Virtual Participant),
 # so a change needs no stack update: which engine streaming meetings use, which
 # engine Virtual Participants use, and whether VPs ask for per-voice labels.

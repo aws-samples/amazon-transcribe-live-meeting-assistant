@@ -10,6 +10,8 @@ process.env.ASR_MIN_BACKOFF_MS = '20';
 process.env.ASR_MAX_RETRIES = '2';
 process.env.ASR_READY_TIMEOUT_MS = '5000';
 process.env.ASR_FINISH_TIMEOUT_MS = '500';
+process.env.ASR_HANDSHAKE_TIMEOUT_MS = '200';
+process.env.ASR_MAX_PENDING_BYTES = '64000'; // 2 s, so a drop is reachable in a test
 process.env.AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 delete process.env.ASR_ENGINE;
 delete process.env.ASR_LAUNCHER_FUNCTION_ARN;
@@ -72,11 +74,18 @@ const ready = (socket: WebSocket, diarize = true) =>
         }
     });
 
-const newSession = (asr: FakeAsr, rows: AsrSegment[], live = { value: true }, diarize = true) =>
+const newSession = (
+    asr: FakeAsr,
+    rows: AsrSegment[],
+    live = { value: true },
+    diarize = true,
+    channel: 'CALLER' | 'AGENT' = 'CALLER',
+) =>
     new MicrovmAsrSession({
         callId: 'vp-test-call',
         lease: { endpointUrl: asr.url },
         diarize,
+        channel,
         onSegment: (segment) => rows.push(segment),
         isMeetingLive: () => live.value,
     });
@@ -281,4 +290,285 @@ test('a buffered backlog is flushed as a few large frames, losing nothing', () =
         [2000, 500],
     );
     assert.deepEqual(coalesceBacklog([]), []);
+});
+
+const until = async (condition: () => boolean, ms = 1500): Promise<void> => {
+    const started = Date.now();
+    while (!condition()) {
+        if (Date.now() - started > ms) throw new Error('timed out waiting for a condition');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+};
+
+test('two sessions on one engine never share a segment id', async () => {
+    const asr = await startFakeAsr((socket) => {
+        ready(socket);
+        let sent = false;
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary || sent) return;
+            sent = true;
+            socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'hi', start: 0, end: 1 }));
+        });
+    });
+    const meeting: AsrSegment[] = [];
+    const agent: AsrSegment[] = [];
+    const a = newSession(asr, meeting, { value: true }, true, 'CALLER');
+    const b = newSession(asr, agent, { value: true }, false, 'AGENT');
+    try {
+        assert.deepEqual(await Promise.all([a.start(), b.start()]), [true, true]);
+        a.pushPcm(Buffer.alloc(3200));
+        b.pushPcm(Buffer.alloc(3200));
+        await until(() => meeting.length === 1 && agent.length === 1);
+        assert.equal(meeting[0].segmentId, 'vp-caller-r0-g0-s1');
+        assert.equal(agent[0].segmentId, 'vp-agent-r0-g0-s1');
+        await Promise.all([a.finish(), b.finish()]);
+    } finally {
+        await asr.close();
+    }
+});
+
+test('audioSeconds follows meeting time, including audio dropped while the engine was away', async () => {
+    const asr = await startFakeAsr((socket) => ready(socket));
+    const session = newSession(asr, []);
+    try {
+        session.pushPcm(Buffer.alloc(32000));
+        assert.equal(session.audioSeconds, 1.0);
+        assert.equal(await session.start(), true);
+        assert.equal(session.audioSeconds, 1.0);
+        session.pushPcm(Buffer.alloc(16000));
+        assert.equal(session.audioSeconds, 1.5);
+        await session.finish();
+    } finally {
+        await asr.close();
+    }
+    const orphan = new MicrovmAsrSession({
+        callId: 'vp-test-call',
+        lease: { endpointUrl: 'ws://127.0.0.1:1' },
+        diarize: false,
+        onSegment: () => {},
+        isMeetingLive: () => true,
+    });
+    for (let i = 0; i < 3; i += 1) orphan.pushPcm(Buffer.alloc(32000));
+    assert.equal(orphan.audioSeconds, 3.0);
+    await orphan.finish();
+});
+
+test('after a reconnect the audio clock continues from the last row the engine reported', async () => {
+    const asr = await startFakeAsr((socket, connection) => {
+        ready(socket);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary || connection !== 1) return;
+            socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'turn', start: 0.5, end: 4.0 }));
+            socket.close(1011, 'engine restart');
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows);
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await until(() => asr.connections === 2 && rows.length === 1);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        session.pushPcm(Buffer.alloc(6400));
+        assert.equal(session.audioSeconds, 4.0 + 6400 / 32000);
+        await session.finish();
+    } finally {
+        await asr.close();
+    }
+});
+
+test('a later run continues the meeting timeline and never reuses an earlier segment id', async () => {
+    const asr = await startFakeAsr((socket) => {
+        ready(socket);
+        let sent = false;
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary || sent) return;
+            sent = true;
+            socket.send(JSON.stringify({ type: 'final', segment: 0, text: 'again', start: 0.5, end: 2.0 }));
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = new MicrovmAsrSession({
+        callId: 'vp-test-call',
+        lease: { endpointUrl: asr.url },
+        diarize: false,
+        onSegment: (segment) => rows.push(segment),
+        isMeetingLive: () => true,
+        channel: 'CALLER',
+        run: 1,
+        timeBaseSeconds: 600,
+    });
+    try {
+        assert.equal(session.audioSeconds, 600);
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await until(() => rows.length === 1);
+        assert.equal(rows[0].segmentId, 'vp-caller-r1-g0-s0');
+        assert.equal(rows[0].startSec, 600.5);
+        assert.equal(rows[0].endSec, 602);
+        await session.finish();
+    } finally {
+        await asr.close();
+    }
+});
+
+test('rows after a reconnect start where the audio sent before it left off, not at the last row', async () => {
+    let received = 0;
+    const asr = await startFakeAsr((socket, connection) => {
+        ready(socket);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            if (connection === 1) {
+                received += (data as Buffer).length;
+                if (received === 3200) {
+                    socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'early', start: 0.0, end: 0.1 }));
+                }
+                if (received >= 64000) socket.close(1011, 'engine restart');
+                return;
+            }
+            socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'after', start: 0.0, end: 0.5 }));
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows);
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await until(() => rows.length === 1);
+        session.pushPcm(Buffer.alloc(64000 - 3200));
+        await until(() => asr.connections === 2);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        session.pushPcm(Buffer.alloc(3200));
+        await until(() => rows.length === 2);
+        assert.equal(rows[1].startSec, 64000 / 32000);
+        assert.ok(rows[1].startSec > rows[0].endSec);
+        await session.finish();
+    } finally {
+        await asr.close();
+    }
+});
+
+test('a second finish waits for the engine to deliver the last row', async () => {
+    const asr = await startFakeAsr((socket) => {
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (isBinary) return;
+            const message = JSON.parse(data.toString());
+            if (message.type === 'config') {
+                socket.send(JSON.stringify({ type: 'ready', effective_config: { diarize: true } }));
+            }
+            if (message.type === 'eos') {
+                setTimeout(() => {
+                    socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'last words', start: 0, end: 0.5 }));
+                    socket.send(JSON.stringify({ type: 'termination', audio_seconds: 1, segments: 1 }));
+                }, 200);
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows);
+    try {
+        assert.equal(await session.start(), true);
+        const first = session.finish();
+        await session.finish();
+        assert.deepEqual(
+            rows.map((row) => row.text),
+            ['last words'],
+        );
+        await first;
+    } finally {
+        await asr.close();
+    }
+});
+
+test('the audio clock does not drop back while the socket is down', async () => {
+    let upgrades = 0;
+    let received = 0;
+    const wss = new WebSocketServer({ port: 0, verifyClient: () => ++upgrades === 1 });
+    wss.on('connection', (socket) => {
+        ready(socket);
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            received += (data as Buffer).length;
+            if (received === 3200) {
+                socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'early', start: 0.0, end: 0.1 }));
+            }
+            if (received >= 64000) socket.close(1011, 'engine restart');
+        });
+    });
+    await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
+    const url = `ws://127.0.0.1:${(wss.address() as AddressInfo).port}`;
+    const rows: AsrSegment[] = [];
+    const session = newSession({ url, connections: 0, audioBytes: 0, close: async () => {} }, rows);
+    try {
+        assert.equal(await session.start(), true);
+        session.pushPcm(Buffer.alloc(3200));
+        await until(() => rows.length === 1);
+        session.pushPcm(Buffer.alloc(64000 - 3200));
+        await until(() => upgrades >= 2);
+        assert.equal(session.audioSeconds, 64000 / 32000);
+        await session.finish();
+    } finally {
+        for (const client of wss.clients) client.terminate();
+        await new Promise<void>((resolve) => wss.close(() => resolve()));
+    }
+});
+
+test('a reconnect whose upgrade never completes still counts against the retry budget', async () => {
+    const server = (await import('node:net')).createServer((socket) => socket.on('data', () => undefined));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const rows: AsrSegment[] = [];
+    const session = newSession({ url, connections: 0, audioBytes: 0, close: async () => {} }, rows);
+    try {
+        assert.equal(await session.start(), false);
+        await until(() => session.hasGivenUp, 5000);
+    } finally {
+        await session.finish();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+});
+
+test('finishing a session that is still waiting for the engine settles its start at once', async () => {
+    const server = (await import('node:net')).createServer((socket) => socket.on('data', () => undefined));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const url = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const session = newSession({ url, connections: 0, audioBytes: 0, close: async () => {} }, []);
+    try {
+        const started = Date.now();
+        const ready = session.start();
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await session.finish();
+        assert.equal(await ready, false);
+        assert.ok(Date.now() - started < 1000, `start took ${Date.now() - started} ms`);
+    } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+});
+
+test('after an outage longer than the buffer, the newest audio is kept and rows keep meeting time', async () => {
+    const asr = await startFakeAsr((socket) => {
+        ready(socket);
+        let got = 0;
+        socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
+            if (!isBinary) return;
+            got += (data as Buffer).length;
+            if (got >= 64000) {
+                socket.send(JSON.stringify({ type: 'final', segment: 1, text: 'newest', start: 1.0, end: 1.5 }));
+            }
+        });
+    });
+    const rows: AsrSegment[] = [];
+    const session = newSession(asr, rows);
+    try {
+        for (let i = 0; i < 3; i += 1) session.pushPcm(Buffer.alloc(32000, i + 1));
+        assert.equal(session.audioSeconds, 3.0);
+        assert.equal(await session.start(), true);
+        await until(() => asr.audioBytes >= 64000);
+        assert.equal(asr.audioBytes, 64000);
+        await until(() => rows.length === 1);
+        assert.equal(rows[0].startSec, 2.0);
+        await session.finish();
+    } finally {
+        await asr.close();
+    }
 });

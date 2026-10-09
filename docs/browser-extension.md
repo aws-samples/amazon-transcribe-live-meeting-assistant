@@ -6,6 +6,8 @@ title: "Browser Extension"
 
 > **Not sure which capture option to use?** See [Meeting Sources](meeting-sources.md) for a side-by-side comparison of the Chrome Extension, Stream Audio, and Virtual Participant.
 
+The extension adds a side panel to meeting tabs on **Zoom, Microsoft Teams, Amazon Chime, Cisco Webex and Google Meet**, capturing both your microphone and the other participants' audio from the tab without adding a bot to the meeting. Google Meet is supported here and **not** by the [Virtual Participant](virtual-participant.md#supported-platforms), so the extension is the route for Meet meetings.
+
 ### Download and unzip the extension
 
 During the LMA stack deployment, the nested stack, BROWSEREXTENSIONSTACK, builds a pre-configured browser extension package which is ready to be downloaded and installed in your browser.
@@ -49,3 +51,32 @@ Choose `Allow` on the popup asking you to share the browser tab.
    <p align="center"><img src="../images/readme-browser-extension-listening.png" alt="Browser Extension Listening" width="350"/></p>
 
 Choose `Open in LMA` to see your live transcript, select language, and to interact with the meeting assistant.
+
+## If the panel shows no platform, name or active speaker
+
+Audio capture and the meeting readouts come from different parts of the
+extension. Audio is captured from whichever tab you share, so it works on any
+page. The **Platform Detected**, **Your name** and **Active Speaker** fields come
+from a small script that reads the meeting page itself, and that script is
+registered for specific meeting hostnames. When a meeting platform changes the
+address it serves from, or changes the structure of its page, those three fields
+go blank together while the transcript keeps working.
+
+If that happens:
+
+- **Reload the meeting tab** after installing or reloading the extension. The
+  page-reading script is only injected into tabs loaded after it.
+- **Open the panel once you are in the meeting**, not while you are still in the
+  lobby — a lobby page has no participants to read.
+- **Type your name and the meeting topic by hand.** Both fields are editable, and
+  anything you type is kept rather than overwritten. Your name is pre-filled from
+  your LMA login when the meeting page does not supply one.
+- **Check the hostname in your address bar.** Microsoft serves Teams from both
+  `teams.microsoft.com` and `teams.cloud.microsoft`, and Zoom from several
+  regional `zoom.us` hosts; all of these are supported, but a host not on the
+  list loads no reader. If you are on an address not listed above, please
+  [open an issue](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues)
+  with the hostname.
+- **Active Speaker is only shown while listening**, and only on platforms that
+  expose who is speaking in their page. A blank active speaker does not affect
+  the transcript, which is produced from the audio.

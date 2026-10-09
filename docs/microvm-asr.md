@@ -110,7 +110,7 @@ deployer should have to answer:
 
 | Mapping key | Value | Purpose |
 |---|---|---|
-| `ModelBundle` | `fastconformer-titanet-small` | Which models the image is built from, with their measured diarization operating point |
+| `ModelBundle` | `parakeet-tdt-v3-titanet-small` | Which models the image is built from, with their measured diarization operating point |
 | `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
 
 To change either, edit the mapping and update the stack. `scripts/sync_bundles.py
@@ -125,16 +125,45 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 
 | Bundle | ASR | Embedder | Turn detection | Threshold | Licences |
 |---|---|---|---|---|---|
-| `fastconformer-titanet-small` (default) | FastConformer streaming EN 480 ms | TitaNet-small | pyannote segmentation 3.0 | **0.5**, min utterance 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT |
+| `fastconformer-titanet-small` | FastConformer streaming EN 480 ms | TitaNet-small | pyannote segmentation 3.0 | **0.5**, min utterance 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT |
 | `fastconformer-transcription-only` | FastConformer streaming EN 480 ms | — | — | — | CC-BY-4.0 |
+| `nemotron35-titanet-small` | Nemotron 3.5 ASR streaming 0.6B, 560 ms (punctuated, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | OpenMDW-1.1 + CC-BY-4.0 + MIT |
+| `nemotron-titanet-small` | Nemotron speech streaming EN 0.6B, 560 ms | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | NVIDIA Open Model License (not redistributable) + CC-BY-4.0 + MIT |
+| `parakeet-tdt-v3-titanet-small` (default) | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v2-titanet-small` | Parakeet TDT 0.6B v2 (offline engine, English) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `qwen3-asr-titanet-small` | Qwen3-ASR 0.6B (offline engine, LLM decoder, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `qwen3-asr-transcription-only` | Qwen3-ASR 0.6B (offline engine) | — | — | — | Apache-2.0 + MIT (VAD) |
+| `cohere-transcribe-titanet-small` | Cohere Transcribe 2B (offline engine, 14 languages, one baked) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-live-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-live-nemotron35-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a punctuated Nemotron 3.5 live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + OpenMDW-1.1 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-sortformer` | Parakeet TDT 0.6B v3 (offline engine) | Nemotron 3 Diarization (end to end) | built in | none to tune; up to 8 speakers per channel | CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
+| `parakeet-tdt-v3-live-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
+| `parakeet-tdt-v3-live-nemotron35-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
 
-Both are permissively licensed and **redistributable** (`AsrRedistributable` is a stack
-output, and is `true` for both). The ASR model is the same cache-aware streaming
-FastConformer-RNNT architecture as NVIDIA's Nemotron speech models, but CC-BY-4.0
-rather than the NVIDIA Open Model License, and trained on NeMo ASRSET — LibriSpeech,
-**Fisher**, **Switchboard**, WSJ, MLS-EN and Common Voice — so it has seen thousands
-of hours of spontaneous conversational speech, which is what a meeting is. English
-only.
+The default is Parakeet TDT 0.6B v3 on the offline engine (CC-BY-4.0): punctuated,
+cased, 25 languages, and in the live runs of 2026-09-22 the most accurate model with the
+only per-turn speaker labels that were right throughout. FastConformer, the previous
+default, is the lightest streaming option: the same cache-aware FastConformer-RNNT
+architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, English only, no punctuation,
+at a real-time factor of about 0.26 on a 4-core host.
+
+The alternatives trade weight for transcript quality. Nemotron 3.5 emits punctuation
+and casing and reads far better on the same meeting audio, but ran at a real-time
+factor of 0.89 for a single session on a 4-core host; on a MicroVM it kept up with two
+channels in the live runs, but it drops or merges more words than any other model in the
+catalog. The earlier
+Nemotron speech model is kept for deployments that accept the NVIDIA Open Model
+License; the catalog marks it `redistributable: false` and it is never the default.
+The Parakeet and Qwen3-ASR bundles run the offline engine described below. Qwen3-ASR
+gave the best transcript of everything measured (real-time factor 0.38, punctuated,
+"WACC" where every other model wrote "whack") but returns no word timings, so its speaker
+labels are one per utterance rather than per turn. Every alternative reuses TitaNet-small,
+so the operating point carries over unchanged; each is `calibrated` until vetted live.
+The `-sortformer` bundles have no threshold to measure and are `experimental` until vetted;
+a bundle with no status in the catalog reports `uncalibrated`.
+Parakeet v3 is `vetted` and the default after the live runs of 2026-09-22: text on a par with
+Qwen3-ASR, every speaker turn of 2.5 s or more labelled correctly, and rows within about 20 s
+of speech.
 
 **Why the threshold travels with the embedder, not the ASR model.** A speaker
 embedding is computed from raw audio samples; the ASR model contributes nothing to
@@ -170,11 +199,38 @@ duplication cannot be removed — `MinimumMemoryInMiB` needs a CloudFormation-ty
 number and a Mapping cannot be keyed on a value a custom resource resolved.
 
 The runtime also carries an offline (`accurate`) engine — VAD-segmented, one decode
-per closed utterance, for transducer models that cannot stream — and the catalog
-schema supports a `vadModels` section for it. No offline bundle ships: it produces no
-interim text while somebody is speaking, and its real-time factor on a real meeting is
-unmeasured. See *Not included: Whisper* below for why Parakeet TDT rather than
-Whisper would be the offline model to try first.
+per closed utterance, for transducer models that cannot stream — which the
+Parakeet, Qwen3-ASR and Cohere Transcribe bundles use. It produces no interim text while somebody is speaking: a row
+appears when the utterance closes, which is a 1.2 s pause, the first 300 ms dip once the
+utterance has run 10 s, or 20 s of speech at the latest, so a row arrives within about
+20 s of speech plus the decode time. It decoded the
+test meeting at a real-time factor of 0.14 on a 4-core host with punctuated, cased text.
+See *Not included: Whisper* below for why Parakeet TDT rather than Whisper is the
+offline model offered.
+
+**Two-pass bundles.** `parakeet-tdt-v3-live-titanet-small` and
+`parakeet-tdt-v3-live-nemotron35-titanet-small` pair Parakeet with a streaming model that
+previews the open utterance: the live row shows the streaming text as it is spoken, and
+Parakeet's decode replaces it under the same segment when the utterance closes. Rows,
+word timings and speaker labels are Parakeet's. The preview adds the streaming model's
+CPU per session, about 0.26 real time for FastConformer and 0.6 to 0.9 for Nemotron 3.5,
+so the Nemotron variant is the heavier one. Both ran live on 2026-09-22 and 2026-09-23 with
+two sessions and no dropped audio, including a 49-minute meeting on the Nemotron variant.
+
+**End-to-end diarization bundles.** The three `-sortformer` bundles replace the TitaNet
+embedder, the pyannote turn detector and the threshold registry with NVIDIA's Nemotron 3
+Diarization, a Sortformer model that labels every 10 ms frame with the activity of up to
+eight speakers per channel and keeps identities through a speaker cache carried across the
+session. The engine runs one diarizer step each time the offline engine closes an
+utterance, over the audio since the previous step in pieces of at most 10 s, and gives each Parakeet word the speaker
+active under it, so a row is split wherever the speaker changes, however short the turn. A
+run of fewer than three words shorter than 0.5 s stays with its neighbour. There is no
+threshold or minimum utterance to calibrate. Labels restart for every meeting, as with the
+other bundles. The model is the int8 ONNX export published by onnx-community, pinned to a
+commit. On a 4-core x86 host the diarizer adds about 0.09 real time to the diarized channel,
+and its streamed labels agree with the full-precision offline reference on more than 99 % of
+speech frames. The two live-preview variants ran live on 2026-09-28 and 2026-09-30 with
+two sessions and kept up; the plain bundle has not run live.
 
 ## Choosing the engine
 
@@ -206,7 +262,7 @@ the start of each meeting, so a change needs no stack update and no image rebuil
 |---|---|---|
 | Stream Audio, Chrome extension and Desktop Capture: engine | Amazon Transcribe | Which engine those meetings use |
 | Virtual Participants: engine | Amazon Transcribe | Which engine Virtual Participants use |
-| Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off |
+| Virtual Participant voice separation | off | On the on-demand engine, a VP asks for per-voice labels so several people behind one attendee tile come out as `Name (spk_0)`, `Name (spk_1)`. A VP already names speakers from the meeting roster, which is the better label for a normal attendee, hence off. The voice assistant's own speech is never diarized: it is transcribed on its own channel |
 
 There is deliberately nothing else. The similarity threshold, minimum utterance
 length, turn-cut behaviour and speaker cap that earlier versions exposed here are the
@@ -287,6 +343,9 @@ engine; `ASR_LIVE_TURN_CUT=0` in the image environment turns it off) the speaker
 change becomes the *primary* boundary and
 endpointing silence is only a backstop — which is the right way round, because a pause
 is not what separates people, taking turns is.
+The recogniser's own forced cut, which resets the decoder and drops the word in flight,
+comes only once an utterance reaches 60 s; the diarizer's 20 s row bound keeps rows
+readable without a reset.
 
 While a segment is open the engine re-runs the detector over the audio since the last
 cut, about once per second of audio (`ASR_TURN_CUT_INTERVAL_MS`), and closes a row as
@@ -353,6 +412,9 @@ Partials now carry no speaker at all, so the row shows the plain channel name un
 label is actually known, and the `(spk_N)` suffix appears when there is something true
 to put in it. This matches the Amazon Transcribe path, which never had speaker labels on
 partials to begin with (they only arrive on final results).
+A channel that asks for no labels, such as Stream Audio's microphone or the Virtual
+Participant's assistant, gets none: the engine skips voice embedding for it, and its rows
+still close at 20 s.
 
 ### Not included: Whisper, Distil-Whisper, and the WhisperX hybrid
 
@@ -390,6 +452,12 @@ alignment is available, and global clustering is correct rather than premature. 
 remains future work, and it is the natural home for
 Whisper-quality transcription and elite DER — a deliberate split, with one engine and
 one timeline live, two passes offline.
+
+Qwen3-ASR has Whisper's shape — an LLM decoder, a different constructor, no word
+timings — and it is offered anyway, on the offline engine, as a transcription-quality
+bundle whose speaker labels are one per utterance. The runtime grew a second offline
+model kind for it (`ASR_MODEL_KIND=qwen3_asr`), which is the route a Whisper bundle would
+take if one were ever wanted.
 
 ## Calibrating a new bundle (developers)
 
@@ -455,8 +523,14 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   always-on ASR capacity.
 - **The transcriber task is unchanged** (`256` CPU / `1024` MB, or `1024`/`2048`
   with video recording): inference happens in the MicroVM, not in the task.
-- One MicroVM serves both audio channels of a meeting. The default 8 GiB baseline
-  gives 4 vCPU, which both channels share.
+- One MicroVM serves both audio channels of a meeting. An 8 GiB MicroVM exposed 16 CPUs
+  in the live runs of 2026-09-30, which both channels share; the image still sizes its
+  inference threads for 4.
+- The engine logs its CPU use once a minute while a meeting is open, as
+  `engine load: 5.57 of 16 cores (35%) over the last 60s, 2 session(s), rss=2340MB`,
+  in `/aws/lambda-microvms/<stack>-asr`. The size is billed whatever the load, so
+  this line is what tells you whether a bundle would fit a smaller size.
+  `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
 - `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
   bounds what a single
   MicroVM can cost. The transcriber terminates the MicroVM on meeting end and on
@@ -509,7 +583,7 @@ Honest state of validation, so nobody deploys this expecting known numbers:
   transcript is slow to appear, or transcripts lag live audio, raise
   the bundle's `baselineMemoryMiB` in `catalog.json` and re-run
   `scripts/sync_bundles.py`. Note the ceiling: the `al2023-1` base MicroVM image
-  accepts only **512, 1024, 2048, 4096 or 8192 MiB**, so 8192 (4 vCPU) is as large as
+  accepts only **512, 1024, 2048, 4096 or 8192 MiB**, so 8192 is as large as
   a MicroVM gets and there is no headroom above the default. The image resolver
   refuses anything else up front rather than letting the stack fail minutes later at
   `AWS::Lambda::MicrovmImage`.
@@ -544,6 +618,12 @@ name in the meantime.
 Labels are per meeting and per channel, and they are not identities. Mapping them onto
 real names — from the participant list, or by asking a model — is a separate step, and
 it works far better when every label is distinct.
+
+**A Virtual Participant with its voice assistant runs two sessions**, like Stream Audio's
+two channels: meeting audio on `CALLER`, named from the roster by the row's start time
+and suffixed with the voice id when voice separation is on, and the assistant's own voice
+on `AGENT` under the VP's name, never diarized. Wake phrases are detected on meeting rows
+only, so the assistant cannot wake itself.
 
 ## Known limitations
 
@@ -650,14 +730,21 @@ complying with their licences.**
 | Component | Licence |
 |---|---|
 | `sherpa-onnx` runtime | Apache-2.0 |
-| NVIDIA FastConformer streaming EN 480 ms (ASR model, both bundles) | CC-BY-4.0 |
+| NVIDIA FastConformer streaming EN 480 ms (ASR, FastConformer bundles and the Parakeet v3 live preview) | CC-BY-4.0 |
+| NVIDIA Nemotron 3.5 ASR streaming 0.6B (ASR, `nemotron35-titanet-small` and the Nemotron 3.5 live preview) | OpenMDW-1.1 |
+| NVIDIA Nemotron speech streaming EN 0.6B (ASR, `nemotron-titanet-small`) | NVIDIA Open Model License, not redistributable |
+| NVIDIA Parakeet TDT 0.6B v3 and v2 (ASR, offline bundles) | CC-BY-4.0 |
+| Qwen3-ASR 0.6B (ASR, offline Qwen bundles; third-party ONNX export re-hosted by k2-fsa) | Apache-2.0 |
+| Cohere Transcribe 03-2026 2B (ASR, `cohere-transcribe-titanet-small`) | Apache-2.0 |
+| NVIDIA Nemotron 3 Diarization (diarization, `-sortformer` bundles; third-party ONNX export by onnx-community) | OpenMDW-1.1 |
+| Silero VAD v5 (utterance segmentation, offline bundles) | MIT |
 | NVIDIA TitaNet-small (speaker embedding) | CC-BY-4.0 |
 | pyannote segmentation 3.0 (turn detection) | MIT |
 
 Each model's licence file is copied into the image alongside its weights, and the
 resolved licences are reported in the ASR stack's `AsrModelLicense`, `AsrLicenceSummary`
-and `AsrRedistributable` outputs. `AsrRedistributable` is `true` for both bundles: every
-weight is permissively licensed. CC-BY-4.0 requires attribution, which
+and `AsrRedistributable` outputs. `AsrRedistributable` is `false` only for
+`nemotron-titanet-small`. CC-BY-4.0 requires attribution, which
 `THIRD-PARTY-LICENSES.txt` carries.
 
 Every checksum in `catalog.json` was verified by downloading the artifact and hashing it.

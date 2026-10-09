@@ -37,7 +37,8 @@ samconfig.toml
 
 # Node
 node_modules/
-.nvmrc
+# .nvmrc is tracked on purpose: it is the single Node.js version pin shared by
+# `make setup-node`, .github/workflows/code-checks.yml and .gitlab-ci.yml.
 
 # Python
 __pycache__/
@@ -86,3 +87,13 @@ utilities/load-simulator/examples/bobmeetings.yaml
 # run from that directory; anchor it at the repo root so `git add -A` from
 # anywhere (or after a directory rename) can never pick these up again.
 **/.build/
+
+# JUnit report written by `make integ-tests-nightly` (collected as a CI
+# artifact by the nightly_integ_tests job, never committed).
+integ-tests-report.xml
+# Coverage artifacts. `make test-coverage` writes everything to a temp dir and
+# leaves nothing behind, but a coverage tool invoked by hand will not.
+.coverage
+.coverage.*
+coverage/
+coverage-summary.json

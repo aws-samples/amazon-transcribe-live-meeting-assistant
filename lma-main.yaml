@@ -103,8 +103,25 @@ Parameters:
       - "elevenlabs"
       - "amazon_nova_sonic"
     Description: >-
-      Voice AI assistant provider for Virtual Participant. Choose 'none' to disable voice responses (default),
-      'elevenlabs' for ElevenLabs Conversational AI (requires API key above), or 'amazon_nova_sonic' for AWS Nova Sonic 2 (placeholder - not yet implemented).
+      Voice AI assistant provider for Virtual Participant. Choose 'none' to
+      disable voice responses (default), 'elevenlabs' for ElevenLabs
+      Conversational AI (requires API key above), or 'amazon_nova_sonic' for
+      Amazon Nova Sonic, which needs no API key and is configured on the Nova
+      Sonic page in the LMA UI.
+
+  AmazonNovaSonicRegion:
+    Type: String
+    Default: ""
+    AllowedPattern: "^$|^[a-z]{2,4}(-[a-z]+)+-[0-9]+$"
+    ConstraintDescription: >-
+      Must be empty, or an AWS Region name such as us-east-1.
+    Description: >-
+      Region to reach Amazon Nova Sonic in, when it differs from the region
+      this stack is deployed to. Leave empty to use the stack's own region.
+      Nova Sonic is available in fewer regions than LMA itself, so a
+      deployment constrained to a particular region for compliance can keep
+      everything else local and reach the voice assistant elsewhere. Only
+      used when VoiceAssistantProvider is amazon_nova_sonic.
 
   VoiceAssistantActivationMode:
     Type: String
@@ -789,6 +806,40 @@ Parameters:
     Description: >-
       Maximum number of EC2 instances for scaling (only used if VPLaunchType=EC2).
 
+  VPAttendeePollMs:
+    Type: Number
+    Default: 20000
+    MinValue: 1000
+    MaxValue: 120000
+    Description: >-
+      How often a Teams Virtual Participant samples the meeting UI to
+      decide whether the meeting is still running, in milliseconds.
+      Leave at the default unless advised otherwise.
+
+  VPPollsBeforeEnd:
+    Type: Number
+    Default: 3
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      Consecutive polls on which a Teams meeting must show one or fewer
+      attendees before the Virtual Participant leaves. 3 polls at the default
+      cadence is about 60 seconds.
+
+  VPPollsBeforeEndMissing:
+    Type: Number
+    Default: 15
+    MinValue: 1
+    MaxValue: 90
+    Description: >-
+      Consecutive polls on which a Teams meeting must show neither a readable
+      attendee count nor any in-meeting controls before the Virtual Participant
+      leaves. 15 polls at the default cadence is about 5 minutes. Raise
+      this if participants report the Virtual Participant leaving meetings
+      that are still in progress. A value producing a tolerance outside 4 to
+      30 minutes at the chosen cadence is adjusted into that range, so at the
+      default cadence anything below 12 is raised.
+
   TranscriberDesiredTaskCount:
     Type: Number
     Default: 1
@@ -883,6 +934,12 @@ Metadata:
           - VPMinInstances
           - VPMaxInstances
       - Label:
+          default: Virtual Participant Meeting-End Detection (Teams)
+        Parameters:
+          - VPAttendeePollMs
+          - VPPollsBeforeEnd
+          - VPPollsBeforeEndMissing
+      - Label:
           default: Meeting Assist Options
         Parameters:
           - MeetingAssistService
@@ -897,6 +954,7 @@ Metadata:
           - SimliApiKey
           - SimliFaceId
           - VoiceAssistantProvider
+          - AmazonNovaSonicRegion
           - VoiceAssistantActivationMode
           - VoiceAssistantWakePhrases
           - VoiceAssistantActivationDuration
@@ -1030,6 +1088,8 @@ Metadata:
         default: Azure Communication Services Connection String for Teams SDK Join (Optional)
       VoiceAssistantProvider:
         default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
+      AmazonNovaSonicRegion:
+        default: Amazon Nova Sonic Region (blank = this stack's region)
       VoiceAssistantActivationMode:
         default: Voice Assistant Activation Mode
       VoiceAssistantWakePhrases:
@@ -1134,6 +1194,12 @@ Metadata:
         default: VP Minimum Warm Instances
       VPMaxInstances:
         default: VP Maximum Instances
+      VPAttendeePollMs:
+        default: VP Teams Meeting-End Poll Interval (ms)
+      VPPollsBeforeEnd:
+        default: VP Teams Polls Before Leaving An Empty Meeting
+      VPPollsBeforeEndMissing:
+        default: VP Teams Polls Before Leaving An Unreadable Meeting
       TranscriberDesiredTaskCount:
         default: WebSocket Transcriber Task Count
       TranscriberAutoScalingEnabled:
@@ -1196,7 +1262,7 @@ Mappings:
   # cost backstop if a transcriber task dies without releasing one (max 28800).
   AsrDefaults:
     Engine:
-      ModelBundle: fastconformer-titanet-small
+      ModelBundle: parakeet-tdt-v3-titanet-small
       MaxMeetingSeconds: "14400"
 
 Conditions:
@@ -2882,11 +2948,15 @@ Resources:
         ZoomMeetingSdkClientSecret: !Ref ZoomMeetingSdkClientSecret
         AcsConnectionString: !Ref AcsConnectionString
         EnableVideoRecording: !Ref EnableVideoRecording
+        VPAttendeePollMs: !Ref VPAttendeePollMs
+        VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
+        VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
         ElevenLabsApiKey: !Ref ElevenLabsApiKey
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
         SimliApiKey: !Ref SimliApiKey
         SimliFaceId: !Ref SimliFaceId
         VoiceAssistantProvider: !Ref VoiceAssistantProvider
+        AmazonNovaSonicRegion: !Ref AmazonNovaSonicRegion
         VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
         VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
         VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration

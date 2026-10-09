@@ -15,6 +15,8 @@ import ValueWithLabel from '../views/ValueWithLabel';
 import { useUserContext } from '../../context/UserContext';
 import { useIntegration } from '../../context/ProviderIntegrationContext';
 import { useSettings } from '../../context/SettingsContext';
+import { nameFromIdToken } from '../../lib/identity';
+import { prefillField } from '../../lib/capture';
 
 function Capture() {
   const { navigate } = useNavigation();
@@ -26,8 +28,12 @@ function Capture() {
   const [agentName, setAgentName] = React.useState("");
   const [nameErrorText, setNameErrorText] = React.useState("");
   const [meetingTopicErrorText, setMeetingTopicErrorText] = React.useState("");
-  const [formError, setFormError] = React.useState(false);
   const [showDisclaimer, setShowDisclaimer] = React.useState(false);
+  // What we last prefilled these two fields with. A field still holding our own
+  // prefill is ours to refresh when a reader reports again or the user switches
+  // to another meeting tab; a field holding anything else is theirs, and the
+  // readers report often enough that overwriting it would eat what they typed.
+  const prefilled = React.useRef({ topic: "", agentName: "" });
 
   // componentDidMount:
   useEffect(() => {
@@ -37,13 +43,36 @@ function Capture() {
 
   useEffect(() => {
     console.log("Metadata changed");
-    if (metadata && metadata.meetingTopic) {
-      setTopic(metadata.meetingTopic);
+    if (!metadata) {
+      return;
     }
-    if (metadata && metadata.userName) {
-      setAgentName(metadata.userName);
+    const nextTopic = prefillField(topic, prefilled.current.topic, metadata.meetingTopic);
+    if (nextTopic !== topic) {
+      prefilled.current.topic = nextTopic;
+      setTopic(nextTopic);
     }
-  }, [metadata, setTopic, setAgentName]);
+    const nextName = prefillField(agentName, prefilled.current.agentName, metadata.userName);
+    if (nextName !== agentName) {
+      prefilled.current.agentName = nextName;
+      setAgentName(nextName);
+    }
+  }, [metadata, topic, agentName, setTopic, setAgentName]);
+
+  // The name the meeting page gives us is better, but it is often missing: a
+  // changed page, a lobby we have not been admitted from, or a platform with no
+  // reader. Fall back to the signed-in user so the field is not left blank.
+  // Only while the field is untouched and nothing has been put in it yet, so
+  // that a name the user clears is not refilled under them on the next render.
+  useEffect(() => {
+    if (agentName || prefilled.current.agentName) {
+      return;
+    }
+    const loginName = nameFromIdToken(user.id_token);
+    if (loginName) {
+      prefilled.current.agentName = loginName;
+      setAgentName(loginName);
+    }
+  }, [user, agentName, setAgentName]);
 
   const validateForm = useCallback(() => {
     let isValid = true;
@@ -64,7 +93,14 @@ function Capture() {
 
   const startListening = useCallback(() => {
     // eslint-disable-next-line no-useless-escape
-    setTopic(topic.replace(/[\/?#%\+&]/g, '|'));
+    const sanitized = topic.replace(/[\/?#%\+&]/g, '|');
+    // Recorded as the prefilled value too, when that is what it came from:
+    // sanitizing it would otherwise look like the user had edited the field,
+    // and it would stop tracking the meeting page from here on.
+    if (topic === prefilled.current.topic) {
+      prefilled.current.topic = sanitized;
+    }
+    setTopic(sanitized);
 
     if (validateForm() === false) {
       return;

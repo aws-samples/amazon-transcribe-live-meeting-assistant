@@ -218,7 +218,7 @@
 **Bob:**
 "So that's Live Meeting Assistant. To recap what makes it different:"
 
-"It runs in your AWS account — your data stays in your cloud. It works across Zoom, Teams, Chime, Meet, and WebEx. It's extensible — we connected Salesforce and web search today, but you can add any tool through MCP. And it's fully open source on GitHub."
+"It runs in your AWS account — your data stays in your cloud. It works across Zoom, Teams, Chime, and WebEx with the bot, and Google Meet with the browser extension. It's extensible — we connected Salesforce and web search today, but you can add any tool through MCP. And it's fully open source on GitHub."
 
 "Check out the link on screen to get started. It deploys in about 35 minutes with a single CloudFormation template. Thanks for watching."
 

@@ -159,7 +159,7 @@ values are fixed in the `AsrDefaults` mapping in `lma-main.yaml` rather than ask
 
 | Mapping key | Value | Purpose |
 |---|---|---|
-| `ModelBundle` | `fastconformer-titanet-small` | Which models the MicroVM image is built from, together with their measured diarization operating point |
+| `ModelBundle` | `parakeet-tdt-v3-titanet-small` | Which models the MicroVM image is built from, together with their measured diarization operating point |
 | `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop if a transcriber task dies without releasing one |
 
 Everything that used to be tunable — the similarity threshold, minimum utterance
@@ -177,8 +177,20 @@ rebuilds the MicroVM image (~20 minutes).
 
 | Bundle | Models | Licences | Speaker labels |
 |--------|--------|----------|----------------|
-| `fastconformer-titanet-small` (default) | NVIDIA FastConformer streaming EN 480 ms + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + CC-BY-4.0 + MIT | Yes — threshold 0.5, minimum utterance 2500 ms, measured on real meeting audio |
+| `fastconformer-titanet-small` | NVIDIA FastConformer streaming EN 480 ms + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + CC-BY-4.0 + MIT | Yes — threshold 0.5, minimum utterance 2500 ms, measured on real meeting audio |
 | `fastconformer-transcription-only` | NVIDIA FastConformer streaming EN 480 ms | CC-BY-4.0 | No — labelled by audio channel, no speaker weights in the image |
+| `nemotron35-titanet-small` | NVIDIA Nemotron 3.5 ASR streaming 0.6B (punctuated, multilingual) + TitaNet-small + pyannote segmentation 3.0 | OpenMDW-1.1 + CC-BY-4.0 + MIT | Yes |
+| `nemotron-titanet-small` | NVIDIA Nemotron speech streaming EN 0.6B + TitaNet-small + pyannote segmentation 3.0 | NVIDIA Open Model License (not redistributable) + CC-BY-4.0 + MIT | Yes |
+| `parakeet-tdt-v3-titanet-small` (default) | NVIDIA Parakeet TDT 0.6B v3 (offline engine) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + MIT + CC-BY-4.0 + MIT | Yes |
+| `parakeet-tdt-v2-titanet-small` | NVIDIA Parakeet TDT 0.6B v2 (offline engine, English) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + MIT + CC-BY-4.0 + MIT | Yes |
+| `qwen3-asr-titanet-small` | Qwen3-ASR 0.6B (offline engine, multilingual) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | Apache-2.0 + MIT + CC-BY-4.0 + MIT | Per utterance only |
+| `qwen3-asr-transcription-only` | Qwen3-ASR 0.6B (offline engine) + Silero VAD | Apache-2.0 + MIT | No |
+| `cohere-transcribe-titanet-small` | Cohere Transcribe 2B (offline engine, 14 languages, one baked at build) + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | Apache-2.0 + MIT + CC-BY-4.0 + MIT | Per utterance only |
+| `parakeet-tdt-v3-live-titanet-small` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + CC-BY-4.0 + MIT + CC-BY-4.0 + MIT | Yes |
+| `parakeet-tdt-v3-live-nemotron35-titanet-small` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview + Silero VAD + TitaNet-small + pyannote segmentation 3.0 | CC-BY-4.0 + OpenMDW-1.1 + MIT + CC-BY-4.0 + MIT | Yes |
+| `parakeet-tdt-v3-sortformer` | NVIDIA Parakeet TDT 0.6B v3 (offline engine) + Silero VAD + NVIDIA Nemotron 3 Diarization | CC-BY-4.0 + MIT + OpenMDW-1.1 | Yes, per word, up to 8 speakers per channel |
+| `parakeet-tdt-v3-live-sortformer` | As above with a FastConformer live preview | CC-BY-4.0 + CC-BY-4.0 + MIT + OpenMDW-1.1 | Yes, per word |
+| `parakeet-tdt-v3-live-nemotron35-sortformer` | As above with a Nemotron 3.5 live preview | CC-BY-4.0 + OpenMDW-1.1 + MIT + OpenMDW-1.1 | Yes, per word |
 
 There are deliberately no parameters for supplying a model URL: every model is a
 curated entry in the ASR stack's `catalog.json` with its checksum pinned and, for a
@@ -203,8 +215,13 @@ next meeting with no stack update.
 | VPInstanceType | EC2 instance type for Virtual Participant. `t3.medium` (default) runs 1 voice + avatar VP (container capped at 3500 MB); the capacity-provider auto-scaler launches additional hosts when concurrent demand exceeds capacity. Bump to `t3.large` or a `c5.*`/`m5.*` instance for more concurrent VPs per host. | t3.medium | t3.medium, t3.large, t3.xlarge, c5.large, c5.xlarge, c5.2xlarge, m5.large, m5.xlarge |
 | VPMinInstances | Minimum warm EC2 instances always running. Set to `0` to fully scale down when idle (cold-start adds ~60-90s to the first VP). | 1 | 0-10 |
 | VPMaxInstances | Maximum EC2 instances. Capacity-provider managed scaling launches new hosts up to this cap when concurrent demand exceeds the current cluster's capacity. | 10 | 1-100 |
+| VPAttendeePollMs | How often a Teams Virtual Participant samples the meeting UI to decide whether the meeting is still running, in milliseconds. | 20000 | 1000-120000 |
+| VPPollsBeforeEnd | Consecutive polls on which a Teams meeting must show one or fewer attendees before the VP leaves — about 60 seconds at the default cadence. | 3 | 1-90 |
+| VPPollsBeforeEndMissing | Consecutive polls on which a Teams meeting must show neither a readable attendee count nor any in-meeting controls before the VP leaves — about 5 minutes at the default cadence. Raise it if participants report the VP leaving meetings that are still in progress. | 15 | 1-90 |
 
 `VPInstanceType`, `VPMinInstances` and `VPMaxInstances` apply only to `VPLaunchType=EC2`. Under `MICROVM` there are no hosts to size or scale — each meeting gets its own MicroVM, billed for its lifetime.
+
+The three meeting-end parameters apply to the **Teams browser join path** only, and no deployment should normally need to change them — see [How the VP decides a meeting has ended](virtual-participant.md#how-the-vp-decides-a-meeting-has-ended) for what each signal measures and why the two thresholds differ so much. Changing them updates the VP task definition without rebuilding the container image, so the new values apply to the next meeting.
 
 The VP stack also creates these infrastructure resources used by the auto-scaling, AI DOM resolver, and per-user persistent Chromium profile features:
 
@@ -222,8 +239,13 @@ None of these requires user configuration. The AI fallback resolver model is con
 | VoiceAssistantActivationMode | How the voice assistant is activated | always_active | always_active, wake_phrase |
 | VoiceAssistantWakePhrase | Comma-separated wake phrases for the voice assistant | (none) | e.g., "hey alex,ok alex" |
 | VoiceAssistantActivationDuration | Duration (in seconds) the voice assistant stays active after wake phrase | 30 | 5-300 |
+| AmazonNovaSonicRegion | Region to reach Amazon Nova Sonic in, when it differs from the region the stack is deployed to. Leave empty to use the stack's own region. Nova Sonic is available in fewer regions than LMA itself, so a deployment constrained to one region for compliance can keep everything else local and reach the voice assistant elsewhere. Only used when `VoiceAssistantProvider` is `amazon_nova_sonic`. | (empty — use the stack's region) | Empty, or an AWS Region name such as `eu-north-1` |
 | ElevenLabsApiKey | API key for ElevenLabs voice assistant | (none) | Valid API key string |
 | ElevenLabsAgentId | ElevenLabs conversational agent ID | (none) | Valid agent ID |
+
+Setting `AmazonNovaSonicRegion` also grants the Virtual Participant's task role permission to invoke the Nova model in that region — without it the client would be pointed at a region IAM denies, and the voice assistant would fail to start with an access-denied error rather than anything that reads like a misconfiguration. Only the Nova Sonic model itself moves. The Bedrock calls behind the Virtual Participant's self-healing DOM resolver, the DynamoDB table holding the Nova Sonic configuration you set on the Nova Sonic page, and the meeting-assistant Lambda the voice assistant calls as a tool are all deployed in the stack's region and continue to be reached there.
+
+Nothing validates that Nova Sonic is actually available in the region you name — check the [Amazon Bedrock model support by region](https://docs.aws.amazon.com/bedrock/latest/userguide/models-regions.html) table first. A region where the model is not enabled fails at the first voice interaction with a Bedrock validation error in the Virtual Participant's logs, not at deploy time.
 
 ## Simli Avatar
 

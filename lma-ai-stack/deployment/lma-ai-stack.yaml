@@ -387,7 +387,7 @@ Parameters:
     Default: ""
     Description: >-
       Runtime configuration table for the MicroVM ASR engine. Empty when that
-      engine is not deployed, in which case the ASR Config page is not offered.
+      engine is not deployed, in which case the Transcription Engine page is not offered.
 
   AsrConfigTableArn:
     Type: String

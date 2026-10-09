@@ -94,6 +94,22 @@ _MODEL_FILES: tuple[tuple[str, str, str], ...] = (
 _VAD_MODEL_ENV = "ASR_VAD_MODEL"
 _VAD_MODEL_FILENAME = "silero_vad.onnx"
 
+# A second offline model kind, Qwen3-ASR: convolution frontend + encoder + LLM decoder
+# + tokenizer directory, no joiner or tokens file. Selected by ``ASR_MODEL_KIND``.
+_MODEL_KIND_ENV = "ASR_MODEL_KIND"
+MODEL_KIND_TRANSDUCER = "transducer"
+MODEL_KIND_QWEN3_ASR = "qwen3_asr"
+MODEL_KIND_COHERE_TRANSCRIBE = "cohere_transcribe"
+MODEL_KINDS = (MODEL_KIND_TRANSDUCER, MODEL_KIND_QWEN3_ASR, MODEL_KIND_COHERE_TRANSCRIBE)
+_MODEL_LANGUAGE_ENV = "ASR_MODEL_LANGUAGE"
+_QWEN3_FILES: tuple[tuple[str, str, str], ...] = (
+    ("conv_frontend", "ASR_MODEL_CONV_FRONTEND", "conv_frontend.onnx"),
+    ("tokenizer", "ASR_MODEL_TOKENIZER", "tokenizer"),
+)
+_COHERE_FILES: tuple[tuple[str, str, str], ...] = (
+    ("encoder_data", "ASR_MODEL_ENCODER_DATA", "encoder.int8.onnx.data"),
+)
+
 # 16-bit signed PCM full-scale magnitude (normalise samples to [-1, 1)). Kept in
 # lock-step with :mod:`asr_server.recognizer` / :mod:`asr_server.vad` (same wire
 # contract); duplicated rather than importing a private symbol across modules.
@@ -237,6 +253,12 @@ class SherpaOfflineRecognizer(Recognizer):
         # and resets the gate; decode that trailing utterance so it is not dropped.
         return self._handle_vad_events(self._vad.flush())
 
+    def current_segment(self) -> int:
+        return self._segment
+
+    def open_segment_start(self) -> float | None:
+        return self._seg_start_t
+
     def _handle_vad_events(self, vad_events: Sequence[Any]) -> list[Event]:
         events: list[Event] = []
         for ve in vad_events:
@@ -340,6 +362,15 @@ class OfflineModelConfig:
     model_type: str = "nemo_transducer"
     # Emit one synthetic ``partial`` at each segment close (R4.4 permits it).
     emit_segment_partial: bool = True
+    model_kind: str = MODEL_KIND_TRANSDUCER
+    conv_frontend: Path | None = None
+    tokenizer: Path | None = None
+    encoder_data: Path | None = None
+    language: str = ""
+    # Qwen3-ASR decodes an utterance as one generation and the VAD does not cap
+    # utterance length, so leave room for a long monologue's audio and its text.
+    max_total_len: int = 4096
+    max_new_tokens: int = 1024
 
 
 def build_offline_model_config(
@@ -353,6 +384,11 @@ def build_offline_model_config(
     joiner: str | Path | None = None,
     vad_model: str | Path | None = None,
     num_threads: int | None = None,
+    conv_frontend: str | Path | None = None,
+    tokenizer: str | Path | None = None,
+    encoder_data: str | Path | None = None,
+    language: str | None = None,
+    model_kind: str | None = None,
 ) -> OfflineModelConfig:
     """Resolve an :class:`OfflineModelConfig` from env + optional overrides (NFR5).
 
@@ -373,10 +409,21 @@ def build_offline_model_config(
     root = Path(model_dir) if model_dir is not None else Path(
         os.environ.get("ASR_MODEL_DIR", DEFAULT_MODEL_DIR)
     )
-    overrides = {"tokens": tokens, "encoder": encoder, "decoder": decoder, "joiner": joiner}
+    kind = model_kind or os.environ.get(_MODEL_KIND_ENV, MODEL_KIND_TRANSDUCER)
+    if kind not in MODEL_KINDS:
+        raise ValueError(f"unknown ASR model kind {kind!r}; expected one of {MODEL_KINDS}")
+    overrides = {
+        "tokens": tokens,
+        "encoder": encoder,
+        "decoder": decoder,
+        "joiner": joiner,
+        "conv_frontend": conv_frontend,
+        "tokenizer": tokenizer,
+        "encoder_data": encoder_data,
+    }
 
     resolved: dict[str, Path] = {}
-    for key, env_key, filename in _MODEL_FILES:
+    for key, env_key, filename in _MODEL_FILES + _QWEN3_FILES + _COHERE_FILES:
         override = overrides[key]
         if override is not None:
             resolved[key] = Path(override)
@@ -410,6 +457,15 @@ def build_offline_model_config(
         vad=vad_config,
         sample_rate=sample_rate,
         num_threads=num_threads,
+        model_kind=kind,
+        conv_frontend=resolved["conv_frontend"] if kind == MODEL_KIND_QWEN3_ASR else None,
+        tokenizer=resolved["tokenizer"] if kind == MODEL_KIND_QWEN3_ASR else None,
+        encoder_data=(
+            resolved["encoder_data"] if kind == MODEL_KIND_COHERE_TRANSCRIBE else None
+        ),
+        language=(
+            language if language is not None else os.environ.get(_MODEL_LANGUAGE_ENV, "")
+        ),
     )
 
 
@@ -481,14 +537,35 @@ def _require_offline_model_files(config: OfflineModelConfig) -> None:
     path or an unbuilt model dir surfaces as an actionable ``RuntimeError`` at
     build-time warmup / server startup rather than opaquely inside sherpa-onnx.
     """
-    required = {
-        "tokens": config.tokens,
-        "encoder": config.encoder,
-        "decoder": config.decoder,
-        "joiner": config.joiner,
-        "vad": config.vad.model,
-    }
-    missing = [f"{name} ({path})" for name, path in required.items() if not Path(path).is_file()]
+    if config.model_kind == MODEL_KIND_QWEN3_ASR:
+        required = {
+            "conv_frontend": config.conv_frontend,
+            "encoder": config.encoder,
+            "decoder": config.decoder,
+            "tokenizer": config.tokenizer,
+            "vad": config.vad.model,
+        }
+    elif config.model_kind == MODEL_KIND_COHERE_TRANSCRIBE:
+        required = {
+            "tokens": config.tokens,
+            "encoder": config.encoder,
+            "encoder_data": config.encoder_data,
+            "decoder": config.decoder,
+            "vad": config.vad.model,
+        }
+    else:
+        required = {
+            "tokens": config.tokens,
+            "encoder": config.encoder,
+            "decoder": config.decoder,
+            "joiner": config.joiner,
+            "vad": config.vad.model,
+        }
+    missing = [
+        f"{name} ({path})"
+        for name, path in required.items()
+        if path is None or not Path(path).exists()
+    ]
     if missing:
         raise RuntimeError(
             "ASR model files are missing: "
@@ -508,6 +585,28 @@ def _build_offline_recognizer(config: OfflineModelConfig) -> Any:
     """
     sherpa = _load_sherpa()
     _require_offline_model_files(config)
+    if config.model_kind == MODEL_KIND_QWEN3_ASR:
+        return sherpa.OfflineRecognizer.from_qwen3_asr(
+            conv_frontend=str(config.conv_frontend),
+            encoder=str(config.encoder),
+            decoder=str(config.decoder),
+            tokenizer=str(config.tokenizer),
+            num_threads=config.num_threads,
+            sample_rate=config.sample_rate,
+            provider=config.provider,
+            max_total_len=config.max_total_len,
+            max_new_tokens=config.max_new_tokens,
+        )
+    if config.model_kind == MODEL_KIND_COHERE_TRANSCRIBE:
+        return sherpa.OfflineRecognizer.from_cohere_transcribe(
+            encoder=str(config.encoder),
+            decoder=str(config.decoder),
+            tokens=str(config.tokens),
+            num_threads=config.num_threads,
+            language=config.language,
+            decoding_method=config.decoding_method,
+            provider=config.provider,
+        )
     return sherpa.OfflineRecognizer.from_transducer(
         tokens=str(config.tokens),
         encoder=str(config.encoder),
@@ -594,6 +693,9 @@ class SherpaOfflineEngine(RecognizerEngine):
             min_silence_ms=min_silence_ms,
             min_speech_ms=self._config.vad.min_speech_ms,
             speech_pad_ms=self._config.vad.speech_pad_ms,
+            max_speech_ms=self._config.vad.max_speech_ms,
+            long_speech_ms=self._config.vad.long_speech_ms,
+            long_speech_silence_ms=self._config.vad.long_speech_silence_ms,
         )
         backend = _SherpaOfflineBackend(self._offline_recognizer, lock=self._lock)
         return SherpaOfflineRecognizer(

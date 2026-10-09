@@ -38,6 +38,22 @@ from graphql_helpers import (
 )
 from sns_utils import publish_sns
 
+# The AWS-free computation, split out so it can be tested without importing this
+# module (which needs aiohttp, powertools and the layer on the path). See pure.py.
+from pure import (  # noqa: E402
+    ChannelType,
+    Sentiment,
+    SentimentByPeriodEntry,
+    SentimentEntry,
+    SentimentLabelType,
+    SentimentPeriodType,
+    SentimentPerChannel,
+    convert_keys_to_uppercamelcase,
+    get_sentiment_per_quarter,
+    matches_wake_phrase,
+    merge_dicts,
+)
+
 # pylint: enable=import-error
 if TYPE_CHECKING:
     from boto3 import Session as Boto3Session
@@ -114,48 +130,6 @@ CUSTOMER_PHONE_NUMBER = ""
 CALL_ID = ""
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
-
-SentimentLabelType = Literal["NEGATIVE", "MIXED", "NEUTRAL", "POSITIVE"]
-ChannelType = Literal["AGENT", "CALLER"]
-StatusType = Literal["STARTED", "TRANSCRIBING", "ERRORED", "ENDED"]
-SentimentPeriodType = Literal["QUARTER"]
-
-
-class SentimentEntry(TypedDict):
-    """Sentiment Shape
-    Held in a list per channel
-    """
-
-    Id: str
-    BeginOffsetMillis: float
-    EndOffsetMillis: float
-    Sentiment: SentimentLabelType
-    Score: float
-
-
-class SentimentPerChannel(TypedDict):
-    """StatePerChannel Shape
-    Holds state per channel under StatePerCallId. Use to keep values needed
-    for statistics and aggregations.
-    """
-
-    SentimentList: List[SentimentEntry]
-
-
-class SentimentByPeriodEntry(TypedDict):
-    """Sentiment By Period Shape"""
-
-    BeginOffsetMillis: float
-    EndOffsetMillis: float
-    Score: float
-
-
-class Sentiment(TypedDict):
-    """Sentiment Shape"""
-
-    OverallSentiment: Dict[ChannelType, float]
-    SentimentByPeriod: Dict[SentimentPeriodType, Dict[ChannelType, List[SentimentByPeriodEntry]]]
-
 
 ##########################################################################
 # Transcripts
@@ -451,55 +425,6 @@ async def execute_get_transcript_segments_query(
     return result
 
 
-def _get_sentiment_per_quarter(
-    sentiment_list: List[SentimentEntry],
-) -> List[SentimentByPeriodEntry]:
-    sorted_sentiment = sorted(sentiment_list, key=lambda i: i["BeginOffsetMillis"])
-    min_begin_time: float = (
-        min(
-            sorted_sentiment,
-            key=lambda i: i["BeginOffsetMillis"],
-        ).get("BeginOffsetMillis", 0.0)
-        if sorted_sentiment
-        else 0.0
-    )
-    max_end_time: float = (
-        max(sorted_sentiment, key=lambda i: i["EndOffsetMillis"]).get("EndOffsetMillis", 0.0)
-        if sorted_sentiment
-        else 0.0
-    )
-    time_range: float = max_end_time - min_begin_time
-    time_ranges = (
-        (
-            max((min_begin_time + time_range * i / 4), min_begin_time),
-            min((min_begin_time + time_range * (i + 1) / 4), max_end_time),
-        )
-        for i in range(4)
-    )
-    quarters = (
-        [
-            s
-            for s in sorted_sentiment
-            if s["EndOffsetMillis"] > time_range[0] and s["EndOffsetMillis"] <= time_range[1]
-        ]
-        for time_range in time_ranges
-    )
-    sentiment_per_quarter = [
-        SentimentByPeriodEntry(
-            {
-                "Score": fmean((i["Score"] for i in quarter)) if quarter else 0,
-                "BeginOffsetMillis": (
-                    min((i["BeginOffsetMillis"] for i in quarter)) if quarter else 0
-                ),
-                "EndOffsetMillis": (max((i["EndOffsetMillis"] for i in quarter)) if quarter else 0),
-            }
-        )
-        for quarter in quarters
-    ]
-
-    return sentiment_per_quarter
-
-
 async def get_aggregated_sentiment(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -551,7 +476,7 @@ async def get_aggregated_sentiment(
         sentiment_scores = [i["Score"] for i in sentiment_list]
         sentiment_average = fmean(sentiment_scores) if sentiment_scores else 0
 
-        sentiment_per_quarter = _get_sentiment_per_quarter(sentiment_list) if sentiment_list else []
+        sentiment_per_quarter = get_sentiment_per_quarter(sentiment_list) if sentiment_list else []
 
         overall_sentiment[channel] = sentiment_average
         sentiment_by_period_by_channel[channel] = sentiment_per_quarter
@@ -1280,25 +1205,9 @@ def add_contact_lens_agent_assistances(
 ##########################################################################
 
 
-def convert_keys_to_uppercamelcase(d):
-    new_dict = {}
-    for k, v in d.items():
-        if isinstance(v, dict):
-            new_dict[k[0].upper() + k[1:]] = convert_keys_to_uppercamelcase(v)
-        else:
-            new_dict[k[0].upper() + k[1:]] = v
-    return new_dict
-
-
 ##########################################################################
 # merge dicts
 ##########################################################################
-
-
-def merge_dicts(d1, d2):
-    new_dict = d1.copy()
-    new_dict.update(d2)
-    return new_dict
 
 
 ##########################################################################
@@ -1332,16 +1241,6 @@ def send_call_session_mapping_event(call_id, session_id):
 ##########################################################################
 # check for agent assist wake phrase
 ##########################################################################
-def isAssistantWakePhrase(transcript):
-    LOGGER.debug(
-        "Checking for Assistant Wake Phrase Regex match '%s'", SETTINGS["AssistantWakePhraseRegEx"]
-    )
-    if SETTINGS["AssistantWakePhraseRegEx"].search(transcript):
-        LOGGER.debug("Assistant Wake Phrase detected: %s", transcript)
-        return True
-    return False
-
-
 ##########################################################################
 # Main event processing
 ##########################################################################
@@ -1587,7 +1486,10 @@ async def execute_process_event_api_mutation(
                 and (
                     not normalized_message["IsPartial"] or "ContactId" in normalized_message.keys()
                 )
-                and isAssistantWakePhrase(normalized_message["Transcript"])
+                and matches_wake_phrase(
+                    SETTINGS.get("AssistantWakePhraseRegEx"),
+                    normalized_message["Transcript"],
+                )
             ):
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN,

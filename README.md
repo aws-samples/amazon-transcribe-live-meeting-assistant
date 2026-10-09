@@ -25,7 +25,7 @@ https://github.com/user-attachments/assets/7642f659-ed9e-4abf-8baf-2f6fb27b08cb
 - **AI meeting assistant** — Strands Agents SDK with Amazon Bedrock, with built-in tools for transcript search, web search, document search, and meeting history
 - **MCP server integration** — Extend the assistant with external tools (Salesforce, Amazon Quick Suite, custom servers)
 - **On-demand and automatic summaries** — Generate summaries, action items, and insights during and after meetings
-- **Virtual Participant** — Headless Chrome bot joins Zoom, Teams, Chime, Google Meet, and WebEx meetings
+- **Virtual Participant** — Headless Chrome bot joins Zoom, Teams, Chime, and WebEx meetings
 - **Desktop Capture App** — Native macOS / Windows menu-bar app captures system + microphone audio (and optionally screen video) for meetings joined from a native desktop app — no browser tab, no bot
 - **Voice assistant** — Nova Sonic 2 or ElevenLabs voice responses with optional Simli animated avatar
 - **Translator Mode** — Real-time bidirectional AI interpreter that joins meetings via the Virtual Participant and speaks each utterance in the other language

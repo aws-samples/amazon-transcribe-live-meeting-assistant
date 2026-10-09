@@ -282,7 +282,7 @@ def list_calls_date_range(event):
         call_ids = [it["CallId"] for it in list_items if it.get("CallId")]
         details = _batch_get_call_details(table, call_ids)
 
-        for list_item in list_items:
+        for position, list_item in enumerate(list_items):
             call_id = list_item.get("CallId")
             detail = details.get(call_id, {})
             merged = _merge_list_into_call(list_item, detail)
@@ -290,6 +290,30 @@ def list_calls_date_range(event):
                 continue
             collected.append(merged)
             if len(collected) >= limit:
+                # Rows after this one in the page have not been returned. If any
+                # remain, resume from THIS row rather than from the page's
+                # LastEvaluatedKey, which is past all of them and would drop them
+                # from every subsequent page.
+                #
+                # Unreachable on the first page, where the query's Limit equals
+                # the caller's limit, so a page cannot hold more than `limit`
+                # rows. It becomes reachable as soon as the entitlement filter
+                # removes anything: page one comes back short, page two is
+                # fetched, and page two fills the limit part-way through.
+                #
+                # When the cut falls on the page's last row there is nothing
+                # after it, so the page's own key stands -- and when that key is
+                # absent the listing has genuinely ended and must report no
+                # token, or the UI's loader spins forever.
+                #
+                # TypeDateIndex is keyed on (ItemType, SK) and the table on
+                # (PK, SK), so a GSI resume key needs all three.
+                if position < len(list_items) - 1:
+                    last_key = {
+                        key: list_item[key]
+                        for key in ("ItemType", "PK", "SK")
+                        if key in list_item
+                    }
                 break
 
         if not last_key:
