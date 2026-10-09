@@ -20,7 +20,14 @@ let metadata = {
 };
 
 const reportMetadata = function () {
-  console.log("Sending Metadata:", metadata);
+  // Only the fields the panel uses are logged. MeetingConfig is Zoom's object
+  // and is spread into `metadata` wholesale, so logging all of it would put
+  // whatever else Zoom keeps in there into the page console.
+  console.log("Sending Metadata:", {
+    baseUrl: metadata.baseUrl,
+    userName: metadata.userName,
+    meetingTopic: metadata.meetingTopic
+  });
   // The side panel may not be open, in which case there is no receiver. That is
   // not a failure worth surfacing: the panel asks again when it opens.
   try {
@@ -190,7 +197,7 @@ window.addEventListener("message", (event) => {
   if (event.origin !== window.location.origin) return;
   
   if (event.data.type && (event.data.type == "MeetingConfig")) {
-    console.log("received value from page: ", event.data.value);
+    console.log("received meeting config from page");
     meetingConfig = event.data.value;
     metadata = Object.assign({}, meetingConfig, { baseUrl: window.location.origin });
     reportMetadata();

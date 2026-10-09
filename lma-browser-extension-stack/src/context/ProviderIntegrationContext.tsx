@@ -9,7 +9,7 @@ import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
-import { applyMuteAndPause, formatTimestamp, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, UNKNOWN_PLATFORM } from '../lib/capture';
+import { applyMuteAndPause, formatTimestamp, MeetingMetadata, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, ReportSource, UNKNOWN_PLATFORM } from '../lib/capture';
 
 type Call = {
   callEvent: string,
@@ -31,10 +31,7 @@ const initialIntegration = {
   fetchMetadata: () => { },
   startTranscription: (user: any, userName: string, meetingTopic: string) => { },
   stopTranscription: () => { },
-  metadata: {
-    userName: "",
-    meetingTopic: ""
-  },
+  metadata: { userName: "", meetingTopic: "" } as MeetingMetadata,
   platform: "n/a",
   activeSpeaker: "n/a",
   sendRecordingMessage: () => { }
@@ -46,10 +43,9 @@ function IntegrationProvider({ children }: any) {
   const [currentCall, setCurrentCall] = useState({} as Call);
   const { user, checkTokenExpired, login } = useUserContext();
   const settings = useSettings();
-  const [metadata, setMetadata] = useState({
-    userName: "",
-    meetingTopic: ""
-  });
+  // Open-ended: the Zoom reader forwards fields out of Zoom's own MeetingConfig,
+  // so neither field is guaranteed to be present or to be a string.
+  const [metadata, setMetadata] = useState<MeetingMetadata>({ userName: "", meetingTopic: "" });
   const [platform, setPlatform] = useState("n/a");
   const [activeSpeaker, setActiveSpeaker] = useState("n/a");
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -94,15 +90,26 @@ function IntegrationProvider({ children }: any) {
   // that a partial update can be folded into it without `updateMetadata`
   // depending on the `metadata` state and being rebuilt on every change.
   const knownMetadata = useRef<MetadataForTab>({
+    source: {},
     metadata: { userName: "", meetingTopic: "" },
   });
 
-  const updateMetadata = useCallback((newMetadata: any, tabId?: number) => {
+  // The tab the panel is showing. Every reader now reports unprompted when its
+  // page becomes ready, so without this a meeting-platform tab opened in the
+  // background would re-point the panel away from the tab being captured.
+  const subjectTabId = useRef<number | undefined>(undefined);
+
+  const updateMetadata = useCallback((newMetadata: any, source: ReportSource = {}) => {
     if (!newMetadata) {
       // A reader that had nothing to say, or a tab with no reader at all.
       return;
     }
-    const known = mergeMetadataForTab(knownMetadata.current, newMetadata, tabId);
+    if (source.tabId !== undefined && subjectTabId.current !== undefined
+      && source.tabId !== subjectTabId.current) {
+      console.log("Ignoring metadata from a tab the panel is not showing", source.tabId);
+      return;
+    }
+    const known = mergeMetadataForTab(knownMetadata.current, newMetadata, source);
     knownMetadata.current = known;
     const merged = known.metadata;
 
@@ -119,10 +126,16 @@ function IntegrationProvider({ children }: any) {
   const fetchMetadata = async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab && tab.id) {
+      subjectTabId.current = tab.id;
       try {
-        const response = await chrome.tabs.sendMessage(tab.id, { action: "FetchMetadata" });
+        // Only the top frame. With `all_frames` enabled every frame holding a
+        // reader answers, and Chrome keeps whichever replies first — which may
+        // be a frame that has found less than another one has.
+        const response = await chrome.tabs.sendMessage(
+          tab.id, { action: "FetchMetadata" }, { frameId: 0 },
+        );
         console.log("Received response from Metadata query!", response);
-        updateMetadata(response, tab.id);
+        updateMetadata(response, { tabId: tab.id, url: tab.url });
       } catch (error) {
         // No reader in this tab, or it did not answer. The platform stays as it
         // was and the user fills the fields in by hand.
@@ -135,7 +148,13 @@ function IntegrationProvider({ children }: any) {
   const sendRecordingMessage = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab && tab.id) {
-      const response = await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: settings.recordingMessage });
+      try {
+        await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: settings.recordingMessage });
+      } catch (error) {
+        // No reader in this tab to post the notice. Neither caller awaits this,
+        // so an unhandled rejection is the alternative.
+        console.log("Unable to send the chat message to this tab", error);
+      }
     }
     return {};
   }, [settings]);
@@ -143,7 +162,13 @@ function IntegrationProvider({ children }: any) {
   const sendStopMessage = useCallback(async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab && tab.id) {
-      const response = await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: settings.stopRecordingMessage });
+      try {
+        await chrome.tabs.sendMessage(tab.id, { action: "SendChatMessage", message: settings.stopRecordingMessage });
+      } catch (error) {
+        // No reader in this tab to post the notice. Neither caller awaits this,
+        // so an unhandled rejection is the alternative.
+        console.log("Unable to send the chat message to this tab", error);
+      }
     }
     return {};
   }, [settings]);
@@ -205,7 +230,10 @@ function IntegrationProvider({ children }: any) {
         } else if (request.action === "UpdateMetadata") {
           // Scoped to the reporting tab, so one meeting's topic is not carried
           // into the next. Messages from the panel itself have no `sender.tab`.
-          updateMetadata(request.metadata, sender && sender.tab ? sender.tab.id : undefined);
+          updateMetadata(
+            request.metadata,
+            sender && sender.tab ? { tabId: sender.tab.id, url: sender.tab.url } : {},
+          );
         } else if (request.action === "SamplingRate") {
           // This event should only bubble up once at the start of recording in the injected code
           currentCall.samplingRate = request.samplingRate;
@@ -231,9 +259,26 @@ function IntegrationProvider({ children }: any) {
       // Clean up the listener when the component unmounts
       return () => chrome.runtime.onMessage.removeListener(handleRuntimeMessage);
     }
-  }, [currentCall, metadata, readyState, muted, paused, activeSpeaker, isTranscribing, setMuted,
+    // `metadata` is deliberately absent: the handler no longer reads it, and
+    // including it re-registered the listener on every reader report.
+  }, [currentCall, readyState, muted, paused, activeSpeaker, isTranscribing, setMuted,
     setActiveSpeaker, sendMessage, setPlatform, setIsTranscribing, sendRecordingMessage, updateMetadata
   ]);
+
+  // Follow the user to another meeting tab. Needed because reports from tabs the
+  // panel is not showing are ignored, which would otherwise leave the panel
+  // stuck on whichever tab was active when it opened. Not while transcribing:
+  // the meeting being captured is the one whose details belong on screen.
+  useEffect(() => {
+    if (!chrome.tabs || !chrome.tabs.onActivated || isTranscribing) {
+      return;
+    }
+    const handleTabActivated = () => { fetchMetadata(); };
+    chrome.tabs.onActivated.addListener(handleTabActivated);
+    return () => chrome.tabs.onActivated.removeListener(handleTabActivated);
+    // Only `isTranscribing`: `fetchMetadata` is redefined on every render and
+    // listing it would re-register the listener each time for no benefit.
+  }, [isTranscribing]);
 
   return (
     <IntegrationContext.Provider value={{

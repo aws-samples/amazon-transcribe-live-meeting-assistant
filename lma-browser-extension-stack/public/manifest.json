@@ -62,7 +62,8 @@
     },
     {
       "matches": [
-        "https://teams.live.com/*"
+        "https://teams.live.com/*",
+        "https://*.teams.live.com/*"
       ],
       "js": [
         "content_scripts/mutation-summary.js",

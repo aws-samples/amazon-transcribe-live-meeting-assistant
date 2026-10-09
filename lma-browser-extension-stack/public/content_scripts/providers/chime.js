@@ -37,6 +37,29 @@ const sendChatMessage = function (message) {
   }
 }
 
+/**
+ * Report whatever is known about the meeting, however little that is.
+ *
+ * `baseUrl` is set the moment this script loads, so the panel can always name
+ * the platform even when a name or topic selector finds nothing.
+ */
+const reportMetadata = function () {
+  console.log("Sending Metadata:", metadata);
+  // The side panel may not be open, in which case there is no receiver. That is
+  // not a failure worth surfacing: the panel asks again when it opens.
+  try {
+    const sent = chrome.runtime.sendMessage({
+      action: "UpdateMetadata",
+      metadata: metadata
+    });
+    if (sent && typeof sent.catch === 'function') {
+      sent.catch(() => { });
+    }
+  } catch (error) {
+    console.log("Unable to send metadata; the panel is not listening.");
+  }
+}
+
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "FetchMetadata") {
     // Answer straight away with what is already known: the scrape below is
@@ -78,10 +101,7 @@ const checkForMeetingMetadata = function() {
       metadata.meetingTopic = title;
     }
 
-    chrome.runtime.sendMessage({
-      action: "UpdateMetadata",
-      metadata: metadata
-    });
+    reportMetadata();
   }, 2000);
 }
 

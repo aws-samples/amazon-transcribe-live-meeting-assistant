@@ -93,7 +93,14 @@ function Capture() {
 
   const startListening = useCallback(() => {
     // eslint-disable-next-line no-useless-escape
-    setTopic(topic.replace(/[\/?#%\+&]/g, '|'));
+    const sanitized = topic.replace(/[\/?#%\+&]/g, '|');
+    // Recorded as the prefilled value too, when that is what it came from:
+    // sanitizing it would otherwise look like the user had edited the field,
+    // and it would stop tracking the meeting page from here on.
+    if (topic === prefilled.current.topic) {
+      prefilled.current.topic = sanitized;
+    }
+    setTopic(sanitized);
 
     if (validateForm() === false) {
       return;

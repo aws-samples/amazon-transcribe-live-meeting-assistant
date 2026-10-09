@@ -244,46 +244,112 @@ describe('mergeMetadata', () => {
 });
 
 describe('mergeMetadataForTab', () => {
-  const onTabOne = {
-    tabId: 1,
+  const MEETING_A = 'https://app.zoom.us/wc/81111111111/join';
+  const MEETING_B = 'https://app.zoom.us/wc/82222222222/join';
+  const onMeetingA = {
+    source: { tabId: 1, url: MEETING_A },
     metadata: { userName: 'Ada Lovelace', meetingTopic: 'Monday standup' },
   };
 
-  it('merges an update from the same tab', () => {
-    const known = mergeMetadataForTab(onTabOne, { baseUrl: 'https://teams.cloud.microsoft' }, 1);
+  it('merges a report from the same page', () => {
+    const known = mergeMetadataForTab(
+      onMeetingA,
+      { baseUrl: 'https://app.zoom.us' },
+      { tabId: 1, url: MEETING_A },
+    );
     expect(known.metadata.meetingTopic).toBe('Monday standup');
-    expect(known.metadata.baseUrl).toBe('https://teams.cloud.microsoft');
-    expect(known.tabId).toBe(1);
+    expect(known.metadata.baseUrl).toBe('https://app.zoom.us');
+    expect(known.source.tabId).toBe(1);
   });
 
   it('does not carry a topic from one tab into another', () => {
     // The topic becomes the meeting's name in LMA. A meeting whose own reader
     // found no topic must not be recorded under the previous meeting's name.
-    const known = mergeMetadataForTab(onTabOne, { baseUrl: 'https://app.zoom.us' }, 2);
+    const known = mergeMetadataForTab(
+      onMeetingA,
+      { baseUrl: 'https://teams.cloud.microsoft' },
+      { tabId: 2, url: 'https://teams.cloud.microsoft/v2/' },
+    );
     expect(known.metadata.meetingTopic).toBeUndefined();
     expect(known.metadata.userName).toBeUndefined();
-    expect(known.metadata.baseUrl).toBe('https://app.zoom.us');
-    expect(known.tabId).toBe(2);
+    expect(known.metadata.baseUrl).toBe('https://teams.cloud.microsoft');
+    expect(known.source.tabId).toBe(2);
   });
 
-  it('treats an update with no tab as belonging to the tab in hand', () => {
+  it('does not carry a topic into a second meeting held in the same tab', () => {
+    // A tab keeps its id across navigation, so the tab id alone would treat a
+    // succession of meetings in one tab as a single meeting — and the second
+    // one would be recorded under the first one's name whenever its own reader
+    // found no topic, which on Zoom is whenever MeetingConfig does not appear.
+    const known = mergeMetadataForTab(
+      onMeetingA,
+      { baseUrl: 'https://app.zoom.us' },
+      { tabId: 1, url: MEETING_B },
+    );
+    expect(known.metadata.meetingTopic).toBeUndefined();
+    expect(known.metadata.userName).toBeUndefined();
+    expect(known.source.url).toBe(MEETING_B);
+  });
+
+  it('ignores a query string or fragment change within one meeting', () => {
+    // Both platforms rewrite these while a meeting is in progress, and a reset
+    // would throw away fields the panel is already showing.
+    const known = mergeMetadataForTab(
+      { source: { tabId: 1, url: MEETING_A }, metadata: { meetingTopic: 'Monday standup' } },
+      { baseUrl: 'https://app.zoom.us' },
+      { tabId: 1, url: `${MEETING_A}?from=join&pwd=xyz#success` },
+    );
+    expect(known.metadata.meetingTopic).toBe('Monday standup');
+  });
+
+  it('does not distinguish meetings that differ only in the fragment', () => {
+    // Documents the known limit rather than claiming more than the code does:
+    // Teams keeps the meeting id at `/v2/#/meet/<id>`, so two Teams meetings in
+    // one tab look like one page here. What covers that case instead is the
+    // Teams reader re-reading the page title on every report.
+    const known = mergeMetadataForTab(
+      {
+        source: { tabId: 1, url: 'https://teams.cloud.microsoft/v2/#/meet/19:aaa' },
+        metadata: { meetingTopic: 'Monday standup' },
+      },
+      { baseUrl: 'https://teams.cloud.microsoft' },
+      { tabId: 1, url: 'https://teams.cloud.microsoft/v2/#/meet/19:bbb' },
+    );
+    expect(known.metadata.meetingTopic).toBe('Monday standup');
+  });
+
+  it('treats a report with no source as belonging to the page in hand', () => {
     // Nothing better to assume, and discarding would blank fields the panel has
     // already shown.
-    const known = mergeMetadataForTab(onTabOne, { baseUrl: 'https://teams.cloud.microsoft' });
+    const known = mergeMetadataForTab(onMeetingA, { baseUrl: 'https://teams.cloud.microsoft' });
     expect(known.metadata.meetingTopic).toBe('Monday standup');
-    expect(known.tabId).toBe(1);
+    expect(known.source.tabId).toBe(1);
   });
 
-  it('adopts the first tab it hears from', () => {
-    const known = mergeMetadataForTab({ metadata: {} }, { userName: 'Ada Lovelace' }, 7);
-    expect(known.tabId).toBe(7);
+  it('adopts the first page it hears from', () => {
+    const known = mergeMetadataForTab(
+      { source: {}, metadata: {} },
+      { userName: 'Ada Lovelace' },
+      { tabId: 7, url: MEETING_A },
+    );
+    expect(known.source.tabId).toBe(7);
+    expect(known.source.url).toBe(MEETING_A);
     expect(known.metadata.userName).toBe('Ada Lovelace');
   });
 
+  it('does not treat an unparseable address as a page change on its own', () => {
+    const known = mergeMetadataForTab(
+      { source: { tabId: 1, url: 'not a url' }, metadata: { meetingTopic: 'Monday standup' } },
+      { baseUrl: 'https://app.zoom.us' },
+      { tabId: 1, url: 'not a url' },
+    );
+    expect(known.metadata.meetingTopic).toBe('Monday standup');
+  });
+
   it('does not mutate what it was given', () => {
-    mergeMetadataForTab(onTabOne, { meetingTopic: 'Tuesday review' }, 2);
-    expect(onTabOne.metadata.meetingTopic).toBe('Monday standup');
-    expect(onTabOne.tabId).toBe(1);
+    mergeMetadataForTab(onMeetingA, { meetingTopic: 'Tuesday review' }, { tabId: 2, url: MEETING_B });
+    expect(onMeetingA.metadata.meetingTopic).toBe('Monday standup');
+    expect(onMeetingA.source.tabId).toBe(1);
   });
 });
 

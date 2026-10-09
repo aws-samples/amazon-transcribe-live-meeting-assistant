@@ -77,15 +77,25 @@ const TEAMS_PAGE_SECTIONS = [
 /**
  * The meeting topic a Teams page title carries, or '' if it is not a meeting.
  *
- * Teams titles a meeting tab "<topic> | Microsoft Teams", so the app name is
- * dropped. Its own sections are titled the same way, and prefilling the topic
- * field with "Chat" would be worse than leaving it for the user to type.
+ * Teams titles a meeting tab "<topic> | Microsoft Teams", so only that trailing
+ * segment is dropped — splitting on the first pipe instead would read a meeting
+ * called "Platform | Weekly sync" as just "Platform".
+ *
+ * Teams titles its own sections the same way, and decorates them with an unread
+ * count ("(3) Chat | Microsoft Teams"), so the count is stripped before the
+ * section names are checked. Prefilling the topic field with "Chat" would be
+ * worse than leaving it for the user to type. The section list is English, so a
+ * localised Teams can still get a section name through; the field is editable
+ * and the value is re-read on every report, so it corrects itself on joining.
  */
 const topicFromPageTitle = function (pageTitle) {
   if (!pageTitle) {
     return '';
   }
-  const topic = pageTitle.split('|')[0].trim();
+  const topic = pageTitle
+    .replace(/\s*\|\s*Microsoft Teams\s*$/i, '')
+    .replace(/^\s*\(\d+\)\s*/, '')
+    .trim();
   if (!topic || TEAMS_PAGE_SECTIONS.indexOf(topic.toLowerCase()) !== -1) {
     return '';
   }
@@ -121,7 +131,9 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
     // Answer straight away with what is already known: the scrape below is
     // asynchronous, and an unanswered request leaves the panel with nothing.
     sendResponse(metadata);
-    checkForMeetingMetadata();
+    // The user is looking at the panel waiting for these fields, so the account
+    // menu may be opened to read the display name.
+    checkForMeetingMetadata(true);
   }
   if (request.action === "SendChatMessage") {
     console.log("received request to send a chat message");
@@ -136,11 +148,23 @@ chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   }
 });
 
-const checkForMeetingMetadata = function () {
+/**
+ * Scrape the name and topic, then report.
+ *
+ * `allowInteraction` gates the one step that changes the page rather than just
+ * reading it: opening the account menu to read the display name out of it. That
+ * is acceptable when the user has just opened the panel and is waiting for the
+ * fields to fill, and not acceptable on every page load — which is what it
+ * would be, now that the page-ready path runs reliably. The passive fallbacks
+ * below run either way.
+ */
+const checkForMeetingMetadata = function (allowInteraction) {
   setTimeout(() => {
     if (!metadata.userName || metadata.userName.trim() === '') {
       //get the user
-      const avatarButton = document.querySelector('button[data-tid="me-control-avatar-trigger"]');
+      const avatarButton = allowInteraction
+        ? document.querySelector('button[data-tid="me-control-avatar-trigger"]')
+        : null;
       // Check if the button element is found
       if (avatarButton) {
         // Simulate a click on the button
@@ -194,24 +218,25 @@ const checkForMeetingMetadata = function () {
         }
       }
     }
-    if (!metadata.meetingTopic || metadata.meetingTopic.trim() === '') {
-      /* const showMoreButton = document.getElementById('callingButtons-showMoreBtn');
-      if (showMoreButton) {
-        showMoreButton.click();
-      }
-      const meetingInfoButton = document.querySelector('[aria-label="Meeting info"]');
-      if (meetingInfoButton) {
-        meetingInfoButton.click();
-      } */
-      //const meetingTitle = document.querySelector('[data-tid="call-title"]');
-      // Independent of the display name, which used to gate this: the page title
-      // is there either way, and a name we failed to scrape says nothing about
-      // whether there is a topic to read.
-      const meetingTitle = topicFromPageTitle(document.title);
-      if (meetingTitle) {
-        metadata.meetingTopic = meetingTitle;
-        //setInterval(checkAndClickRoster, 2000);
-      }
+    /* const showMoreButton = document.getElementById('callingButtons-showMoreBtn');
+    if (showMoreButton) {
+      showMoreButton.click();
+    }
+    const meetingInfoButton = document.querySelector('[aria-label="Meeting info"]');
+    if (meetingInfoButton) {
+      meetingInfoButton.click();
+    } */
+    //const meetingTitle = document.querySelector('[data-tid="call-title"]');
+    // Re-read on every scrape rather than keeping the first value found.
+    // Teams is a single-page app, so this script loads once and then the user
+    // navigates and joins without a reload; a title read before they joined
+    // would otherwise be the one reported for the meeting. Independent of the
+    // display name, which used to gate it: a name we failed to scrape says
+    // nothing about whether there is a topic to read.
+    const meetingTitle = topicFromPageTitle(document.title);
+    if (meetingTitle) {
+      metadata.meetingTopic = meetingTitle;
+      //setInterval(checkAndClickRoster, 2000);
     }
     reportMetadata();
   }, 2000);
@@ -377,7 +402,8 @@ const onPageReady = function () {
     }
   }, 2000);
 
-  checkForMeetingMetadata();
+  // No interaction on page load: nothing is waiting on these fields yet.
+  checkForMeetingMetadata(false);
   // startObserver();
   // setInterval(checkAndStartObserver, 5000);
 };

@@ -40,7 +40,12 @@ function claimsOf(jwt: string): { [claim: string]: unknown } {
     // JWTs are base64url: restore the base64 alphabet and the padding `atob` wants.
     const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
     const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-    const claims = JSON.parse(atob(padded));
+    // `atob` yields one character per decoded *byte*, so the claims have to be
+    // read back through a UTF-8 decoder. Taking its output as a string instead
+    // would turn every accented or non-Latin character of someone's name into
+    // mojibake, and that name labels their speech in the transcript.
+    const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+    const claims = JSON.parse(new TextDecoder().decode(bytes));
     return (claims && typeof claims === 'object') ? claims : {};
   } catch (error) {
     // Logged without the error, which would carry token material into the console.
@@ -62,6 +67,13 @@ export function nameFromIdToken(idToken: string | undefined | null): string {
   }
   const claims = claimsOf(idToken);
 
+  // `name` first, as NAME_CLAIMS says: a federated pool often maps all three,
+  // and the identity provider's single `name` is the one the user recognises.
+  // given+family is the fallback for pools that only populate the parts.
+  const name = typeof claims.name === 'string' ? claims.name.trim() : '';
+  if (name) {
+    return name;
+  }
   const given = typeof claims.given_name === 'string' ? claims.given_name.trim() : '';
   const family = typeof claims.family_name === 'string' ? claims.family_name.trim() : '';
   if (given && family) {

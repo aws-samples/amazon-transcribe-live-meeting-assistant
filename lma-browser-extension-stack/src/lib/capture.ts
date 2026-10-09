@@ -92,34 +92,83 @@ export function mergeMetadata(
   return merged;
 }
 
-/** What is known about a meeting, and which tab it was read from. */
-export type MetadataForTab = {
+/** Which page a reader's report came from: its tab, and that tab's address. */
+export type ReportSource = {
   tabId?: number;
+  url?: string;
+};
+
+/** What is known about a meeting, and which page it was read from. */
+export type MetadataForTab = {
+  source: ReportSource;
   metadata: MeetingMetadata;
 };
 
 /**
- * Fold a reader's update into what is known, scoped to the tab it came from.
+ * Is a report from the same meeting page as what is already known?
  *
- * Merging is only right within one tab. Across tabs it would carry a previous
- * meeting's topic into the next one, and the topic becomes the meeting's name in
- * LMA — so a meeting whose own reader found no topic would be recorded under the
- * name of the one before it. An update from a different tab therefore starts
- * from nothing instead of from what the last tab reported.
+ * The tab id alone is not enough. A tab keeps its id across navigation, so one
+ * tab hosts a succession of meetings and the address is what changes between
+ * them. Both are compared, with the query string and fragment dropped, since
+ * both platforms rewrite those within a single meeting and a spurious reset
+ * would throw away fields the panel has.
  *
- * An update with no tab attached is treated as belonging to the tab in hand,
- * since there is nothing better to assume and the alternative discards what the
- * panel has already shown the user.
+ * That limit is worth stating: a platform that keeps the meeting id in the
+ * fragment — Teams, at `/v2/#/meet/<id>` — is not distinguished here, so two
+ * Teams meetings in one tab look like one page. What covers that is the Teams
+ * reader re-reading the page title on every report rather than caching the
+ * first one it saw.
+ *
+ * A report that carries neither tab nor address is treated as belonging to the
+ * page in hand: there is nothing better to assume, and the alternative discards
+ * what the panel has already shown the user.
+ */
+function isSamePage(known: ReportSource, incoming: ReportSource): boolean {
+  if (incoming.tabId === undefined && incoming.url === undefined) {
+    return true;
+  }
+  if (incoming.tabId !== undefined && known.tabId !== undefined
+    && incoming.tabId !== known.tabId) {
+    return false;
+  }
+  const pagePath = (url: string | undefined): string => {
+    if (!url) {
+      return '';
+    }
+    try {
+      const parsed = new URL(url);
+      return `${parsed.origin}${parsed.pathname}`;
+    } catch {
+      return url;
+    }
+  };
+  if (incoming.url !== undefined && known.url !== undefined) {
+    return pagePath(incoming.url) === pagePath(known.url);
+  }
+  return true;
+}
+
+/**
+ * Fold a reader's update into what is known, scoped to the page it came from.
+ *
+ * Merging is only right within one meeting. Carried across meetings it would
+ * bring a previous one's topic into the next, and the topic becomes the
+ * meeting's name in LMA — so a meeting whose own reader found no topic would be
+ * recorded under the name of the one before it. A report from a different page
+ * therefore starts from nothing instead of from what the last one said.
  */
 export function mergeMetadataForTab(
   known: MetadataForTab,
   incoming: MeetingMetadata | undefined | null,
-  tabId?: number,
+  source: ReportSource = {},
 ): MetadataForTab {
-  const sameTab = tabId === undefined || known.tabId === undefined || known.tabId === tabId;
+  const samePage = isSamePage(known.source, source);
   return {
-    tabId: tabId !== undefined ? tabId : known.tabId,
-    metadata: mergeMetadata(sameTab ? known.metadata : {}, incoming),
+    source: {
+      tabId: source.tabId !== undefined ? source.tabId : known.source.tabId,
+      url: source.url !== undefined ? source.url : known.source.url,
+    },
+    metadata: mergeMetadata(samePage ? known.metadata : {}, incoming),
   };
 }
 

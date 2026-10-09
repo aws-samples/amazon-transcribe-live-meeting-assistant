@@ -16,22 +16,45 @@
 
 import { nameFromIdToken } from './identity';
 
-/** An unsigned JWT carrying `claims`, base64url-encoded as a real one would be. */
+/**
+ * An unsigned JWT carrying `claims`, base64url-encoded as a real one would be.
+ *
+ * The JSON is encoded to UTF-8 bytes before base64, which is what a real token
+ * does and what `btoa` alone cannot do — it rejects any code point above U+00FF.
+ * Getting this wrong in the helper would make the non-ASCII test vacuous.
+ */
 function tokenWith(claims: object): string {
-  const encode = (value: object) => btoa(JSON.stringify(value))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  const encode = (value: object) => {
+    const bytes = new TextEncoder().encode(JSON.stringify(value));
+    let latin1 = '';
+    bytes.forEach((byte) => { latin1 += String.fromCharCode(byte); });
+    return btoa(latin1).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
   return `${encode({ alg: 'none' })}.${encode(claims)}.signature`;
 }
 
 describe('nameFromIdToken', () => {
-  it('prefers the name claim', () => {
+  it('prefers the name claim over every other claim', () => {
+    // Including given_name/family_name, which a federated pool populates
+    // alongside `name`. An earlier version returned the joined parts instead,
+    // and this test passed only because it had not supplied them.
     expect(nameFromIdToken(tokenWith({
-      name: 'Ada Lovelace',
+      name: 'Lovelace, Ada (Contractor)',
+      given_name: 'Ada',
+      family_name: 'Lovelace',
+      preferred_username: 'alovelace',
       email: 'ada@example.com',
       'cognito:username': 'ada',
-    }))).toBe('Ada Lovelace');
+    }))).toBe('Lovelace, Ada (Contractor)');
+  });
+
+  it('reads a name with non-ASCII characters without mangling it', () => {
+    // The payload is base64url over UTF-8 bytes, and this name is what appears
+    // against the user's speech in the transcript.
+    expect(nameFromIdToken(tokenWith({ name: 'José Álvarez' }))).toBe('José Álvarez');
+    expect(nameFromIdToken(tokenWith({ given_name: 'Łukasz', family_name: 'Kowalczyk' })))
+      .toBe('Łukasz Kowalczyk');
+    expect(nameFromIdToken(tokenWith({ name: '田中 太郎' }))).toBe('田中 太郎');
   });
 
   it('joins given and family name when there is no name claim', () => {
