@@ -9,7 +9,7 @@ import useWebSocket, { ReadyState } from 'react-use-websocket';
 import { useSettings } from './SettingsContext';
 import { useUserContext } from './UserContext';
 import { WebSocketHook } from 'react-use-websocket/dist/lib/types';
-import { applyMuteAndPause, formatTimestamp, platformFromBaseUrl, UNKNOWN_PLATFORM } from '../lib/capture';
+import { applyMuteAndPause, formatTimestamp, MetadataForTab, mergeMetadataForTab, platformFromBaseUrl, UNKNOWN_PLATFORM } from '../lib/capture';
 
 type Call = {
   callEvent: string,
@@ -90,23 +90,44 @@ function IntegrationProvider({ children }: any) {
     return applyMuteAndPause(dataArray, isMuted, isPaused);
   }
 
-  const updateMetadata = useCallback((newMetadata: any) => {
-    const detected = platformFromBaseUrl(newMetadata && newMetadata.baseUrl);
+  // Holds what the readers have reported so far, and the tab it came from, so
+  // that a partial update can be folded into it without `updateMetadata`
+  // depending on the `metadata` state and being rebuilt on every change.
+  const knownMetadata = useRef<MetadataForTab>({
+    metadata: { userName: "", meetingTopic: "" },
+  });
+
+  const updateMetadata = useCallback((newMetadata: any, tabId?: number) => {
+    if (!newMetadata) {
+      // A reader that had nothing to say, or a tab with no reader at all.
+      return;
+    }
+    const known = mergeMetadataForTab(knownMetadata.current, newMetadata, tabId);
+    knownMetadata.current = known;
+    const merged = known.metadata;
+
+    const detected = platformFromBaseUrl(merged.baseUrl as string | undefined);
     // Left as-is when unrecognised, so a tab change away from a meeting does not
     // clear a platform that is still being captured.
     if (detected !== UNKNOWN_PLATFORM) {
       setPlatform(detected);
     }
 
-    setMetadata(newMetadata);
-  }, [metadata, setMetadata, platform, setPlatform]);
+    setMetadata(merged as any);
+  }, [setMetadata, setPlatform]);
 
   const fetchMetadata = async () => {
     const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
     if (tab && tab.id) {
-      const response = await chrome.tabs.sendMessage(tab.id, { action: "FetchMetadata" });
-      console.log("Received response from Metadata query!", response);
-      updateMetadata(response);
+      try {
+        const response = await chrome.tabs.sendMessage(tab.id, { action: "FetchMetadata" });
+        console.log("Received response from Metadata query!", response);
+        updateMetadata(response, tab.id);
+      } catch (error) {
+        // No reader in this tab, or it did not answer. The platform stays as it
+        // was and the user fills the fields in by hand.
+        console.log("No meeting metadata available for this tab", error);
+      }
     }
     return {};
   }
@@ -182,7 +203,9 @@ function IntegrationProvider({ children }: any) {
         if (request.action === "TranscriptionStopped") {
           stopTranscription();
         } else if (request.action === "UpdateMetadata") {
-          updateMetadata(request.metadata);
+          // Scoped to the reporting tab, so one meeting's topic is not carried
+          // into the next. Messages from the panel itself have no `sender.tab`.
+          updateMetadata(request.metadata, sender && sender.tab ? sender.tab.id : undefined);
         } else if (request.action === "SamplingRate") {
           // This event should only bubble up once at the start of recording in the injected code
           currentCall.samplingRate = request.samplingRate;

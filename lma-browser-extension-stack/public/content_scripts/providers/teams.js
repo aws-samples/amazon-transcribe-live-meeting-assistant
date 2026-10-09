@@ -69,8 +69,58 @@ const sendChatMessage = function (message) {
   } */
 };
 
+/** Teams' own navigation sections, which are page titles but not meeting topics. */
+const TEAMS_PAGE_SECTIONS = [
+  'microsoft teams', 'activity', 'chat', 'teams', 'calendar', 'calls', 'files', 'apps', 'home',
+];
+
+/**
+ * The meeting topic a Teams page title carries, or '' if it is not a meeting.
+ *
+ * Teams titles a meeting tab "<topic> | Microsoft Teams", so the app name is
+ * dropped. Its own sections are titled the same way, and prefilling the topic
+ * field with "Chat" would be worse than leaving it for the user to type.
+ */
+const topicFromPageTitle = function (pageTitle) {
+  if (!pageTitle) {
+    return '';
+  }
+  const topic = pageTitle.split('|')[0].trim();
+  if (!topic || TEAMS_PAGE_SECTIONS.indexOf(topic.toLowerCase()) !== -1) {
+    return '';
+  }
+  return topic;
+}
+
+/**
+ * Report whatever is known about the meeting, however little that is.
+ *
+ * `baseUrl` is set the moment this script loads, so the panel can always name
+ * the platform even when a name or topic selector finds nothing. The panel
+ * leaves a missing name and topic for the user to type.
+ */
+const reportMetadata = function () {
+  console.log("Sending Metadata:", metadata);
+  // The side panel may not be open, in which case there is no receiver. That is
+  // not a failure worth surfacing: the panel asks again when it opens.
+  try {
+    const sent = chrome.runtime.sendMessage({
+      action: "UpdateMetadata",
+      metadata: metadata
+    });
+    if (sent && typeof sent.catch === 'function') {
+      sent.catch(() => { });
+    }
+  } catch (error) {
+    console.log("Unable to send metadata; the panel is not listening.");
+  }
+}
+
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "FetchMetadata") {
+    // Answer straight away with what is already known: the scrape below is
+    // asynchronous, and an unanswered request leaves the panel with nothing.
+    sendResponse(metadata);
     checkForMeetingMetadata();
   }
   if (request.action === "SendChatMessage") {
@@ -154,18 +204,16 @@ const checkForMeetingMetadata = function () {
         meetingInfoButton.click();
       } */
       //const meetingTitle = document.querySelector('[data-tid="call-title"]');
-      const meetingTitle = document.title;
-      if (meetingTitle && displayName) {
+      // Independent of the display name, which used to gate this: the page title
+      // is there either way, and a name we failed to scrape says nothing about
+      // whether there is a topic to read.
+      const meetingTitle = topicFromPageTitle(document.title);
+      if (meetingTitle) {
         metadata.meetingTopic = meetingTitle;
         //setInterval(checkAndClickRoster, 2000);
       }
     }
-    if (metadata.userName && metadata.userName.trim() !== '' && metadata.meetingTopic && metadata.meetingTopic.trim() !== '') {
-      chrome.runtime.sendMessage({
-        action: "UpdateMetadata",
-        metadata: metadata
-      });
-    }
+    reportMetadata();
   }, 2000);
 }
 
@@ -305,7 +353,7 @@ function checkAndStartObserver() {
   }
 }
 
-window.onload = function () {
+const onPageReady = function () {
   const muteObserver = new MutationObserver((mutationList) => {
     mutationList.forEach((mutation) => {
       if (mutation.type === 'attributes' && mutation.attributeName === 'aria-label') {
@@ -333,3 +381,15 @@ window.onload = function () {
   // startObserver();
   // setInterval(checkAndStartObserver, 5000);
 };
+
+// This script is registered `run_at: "document_idle"`, which Chrome defines as
+// after the load event. Waiting on `load` alone therefore never runs on a tab
+// that was already loaded when the script injected — a reload after installing
+// or reloading the extension, which is exactly when it matters. The metadata
+// scrape has the panel's FetchMetadata request as a backstop; the mute observer
+// set up here has none.
+if (document.readyState === 'loading') {
+  window.addEventListener('load', onPageReady);
+} else {
+  onPageReady();
+}

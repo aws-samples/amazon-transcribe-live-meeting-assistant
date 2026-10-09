@@ -56,40 +56,175 @@ export function applyMuteAndPause(
 export const UNKNOWN_PLATFORM = 'n/a';
 
 /**
+ * What a meeting reader reports about the tab it is running in.
+ *
+ * Loosely typed on purpose: the Zoom reader forwards fields out of Zoom's own
+ * `MeetingConfig` object, so the shape is not ours to fix.
+ */
+export type MeetingMetadata = {
+  [field: string]: unknown;
+};
+
+/**
+ * Fold a metadata update into what is already known.
+ *
+ * Readers report whatever they have found so far rather than waiting for every
+ * field, and with `all_frames` enabled several frames of the same tab each
+ * report independently — so an update carrying only `baseUrl` can arrive after
+ * one that carried the name and topic. Overlaying only the non-blank fields
+ * keeps the later, thinner update from discarding what the earlier one found.
+ */
+export function mergeMetadata(
+  previous: MeetingMetadata | undefined | null,
+  incoming: MeetingMetadata | undefined | null,
+): MeetingMetadata {
+  const merged: MeetingMetadata = { ...(previous || {}) };
+  const update = incoming || {};
+  Object.keys(update).forEach((field) => {
+    const value = update[field];
+    const isBlank = value === undefined
+      || value === null
+      || (typeof value === 'string' && value.trim() === '');
+    if (!isBlank) {
+      merged[field] = value;
+    }
+  });
+  return merged;
+}
+
+/** What is known about a meeting, and which tab it was read from. */
+export type MetadataForTab = {
+  tabId?: number;
+  metadata: MeetingMetadata;
+};
+
+/**
+ * Fold a reader's update into what is known, scoped to the tab it came from.
+ *
+ * Merging is only right within one tab. Across tabs it would carry a previous
+ * meeting's topic into the next one, and the topic becomes the meeting's name in
+ * LMA — so a meeting whose own reader found no topic would be recorded under the
+ * name of the one before it. An update from a different tab therefore starts
+ * from nothing instead of from what the last tab reported.
+ *
+ * An update with no tab attached is treated as belonging to the tab in hand,
+ * since there is nothing better to assume and the alternative discards what the
+ * panel has already shown the user.
+ */
+export function mergeMetadataForTab(
+  known: MetadataForTab,
+  incoming: MeetingMetadata | undefined | null,
+  tabId?: number,
+): MetadataForTab {
+  const sameTab = tabId === undefined || known.tabId === undefined || known.tabId === tabId;
+  return {
+    tabId: tabId !== undefined ? tabId : known.tabId,
+    metadata: mergeMetadata(sameTab ? known.metadata : {}, incoming),
+  };
+}
+
+/**
+ * What a prefilled form field should hold once a reader reports a value for it.
+ *
+ * The readers report repeatedly — on page load, on each request from the panel,
+ * and again when a late-arriving source such as Zoom's `MeetingConfig` turns up
+ * minutes later — so "fill the field from the latest report" would overwrite
+ * whatever the user had typed in the meantime, mid-word.
+ *
+ * The test is whether the field still holds exactly what we last put in it,
+ * which is a single comparison that covers every case. An untouched field holds
+ * our prefill, so a later report refreshes it — that is what makes switching the
+ * panel to a different meeting tab update the field. A field holding anything
+ * else is the user's and is left alone, *including* a field they have emptied:
+ * backspacing to nothing is how someone starts retyping a topic, and refilling
+ * it under them would make the field impossible to clear.
+ *
+ * Both the field and the record of what we prefilled start empty, which is what
+ * lets the first report fill it.
+ */
+export function prefillField(current: string, lastPrefilled: string, reported: unknown): string {
+  if (typeof reported !== 'string' || reported.trim() === '') {
+    return current;
+  }
+  return current === lastPrefilled ? reported.trim() : current;
+}
+
+/** The hostnames one meeting platform serves its web client from. */
+export type PlatformHosts = {
+  platform: string;
+  /** Hosts that must equal the whole hostname. */
+  exact?: string[];
+  /** Hosts that match themselves or any subdomain of themselves. */
+  suffix?: string[];
+};
+
+/**
+ * Which hostnames belong to which meeting platform.
+ *
+ * Exported because `public/manifest.json` has to register a content script for
+ * these same hosts, and the two drifting apart is what makes the panel show no
+ * platform for a meeting it is nonetheless capturing. `manifest.test.ts` checks
+ * one against the other.
+ *
+ * Teams is the reason the suffix/exact distinction exists. Microsoft serves it
+ * from `teams.microsoft.com`, from `teams.microsoft.us` for government tenants,
+ * from `teams.live.com` for consumer accounts, and from `teams.cloud.microsoft`
+ * since the Microsoft 365 unified-domain consolidation; a tenant may land on
+ * either of the first and the last, so both have to be listed. Webex is
+ * per-organisation (`acme.webex.com`), so it needs the same subdomain treatment.
+ *
+ * Google Meet belongs here even though it is not a Virtual Participant
+ * platform: the extension is how Meet meetings are captured.
+ */
+export const MEETING_PLATFORM_HOSTS: PlatformHosts[] = [
+  { platform: 'Zoom', suffix: ['zoom.us'] },
+  { platform: 'Amazon Chime', exact: ['app.chime.aws'] },
+  {
+    platform: 'Microsoft Teams',
+    suffix: ['teams.microsoft.com', 'teams.cloud.microsoft', 'teams.microsoft.us', 'teams.live.com'],
+  },
+  { platform: 'Cisco Webex', suffix: ['webex.com'] },
+  { platform: 'Google Meet', exact: ['meet.google.com'] },
+];
+
+/**
+ * The hostname of a reader-supplied base URL, or '' if there isn't one.
+ *
+ * Every reader but Zoom reports `window.location.origin`, which always carries a
+ * scheme. Zoom's value comes out of Zoom's own `MeetingConfig` object, so a bare
+ * hostname has to parse too — hence the second attempt.
+ */
+function hostnameOf(baseUrl: string): string {
+  const parse = (candidate: string): string => {
+    try {
+      return new URL(candidate).hostname.toLowerCase();
+    } catch {
+      return '';
+    }
+  };
+  return parse(baseUrl) || parse(`https://${baseUrl}`);
+}
+
+/**
  * Name the meeting platform from the captured tab's base URL.
  *
- * Teams is matched by substring across its four hostnames, and the others by the
- * exact origin they use, which is how the original distinguished them. An
- * unrecognised URL is left as `UNKNOWN_PLATFORM` rather than guessed at.
- *
- * Google Meet belongs here even though it is not a Virtual Participant platform:
- * the extension is how Meet meetings are captured.
+ * Matching is on the parsed hostname rather than on a substring of the URL, so
+ * that a host which merely contains a platform's name is not attributed to it.
+ * An unrecognised URL is left as `UNKNOWN_PLATFORM` rather than guessed at.
  */
 export function platformFromBaseUrl(baseUrl: string | undefined | null): string {
   if (!baseUrl) {
     return UNKNOWN_PLATFORM;
   }
-  if (baseUrl === 'https://app.zoom.us') {
-    return 'Zoom';
+  const hostname = hostnameOf(baseUrl);
+  if (!hostname) {
+    return UNKNOWN_PLATFORM;
   }
-  if (baseUrl === 'https://app.chime.aws') {
-    return 'Amazon Chime';
-  }
-  if (
-    baseUrl.includes('teams.microsoft.com') ||
-    baseUrl.includes('teams.live.com') ||
-    baseUrl.includes('teams.microsoft.us') ||
-    baseUrl.includes('teams.cloud.microsoft')
-  ) {
-    return 'Microsoft Teams';
-  }
-  if (baseUrl.includes('webex.com')) {
-    return 'Cisco Webex';
-  }
-  if (baseUrl === 'https://meet.google.com') {
-    return 'Google Meet';
-  }
-  return UNKNOWN_PLATFORM;
+  const match = MEETING_PLATFORM_HOSTS.find(({ exact = [], suffix = [] }) => (
+    exact.indexOf(hostname) !== -1
+    || suffix.some((host) => hostname === host || hostname.endsWith(`.${host}`))
+  ));
+  return match ? match.platform : UNKNOWN_PLATFORM;
 }
 
 /**

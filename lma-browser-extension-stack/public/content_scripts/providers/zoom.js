@@ -7,6 +7,35 @@ console.log("Inside LMA Zoom script");
 
 let meetingConfig = {};
 
+/**
+ * What this reader reports to the panel.
+ *
+ * The name and topic come from Zoom's own `MeetingConfig` page object, which may
+ * not be there (see zoom-injection.js). `baseUrl` is taken from the tab instead,
+ * so the panel can always name the platform; it is set last when MeetingConfig
+ * is merged in, because the tab's own origin is the more reliable of the two.
+ */
+let metadata = {
+  baseUrl: window.location.origin
+};
+
+const reportMetadata = function () {
+  console.log("Sending Metadata:", metadata);
+  // The side panel may not be open, in which case there is no receiver. That is
+  // not a failure worth surfacing: the panel asks again when it opens.
+  try {
+    const sent = chrome.runtime.sendMessage({
+      action: "UpdateMetadata",
+      metadata: metadata
+    });
+    if (sent && typeof sent.catch === 'function') {
+      sent.catch(() => { });
+    }
+  } catch (error) {
+    console.log("Unable to send metadata; the panel is not listening.");
+  }
+}
+
 /************** Helper functions ***************/
 const getNameForVideoAvatar = function (element) {
   var speakerName = "n/a";
@@ -120,10 +149,9 @@ const sendChatMessage = function (message) {
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "FetchMetadata") {
     console.log("Received request to send meeting config");
-    if (Object.keys(meetingConfig).length > 0) {
-      console.log("Sending meeting config to extension");
-      sendResponse(meetingConfig);
-    }
+    // Always answer. An unanswered request leaves the panel with nothing, and
+    // the reply carries the tab's origin even when MeetingConfig never appeared.
+    sendResponse(metadata);
   }
   else if (request.action === "SendChatMessage") {
     console.log("received request to send a chat message");
@@ -164,6 +192,10 @@ window.addEventListener("message", (event) => {
   if (event.data.type && (event.data.type == "MeetingConfig")) {
     console.log("received value from page: ", event.data.value);
     meetingConfig = event.data.value;
-    chrome.runtime.sendMessage({ action: "UpdateMetadata", metadata: event.data.value });
+    metadata = Object.assign({}, meetingConfig, { baseUrl: window.location.origin });
+    reportMetadata();
   }
 });
+
+// Report the platform without waiting on MeetingConfig, which may never arrive.
+reportMetadata();

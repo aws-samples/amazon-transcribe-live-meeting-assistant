@@ -39,6 +39,9 @@ const sendChatMessage = function (message) {
 
 chrome.runtime.onMessage.addListener(function (request, sender, sendResponse) {
   if (request.action === "FetchMetadata") {
+    // Answer straight away with what is already known: the scrape below is
+    // asynchronous, and an unanswered request leaves the panel with nothing.
+    sendResponse(metadata);
     checkForMeetingMetadata();
   }
   if (request.action === "SendChatMessage") {
@@ -83,7 +86,7 @@ const checkForMeetingMetadata = function() {
 }
 
 
-window.onload = function () {
+const onPageReady = function () {
 
   const muteObserver = new MutationObserver((mutationList) => {
     if (mutationList[0].target.textContent.indexOf('Unmute') >= 0) {
@@ -163,3 +166,12 @@ window.onload = function () {
     }
   }, 2000);
 };
+
+// Registered `run_at: "document_idle"`, which Chrome defines as after the load
+// event, so waiting on `load` alone never runs on a tab that was already loaded
+// when the script injected. See the same note in teams.js.
+if (document.readyState === 'loading') {
+  window.addEventListener('load', onPageReady);
+} else {
+  onPageReady();
+}

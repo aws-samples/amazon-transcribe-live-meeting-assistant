@@ -46,7 +46,12 @@
     },
     {
       "matches": [
-        "https://teams.microsoft.com/*"
+        "https://teams.microsoft.com/*",
+        "https://*.teams.microsoft.com/*",
+        "https://teams.cloud.microsoft/*",
+        "https://*.teams.cloud.microsoft/*",
+        "https://teams.microsoft.us/*",
+        "https://*.teams.microsoft.us/*"
       ],
       "js": [
         "content_scripts/mutation-summary.js",
