@@ -13,6 +13,10 @@ whether a scheduled run can report success without having tested anything:
   * the ``--no-skips`` hook in conftest.py — which turns such a skip into a
     failure, and is therefore the thing standing between a lapsed secret and a
     green nightly.
+  * ``junit_summary`` — the chat notification's body. It runs in the job's
+    ``after_script``, after a run that may have failed in any way, so what it
+    has to do is produce a payload in every one of those cases rather than a
+    traceback where the notification should have been.
 
 ``ci_assume_role`` is covered for the file it writes; the STS exchange itself
 needs a real OIDC token and is exercised only by the pipeline.
@@ -32,6 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ci_assume_role  # noqa: E402
 import cognito_test_user  # noqa: E402
+import junit_summary  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -189,3 +194,202 @@ def test_an_empty_oidc_token_is_refused_before_calling_sts(monkeypatch):
     )
     assert exit_code == 2
     called.assert_not_called()
+
+
+# ── the notification payload built from the JUnit report ────────────────────
+
+_PASSING_REPORT = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="pytest" errors="0" failures="0" skipped="0" tests="3" time="412.5">
+    <testcase classname="t" name="test_stack_status_is_complete" time="1.0"/>
+    <testcase classname="t" name="test_appsync_reachable" time="2.0"/>
+    <testcase classname="t" name="test_ws_stream_transcribes_to_meeting" time="409.5"/>
+  </testsuite>
+</testsuites>
+"""
+
+_FAILING_REPORT = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+  <testsuite name="pytest" errors="1" failures="1" skipped="0" tests="4" time="300.0">
+    <testcase classname="t" name="test_stack_status_is_complete" time="1.0"/>
+    <testcase classname="t" name="test_appsync_reachable" time="2.0"/>
+    <testcase classname="t" name="test_ws_stream_transcribes_to_meeting" time="200.0">
+      <failure message="AssertionError: no transcript segments were produced within 90s">
+      Traceback (most recent call last):
+        File "integ-tests/test_lma_integration.py", line 400, in test_ws_stream
+      AssertionError: no transcript segments were produced within 90s
+      </failure>
+    </testcase>
+    <testcase classname="t" name="test_vp_registry_lifecycle" time="97.0">
+      <error message="botocore.exceptions.ClientError: AccessDenied"/>
+    </testcase>
+  </testsuite>
+</testsuites>
+"""
+
+
+def _write(tmp_path: Path, body: str) -> Path:
+    path = tmp_path / "integ-tests-report.xml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_counts_and_duration_are_read_from_the_report(tmp_path: Path):
+    report = junit_summary.parse_report(_write(tmp_path, _PASSING_REPORT))
+    assert report.problem is None
+    assert (report.total, report.passed, report.failures, report.skipped) == (3, 3, 0, 0)
+    assert report.duration == pytest.approx(412.5)
+
+
+def test_failing_tests_are_named_with_their_assertion_in_the_summary(tmp_path: Path):
+    report = junit_summary.parse_report(_write(tmp_path, _FAILING_REPORT))
+    summary = junit_summary.build_summary(
+        report, stack="lma-integtest1", region="us-west-2", ok=False
+    )
+    assert "lma-integtest1 (us-west-2)" in summary
+    assert "2 passed, 2 failed" in summary
+    assert "FAILED test_ws_stream_transcribes_to_meeting" in summary
+    assert "no transcript segments were produced" in summary
+    # An <error> is a different element from a <failure> and must not be dropped.
+    assert "ERROR test_vp_registry_lifecycle" in summary
+
+
+def test_passing_runs_do_not_list_per_test_detail(tmp_path: Path):
+    report = junit_summary.parse_report(_write(tmp_path, _PASSING_REPORT))
+    summary = junit_summary.build_summary(report, stack="lma-integtest1", ok=True)
+    assert "3 passed, 0 failed" in summary
+    assert "FAILED" not in summary
+
+
+def test_a_missing_report_is_summarised_rather_than_raising(tmp_path: Path):
+    """The job can die in before_script, before pytest writes anything."""
+    report = junit_summary.parse_report(tmp_path / "absent.xml")
+    assert report.problem is not None
+    summary = junit_summary.build_summary(report, stack="lma-integtest1", ok=False)
+    assert "no results to report" in summary
+    assert "No JUnit report" in summary
+
+
+def test_an_unparseable_report_is_summarised_rather_than_raising(tmp_path: Path):
+    """A job killed by its timeout can leave a half-written report."""
+    report = junit_summary.parse_report(_write(tmp_path, "<testsuites><testsuite tests="))
+    assert report.problem is not None
+    assert "Could not parse" in junit_summary.build_summary(report, ok=False)
+
+
+def test_a_run_that_collected_no_tests_says_so(tmp_path: Path):
+    """Zero tests with a green job would otherwise read as a passing nightly."""
+    empty = '<testsuites><testsuite name="pytest" tests="0" failures="0" errors="0" '
+    empty += 'skipped="0" time="0.1"/></testsuites>'
+    report = junit_summary.parse_report(_write(tmp_path, empty))
+    assert "No tests ran" in junit_summary.build_summary(report, ok=True)
+
+
+def test_skips_are_listed_when_they_are_all_there_is(tmp_path: Path):
+    """--no-skips should prevent this, so seeing it means that hook regressed."""
+    body = """<testsuites>
+      <testsuite name="pytest" errors="0" failures="0" skipped="1" tests="1" time="1.0">
+        <testcase classname="t" name="test_ws_stream_transcribes_to_meeting">
+          <skipped message="no Cognito test user configured"/>
+        </testcase>
+      </testsuite>
+    </testsuites>"""
+    report = junit_summary.parse_report(_write(tmp_path, body))
+    summary = junit_summary.build_summary(report, ok=True)
+    assert "SKIPPED test_ws_stream_transcribes_to_meeting" in summary
+    assert "no Cognito test user configured" in summary
+
+
+def test_summary_is_capped_so_slack_accepts_the_message(tmp_path: Path):
+    """Slack rejects a message over its limit outright rather than truncating."""
+    cases = "".join(
+        f'<testcase classname="t" name="test_{i}"><failure message="{"x" * 500}"/></testcase>'
+        for i in range(40)
+    )
+    body = (
+        '<testsuites><testsuite name="pytest" errors="0" failures="40" skipped="0" '
+        f'tests="40" time="10.0">{cases}</testsuite></testsuites>'
+    )
+    report = junit_summary.parse_report(_write(tmp_path, body))
+    summary = junit_summary.build_summary(report, ok=False, max_chars=2000)
+    assert len(summary) <= 2000 + 60  # the cap plus the "truncated" marker
+    assert "truncated" in summary
+
+
+def test_payload_keys_match_the_workflow_builder_contract(tmp_path: Path):
+    """A Workflow Builder trigger silently ignores keys it does not declare."""
+    report = junit_summary.parse_report(_write(tmp_path, _PASSING_REPORT))
+    payload = junit_summary.build_payload(
+        report,
+        status="success",
+        job_url="https://example.com/jobs/1",
+        commit="0123456789abcdef",
+        stack="lma-integtest1",
+    )
+    assert set(payload) == {"status", "commit", "job_url", "summary"}
+    # Flat strings only: a Text variable takes nothing else.
+    assert all(isinstance(value, str) for value in payload.values())
+    assert payload["status"] == "✅ PASSED"
+    assert payload["commit"] == "01234567"
+    # Bare URL, not <url|label>: Workflow Builder shows that syntax literally.
+    assert payload["job_url"] == "https://example.com/jobs/1"
+
+
+@pytest.mark.parametrize(
+    ("job_status", "expected"),
+    [("success", "✅ PASSED"), ("failed", "❌ FAILED"), ("canceled", "⚠️ CANCELED")],
+)
+def test_job_status_decides_the_headline(tmp_path: Path, job_status: str, expected: str):
+    report = junit_summary.parse_report(_write(tmp_path, _PASSING_REPORT))
+    payload = junit_summary.build_payload(
+        report, status=job_status, job_url="", commit="abc", stack="s"
+    )
+    assert payload["status"] == expected
+
+
+def test_a_green_job_with_failures_in_its_report_is_flagged(tmp_path: Path):
+    """The two disagreeing is itself worth saying, rather than posting green."""
+    report = junit_summary.parse_report(_write(tmp_path, _FAILING_REPORT))
+    payload = junit_summary.build_payload(
+        report, status="success", job_url="", commit="abc", stack="s"
+    )
+    assert "report lists failures" in payload["status"]
+
+
+def test_the_cli_prints_a_json_payload(tmp_path: Path, capsys):
+    path = _write(tmp_path, _PASSING_REPORT)
+    exit_code = junit_summary.main(
+        [
+            "--report",
+            str(path),
+            "--status",
+            "success",
+            "--job-url",
+            "https://example.com/jobs/1",
+            "--commit",
+            "0123456789abcdef",
+            "--stack",
+            "lma-integtest1",
+            "--region",
+            "us-west-2",
+        ]
+    )
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    # stdout is the payload and nothing else: the job pipes it into a file curl
+    # posts verbatim, so a stray print there would corrupt the request body.
+    payload = json.loads(captured.out)
+    assert payload["status"] == "✅ PASSED"
+    assert "lma-integtest1 (us-west-2)" in payload["summary"]
+    # The readable form goes to stderr, which is what the job log shows.
+    assert "✅ PASSED" in captured.err
+    assert "lma-integtest1 (us-west-2)" in captured.err
+
+
+def test_the_cli_succeeds_when_there_is_no_report(tmp_path: Path, capsys):
+    """after_script must still get a payload out of a job that died early."""
+    exit_code = junit_summary.main(["--report", str(tmp_path / "absent.xml"), "--status", "failed"])
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "❌ FAILED"
+    assert "No JUnit report" in payload["summary"]
