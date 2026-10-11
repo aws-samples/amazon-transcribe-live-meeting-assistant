@@ -26,8 +26,44 @@ runners and masked variables are where that belongs.
 
 ## What the nightly run does
 
-It runs `make integ-tests-nightly`, which is `make integ-tests` plus two things
-that matter when nobody is watching the run:
+Three jobs, in order, every night:
+
+| Job | Does | Posts to Slack |
+|---|---|---|
+| `nightly_publish` | Builds the scheduled commit and uploads its artifacts | only if it fails |
+| `nightly_deploy` | Deploys those artifacts to `lma-integtest1` | only if it fails |
+| `nightly_integ_tests` | `make integ-tests-nightly` against that stack | always |
+
+So the stack is rebuilt from the scheduled ref before the suite runs, and a
+green nightly means **this branch** works — not that some older build still
+does. Exactly one Slack message arrives per run, from whichever stage decided
+the outcome.
+
+### Why three jobs and not one
+
+Two reasons, and the second one is a hard constraint rather than a preference.
+
+**The run has to fit inside its AWS credentials.** The runner's credential
+vendor is a one-shot `pre_clone` step: it assumes the role once, writes the
+default profile, and never refreshes. The session is role-chained, so STS caps
+it at **one hour** whatever the role's `MaxSessionDuration` says. One job doing
+all three stages would run past that and die on an expired token wherever the
+next AWS call happened to fall — a failure that points at the call rather than
+at the cause. Each job re-enters the pipeline and gets its own fresh hour, and
+each carries a `timeout` **below** that hour, so credentials cannot expire
+mid-job: an overrun is killed by its timeout and says so. Anything added to
+these jobs has to preserve that. Don't merge them.
+
+**A build failure and a test failure are different news.** Keeping them in
+separate jobs is what lets the notification say which stage failed and what it
+means for the stack — a failed publish leaves the stack untouched, while a
+failed deploy can leave it mid-update, where it will fail every following night
+until someone resolves it. See `--stage` in `integ-tests/junit_summary.py`.
+
+### The suite itself
+
+`make integ-tests-nightly` is `make integ-tests` plus two things that matter
+when nobody is watching the run:
 
 | | `make integ-tests` | `make integ-tests-nightly` |
 |---|---|---|
@@ -44,19 +80,33 @@ checked no transcript. Under `--no-skips` a skip is a failure, so a lapsed secre
 or a dropped requirement reports red. Tests excluded by a marker (`live`) are
 still allowed to skip; see `integ-tests/conftest.py`.
 
-The nightly **tests an existing stack and does not deploy one.** A deploy takes
-35–40 minutes and is far likelier to fail on its own account than to tell you
-anything about the code, which would make the nightly's signal useless. Update
-the stack deliberately instead, with `make integ-deploy-and-test`, when you want
-the deployed code refreshed.
+### The build, without a Docker daemon
+
+`nightly_publish` sets **`SAM_BUILD_IN_CONTAINER=false`**, which builds the
+Lambda bundles with the runner's own interpreter instead of inside SAM's build
+container. These shared runners have no Docker daemon and cannot start one —
+`services:` containers don't come up and `/var/run/docker.sock` doesn't exist —
+so `--use-container` fails before it builds anything.
+
+That substitution is only sound because the runner **is** the Lambda platform:
+linux/amd64 on python3.12, so the wheels it resolves are the wheels Lambda
+wants. The flag is explicit rather than inferred from `uname` for exactly that
+reason — on a developer's machine, or on a runner with a different Python, it
+would produce bundles Lambda cannot import, and the failure would surface at
+runtime as an import error rather than at build time. **Leave the default
+(`true`) alone locally**, where Docker is a prerequisite and
+`lma publish` checks for it.
 
 ## How a failure reaches you
 
 Four independent paths, so a red nightly cannot go unnoticed:
 
-1. **Slack.** The job's `after_script` posts the result — pass or fail — to a
-   channel, with the stack name, the pass/fail/skip counts, the names and
-   assertion messages of any failures, and a link to the job. Needs the
+1. **Slack.** Each job's `after_script` can post to a channel, and exactly one
+   of them does per run: `nightly_publish` and `nightly_deploy` post only when
+   they fail, and `nightly_integ_tests` posts pass or fail. The message carries
+   the stack name, the pass/fail/skip counts, the names and assertion messages
+   of any failures, and a link to the job — or, when an earlier stage failed,
+   which stage it was and what that leaves the stack in. Needs the
    `SLACK_WEBHOOK_URL` variable from [step 4](#4-cicd-variables); absent, the job
    logs one line and skips the post. Setup is in
    [step 6](#6-optional-the-slack-notification).
@@ -161,13 +211,28 @@ order. No long-lived access key is stored anywhere, and the job's own
 resulting identity. See
 [Vending AWS credentials to CI/CD jobs](https://docs.hub.amazon.dev/docs/gitlab/user-guide/howto/vending-aws-credentials/).
 
-The role needs read access to the stack and its resources (CloudFormation,
-ELBv2, ECS, Kinesis), read/write on the EventSourcing DynamoDB table (the suite
-creates rows and deletes them), and `secretsmanager:GetSecretValue` on the one
-secret above. Scope it to the test stack's resources — it does not need
-administrator access, and should not have it. The Cognito side needs no IAM: the
-test user authenticates over the public SRP API with the password from the
-secret.
+**The role deploys the stack, so it needs the permissions to do that.** The
+nightly publishes artifacts to S3 and then updates a stack of a dozen nested
+stacks that create IAM roles, Lambda functions, ECS services, CloudFront
+distributions, Cognito pools, Kinesis streams and DynamoDB tables. Enumerating
+that as a least-privilege policy is not practical to keep correct: every miss
+surfaces as a nightly that fails partway through a deploy, which is precisely
+the unreliable signal this schedule exists to replace.
+
+So the containment here is **the account, not the role**. Give the test account
+nothing but this stack, let nobody else deploy into it, and grant the role
+broad permissions **within it** — `AdministratorAccess` is a reasonable choice
+for a dedicated test account and a bad one anywhere else. The trust policy
+below is then what limits who can use it: one GitLab group and one project.
+
+If you would rather scope the role down, the suite itself — as opposed to the
+deploy — needs only read access to the stack and its resources (CloudFormation,
+ELBv2, ECS, Kinesis), `appsync:GraphQL` on the stack's API, read/write on the
+EventSourcing DynamoDB table (it creates rows and deletes them),
+`states:StartSyncExecution` on the Virtual Participant scheduler, use of the
+stack's KMS key through those services, and `secretsmanager:GetSecretValue` on
+the one secret above. The Cognito side needs no IAM at all: the test user
+authenticates over the public SRP API with the password from the secret.
 
 The trust policy is a template with two values to fill in — your GitLab group
 and project, as they appear in the project URL. Do **not** change the principal:

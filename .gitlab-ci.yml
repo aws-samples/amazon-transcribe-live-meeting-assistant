@@ -352,6 +352,11 @@ nightly_publish:
   before_script:
     - apt-get update -y
     - apt-get install -y make git curl zip unzip
+    # The AWS CLI, because `cfn package` shells out to it for every nested
+    # stack. boto3 alone is not enough for this job, unlike the other two.
+    - curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+    - unzip -q awscliv2.zip && ./aws/install && rm -rf awscliv2.zip aws
+    - aws --version
     # Node from .nvmrc, the same pin code_checks and `make setup-node` use.
     - NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
     - NODE_PIN=$(tr -d '[:space:]' < .nvmrc)

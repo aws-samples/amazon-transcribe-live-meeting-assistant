@@ -230,6 +230,13 @@ def check_prerequisites() -> list[str]:
         lambda: _check_command("zip", "Install zip."),
         lambda: _check_command("pip3", "Install pip3."),
         lambda: _check_command("npm", "Install npm."),
+        # `cfn package` shells out to the AWS CLI. Checked here so a builder
+        # without it is told up front, rather than after several minutes of
+        # building, by eight nested stacks failing with "command not found".
+        lambda: _check_command(
+            "aws",
+            "Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+        ),
         _check_node_version,
     ]:
         err = check()
