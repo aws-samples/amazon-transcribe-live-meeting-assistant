@@ -340,3 +340,70 @@ def test_the_cli_succeeds_when_there_is_no_report(tmp_path: Path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "❌ FAILED"
     assert "No JUnit report" in payload["summary"]
+
+
+def test_a_failed_publish_stage_names_the_stage_rather_than_the_missing_report(
+    tmp_path: Path, capsys
+):
+    """The publish job has no report to write, and that is not the news."""
+    exit_code = junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "publish",
+            "--stack",
+            "lma-integtest1",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "❌ FAILED"
+    assert "publish stage failed" in payload["summary"]
+    assert "no tests ran" in payload["summary"]
+    # Says the stack is untouched, which is the thing worth knowing at 8pm.
+    assert "unchanged" in payload["summary"]
+    assert "No JUnit report" not in payload["summary"]
+
+
+def test_a_failed_deploy_stage_warns_that_the_stack_may_need_attention(tmp_path: Path, capsys):
+    """A stack stuck mid-update fails every following night, so say so once."""
+    exit_code = junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "deploy",
+            "--stack",
+            "lma-integtest1",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "deploy stage failed" in payload["summary"]
+    assert "every night" in payload["summary"]
+
+
+def test_the_tests_stage_is_the_default_and_still_summarises_the_report(tmp_path: Path, capsys):
+    """Passing no --stage must not change what the tests job has always posted."""
+    report = _write(tmp_path, _PASSING_REPORT)
+    exit_code = junit_summary.main(
+        ["--report", str(report), "--status", "success", "--stack", "lma-integtest1"]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "✅ PASSED"
+    assert "3 passed" in payload["summary"]
+    assert "stage failed" not in payload["summary"]
+
+
+def test_an_unknown_stage_is_refused_rather_than_silently_mislabelled(tmp_path: Path):
+    """A typo in the job definition must fail loudly, not post a wrong label."""
+    with pytest.raises(SystemExit):
+        junit_summary.main(
+            ["--report", str(tmp_path / "absent.xml"), "--status", "failed", "--stage", "deployy"]
+        )

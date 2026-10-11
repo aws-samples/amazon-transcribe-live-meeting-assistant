@@ -217,8 +217,15 @@ def _compare_versions(v1: str, v2: str) -> int:
 def check_prerequisites() -> list[str]:
     """Check all publish prerequisites. Returns list of error messages (empty = all OK)."""
     errors = []
-    for check in [
-        _check_docker_running,
+    # Docker is only a prerequisite because SAM builds the Lambda bundles in a
+    # container. A builder that sets SAM_BUILD_IN_CONTAINER=false has taken
+    # responsibility for already being the Lambda platform (see the flag in
+    # lma-ai-stack/Makefile), and needs no daemon -- so demanding one here would
+    # reject a build that is going to succeed.
+    checks: list[Callable[[], str | None]] = []
+    if os.environ.get("SAM_BUILD_IN_CONTAINER", "true").strip().lower() != "false":
+        checks.append(_check_docker_running)
+    for check in checks + [
         _check_sam_version,
         lambda: _check_command("zip", "Install zip."),
         lambda: _check_command("pip3", "Install pip3."),

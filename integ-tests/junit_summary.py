@@ -62,6 +62,32 @@ _DEFAULT_MAX_CHARS = 2000
 _MAX_FAILURE_CHARS = 400
 _MAX_FAILURES_LISTED = 8
 
+# The nightly builds the branch, deploys it, then tests it, and each of those is
+# a separate job so that each gets its own freshly vended AWS credentials. Any
+# of them can be the one that failed, and the notification has to say which --
+# a message about a missing JUnit report would describe the symptom of a failed
+# deploy rather than the deploy.
+_PUBLISH_STAGE = "publish"
+_DEPLOY_STAGE = "deploy"
+_TESTS_STAGE = "tests"
+STAGES = (_PUBLISH_STAGE, _DEPLOY_STAGE, _TESTS_STAGE)
+
+# Where to look first, per stage. Plain text, no backticks or asterisks: a
+# message composed in Slack's Workflow Builder renders those literally.
+_STAGE_TRIAGE = {
+    _PUBLISH_STAGE: (
+        "The build of the branch failed before anything was deployed, so the "
+        "stack still holds the previous build and is unchanged. This is a build "
+        "failure, not a test failure: read the job log, not the stack."
+    ),
+    _DEPLOY_STAGE: (
+        "The branch built but CloudFormation did not accept it, so the stack may "
+        "be mid-update or rolled back. Check the stack's events before the next "
+        "run, because a stack left in a failed update state will fail every "
+        "night until someone resolves it."
+    ),
+}
+
 
 @dataclass
 class _Failure:
@@ -156,6 +182,7 @@ def build_summary(
     stack: str | None = None,
     region: str | None = None,
     ok: bool = True,
+    stage: str = _TESTS_STAGE,
     max_chars: int = _DEFAULT_MAX_CHARS,
 ) -> str:
     """Compose the human-readable body of the notification."""
@@ -164,6 +191,19 @@ def build_summary(
         where = f"{where} ({region})"
 
     lines: list[str] = []
+    if stage != _TESTS_STAGE:
+        # A stage before the tests failed, so there is no report to summarise
+        # and its absence is not the news. Name the stage that failed instead:
+        # "no results to report" would read as a broken notification rather
+        # than as a build that never got as far as testing.
+        lines.append(f"Stack {where} — the {stage} stage failed, so no tests ran.")
+        lines.append("")
+        lines.append(_STAGE_TRIAGE.get(stage, _STAGE_TRIAGE[_DEPLOY_STAGE]))
+        body = "\n".join(lines).strip()
+        if len(body) > max_chars:
+            body = body[:max_chars].rstrip() + "\n… (truncated — see the job log)"
+        return body
+
     if report.problem:
         lines.append(f"Stack {where} — no results to report.")
         lines.append(report.problem)
@@ -199,9 +239,10 @@ def build_summary(
         # Plain text, no backticks or asterisks: a message composed in Slack's
         # Workflow Builder renders those literally rather than as formatting.
         lines.append(
-            "The nightly tests an existing stack and does not deploy one, so a "
-            "failure is either a regression on develop or drift in the stack "
-            "itself. Triage with the JUnit report first, then the job log."
+            "The stack was built and deployed from this commit before the tests "
+            "ran, so a failure here is the branch's behaviour rather than a "
+            "stale deployment. Triage with the JUnit report first, then the job "
+            "log."
         )
 
     body = "\n".join(lines).strip()
@@ -218,6 +259,7 @@ def build_payload(
     commit: str,
     stack: str | None = None,
     region: str | None = None,
+    stage: str = _TESTS_STAGE,
     max_chars: int = _DEFAULT_MAX_CHARS,
 ) -> dict[str, str]:
     """Build the flat, all-string object a Workflow Builder trigger accepts."""
@@ -238,7 +280,9 @@ def build_payload(
         "status": headline,
         "commit": (commit or "unknown")[:8],
         "job_url": job_url or "",
-        "summary": build_summary(report, stack=stack, region=region, ok=ok, max_chars=max_chars),
+        "summary": build_summary(
+            report, stack=stack, region=region, ok=ok, stage=stage, max_chars=max_chars
+        ),
     }
 
 
@@ -260,6 +304,17 @@ def main(argv: list[str] | None = None) -> int:
     args_parser.add_argument("--stack", default=None, help="Target stack name, for the summary.")
     args_parser.add_argument("--region", default=None, help="Target region, for the summary.")
     args_parser.add_argument(
+        "--stage",
+        default=_TESTS_STAGE,
+        choices=STAGES,
+        help=(
+            "Which stage of the nightly is reporting. Anything but "
+            f"'{_TESTS_STAGE}' means the run failed before the tests, and the "
+            "summary names that stage instead of summarising a report that was "
+            f"never written (default: {_TESTS_STAGE})."
+        ),
+    )
+    args_parser.add_argument(
         "--max-chars",
         type=int,
         default=_DEFAULT_MAX_CHARS,
@@ -274,6 +329,7 @@ def main(argv: list[str] | None = None) -> int:
         commit=args.commit,
         stack=args.stack,
         region=args.region,
+        stage=args.stage,
         max_chars=args.max_chars,
     )
     json.dump(payload, sys.stdout)
