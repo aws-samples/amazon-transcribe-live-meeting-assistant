@@ -18,14 +18,14 @@ whether a scheduled run can report success without having tested anything:
     has to do is produce a payload in every one of those cases rather than a
     traceback where the notification should have been.
 
-``ci_assume_role`` is covered for the file it writes; the STS exchange itself
-needs a real OIDC token and is exercised only by the pipeline.
+The job's AWS credentials are not covered here: they are vended by the runner
+rather than acquired by code in this repository, so the thing that can go wrong
+is the role's trust policy, and the pipeline is what exercises it.
 """
 
 from __future__ import annotations
 
 import json
-import stat
 import sys
 from pathlib import Path
 from unittest import mock
@@ -34,7 +34,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import ci_assume_role  # noqa: E402
 import cognito_test_user  # noqa: E402
 import junit_summary  # noqa: E402
 
@@ -142,58 +141,6 @@ def test_available_reports_false_for_a_broken_source_without_raising(monkeypatch
     """`available()` is the skip guard, so it must not raise out of a test body."""
     _stub_secret(monkeypatch, {"username": "ci@example.com"})
     assert cognito_test_user.available() is False
-
-
-# ── the credentials file the pipeline writes ────────────────────────────────
-
-_FAKE_CREDENTIALS = {
-    "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
-    "aws_secret_access_key": "wJalrXUtnFEMI-EXAMPLE-KEY",  # pragma: allowlist secret
-    "aws_session_token": "FwoGZXIvYXdzEXAMPLE",
-}
-
-
-def test_credentials_file_is_written_owner_only(tmp_path: Path):
-    path = tmp_path / "credentials"
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-
-def test_an_existing_credentials_file_is_tightened_not_left_as_found(tmp_path: Path):
-    """O_CREAT's mode applies only on creation, so an existing file needs a chmod."""
-    path = tmp_path / "credentials"
-    path.write_text("[other]\naws_access_key_id = KEEP\n", encoding="utf-8")
-    path.chmod(0o644)
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-
-def test_writing_a_profile_preserves_other_profiles(tmp_path: Path):
-    path = tmp_path / "credentials"
-    path.write_text("[other]\naws_access_key_id = KEEP\n", encoding="utf-8")
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    body = path.read_text(encoding="utf-8")
-    assert "[other]" in body and "KEEP" in body
-    assert "[lma-ci]" in body
-    assert _FAKE_CREDENTIALS["aws_session_token"] in body
-
-
-def test_credentials_path_honours_the_aws_environment_variable(monkeypatch, tmp_path: Path):
-    """The pipeline points this outside the checkout so it cannot become an artifact."""
-    target = tmp_path / "elsewhere" / "credentials"
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(target))
-    assert ci_assume_role._credentials_path() == target
-
-
-def test_an_empty_oidc_token_is_refused_before_calling_sts(monkeypatch):
-    """An absent `id_tokens:` block yields an empty variable, not an error."""
-    called = mock.Mock()
-    monkeypatch.setattr(ci_assume_role, "_assume", called)
-    exit_code = ci_assume_role.main(
-        ["--role-arn", "arn:aws:iam::123456789012:role/example", "--token", "   "]
-    )
-    assert exit_code == 2
-    called.assert_not_called()
 
 
 # ── the notification payload built from the JUnit report ────────────────────

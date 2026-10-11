@@ -121,20 +121,26 @@ it does not fall back to skipping. See `integ-tests/cognito_test_user.py`.
 
 ### 3. An IAM role the pipeline can assume
 
-The job authenticates with the OIDC token GitLab mints for it and assumes a role;
-no long-lived access key is stored anywhere. Register the GitLab instance as an
-OIDC identity provider in the account, then create a role trusting it, restricted
-to this project and to protected-branch pipelines.
+The job gets short-lived, job-scoped credentials from the GitLab instance's
+**AWS Credential Vendor**: name a role in `AWS_CREDS_TARGET_ROLE` and the runner
+assumes it and writes the result to the default profile in the credential search
+order. No long-lived access key is stored anywhere, and the job's own
+`before_script` does nothing but check the variable is set and print the
+resulting identity. See
+[Vending AWS credentials to CI/CD jobs](https://docs.hub.amazon.dev/docs/gitlab/user-guide/howto/vending-aws-credentials/).
 
 The role needs read access to the stack and its resources (CloudFormation,
-ELBv2, ECS, AppSync, Kinesis, Cognito), read/write on the EventSourcing DynamoDB
-table (the suite creates rows and deletes them), and
-`secretsmanager:GetSecretValue` on the one secret above. Scope it to the test
-stack's resources — it does not need administrator access, and should not have it.
+ELBv2, ECS, Kinesis), read/write on the EventSourcing DynamoDB table (the suite
+creates rows and deletes them), and `secretsmanager:GetSecretValue` on the one
+secret above. Scope it to the test stack's resources — it does not need
+administrator access, and should not have it. The Cognito side needs no IAM: the
+test user authenticates over the public SRP API with the password from the
+secret.
 
-A trust policy of this shape. Replace `123456789012` with the account id,
-`gitlab.example.com` with your GitLab instance's host, and the `sub` claim with
-your project path:
+The trust policy is a template with two values to fill in — your GitLab group
+and project, as they appear in the project URL. Do **not** change the principal:
+`arn:aws:iam::979517299116:role/gitlab-runners-prod` is the runner role the
+credential vendor jumps through, and it is the same for every project.
 
 ```json
 {
@@ -142,29 +148,30 @@ your project path:
   "Statement": [{
     "Effect": "Allow",
     "Principal": {
-      "Federated": "arn:aws:iam::123456789012:oidc-provider/gitlab.example.com"
+      "AWS": "arn:aws:iam::979517299116:role/gitlab-runners-prod"
     },
-    "Action": "sts:AssumeRoleWithWebIdentity",
+    "Action": ["sts:AssumeRole", "sts:TagSession"],
     "Condition": {
       "StringEquals": {
-        "gitlab.example.com:aud": "https://gitlab.example.com"
-      },
-      "StringLike": {
-        "gitlab.example.com:sub": "project_path:YOUR-GROUP/LMA:ref_type:branch:ref:develop"
+        "aws:PrincipalTag/GitLab:Group": "your-group",
+        "aws:PrincipalTag/GitLab:Project": "YOUR-PROJECT"
       }
     }
   }]
 }
 ```
 
-The audience must be the GitLab instance's own URL. The job asks for the token
-with `aud: $CI_SERVER_URL`, a predefined variable that already holds exactly
-that, so there is nothing to keep in step — but if you override the audience,
-change it in both places.
+`sts:TagSession` is required, not optional — the vendor tags the session with
+the group and project, which is what these conditions read. Always condition on
+**both**: a project-only condition would let a same-named project in another
+group assume the role. The values are case-sensitive and must match the project
+URL's path segments.
 
-Narrowing `sub` to a branch is what keeps a pipeline on an arbitrary branch from
-assuming this role. Restrict the OIDC provider to protected branches as well, so
-the claim cannot be produced from an unreviewed ref.
+> **Why not OIDC.** An `id_tokens:` block and an IAM OIDC provider are the
+> obvious shape for this and do not work on `gitlab.aws.dev`: its OpenID
+> discovery and JWKS endpoints sit behind the same authenticating edge as the
+> rest of the instance, so IAM cannot fetch the keys to validate a job's token.
+> The credential vendor is the supported path on this instance.
 
 ### 4. CI/CD variables
 
@@ -172,7 +179,7 @@ Under **Settings > CI/CD > Variables**, or on the schedule itself:
 
 | Variable | Required | Notes |
 |---|---|---|
-| `LMA_INTEG_ROLE_ARN` | yes | The role from step 3. **Mask it** — it contains the account id, which must not appear in this public repository. |
+| `AWS_CREDS_TARGET_ROLE` | yes | The role from step 3. **Mask it** — it contains the account id, which must not appear in this public repository. Read by the runner's credential vendor, not by anything in this repository, so the name is fixed. |
 | `LMA_TEST_USER_SECRET_ID` | yes | The secret from step 2, e.g. `lma/integ-tests/cognito-user`. |
 | `NIGHTLY_INTEG` | yes | `true`. Set on the *schedule*, so only that schedule runs the job. |
 | `LMA_INTEG_STACK` | no | Defaults to `lma-integtest1`. |

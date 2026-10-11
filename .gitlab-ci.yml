@@ -189,9 +189,10 @@ srt_security_review:
 #   1. A pipeline schedule (Build > Pipeline schedules), on `develop`, with
 #      `NIGHTLY_INTEG` = `true`.
 #   2. CI/CD variables on the schedule or the project:
-#        LMA_INTEG_ROLE_ARN        the IAM role to assume (masked; it contains
-#                                  the account id, which must not be committed
-#                                  to this public repository)
+#        AWS_CREDS_TARGET_ROLE     the IAM role the runner's credential vendor
+#                                  assumes (masked; it contains the account id,
+#                                  which must not be committed to this public
+#                                  repository)
 #        LMA_TEST_USER_SECRET_ID   Secrets Manager secret holding the Cognito
 #                                  test user, as {"username":…, "password":…}
 #        LMA_INTEG_STACK           optional; defaults to lma-integtest1
@@ -201,8 +202,8 @@ srt_security_review:
 #                                  MASKED and NOT PROTECTED — see the
 #                                  after_script below. Absent, the post is
 #                                  skipped with one log line.
-#   3. An IAM role trusting this GitLab instance as an OIDC provider, with the
-#      audience below.
+#   3. An IAM role in the stack's account trusting this GitLab instance's
+#      credential vendor, scoped by the group and project session tags.
 #
 # Failures surface four ways, so a red nightly cannot go unnoticed: the
 # after_script below posts the result to Slack; GitLab's own "pipeline failed"
@@ -229,23 +230,29 @@ nightly_integ_tests:
     - if: $CI_PIPELINE_SOURCE == "schedule" && $NIGHTLY_INTEG == "true"
     - when: never
 
-  # GitLab mints this JWT for the job; integ-tests/ci_assume_role.py exchanges
-  # it for short-lived AWS credentials. No long-lived access key is stored.
-  # $CI_SERVER_URL is the GitLab instance's own URL, which is the audience the
-  # IAM role's trust policy should require. Using the predefined variable keeps
-  # the instance hostname out of this file, which is published publicly.
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: $CI_SERVER_URL
-
+  # AWS credentials come from this GitLab instance's credential vendor, which
+  # assumes $AWS_CREDS_TARGET_ROLE for the job and writes the result to the
+  # default profile in the credential search order. They are short-lived and
+  # job-scoped; no long-lived access key is stored anywhere.
+  #
+  # ⚠️ Do NOT set AWS_SHARED_CREDENTIALS_FILE or AWS_PROFILE in this job. The
+  # vendor writes the default profile at the default path, so either one points
+  # the SDK somewhere the credentials are not.
+  #
+  # ⚠️ Nor is AWS_CREDS_TARGET_ROLE set here: it holds the account id, which
+  # must not appear in this public repository. It is a masked project variable,
+  # and the job checks for it below rather than failing inside a test.
+  #
+  # The OIDC route that an `id_tokens` block would take is not available on this
+  # instance: its OpenID discovery and JWKS endpoints sit behind the same
+  # authenticating edge as the rest of it, so IAM cannot reach them to validate
+  # a job token. The credential vendor is the supported path here — see
+  # https://docs.hub.amazon.dev/docs/gitlab/user-guide/howto/vending-aws-credentials/
   variables:
     LMA_INTEG_STACK: lma-integtest1
     # lma-integtest1 is in us-west-2, not the us-east-1 that a bare profile
     # resolves to. A wrong region here reports the stack as non-existent.
     AWS_DEFAULT_REGION: us-west-2
-    # Outside the checkout, so the assumed-role credentials cannot be collected
-    # as a job artifact.
-    AWS_SHARED_CREDENTIALS_FILE: /tmp/lma-ci-aws-credentials
 
   before_script:
     - apt-get update -y
@@ -258,26 +265,19 @@ nightly_integ_tests:
     # missing that test skips, which --no-skips then turns into a failure.
     - .venv/bin/pip install -r integ-tests/requirements.txt
     - |
-      if [ -z "$LMA_INTEG_ROLE_ARN" ]; then
-        echo "LMA_INTEG_ROLE_ARN is not set." >&2
+      if [ -z "$AWS_CREDS_TARGET_ROLE" ]; then
+        echo "AWS_CREDS_TARGET_ROLE is not set, so the runner vended no AWS credentials." >&2
         echo "See docs/scheduled-integration-tests.md" >&2
         exit 1
       fi
-    # Writes a profile to $AWS_SHARED_CREDENTIALS_FILE. Prints the path, never
-    # the credentials.
-    - >
-      .venv/bin/python integ-tests/ci_assume_role.py
-      --role-arn "$LMA_INTEG_ROLE_ARN"
-      --token "$GITLAB_OIDC_TOKEN"
-      --profile lma-ci
-    - export AWS_PROFILE=lma-ci
-    # Fail here, with the identity in the log, rather than inside a test.
+    # Fail here, with the identity in the log, rather than inside a test. This
+    # is also what proves the vendor ran: an empty or unexpected ARN means the
+    # trust policy did not match this group and project, not that a test broke.
     - >
       .venv/bin/python -c "import boto3;
       print(boto3.client('sts').get_caller_identity()['Arn'])"
 
   script:
-    - export AWS_PROFILE=lma-ci
     - make integ-tests-nightly STACK="$LMA_INTEG_STACK"
 
   # Post the result to Slack. In after_script, so it runs on a pass, a failure
