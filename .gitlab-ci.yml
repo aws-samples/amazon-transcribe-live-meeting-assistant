@@ -325,7 +325,14 @@ nightly_publish:
   # Node for the UI and extension bundles, python3.12 because that is the
   # Lambda runtime and this build has no container to pin it (see below).
   image: public.ecr.aws/docker/library/python:3.12-bookworm
+  # ⚠️ arch:amd64 is REQUIRED, not a preference. This instance has arm64
+  # runners too, and an unpinned job lands on either. Building without SAM's
+  # container means the runner's own wheels go into the bundles, so an arm64
+  # runner would produce arm64 wheels for an x86_64 Lambda — a build that
+  # succeeds and deploys and then fails at runtime on import. The script
+  # asserts the architecture as well; the tag is how it gets the right one.
   tags:
+    - arch:amd64
     - size:large
   # Below the one-hour credential ceiling, deliberately. See the note above.
   timeout: 55m
@@ -350,6 +357,28 @@ nightly_publish:
     SAM_BUILD_IN_CONTAINER: "false"
 
   before_script:
+    # Refuse to build before checking the two things SAM_BUILD_IN_CONTAINER=false
+    # relies on. Both are guaranteed by the image and the arch tag, which is
+    # exactly why they are worth asserting: if either ever stops holding, this
+    # job would otherwise keep succeeding and publish bundles that Lambda
+    # cannot import, and the first sign of it would be a runtime error in a
+    # deployed stack rather than a failed build.
+    - |
+      ARCH=$(uname -m)
+      PY=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+      echo "Builder: $ARCH, python $PY (building in container: ${SAM_BUILD_IN_CONTAINER})"
+      if [ "$SAM_BUILD_IN_CONTAINER" = "false" ]; then
+        if [ "$ARCH" != "x86_64" ]; then
+          echo "Refusing to build: an uncontainerised build needs an x86_64 builder, got $ARCH." >&2
+          echo "Add or fix the arch:amd64 tag on this job." >&2
+          exit 1
+        fi
+        if [ "$PY" != "3.12" ]; then
+          echo "Refusing to build: an uncontainerised build needs python3.12 to match the" >&2
+          echo "Lambda runtime, got $PY. Fix this job's image." >&2
+          exit 1
+        fi
+      fi
     - apt-get update -y
     - apt-get install -y make git curl zip unzip
     # The AWS CLI, because `cfn package` shells out to it for every nested
