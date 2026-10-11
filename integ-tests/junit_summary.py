@@ -62,6 +62,18 @@ _DEFAULT_MAX_CHARS = 2000
 _MAX_FAILURE_CHARS = 400
 _MAX_FAILURES_LISTED = 8
 
+# The triage agent's report gets its own budget on top of the body's, so a
+# verbose agent cannot crowd out the test results it is commenting on. Both
+# budgets together have to stay inside Slack's own 4000-character message cap,
+# which the whole post is rejected for exceeding.
+_MAX_AGENT_CHARS = 1200
+
+# Above this many distinct checks, a module is summarised by its count rather
+# than listed. The live suite sits well under it and is listed in full; the
+# pipeline's own plumbing tests are numerous, uniform and not what anyone reads
+# this notification for.
+_MAX_CASES_PER_MODULE = 16
+
 # The nightly builds the branch, deploys it, then tests it, and each of those is
 # a separate job so that each gets its own freshly vended AWS credentials. Any
 # of them can be the one that failed, and the notification has to say which --
@@ -97,6 +109,34 @@ class _Failure:
 
 
 @dataclass
+class _Case:
+    """One test and how it ended, in the order pytest ran it."""
+
+    name: str
+    outcome: str  # "passed", "failed", "error" or "skipped"
+    module: str = ""
+    duration: float = 0.0
+
+    @property
+    def icon(self) -> str:
+        return {"passed": "✓", "failed": "✗", "error": "✗", "skipped": "⏭"}.get(
+            self.outcome, "?"
+        )
+
+    @property
+    def base_name(self) -> str:
+        """The test's name without its ``test_`` prefix or parametrisation.
+
+        ``required_output_present[LMAWebsocketEndpoint]`` and its six siblings
+        are one check applied to seven values; listing them separately spends
+        seven lines of a capped message saying one thing.
+        """
+        name = self.name[5:] if self.name.startswith("test_") else self.name
+        bracket = name.find("[")
+        return name[:bracket] if bracket != -1 else name
+
+
+@dataclass
 class _Report:
     """What the JUnit XML says, or why it could not be read."""
 
@@ -106,6 +146,7 @@ class _Report:
     skipped: int = 0
     duration: float = 0.0
     detail: list[_Failure] = field(default_factory=list)
+    cases: list[_Case] = field(default_factory=list)
     problem: str | None = None
 
     @property
@@ -132,6 +173,39 @@ def _first_lines(text: str, limit: int = _MAX_FAILURE_CHARS) -> str:
     if len(collapsed) > limit:
         return collapsed[:limit].rstrip() + " …"
     return collapsed
+
+
+def _capped(text: str, limit: int) -> str:
+    """Trim to a budget while keeping the line structure.
+
+    Unlike ``_first_lines`` this preserves newlines, because it is used on
+    prose written to be read as lines rather than on a traceback being reduced
+    to one identifying string. Cuts at the last line break inside the budget so
+    the result never ends mid-sentence.
+    """
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = cut.rfind("\n")
+    if boundary > limit // 2:
+        cut = cut[:boundary]
+    return cut.rstrip() + "\n… (truncated — the full report is in the job artifacts)"
+
+
+def _read_optional(path: str | None) -> str | None:
+    """Read a file that may legitimately not be there.
+
+    The triage agent is advisory: it is opt-in, it can be disabled, and it
+    returns nothing when it cannot finish. All three cases have to leave the
+    notification intact rather than turning an informative failure report into
+    a traceback from the thing reporting it.
+    """
+    if not path:
+        return None
+    try:
+        return Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
 
 
 def parse_report(path: Path) -> _Report:
@@ -164,16 +238,101 @@ def parse_report(path: Path) -> _Report:
         report.duration += float(suite.get("time") or 0.0)
 
         for case in suite.iter("testcase"):
+            name = case.get("name") or "(unnamed test)"
+            outcome = "passed"
             for tag, kind in (("failure", "FAILED"), ("error", "ERROR"), ("skipped", "SKIPPED")):
                 for element in case.findall(tag):
+                    outcome = kind.lower()
                     report.detail.append(
                         _Failure(
-                            name=case.get("name") or "(unnamed test)",
+                            name=name,
                             kind=kind,
                             message=_first_lines(_text_of(element)),
                         )
                     )
+            # Every case, not just the interesting ones: a reader wants to see
+            # WHICH checks ran, and a count alone cannot show that the one test
+            # they care about was among them.
+            report.cases.append(
+                _Case(
+                    name=name,
+                    outcome=outcome,
+                    module=case.get("classname") or "",
+                    duration=float(case.get("time") or 0.0),
+                )
+            )
     return report
+
+
+def _case_lines(report: _Report) -> list[str]:
+    """What the run actually checked, grouped by test module.
+
+    The counts say how the run went; this says what it covered, which is the
+    thing a reader cannot reconstruct from counts and the thing they need in
+    order to notice that an expected check is missing entirely.
+
+    Grouped by module because the modules mean different things — one is the
+    live end-to-end suite, another is the pipeline's own plumbing — and a flat
+    list of forty names buries that. Parametrised cases collapse to one line
+    with a count, and a module whose every test passed collapses to a single
+    line: the detail that earns its place in a capped message is the detail
+    that is not uniform.
+    """
+    if not report.cases:
+        return []
+
+    by_module: dict[str, list[_Case]] = {}
+    for case in report.cases:
+        by_module.setdefault(case.module or "tests", []).append(case)
+
+    # Listed-in-full modules first: the live suite is what this notification is
+    # for, and a reader should not have to scroll past the plumbing to find it.
+    def detail_first(item: tuple[str, list[_Case]]) -> tuple[int, str]:
+        module, cases = item
+        distinct = len({c.base_name for c in cases})
+        return (1 if distinct > _MAX_CASES_PER_MODULE else 0, module)
+
+    lines: list[str] = []
+    for module, cases in sorted(by_module.items(), key=detail_first):
+        label = module.rsplit(".", 1)[-1] or module
+        bad = [c for c in cases if c.outcome in ("failed", "error")]
+        skipped = [c for c in cases if c.outcome == "skipped"]
+
+        # Collapse parametrisation: one entry per distinct check, carrying the
+        # worst outcome among its variants and how many there were.
+        checks: dict[str, _Case] = {}
+        counts: dict[str, int] = {}
+        for case in cases:
+            counts[case.base_name] = counts.get(case.base_name, 0) + 1
+            kept = checks.get(case.base_name)
+            if kept is None or (kept.outcome == "passed" and case.outcome != "passed"):
+                checks[case.base_name] = case
+
+        passed = len(cases) - len(bad) - len(skipped)
+        tally = (
+            f"all {len(cases)} passed" if not bad and not skipped
+            else f"{passed}/{len(cases)} passed"
+        )
+
+        if lines:
+            lines.append("")
+
+        if len(checks) > _MAX_CASES_PER_MODULE:
+            # Too many distinct checks to read in a chat message. Give the
+            # tally, and name whatever did not pass — the part that cannot be
+            # summarised away without losing the point of the message.
+            lines.append(f"{label} — {tally}")
+            for name, case in checks.items():
+                if case.outcome != "passed":
+                    suffix = f" (×{counts[name]})" if counts[name] > 1 else ""
+                    lines.append(f"• {name} {case.icon}{suffix}")
+            continue
+
+        lines.append(f"{label} — {tally}:")
+        for name, case in checks.items():
+            suffix = f" (×{counts[name]})" if counts[name] > 1 else ""
+            lines.append(f"• {name} {case.icon}{suffix}")
+    return lines
 
 
 def build_summary(
@@ -183,6 +342,8 @@ def build_summary(
     region: str | None = None,
     ok: bool = True,
     stage: str = _TESTS_STAGE,
+    template_url: str | None = None,
+    agent_report: str | None = None,
     max_chars: int = _DEFAULT_MAX_CHARS,
 ) -> str:
     """Compose the human-readable body of the notification."""
@@ -213,6 +374,11 @@ def build_summary(
             f"{report.failures + report.errors} failed, "
             f"{report.skipped} skipped, in {report.duration:.0f}s"
         )
+        if template_url:
+            # What was actually deployed and tested. Worth a line because the
+            # nightly builds and deploys the commit before testing it, so "which
+            # artifacts" is a real question with a real answer.
+            lines.append(f"Deployed: {template_url}")
         if report.total == 0:
             # Red flag of its own: the suite collected nothing, which under
             # --no-skips should be impossible. A green job here would mean the
@@ -234,6 +400,13 @@ def build_summary(
             if remaining > 0:
                 lines.append(f"… and {remaining} more — see the JUnit report in the artifacts.")
 
+        case_lines = _case_lines(report)
+        if case_lines:
+            # No heading: the counts line above already says how it went, and
+            # each module names its own tally.
+            lines.append("")
+            lines.extend(case_lines)
+
     if not ok:
         lines.append("")
         # Plain text, no backticks or asterisks: a message composed in Slack's
@@ -246,6 +419,17 @@ def build_summary(
         )
 
     body = "\n".join(lines).strip()
+
+    # The triage agent's reading of the failure, if it ran. Appended AFTER the
+    # deterministic body is already within budget, and given its own slice of
+    # the message, so a long agent report can never push the test results out
+    # of the notification: the facts outrank the interpretation of them.
+    if agent_report and agent_report.strip():
+        if len(body) > max_chars:
+            body = body[:max_chars].rstrip() + "\n… (truncated — full report in the job artifacts)"
+        head = _capped(agent_report.strip(), _MAX_AGENT_CHARS)
+        return f"{body}\n\n🤖 Triage:\n{head}"
+
     if len(body) > max_chars:
         body = body[:max_chars].rstrip() + "\n… (truncated — full report in the job artifacts)"
     return body
@@ -260,6 +444,8 @@ def build_payload(
     stack: str | None = None,
     region: str | None = None,
     stage: str = _TESTS_STAGE,
+    template_url: str | None = None,
+    agent_report: str | None = None,
     max_chars: int = _DEFAULT_MAX_CHARS,
 ) -> dict[str, str]:
     """Build the flat, all-string object a Workflow Builder trigger accepts."""
@@ -281,7 +467,14 @@ def build_payload(
         "commit": (commit or "unknown")[:8],
         "job_url": job_url or "",
         "summary": build_summary(
-            report, stack=stack, region=region, ok=ok, stage=stage, max_chars=max_chars
+            report,
+            stack=stack,
+            region=region,
+            ok=ok,
+            stage=stage,
+            template_url=template_url,
+            agent_report=agent_report,
+            max_chars=max_chars,
         ),
     }
 
@@ -315,6 +508,20 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args_parser.add_argument(
+        "--template-url",
+        default=None,
+        help="The template this run deployed and tested, shown in the summary.",
+    )
+    args_parser.add_argument(
+        "--agent-report",
+        default=None,
+        help=(
+            "Path to the triage agent's report. Appended under a 'Triage' "
+            "heading when the file exists and is non-empty; a missing file is "
+            "not an error, because the agent is advisory and may not have run."
+        ),
+    )
+    args_parser.add_argument(
         "--max-chars",
         type=int,
         default=_DEFAULT_MAX_CHARS,
@@ -330,6 +537,8 @@ def main(argv: list[str] | None = None) -> int:
         stack=args.stack,
         region=args.region,
         stage=args.stage,
+        template_url=args.template_url,
+        agent_report=_read_optional(args.agent_report),
         max_chars=args.max_chars,
     )
     json.dump(payload, sys.stdout)

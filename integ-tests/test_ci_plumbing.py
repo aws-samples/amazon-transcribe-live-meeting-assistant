@@ -407,3 +407,157 @@ def test_an_unknown_stage_is_refused_rather_than_silently_mislabelled(tmp_path: 
         junit_summary.main(
             ["--report", str(tmp_path / "absent.xml"), "--status", "failed", "--stage", "deployy"]
         )
+
+
+# ── the per-test listing ────────────────────────────────────────────────────
+
+_GROUPED_REPORT = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="5" time="100.0">
+  <testcase classname="integ-tests.test_lma_integration" name="test_stack_status_is_complete" time="1.0"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_output_present[A]" time="0.1"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_output_present[B]" time="0.1"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_appsync_reachable" time="2.0"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_ws_stream_transcribes_to_meeting" time="90.0">
+    <failure message="AssertionError: no transcript segments">trace</failure>
+  </testcase>
+</testsuite></testsuites>
+"""
+
+
+def test_every_test_is_named_in_the_summary(tmp_path: Path, capsys):
+    """The counts say how it went; the list says what it covered."""
+    report = _write(tmp_path, _GROUPED_REPORT)
+    junit_summary.main(["--report", str(report), "--status", "failed", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "stack_status_is_complete ✓" in summary
+    assert "appsync_reachable ✓" in summary
+    assert "ws_stream_transcribes_to_meeting ✗" in summary
+
+
+def test_parametrised_cases_collapse_to_one_line_with_a_count(tmp_path: Path, capsys):
+    """Seven values of one check are one check, not seven lines of a capped message."""
+    report = _write(tmp_path, _GROUPED_REPORT)
+    junit_summary.main(["--report", str(report), "--status", "failed", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "output_present ✓ (×2)" in summary
+    assert "output_present[A]" not in summary
+
+
+def test_a_module_with_too_many_checks_is_summarised_not_listed(tmp_path: Path, capsys):
+    """The plumbing suite is numerous and uniform; it must not bury the live suite."""
+    cases = "".join(
+        f'<testcase classname="integ-tests.test_ci_plumbing" name="test_p{i}" time="0.01"/>'
+        for i in range(30)
+    )
+    report = _write(
+        tmp_path,
+        '<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" '
+        f'errors="0" failures="0" skipped="0" tests="30" time="1.0">{cases}</testsuite></testsuites>',
+    )
+    junit_summary.main(["--report", str(report), "--status", "success", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "test_ci_plumbing — all 30 passed" in summary
+    assert "p17" not in summary
+
+
+def test_the_deployed_template_is_named_when_given(tmp_path: Path, capsys):
+    report = _write(tmp_path, _PASSING_REPORT)
+    junit_summary.main(
+        [
+            "--report",
+            str(report),
+            "--status",
+            "success",
+            "--template-url",
+            "https://s3.us-west-2.amazonaws.com/bucket/nightly/lma-main.yaml",
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "Deployed: https://s3.us-west-2.amazonaws.com/bucket/nightly/lma-main.yaml" in summary
+
+
+# ── the triage agent's report, as the notification sees it ──────────────────
+
+
+def test_the_agent_report_is_appended_under_its_own_heading(tmp_path: Path, capsys):
+    report = _write(tmp_path, _FAILING_REPORT)
+    agent = tmp_path / "triage-report.txt"
+    agent.write_text("ROOT CAUSE: the transcriber rejected the upgrade\nEVIDENCE: a log line\n")
+    junit_summary.main(
+        ["--report", str(report), "--status", "failed", "--agent-report", str(agent)]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "🤖 Triage:" in summary
+    assert "ROOT CAUSE: the transcriber rejected the upgrade" in summary
+    # The deterministic detail is still there: the agent adds to it, never
+    # replaces it.
+    assert "test_ws_stream_transcribes_to_meeting" in summary
+
+
+def test_an_empty_or_absent_agent_report_changes_nothing(tmp_path: Path, capsys):
+    """A green run touches the file; a disabled agent writes nothing to it."""
+    report = _write(tmp_path, _PASSING_REPORT)
+    empty = tmp_path / "triage-report.txt"
+    empty.write_text("")
+    junit_summary.main(
+        ["--report", str(report), "--status", "success", "--agent-report", str(empty)]
+    )
+    with_empty = json.loads(capsys.readouterr().out)["summary"]
+
+    junit_summary.main(
+        ["--report", str(report), "--status", "success", "--agent-report", str(tmp_path / "nope")]
+    )
+    with_absent = json.loads(capsys.readouterr().out)["summary"]
+
+    assert "Triage" not in with_empty
+    assert with_empty == with_absent
+
+
+def test_a_verbose_agent_cannot_crowd_out_the_test_results(tmp_path: Path, capsys):
+    """The facts outrank the interpretation, so both get their own budget."""
+    report = _write(tmp_path, _FAILING_REPORT)
+    agent = tmp_path / "triage-report.txt"
+    agent.write_text("ROOT CAUSE: x\n" + "padding line\n" * 2000)
+    junit_summary.main(
+        ["--report", str(report), "--status", "failed", "--agent-report", str(agent)]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "test_ws_stream_transcribes_to_meeting" in summary
+    assert "ROOT CAUSE: x" in summary
+    # Slack rejects the whole post past 4000 characters.
+    assert len(summary) < 4000
+
+
+def test_the_agent_refuses_to_run_without_read_only_credentials(monkeypatch):
+    """It would otherwise inherit the nightly's administrative credentials."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    monkeypatch.setattr(failure_agent, "AGENT_ENABLED", True)
+    monkeypatch.setattr(failure_agent, "AGENT_ROLE_ARN", "")
+    # Would raise if reached: nothing may be launched without the role.
+    monkeypatch.setattr(
+        failure_agent, "ensure_claude_code", lambda: pytest.fail("launched without a role")
+    )
+    assert (
+        failure_agent.run_failure_agent(
+            report_path=Path("x.xml"), log_path=Path("x.log"), stack="s", region="us-west-2"
+        )
+        is None
+    )
+
+
+def test_the_agent_is_off_unless_explicitly_enabled(monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    monkeypatch.setattr(failure_agent, "AGENT_ENABLED", False)
+    monkeypatch.setattr(
+        failure_agent, "_readonly_credentials", lambda: pytest.fail("ran while disabled")
+    )
+    assert (
+        failure_agent.run_failure_agent(
+            report_path=Path("x.xml"), log_path=Path("x.log"), stack="s", region="us-west-2"
+        )
+        is None
+    )

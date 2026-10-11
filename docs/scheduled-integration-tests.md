@@ -104,12 +104,19 @@ Four independent paths, so a red nightly cannot go unnoticed:
 1. **Slack.** Each job's `after_script` can post to a channel, and exactly one
    of them does per run: `nightly_publish` and `nightly_deploy` post only when
    they fail, and `nightly_integ_tests` posts pass or fail. The message carries
-   the stack name, the pass/fail/skip counts, the names and assertion messages
-   of any failures, and a link to the job — or, when an earlier stage failed,
-   which stage it was and what that leaves the stack in. Needs the
-   `SLACK_WEBHOOK_URL` variable from [step 4](#4-cicd-variables); absent, the job
-   logs one line and skips the post. Setup is in
-   [step 6](#6-optional-the-slack-notification).
+   the stack name, the counts, the template that was deployed, **every check
+   that ran and how it ended**, the assertion messages of any failures, and a
+   link to the job — or, when an earlier stage failed, which stage it was and
+   what that leaves the stack in. Needs the `SLACK_WEBHOOK_URL` variable from
+   [step 4](#4-cicd-variables); absent, the job logs one line and skips the
+   post. Setup is in [step 6](#6-optional-the-slack-notification).
+
+   The per-check list is grouped by test module, and a module is listed in full
+   only when it has few enough distinct checks to read — the live suite always
+   is; the pipeline's own plumbing tests are numerous and uniform, so they
+   collapse to a tally. Parametrised checks collapse to one line with a count.
+   The point of the list is to make a *missing* check visible: counts alone
+   cannot show that the test you care about never ran.
 2. **Email.** GitLab's **scheduled-pipeline failure notification** goes to the
    owner of the schedule. This is on by default for scheduled pipelines; confirm
    the schedule's owner is a person who reads that mailbox, because the schedule
@@ -127,6 +134,51 @@ Four independent paths, so a red nightly cannot go unnoticed:
 that silently stops firing produces exactly the same quiet as a month of passing
 runs. **Build > Pipeline schedules** shows the last run and its status per
 schedule, and is the only view that answers "did it run at all".
+
+### Triage of a failed run
+
+A test's assertion often names a symptom rather than a cause.
+`test_ws_stream_transcribes_to_meeting` reports "no transcript segments were
+produced within 90s" whether the WebSocket server rejected the upgrade,
+Transcribe refused the stream, the Kinesis consumer errored, the Call Event
+Processor threw, or the Cognito test user's password has lapsed — and the
+evidence that tells those apart is in several CloudWatch log groups, not in the
+pytest output.
+
+So when the suite fails, `integ-tests/failure_agent.py` runs Claude Code
+headless against Bedrock, hands it the JUnit report and the run's full output
+**on disk**, and lets it grep those, read the repository, and query the live
+stack. Its report is appended to the Slack message under a `🤖 Triage:`
+heading, and kept as the `triage-report.txt` artifact. On disk rather than in
+the prompt because a nightly's output is tens of thousands of lines, most of
+them pytest progress: a file it greps costs almost nothing, where the same text
+as prompt tokens would not.
+
+Enable it with **`LMA_FAILURE_AGENT=1`**. It is off by default so that a slow
+or flaky agent cannot destabilise the nightly.
+
+⚠️ **It needs its own read-only role**, named in
+`LMA_FAILURE_AGENT_ROLE_ARN`, and **refuses to run without one** rather than
+falling back to the job's own credentials — which are administrative in the
+test account, so an agent inheriting them could delete the stack it was asked
+to diagnose. The trust policy needs `sts:TagSession` as well as
+`sts:AssumeRole`: the credential vendor's session carries transitive tags, so a
+chained assume that cannot pass them on is denied. Three further points, in
+decreasing order of how much they protect you:
+
+- **IAM is the boundary.** `ReadOnlyAccess` plus `bedrock:InvokeModel` on the
+  Claude models is all the role needs.
+- **The harness allowlist is a speed bump, not a boundary.** `--allowedTools`
+  lists read-only verbs, but Bash allowlist rules are prefix globs, so
+  `Bash(aws logs *)` does not stop a chained
+  `aws logs … ; aws cloudformation delete-stack …`. Treat it as noise reduction.
+- **The agent never decides pass/fail.** Python owns the verdict; the agent is
+  advisory, and returns nothing rather than guessing. A notification that
+  called a run green because an agent said so would be worse than no agent.
+
+It is capped three ways — turns, dollars, and a wall clock — all inside the
+job's timeout and so inside the one-hour credential ceiling. Observed: about
+1–3 minutes and $0.20–$0.50 per failure.
 
 ### Why the notification is posted by the job
 
@@ -282,6 +334,8 @@ Under **Settings > CI/CD > Variables**, or on the schedule itself:
 | `LMA_INTEG_STACK` | no | Defaults to `lma-integtest1`. |
 | `AWS_DEFAULT_REGION` | no | Defaults to `us-west-2`. |
 | `SLACK_WEBHOOK_URL` | no | The webhook from step 6. **Mask it, and do not protect it** — see step 6. Absent, the Slack post is skipped. |
+| `LMA_FAILURE_AGENT` | no | `1` enables the failure-triage agent. Off by default. |
+| `LMA_FAILURE_AGENT_ROLE_ARN` | if the agent is on | The **read-only** role it runs as. **Mask it.** Without it the agent declines to run; see [Triage of a failed run](#triage-of-a-failed-run). |
 
 ### 5. The schedule
 

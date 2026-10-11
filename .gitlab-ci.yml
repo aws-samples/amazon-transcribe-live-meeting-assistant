@@ -221,6 +221,13 @@ srt_security_review:
 #                                  MASKED and NOT PROTECTED — see the
 #                                  after_script below. Absent, the post is
 #                                  skipped with one log line.
+#        LMA_FAILURE_AGENT         optional; `1` enables the triage agent that
+#                                  diagnoses a failed run. Off by default.
+#        LMA_FAILURE_AGENT_ROLE_ARN  required IF the agent is enabled: the
+#                                  READ-ONLY role it runs as (masked). Without
+#                                  it the agent refuses to run rather than
+#                                  inherit this job's administrative
+#                                  credentials. See integ-tests/failure_agent.py.
 #   3. An IAM role in the stack's account trusting this GitLab instance's
 #      credential vendor, scoped by the group and project session tags. It
 #      deploys the stack, so it needs permissions to do that — see the doc.
@@ -252,6 +259,10 @@ srt_security_review:
   # two values without passing an artifact between them.
   LMA_ARTIFACT_BUCKET_BASENAME: lma-integtest-nightly-artifacts
   LMA_ARTIFACT_PREFIX: nightly
+  # Derived once, here, from the three values above. The deploy job deploys it
+  # and the notification names it, so "which artifacts was this?" has an answer
+  # in the channel rather than only in a job log.
+  LMA_TEMPLATE_URL: "https://s3.${AWS_DEFAULT_REGION}.amazonaws.com/${LMA_ARTIFACT_BUCKET_BASENAME}-${AWS_DEFAULT_REGION}/${LMA_ARTIFACT_PREFIX}/lma-main.yaml"
 
 # One Slack post per run. The publish and deploy jobs post only when they fail,
 # because on a good night the tests job has the result worth reading; the tests
@@ -289,6 +300,10 @@ srt_security_review:
   # python3 from the image, not .venv/bin/python: junit_summary is stdlib-only,
   # and this has to work even when the failure being reported is
   # `make setup-python` itself. The webhook URL is never passed to it.
+  # --agent-report names a file that usually does not exist: the triage agent
+  # is opt-in, only runs on a failure, and produces nothing when it cannot
+  # reach a conclusion. All three cases are normal and leave the notification
+  # as it would have been.
   - >
     python3 integ-tests/junit_summary.py
     --report integ-tests-report.xml
@@ -297,7 +312,9 @@ srt_security_review:
     --job-url "$CI_JOB_URL"
     --commit "$CI_COMMIT_SHA"
     --stack "$LMA_INTEG_STACK"
-    --region "$AWS_DEFAULT_REGION" > slack-payload.json
+    --region "$AWS_DEFAULT_REGION"
+    --template-url "$LMA_TEMPLATE_URL"
+    --agent-report triage-report.txt > slack-payload.json
   - |
     if [ "$NIGHTLY_POST_WHEN" = "on_failure" ] && [ "$CI_JOB_STATUS" = "success" ]; then
       echo "ℹ️ $NIGHTLY_STAGE succeeded — the tests job posts the night's result"
@@ -459,17 +476,17 @@ nightly_deploy:
       print(boto3.client('sts').get_caller_identity()['Arn'])"
 
   script:
-    # The URL the publish job uploaded to. Named from the same two variables
-    # rather than passed as an artifact or scraped from the other job's log:
-    # the CLI builds it the same way (lib/lma_sdk/lma_sdk/_core/publish.py),
-    # and a value derived twice from one source cannot go stale.
-    - export TEMPLATE_URL="https://s3.${AWS_DEFAULT_REGION}.amazonaws.com/${LMA_ARTIFACT_BUCKET_BASENAME}-${AWS_DEFAULT_REGION}/${LMA_ARTIFACT_PREFIX}/lma-main.yaml"
-    - echo "Deploying $TEMPLATE_URL"
+    # $LMA_TEMPLATE_URL is the URL the publish job uploaded to, derived in the
+    # shared variables above rather than passed as an artifact or scraped from
+    # the other job's log: the CLI builds it the same way (see
+    # lib/lma_sdk/lma_sdk/_core/publish.py), and a value derived from one
+    # source cannot go stale against it.
+    - echo "Deploying $LMA_TEMPLATE_URL"
     - >
       .venv/bin/lma deploy
       --stack-name "$LMA_INTEG_STACK"
       --region "$AWS_DEFAULT_REGION"
-      --template-url "$TEMPLATE_URL"
+      --template-url "$LMA_TEMPLATE_URL"
       --wait
 
   after_script: *nightly_slack_post
@@ -543,9 +560,49 @@ nightly_integ_tests:
     - >
       .venv/bin/python -c "import boto3;
       print(boto3.client('sts').get_caller_identity()['Arn'])"
+    # The declared artifact always exists, so a green night does not emit a
+    # "no matching files" warning for a report there was no failure to write.
+    # Empty is the signal junit_summary reads as "no triage", so this is also
+    # what keeps the notification unchanged on a passing run.
+    - touch triage-report.txt
 
   script:
-    - make integ-tests-nightly STACK="$LMA_INTEG_STACK"
+    # The suite's output is captured to a file as well as the log, because the
+    # triage agent greps that file. pipefail so the pipe reports the SUITE's
+    # exit status rather than tee's, which is always 0.
+    #
+    # The failure is held rather than propagated so the agent can run while the
+    # stack is still up and inside this job's credentials, and the held status
+    # is re-raised at the end — so the job is still red, and $CI_JOB_STATUS in
+    # the after_script is still the truth. The agent runs HERE and not in the
+    # after_script because an after_script gets five minutes by default, which
+    # is less than the agent's own budget.
+    - |
+      # `set +e` explicitly: the runner may or may not have errexit on, and
+      # with it on the held-status pattern below would never be reached.
+      set +e
+      set -o pipefail
+      make integ-tests-nightly STACK="$LMA_INTEG_STACK" 2>&1 | tee integ-tests-output.log
+      TEST_STATUS=$?
+      echo "suite exit status: $TEST_STATUS"
+      if [ "$TEST_STATUS" != "0" ]; then
+        # Node only on the failure path: Claude Code needs it, and a green
+        # night should not pay to install it. Failure to install is not fatal —
+        # the agent is advisory and declines cleanly without it.
+        if ! command -v npm >/dev/null 2>&1; then
+          NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
+          NODE_PIN=$(tr -d '[:space:]' < .nvmrc)
+          curl -fsSL "https://nodejs.org/dist/v$NODE_PIN/node-v$NODE_PIN-linux-$NODE_ARCH.tar.xz" \
+            | tar -xJ -C /usr/local --strip-components=1 || echo "node install failed; triage will be skipped"
+        fi
+        .venv/bin/python integ-tests/failure_agent.py \
+          --report integ-tests-report.xml \
+          --log integ-tests-output.log \
+          --stack "$LMA_INTEG_STACK" \
+          --region "$AWS_DEFAULT_REGION" \
+          --out triage-report.txt || echo "triage agent errored; continuing"
+      fi
+      exit "$TEST_STATUS"
 
   after_script: *nightly_slack_post
 
@@ -555,6 +612,10 @@ nightly_integ_tests:
       junit: integ-tests-report.xml
     paths:
       - integ-tests-report.xml
+      # The suite's full output and the agent's reading of it, so a failure can
+      # be re-examined after the fact without re-running the night.
+      - integ-tests-output.log
+      - triage-report.txt
       # The posted message, so "what did Slack get told" is answerable from the
       # pipeline when the channel post looks wrong. Contains no credentials.
       - slack-payload.json
