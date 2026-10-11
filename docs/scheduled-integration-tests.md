@@ -91,14 +91,46 @@ the only place that has the JUnit report to summarise.
 
 ### 1. A long-lived target stack
 
-The convention is `lma-integtest1`, which already exists **in `us-west-2`** —
-note that this is not the region a default profile resolves to. It has to be
-updated in place rather than deleted and recreated, because `us-west-2` is at its
-VPC quota and this stack's VPC is one of the five.
+The convention is `lma-integtest1`, in **`us-west-2`** — note that this is not
+the region a default profile resolves to, and a wrong region here reports the
+stack as non-existent rather than as misconfigured.
+
+It lives in an account of its own, used for nothing else, so that a run that
+leaves something behind cannot disturb anybody's work and the test user below
+is the only human-shaped identity in it. Deploy it from the published template
+once, which needs no local build:
 
 ```bash
-# Refresh the deployed code when you want to (NOT what the nightly does):
-AWS_PROFILE=default make integ-deploy-and-test STACK=lma-integtest1
+lma deploy --stack-name lma-integtest1 --region us-west-2 \
+    --admin-email you@example.com --wait
+```
+
+Thereafter refresh the deployed code when you want to — deliberately, and **not**
+what the nightly does:
+
+```bash
+AWS_PROFILE=<the test account> make integ-deploy-and-test STACK=lma-integtest1
+```
+
+⚠️ **Check the account's VPC Block Public Access setting before concluding the
+stack is broken.** A newly created account may have it set to `block-ingress`,
+which drops inbound internet-gateway traffic for the whole account **without
+changing security groups or NACLs** — so every per-resource check passes while
+CloudFront cannot reach the transcriber's load balancer, and
+`test_ws_stream_transcribes_to_meeting` fails on a WebSocket upgrade returning
+HTTP 502. The symptom to recognise is a load balancer whose target is healthy
+and whose `RequestCount` is nevertheless zero.
+
+```bash
+aws ec2 describe-vpc-block-public-access-options --region us-west-2
+```
+
+Rather than turning it off account-wide, exclude the stack's VPC and leave the
+account-wide setting as it is, so a VPC added later is still blocked by default:
+
+```bash
+aws ec2 create-vpc-block-public-access-exclusion --region us-west-2 \
+    --vpc-id <the stack's VPC> --internet-gateway-exclusion-mode allow-bidirectional
 ```
 
 ### 2. A Cognito test user, in Secrets Manager
