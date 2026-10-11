@@ -20,6 +20,14 @@
 #
 #  - version-code: version of the package
 
+# Stop at the first failing step, and treat a failure anywhere in a pipeline as
+# the pipeline's failure. Without this the script ran to the end regardless and
+# exited on its closing `echo`, so a `sam build` that could not start still
+# reported success to the caller -- and the stack's template was simply absent
+# from S3, surfacing much later as a NoSuchKey when CloudFormation went looking
+# for the nested template. A build that did not build has to say so.
+set -eo pipefail
+
 # Check to see if input has been provided:
 if [ -z "$1" ]; then
     echo "usage: $0 <base source bucket name> [<solution name or s3 prefix>] [<version>] [<region>]"
@@ -86,9 +94,22 @@ sed -e "s%<LMA_WEBSOCKET_ZIP_FILENAME>%$ZIPFILE%g"  > ${PACKAGE_RELEASE_REPLACE_
 PACKAGE_RELEASE_FILE_NAME=template-packaged-${RELEASE_S3_BUCKET}-${RELEASE_S3_PREFIX_SUB}-${RELEASE_VERSION}.yaml
 PACKAGE_RELEASE_OUT_FILE=${OUT_DIR}/${PACKAGE_RELEASE_FILE_NAME}
 
-echo "[INFO] sam building template file for release ${RELEASE_VERSION}"
+# Build the Lambda bundles inside SAM's build container by default, which pins
+# the interpreter and produces manylinux wheels whatever the developer runs.
+# SAM_BUILD_IN_CONTAINER=false builds with the local interpreter instead, for a
+# builder that already IS the Lambda platform and has no Docker daemon to offer
+# -- a linux/amd64 CI runner on python3.12. Same flag, same meaning, as
+# lma-ai-stack/Makefile; see the longer note there.
+SAM_BUILD_IN_CONTAINER="${SAM_BUILD_IN_CONTAINER:-true}"
+if [ "${SAM_BUILD_IN_CONTAINER}" = "false" ]; then
+	SAM_BUILD_CONTAINER_ARGS=()
+else
+	SAM_BUILD_CONTAINER_ARGS=(--use-container)
+fi
+
+echo "[INFO] sam building template file for release ${RELEASE_VERSION} (in container: ${SAM_BUILD_IN_CONTAINER})"
 sam build \
-	--use-container \
+	"${SAM_BUILD_CONTAINER_ARGS[@]}" \
 	--parallel \
 	--cached \
 	--template-file ${PACKAGE_RELEASE_REPLACE_OUT_FILE}
