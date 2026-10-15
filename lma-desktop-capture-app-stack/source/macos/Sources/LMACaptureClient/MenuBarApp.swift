@@ -1167,7 +1167,7 @@ struct LevelBar: View {
 /// Start/Pause/Stop, and clicking it opens the same panel as the menu-bar icon.
 @available(macOS 13.0, *)
 final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate,
-                               UNUserNotificationCenterDelegate {
+                               NSMenuItemValidation, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
     private var panelWindow: NSWindow?
@@ -1177,6 +1177,7 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
     private var restorePanelAfterSettings = false
     private let state: MenuBarAppState
     private var pollTimer: Timer?
+    private var quitting = false
 
     init(state: MenuBarAppState) { self.state = state }
 
@@ -1190,6 +1191,10 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
         var v = MenuBarContentView(s: state, host: host)
         v.openSettings = { [weak self] in self?.showSettingsWindow() }
         return v
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        installMainMenu()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1424,7 +1429,6 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
         menu.addItem(openItem)
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettingsFromMenu), keyEquivalent: ",")
         settingsItem.target = self
-        settingsItem.isEnabled = !state.isStreaming
         menu.addItem(settingsItem)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit \(name)", action: #selector(quitApp), keyEquivalent: "q")
@@ -1433,7 +1437,60 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
         return menu
     }
 
+    /// AppKit routes ⌘X/⌘C/⌘V/⌘A/⌘Z through the Edit menu: without a main menu
+    /// they do nothing in text fields (#756).
+    private func installMainMenu() {
+        let name = state.controller.config.appDisplayName
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "About \(name)",
+                        action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        let settings = appMenu.addItem(withTitle: "Settings…", action: #selector(openSettingsFromMenu),
+                                       keyEquivalent: ",")
+        settings.target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Hide \(name)", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(withTitle: "Hide Others",
+                                         action: #selector(NSApplication.hideOtherApplications(_:)),
+                                         keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(withTitle: "Show All",
+                        action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: "Quit \(name)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(withTitle: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)),
+                           keyEquivalent: "m")
+        windowMenu.addItem(withTitle: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+
+        let mainMenu = NSMenu()
+        for submenu in [appMenu, editMenu, windowMenu] {
+            let item = NSMenuItem(title: submenu.title, action: nil, keyEquivalent: "")
+            item.submenu = submenu
+            mainMenu.addItem(item)
+        }
+        NSApp.mainMenu = mainMenu
+        NSApp.windowsMenu = windowMenu
+    }
+
     @objc private func openSettingsFromMenu() { showSettingsWindow() }
+
+    /// NSMenu auto-enables items and ignores `isEnabled`, so this is what greys out
+    /// Settings… while recording.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        menuItem.action == #selector(openSettingsFromMenu) ? !state.isStreaming : true
+    }
 
     // MARK: - Notification clicks
 
@@ -1461,6 +1518,17 @@ final class MenuBarController: NSObject, NSApplicationDelegate, NSWindowDelegate
     }
 
     @objc private func quitApp() { NSApp.terminate(nil) }
+
+    /// Quitting mid-recording stops it the way Stop does first; 1.5 s covers
+    /// CaptureController.stop(), and a repeat Quit meanwhile waits on the same reply.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if quitting { return .terminateLater }
+        guard state.isStreaming else { return .terminateNow }
+        quitting = true
+        state.stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { NSApp.reply(toApplicationShouldTerminate: true) }
+        return .terminateLater
+    }
 
     @objc private func openPopoverFromMenu() { showPopover() }
 
