@@ -277,7 +277,13 @@ def lambda_handler(event, context):
     transcript_string = "".join(transcripts)
     transcript_string = truncate_number_of_words(transcript_string, tokenCount)
     response = {"transcript": transcript_string, "metadata": metadata}
-    print("Fetch Transcript response:", response)
+    # Log the shape of the response rather than the response. Everything this
+    # function returns is meeting content, and the counts are what is actually
+    # useful when diagnosing a short or empty transcript.
+    print(
+        f"Fetch Transcript response: {len(transcript_string)} characters "
+        f"over {len(transcripts)} segment(s)"
+    )
     return response
 
 

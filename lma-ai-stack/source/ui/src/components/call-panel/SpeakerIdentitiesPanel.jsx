@@ -28,15 +28,14 @@ import {
   Box,
   Button,
   ButtonDropdown,
-  Container,
   ExpandableSection,
-  Header,
   Input,
   Select,
   SpaceBetween,
   StatusIndicator,
   Textarea,
   TextContent,
+  TokenGroup,
 } from '@cloudscape-design/components';
 
 import { InfoLink } from '../common/info-link';
@@ -44,6 +43,7 @@ import { InfoLink } from '../common/info-link';
 import {
   buildSpeakerRoster,
   formatTalkTime,
+  hasMultipleVoicesOnAChannel,
   parseAttendeeList,
   parseSpeakerIdentities,
   serializeSpeakerIdentities,
@@ -163,6 +163,11 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly
 
   const namedCount = roster.filter((row) => row.name).length;
 
+  // Starts open only on a channel separation actually split; once the user opens
+  // or closes it themselves, their choice wins for the rest of the session.
+  const [expandedOverride, setExpandedOverride] = useState(undefined);
+  const expanded = expandedOverride ?? hasMultipleVoicesOnAChannel(roster);
+
   const write = async (next) => {
     setSaving(true);
     try {
@@ -231,42 +236,39 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly
   const handleClearAll = () => write({ ...identities, identities: {}, merges: {}, segmentOverrides: {} });
 
   return (
-    <Container
-      header={
-        <Header
-          variant="h4"
-          info={<InfoLink onFollow={() => setToolsOpen(true)} />}
-          counter={roster.length ? `(${namedCount}/${roster.length})` : undefined}
-          description="Name each voice once and the whole transcript updates, past segments included."
-          actions={
-            <SpaceBetween direction="horizontal" size="xs">
-              {saving && <StatusIndicator type="loading">Saving</StatusIndicator>}
-              <ButtonDropdown
-                items={[
-                  { text: 'Paste attendee list', id: 'attendees', iconName: 'add-plus' },
-                  {
-                    text: 'Clear all names',
-                    id: 'clear',
-                    iconName: 'remove',
-                    disabled: readOnly || (!Object.keys(identities.identities).length && !namedCount),
-                  },
-                ]}
-                onItemClick={({ detail }) => {
-                  if (detail.id === 'attendees') {
-                    setAttendeesOpen(true);
-                  } else if (detail.id === 'clear') {
-                    handleClearAll();
-                  }
-                }}
-                disabled={saving}
-              >
-                Actions
-              </ButtonDropdown>
-            </SpaceBetween>
-          }
-        >
-          Speakers
-        </Header>
+    <ExpandableSection
+      variant="container"
+      expanded={expanded}
+      onChange={({ detail }) => setExpandedOverride(detail.expanded)}
+      headerText="Speakers"
+      headerCounter={roster.length ? `(${namedCount}/${roster.length})` : undefined}
+      headerDescription="Name each voice once and the whole transcript updates, past segments included."
+      headerInfo={<InfoLink onFollow={() => setToolsOpen(true)} />}
+      headerActions={
+        <SpaceBetween direction="horizontal" size="xs">
+          {saving && <StatusIndicator type="loading">Saving</StatusIndicator>}
+          <ButtonDropdown
+            items={[
+              { text: 'Paste attendee list', id: 'attendees', iconName: 'add-plus' },
+              {
+                text: 'Clear all names',
+                id: 'clear',
+                iconName: 'remove',
+                disabled: readOnly || (!Object.keys(identities.identities).length && !namedCount),
+              },
+            ]}
+            onItemClick={({ detail }) => {
+              if (detail.id === 'attendees') {
+                setAttendeesOpen(true);
+              } else if (detail.id === 'clear') {
+                handleClearAll();
+              }
+            }}
+            disabled={saving}
+          >
+            Actions
+          </ButtonDropdown>
+        </SpaceBetween>
       }
     >
       <SpaceBetween direction="vertical" size="s">
@@ -311,20 +313,11 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly
               </small>
             </TextContent>
             {identities.candidates.length > 0 && (
-              <SpaceBetween direction="horizontal" size="xxs">
-                {identities.candidates.map((name) => (
-                  <Button
-                    key={name}
-                    variant="inline-link"
-                    iconName="close"
-                    iconAlign="right"
-                    onClick={() => handleRemoveCandidate(name)}
-                    disabled={readOnly || saving}
-                  >
-                    {name}
-                  </Button>
-                ))}
-              </SpaceBetween>
+              <TokenGroup
+                items={identities.candidates.map((name) => ({ label: name, dismissLabel: `Remove ${name}` }))}
+                onDismiss={({ detail }) => handleRemoveCandidate(identities.candidates[detail.itemIndex])}
+                readOnly={readOnly || saving}
+              />
             )}
             <Textarea
               value={pasted}
@@ -339,7 +332,7 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly
           </SpaceBetween>
         </ExpandableSection>
       </SpaceBetween>
-    </Container>
+    </ExpandableSection>
   );
 };
 

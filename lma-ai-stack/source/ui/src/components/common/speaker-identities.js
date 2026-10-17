@@ -281,6 +281,22 @@ export const parseAttendeeList = (text) => {
   });
 };
 
+/**
+ * Did separation actually split a channel into more than one voice?
+ *
+ * Drives whether the Speakers panel starts open. Every meeting has speakers, so a
+ * panel that is always expanded pushes the transcript down the page for the
+ * majority of meetings that have one voice per channel and nothing to
+ * disambiguate. It starts open only where it has work to do.
+ */
+export const hasMultipleVoicesOnAChannel = (roster) => {
+  const perChannel = {};
+  (roster ?? []).forEach((row) => {
+    perChannel[row.channel] = (perChannel[row.channel] || 0) + 1;
+  });
+  return Object.values(perChannel).some((count) => count > 1);
+};
+
 /** mm:ss for a talk-time total. */
 export const formatTalkTime = (seconds) => {
   const total = Math.round(seconds ?? 0);

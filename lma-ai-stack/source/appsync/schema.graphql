@@ -636,7 +636,6 @@ input UpdatePcaUrlInput {
 input UpdateSpeakerIdentitiesInput {
 	CallId: ID!
 	SpeakerIdentities: String!
-	UpdatedAt: AWSDateTime
 }
 
 input ShareCallInput {

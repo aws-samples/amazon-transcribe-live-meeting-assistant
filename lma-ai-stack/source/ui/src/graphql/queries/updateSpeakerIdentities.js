@@ -17,7 +17,6 @@ export default /* GraphQL */ `
   mutation UpdateSpeakerIdentities($input: UpdateSpeakerIdentitiesInput!) {
     updateSpeakerIdentities(input: $input) {
       CallId
-      UpdatedAt
       SpeakerIdentities
     }
   }

@@ -8,8 +8,16 @@
 ## the read path applies in getCall.response.vtl -- Admin, the meeting's owner, or
 ## a user it has been shared with -- which is expressed below as a DynamoDB
 ## condition so the check and the write are one atomic operation.
+##
+## UpdatedAt is deliberately NOT written here, and not used as a guard. Every
+## other Call update carries `#UpdatedAt < :UpdatedAt` so that out-of-order events
+## from the Kinesis pipeline cannot clobber newer state. A speaker rename is not
+## one of those events: it is a deliberate user action, and last-write-wins by the
+## person doing the renaming is the behaviour wanted. Leaving UpdatedAt alone also
+## keeps a rename from interacting with that guard in either direction -- renaming
+## during a live meeting neither fails because the pipeline moved UpdatedAt ahead,
+## nor causes the next aggregation update to be rejected because the rename did.
 #set( $PK = "c#${ctx.args.input.CallId}" )
-#set( $UpdatedAt = $util.defaultIfNull($ctx.args.input.UpdatedAt, $util.time.nowISO8601() ) )
 
 ## A Lambda calling with IAM credentials arrives as an assumed role; a signed-in
 ## user arrives through Cognito. Same detection as getCall.response.vtl.
@@ -18,11 +26,9 @@
   #set( $isCognitoUser = false )
 #end
 
-## Only update an existing meeting, and only when this write is newer than the one
-## already stored -- the same guard every other Call update carries.
-#set( $conditionNames = { "#PK": "PK", "#UpdatedAt": "UpdatedAt" } )
-#set( $conditionValues = { ":UpdatedAt": $util.dynamodb.toDynamoDB($UpdatedAt) } )
-#set( $condition = "attribute_exists(#PK) AND #UpdatedAt < :UpdatedAt" )
+#set( $conditionNames = { "#PK": "PK" } )
+#set( $conditionValues = {} )
+#set( $condition = "attribute_exists(#PK)" )
 
 #if( $isCognitoUser && !$context.identity.groups.contains("Admin") )
   $util.qr( $conditionNames.put("#Owner", "Owner") )
@@ -39,19 +45,19 @@
     "SK": $util.dynamodb.toDynamoDBJson($PK)
   },
   "update" : {
-    "expression": "SET #SpeakerIdentities = :SpeakerIdentities, #UpdatedAt = :UpdatedAt",
+    "expression": "SET #SpeakerIdentities = :SpeakerIdentities",
     "expressionNames": {
-      "#SpeakerIdentities": "SpeakerIdentities",
-      "#UpdatedAt": "UpdatedAt"
+      "#SpeakerIdentities": "SpeakerIdentities"
     },
     "expressionValues": {
-      ":SpeakerIdentities": $util.dynamodb.toDynamoDBJson($ctx.args.input.SpeakerIdentities),
-      ":UpdatedAt": $util.dynamodb.toDynamoDBJson($UpdatedAt)
+      ":SpeakerIdentities": $util.dynamodb.toDynamoDBJson($ctx.args.input.SpeakerIdentities)
     }
   },
   "condition": {
     "expression": "$condition",
-    "expressionNames": $utils.toJson($conditionNames),
-    "expressionValues": $utils.toJson($conditionValues)
+    "expressionNames": $utils.toJson($conditionNames)
+    #if( !${conditionValues.isEmpty()} )
+      , "expressionValues": $utils.toJson($conditionValues)
+    #end
   }
 }

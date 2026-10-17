@@ -9,6 +9,7 @@ import {
   buildSpeakerRoster,
   emptyIdentities,
   formatTalkTime,
+  hasMultipleVoicesOnAChannel,
   parseAttendeeList,
   parseSpeakerIdentities,
   resolveMergeTarget,
@@ -244,6 +245,26 @@ describe('parseAttendeeList', () => {
   it('reads a mixed line of bracketed and bare entries', () => {
     const pasted = '"Lee, Sarah" <sarah@example.com>, Bob Strahan <bob@example.com>; Priya Raman';
     expect(parseAttendeeList(pasted).sort()).toEqual(['Bob Strahan', 'Lee, Sarah', 'Priya Raman']);
+  });
+});
+
+describe('hasMultipleVoicesOnAChannel', () => {
+  // Decides whether the Speakers panel starts open: only where separation split a
+  // channel is there anything to disambiguate.
+  const row = (channel, key) => ({ channel, key });
+
+  it('is true when one channel holds two voices', () => {
+    expect(hasMultipleVoicesOnAChannel([row('CALLER', 'a'), row('CALLER', 'b')])).toBe(true);
+  });
+
+  it('is false for one voice per channel, however many channels', () => {
+    expect(hasMultipleVoicesOnAChannel([row('CALLER', 'a'), row('AGENT', 'b')])).toBe(false);
+  });
+
+  it('is false for a single voice and for no voices at all', () => {
+    expect(hasMultipleVoicesOnAChannel([row('CALLER', 'a')])).toBe(false);
+    expect(hasMultipleVoicesOnAChannel([])).toBe(false);
+    expect(hasMultipleVoicesOnAChannel(undefined)).toBe(false);
   });
 });
 
