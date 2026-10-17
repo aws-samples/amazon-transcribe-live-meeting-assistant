@@ -53,7 +53,7 @@ Afterwards the job summarises its JUnit report with `junit_summary.py` and posts
 the result to Slack, on a pass as well as a failure.
 
 See [Scheduled Integration Tests](../docs/scheduled-integration-tests.md) for the
-one-time GitLab schedule, OIDC role, test-user and Slack-webhook setup it needs.
+one-time GitLab schedule, CI role, test-user and Slack-webhook setup it needs.
 
 The machinery those behaviours rest on — `cognito_test_user.py`, the `--no-skips`
 hook in `conftest.py`, and `junit_summary.py` — is unit-tested in

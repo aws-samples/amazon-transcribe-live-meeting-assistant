@@ -18,14 +18,14 @@ whether a scheduled run can report success without having tested anything:
     has to do is produce a payload in every one of those cases rather than a
     traceback where the notification should have been.
 
-``ci_assume_role`` is covered for the file it writes; the STS exchange itself
-needs a real OIDC token and is exercised only by the pipeline.
+The job's AWS credentials are not covered here: they are vended by the runner
+rather than acquired by code in this repository, so the thing that can go wrong
+is the role's trust policy, and the pipeline is what exercises it.
 """
 
 from __future__ import annotations
 
 import json
-import stat
 import sys
 from pathlib import Path
 from unittest import mock
@@ -34,7 +34,6 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import ci_assume_role  # noqa: E402
 import cognito_test_user  # noqa: E402
 import junit_summary  # noqa: E402
 
@@ -142,58 +141,6 @@ def test_available_reports_false_for_a_broken_source_without_raising(monkeypatch
     """`available()` is the skip guard, so it must not raise out of a test body."""
     _stub_secret(monkeypatch, {"username": "ci@example.com"})
     assert cognito_test_user.available() is False
-
-
-# ── the credentials file the pipeline writes ────────────────────────────────
-
-_FAKE_CREDENTIALS = {
-    "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
-    "aws_secret_access_key": "wJalrXUtnFEMI-EXAMPLE-KEY",  # pragma: allowlist secret
-    "aws_session_token": "FwoGZXIvYXdzEXAMPLE",
-}
-
-
-def test_credentials_file_is_written_owner_only(tmp_path: Path):
-    path = tmp_path / "credentials"
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-
-def test_an_existing_credentials_file_is_tightened_not_left_as_found(tmp_path: Path):
-    """O_CREAT's mode applies only on creation, so an existing file needs a chmod."""
-    path = tmp_path / "credentials"
-    path.write_text("[other]\naws_access_key_id = KEEP\n", encoding="utf-8")
-    path.chmod(0o644)
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-
-
-def test_writing_a_profile_preserves_other_profiles(tmp_path: Path):
-    path = tmp_path / "credentials"
-    path.write_text("[other]\naws_access_key_id = KEEP\n", encoding="utf-8")
-    ci_assume_role._write_profile(path, "lma-ci", _FAKE_CREDENTIALS)
-    body = path.read_text(encoding="utf-8")
-    assert "[other]" in body and "KEEP" in body
-    assert "[lma-ci]" in body
-    assert _FAKE_CREDENTIALS["aws_session_token"] in body
-
-
-def test_credentials_path_honours_the_aws_environment_variable(monkeypatch, tmp_path: Path):
-    """The pipeline points this outside the checkout so it cannot become an artifact."""
-    target = tmp_path / "elsewhere" / "credentials"
-    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(target))
-    assert ci_assume_role._credentials_path() == target
-
-
-def test_an_empty_oidc_token_is_refused_before_calling_sts(monkeypatch):
-    """An absent `id_tokens:` block yields an empty variable, not an error."""
-    called = mock.Mock()
-    monkeypatch.setattr(ci_assume_role, "_assume", called)
-    exit_code = ci_assume_role.main(
-        ["--role-arn", "arn:aws:iam::123456789012:role/example", "--token", "   "]
-    )
-    assert exit_code == 2
-    called.assert_not_called()
 
 
 # ── the notification payload built from the JUnit report ────────────────────
@@ -393,3 +340,224 @@ def test_the_cli_succeeds_when_there_is_no_report(tmp_path: Path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "❌ FAILED"
     assert "No JUnit report" in payload["summary"]
+
+
+def test_a_failed_publish_stage_names_the_stage_rather_than_the_missing_report(
+    tmp_path: Path, capsys
+):
+    """The publish job has no report to write, and that is not the news."""
+    exit_code = junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "publish",
+            "--stack",
+            "lma-integtest1",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "❌ FAILED"
+    assert "publish stage failed" in payload["summary"]
+    assert "no tests ran" in payload["summary"]
+    # Says the stack is untouched, which is the thing worth knowing at 8pm.
+    assert "unchanged" in payload["summary"]
+    assert "No JUnit report" not in payload["summary"]
+
+
+def test_a_failed_deploy_stage_warns_that_the_stack_may_need_attention(tmp_path: Path, capsys):
+    """A stack stuck mid-update fails every following night, so say so once."""
+    exit_code = junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "deploy",
+            "--stack",
+            "lma-integtest1",
+        ]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "deploy stage failed" in payload["summary"]
+    assert "every night" in payload["summary"]
+
+
+def test_the_tests_stage_is_the_default_and_still_summarises_the_report(tmp_path: Path, capsys):
+    """Passing no --stage must not change what the tests job has always posted."""
+    report = _write(tmp_path, _PASSING_REPORT)
+    exit_code = junit_summary.main(
+        ["--report", str(report), "--status", "success", "--stack", "lma-integtest1"]
+    )
+    assert exit_code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "✅ PASSED"
+    assert "3 passed" in payload["summary"]
+    assert "stage failed" not in payload["summary"]
+
+
+def test_an_unknown_stage_is_refused_rather_than_silently_mislabelled(tmp_path: Path):
+    """A typo in the job definition must fail loudly, not post a wrong label."""
+    with pytest.raises(SystemExit):
+        junit_summary.main(
+            ["--report", str(tmp_path / "absent.xml"), "--status", "failed", "--stage", "deployy"]
+        )
+
+
+# ── the per-test listing ────────────────────────────────────────────────────
+
+_GROUPED_REPORT = """<?xml version="1.0" encoding="utf-8"?>
+<testsuites><testsuite name="pytest" errors="0" failures="1" skipped="0" tests="5" time="100.0">
+  <testcase classname="integ-tests.test_lma_integration" name="test_stack_status_is_complete" time="1.0"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_output_present[A]" time="0.1"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_output_present[B]" time="0.1"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_appsync_reachable" time="2.0"/>
+  <testcase classname="integ-tests.test_lma_integration" name="test_ws_stream_transcribes_to_meeting" time="90.0">
+    <failure message="AssertionError: no transcript segments">trace</failure>
+  </testcase>
+</testsuite></testsuites>
+"""
+
+
+def test_every_test_is_named_in_the_summary(tmp_path: Path, capsys):
+    """The counts say how it went; the list says what it covered."""
+    report = _write(tmp_path, _GROUPED_REPORT)
+    junit_summary.main(["--report", str(report), "--status", "failed", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "stack_status_is_complete ✓" in summary
+    assert "appsync_reachable ✓" in summary
+    assert "ws_stream_transcribes_to_meeting ✗" in summary
+
+
+def test_parametrised_cases_collapse_to_one_line_with_a_count(tmp_path: Path, capsys):
+    """Seven values of one check are one check, not seven lines of a capped message."""
+    report = _write(tmp_path, _GROUPED_REPORT)
+    junit_summary.main(["--report", str(report), "--status", "failed", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "output_present ✓ (×2)" in summary
+    assert "output_present[A]" not in summary
+
+
+def test_a_module_with_too_many_checks_is_summarised_not_listed(tmp_path: Path, capsys):
+    """The plumbing suite is numerous and uniform; it must not bury the live suite."""
+    cases = "".join(
+        f'<testcase classname="integ-tests.test_ci_plumbing" name="test_p{i}" time="0.01"/>'
+        for i in range(30)
+    )
+    report = _write(
+        tmp_path,
+        '<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" '
+        f'errors="0" failures="0" skipped="0" tests="30" time="1.0">{cases}</testsuite></testsuites>',
+    )
+    junit_summary.main(["--report", str(report), "--status", "success", "--stack", "s"])
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "test_ci_plumbing — all 30 passed" in summary
+    assert "p17" not in summary
+
+
+def test_the_deployed_template_is_named_when_given(tmp_path: Path, capsys):
+    report = _write(tmp_path, _PASSING_REPORT)
+    junit_summary.main(
+        [
+            "--report",
+            str(report),
+            "--status",
+            "success",
+            "--template-url",
+            "https://s3.us-west-2.amazonaws.com/bucket/nightly/lma-main.yaml",
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "Deployed: https://s3.us-west-2.amazonaws.com/bucket/nightly/lma-main.yaml" in summary
+
+
+# ── the triage agent's report, as the notification sees it ──────────────────
+
+
+def test_the_agent_report_is_appended_under_its_own_heading(tmp_path: Path, capsys):
+    report = _write(tmp_path, _FAILING_REPORT)
+    agent = tmp_path / "triage-report.txt"
+    agent.write_text("ROOT CAUSE: the transcriber rejected the upgrade\nEVIDENCE: a log line\n")
+    junit_summary.main(
+        ["--report", str(report), "--status", "failed", "--agent-report", str(agent)]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "🤖 Triage:" in summary
+    assert "ROOT CAUSE: the transcriber rejected the upgrade" in summary
+    # The deterministic detail is still there: the agent adds to it, never
+    # replaces it.
+    assert "test_ws_stream_transcribes_to_meeting" in summary
+
+
+def test_an_empty_or_absent_agent_report_changes_nothing(tmp_path: Path, capsys):
+    """A green run touches the file; a disabled agent writes nothing to it."""
+    report = _write(tmp_path, _PASSING_REPORT)
+    empty = tmp_path / "triage-report.txt"
+    empty.write_text("")
+    junit_summary.main(
+        ["--report", str(report), "--status", "success", "--agent-report", str(empty)]
+    )
+    with_empty = json.loads(capsys.readouterr().out)["summary"]
+
+    junit_summary.main(
+        ["--report", str(report), "--status", "success", "--agent-report", str(tmp_path / "nope")]
+    )
+    with_absent = json.loads(capsys.readouterr().out)["summary"]
+
+    assert "Triage" not in with_empty
+    assert with_empty == with_absent
+
+
+def test_a_verbose_agent_cannot_crowd_out_the_test_results(tmp_path: Path, capsys):
+    """The facts outrank the interpretation, so both get their own budget."""
+    report = _write(tmp_path, _FAILING_REPORT)
+    agent = tmp_path / "triage-report.txt"
+    agent.write_text("ROOT CAUSE: x\n" + "padding line\n" * 2000)
+    junit_summary.main(
+        ["--report", str(report), "--status", "failed", "--agent-report", str(agent)]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "test_ws_stream_transcribes_to_meeting" in summary
+    assert "ROOT CAUSE: x" in summary
+    # Slack rejects the whole post past 4000 characters.
+    assert len(summary) < 4000
+
+
+def test_the_agent_refuses_to_run_without_read_only_credentials(monkeypatch):
+    """It would otherwise inherit the nightly's administrative credentials."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    monkeypatch.setattr(failure_agent, "AGENT_ENABLED", True)
+    monkeypatch.setattr(failure_agent, "AGENT_ROLE_ARN", "")
+    # Would raise if reached: nothing may be launched without the role.
+    monkeypatch.setattr(
+        failure_agent, "ensure_claude_code", lambda: pytest.fail("launched without a role")
+    )
+    assert (
+        failure_agent.run_failure_agent(
+            report_path=Path("x.xml"), log_path=Path("x.log"), stack="s", region="us-west-2"
+        )
+        is None
+    )
+
+
+def test_the_agent_is_off_unless_explicitly_enabled(monkeypatch):
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import failure_agent  # noqa: PLC0415
+
+    monkeypatch.setattr(failure_agent, "AGENT_ENABLED", False)
+    monkeypatch.setattr(
+        failure_agent, "_readonly_credentials", lambda: pytest.fail("ran while disabled")
+    )
+    assert (
+        failure_agent.run_failure_agent(
+            report_path=Path("x.xml"), log_path=Path("x.log"), stack="s", region="us-west-2"
+        )
+        is None
+    )

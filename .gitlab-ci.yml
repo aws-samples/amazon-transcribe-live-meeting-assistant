@@ -176,22 +176,42 @@ srt_security_review:
       - srt-project-summary.md
     expire_in: 1 week
 
-# ── scheduled_integration: end-to-end suite against a live stack ────────────
+# ── scheduled_integration: build the branch, deploy it, then test it ───────
 # Runs ONLY from a pipeline schedule. The suite in integ-tests/ is the only
 # thing in this repository that exercises the WebSocket transcriber, Amazon
 # Transcribe, Kinesis, the Call Event Processor and AppSync together, and until
-# this job existed it ran only when someone remembered to.
+# these jobs existed it ran only when someone remembered to.
 #
-# ONE-TIME SETUP IS REQUIRED — this job does nothing until it is done, and fails
+# THREE JOBS, in order: publish → deploy → tests. The split is not cosmetic.
+#
+#   * It is what makes the nightly test THIS COMMIT. The stack is rebuilt from
+#     the scheduled ref and deployed before the suite runs, so a green nightly
+#     means the branch works rather than that some older build still does.
+#
+#   * ⚠️ It is also the only way the run fits in its AWS credentials. The
+#     runner's credential vendor is a one-shot `pre_clone` step: it assumes the
+#     role once, writes the default profile, and never refreshes. Those
+#     credentials are a role-chained session, so STS caps them at ONE HOUR
+#     whatever the role's MaxSessionDuration says. A single job that published,
+#     deployed and tested would run past that and die on an expired token
+#     somewhere in the middle, with the failure landing wherever the next AWS
+#     call happened to be. Each job here re-enters the pipeline and so gets its
+#     own fresh hour, and each carries a timeout BELOW that hour, so the
+#     credentials cannot expire mid-job: a job that overruns is killed by its
+#     timeout and says so, which is a diagnosis rather than a mystery.
+#     Anything added here must keep that property. Do not merge these jobs.
+#
+# ONE-TIME SETUP IS REQUIRED — these jobs do nothing until it is done, and fail
 # rather than passing quietly if it is half-done. See
 # docs/scheduled-integration-tests.md for the full procedure:
 #
 #   1. A pipeline schedule (Build > Pipeline schedules), on `develop`, with
 #      `NIGHTLY_INTEG` = `true`.
 #   2. CI/CD variables on the schedule or the project:
-#        LMA_INTEG_ROLE_ARN        the IAM role to assume (masked; it contains
-#                                  the account id, which must not be committed
-#                                  to this public repository)
+#        AWS_CREDS_TARGET_ROLE     the IAM role the runner's credential vendor
+#                                  assumes (masked; it contains the account id,
+#                                  which must not be committed to this public
+#                                  repository)
 #        LMA_TEST_USER_SECRET_ID   Secrets Manager secret holding the Cognito
 #                                  test user, as {"username":…, "password":…}
 #        LMA_INTEG_STACK           optional; defaults to lma-integtest1
@@ -201,22 +221,290 @@ srt_security_review:
 #                                  MASKED and NOT PROTECTED — see the
 #                                  after_script below. Absent, the post is
 #                                  skipped with one log line.
-#   3. An IAM role trusting this GitLab instance as an OIDC provider, with the
-#      audience below.
+#        LMA_FAILURE_AGENT         optional; `1` enables the triage agent that
+#                                  diagnoses a failed run. Off by default.
+#        LMA_FAILURE_AGENT_ROLE_ARN  required IF the agent is enabled: the
+#                                  READ-ONLY role it runs as (masked). Without
+#                                  it the agent refuses to run rather than
+#                                  inherit this job's administrative
+#                                  credentials. See integ-tests/failure_agent.py.
+#   3. An IAM role in the stack's account trusting this GitLab instance's
+#      credential vendor, scoped by the group and project session tags. It
+#      deploys the stack, so it needs permissions to do that — see the doc.
 #
-# Failures surface four ways, so a red nightly cannot go unnoticed: the
-# after_script below posts the result to Slack; GitLab's own "pipeline failed"
-# notification for scheduled pipelines goes to the schedule's owner by email;
-# the JUnit report is attached to the pipeline so the failing test is visible
-# without opening the log; and `--no-skips` (see
-# integ-tests/conftest.py) turns a skipped test into a failure, so a lapsed
-# secret or a dropped dependency reports red rather than green having run
-# nothing.
-nightly_integ_tests:
+# Failures surface four ways, so a red nightly cannot go unnoticed: exactly one
+# Slack post per run, from whichever job failed (or from the tests on a good
+# run); GitLab's own "pipeline failed" notification for scheduled pipelines,
+# which goes to the schedule's owner by email; the JUnit report, attached to
+# the pipeline so the failing test is visible without opening a log; and
+# `--no-skips` (see integ-tests/conftest.py), which turns a skipped test into a
+# failure, so a lapsed secret or a dropped dependency reports red rather than
+# green having run nothing.
+
+# Shared by all three jobs. Anchored rather than repeated so the three cannot
+# drift apart — in particular the rule, where a mismatch would leave a job out
+# of the scheduled pipeline and silently skip a stage.
+.nightly_rules: &nightly_rules
+  - if: $CI_PIPELINE_SOURCE == "schedule" && $NIGHTLY_INTEG == "true"
+  - when: never
+
+.nightly_variables: &nightly_variables
+  LMA_INTEG_STACK: lma-integtest1
+  # lma-integtest1 is in us-west-2, not the us-east-1 that a bare profile
+  # resolves to. A wrong region here reports the stack as non-existent.
+  AWS_DEFAULT_REGION: us-west-2
+  # The publish job uploads here and the deploy job reads back from it. The
+  # CLI appends the region to the basename, and the main template always lands
+  # at <prefix>/lma-main.yaml, so both jobs can name the same URL from these
+  # two values without passing an artifact between them.
+  LMA_ARTIFACT_BUCKET_BASENAME: lma-integtest-nightly-artifacts
+  LMA_ARTIFACT_PREFIX: nightly
+  # Derived once, here, from the three values above. The deploy job deploys it
+  # and the notification names it, so "which artifacts was this?" has an answer
+  # in the channel rather than only in a job log.
+  LMA_TEMPLATE_URL: "https://s3.${AWS_DEFAULT_REGION}.amazonaws.com/${LMA_ARTIFACT_BUCKET_BASENAME}-${AWS_DEFAULT_REGION}/${LMA_ARTIFACT_PREFIX}/lma-main.yaml"
+
+# One Slack post per run. The publish and deploy jobs post only when they fail,
+# because on a good night the tests job has the result worth reading; the tests
+# job posts either way. So a run produces exactly one message, from the stage
+# that decided the outcome.
+#
+# ⚠️ WHY THIS IS HERE AND NOT GitLab's OWN SLACK INTEGRATION. That integration
+# fires on `pipeline_events` for a branch and, like the pipeline BADGE, cannot
+# filter by pipeline SOURCE — so it would post every push pipeline to `develop`
+# as well, which is most of them and is not what anybody subscribed for. These
+# jobs are the only place that knows the run was the scheduled one, and the
+# tests job is the only place with the JUnit report to summarise.
+#
+# SLACK_WEBHOOK_URL is a MASKED CI variable, never a committed value: this
+# repository is public and a webhook URL is a bearer credential that lets
+# anyone post to the channel. Absent, this prints one line and exits 0.
+#
+# ⚠️ The variable must be MASKED and **NOT PROTECTED**. A protected variable is
+# absent from pipelines on unprotected branches, so unless `develop` is a
+# protected branch here the block would log "not set" forever and look like it
+# was working.
+#
+# ⚠️ PAYLOAD SHAPE is a contract with the Slack workflow, and getting it wrong
+# posts a message with a blank variable rather than failing. The four keys and
+# the reason the target is a Workflow Builder webhook rather than an incoming
+# one are documented in integ-tests/junit_summary.py — read that before
+# changing either side.
+.nightly_slack_post: &nightly_slack_post
+  # Built unconditionally, even when no webhook is configured and even when
+  # this job is not the one that will post: it costs nothing, it prints the
+  # stage's verdict to the end of the log (readable form on stderr, JSON on
+  # stdout), and it means the declared artifact always exists rather than
+  # emitting a "no matching files" warning.
+  #
+  # python3 from the image, not .venv/bin/python: junit_summary is stdlib-only,
+  # and this has to work even when the failure being reported is
+  # `make setup-python` itself. The webhook URL is never passed to it.
+  # --agent-report names a file that usually does not exist: the triage agent
+  # is opt-in, only runs on a failure, and produces nothing when it cannot
+  # reach a conclusion. All three cases are normal and leave the notification
+  # as it would have been.
+  - >
+    python3 integ-tests/junit_summary.py
+    --report integ-tests-report.xml
+    --status "$CI_JOB_STATUS"
+    --stage "$NIGHTLY_STAGE"
+    --job-url "$CI_JOB_URL"
+    --commit "$CI_COMMIT_SHA"
+    --stack "$LMA_INTEG_STACK"
+    --region "$AWS_DEFAULT_REGION"
+    --template-url "$LMA_TEMPLATE_URL"
+    --agent-report triage-report.txt > slack-payload.json
+  - |
+    if [ "$NIGHTLY_POST_WHEN" = "on_failure" ] && [ "$CI_JOB_STATUS" = "success" ]; then
+      echo "ℹ️ $NIGHTLY_STAGE succeeded — the tests job posts the night's result"
+    elif [ -z "$SLACK_WEBHOOK_URL" ]; then
+      echo "ℹ️ SLACK_WEBHOOK_URL not set — skipping the Slack post"
+    elif [ "$CI_PIPELINE_SOURCE" != "schedule" ]; then
+      echo "ℹ️ Not the scheduled run (source=$CI_PIPELINE_SOURCE) — skipping the Slack post"
+    else
+      # --fail so a 4xx from Slack is visible rather than silently discarded,
+      # but the `else` branch keeps a notification problem from changing the
+      # job's verdict: the stage's result is what this job reports.
+      if curl -sS --fail -X POST -H 'Content-type: application/json' \
+           --data @slack-payload.json "$SLACK_WEBHOOK_URL" >/dev/null; then
+        echo "💬 Nightly result posted to Slack"
+      else
+        echo "⚠️ Slack post failed (HTTP error, bad webhook, or curl missing)"
+        echo "   The $NIGHTLY_STAGE result above is unaffected."
+      fi
+    fi
+
+# ── 1/3: build this commit and publish its artifacts ───────────────────────
+nightly_publish:
   stage: scheduled_integration
   needs: []
+  # Node for the UI and extension bundles, python3.12 because that is the
+  # Lambda runtime and this build has no container to pin it (see below).
+  image: public.ecr.aws/docker/library/python:3.12-bookworm
+  # ⚠️ arch:amd64 is REQUIRED, not a preference. This instance has arm64
+  # runners too, and an unpinned job lands on either. Building without SAM's
+  # container means the runner's own wheels go into the bundles, so an arm64
+  # runner would produce arm64 wheels for an x86_64 Lambda — a build that
+  # succeeds and deploys and then fails at runtime on import. The script
+  # asserts the architecture as well; the tag is how it gets the right one.
+  tags:
+    - arch:amd64
+    - size:large
+  # Below the one-hour credential ceiling, deliberately. See the note above.
+  timeout: 55m
+  interruptible: false
+  # Serialised with the other two against the same stack, so two nights — or a
+  # night and a manual run — cannot publish and deploy over each other.
+  resource_group: integ-stack-$LMA_INTEG_STACK
+
+  rules: *nightly_rules
+
+  variables:
+    <<: *nightly_variables
+    NIGHTLY_STAGE: publish
+    NIGHTLY_POST_WHEN: on_failure
+    # ⚠️ Build the Lambda bundles with the runner's own interpreter rather than
+    # in SAM's build container: these runners have no Docker daemon and cannot
+    # start one (no `services:` support, no socket), so `--use-container` fails
+    # before it builds anything. That is sound HERE and nowhere else — the
+    # runner is linux/amd64 on python3.12, which is what Lambda is, so the
+    # wheels it resolves are the wheels Lambda wants. See the flag's comment in
+    # lma-ai-stack/Makefile.
+    SAM_BUILD_IN_CONTAINER: "false"
+
+  before_script:
+    # Refuse to build before checking the two things SAM_BUILD_IN_CONTAINER=false
+    # relies on. Both are guaranteed by the image and the arch tag, which is
+    # exactly why they are worth asserting: if either ever stops holding, this
+    # job would otherwise keep succeeding and publish bundles that Lambda
+    # cannot import, and the first sign of it would be a runtime error in a
+    # deployed stack rather than a failed build.
+    - |
+      ARCH=$(uname -m)
+      PY=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+      echo "Builder: $ARCH, python $PY (building in container: ${SAM_BUILD_IN_CONTAINER})"
+      if [ "$SAM_BUILD_IN_CONTAINER" = "false" ]; then
+        if [ "$ARCH" != "x86_64" ]; then
+          echo "Refusing to build: an uncontainerised build needs an x86_64 builder, got $ARCH." >&2
+          echo "Add or fix the arch:amd64 tag on this job." >&2
+          exit 1
+        fi
+        if [ "$PY" != "3.12" ]; then
+          echo "Refusing to build: an uncontainerised build needs python3.12 to match the" >&2
+          echo "Lambda runtime, got $PY. Fix this job's image." >&2
+          exit 1
+        fi
+      fi
+    - apt-get update -y
+    - apt-get install -y make git curl zip unzip
+    # The AWS CLI, because `cfn package` shells out to it for every nested
+    # stack. boto3 alone is not enough for this job, unlike the other two.
+    - curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+    - unzip -q awscliv2.zip && ./aws/install && rm -rf awscliv2.zip aws
+    - aws --version
+    # Node from .nvmrc, the same pin code_checks and `make setup-node` use.
+    - NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
+    - NODE_PIN=$(tr -d '[:space:]' < .nvmrc)
+    - curl -fsSL https://nodejs.org/dist/v$NODE_PIN/node-v$NODE_PIN-linux-$NODE_ARCH.tar.xz | tar -xJ -C /usr/local --strip-components=1
+    - node --version && npm --version
+    - pip install --quiet aws-sam-cli
+    - sam --version
+    - make setup-python
+    - make setup-cli
+    - |
+      if [ -z "$AWS_CREDS_TARGET_ROLE" ]; then
+        echo "AWS_CREDS_TARGET_ROLE is not set, so the runner vended no AWS credentials." >&2
+        echo "See docs/scheduled-integration-tests.md" >&2
+        exit 1
+      fi
+    - >
+      .venv/bin/python -c "import boto3;
+      print(boto3.client('sts').get_caller_identity()['Arn'])"
+
+  script:
+    # --force: skip the SHA-based change detection. A nightly that reused a
+    # previous build when it thought nothing had changed would be back to
+    # testing an older artifact, which is the thing this job exists to stop.
+    - >
+      .venv/bin/lma publish
+      --source-dir .
+      --bucket-basename "$LMA_ARTIFACT_BUCKET_BASENAME"
+      --prefix "$LMA_ARTIFACT_PREFIX"
+      --region "$AWS_DEFAULT_REGION"
+      --force
+
+  after_script: *nightly_slack_post
+
+  artifacts:
+    when: always
+    paths:
+      - slack-payload.json
+    expire_in: 1 month
+
+# ── 2/3: deploy what was just published ────────────────────────────────────
+nightly_deploy:
+  stage: scheduled_integration
+  needs:
+    - nightly_publish
+  image: public.ecr.aws/docker/library/python:3.13-bookworm
+  # Below the one-hour credential ceiling, deliberately. See the note above.
+  timeout: 55m
+  interruptible: false
+  resource_group: integ-stack-$LMA_INTEG_STACK
+
+  rules: *nightly_rules
+
+  variables:
+    <<: *nightly_variables
+    NIGHTLY_STAGE: deploy
+    NIGHTLY_POST_WHEN: on_failure
+
+  before_script:
+    - apt-get update -y
+    - apt-get install -y make git curl
+    - make setup-python
+    - make setup-cli
+    - |
+      if [ -z "$AWS_CREDS_TARGET_ROLE" ]; then
+        echo "AWS_CREDS_TARGET_ROLE is not set, so the runner vended no AWS credentials." >&2
+        echo "See docs/scheduled-integration-tests.md" >&2
+        exit 1
+      fi
+    - >
+      .venv/bin/python -c "import boto3;
+      print(boto3.client('sts').get_caller_identity()['Arn'])"
+
+  script:
+    # $LMA_TEMPLATE_URL is the URL the publish job uploaded to, derived in the
+    # shared variables above rather than passed as an artifact or scraped from
+    # the other job's log: the CLI builds it the same way (see
+    # lib/lma_sdk/lma_sdk/_core/publish.py), and a value derived from one
+    # source cannot go stale against it.
+    - echo "Deploying $LMA_TEMPLATE_URL"
+    - >
+      .venv/bin/lma deploy
+      --stack-name "$LMA_INTEG_STACK"
+      --region "$AWS_DEFAULT_REGION"
+      --template-url "$LMA_TEMPLATE_URL"
+      --wait
+
+  after_script: *nightly_slack_post
+
+  artifacts:
+    when: always
+    paths:
+      - slack-payload.json
+    expire_in: 1 month
+
+# ── 3/3: run the suite against the stack just deployed ─────────────────────
+nightly_integ_tests:
+  stage: scheduled_integration
+  needs:
+    - nightly_deploy
   # ~40 min of wall time is expected; the cap leaves room for a slow Transcribe
-  # stream without letting a wedged run hold the schedule all day.
+  # stream without letting a wedged run hold the schedule all day, and stays
+  # below the one-hour credential ceiling. See the note above.
   timeout: 50m
   # Never cancelled mid-run: the suite creates a meeting row and a Virtual
   # Participant registry entry and cleans them up in a `finally`, which a
@@ -225,28 +513,31 @@ nightly_integ_tests:
   # Two runs against one stack would race on those same rows.
   resource_group: integ-stack-$LMA_INTEG_STACK
 
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule" && $NIGHTLY_INTEG == "true"
-    - when: never
-
-  # GitLab mints this JWT for the job; integ-tests/ci_assume_role.py exchanges
-  # it for short-lived AWS credentials. No long-lived access key is stored.
-  # $CI_SERVER_URL is the GitLab instance's own URL, which is the audience the
-  # IAM role's trust policy should require. Using the predefined variable keeps
-  # the instance hostname out of this file, which is published publicly.
-  id_tokens:
-    GITLAB_OIDC_TOKEN:
-      aud: $CI_SERVER_URL
+  rules: *nightly_rules
 
   variables:
-    LMA_INTEG_STACK: lma-integtest1
-    # lma-integtest1 is in us-west-2, not the us-east-1 that a bare profile
-    # resolves to. A wrong region here reports the stack as non-existent.
-    AWS_DEFAULT_REGION: us-west-2
-    # Outside the checkout, so the assumed-role credentials cannot be collected
-    # as a job artifact.
-    AWS_SHARED_CREDENTIALS_FILE: /tmp/lma-ci-aws-credentials
+    <<: *nightly_variables
+    NIGHTLY_STAGE: tests
+    NIGHTLY_POST_WHEN: always
 
+  # AWS credentials come from this GitLab instance's credential vendor, which
+  # assumes $AWS_CREDS_TARGET_ROLE for the job and writes the result to the
+  # default profile in the credential search order. They are short-lived and
+  # job-scoped; no long-lived access key is stored anywhere.
+  #
+  # ⚠️ Do NOT set AWS_SHARED_CREDENTIALS_FILE or AWS_PROFILE in this job. The
+  # vendor writes the default profile at the default path, so either one points
+  # the SDK somewhere the credentials are not.
+  #
+  # ⚠️ Nor is AWS_CREDS_TARGET_ROLE set here: it holds the account id, which
+  # must not appear in this public repository. It is a masked project variable,
+  # and the job checks for it below rather than failing inside a test.
+  #
+  # The OIDC route that an `id_tokens` block would take is not available on this
+  # instance: its OpenID discovery and JWKS endpoints sit behind the same
+  # authenticating edge as the rest of it, so IAM cannot reach them to validate
+  # a job token. The credential vendor is the supported path here — see
+  # https://docs.hub.amazon.dev/docs/gitlab/user-guide/howto/vending-aws-credentials/
   before_script:
     - apt-get update -y
     # curl is used by the after_script's Slack post, and is installed here (not
@@ -258,88 +549,62 @@ nightly_integ_tests:
     # missing that test skips, which --no-skips then turns into a failure.
     - .venv/bin/pip install -r integ-tests/requirements.txt
     - |
-      if [ -z "$LMA_INTEG_ROLE_ARN" ]; then
-        echo "LMA_INTEG_ROLE_ARN is not set." >&2
+      if [ -z "$AWS_CREDS_TARGET_ROLE" ]; then
+        echo "AWS_CREDS_TARGET_ROLE is not set, so the runner vended no AWS credentials." >&2
         echo "See docs/scheduled-integration-tests.md" >&2
         exit 1
       fi
-    # Writes a profile to $AWS_SHARED_CREDENTIALS_FILE. Prints the path, never
-    # the credentials.
-    - >
-      .venv/bin/python integ-tests/ci_assume_role.py
-      --role-arn "$LMA_INTEG_ROLE_ARN"
-      --token "$GITLAB_OIDC_TOKEN"
-      --profile lma-ci
-    - export AWS_PROFILE=lma-ci
-    # Fail here, with the identity in the log, rather than inside a test.
+    # Fail here, with the identity in the log, rather than inside a test. This
+    # is also what proves the vendor ran: an empty or unexpected ARN means the
+    # trust policy did not match this group and project, not that a test broke.
     - >
       .venv/bin/python -c "import boto3;
       print(boto3.client('sts').get_caller_identity()['Arn'])"
+    # The declared artifact always exists, so a green night does not emit a
+    # "no matching files" warning for a report there was no failure to write.
+    # Empty is the signal junit_summary reads as "no triage", so this is also
+    # what keeps the notification unchanged on a passing run.
+    - touch triage-report.txt
 
   script:
-    - export AWS_PROFILE=lma-ci
-    - make integ-tests-nightly STACK="$LMA_INTEG_STACK"
-
-  # Post the result to Slack. In after_script, so it runs on a pass, a failure
-  # and a job that died in before_script alike — the cases where nobody is
-  # watching are exactly the ones worth reporting.
-  #
-  # ⚠️ WHY THIS IS HERE AND NOT GitLab's OWN SLACK INTEGRATION. That integration
-  # fires on `pipeline_events` for a branch and, like the pipeline BADGE, cannot
-  # filter by pipeline SOURCE — so it would post every push pipeline to
-  # `develop` as well, which is most of them and is not what anybody subscribed
-  # for. This job is the only place that knows the run was the scheduled one,
-  # and the only place with the JUnit report to summarise.
-  #
-  # SLACK_WEBHOOK_URL is a MASKED CI variable, never a committed value: this
-  # repository is public and a webhook URL is a bearer credential that lets
-  # anyone post to the channel. Absent, this prints one line and exits 0.
-  #
-  # ⚠️ The variable must be MASKED and **NOT PROTECTED**. A protected variable
-  # is absent from pipelines on unprotected branches, so unless `develop` is a
-  # protected branch here the block would log "not set" forever and look like it
-  # was working.
-  #
-  # ⚠️ PAYLOAD SHAPE is a contract with the Slack workflow, and getting it wrong
-  # posts a message with a blank variable rather than failing. The four keys and
-  # the reason the target is a Workflow Builder webhook rather than an incoming
-  # one are documented in integ-tests/junit_summary.py — read that before
-  # changing either side.
-  after_script:
-    # The payload is built unconditionally, even when no webhook is configured:
-    # it costs nothing, it prints the run's result to the end of the log (the
-    # script puts the readable form on stderr and the JSON on stdout), and it
-    # means the declared artifact always exists rather than emitting a "no
-    # matching files" warning on runs that post nothing.
+    # The suite's output is captured to a file as well as the log, because the
+    # triage agent greps that file. pipefail so the pipe reports the SUITE's
+    # exit status rather than tee's, which is always 0.
     #
-    # python3 from the image, not .venv/bin/python: junit_summary is stdlib-only,
-    # and this has to work even when the failure being reported is
-    # `make setup-python` itself. The webhook URL is never passed to it.
-    - >
-      python3 integ-tests/junit_summary.py
-      --report integ-tests-report.xml
-      --status "$CI_JOB_STATUS"
-      --job-url "$CI_JOB_URL"
-      --commit "$CI_COMMIT_SHA"
-      --stack "$LMA_INTEG_STACK"
-      --region "$AWS_DEFAULT_REGION" > slack-payload.json
+    # The failure is held rather than propagated so the agent can run while the
+    # stack is still up and inside this job's credentials, and the held status
+    # is re-raised at the end — so the job is still red, and $CI_JOB_STATUS in
+    # the after_script is still the truth. The agent runs HERE and not in the
+    # after_script because an after_script gets five minutes by default, which
+    # is less than the agent's own budget.
     - |
-      if [ -z "$SLACK_WEBHOOK_URL" ]; then
-        echo "ℹ️ SLACK_WEBHOOK_URL not set — skipping the Slack post"
-      elif [ "$CI_PIPELINE_SOURCE" != "schedule" ]; then
-        echo "ℹ️ Not the scheduled run (source=$CI_PIPELINE_SOURCE) — skipping the Slack post"
-      else
-        # --fail so a 4xx from Slack is visible rather than silently discarded,
-        # but the `else` branch keeps a notification problem from changing the
-        # job's verdict: the test result is what this job reports.
-        if curl -sS --fail -X POST -H 'Content-type: application/json' \
-             --data @slack-payload.json "$SLACK_WEBHOOK_URL" >/dev/null; then
-          echo "💬 Nightly result posted to Slack"
-        else
-          echo "⚠️ Slack post failed (HTTP error, bad webhook, or curl missing)"
-          echo "   The test result above is unaffected."
+      # `set +e` explicitly: the runner may or may not have errexit on, and
+      # with it on the held-status pattern below would never be reached.
+      set +e
+      set -o pipefail
+      make integ-tests-nightly STACK="$LMA_INTEG_STACK" 2>&1 | tee integ-tests-output.log
+      TEST_STATUS=$?
+      echo "suite exit status: $TEST_STATUS"
+      if [ "$TEST_STATUS" != "0" ]; then
+        # Node only on the failure path: Claude Code needs it, and a green
+        # night should not pay to install it. Failure to install is not fatal —
+        # the agent is advisory and declines cleanly without it.
+        if ! command -v npm >/dev/null 2>&1; then
+          NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
+          NODE_PIN=$(tr -d '[:space:]' < .nvmrc)
+          curl -fsSL "https://nodejs.org/dist/v$NODE_PIN/node-v$NODE_PIN-linux-$NODE_ARCH.tar.xz" \
+            | tar -xJ -C /usr/local --strip-components=1 || echo "node install failed; triage will be skipped"
         fi
+        .venv/bin/python integ-tests/failure_agent.py \
+          --report integ-tests-report.xml \
+          --log integ-tests-output.log \
+          --stack "$LMA_INTEG_STACK" \
+          --region "$AWS_DEFAULT_REGION" \
+          --out triage-report.txt || echo "triage agent errored; continuing"
       fi
+      exit "$TEST_STATUS"
+
+  after_script: *nightly_slack_post
 
   artifacts:
     when: always
@@ -347,6 +612,10 @@ nightly_integ_tests:
       junit: integ-tests-report.xml
     paths:
       - integ-tests-report.xml
+      # The suite's full output and the agent's reading of it, so a failure can
+      # be re-examined after the fact without re-running the night.
+      - integ-tests-output.log
+      - triage-report.txt
       # The posted message, so "what did Slack get told" is answerable from the
       # pipeline when the channel post looks wrong. Contains no credentials.
       - slack-payload.json

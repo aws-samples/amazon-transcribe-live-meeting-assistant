@@ -217,12 +217,26 @@ def _compare_versions(v1: str, v2: str) -> int:
 def check_prerequisites() -> list[str]:
     """Check all publish prerequisites. Returns list of error messages (empty = all OK)."""
     errors = []
-    for check in [
-        _check_docker_running,
+    # Docker is only a prerequisite because SAM builds the Lambda bundles in a
+    # container. A builder that sets SAM_BUILD_IN_CONTAINER=false has taken
+    # responsibility for already being the Lambda platform (see the flag in
+    # lma-ai-stack/Makefile), and needs no daemon -- so demanding one here would
+    # reject a build that is going to succeed.
+    checks: list[Callable[[], str | None]] = []
+    if os.environ.get("SAM_BUILD_IN_CONTAINER", "true").strip().lower() != "false":
+        checks.append(_check_docker_running)
+    for check in checks + [
         _check_sam_version,
         lambda: _check_command("zip", "Install zip."),
         lambda: _check_command("pip3", "Install pip3."),
         lambda: _check_command("npm", "Install npm."),
+        # `cfn package` shells out to the AWS CLI. Checked here so a builder
+        # without it is told up front, rather than after several minutes of
+        # building, by eight nested stacks failing with "command not found".
+        lambda: _check_command(
+            "aws",
+            "Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html",
+        ),
         _check_node_version,
     ]:
         err = check()
