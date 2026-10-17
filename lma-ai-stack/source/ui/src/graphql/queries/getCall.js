@@ -14,6 +14,7 @@ export default /* GraphQL */ `
       CallCategories
       IssuesDetected
       CallSummaryText
+      SpeakerIdentities
       CreatedAt
       CustomerPhoneNumber
       Status

@@ -5,8 +5,7 @@
  */
 /* eslint-disable indent */
 import * as XLSX from 'xlsx';
-import { DEFAULT_OTHER_SPEAKER_NAME } from './constants';
-import { splitDiarizationLabel } from './utilities';
+import { parseSpeakerIdentities, resolveSpeakerName } from './speaker-identities';
 
 // eslint-disable-next-line prettier/prettier
 export const onImportExcelAsync = (file) =>
@@ -160,6 +159,9 @@ const getTimestampFromSeconds = (secs) => {
 
 const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
   const { callId, callerPhoneNumber } = meeting;
+  // An exported transcript has to carry the same speaker names the UI shows, or
+  // a shared download contradicts the screen it was taken from.
+  const speakerIdentities = parseSpeakerIdentities(meeting.speakerIdentities);
 
   const maxChannels = 6;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
@@ -177,16 +179,13 @@ const sortTranscriptByTime = (callTranscriptPerCallId, meeting) => {
       const { channel, startTime, endTime } = c;
       let { speaker, transcript } = c;
 
-      // Compare the base name, not the whole string: with per-channel speaker
-      // identification on, the speaker arrives as 'Other Participant (spk_0)' and
-      // an exact match would miss it. The label is re-attached below so it is not
-      // lost to the substitution.
-      const { base: speakerBase, suffix: speakerLabel } = splitDiarizationLabel(speaker);
-
-      if (channel === 'CALLER' && (speakerBase === DEFAULT_OTHER_SPEAKER_NAME || speakerBase === '')) {
-        // In streaming audio the speaker will just be "Other participant", override this with the
-        // name the user chose if needed
-        speaker = `${callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME}${speakerLabel}`;
+      if (channel === 'CALLER' || channel === 'AGENT') {
+        // Resolve through the meeting's speaker identity map, which also covers
+        // the older substitution of the participant name typed on the Stream
+        // Audio form for the 'Other Participant' placeholder. That fallback is
+        // passed for the CALLER channel only -- it is the remote side's name, and
+        // applying it to the local channel would mislabel it.
+        speaker = resolveSpeakerName(c, speakerIdentities, channel === 'CALLER' ? callerPhoneNumber : undefined);
       } else if (channel === 'AGENT_ASSISTANT' || channel === 'MEETING_ASSISTANT') {
         // The speaker for the assistant will just be "Other participant", override this
         speaker = 'MEETING ASSISTANT';

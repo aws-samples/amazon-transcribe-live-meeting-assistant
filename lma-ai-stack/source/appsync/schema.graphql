@@ -53,6 +53,15 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	CallCategories: [String]
 	IssuesDetected: String
 	CallSummaryText: String
+	# JSON map from a transcript segment's STORED speaker (its channel plus the
+	# voice id the engine assigned, e.g. 'Other Participant (spk_0)') to a real
+	# name, plus any merges of two voice ids onto one person, single-segment
+	# overrides and the optional pasted attendee list. Applied wherever a speaker
+	# is read rather than written back onto the segments, so naming a voice is one
+	# small write and applies retroactively to the whole transcript. See
+	# ui/src/components/common/speaker-identities.js for the shape and the
+	# resolution order.
+	SpeakerIdentities: String
 	Owner: String
 	SharedWith: String
 }
@@ -179,6 +188,7 @@ type Mutation @aws_iam {
 	updateVideoRecordingUrl(input: UpdateVideoRecordingUrlInput!): Call
 	updatePcaUrl(input: UpdatePcaUrlInput!): Call
 	updateAgent(input: UpdateAgentInput!): Call
+	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
 	addCallCategory(input: AddCallCategoryInput!): Call
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
@@ -478,7 +488,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "updateSpeakerIdentities", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
@@ -621,6 +631,12 @@ input UpdatePcaUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+}
+
+input UpdateSpeakerIdentitiesInput {
+	CallId: ID!
+	SpeakerIdentities: String!
+	UpdatedAt: AWSDateTime
 }
 
 input ShareCallInput {

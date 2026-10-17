@@ -1,0 +1,57 @@
+## Write the per-meeting speaker identity map.
+##
+## This has its own template rather than sharing updateCall.request.vtl for two
+## reasons. That template SETs every key present in the input, which is safe only
+## because every mutation using it is reachable by IAM callers alone; this field
+## is written from the browser, so the update is spelled out attribute by
+## attribute instead. And a browser caller has to be held to the same access rule
+## the read path applies in getCall.response.vtl -- Admin, the meeting's owner, or
+## a user it has been shared with -- which is expressed below as a DynamoDB
+## condition so the check and the write are one atomic operation.
+#set( $PK = "c#${ctx.args.input.CallId}" )
+#set( $UpdatedAt = $util.defaultIfNull($ctx.args.input.UpdatedAt, $util.time.nowISO8601() ) )
+
+## A Lambda calling with IAM credentials arrives as an assumed role; a signed-in
+## user arrives through Cognito. Same detection as getCall.response.vtl.
+#set( $isCognitoUser = true )
+#if( $context.identity.userArn && $context.identity.userArn.contains(":assumed-role/") )
+  #set( $isCognitoUser = false )
+#end
+
+## Only update an existing meeting, and only when this write is newer than the one
+## already stored -- the same guard every other Call update carries.
+#set( $conditionNames = { "#PK": "PK", "#UpdatedAt": "UpdatedAt" } )
+#set( $conditionValues = { ":UpdatedAt": $util.dynamodb.toDynamoDB($UpdatedAt) } )
+#set( $condition = "attribute_exists(#PK) AND #UpdatedAt < :UpdatedAt" )
+
+#if( $isCognitoUser && !$context.identity.groups.contains("Admin") )
+  $util.qr( $conditionNames.put("#Owner", "Owner") )
+  $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )
+  $util.qr( $conditionValues.put(":caller", $util.dynamodb.toDynamoDB($context.identity.username)) )
+  #set( $condition = "${condition} AND (#Owner = :caller OR contains(#SharedWith, :caller))" )
+#end
+
+{
+  "version" : "2018-05-29",
+  "operation" : "UpdateItem",
+  "key": {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($PK)
+  },
+  "update" : {
+    "expression": "SET #SpeakerIdentities = :SpeakerIdentities, #UpdatedAt = :UpdatedAt",
+    "expressionNames": {
+      "#SpeakerIdentities": "SpeakerIdentities",
+      "#UpdatedAt": "UpdatedAt"
+    },
+    "expressionValues": {
+      ":SpeakerIdentities": $util.dynamodb.toDynamoDBJson($ctx.args.input.SpeakerIdentities),
+      ":UpdatedAt": $util.dynamodb.toDynamoDBJson($UpdatedAt)
+    }
+  },
+  "condition": {
+    "expression": "$condition",
+    "expressionNames": $utils.toJson($conditionNames),
+    "expressionValues": $utils.toJson($conditionValues)
+  }
+}

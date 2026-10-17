@@ -43,7 +43,8 @@ import mapCallsAttributes from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
 import { getMarkdownSummary } from '../common/summary';
-import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
+import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
+import { parseSpeakerIdentities, resolveSpeakerName } from '../common/speaker-identities';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import { getWeightedSentimentLabel } from '../common/sentiment';
 import onCreateCall from '../../graphql/queries/onCreateCall';
@@ -322,6 +323,7 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
   const { callId } = item;
   const transcriptsForThisCallId = callTranscriptPerCallId[callId] || {};
   const transcriptChannels = Object.keys(transcriptsForThisCallId).slice(0, maxChannels);
+  const speakerIdentities = parseSpeakerIdentities(item.speakerIdentities);
 
   const handleLanguageSelect = (event) => {
     setTargetLanguage(event.target.value);
@@ -352,9 +354,13 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
         const t = { ...c };
         t.targetLanguage = targetLanguage;
         t.translateOn = translateOn;
-        if (t.speaker === DEFAULT_OTHER_SPEAKER_NAME || t.speaker === '') {
-          t.speaker = item.callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME;
-        }
+        // Resolve through the meeting's speaker identity map so an embedded
+        // transcript shows the same names as the full UI. This also fixes the
+        // placeholder substitution for a diarized meeting: matching the whole
+        // speaker string never fired once a voice id was appended, and assigning
+        // the bare name would have dropped the id that keeps two voices on one
+        // channel apart.
+        t.speaker = resolveSpeakerName(t, speakerIdentities, item.callerPhoneNumber);
         return t;
       })
       .filter(
@@ -490,6 +496,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     callTranscriptPerCallId,
     getCallDetailsFromCallIds,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
     setLiveTranscriptCallId,
     isCallsListLoading,
     setIsCallsListLoading,
@@ -698,6 +705,7 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     isCallsListLoading,
     selectedItems,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     setDateRange,

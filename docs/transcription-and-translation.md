@@ -9,6 +9,7 @@ title: "Transcription & Translation"
 - [How Transcription Works](#how-transcription-works)
 - [Speaker Attribution](#speaker-attribution)
   - [Speaker Identification within a Channel](#speaker-identification-within-a-channel)
+  - [Naming the Voices](#naming-the-voices)
 - [Language Configuration](#language-configuration)
   - [Single Language](#single-language)
   - [Automatic Single Language Identification](#automatic-single-language-identification)
@@ -86,11 +87,51 @@ deployment-wide default for clients that do not send their own choice.
   for the thresholds and the `[DIARIZATION]` log lines used to tune them.
 - Diarization support varies by language; on an unsupported language the speaker
   names are simply left unlabelled.
-- Labels are numbers, not names. To get real participant names, use the
+- Labels are numbers, not names. Name them yourself on the meeting page -- see
+  [Naming the Voices](#naming-the-voices) below -- or use the
   [Chrome Extension](browser-extension.md) or a
-  [Virtual Participant](virtual-participant.md), which read them from the meeting
-  itself.
+  [Virtual Participant](virtual-participant.md), which read real names from the
+  meeting itself.
 - There is no additional Amazon Transcribe charge for speaker partitioning.
+
+### Naming the Voices
+
+Speaker separation can tell voices apart but cannot know who they are, so a
+conference-room transcript reads `Other Participant (spk_0)`. The **Speakers**
+panel on the meeting page turns those voice ids into names. It works the same way
+whichever engine produced the labels -- Amazon Transcribe speaker partitioning or
+the [on-demand MicroVM engine](microvm-asr.md) -- and on a meeting with no
+separation at all, where it names the channel.
+
+Each row in the panel is one voice, with the number of turns it has taken and how
+long it has spoken. Type a name and the whole transcript updates: **naming is per
+voice, not per segment**, so one name relabels every segment that voice has
+already produced as well as every segment it produces afterwards. The turn count
+on the row is how many segments a rename will move.
+
+Names are stored as a map on the meeting and applied wherever the transcript is
+read, so a rename is immediate and reversible, and it reaches the meeting
+summary, the Meeting Assistant and the transcript download as well as the screen.
+The underlying voice id is never overwritten.
+
+The panel also offers:
+
+- **Merge** -- fold one voice into another when the engine split a single person
+  across two ids. Naming both rows without merging would leave two rows with the
+  same name, which then reads as two people in any summary.
+- **Lock** -- pin a name you are confident about.
+- **Only this segment** -- available from the popover that opens when you click a
+  speaker name in the transcript. Use it where separation attributed a single
+  turn to the wrong voice, which no voice-level rename can correct.
+- **Known attendees (optional)** -- paste the attendee list from a meeting
+  invite, an email recipient line, or any list of names, and each row's name
+  field offers them as suggestions. This is entirely optional: with nothing
+  pasted the fields are plain text inputs and everything else behaves the same
+  way. There is no automatic attendee list for a browser or desktop-app meeting,
+  which is why it is a paste-in.
+
+Anyone who can view a meeting sees the names; only its owner, a user it has been
+shared with, or an admin can change them.
 
 ## Language Configuration
 

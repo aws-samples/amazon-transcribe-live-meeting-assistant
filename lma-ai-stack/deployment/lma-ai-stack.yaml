@@ -4272,6 +4272,20 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  # Unlike its neighbours this one is reachable by signed-in users, so it uses a
+  # dedicated request template that writes only SpeakerIdentities and restricts a
+  # Cognito caller to Admin, the meeting owner, or a user it is shared with.
+  UpdateSpeakerIdentitiesAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: updateSpeakerIdentities
+      RequestMappingTemplateS3Location: ../source/appsync/updateSpeakerIdentities.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   AddCallCategoryAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
