@@ -1018,6 +1018,190 @@ Resources:
       # is nothing in it that expiry would protect -- and an audit trail that
       # deletes itself is not an audit trail.
 
+  VoiceEnrollmentManagerFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt VoiceEnrollmentManagerExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/voice_enrollment_manager
+      Description: Consent, enrollment and withdrawal for speaker voiceprints
+      MemorySize: 512
+      # Long enough to open a short embedding session and read a handful of
+      # vectors back, and no longer: nothing here waits on a model.
+      Timeout: 60
+      Environment:
+        Variables:
+          VOICE_ENROLLMENT_TABLE: !Ref VoiceEnrollmentTable
+          VOICE_CONSENT_LOG_TABLE: !Ref VoiceConsentLogTable
+          VOICE_ENROLLMENT_TERMS_VERSION: !Ref VoiceEnrollmentTermsVersion
+          VOICE_ENROLLMENT_RETENTION_DAYS: !Ref VoiceEnrollmentRetentionDays
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentManagerFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; every operation is user-initiated and retried by the user"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names and two settings"
+    DependsOn:
+      - VoiceEnrollmentManagerFunctionLogGroup
+
+  VoiceEnrollmentManagerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentManagerFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VoiceEnrollmentManagerExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Description: Voice Enrollment Manager Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-VoiceEnrollment
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The mutable enrollment: read, write and delete, because a
+              # withdrawal has to be able to destroy the voiceprint.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Scan
+                Resource: !GetAtt VoiceEnrollmentTable.Arn
+              # The consent log is APPEND-ONLY, and that is enforced here rather
+              # than by convention: PutItem and Query only. With no UpdateItem
+              # and no DeleteItem, this application cannot rewrite its own
+              # history even if its code is wrong or compromised. Only an
+              # operator with separate privileges can.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:Query
+                Resource: !GetAtt VoiceConsentLogTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncVoiceEnrollmentLambdaRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-AppSyncInvokeVoiceEnrollment
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt VoiceEnrollmentManagerFunction.Arn
+
+  VoiceEnrollmentLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: VoiceEnrollmentLambda
+      Description: Lambda function for the voice enrollment portal
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncVoiceEnrollmentLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VoiceEnrollmentManagerFunction.Arn
+
+  VoiceEnrollmentTermsResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: ShouldEnableVoiceEnrollment
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt VoiceEnrollmentLambdaDataSource.Name
+      TypeName: Query
+      FieldName: voiceEnrollmentTerms
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/voiceEnrollment.js
+
+  GrantVoiceConsentResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: ShouldEnableVoiceEnrollment
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt VoiceEnrollmentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: grantVoiceConsent
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/voiceEnrollment.js
+
+  EnrolMyVoiceResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: ShouldEnableVoiceEnrollment
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt VoiceEnrollmentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: enrolMyVoice
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/voiceEnrollment.js
+
+  RevokeVoiceConsentResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: ShouldEnableVoiceEnrollment
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt VoiceEnrollmentLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: revokeVoiceConsent
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/voiceEnrollment.js
+
   ##########################################################################
   # TypeDateIndex GSI Backfill — populates the ItemType attribute on any
   # pre-existing `cls#…` list-tracking rows so they show up in the GSI.

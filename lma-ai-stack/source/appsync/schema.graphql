@@ -189,6 +189,9 @@ type Mutation @aws_iam {
 	updatePcaUrl(input: UpdatePcaUrlInput!): Call
 	updateAgent(input: UpdateAgentInput!): Call
 	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
+	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
+	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
+	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools
 	addCallCategory(input: AddCallCategoryInput!): Call
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
@@ -249,6 +252,9 @@ input OverallSentimentInput {
 type Query @aws_cognito_user_pools
 @aws_iam {
 	getCall(CallId: ID!): Call
+	# What the enrollment portal shows its visitor about their own enrollment,
+	# including the terms text whose hash is stored with a consent.
+	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools
 	getTranscriptSegments(callId: ID!, isPartial: Boolean): TranscriptSegmentList
 	getTranscriptSegmentsWithSentiment(callId: ID!): TranscriptSegmentsWithSentimentList
 	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
@@ -631,6 +637,52 @@ input UpdatePcaUrlInput {
 	UpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
+}
+
+# ----------------------------------------------------------------------------
+# Voice enrollment
+#
+# A voiceprint is biometric data, so consent is first-party: the enrollee
+# authenticates as themselves and performs the consent in their own session. An
+# admin can invite and can revoke; only the enrollee can grant. These fields
+# exist only in a deployment with EnableVoiceEnrollment=true.
+# ----------------------------------------------------------------------------
+
+type VoiceEnrollmentState @aws_cognito_user_pools {
+	Success: Boolean
+	Message: String
+	# none | pending | active | revoked
+	Status: String
+	DisplayName: String
+	ConsentExpiresAt: String
+	# True when the terms have changed since this person agreed, so what they
+	# agreed to is no longer what the deployment does.
+	NeedsReconsent: Boolean
+	TermsVersion: String
+	# The exact text the enrollee is shown and whose hash is stored with their
+	# consent, so a stored consent proves what it was given to.
+	Terms: String
+}
+
+type VoiceEnrollmentResult @aws_cognito_user_pools {
+	Success: Boolean
+	Message: String
+	Status: String
+}
+
+input EnrolMyVoiceInput {
+	# The name to label transcripts with, as the enrollee types it.
+	DisplayName: String!
+	# Base64 PCM recordings. Used to compute the voiceprint and then discarded --
+	# they are never written to S3 or to a table.
+	Samples: [String!]!
+	TotalSeconds: Float!
+}
+
+input RevokeVoiceConsentInput {
+	# Omitted when withdrawing your own. An admin may name somebody else, for a
+	# person who has left; the log records which of them acted.
+	SubjectId: ID
 }
 
 input UpdateSpeakerIdentitiesInput {
