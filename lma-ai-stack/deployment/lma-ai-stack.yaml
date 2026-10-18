@@ -1051,9 +1051,11 @@ Resources:
       CodeUri: ../source/lambda_functions/voice_enrollment_manager
       Description: Consent, enrollment and withdrawal for speaker voiceprints
       MemorySize: 512
-      # Long enough to open a short embedding session and read a handful of
-      # vectors back, and no longer: nothing here waits on a model.
-      Timeout: 60
+      # Deliberately under AppSync's 30-second request-execution ceiling, which
+      # is not adjustable. The only caller is an AppSync resolver, so work that
+      # outlives that window has nobody listening to it -- and worse, could
+      # still store a voiceprint after the enrollee was told it had failed.
+      Timeout: 28
       Environment:
         Variables:
           VOICE_ENROLLMENT_TABLE: !Ref VoiceEnrollmentTable

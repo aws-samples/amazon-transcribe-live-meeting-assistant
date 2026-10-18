@@ -236,3 +236,44 @@ def test_this_module_writes_the_audio_nowhere(monkeypatch: pytest.MonkeyPatch) -
     source = (HERE / "asr_enrollment_client.py").read_text(encoding="utf-8")
     for forbidden in ("open(", "put_object", "s3", "write_text", "write_bytes", "tempfile"):
         assert forbidden not in source, f"{forbidden!r} must not appear here"
+
+
+def test_the_embed_budget_fits_inside_appsyncs_request_ceiling() -> None:
+    """The only caller is an AppSync resolver, whose ceiling is 30s and fixed.
+
+    A longer budget is not a longer wait -- it is a wait nobody is listening
+    to, after which this function can still store a voiceprint the enrollee was
+    told had failed.
+    """
+    assert client.EMBED_TIMEOUT_SECONDS <= 25
+
+
+def test_the_total_payload_bound_is_smaller_than_the_product_of_the_per_clip_ones(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-clip bounds multiply, so a total bound is what actually binds.
+
+    The per-clip limit times the count used to come to far more than the
+    request carrying them could possibly have been, so the guard did not guard.
+    """
+    assert client.MAX_TOTAL_BYTES < client.MAX_UTTERANCES * client.MAX_UTTERANCE_BYTES
+
+
+def test_too_much_audio_in_total_acquires_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake, _ = install(monkeypatch)
+    big = base64.b64encode(b"\x01\x00" * (client.MAX_UTTERANCE_BYTES // 2)).decode()
+    count = client.MAX_TOTAL_BYTES // client.MAX_UTTERANCE_BYTES + 2
+    with pytest.raises(ValueError, match="in total"):
+        client.embed_utterances([big] * count)
+    assert fake.actions() == []
+
+
+def test_a_realistic_enrolment_is_still_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bounds must not refuse the enrolment the portal actually asks for.
+
+    Six clips of about five seconds is what reading the script produces, and it
+    measured 1.16 MB base64 against a live stack.
+    """
+    install(monkeypatch)
+    five_seconds = base64.b64encode(b"\x01\x00" * (5 * 16000)).decode()
+    assert client.embed_utterances([five_seconds] * 6)

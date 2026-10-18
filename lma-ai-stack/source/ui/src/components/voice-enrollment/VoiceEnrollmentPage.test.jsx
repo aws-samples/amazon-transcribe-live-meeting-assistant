@@ -14,7 +14,7 @@
  */
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 
 /* eslint-disable react/prop-types */
 
@@ -37,6 +37,8 @@ vi.mock('aws-amplify/utils', () => ({
 
 // eslint-disable-next-line import/first
 import VoiceEnrollmentPage from './VoiceEnrollmentPage';
+// eslint-disable-next-line import/first
+import { FakeMediaRecorder, audioContextStub } from './recording-stubs';
 
 const TERMS = [
   'You are being asked to let this deployment recognise your voice.',
@@ -45,6 +47,9 @@ const TERMS = [
 ].join('\n\n');
 
 const getUserMedia = vi.fn();
+
+/** How long each stubbed recording decodes to. Reset per test. */
+let clipSeconds = 4;
 
 const state = (overrides = {}) => ({
   Success: true,
@@ -66,6 +71,9 @@ beforeEach(() => {
     value: { getUserMedia },
     configurable: true,
   });
+  window.MediaRecorder = FakeMediaRecorder;
+  clipSeconds = 4;
+  window.AudioContext = audioContextStub(() => clipSeconds);
 });
 
 const renderWith = (initial, ...rest) => {
@@ -325,5 +333,43 @@ describe('when the terms cannot be shown', () => {
     renderWith(state());
     await waitFor(() => expect(screen.getByRole('checkbox')).toBeTruthy());
     expect(screen.queryByText(/Could not load the consent terms/)).toBeNull();
+  });
+});
+
+describe('bounds on what can be recorded', () => {
+  // Mirrored from the backend so somebody is stopped before uploading rather
+  // than refused after waiting for it. The clips go in one mutation.
+
+  it('stops offering to record once the maximum is reached', async () => {
+    renderWith(state({ Status: 'pending' }));
+    await waitFor(() => expect(screen.getByText(/Read each line aloud/)).toBeTruthy());
+    const record = () => screen.getByRole('button', { name: /Record a line/ });
+    expect(record().getAttribute('disabled')).toBeNull();
+
+    // Eight very short clips: the maximum number of recordings, and still well
+    // under the minimum seconds -- which is the only state the warning is for.
+    clipSeconds = 1;
+    for (let i = 0; i < 8; i += 1) {
+      fireEvent.click(record());
+      // eslint-disable-next-line no-await-in-loop
+      await waitFor(() => expect(screen.getByRole('button', { name: /Stop/ })).toBeTruthy());
+      fireEvent.click(screen.getByRole('button', { name: /Stop/ }));
+      // eslint-disable-next-line no-await-in-loop
+      await waitFor(() => expect(screen.getByRole('button', { name: /Record a line/ })).toBeTruthy());
+    }
+    expect(record().getAttribute('disabled')).not.toBeNull();
+    expect(screen.getByText(/as many recordings as can be sent at once/)).toBeTruthy();
+  });
+
+  it('releases the microphone when the page goes away mid-recording', async () => {
+    // A page about consent must not keep a microphone open behind itself.
+    const stop = vi.fn();
+    getUserMedia.mockResolvedValue({ getTracks: () => [{ stop }] });
+    renderWith(state({ Status: 'pending' }));
+    await waitFor(() => expect(screen.getByText(/Read each line aloud/)).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: /Record a line/ }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /Stop/ })).toBeTruthy());
+    cleanup();
+    expect(stop).toHaveBeenCalled();
   });
 });

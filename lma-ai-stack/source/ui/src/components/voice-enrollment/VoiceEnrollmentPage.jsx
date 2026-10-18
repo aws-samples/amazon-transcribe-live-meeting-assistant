@@ -59,6 +59,17 @@ const MIN_SECONDS = 20;
 const MIN_CLIPS = 3;
 
 /**
+ * Upper bounds, mirroring what the backend accepts.
+ *
+ * Enforced here as well so somebody is stopped before uploading rather than
+ * refused afterwards: the clips are sent in one mutation, and finding out that
+ * the eleventh recording was too many after waiting for the upload is a poor
+ * way to learn it. The backend remains the authority.
+ */
+const MAX_CLIPS = 8;
+const MAX_CLIP_SECONDS = 20;
+
+/**
  * What to read aloud.
  *
  * Phonetically varied on purpose: a voiceprint from one short phrase recognises
@@ -88,6 +99,7 @@ const VoiceEnrollmentPage = () => {
   const recorder = useRef(null);
   const chunks = useRef([]);
   const stream = useRef(null);
+  const autoStop = useRef(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,6 +134,9 @@ const VoiceEnrollmentPage = () => {
   // somebody navigates away is not acceptable on a page about consent.
   useEffect(
     () => () => {
+      if (autoStop.current) {
+        window.clearTimeout(autoStop.current);
+      }
       if (stream.current) {
         stream.current.getTracks().forEach((track) => track.stop());
       }
@@ -162,6 +177,21 @@ const VoiceEnrollmentPage = () => {
     }
   };
 
+  const stopRecording = () => {
+    if (autoStop.current) {
+      window.clearTimeout(autoStop.current);
+      autoStop.current = null;
+    }
+    if (recorder.current && recorder.current.state !== 'inactive') {
+      recorder.current.stop();
+    }
+    if (stream.current) {
+      stream.current.getTracks().forEach((track) => track.stop());
+      stream.current = null;
+    }
+    setRecording(false);
+  };
+
   const startRecording = async () => {
     setError(null);
     try {
@@ -184,21 +214,15 @@ const VoiceEnrollmentPage = () => {
       };
       recorder.current.start();
       setRecording(true);
+      // Stop by itself at the per-clip limit. A recording left running -- a
+      // forgotten tab, a misread button -- would otherwise be refused by the
+      // backend after the upload, and would hold the microphone open on a page
+      // whose whole subject is consent.
+      autoStop.current = window.setTimeout(() => stopRecording(), MAX_CLIP_SECONDS * 1000);
     } catch (problem) {
       logger.error('could not reach the microphone', problem);
       setError('Could not reach your microphone. Please allow access and try again.');
     }
-  };
-
-  const stopRecording = () => {
-    if (recorder.current && recorder.current.state !== 'inactive') {
-      recorder.current.stop();
-    }
-    if (stream.current) {
-      stream.current.getTracks().forEach((track) => track.stop());
-      stream.current = null;
-    }
-    setRecording(false);
   };
 
   const submit = async () => {
@@ -379,7 +403,14 @@ const VoiceEnrollmentPage = () => {
                   should not happen, but reading pace varies more than any
                   fixed script can allow for, so say what to do rather than
                   leaving them at "19s of 20s" with every line ticked. */}
-              {clips.length >= SCRIPT.length && !enough && (
+              {clips.length >= MAX_CLIPS && !enough && (
+                <Alert type="warning">
+                  That is as many recordings as can be sent at once. Use <b>Start again</b> and read each line a little
+                  more slowly.
+                </Alert>
+              )}
+
+              {clips.length >= SCRIPT.length && clips.length < MAX_CLIPS && !enough && (
                 <Alert type="info">
                   That is every line. Record any of them again — it is the amount of speech that matters, not which
                   words.
@@ -392,7 +423,7 @@ const VoiceEnrollmentPage = () => {
                     Stop
                   </Button>
                 ) : (
-                  <Button iconName="microphone" onClick={startRecording} disabled={busy}>
+                  <Button iconName="microphone" onClick={startRecording} disabled={busy || clips.length >= MAX_CLIPS}>
                     Record a line
                   </Button>
                 )}

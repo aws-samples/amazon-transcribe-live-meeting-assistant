@@ -43,15 +43,31 @@ ASR_PORT = 8080
 
 lambda_client = boto3.client("lambda")
 
-# A whole enrollment is half a minute of speech in a handful of clips, so this
-# is generous. It exists so a session that stops replying cannot hold the
-# function open to its timeout.
-EMBED_TIMEOUT_SECONDS = float(os.environ.get("ASR_EMBED_TIMEOUT_SECONDS", "45"))
+# Budgeted DOWN from AppSync's request-execution ceiling, which is 30 seconds
+# and not adjustable. The only caller of this module is an AppSync resolver, so
+# a longer budget is not a longer wait -- it is a wait nobody is still listening
+# to. At 45 seconds AppSync abandoned the request and told the enrollee their
+# recordings could not be used, while this function carried on and could still
+# store the voiceprint, leaving the page offering to record again.
+#
+# The split: acquiring a MicroVM can take several seconds of cold boot, the
+# WebSocket open allows 20, and the remainder is embedding. Rounded down so the
+# whole call fails inside the window the caller is waiting on.
+EMBED_TIMEOUT_SECONDS = float(os.environ.get("ASR_EMBED_TIMEOUT_SECONDS", "20"))
 
 # Guards against a request that would cost a lot of work: enrollment needs a few
 # clips of a few seconds, and anything far beyond that is not an enrollment.
-MAX_UTTERANCES = 12
-MAX_UTTERANCE_BYTES = 2 * ASR_SAMPLE_RATE * 30  # 16-bit mono, 30 seconds
+#
+# The per-clip bound is the one that matters. The TOTAL is bounded by what the
+# caller can carry rather than by anything here: these arrive base64-encoded in
+# a single GraphQL mutation, so the practical ceiling is Lambda's 6 MB
+# synchronous payload, which the old count x size product (11.5 MB raw, ~15 MB
+# encoded) sailed past. A real enrollment is about 20-30 seconds in 4-6 clips;
+# 28 seconds measured 1.16 MB encoded and went through.
+MAX_UTTERANCES = 8
+MAX_UTTERANCE_BYTES = 2 * ASR_SAMPLE_RATE * 20  # 16-bit mono, 20 seconds
+# Belt and braces on the total, since per-clip bounds multiply.
+MAX_TOTAL_BYTES = 3 * 1024 * 1024
 
 
 def _decode(samples):
@@ -73,6 +89,11 @@ def _decode(samples):
         frames.append(raw)
     if not frames:
         raise ValueError("no recordings to embed")
+    if sum(len(frame) for frame in frames) > MAX_TOTAL_BYTES:
+        # Per-clip bounds multiply, so the total needs its own check: the
+        # product of the two above is far more than the request that carried
+        # them could have been.
+        raise ValueError("those recordings are too long in total")
     return frames
 
 
