@@ -98,14 +98,67 @@ def _placeholder_key(name):
 # from costing a model call. Deliberately generous -- a missed pass costs a
 # naming opportunity, and the end-of-meeting pass sees the whole transcript
 # anyway.
+#
+# This list is Latin-script, and mostly English. That is a limit on what it can
+# be used for, NOT a limit on which meetings get named: see
+# `shortcut_is_meaningful_for`. Treating a miss as "nothing here" meant a Russian,
+# Chinese or Thai meeting never reached the model at all -- the feature was
+# silently off for those languages, which is the same mistake four other guards
+# in this module made before it.
 NAMING_HINT = re.compile(
     r"\b("
+    # English
     r"i'?m|i\s+am|my\s+name|this\s+is|here\b|call\s+me|speaking\b|"
     r"thanks|thank\s+you|good\s+point|agree|right|exactly|over\s+to|"
-    r"what\s+do\s+you|you\s+want\s+to|go\s+ahead"
+    r"what\s+do\s+you|you\s+want\s+to|go\s+ahead|"
+    # The other widely-spoken Latin-script languages, so a French or Spanish
+    # meeting is not paying for a pass it did not need either.
+    r"je\s+m'appelle|je\s+suis|moi\s+c'est|"  # French
+    r"ich\s+bin|mein\s+name|"  # German
+    r"me\s+llamo|yo\s+soy|soy\s+|"  # Spanish
+    r"meu\s+nome|eu\s+sou|"  # Portuguese
+    r"mi\s+chiamo|sono\s+"  # Italian
     r")\b",
     re.IGNORECASE,
 )
+
+# Characters outside the Latin script, give or take its diacritics. Used only to
+# decide whether the phrase list above could possibly have matched.
+NON_LATIN = re.compile(r"[^\W\d_]", re.UNICODE)
+LATIN_LETTER = re.compile(r"[A-Za-zÀ-ɏ]")
+
+# Where one spoken word ends and the next begins: whitespace and punctuation,
+# and nothing else.
+#
+# Deliberately NOT `[^\w']+`. Python's `\w` excludes Unicode combining marks,
+# which are how most Indic scripts, and Arabic and Hebrew vocalisation, are
+# written -- so splitting on its complement shatters a word at every vowel sign:
+# `नरेन्द्र` came out as `नर`, `न`, `द`, `र`, and no Hindi name could ever match
+# the turn that contained it. Splitting on explicit separators keeps marks
+# attached to the letter they belong to, in every script.
+#
+# The apostrophe is excluded from the separators on purpose, so O'Brien stays one
+# word; `!-&` and `(-/` are the ASCII punctuation either side of it.
+WORD_SEPARATOR = re.compile(
+    r"[\s!-&(-/:-@\[-`{-~¡-¿ -⁯　-〿։،؛؟"
+    r"।॥、。，．：；？！]+"
+)
+
+
+def shortcut_is_meaningful_for(text):
+    """Could the phrase list have matched this text at all?
+
+    The shortcut exists to avoid paying for a model call on a transcript that
+    plainly names nobody. It can only make that judgement about a language it
+    can read, so for anything substantially outside the Latin script it declines
+    to judge and the pass runs. Cost is still bounded -- by the cooldown and by
+    requiring the transcript to have grown -- and those two are language-neutral.
+    """
+    letters = NON_LATIN.findall(text or "")
+    if not letters:
+        return True
+    latin = sum(1 for character in letters if LATIN_LETTER.match(character))
+    return latin * 2 >= len(letters)
 
 
 def parse_identities(raw):
@@ -345,12 +398,22 @@ def worth_a_model_call(turns, identities, force=False):
     Skips the model when no turn contains so much as an introduction or a thanks.
     `force` is the on-demand path: somebody pressed the button, so answer them
     even if the heuristic says there is nothing there.
+
+    The phrase list is Latin-script, so it can only answer this question about a
+    transcript it could have read. For a turn substantially outside that script
+    the shortcut declines to judge and the pass runs -- otherwise naming is
+    silently unavailable for whole languages, which is what happened before.
     """
     if not unresolved_voices(turns, identities):
         return False
     if force:
         return True
-    return any(NAMING_HINT.search(turn["text"]) for turn in turns)
+    for turn in turns:
+        if not shortcut_is_meaningful_for(turn["text"]):
+            return True
+        if NAMING_HINT.search(turn["text"]):
+            return True
+    return False
 
 
 def format_transcript(turns):
@@ -510,7 +573,7 @@ def name_appears_in(name, text):
     # Apostrophes are not split out of the name, and are also compared with them
     # removed: splitting the name but not the text made "O'Brien" fail against a
     # turn that says "O'Brien".
-    spoken = {word for word in re.split(r"[^\w']+", folded_text) if word}
+    spoken = {word for word in WORD_SEPARATOR.split(folded_text) if word}
     spoken |= {word.replace("'", "") for word in spoken}
     parts = [part for part in re.split(r"[\s\-]+", folded_name) if len(part) > 1]
     if not parts:

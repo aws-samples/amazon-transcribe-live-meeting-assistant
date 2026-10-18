@@ -236,7 +236,12 @@ def resolve(call_id, identity=None, force=False, final=False):
         LOGGER.info("Declining a pass for %s: nobody has spoken since the last one", call_id)
         return {"ok": True, "reason": "nothing new said since the last pass", "applied": []}
 
-    if not pure.worth_a_model_call(turns, identities, force=force):
+    # `final` counts as force here too. The end-of-meeting pass is the
+    # once-per-meeting authoritative one, and skipping it on a cheap heuristic
+    # is exactly the over-rejection this module has been bitten by five times:
+    # an introduction with no phrase a regex can spot -- "Sarah Lee, platform
+    # engineering" -- would never be found at all.
+    if not pure.worth_a_model_call(turns, identities, force=force or final):
         LOGGER.info("Nothing to name for %s (turns=%d, forced=%s)", call_id, len(turns), force)
         return {"ok": True, "reason": "nothing to name", "applied": []}
 
