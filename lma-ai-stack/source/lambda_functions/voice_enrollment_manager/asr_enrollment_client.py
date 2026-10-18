@@ -23,14 +23,25 @@ import json
 import logging
 import os
 
+import boto3
+
 LOGGER = logging.getLogger()
 
-# Where to reach an ASR session for embedding. In a deployment this is the
-# MicroVM launcher's endpoint; ASR_DIRECT_ENDPOINT bypasses it for local work,
-# the same escape hatch the transcriber uses.
-ASR_EMBED_ENDPOINT = os.environ.get("ASR_EMBED_ENDPOINT", "")
+# An embedding session runs on a MicroVM acquired from the ASR launcher, the
+# same way the transcriber gets one: there is no long-lived endpoint to point
+# at, and reaching one needs a per-session auth token the launcher mints.
+# Without this ARN there is no engine to embed with, and enrolling is refused
+# rather than appearing to work.
+ASR_LAUNCHER_FUNCTION_ARN = os.environ.get("ASR_LAUNCHER_FUNCTION_ARN", "")
+# Development escape hatch: an already-running ASR server (ws://host:8080),
+# which needs no lease and no token. Same hatch the transcriber has.
 ASR_DIRECT_ENDPOINT = os.environ.get("ASR_DIRECT_ENDPOINT", "")
 ASR_SAMPLE_RATE = int(os.environ.get("ASR_SAMPLE_RATE", "16000"))
+# The port the ASR server listens on inside the MicroVM, named in the
+# subprotocol the proxy routes on.
+ASR_PORT = 8080
+
+lambda_client = boto3.client("lambda")
 
 # A whole enrollment is half a minute of speech in a handful of clips, so this
 # is generous. It exists so a session that stops replying cannot hold the
@@ -65,12 +76,55 @@ def _decode(samples):
     return frames
 
 
-async def _embed(frames, endpoint):
+def _subprotocols(auth_token):
+    """How the MicroVM proxy authenticates and routes a WebSocket connection.
+
+    The token goes in the subprotocol list rather than a header because that is
+    the only part of a WebSocket handshake the proxy reads. A direct endpoint
+    has no proxy in front of it and needs none of this.
+    """
+    if not auth_token:
+        return []
+    return [
+        "lambda-microvms",
+        f"lambda-microvms.authentication.{auth_token}",
+        f"lambda-microvms.port.{ASR_PORT}",
+    ]
+
+
+def _invoke_launcher(payload):
+    """One launcher call. Returns the parsed body, or None if it refused."""
+    if not ASR_LAUNCHER_FUNCTION_ARN:
+        return None
+    try:
+        response = lambda_client.invoke(
+            FunctionName=ASR_LAUNCHER_FUNCTION_ARN,
+            Payload=json.dumps(payload).encode("utf-8"),
+        )
+        if response.get("FunctionError"):
+            LOGGER.error("ASR launcher %s failed: %s", payload.get("action"), response["FunctionError"])
+            return None
+        body = json.loads(response["Payload"].read().decode("utf-8"))
+    except Exception:  # noqa: BLE001 - reported to the caller as "no endpoint"
+        LOGGER.exception("ASR launcher %s could not be invoked", payload.get("action"))
+        return None
+    if not body.get("ok"):
+        LOGGER.error("ASR launcher %s refused: %s", payload.get("action"), body.get("reason"))
+        return None
+    return body
+
+
+async def _embed(frames, endpoint, auth_token):
     """One ``embed``-mode session: config, frames, then read the vectors back."""
     import websockets  # noqa: PLC0415 - optional at import time, as elsewhere
 
     vectors = []
-    async with websockets.connect(endpoint, max_size=None, open_timeout=20) as socket:
+    async with websockets.connect(
+        endpoint,
+        max_size=None,
+        open_timeout=20,
+        subprotocols=_subprotocols(auth_token) or None,
+    ) as socket:
         await socket.send(
             json.dumps(
                 {
@@ -111,17 +165,34 @@ def embed_utterances(samples):
     turns both into "could not use those recordings" rather than surfacing
     either to the browser.
     """
-    endpoint = ASR_DIRECT_ENDPOINT or ASR_EMBED_ENDPOINT
-    if not endpoint:
-        raise RuntimeError("no ASR endpoint is configured for embedding")
-
+    # Decode BEFORE acquiring anything. A request that is not a plausible
+    # enrollment should not have started a MicroVM.
     frames = _decode(samples)
+
+    microvm_id = None
+    if ASR_DIRECT_ENDPOINT:
+        endpoint, auth_token = ASR_DIRECT_ENDPOINT, ""
+    else:
+        lease = _invoke_launcher({"action": "acquire", "callId": f"enroll-{os.urandom(8).hex()}"})
+        if not lease:
+            raise RuntimeError("no ASR engine is available for embedding")
+        microvm_id = lease.get("microvmId")
+        endpoint = f"wss://{lease['endpoint']}"
+        auth_token = lease.get("authToken", "")
+
     try:
         vectors = asyncio.run(
-            asyncio.wait_for(_embed(frames, endpoint), timeout=EMBED_TIMEOUT_SECONDS)
+            asyncio.wait_for(
+                _embed(frames, endpoint, auth_token), timeout=EMBED_TIMEOUT_SECONDS
+            )
         )
     except TimeoutError as error:
         raise RuntimeError("the embedding session did not respond in time") from error
+    finally:
+        # Released whatever happened. A MicroVM left running would otherwise
+        # cost until its own max-duration backstop expired.
+        if microvm_id:
+            _invoke_launcher({"action": "release", "microvmId": microvm_id})
 
     usable = [vector for vector in vectors if vector]
     if not usable:

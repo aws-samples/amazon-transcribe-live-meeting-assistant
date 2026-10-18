@@ -394,6 +394,14 @@ Parameters:
     Default: ""
     Description: ARN of the runtime ASR configuration table.
 
+  AsrLauncherFunctionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of the MicroVM ASR session launcher. Voice enrollment needs
+      it to open a short-lived embedding session; empty means that engine is not
+      deployed, and enrolling a voice is refused rather than appearing to work.
+
   NovaSonicConfigTableName:
     Type: String
     Description:
@@ -673,6 +681,14 @@ Conditions:
   # Biometric data, so this gates the EXISTENCE of the resources rather than
   # just their use: with it false there is nowhere for a voiceprint to be stored.
   ShouldEnableVoiceEnrollment: !Equals [!Ref EnableVoiceEnrollment, "true"]
+  # Enrolling needs the on-demand engine, because it is the only one that
+  # computes speaker embeddings. Storage and the portal exist without it; what
+  # cannot happen is creating a voiceprint.
+  CanEmbedVoiceEnrollments:
+    !And [
+      !Equals [!Ref EnableVoiceEnrollment, "true"],
+      !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]],
+    ]
   HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   # Generic WAF enablement - true when WAFAllowedIPv4Ranges is restricted (not 0.0.0.0/0).
   # The WebACL is REGIONAL and can be associated with any eligible regional resource
@@ -1044,6 +1060,9 @@ Resources:
           VOICE_CONSENT_LOG_TABLE: !Ref VoiceConsentLogTable
           VOICE_ENROLLMENT_TERMS_VERSION: !Ref VoiceEnrollmentTermsVersion
           VOICE_ENROLLMENT_RETENTION_DAYS: !Ref VoiceEnrollmentRetentionDays
+          # The embedding model lives in the ASR MicroVM image, so computing a
+          # voiceprint means acquiring a short-lived session from the launcher.
+          ASR_LAUNCHER_FUNCTION_ARN: !Ref AsrLauncherFunctionArn
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentManagerFunction
@@ -1119,6 +1138,15 @@ Resources:
                 Condition:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+              # Acquire and release one short-lived MicroVM to embed the
+              # enrollment recordings. Scoped to the launcher function: this
+              # role never calls the lambda-microvms API itself.
+              - !If
+                - CanEmbedVoiceEnrollments
+                - Effect: Allow
+                  Action: lambda:InvokeFunction
+                  Resource: !Ref AsrLauncherFunctionArn
+                - !Ref AWS::NoValue
 
   AppSyncVoiceEnrollmentLambdaRole:
     Type: AWS::IAM::Role

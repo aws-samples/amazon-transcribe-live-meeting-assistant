@@ -165,6 +165,18 @@ def put_enrollment(record):
     dynamodb.put_item(TableName=ENROLLMENT_TABLE, Item=_to_item(record))
 
 
+def asr_embedding_available():
+    """Whether there is an engine that can compute a voiceprint.
+
+    Read from the environment rather than attempted and caught, so somebody is
+    told the deployment cannot enrol voices instead of being told their
+    recordings were unusable.
+    """
+    return bool(
+        os.environ.get("ASR_LAUNCHER_FUNCTION_ARN") or os.environ.get("ASR_DIRECT_ENDPOINT")
+    )
+
+
 def embed_samples(samples):
     """Turn enrollment recordings into one voiceprint.
 
@@ -269,6 +281,15 @@ def store_voiceprint(event, who):
                 f"please record at least {pure.MIN_ENROLLMENT_SECONDS:.0f} seconds "
                 f"across {pure.MIN_ENROLLMENT_UTTERANCES} recordings"
             ),
+        }
+
+    if not asr_embedding_available():
+        # Enrolling needs the on-demand engine, which computes the embeddings.
+        # Saying so is better than "could not use those recordings", which
+        # sends somebody off to re-record audio that was never the problem.
+        return {
+            "Success": False,
+            "Message": "voice enrolment needs the on-demand speech engine, which is not deployed",
         }
 
     try:

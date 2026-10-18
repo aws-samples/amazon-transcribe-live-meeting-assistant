@@ -29,6 +29,12 @@ os.environ.setdefault("VOICE_ENROLLMENT_TABLE", "enrollments")
 os.environ.setdefault("VOICE_CONSENT_LOG_TABLE", "consent-log")
 os.environ.setdefault("VOICE_ENROLLMENT_TERMS_VERSION", "1")
 os.environ.setdefault("VOICE_ENROLLMENT_RETENTION_DAYS", "365")
+# Enrolling needs an engine that computes embeddings. These tests stub the
+# embedding call itself, but the handler checks the deployment has one before
+# asking, so the variable has to be present for the enrolment path to run.
+os.environ.setdefault(
+    "ASR_LAUNCHER_FUNCTION_ARN", "arn:aws:lambda:us-east-1:123456789012:function:asr-launcher"
+)
 
 HERE = Path(__file__).resolve().parent
 
@@ -505,3 +511,24 @@ def test_re_consenting_with_no_voiceprint_records_no_deletion(
     ddb = install(monkeypatch, enrollment=consented(status="active", terms="0"))
     index.handler(event("grantVoiceConsent"), None)
     assert [row["Action"]["S"] for row in ddb.consent_rows()] == ["RE_CONSENTED"]
+
+
+def test_enrolling_says_so_when_no_engine_can_compute_a_voiceprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Better than "could not use those recordings", which blames the audio.
+
+    A deployment can have enrollment switched on without the on-demand engine,
+    and somebody who records four clips perfectly well should be told what is
+    actually missing.
+    """
+    monkeypatch.delenv("ASR_LAUNCHER_FUNCTION_ARN", raising=False)
+    monkeypatch.delenv("ASR_DIRECT_ENDPOINT", raising=False)
+    ddb = install(monkeypatch, enrollment=consented())
+    result = index.handler(
+        event("enrolMyVoice", DisplayName="Sarah Lee", Samples=SAMPLES, TotalSeconds=30.0),
+        None,
+    )
+    assert result["Success"] is False
+    assert "engine" in result["Message"]
+    assert ddb.enrollment_rows() == []

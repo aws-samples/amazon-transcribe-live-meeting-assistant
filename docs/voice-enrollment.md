@@ -154,6 +154,13 @@ which in practice is about 20–30 seconds across several utterances. The audio 
 streamed to an [ASR MicroVM](microvm-asr.md) session in `embed` mode, which
 returns one embedding per utterance; those are averaged into the stored centroid.
 
+The session is acquired for the enrolment and released as soon as it finishes,
+including when it fails. It is the same engine and the same short-lived MicroVM
+a meeting uses, so **enrolling requires `EnableMicrovmAsr=true`**: the embedding
+model lives in that image and Amazon Transcribe exposes no speaker embedding. In
+a deployment with enrolment on but that engine absent, the portal says so rather
+than telling somebody their recordings were unusable.
+
 **The sample audio is not kept.** It is held in memory for the length of the
 request and never written to S3 or to a table. What persists is the centroid,
 which is a one-way summary: it is enough to recognise the voice and not enough to
@@ -261,10 +268,13 @@ organisation that wants a shorter cycle can set one.
 | `VoiceEnrollmentRetentionDays` | `365` | How long a consent stands before it must be renewed. |
 | `VoiceEnrollmentTermsVersion` | `1` | Bump to require everybody to re-consent to new terms. |
 
-Matching also needs the on-demand
+Both enrolling and matching need the on-demand
 [ASR MicroVM engine](microvm-asr.md) (`EnableMicrovmAsr=true`), because that is
-the engine that computes embeddings. Amazon Transcribe exposes no speaker
-embedding, so a deployment using it can enroll voices but cannot match them.
+the engine that computes speaker embeddings — one to build a voiceprint, the
+other to compare against it. Amazon Transcribe exposes none, so with enrolment
+on and that engine off the tables, the portal and the consent log all exist and
+work, and the step that would create a voiceprint reports that the engine is
+missing.
 
 ## Related Documentation
 
