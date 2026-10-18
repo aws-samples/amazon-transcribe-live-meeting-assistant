@@ -572,6 +572,40 @@ Parameters:
       Logging level for Lambda functions. Set to DEBUG for troubleshooting,
       INFO for normal operation.
 
+  EnableVoiceEnrollment:
+    Type: String
+    Default: "false"
+    Description: >-
+      Let people enrol their voice so they are labelled by name in meetings from
+      their first word. A voiceprint is biometric data about a person: while this
+      is false the enrollment table, the consent log and the consent portal do
+      not exist in the deployment at all. Turning it on creates obligations that
+      are yours -- biometric data is separately regulated in many jurisdictions
+      and typically requires informed consent before collection, a published
+      retention schedule and deletion on request. See docs/voice-enrollment.md.
+      Matching also needs EnableMicrovmAsr=true, since Amazon Transcribe exposes
+      no speaker embedding.
+    AllowedValues:
+      - "true"
+      - "false"
+  VoiceEnrollmentRetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 1
+    MaxValue: 3650
+    Description: >-
+      How long a voice-enrollment consent stands before it must be renewed. When
+      it lapses the voiceprint is deleted and the person is asked to consent
+      again. Consent that never expires is not meaningfully informed.
+  VoiceEnrollmentTermsVersion:
+    Type: String
+    Default: "1"
+    AllowedPattern: "^[A-Za-z0-9._-]{1,32}$"
+    Description: >-
+      Bump this to require everybody to re-consent. An enrollment whose consent
+      is to a superseded version stops being used for matching until its owner
+      agrees to the current terms.
+
 Globals:
   Function:
     Environment:
@@ -636,6 +670,9 @@ Conditions:
   ShouldReapInactiveMeetings:
     !Not [!Equals [!Ref MeetingInactivityTimeoutInMinutes, 0]]
   ShouldEnableMCPServer: !Equals [!Ref EnableMCPServer, "true"]
+  # Biometric data, so this gates the EXISTENCE of the resources rather than
+  # just their use: with it false there is nowhere for a voiceprint to be stored.
+  ShouldEnableVoiceEnrollment: !Equals [!Ref EnableVoiceEnrollment, "true"]
   HasCustomMCPServerCallbackURLs: !Not [!Equals [!Ref MCPServerCallbackURLs, ""]]
   # Generic WAF enablement - true when WAFAllowedIPv4Ranges is restricted (not 0.0.0.0/0).
   # The WebACL is REGIONAL and can be associated with any eligible regional resource
@@ -913,6 +950,73 @@ Resources:
         Enabled: true
       StreamSpecification:
         StreamViewType: NEW_IMAGE
+
+  ##########################################################################
+  # Voice enrollment
+  #
+  # Two tables, for two different reasons. The enrollment is mutable and is the
+  # only place a voiceprint lives. The consent log is append-only and holds no
+  # biometric data at all -- which is what lets a withdrawal destroy the
+  # voiceprint while preserving the record that consent was given and then
+  # withdrawn. Both exist only when EnableVoiceEnrollment is true.
+  ##########################################################################
+
+  VoiceEnrollmentTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldEnableVoiceEnrollment
+    # Retained on stack delete even when meeting data is not. Deleting a
+    # voiceprint is the right default for the data; losing the table silently on
+    # a stack operation is not the way to do it, because the matching withdrawal
+    # record would never be written.
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        # The enrollee's Cognito sub, never an email, so the key itself is not
+        # personal data.
+        - AttributeName: SubjectId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: SubjectId
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VoiceConsentLogTable:
+    Type: AWS::DynamoDB::Table
+    Condition: ShouldEnableVoiceEnrollment
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: SubjectId
+          AttributeType: S
+        # ISO-8601, so the range key orders the history and is unique per event.
+        - AttributeName: RecordedAt
+          AttributeType: S
+      KeySchema:
+        - AttributeName: SubjectId
+          KeyType: HASH
+        - AttributeName: RecordedAt
+          KeyType: RANGE
+      BillingMode: PAY_PER_REQUEST
+      # So the consent history can be restored to any moment in the window. An
+      # audit trail that can be lost is not one.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      # Deliberately NO TimeToLiveSpecification. The log is the record that
+      # consent was given and withdrawn, and it holds no biometric data, so there
+      # is nothing in it that expiry would protect -- and an audit trail that
+      # deletes itself is not an audit trail.
 
   ##########################################################################
   # TypeDateIndex GSI Backfill — populates the ItemType attribute on any
