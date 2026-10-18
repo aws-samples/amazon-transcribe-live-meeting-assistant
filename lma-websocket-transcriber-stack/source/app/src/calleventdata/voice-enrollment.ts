@@ -86,7 +86,9 @@ const parseVoices = (body: SeedsResponse | undefined): EnrolledVoice[] => {
         if (typeof row?.label !== 'string' || !Array.isArray(row.vector)) {
             continue;
         }
-        const vector = row.vector.filter((value): value is number => typeof value === 'number');
+        const vector = row.vector.filter(
+            (value): value is number => typeof value === 'number' && Number.isFinite(value)
+        );
         if (vector.length !== row.vector.length) {
             // A partly numeric vector is a different thing from a short one:
             // silently dropping components would leave a vector that compares

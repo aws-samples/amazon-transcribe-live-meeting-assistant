@@ -138,6 +138,15 @@ them. Plan a retention change accordingly.
 **Point-in-time recovery is on**, so the log can be restored to any moment in the
 retention window.
 
+**Both tables survive stack deletion** (`DeletionPolicy: Retain`), and that cuts
+both ways, so it is worth being explicit. It means a stack deleted by accident,
+or replaced, does not take the consent history with it — an audit record that a
+`cdk destroy` can erase is not much of an audit record. It also means **deleting
+the stack leaves the voiceprints behind**, in a table nothing is managing any
+more. If you are decommissioning a deployment and people have enrolled, delete
+those two tables deliberately after the stack, or ask people to withdraw first,
+which destroys the voiceprints and leaves only the log.
+
 ## Who can enrol
 
 Anyone with an account in the deployment can enrol their own voice, and nobody

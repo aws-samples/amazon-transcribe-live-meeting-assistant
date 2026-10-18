@@ -92,10 +92,12 @@ def expire(enrollment, now_iso):
                 subject_id=subject_id,
                 action=pure.ACTION_EXPIRED,
                 terms_version=record.get("TermsVersion", TERMS_VERSION),
-                # The text is not re-read here: what matters for an expiry is
-                # that it happened and when, and the version already identifies
-                # which terms had been agreed to.
+                # No terms are shown for an expiry -- the deployment performs it
+                # with nobody present -- so the hash the consent itself recorded
+                # is carried forward. It says which terms lapsed, where hashing
+                # an empty string would have said only that none were shown.
                 terms_text="",
+                terms_sha256=record.get("TermsSha256") or None,
                 actor_sub=SYSTEM_ACTOR,
                 actor_email="",
                 recorded_at=now_iso,

@@ -364,3 +364,66 @@ def test_an_enrollment_without_a_usable_name_or_voiceprint_is_refused() -> None:
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# --------------------------------------------------------------------------
+# "Consent expires" has to hold for every active row, including odd ones
+# --------------------------------------------------------------------------
+
+
+def test_an_active_enrollment_with_no_recorded_expiry_is_not_usable() -> None:
+    """Nothing shows the consent is in date, so it is not used.
+
+    enrollment_record always writes one, so such a row was hand-written or
+    migrated -- but without this it would stand for ever, which is exactly what
+    the retention period exists to prevent.
+    """
+    record = active()
+    del record["ConsentExpiresAt"]
+    assert pure.is_usable_for_matching(record, 1, NOW) is False
+
+
+def test_an_active_enrollment_with_no_recorded_expiry_is_collected() -> None:
+    """And the retention pass takes it, so it does not linger unusable."""
+    record = active()
+    del record["ConsentExpiresAt"]
+    assert pure.expired_subjects([record], NOW) == [ENROLLEE]
+
+
+def test_a_pending_row_without_an_expiry_is_not_collected() -> None:
+    """A consent recorded but not yet acted on is not an expiry candidate."""
+    pending = {"SubjectId": ENROLLEE, "Status": pure.STATUS_PENDING, "TermsVersion": "1"}
+    assert pure.expired_subjects([pending], NOW) == []
+
+
+def test_an_expiry_row_can_carry_the_hash_the_consent_recorded() -> None:
+    """No terms are shown for an expiry, so hashing "" would say only that.
+
+    Carrying the original hash forward makes the row say which terms lapsed.
+    """
+    row = pure.consent_record(
+        subject_id=ENROLLEE,
+        action=pure.ACTION_EXPIRED,
+        terms_version=1,
+        terms_text="",
+        terms_sha256="the-hash-that-was-agreed",
+        actor_sub="system:retention",
+        actor_email="",
+        recorded_at=NOW,
+    )
+    assert row["TermsSha256"] == "the-hash-that-was-agreed"
+    assert row["TermsSha256"] != pure.terms_fingerprint("")
+
+
+def test_a_consent_row_still_hashes_the_text_when_one_is_shown() -> None:
+    """The normal path is unchanged: the hash is of what the person read."""
+    row = pure.consent_record(
+        subject_id=ENROLLEE,
+        action=pure.ACTION_GRANTED,
+        terms_version=1,
+        terms_text="the exact words shown",
+        actor_sub=ENROLLEE,
+        actor_email="e@x.com",
+        recorded_at=NOW,
+    )
+    assert row["TermsSha256"] == pure.terms_fingerprint("the exact words shown")

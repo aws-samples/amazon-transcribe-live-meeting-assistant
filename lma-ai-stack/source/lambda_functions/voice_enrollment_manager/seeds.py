@@ -73,6 +73,7 @@ def read_enrollments():
     items = []
     start_key = None
     pages = 0
+    truncated = False
     while pages < MAX_PAGES:
         kwargs = {"TableName": ENROLLMENT_TABLE}
         if start_key:
@@ -84,7 +85,12 @@ def read_enrollments():
         if not next_key or next_key == start_key:
             break
         start_key = next_key
-    if pages >= MAX_PAGES:
+    else:
+        # Only reachable by exhausting the bound with a continuation key still
+        # outstanding. Testing `pages >= MAX_PAGES` instead warned on a table
+        # that happened to have exactly MAX_PAGES pages and was read in full.
+        truncated = True
+    if truncated:
         LOGGER.warning("Stopped reading enrollments at the %d page limit", MAX_PAGES)
     return items
 

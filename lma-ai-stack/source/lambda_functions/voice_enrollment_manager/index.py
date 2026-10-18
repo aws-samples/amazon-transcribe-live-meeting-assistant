@@ -36,6 +36,10 @@ import boto3
 import pure
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 
+# Standard logging rather than Powertools, which the repository otherwise
+# prefers: the layer carrying Powertools is built for arm64 only, and these
+# functions have no other reason to be pinned to an architecture. Same choice
+# and same reason as FetchTranscript and the speaker-name resolver.
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 

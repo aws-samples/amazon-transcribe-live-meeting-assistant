@@ -102,6 +102,7 @@ def consent_record(
     actor_sub,
     actor_email,
     recorded_at,
+    terms_sha256=None,
     source_ip=None,
     user_agent=None,
     sample_count=None,
@@ -111,6 +112,12 @@ def consent_record(
     Carries no biometric data by construction: there is no field for a centroid
     and none is accepted. A caller that wants to store a voiceprint uses
     :func:`enrollment_record` instead.
+
+    ``terms_sha256`` is for rows where no terms were shown -- an expiry, which
+    the deployment performs with nobody present. Those carry forward the hash
+    the consent itself recorded, so the row says which terms lapsed. Hashing an
+    empty string instead produced e3b0c442... on every such row, which is
+    indistinguishable from "the terms shown were empty".
     """
     if action not in CONSENT_ACTIONS:
         raise ValueError(f"unknown consent action: {action!r}")
@@ -124,7 +131,7 @@ def consent_record(
         "RecordedAt": recorded_at,
         "Action": action,
         "TermsVersion": str(terms_version),
-        "TermsSha256": terms_fingerprint(terms_text),
+        "TermsSha256": terms_sha256 or terms_fingerprint(terms_text),
         "ActorSub": actor_sub,
         "ActorEmail": actor_email or "",
     }
@@ -283,7 +290,13 @@ def is_usable_for_matching(
         # Same version, different words. Treated exactly like a version change.
         return False
     expires_at = enrollment.get("ConsentExpiresAt")
-    if expires_at and _parse(expires_at) <= _parse(now_iso):
+    if not expires_at:
+        # No recorded expiry, so there is nothing showing this consent is still
+        # in date. enrollment_record always sets one, so an active row without
+        # it was hand-written or migrated; "consent expires" has to hold for it
+        # too, or it would stand for ever.
+        return False
+    if _parse(expires_at) <= _parse(now_iso):
         return False
     return True
 
@@ -398,13 +411,21 @@ def session_seeds(enrollments, current_terms_version, now_iso, limit, current_te
 
 
 def expired_subjects(enrollments, now_iso):
-    """Active enrollments whose consent has aged out, for the retention pass."""
+    """Active enrollments whose consent has aged out, for the retention pass.
+
+    An active row with no recorded expiry is collected too. It is not usable for
+    matching either (see :func:`is_usable_for_matching`), and leaving it alone
+    would keep a voiceprint alive for ever on a consent nothing can show is
+    current -- which is the one outcome the retention period exists to prevent.
+    """
     return [
         enrollment["SubjectId"]
         for enrollment in enrollments or []
         if enrollment.get("Status") == STATUS_ACTIVE
-        and enrollment.get("ConsentExpiresAt")
-        and _parse(enrollment["ConsentExpiresAt"]) <= _parse(now_iso)
+        and (
+            not enrollment.get("ConsentExpiresAt")
+            or _parse(enrollment["ConsentExpiresAt"]) <= _parse(now_iso)
+        )
     ]
 
 
