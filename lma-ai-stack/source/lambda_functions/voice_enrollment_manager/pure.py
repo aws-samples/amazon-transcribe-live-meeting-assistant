@@ -205,6 +205,7 @@ def enrollment_record(
     display_name,
     centroid,
     terms_version,
+    terms_sha256,
     sample_count,
     total_seconds,
     enrolled_at,
@@ -224,6 +225,10 @@ def enrollment_record(
         "Dim": len(centroid),
         "Status": STATUS_ACTIVE,
         "TermsVersion": str(terms_version),
+        # Carried on the enrollment as well as in the log, because this is the
+        # record the matching path reads: a hash only an auditor can see cannot
+        # stop a voiceprint being used under terms that have since changed.
+        "TermsSha256": terms_sha256,
         "SampleCount": int(sample_count),
         "SampleSeconds": round(float(total_seconds), 2),
         "EnrolledAt": enrolled_at,
@@ -245,12 +250,27 @@ def revoke(enrollment):
     return revoked
 
 
-def is_usable_for_matching(enrollment, current_terms_version, now_iso):
+def is_usable_for_matching(
+    enrollment, current_terms_version, now_iso, current_terms_sha256=None
+):
     """May this enrollment be used to label a meeting?
 
-    Four things must all hold, and each of them is a promise made to the person
+    Five things must all hold, and each of them is a promise made to the person
     who enrolled: they consented, they have not withdrawn, they consented to the
-    terms that are current, and their consent has not aged out.
+    terms that are current, the words of those terms have not changed under
+    them, and their consent has not aged out.
+
+    The fourth is why ``TermsSha256`` is stored rather than only the version
+    number. The terms text states the retention period, so changing
+    ``VoiceEnrollmentRetentionDays`` changes what somebody agreed to without
+    changing ``TermsVersion``. Comparing the hash catches that, and catches any
+    other edit to the text, without relying on an operator remembering to bump
+    a version. Pinning the text and then never comparing it would record the
+    difference and act on the old consent anyway.
+
+    ``current_terms_sha256`` is optional so a caller that genuinely has no terms
+    text to compare -- the retention pass, which only asks what has lapsed --
+    does not have to invent one.
     """
     if not enrollment or enrollment.get("Status") != STATUS_ACTIVE:
         return False
@@ -258,6 +278,9 @@ def is_usable_for_matching(enrollment, current_terms_version, now_iso):
         return False
     if str(enrollment.get("TermsVersion")) != str(current_terms_version):
         # The terms changed, so what they agreed to is no longer what we do.
+        return False
+    if current_terms_sha256 and enrollment.get("TermsSha256") != current_terms_sha256:
+        # Same version, different words. Treated exactly like a version change.
         return False
     expires_at = enrollment.get("ConsentExpiresAt")
     if expires_at and _parse(expires_at) <= _parse(now_iso):
@@ -295,16 +318,23 @@ def may_store_voiceprint(enrollment, current_terms_version, now_iso):
     return True
 
 
-def needs_reconsent(enrollment, current_terms_version):
-    """An active enrollment whose consent is to superseded terms."""
+def needs_reconsent(enrollment, current_terms_version, current_terms_sha256=None):
+    """An active enrollment whose consent is to superseded terms.
+
+    Superseded by either a version bump or an edit to the words, for the reason
+    given in :func:`is_usable_for_matching`: the retention period appears in the
+    text, so the two can diverge.
+    """
+    if not enrollment or enrollment.get("Status") != STATUS_ACTIVE:
+        return False
+    if str(enrollment.get("TermsVersion")) != str(current_terms_version):
+        return True
     return bool(
-        enrollment
-        and enrollment.get("Status") == STATUS_ACTIVE
-        and str(enrollment.get("TermsVersion")) != str(current_terms_version)
+        current_terms_sha256 and enrollment.get("TermsSha256") != current_terms_sha256
     )
 
 
-def seedable_voices(enrollments, current_terms_version, now_iso):
+def seedable_voices(enrollments, current_terms_version, now_iso, current_terms_sha256=None):
     """The labelled centroids a transcription session may be seeded with.
 
     Only usable enrollments, reduced to exactly what the engine needs. Two people
@@ -313,7 +343,9 @@ def seedable_voices(enrollments, current_terms_version, now_iso):
     """
     out = []
     for enrollment in enrollments or []:
-        if not is_usable_for_matching(enrollment, current_terms_version, now_iso):
+        if not is_usable_for_matching(
+            enrollment, current_terms_version, now_iso, current_terms_sha256
+        ):
             continue
         out.append(
             {
@@ -325,7 +357,7 @@ def seedable_voices(enrollments, current_terms_version, now_iso):
     return out
 
 
-def session_seeds(enrollments, current_terms_version, now_iso, limit):
+def session_seeds(enrollments, current_terms_version, now_iso, limit, current_terms_sha256=None):
     """`seedable_voices`, ordered and bounded for one transcription session.
 
     The limit is a guard against a table that has grown past what session setup
@@ -343,7 +375,9 @@ def session_seeds(enrollments, current_terms_version, now_iso, limit):
     usable = [
         enrollment
         for enrollment in enrollments or []
-        if is_usable_for_matching(enrollment, current_terms_version, now_iso)
+        if is_usable_for_matching(
+            enrollment, current_terms_version, now_iso, current_terms_sha256
+        )
     ]
     usable.sort(
         key=lambda e: (
@@ -357,7 +391,10 @@ def session_seeds(enrollments, current_terms_version, now_iso, limit):
         reverse=True,
     )
     bounded = usable[: max(0, int(limit))]
-    return seedable_voices(bounded, current_terms_version, now_iso), len(usable)
+    return (
+        seedable_voices(bounded, current_terms_version, now_iso, current_terms_sha256),
+        len(usable),
+    )
 
 
 def expired_subjects(enrollments, now_iso):

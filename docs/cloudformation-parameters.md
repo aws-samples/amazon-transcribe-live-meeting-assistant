@@ -213,7 +213,7 @@ matching step do not exist in the deployment at all.
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | EnableVoiceEnrollment | Creates the enrollment table, the append-only consent log, the enrollment portal and the invitation page | false | true, false |
-| VoiceEnrollmentRetentionDays | How long a consent stands before it must be renewed. When it lapses the voiceprint is deleted and the person is asked again | 365 | 1–3650 |
+| VoiceEnrollmentRetentionDays | How long a consent stands before it must be renewed. When it lapses the voiceprint is deleted and the person is asked again. Changing this changes the consent terms, which state the period, so everybody is asked to agree again at the new one | 365 | 1–3650 |
 | VoiceEnrollmentTermsVersion | Bump to require everybody to re-consent. An enrollment agreeing to a superseded version stops being used for matching until its owner agrees to the current terms | 1 | 1–32 characters of `A-Za-z0-9._-` |
 
 Matching also needs `EnableMicrovmAsr=true`, because that engine is what computes

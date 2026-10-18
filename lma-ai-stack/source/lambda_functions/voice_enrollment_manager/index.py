@@ -305,6 +305,7 @@ def store_voiceprint(event, who):
             display_name=display_name,
             centroid=centroid,
             terms_version=TERMS_VERSION,
+            terms_sha256=pure.terms_fingerprint(terms_text()),
             sample_count=len(samples),
             total_seconds=total_seconds,
             enrolled_at=enrolled_at,
@@ -356,7 +357,9 @@ def my_enrollment(event, who):
         "Status": existing.get("Status", "none"),
         "DisplayName": existing.get("DisplayName", ""),
         "ConsentExpiresAt": existing.get("ConsentExpiresAt", ""),
-        "NeedsReconsent": pure.needs_reconsent(existing, TERMS_VERSION),
+        "NeedsReconsent": pure.needs_reconsent(
+            existing, TERMS_VERSION, pure.terms_fingerprint(terms_text())
+        ),
         "TermsVersion": str(TERMS_VERSION),
         "Terms": terms_text(),
     }

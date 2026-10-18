@@ -50,6 +50,11 @@ index = _load("index", "index.py")
 pure = _load("pure", "pure.py")
 seeds = _load("voice_seeds", "seeds.py")
 
+# What the deployment's terms currently hash to. Computed the same way the code
+# does rather than hard-coded, so editing the terms text does not silently turn
+# every fixture here into a row that is correctly refused.
+CURRENT_TERMS_SHA256 = pure.terms_fingerprint(index.terms_text())
+
 
 def iso(days_from_now):
     return (
@@ -68,6 +73,7 @@ def row(
     expires_in_days=30,
     enrolled_at=None,
     centroid=(0.1, 0.2, 0.3),
+    terms_sha256=None,
 ):
     """One enrollment as DynamoDB returns it.
 
@@ -80,6 +86,9 @@ def row(
         "DisplayName": {"S": name},
         "Status": {"S": status},
         "TermsVersion": {"S": terms},
+        # The hash of the terms in force. A row carrying a different one agreed
+        # to different words and is not seeded, even on the same version.
+        "TermsSha256": {"S": terms_sha256 or CURRENT_TERMS_SHA256},
         "EnrolledAt": {"S": enrolled_at or iso(-1)},
         "ConsentExpiresAt": {"S": iso(expires_in_days)},
     }
@@ -248,3 +257,35 @@ def test_session_seeds_with_a_zero_limit_sends_nothing():
     voices, usable = pure.session_seeds(rows, "1", iso(0), 0)
     assert voices == []
     assert usable == 1
+
+
+def test_an_enrollment_agreeing_to_different_words_is_not_sent():
+    """Same version, different text -- which is what a changed retention
+    period looks like, since the period appears in the terms."""
+    assert run([row("sub-1", terms_sha256="a-hash-of-older-words")])["EnrolledVoices"] == []
+
+
+def test_a_row_with_no_recorded_terms_hash_is_not_sent():
+    """There is no evidence of which words were agreed to, so it is not used."""
+    rows = [row("sub-1")]
+    del rows[0]["TermsSha256"]
+    assert run(rows)["EnrolledVoices"] == []
+
+
+def test_session_seeds_without_a_hash_to_compare_does_not_filter_on_one():
+    """The retention pass only asks what has lapsed and has no terms text."""
+    rows = [
+        {
+            "SubjectId": "sub-1",
+            "DisplayName": "Sarah Lee",
+            "Status": "active",
+            "TermsVersion": "1",
+            "TermsSha256": "whatever-was-agreed",
+            "EnrolledAt": iso(-1),
+            "ConsentExpiresAt": iso(30),
+            "Centroid": [0.1, 0.2],
+        }
+    ]
+    voices, usable = pure.session_seeds(rows, "1", iso(0), 8)
+    assert usable == 1
+    assert [v["label"] for v in voices] == ["Sarah Lee"]

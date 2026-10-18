@@ -121,7 +121,15 @@ const VoiceEnrollmentPage = () => {
   const totalSeconds = clips.reduce((sum, clip) => sum + clip.seconds, 0);
   const enough = totalSeconds >= MIN_SECONDS && clips.length >= MIN_CLIPS;
   const status = state?.Status || 'none';
-  const consented = status !== 'none' && !state?.NeedsReconsent;
+  // Whether a consent currently STANDS, which is not the same as whether one
+  // was ever given. A withdrawal and an expiry both leave the record in place
+  // with status 'revoked' -- that is what preserves the fact of the consent
+  // after the voiceprint is destroyed -- so testing only that a status exists
+  // treated a withdrawn person as still consented, and the page then offered
+  // them neither the terms nor the recorder. The way back has to be open: the
+  // terms say withdrawing is reversible, and the retention pass puts everybody
+  // in this state eventually.
+  const consented = ['pending', 'active'].includes(status) && !state?.NeedsReconsent;
 
   const giveConsent = async () => {
     setBusy(true);

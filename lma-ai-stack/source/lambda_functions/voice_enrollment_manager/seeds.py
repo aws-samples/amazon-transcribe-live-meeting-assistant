@@ -98,10 +98,22 @@ def handler(event, context):  # pylint: disable=unused-argument
     would risk the transcript itself, which is a far worse outcome than labels
     that say `spk_0`.
     """
+    from index import terms_text  # noqa: PLC0415 - shared terms text
+
     call_id = (event or {}).get("CallId") or ""
     try:
         enrollments = read_enrollments()
-        voices, usable_total = pure.session_seeds(enrollments, TERMS_VERSION, _now(), MAX_SEEDS)
+        # The hash of the terms currently in force, so an enrollment whose
+        # agreed words have changed under it is not used. The retention period
+        # appears in that text, so this catches a changed retention period as
+        # well as an edit, neither of which moves TermsVersion.
+        voices, usable_total = pure.session_seeds(
+            enrollments,
+            TERMS_VERSION,
+            _now(),
+            MAX_SEEDS,
+            pure.terms_fingerprint(terms_text()),
+        )
     except Exception:  # noqa: BLE001 - see the docstring
         LOGGER.exception("Could not read voice enrollments for %s", call_id)
         return {"EnrolledVoices": []}

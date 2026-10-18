@@ -120,12 +120,20 @@ Three properties make the log an audit trail rather than a logfile:
 if its code is wrong or compromised. Only an operator with separate privileges
 can.
 
-**The terms are pinned by hash.** `TermsSha256` is the SHA-256 of the exact text
-the person was shown. If the terms are later edited, previous consents still
-prove what was agreed to, and the mismatch is detectable. A changed
-`TermsVersion` requires a fresh consent — an `active` enrollment whose terms
-version is no longer current is treated as `pending` until the enrollee
-re-consents.
+**The terms are pinned by hash, and the hash is compared.** `TermsSha256` is the
+SHA-256 of the exact text the person was shown, stored both in the consent log
+and on the enrollment itself. An `active` enrollment stops being used for
+matching, and the portal asks its owner to agree again, as soon as either the
+`TermsVersion` or the text behind it changes. Previous consents still prove what
+was agreed to.
+
+Comparing the text and not only the version matters because **the retention
+period appears in the terms**: the text says how many days a consent stands. So
+changing `VoiceEnrollmentRetentionDays` changes what people agreed to, and
+everybody is asked to agree again at the new period — without an operator having
+to remember to bump `VoiceEnrollmentTermsVersion` as well. Until they do, their
+voiceprints are not used; they are not deleted, and agreeing again restores
+them. Plan a retention change accordingly.
 
 **Point-in-time recovery is on**, so the log can be restored to any moment in the
 retention window.

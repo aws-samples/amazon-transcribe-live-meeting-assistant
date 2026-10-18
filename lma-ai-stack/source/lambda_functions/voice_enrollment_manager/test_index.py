@@ -120,6 +120,9 @@ def consented(terms="1", status="pending", **extra):
         "SubjectId": {"S": ENROLLEE},
         "Status": {"S": status},
         "TermsVersion": {"S": terms},
+        # The hash of the terms in force. An enrollment carrying a different
+        # one agreed to different words, which is treated as a version change.
+        "TermsSha256": {"S": index.pure.terms_fingerprint(index.terms_text())},
         "DisplayName": {"S": "Sarah Lee"},
     }
     row.update(extra)
@@ -532,3 +535,49 @@ def test_enrolling_says_so_when_no_engine_can_compute_a_voiceprint(
     assert result["Success"] is False
     assert "engine" in result["Message"]
     assert ddb.enrollment_rows() == []
+
+
+# --------------------------------------------------------------------------
+# The terms are pinned by hash, and the hash is COMPARED
+#
+# The retention period appears in the terms text, so changing
+# VoiceEnrollmentRetentionDays changes what somebody agreed to without changing
+# TermsVersion. Recording the hash and never comparing it would note the
+# difference and then act on the superseded consent anyway.
+# --------------------------------------------------------------------------
+
+
+def test_the_portal_asks_again_when_the_words_changed_under_the_same_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(
+        monkeypatch,
+        enrollment=consented(status="active", TermsSha256={"S": "a-hash-of-older-words"}),
+    )
+    result = index.handler(event("voiceEnrollmentTerms"), None)
+    assert result["NeedsReconsent"] is True
+
+
+def test_the_portal_does_not_ask_again_when_the_words_are_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(monkeypatch, enrollment=consented(status="active"))
+    result = index.handler(event("voiceEnrollmentTerms"), None)
+    assert result["NeedsReconsent"] is False
+
+
+def test_a_stored_voiceprint_records_the_words_that_were_agreed_to(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On the enrollment, not only in the log: the matching path reads this row.
+
+    A hash only an auditor can see cannot stop a voiceprint being used under
+    terms that have since changed.
+    """
+    ddb = install(monkeypatch, enrollment=consented())
+    index.handler(
+        event("enrolMyVoice", DisplayName="Sarah Lee", Samples=SAMPLES, TotalSeconds=30.0),
+        None,
+    )
+    stored = ddb.enrollment_rows()[0]
+    assert stored["TermsSha256"]["S"] == index.pure.terms_fingerprint(index.terms_text())

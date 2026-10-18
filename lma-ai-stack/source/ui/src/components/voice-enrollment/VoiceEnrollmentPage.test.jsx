@@ -220,3 +220,53 @@ describe('when something fails', () => {
     await waitFor(() => expect(screen.getByText('not permitted')).toBeTruthy());
   });
 });
+
+describe('after withdrawing, or after a consent lapses', () => {
+  // Both leave the record with status 'revoked': the row survives so the fact
+  // of the consent is not lost when the voiceprint is destroyed. The terms
+  // promise withdrawal is reversible, and the retention pass puts everybody
+  // here eventually, so the way back has to be open.
+
+  it('offers the terms again so somebody can enrol a second time', async () => {
+    renderWith(state({ Status: 'revoked', DisplayName: 'Sarah Lee' }));
+    await waitFor(() => expect(screen.getByText(/recognise your voice/)).toBeTruthy());
+    expect(screen.getByRole('checkbox')).toBeTruthy();
+    expect(screen.getByRole('button', { name: /I agree/ })).toBeTruthy();
+  });
+
+  it('says the voiceprint is gone, next to the terms it points at', async () => {
+    renderWith(state({ Status: 'revoked' }));
+    await waitFor(() => expect(screen.getByText(/voiceprint was deleted/)).toBeTruthy());
+    // The notice says "by agreeing to the terms above", so they have to be there.
+    expect(screen.getByText(/A voiceprint: a set of numbers/)).toBeTruthy();
+  });
+
+  it('does not offer the recorder before consent is given again', async () => {
+    // Recording is gated on a standing consent, not on having had one once.
+    renderWith(state({ Status: 'revoked' }));
+    await waitFor(() => expect(screen.getByRole('checkbox')).toBeTruthy());
+    expect(screen.queryByText(/Read each line aloud/)).toBeNull();
+  });
+
+  it('agreeing again moves on to recording', async () => {
+    renderWith(
+      state({ Status: 'revoked' }),
+      respond({ grantVoiceConsent: { Success: true, Status: 'pending' } }),
+      respond({ voiceEnrollmentTerms: state({ Status: 'pending' }) }),
+    );
+    await waitFor(() => expect(screen.getByRole('checkbox')).toBeTruthy());
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /I agree/ }));
+    await waitFor(() => expect(screen.getByText(/Read each line aloud/)).toBeTruthy());
+  });
+});
+
+describe('an active enrolment', () => {
+  it('does not show the terms again', async () => {
+    // Somebody who has already agreed and recorded should see their record,
+    // not be asked to agree a second time.
+    renderWith(state({ Status: 'active', DisplayName: 'Sarah Lee' }));
+    await waitFor(() => expect(screen.queryByRole('checkbox')).toBeNull());
+    expect(screen.queryByText(/Read each line aloud/)).toBeNull();
+  });
+});
