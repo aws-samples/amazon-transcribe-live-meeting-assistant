@@ -406,7 +406,10 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
           {!saving && identifyStatus && (
             // Announced, because the outcome of pressing the button -- especially
             // "nothing names them yet" -- is the whole feedback for that action.
-            <Box role="status" ariaLive="polite">
+            // Through nativeAttributes: Cloudscape's Box accepts neither `role`
+            // nor `ariaLive` as a prop, so passing them directly dropped both
+            // and no live region ever reached the DOM.
+            <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
               <StatusIndicator type={identifyStatus.type}>{identifyStatus.text}</StatusIndicator>
             </Box>
           )}

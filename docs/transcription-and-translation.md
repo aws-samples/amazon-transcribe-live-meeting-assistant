@@ -184,7 +184,13 @@ end means a late "by the way, I'm Priya" is still found.
 
 The pass is skipped entirely when no new speech could name anybody, so an
 ordinary meeting does not spend model calls reading the same transcript over and
-over. Pressing the button overrides that.
+over. Pressing the button overrides that, as does the end-of-meeting pass.
+
+That skip recognises introductions in a list of languages, so a meeting in a
+language outside it may get no names during the meeting and all of them at the
+end, when the pass runs regardless. Pressing **Identify speakers** at any point
+has the same effect. If your meetings are routinely in a language this misses,
+that is worth knowing about rather than discovering.
 
 The panel also offers:
 

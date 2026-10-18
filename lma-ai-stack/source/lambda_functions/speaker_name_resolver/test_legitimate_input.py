@@ -100,7 +100,11 @@ class HonestModel:
     """
 
     def __init__(self, name, basis="self-introduction"):
-        self.name = name
+        # A set, not one name: proposing only the first match made every
+        # multi-speaker, merge and rejected-name case silently untested, because
+        # the second voice was never proposed at all.
+        self.names = [name] if isinstance(name, str) else list(name)
+        self.name = self.names[0]
         self.basis = basis
         self.prompts = []
 
@@ -108,21 +112,22 @@ class HonestModel:
         prompt = kwargs["messages"][0]["content"][0]["text"]
         self.prompts.append(prompt)
         proposals = []
-        for line in prompt.splitlines():
-            if not line.startswith("[") or self.name not in line:
-                continue
-            number = int(line[1 : line.index("]")])
-            label = line[line.index("] ") + 2 : line.index(": ")]
-            if self.basis == pure.ADDRESSED_BY_NAME:
-                # The name belongs to whoever spoke the previous turn.
-                number_label = self._previous_label(prompt, number)
-                if number_label is None:
+        for wanted in self.names:
+            for line in prompt.splitlines():
+                if not line.startswith("[") or wanted not in line:
                     continue
-                label = number_label
-            proposals.append(
-                {"label": label, "name": self.name, "basis": self.basis, "turn": number}
-            )
-            break
+                number = int(line[1 : line.index("]")])
+                label = line[line.index("] ") + 2 : line.index(": ")]
+                if self.basis == pure.ADDRESSED_BY_NAME:
+                    # The name belongs to whoever spoke the previous turn.
+                    number_label = self._previous_label(prompt, number)
+                    if number_label is None:
+                        continue
+                    label = number_label
+                proposals.append(
+                    {"label": label, "name": wanted, "basis": self.basis, "turn": number}
+                )
+                break
         return {"output": {"message": {"content": [{"text": json.dumps(proposals)}]}}}
 
     @staticmethod
@@ -173,6 +178,14 @@ INTRODUCTIONS = [
     ("Chinese", "大家好，我是李明", "李明"),
     ("Japanese", "こんにちは、田中です", "田中"),
     ("Thai", "สวัสดีครับผมสมชาย", "สมชาย"),
+    ("Polish", "Nazywam się Łukasz Kowalski", "Łukasz Kowalski"),
+    ("Turkish", "Benim adım Mehmet Şahin", "Mehmet Şahin"),
+    ("Vietnamese", "Tôi tên là Nguyễn Văn An", "Nguyễn Văn An"),
+    ("Indonesian", "Nama saya Budi Santoso", "Budi Santoso"),
+    ("Dutch", "Mijn naam is Jan de Vries", "Jan de Vries"),
+    ("Swedish", "Jag heter Erik Lindqvist", "Erik Lindqvist"),
+    ("Persian, zero-width joiner", "اسمی محمد\u200cحسین", "محمد\u200cحسین"),
+    ("English, typographic apostrophe", "my name is O\u2019Brien", "O\u2019Brien"),
 ]
 
 
@@ -369,13 +382,106 @@ def test_being_addressed_by_name_still_produces_a_suggestion(
     assert written[-1]["identities"][SPK0]["status"] == "proposed"
 
 
-def test_a_two_speaker_conference_room_is_named(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The case the whole feature exists for."""
+SPK1 = "CALLER#Other Participant (spk_1)"
+AGENT0 = "AGENT#Me (spk_0)"
+
+
+def test_a_two_speaker_conference_room_names_both_people(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The case the whole feature exists for. Asserting only the first voice let
+    a guard drop the second without any test noticing."""
     segments = [
         segment("Other Participant (spk_0)", 0, "Hi everyone, I'm Sarah Lee", segment_id="a"),
         segment("Other Participant (spk_1)", 10, "And I'm Priya Raman", segment_id="b"),
     ]
-    _, written, _ = run(monkeypatch, segments, "Sarah Lee")
+    result, written, _ = run(monkeypatch, segments, ["Sarah Lee", "Priya Raman"])
+    assert result["NamesApplied"] == 2
+    assert written[-1]["identities"][SPK0]["name"] == "Sarah Lee"
+    assert written[-1]["identities"][SPK1]["name"] == "Priya Raman"
+
+
+def test_three_people_sharing_one_channel_are_all_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A conference room, which is the motivating case in the documentation."""
+    segments = [
+        segment("Other Participant (spk_0)", 0, "Hi, I'm Sarah Lee", segment_id="a"),
+        segment("Other Participant (spk_1)", 10, "And I'm Priya Raman", segment_id="b"),
+        segment("Other Participant (spk_2)", 20, "Bob Strahan here", segment_id="c"),
+    ]
+    result, written, _ = run(monkeypatch, segments, ["Sarah Lee", "Priya Raman", "Bob Strahan"])
+    assert result["NamesApplied"] == 3
+    names = {e["name"] for e in written[-1]["identities"].values()}
+    assert names == {"Sarah Lee", "Priya Raman", "Bob Strahan"}
+
+
+def test_two_different_people_with_the_same_first_name_are_not_merged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Per-channel name uniqueness is a guard, so it can over-reject: two real
+    people both introducing themselves as Chris must not silently become one."""
+    segments = [
+        segment("Other Participant (spk_0)", 0, "Hi, I'm Chris Adams", segment_id="a"),
+        segment("Other Participant (spk_1)", 10, "And I'm Chris Baker", segment_id="b"),
+    ]
+    result, written, _ = run(monkeypatch, segments, ["Chris Adams", "Chris Baker"])
+    assert result["NamesApplied"] == 2
+    assert written[-1]["identities"][SPK0]["name"] == "Chris Adams"
+    assert written[-1]["identities"][SPK1]["name"] == "Chris Baker"
+
+
+def test_a_voice_on_the_microphone_channel_is_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every other test here is on the meeting-audio channel, so half of the
+    nameable channels was untested."""
+    segments = [segment("Me (spk_0)", 0, "Hi, I'm Sarah Lee", channel="AGENT")]
+    result, written, _ = run(monkeypatch, segments, "Sarah Lee")
+    assert result["NamesApplied"] == 1
+    assert written[-1]["identities"][AGENT0]["name"] == "Sarah Lee"
+
+
+def test_a_stereo_meeting_names_a_voice_on_each_channel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    segments = [
+        segment("Other Participant (spk_0)", 0, "Hi, I'm Sarah Lee", segment_id="a"),
+        segment("Me (spk_0)", 10, "And I'm Priya Raman", channel="AGENT", segment_id="b"),
+    ]
+    result, _, _ = run(monkeypatch, segments, ["Sarah Lee", "Priya Raman"])
+    assert result["NamesApplied"] == 2
+
+
+def test_an_introduction_on_a_merged_away_voice_names_the_person(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The case pure.py calls the one that matters most: merging usually means
+    the engine split one person, so the introduction sits on the half merged
+    away."""
+    merged = meeting_row(
+        SpeakerIdentities={"S": json.dumps({"identities": {}, "merges": {SPK1: SPK0}})}
+    )
+    segments = [
+        segment("Other Participant (spk_0)", 0, "so the number was three percent", segment_id="a"),
+        segment("Other Participant (spk_1)", 10, "Hi, I'm Sarah Lee", segment_id="b"),
+    ]
+    result, written, _ = run(monkeypatch, segments, "Sarah Lee", meeting=merged)
+    assert result["NamesApplied"] == 1
+    assert written[-1]["identities"][SPK0]["name"] == "Sarah Lee"
+
+
+def test_a_rejected_name_does_not_block_a_different_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Remembering a rejection is a guard too, so it can over-reject: it must
+    block only the name that was rejected."""
+    rejected = meeting_row(
+        SpeakerIdentities={"S": json.dumps({"identities": {}, "rejected": {SPK0: ["Bob Strahan"]}})}
+    )
+    segments = [segment("Other Participant (spk_0)", 0, "Hi, I'm Sarah Lee")]
+    result, written, _ = run(monkeypatch, segments, "Sarah Lee", meeting=rejected)
+    assert result["NamesApplied"] == 1
     assert written[-1]["identities"][SPK0]["name"] == "Sarah Lee"
 
 

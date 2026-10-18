@@ -39,6 +39,12 @@ import re
 # Shared with the UI's speaker-identities.js -- see the note there on why the key
 # is the channel plus the speaker string AS STORED.
 DEFAULT_OTHER_SPEAKER_NAME = "Other Participant"
+# What the client calls the local microphone channel before anybody is named.
+# Just as much a placeholder as the one above, and leaving it out meant a voice
+# on the microphone channel could never be named at all -- the same
+# over-rejection as every other guard in this module's history.
+DEFAULT_LOCAL_SPEAKER_NAME = "Me"
+PLACEHOLDER_SPEAKERS = (DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, "")
 DIARIZATION_LABEL = re.compile(r"^(.*?)(\s*\(spk_\d+\))$")
 
 # Channels that carry a nameable human voice.
@@ -117,15 +123,25 @@ NAMING_HINT = re.compile(
     r"ich\s+bin|mein\s+name|"  # German
     r"me\s+llamo|yo\s+soy|soy\s+|"  # Spanish
     r"meu\s+nome|eu\s+sou|"  # Portuguese
-    r"mi\s+chiamo|sono\s+"  # Italian
+    r"mi\s+chiamo|sono\s+|"  # Italian
+    r"nazywam\s+si|nazywam|mam\s+na\s+imi|"  # Polish
+    r"benim\s+ad|ad\u0131m|ben\s+|"  # Turkish
+    r"t\u00f4i\s+t\u00ean|t\u00ean\s+t\u00f4i|t\u00f4i\s+l\u00e0|"  # Vietnamese
+    r"nama\s+saya|saya\s+|"  # Indonesian / Malay
+    r"mijn\s+naam|ik\s+ben|"  # Dutch
+    r"jag\s+heter|mitt\s+namn|"  # Swedish
+    r"jeg\s+heter|jeg\s+er|"  # Norwegian / Danish
+    r"nimeni\s+on|olen\s+"  # Finnish
     r")\b",
     re.IGNORECASE,
 )
 
-# Characters outside the Latin script, give or take its diacritics. Used only to
-# decide whether the phrase list above could possibly have matched.
-NON_LATIN = re.compile(r"[^\W\d_]", re.UNICODE)
-LATIN_LETTER = re.compile(r"[A-Za-zÀ-ɏ]")
+# Any letter, in any script -- `[^\W\d_]` is the standard idiom for that. Named
+# for what it matches, because an earlier name said the opposite.
+ANY_LETTER = re.compile(r"[^\W\d_]", re.UNICODE)
+# Latin and its extensions, including Latin Extended Additional (U+1e00-U+1eff),
+# without which Vietnamese was counted as non-Latin.
+LATIN_LETTER = re.compile(r"[A-Za-zÀ-ɏḀ-ỿ]")
 
 # Where one spoken word ends and the next begins: whitespace and punctuation,
 # and nothing else.
@@ -140,9 +156,30 @@ LATIN_LETTER = re.compile(r"[A-Za-zÀ-ɏ]")
 # The apostrophe is excluded from the separators on purpose, so O'Brien stays one
 # word; `!-&` and `(-/` are the ASCII punctuation either side of it.
 WORD_SEPARATOR = re.compile(
-    r"[\s!-&(-/:-@\[-`{-~¡-¿ -⁯　-〿։،؛؟"
-    r"।॥、。，．：；？！]+"
+    "[\\s"
+    "\\u0021-\\u0026\\u0028-\\u002f\\u003a-\\u0040"  # ASCII punctuation, minus '
+    "\\u005b-\\u0060\\u007b-\\u007e\\u00a1-\\u00bf"
+    # General punctuation, in TWO pieces. The gap between them is the point:
+    # U+200b-U+200f and U+202a-U+202e are format characters, not punctuation,
+    # and U+200c/U+200d (ZERO WIDTH NON-JOINER and JOINER) are how Persian,
+    # Urdu and several Indic scripts control conjunct and medial forms INSIDE
+    # a word. Treating them as boundaries shattered a compound given name,
+    # which is the same mistake as splitting Devanagari at its vowel signs in
+    # a different script. U+2060-U+206f are format characters too.
+    "\\u2010-\\u2027\\u2030-\\u205e"
+    "\\u3000-\\u303f"  # CJK punctuation
+    "\\u0589\\u060c\\u061b\\u061f"  # Armenian, Arabic
+    "\\u0964\\u0965"  # Devanagari danda
+    "\\u3001\\u3002\\uff0c\\uff0e\\uff1a\\uff1b\\uff1f\\uff01"  # fullwidth
+    "]+"
 )
+
+# Apostrophes a transcript or a model may use interchangeably. Normalised to
+# the ASCII one on both sides before comparing, because the ASCII apostrophe
+# is excluded from the separators above and the typographic ones are not -- so
+# without this, "O’Brien" failed against a turn that said exactly that.
+# Language models emit U+2019 routinely.
+APOSTROPHES = str.maketrans({"\u2019": "'", "\u02bc": "'", "\u2018": "'", "\u00b4": "'"})
 
 
 def shortcut_is_meaningful_for(text):
@@ -154,7 +191,7 @@ def shortcut_is_meaningful_for(text):
     to judge and the pass runs. Cost is still bounded -- by the cooldown and by
     requiring the transcript to have grown -- and those two are language-neutral.
     """
-    letters = NON_LATIN.findall(text or "")
+    letters = ANY_LETTER.findall(text or "")
     if not letters:
         return True
     latin = sum(1 for character in letters if LATIN_LETTER.match(character))
@@ -330,9 +367,11 @@ def unresolved_voices(turns, identities):
         if key in named or key in settled_keys(identities):
             continue
         base, suffix = split_diarization_label(key.split("#", 1)[-1])
-        if base and base != DEFAULT_OTHER_SPEAKER_NAME:
+        if base not in PLACEHOLDER_SPEAKERS:
+            # Already reads as a person: a meeting-roster name from a Virtual
+            # Participant, or a channel name the client supplied.
             continue
-        if not suffix and base == DEFAULT_OTHER_SPEAKER_NAME:
+        if not suffix and base in PLACEHOLDER_SPEAKERS:
             # A whole channel with no separation: nameable, and worth asking about.
             out.append(key)
             continue
@@ -552,8 +591,11 @@ def name_appears_in(name, text):
     Matched loosely and per word, because the transcript is speech: "Sarah Lee"
     is supported by a turn that says "Sara Lee", and a first name alone is enough.
     """
-    folded_text = (text or "").casefold()
-    folded_name = (name or "").casefold()
+    # Apostrophe variants normalised on both sides before anything else, so the
+    # one that is excluded from the separators and the ones that are not cannot
+    # disagree about where a word ends.
+    folded_text = (text or "").casefold().translate(APOSTROPHES)
+    folded_name = (name or "").casefold().translate(APOSTROPHES)
 
     # Chinese, Japanese, Thai, Khmer and Lao are written without spaces between
     # words, so tokenising makes a whole turn one token and no name can ever
