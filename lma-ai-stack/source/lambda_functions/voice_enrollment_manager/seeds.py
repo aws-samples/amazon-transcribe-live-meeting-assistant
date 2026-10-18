@@ -130,6 +130,24 @@ def handler(event, context):  # pylint: disable=unused-argument
             len(voices),
             usable_total,
         )
+    # Said explicitly, because "0 of 7" is otherwise the only trace of a
+    # deployment where every enrollment is refused for the same reason. The
+    # usable_total warning above cannot cover it: when nothing is usable the
+    # comparison is 0 > 0. A terms-hash mismatch across the whole table means
+    # this function computes different terms from the one that stored them.
+    if enrollments and not voices:
+        agreed = {
+            row.get("TermsSha256")
+            for row in enrollments
+            if row.get("Status") == pure.STATUS_ACTIVE
+        }
+        current = pure.terms_fingerprint(terms_text())
+        if agreed and current not in agreed:
+            LOGGER.warning(
+                "No enrollment agrees with the terms this function computes. "
+                "Check VOICE_ENROLLMENT_RETENTION_DAYS and "
+                "VOICE_ENROLLMENT_TERMS_VERSION match the portal's."
+            )
     # Counts only. The point of this function is to move names and voiceprints,
     # and neither belongs in a log line.
     LOGGER.info(

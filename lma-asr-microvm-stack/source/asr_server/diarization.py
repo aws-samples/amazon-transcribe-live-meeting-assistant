@@ -335,13 +335,20 @@ class SpeakerRegistry:
                 self._accumulate(fallback, embedding)
                 return fallback
 
-        if best_label is not None and self._require_corroboration:
+        if minted and self._require_corroboration:
             corroborated = self._mint_with_corroboration(embedding)
             if not corroborated:
-                # Attribute to the closest existing speaker for now WITHOUT folding
-                # this embedding into that centroid: it may well belong to someone
-                # new, and polluting the centroid would hurt both identities.
-                return best_label
+                # Attribute to the closest DISCOVERED speaker for now WITHOUT
+                # folding this embedding into that centroid: it may well belong
+                # to someone new, and polluting the centroid would hurt both
+                # identities.
+                #
+                # Seeded voices are excluded here for the same reason as in the
+                # cap fallback above. This is the guard the docstring's "in both
+                # guards" refers to, and leaving `best_label` in place put an
+                # enrolled person's name on a stranger's first utterance at a
+                # score of 0.0 against a 0.5 threshold.
+                return max(minted, key=lambda label: self.score(label, embedding))
 
         return self._mint(embedding)
 

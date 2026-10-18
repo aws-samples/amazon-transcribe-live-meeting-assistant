@@ -7,12 +7,16 @@ A voiceprint is biometric data about a person, so the rules around it are not
 ordinary product rules and are kept here, in one testable place, rather than
 spread through handlers.
 
-The shape of the problem: the person being enrolled is often not an LMA user at
-all -- somebody from another company, a contractor in a meeting room -- so a
-consent that the meeting host asserts on their behalf is worthless. Consent is
+The shape of the problem: a voiceprint is biometric data about a person, so a
+consent that anybody else asserts on their behalf is worthless. Consent is
 therefore first-party: the enrollee authenticates as themselves, is shown the
 terms, and performs an explicit affirmative action. Everything below enforces
 that, and records it in a form an auditor can rely on.
+
+Enrolment is limited to people who already have an account in the deployment.
+The external participant and the contractor in a meeting room -- who are who
+this feature would be most useful for -- are deliberately not served, because
+reaching them means issuing them credentials to this deployment.
 
 Two records, deliberately separate:
 
@@ -33,7 +37,6 @@ import re
 from datetime import datetime, timedelta, timezone
 
 # Actions recorded in the append-only log. A withdrawal appends; it never edits.
-ACTION_INVITED = "INVITED"
 ACTION_GRANTED = "GRANTED"
 ACTION_RE_CONSENTED = "RE_CONSENTED"
 ACTION_REVOKED = "REVOKED"
@@ -42,7 +45,6 @@ ACTION_DELETED = "DELETED"
 
 CONSENT_ACTIONS = frozenset(
     {
-        ACTION_INVITED,
         ACTION_GRANTED,
         ACTION_RE_CONSENTED,
         ACTION_REVOKED,
@@ -149,7 +151,7 @@ def may_grant(action, subject_id, actor_sub, actor_groups=()):
 
     The asymmetry is the whole design: **only the enrollee may grant**, because a
     consent somebody else gave on their behalf is not consent. An admin may
-    invite, and may revoke on somebody's behalf (for a person who has left), but
+    revoke on somebody's behalf (for a person who has left), but
     may never grant.
     """
     is_self = bool(subject_id) and subject_id == actor_sub
@@ -157,8 +159,6 @@ def may_grant(action, subject_id, actor_sub, actor_groups=()):
 
     if action in (ACTION_GRANTED, ACTION_RE_CONSENTED):
         return is_self
-    if action == ACTION_INVITED:
-        return is_admin
     if action in (ACTION_REVOKED, ACTION_DELETED):
         return is_self or is_admin
     if action == ACTION_EXPIRED:
@@ -301,7 +301,9 @@ def is_usable_for_matching(
     return True
 
 
-def may_store_voiceprint(enrollment, current_terms_version, now_iso):
+def may_store_voiceprint(
+    enrollment, current_terms_version, now_iso, current_terms_sha256=None
+):
     """Is there a standing consent that permits storing a voiceprint?
 
     Separate from ``is_usable_for_matching`` because the two ask different
@@ -325,13 +327,21 @@ def may_store_voiceprint(enrollment, current_terms_version, now_iso):
         return False
     if str(enrollment.get("TermsVersion")) != str(current_terms_version):
         return False
+    if current_terms_sha256 and enrollment.get("TermsSha256") != current_terms_sha256:
+        # Same version, different words. A consent can be recorded and acted on
+        # much later -- a pending row has no expiry -- so the terms can move in
+        # between, and a missing hash counts as a mismatch rather than a pass:
+        # a row that does not say what was agreed to cannot show it is current.
+        return False
     expires_at = enrollment.get("ConsentExpiresAt")
     if expires_at and _parse(expires_at) <= _parse(now_iso):
         return False
     return True
 
 
-def needs_reconsent(enrollment, current_terms_version, current_terms_sha256=None):
+def needs_reconsent(
+    enrollment, current_terms_version, current_terms_sha256=None, now_iso=None
+):
     """An active enrollment whose consent is to superseded terms.
 
     Superseded by either a version bump or an edit to the words, for the reason
@@ -342,9 +352,17 @@ def needs_reconsent(enrollment, current_terms_version, current_terms_sha256=None
         return False
     if str(enrollment.get("TermsVersion")) != str(current_terms_version):
         return True
-    return bool(
-        current_terms_sha256 and enrollment.get("TermsSha256") != current_terms_sha256
-    )
+    if current_terms_sha256 and enrollment.get("TermsSha256") != current_terms_sha256:
+        return True
+    # A consent that has aged out needs giving again too. The retention pass
+    # sweeps daily, so an active row can sit here for up to a day -- longer if
+    # the schedule is disabled -- already refused for matching. Without this the
+    # portal told that person they were enrolled, showed them an expiry date in
+    # the past, and offered them no way to put it right.
+    expires_at = enrollment.get("ConsentExpiresAt")
+    if not expires_at:
+        return True
+    return _parse(expires_at) <= _parse(now_iso or _iso(datetime.now(timezone.utc)))
 
 
 def seedable_voices(enrollments, current_terms_version, now_iso, current_terms_sha256=None):

@@ -87,7 +87,7 @@ lives:
 
 | Field | Purpose |
 |---|---|
-| `SubjectId` | The enrollee's Cognito `sub`. Never an email, so the key is not itself personal data. |
+| `SubjectId` | The enrollee's Cognito `sub`, rather than an email, so the key carries no contact details. |
 | `DisplayName` | The name to label transcripts with, as the enrollee typed it. |
 | `Centroid` | The voiceprint: a vector of floats. **This is the biometric.** |
 | `Status` | `pending`, `active` or `revoked`. |
@@ -100,7 +100,7 @@ at all**:
 |---|---|
 | `SubjectId` (PK) | Who the record is about. |
 | `RecordedAt` (SK) | ISO timestamp, so the history is ordered and unique per event. |
-| `Action` | `INVITED`, `GRANTED`, `RE_CONSENTED`, `REVOKED`, `EXPIRED`, `DELETED`. |
+| `Action` | `GRANTED`, `RE_CONSENTED`, `REVOKED`, `EXPIRED`, `DELETED`. |
 | `TermsVersion`, `TermsSha256` | Which terms text, and its exact hash. |
 | `ActorSub`, `ActorEmail` | The authenticated identity that performed the action. |
 | `SourceIp`, `UserAgent` | Where from. |
@@ -132,8 +132,10 @@ period appears in the terms**: the text says how many days a consent stands. So
 changing `VoiceEnrollmentRetentionDays` changes what people agreed to, and
 everybody is asked to agree again at the new period — without an operator having
 to remember to bump `VoiceEnrollmentTermsVersion` as well. Until they do, their
-voiceprints are not used; they are not deleted, and agreeing again restores
-them. Plan a retention change accordingly.
+voiceprints are not used; they are not deleted, and agreeing again *and
+re-recording* restores them. Plan a retention change accordingly: it asks every
+enrolled person to repeat the enrollment, so it is not a parameter to tune
+casually once people have enrolled.
 
 **Point-in-time recovery is on**, so the log can be restored to any moment in the
 retention window.
@@ -210,8 +212,9 @@ A meeting cannot know who is in the room. A transcript captured from a browser
 tab or a desktop app has no attendee list — that is the whole reason the Speakers
 panel offers a pasted one — so a starting session is given every enrollment that
 consent currently permits, up to 32 of them. An enrollment counts only while all
-four of these hold: it is `active`, it has a voiceprint, its `TermsVersion` is
-the one in force, and its consent has not lapsed. The transcriber asks for the
+five of these hold: it is `active`, it has a voiceprint, its `TermsVersion` is
+the one in force, the hash of the terms it agreed to matches the terms in force,
+and its consent has not lapsed. The transcriber asks for the
 list at the start of every meeting and keeps no copy, so a withdrawal applies to
 the very next meeting.
 

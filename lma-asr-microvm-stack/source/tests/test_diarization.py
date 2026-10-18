@@ -1792,3 +1792,41 @@ def test_a_seed_from_a_different_embedding_model_matches_nobody() -> None:
     registry.enroll("Sarah Lee", [1.0, 0.0, 0.0])
     assert registry.score("Sarah Lee", [1.0, 0.0]) == 0.0
     assert registry.assign([1.0, 0.0]) == "spk_0"
+
+
+def test_corroboration_never_puts_an_enrolled_name_on_a_strangers_first_turn() -> None:
+    """The second of assign()'s two guards, which was only half updated.
+
+    With corroboration on, the first dissimilar embedding is withheld and
+    attributed to the nearest existing speaker. Searching all labels put a
+    named, identifiable person on a stranger's words at a score of 0.0 against
+    a 0.5 threshold.
+    """
+    registry = SpeakerRegistry(threshold=0.5, require_corroboration=True)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    # Orthogonal to the seeded voice: a score of 0.0, as far from a match as
+    # cosine similarity allows.
+    assert registry.score("Sarah Lee", [0.0, 1.0]) == 0.0
+    assigned = registry.assign([0.0, 1.0])
+    assert assigned != "Sarah Lee"
+    assert assigned.startswith("spk_")
+
+
+def test_corroboration_still_withholds_a_first_outlier_among_minted_voices() -> None:
+    """The guard must keep doing its job for discovered speakers."""
+    registry = SpeakerRegistry(threshold=0.9, require_corroboration=True)
+    first = registry.assign([1.0, 0.0])
+    assert first == "spk_0"
+    # One dissimilar embedding is weak evidence, so it lands on the known
+    # speaker rather than minting a second identity.
+    assert registry.assign([0.0, 1.0]) == "spk_0"
+    assert registry.minted_speakers == ["spk_0"]
+
+
+def test_corroboration_with_only_enrolled_voices_mints_rather_than_naming() -> None:
+    """No discovered speaker to fall back to, so a new voice gets an id."""
+    registry = SpeakerRegistry(threshold=0.5, require_corroboration=True)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    registry.enroll("Bob Strahan", [0.0, 1.0])
+    assigned = registry.assign([-1.0, 0.0])
+    assert assigned not in ("Sarah Lee", "Bob Strahan")

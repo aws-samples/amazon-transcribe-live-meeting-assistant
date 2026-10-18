@@ -212,13 +212,16 @@ matching step do not exist in the deployment at all.
 
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
-| EnableVoiceEnrollment | Creates the enrollment table, the append-only consent log, the enrollment portal and the invitation page | false | true, false |
+| EnableVoiceEnrollment | Creates the enrollment table, the append-only consent log and the enrollment portal, and adds **Enrol My Voice** to the navigation | false | true, false |
 | VoiceEnrollmentRetentionDays | How long a consent stands before it must be renewed. When it lapses the voiceprint is deleted and the person is asked again. Changing this changes the consent terms, which state the period, so everybody is asked to agree again at the new one | 365 | 1–3650 |
 | VoiceEnrollmentTermsVersion | Bump to require everybody to re-consent. An enrollment agreeing to a superseded version stops being used for matching until its owner agrees to the current terms | 1 | 1–32 characters of `A-Za-z0-9._-` |
 
-Matching also needs `EnableMicrovmAsr=true`, because that engine is what computes
-speaker embeddings. Amazon Transcribe exposes none, so a deployment using it can
-enroll voices but cannot match them.
+Both enrolling and matching need `EnableMicrovmAsr=true`, because that engine is
+what computes speaker embeddings -- one to build a voiceprint, the other to
+compare against it. Amazon Transcribe exposes none, so with enrollment on and
+that engine off, the tables, the portal and the consent log all exist and work,
+and the step that would create a voiceprint reports that the engine is
+missing.
 
 ## End-of-Call Summary
 

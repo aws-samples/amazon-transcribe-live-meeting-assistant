@@ -71,9 +71,11 @@ def test_another_user_may_not_grant_consent_for_somebody_else() -> None:
     assert pure.may_grant(pure.ACTION_GRANTED, ENROLLEE, "sub-stranger", []) is False
 
 
-def test_an_admin_may_invite_but_a_plain_user_may_not() -> None:
-    assert pure.may_grant(pure.ACTION_INVITED, ENROLLEE, ADMIN, ["Admin"]) is True
-    assert pure.may_grant(pure.ACTION_INVITED, ENROLLEE, "sub-other", []) is False
+def test_an_unknown_action_is_refused_to_everybody_including_an_admin() -> None:
+    """The vocabulary is closed, so a typo or a removed action denies rather
+    than defaults to allow."""
+    assert pure.may_grant("INVITED", ENROLLEE, ADMIN, ["Admin"]) is False
+    assert pure.may_grant("ANYTHING", ENROLLEE, ENROLLEE, ["Admin"]) is False
 
 
 def test_either_the_person_or_an_admin_may_revoke() -> None:
@@ -207,7 +209,7 @@ def test_an_enrollment_with_no_voiceprint_is_not_usable() -> None:
 
 
 def test_a_pending_enrollment_is_not_usable() -> None:
-    """Invited but not yet consented."""
+    """Consent given, but no voice recorded yet."""
     assert pure.is_usable_for_matching(active(Status=pure.STATUS_PENDING), 1, NOW) is False
 
 

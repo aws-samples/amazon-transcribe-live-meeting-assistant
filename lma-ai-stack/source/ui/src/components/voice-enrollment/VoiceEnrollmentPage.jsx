@@ -6,9 +6,8 @@
 /**
  * The voice-enrollment portal.
  *
- * The person using this page is often not an LMA user -- somebody from another
- * company, a contractor in a meeting room -- and the whole reason the page
- * exists is that a consent the meeting host asserts on their behalf would be
+ * A voiceprint is biometric data about a person, and the whole reason this page
+ * exists is that a consent anybody else asserts on their behalf would be
  * worthless. So the flow is deliberately theirs, in this order:
  *
  *   1. read the terms, in full, in the text whose hash will be stored;
@@ -97,6 +96,16 @@ const VoiceEnrollmentPage = () => {
       const result = response?.data?.voiceEnrollmentTerms;
       setState(result);
       setDisplayName(result?.DisplayName || '');
+      // A resolved response is not necessarily a usable one. The backend
+      // returns a message with no Terms on any transient failure, and on a
+      // deployment with enrollment switched off this field resolves to null
+      // because the schema advertises it while the resolver does not exist.
+      // Either way the page must not offer a consent: a recorded consent to
+      // terms that were never displayed is the one thing this page exists to
+      // make impossible.
+      if (!result?.Terms) {
+        setError(result?.Message || 'Could not load the consent terms. Please try again.');
+      }
     } catch (problem) {
       logger.error('could not load the enrollment page', problem);
       setError('Could not load this page. Please try again.');
@@ -304,7 +313,7 @@ const VoiceEnrollmentPage = () => {
           </Alert>
         )}
 
-        {!consented && (
+        {!consented && state?.Terms && (
           <Container header={<Header variant="h2">What you are being asked</Header>}>
             <SpaceBetween direction="vertical" size="m">
               {/* The text whose hash is stored with the consent, rendered as

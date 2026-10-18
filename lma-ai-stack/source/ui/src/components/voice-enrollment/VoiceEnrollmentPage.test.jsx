@@ -291,3 +291,39 @@ describe('having enough speech to enrol', () => {
     expect(screen.queryByText(/That is every line/)).toBeNull();
   });
 });
+
+describe('when the terms cannot be shown', () => {
+  // A consent recorded against terms the person was never shown is the one
+  // outcome this page exists to prevent, so a response that resolves without
+  // them must not produce an actionable consent form. Two reachable cases:
+  // the backend's generic failure reply carries a Message and no Terms, and on
+  // a deployment with enrollment off the field resolves to null because the
+  // schema advertises it while the resolver does not exist.
+
+  it('offers no consent when the backend replies without terms', async () => {
+    renderWith({ Success: false, Message: 'could not complete that just now' });
+    await waitFor(() => expect(screen.getByText(/could not complete/)).toBeTruthy());
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: /I agree/ })).toBeNull();
+  });
+
+  it('offers no consent when the field resolves to null', async () => {
+    renderWith(null);
+    await waitFor(() => expect(screen.getByText(/Could not load the consent terms/)).toBeTruthy());
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    expect(screen.queryByRole('button', { name: /I agree/ })).toBeNull();
+  });
+
+  it('offers no consent when the terms come back empty', async () => {
+    renderWith(state({ Terms: '' }));
+    await waitFor(() => expect(screen.getByText(/Could not load the consent terms/)).toBeTruthy());
+    expect(screen.queryByRole('checkbox')).toBeNull();
+  });
+
+  it('still shows the terms normally when they are present', async () => {
+    // The guard must not swallow the ordinary case.
+    renderWith(state());
+    await waitFor(() => expect(screen.getByRole('checkbox')).toBeTruthy());
+    expect(screen.queryByText(/Could not load the consent terms/)).toBeNull();
+  });
+});

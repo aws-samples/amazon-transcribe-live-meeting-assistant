@@ -1205,6 +1205,10 @@ Resources:
           VOICE_ENROLLMENT_TABLE: !Ref VoiceEnrollmentTable
           VOICE_CONSENT_LOG_TABLE: !Ref VoiceConsentLogTable
           VOICE_ENROLLMENT_TERMS_VERSION: !Ref VoiceEnrollmentTermsVersion
+          # Harmless here today -- retention.py never reads the terms text --
+          # but it imports index, so it is set for the same reason: a function
+          # that loads that module and omits this gets different terms.
+          VOICE_ENROLLMENT_RETENTION_DAYS: !Ref VoiceEnrollmentRetentionDays
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentRetentionFunction
@@ -1322,6 +1326,12 @@ Resources:
           VOICE_ENROLLMENT_TABLE: !Ref VoiceEnrollmentTable
           VOICE_CONSENT_LOG_TABLE: !Ref VoiceConsentLogTable
           VOICE_ENROLLMENT_TERMS_VERSION: !Ref VoiceEnrollmentTermsVersion
+          # Required, not optional. The consent text states the retention
+          # period, so this value decides what terms_text() hashes to -- and
+          # this function compares that hash against what each enrollment
+          # agreed to. A function missing it hashes different words from the
+          # one that wrote the enrollment and matches nobody, silently.
+          VOICE_ENROLLMENT_RETENTION_DAYS: !Ref VoiceEnrollmentRetentionDays
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentSeedsFunction

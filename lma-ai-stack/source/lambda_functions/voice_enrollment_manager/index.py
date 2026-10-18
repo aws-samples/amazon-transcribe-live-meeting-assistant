@@ -3,18 +3,17 @@
 # See the LICENSE file in the project root for full license information.
 """The voice-enrollment portal's backend.
 
-Handles the whole lifecycle of a voiceprint: an invitation, the enrollee's own
-consent, the samples that become the voiceprint, withdrawal, and the retention
-pass that expires a consent nobody renewed.
+Handles the whole lifecycle of a voiceprint: the enrollee's own consent, the
+samples that become the voiceprint, withdrawal, and the retention pass that
+expires a consent nobody renewed.
 
 Two things about the shape of this module are deliberate.
 
 **Consent is checked before anything else happens, on every call.** Not once at
 the start of a flow -- each operation re-derives who is asking and what they are
 allowed to do, from `pure.may_grant`. The asymmetry that matters is that only the
-enrollee can grant: an admin can invite and can revoke, never grant, because a
-consent the meeting host asserts on somebody's behalf is worthless and the person
-being enrolled is frequently not an LMA user at all.
+enrollee can grant: an admin can revoke, never grant, because a consent somebody
+else asserts on another person's behalf is worthless.
 
 **Every write to the consent log is a PutItem of a new row.** Nothing here
 updates or deletes a log row, and the function's IAM role is not granted the
@@ -249,6 +248,12 @@ def grant_consent(event, who):
             "DisplayName": (existing or {}).get("DisplayName", ""),
             "Status": pure.STATUS_PENDING,
             "TermsVersion": str(TERMS_VERSION),
+            # The words agreed to, recorded HERE rather than when the
+            # voiceprint is stored. Somebody can agree, walk away, and come
+            # back after the terms have changed -- which this flow explicitly
+            # allows, since a pending row has no expiry. Hashing at the later
+            # point would assert they agreed to whatever the terms say then.
+            "TermsSha256": pure.terms_fingerprint(terms_text()),
             "ConsentedAt": _now(),
         }
     )
@@ -263,7 +268,9 @@ def store_voiceprint(event, who):
         return {"Success": False, "Message": "only you can enrol your own voice"}
 
     existing = read_enrollment(subject_id)
-    if not pure.may_store_voiceprint(existing, TERMS_VERSION, _now()):
+    if not pure.may_store_voiceprint(
+        existing, TERMS_VERSION, _now(), pure.terms_fingerprint(terms_text())
+    ):
         # No standing consent to the terms in force, so there is nothing that
         # permits storing a voiceprint. A withdrawn or lapsed consent reaches
         # here too: the row survives a withdrawal, deliberately, so that the
@@ -309,7 +316,11 @@ def store_voiceprint(event, who):
             display_name=display_name,
             centroid=centroid,
             terms_version=TERMS_VERSION,
-            terms_sha256=pure.terms_fingerprint(terms_text()),
+            # The hash the CONSENT recorded, not one recomputed now. They are
+            # the same whenever the terms have not moved, and when they have
+            # moved the gate above has already refused -- so recomputing could
+            # only ever overwrite the truth with something more convenient.
+            terms_sha256=existing.get("TermsSha256") or pure.terms_fingerprint(terms_text()),
             sample_count=len(samples),
             total_seconds=total_seconds,
             enrolled_at=enrolled_at,
@@ -362,7 +373,7 @@ def my_enrollment(event, who):
         "DisplayName": existing.get("DisplayName", ""),
         "ConsentExpiresAt": existing.get("ConsentExpiresAt", ""),
         "NeedsReconsent": pure.needs_reconsent(
-            existing, TERMS_VERSION, pure.terms_fingerprint(terms_text())
+            existing, TERMS_VERSION, pure.terms_fingerprint(terms_text()), _now()
         ),
         "TermsVersion": str(TERMS_VERSION),
         "Terms": terms_text(),

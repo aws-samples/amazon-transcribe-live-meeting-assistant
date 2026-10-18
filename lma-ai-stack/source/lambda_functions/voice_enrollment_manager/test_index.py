@@ -116,6 +116,13 @@ def event(field, *, sub=ENROLLEE, groups=(), **args):
 
 
 def consented(terms="1", status="pending", **extra):
+    """An enrollment row shaped the way the handlers actually write one.
+
+    The shape matters: a fixture that carries fields grant_consent never
+    writes, or omits fields enrollment_record always writes, tests a row the
+    product cannot produce. An `active` row therefore gets an expiry, because
+    enrollment_record always sets one and an active row without one is refused.
+    """
     row = {
         "SubjectId": {"S": ENROLLEE},
         "Status": {"S": status},
@@ -125,6 +132,9 @@ def consented(terms="1", status="pending", **extra):
         "TermsSha256": {"S": index.pure.terms_fingerprint(index.terms_text())},
         "DisplayName": {"S": "Sarah Lee"},
     }
+    if status == "active":
+        row["ConsentExpiresAt"] = {"S": "2099-01-01T00:00:00Z"}
+        row["Centroid"] = {"L": [{"N": "0.1"}, {"N": "0.2"}]}
     row.update(extra)
     return row
 
@@ -511,7 +521,12 @@ def test_re_consenting_with_no_voiceprint_records_no_deletion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Nothing was destroyed, so claiming it was would be a false audit row."""
-    ddb = install(monkeypatch, enrollment=consented(status="active", terms="0"))
+    row = consented(status="active", terms="0")
+    # An active row with no voiceprint: unusual, but a revoked-then-reactivated
+    # record looks like this, and the DELETED row must be about an actual
+    # deletion rather than about the re-consent having happened.
+    del row["Centroid"]
+    ddb = install(monkeypatch, enrollment=row)
     index.handler(event("grantVoiceConsent"), None)
     assert [row["Action"]["S"] for row in ddb.consent_rows()] == ["RE_CONSENTED"]
 
@@ -571,8 +586,12 @@ def test_a_stored_voiceprint_records_the_words_that_were_agreed_to(
 ) -> None:
     """On the enrollment, not only in the log: the matching path reads this row.
 
-    A hash only an auditor can see cannot stop a voiceprint being used under
-    terms that have since changed.
+    Note what this test can and cannot show. Whether the value was taken from
+    the consent row or recomputed at store time is no longer observable from
+    outside, because the gate above now refuses the case where those two
+    differ -- which is a stronger guarantee than any assertion here could
+    make. The two tests that follow cover that gate. This one only pins that
+    the field is written at all, since the matching path is useless without it.
     """
     ddb = install(monkeypatch, enrollment=consented())
     index.handler(
@@ -581,3 +600,72 @@ def test_a_stored_voiceprint_records_the_words_that_were_agreed_to(
     )
     stored = ddb.enrollment_rows()[0]
     assert stored["TermsSha256"]["S"] == index.pure.terms_fingerprint(index.terms_text())
+
+
+def test_consent_records_the_terms_hash_when_it_is_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """So there is something to compare against later.
+
+    Somebody can agree, walk away, and return after the terms have moved -- a
+    pending row has no expiry, so it waits indefinitely. Without a hash on that
+    row there is no evidence of which words they agreed to.
+    """
+    ddb = install(monkeypatch)
+    index.handler(event("grantVoiceConsent"), None)
+    stored = ddb.enrollment_rows()[0]
+    assert stored["TermsSha256"]["S"] == index.pure.terms_fingerprint(index.terms_text())
+
+
+def test_a_consent_to_superseded_words_cannot_store_a_voiceprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agreed, walked away, terms changed, came back and recorded.
+
+    The version is untouched -- only the retention period moved, which the
+    terms text states -- so a version check alone lets this through.
+    """
+    ddb = install(
+        monkeypatch,
+        enrollment=consented(TermsSha256={"S": "a-hash-of-the-older-words"}),
+    )
+    result = index.handler(
+        event("enrolMyVoice", DisplayName="Sarah Lee", Samples=SAMPLES, TotalSeconds=30.0),
+        None,
+    )
+    assert result["Success"] is False
+    assert ddb.enrollment_rows() == []
+
+
+def test_a_consent_with_no_recorded_words_cannot_store_a_voiceprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A row that does not say what was agreed to cannot show it is current."""
+    row = consented()
+    del row["TermsSha256"]
+    ddb = install(monkeypatch, enrollment=row)
+    result = index.handler(
+        event("enrolMyVoice", DisplayName="Sarah Lee", Samples=SAMPLES, TotalSeconds=30.0),
+        None,
+    )
+    assert result["Success"] is False
+    assert ddb.enrollment_rows() == []
+
+
+def test_the_portal_asks_again_when_a_consent_has_aged_out(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Between lapsing and the nightly sweep, the row is still `active`.
+
+    The voiceprint has already stopped being used, so telling the person they
+    are enrolled -- with an expiry date in the past and no way to renew -- is
+    both wrong and a dead end.
+    """
+    install(
+        monkeypatch,
+        enrollment=consented(
+            status="active", ConsentExpiresAt={"S": "2000-01-01T00:00:00Z"}
+        ),
+    )
+    result = index.handler(event("voiceEnrollmentTerms"), None)
+    assert result["NeedsReconsent"] is True
