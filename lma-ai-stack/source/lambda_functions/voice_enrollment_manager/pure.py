@@ -196,10 +196,7 @@ def enrollment_is_sufficient(total_seconds, utterance_count):
     Storing a weak voiceprint is worse than storing none: it produces confident
     wrong matches, and it has taken somebody's biometric data for no benefit.
     """
-    return (
-        total_seconds >= MIN_ENROLLMENT_SECONDS
-        and utterance_count >= MIN_ENROLLMENT_UTTERANCES
-    )
+    return total_seconds >= MIN_ENROLLMENT_SECONDS and utterance_count >= MIN_ENROLLMENT_UTTERANCES
 
 
 def enrollment_record(
@@ -242,9 +239,7 @@ def revoke(enrollment):
     withdrew" is information the audit needs and is not itself biometric.
     """
     revoked = {
-        key: value
-        for key, value in (enrollment or {}).items()
-        if key not in ("Centroid", "Dim")
+        key: value for key, value in (enrollment or {}).items() if key not in ("Centroid", "Dim")
     }
     revoked["Status"] = STATUS_REVOKED
     return revoked

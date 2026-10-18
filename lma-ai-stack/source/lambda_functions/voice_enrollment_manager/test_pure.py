@@ -166,7 +166,7 @@ def test_revoking_destroys_the_voiceprint() -> None:
 
 
 def test_revoking_keeps_the_fact_that_the_person_enrolled() -> None:
-    """"This person withdrew" is what the audit needs, and is not biometric."""
+    """ "This person withdrew" is what the audit needs, and is not biometric."""
     revoked = pure.revoke(active())
     assert revoked["SubjectId"] == ENROLLEE
     assert revoked["EnrolledAt"] == NOW
@@ -258,13 +258,17 @@ def test_an_enrollment_expires_a_retention_period_after_consent() -> None:
 def test_the_retention_pass_finds_only_aged_out_active_enrollments() -> None:
     aged = active(SubjectId="sub-old", ConsentExpiresAt="2026-01-01T00:00:00Z")
     fresh = active(SubjectId="sub-new")
-    already_revoked = pure.revoke(active(SubjectId="sub-gone", ConsentExpiresAt="2026-01-01T00:00:00Z"))
+    already_revoked = pure.revoke(
+        active(SubjectId="sub-gone", ConsentExpiresAt="2026-01-01T00:00:00Z")
+    )
     assert pure.expired_subjects([aged, fresh, already_revoked], NOW) == ["sub-old"]
 
 
 def test_a_naive_timestamp_is_read_as_utc() -> None:
     """Mixing a bare timestamp with a Z-suffixed one must not shift a date."""
-    assert pure.is_usable_for_matching(active(ConsentExpiresAt="2027-10-18T12:00:00"), 1, NOW) is True
+    assert (
+        pure.is_usable_for_matching(active(ConsentExpiresAt="2027-10-18T12:00:00"), 1, NOW) is True
+    )
 
 
 # --------------------------------------------------------------------------
