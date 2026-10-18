@@ -18,5 +18,9 @@ export const TRANSCRIPT_SUMMARY_PATH = '/configuration/transcript-summary';
 export const USER_MANAGEMENT_PATH = '/configuration/user-management';
 export const DEFAULT_PATH = CALLS_PATH;
 export const EMBED_PATH = '/embed';
+// The enrollment portal. Top-level rather than under /configuration, because the
+// person using it is often not an LMA user at all and has access to nothing else
+// -- putting it under configuration would imply otherwise.
+export const VOICE_ENROLLMENT_PATH = '/voice-enrollment';
 export const REDIRECT_URL_PARAM = 'redirect';
 export const MEETINGS_QUERY_PATH = `${CALLS_PATH}/query`;
