@@ -449,6 +449,22 @@ Resources:
       Precedence: 0
       UserPoolId: !Ref UserPool
 
+  # The group an invited voice enrollee lands in. Created unconditionally,
+  # rather than with the voice-enrollment resources in the AI stack, for two
+  # reasons: groups live with the user pool, and a group that exists but has no
+  # members changes nothing about a deployment that never enables enrollment.
+  # Precedence is below Admin, so an administrator who also enrols their own
+  # voice keeps the Admin precedence that decides their effective role.
+  VoiceEnrolleeGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      Description: >-
+        People invited to enrol their voice. Reaches the voice-enrollment portal
+        only.
+      GroupName: VoiceEnrollee
+      Precedence: 10
+      UserPoolId: !Ref UserPool
+
   AdminUserToGroupAttachment:
     Type: AWS::Cognito::UserPoolUserToGroupAttachment
     Properties:

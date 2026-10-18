@@ -16,7 +16,12 @@ import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert';
 import { LambdaClient } from '@aws-sdk/client-lambda';
 
-import { fetchEnrolledVoices, voiceEnrollmentEnabled } from './voice-enrollment';
+import {
+    fetchEnrolledVoices,
+    seedsMaxAttempts,
+    seedsRequestBound,
+    voiceEnrollmentEnabled,
+} from './voice-enrollment';
 
 const ARN = 'arn:aws:lambda:us-east-1:123456789012:function:seeds';
 
@@ -105,11 +110,18 @@ describe('fetchEnrolledVoices', () => {
         );
     });
 
-    it('bounds how long a meeting waits for the answer', async () => {
-        respondWith(() => ({ Payload: payloadOf({ EnrolledVoices: [] }) }));
-        await fetchEnrolledVoices('call-1', logger);
-        const timeout = sent[0]?.options?.requestTimeout;
-        assert.ok(timeout && timeout > 0, 'a request timeout must be set');
+    it('bounds how long a meeting waits, and treats the deadline as an error', async () => {
+        // Passing requestTimeout per request is NOT enough: without
+        // throwOnRequestTimeout the SDK logs a warning at the deadline and lets
+        // the request run on, so the stated bound would not be the enforced
+        // one. Both halves have to hold.
+        const bound = await seedsRequestBound();
+        assert.ok(bound.timeoutMs > 0, 'a request timeout must be configured on the client');
+        assert.equal(bound.throwsOnTimeout, true, 'the deadline must raise, not warn');
+    });
+
+    it('does not retry, so a slow answer cannot double the wait', async () => {
+        assert.equal(await seedsMaxAttempts(), 1);
     });
 
     it('yields no names rather than throwing when the function errors', async () => {

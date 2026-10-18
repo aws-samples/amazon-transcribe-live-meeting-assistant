@@ -18,6 +18,7 @@
  * biometric data outlives the session it was fetched for.
  */
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { FastifyInstance } from 'fastify';
 
 import { normalizeErrorForLogging } from '../utils/common';
@@ -45,7 +46,24 @@ const seedsFunctionArn = (): string => process.env['VOICE_ENROLLMENT_SEEDS_FUNCT
  */
 const SEEDS_TIMEOUT_MS = parseInt(process.env['VOICE_ENROLLMENT_SEEDS_TIMEOUT_MS'] || '5000', 10);
 
-const lambdaClient = new LambdaClient({ region: AWS_REGION });
+/**
+ * The timeout has to be configured on the client, with `throwOnRequestTimeout`.
+ * Passing `requestTimeout` per request does reach the handler, but without that
+ * flag the SDK only logs a warning when the deadline passes and lets the
+ * request run on — so the stated bound would not have been the enforced one,
+ * and the real wait would have been the seeds function's own timeout plus
+ * retries.
+ */
+const lambdaClient = new LambdaClient({
+    region: AWS_REGION,
+    requestHandler: new NodeHttpHandler({
+        requestTimeout: SEEDS_TIMEOUT_MS,
+        throwOnRequestTimeout: true,
+    }),
+    // One attempt. A retry would double a wait a meeting is already sitting
+    // behind, and the cost of giving up is names rather than a transcript.
+    maxAttempts: 1,
+});
 
 export const voiceEnrollmentEnabled = (): boolean => seedsFunctionArn() !== '';
 
@@ -100,8 +118,7 @@ export const fetchEnrolledVoices = async (
             new InvokeCommand({
                 FunctionName: seedsFunctionArn(),
                 Payload: Buffer.from(JSON.stringify({ CallId: callId })),
-            }),
-            { requestTimeout: SEEDS_TIMEOUT_MS }
+            })
         );
         if (response.FunctionError) {
             server.log.error(
@@ -129,4 +146,33 @@ export const fetchEnrolledVoices = async (
     }
 };
 
-export const seedsTimeoutMs = (): number => SEEDS_TIMEOUT_MS;
+/**
+ * How the wait is actually bounded, for assertion.
+ *
+ * Exported because the bound is a claim worth testing and it lives in the
+ * client's construction rather than in any function here: a test that checked
+ * only that a timeout value was passed somewhere would have passed while the
+ * SDK silently logged a warning and let the request run on.
+ */
+export const seedsRequestBound = async (): Promise<{
+    timeoutMs: number;
+    throwsOnTimeout: boolean;
+}> => {
+    // The handler resolves its options lazily, so they have to be awaited
+    // rather than read off the instance.
+    const handler = lambdaClient.config.requestHandler as {
+        configProvider?: Promise<{ requestTimeout?: number; throwOnRequestTimeout?: boolean }>;
+    };
+    const resolved = (await handler.configProvider) ?? {};
+    return {
+        timeoutMs: resolved.requestTimeout ?? 0,
+        throwsOnTimeout: resolved.throwOnRequestTimeout === true,
+    };
+};
+
+/**
+ * Attempts per lookup, read from the client rather than restated here, so the
+ * test asserts the client's real setting and not a copy of the intention.
+ */
+export const seedsMaxAttempts = async (): Promise<number> =>
+    lambdaClient.config.maxAttempts();

@@ -425,3 +425,83 @@ def test_an_unexpected_failure_is_reported_not_leaked(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# --------------------------------------------------------------------------
+# A withdrawal or an expiry has to STAY withdrawn
+#
+# Both leave the row in place -- deliberately, so the fact of the consent is
+# not lost when the biometric is destroyed. That means the row's STATUS is
+# load-bearing: a gate that reads only the terms version accepts a row whose
+# last recorded action was REVOKED, and a voiceprint would exist again while
+# the append-only log still said consent had been withdrawn.
+# --------------------------------------------------------------------------
+
+
+def test_a_withdrawn_consent_does_not_permit_storing_a_voiceprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ddb = install(monkeypatch, enrollment=consented(status="revoked"))
+    result = index.handler(
+        event("enrolMyVoice", DisplayName="Sarah Lee", Samples=SAMPLES, TotalSeconds=30.0),
+        None,
+    )
+    assert result["Success"] is False
+    assert ddb.enrollment_rows() == []
+
+
+def test_a_lapsed_consent_does_not_permit_storing_a_voiceprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ddb = install(
+        monkeypatch,
+        enrollment=consented(status="active", ConsentExpiresAt={"S": "2000-01-01T00:00:00Z"}),
+    )
+    result = index.handler(
+        event("enrolMyVoice", DisplayName="Sarah Lee", Samples=SAMPLES, TotalSeconds=30.0),
+        None,
+    )
+    assert result["Success"] is False
+    assert ddb.enrollment_rows() == []
+
+
+def test_agreeing_again_is_the_way_back_after_a_withdrawal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Refusing the enrolment above must not leave somebody permanently stuck."""
+    ddb = install(monkeypatch, enrollment=consented(status="revoked"))
+    granted = index.handler(event("grantVoiceConsent"), None)
+    assert granted["Success"] is True
+    assert ddb.consent_rows()[0]["Action"]["S"] == "RE_CONSENTED"
+    assert ddb.enrollment_rows()[0]["Status"]["S"] == "pending"
+
+
+def test_destroying_a_voiceprint_to_re_consent_is_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agreeing to new terms replaces the stored voiceprint, so the log says so.
+
+    The whole purpose of the append-only table is that no centroid disappears
+    without a row attesting to it.
+    """
+    ddb = install(
+        monkeypatch,
+        enrollment=consented(
+            status="active", terms="0", Centroid={"L": [{"N": "0.1"}, {"N": "0.2"}]}
+        ),
+    )
+    index.handler(event("grantVoiceConsent"), None)
+    actions = [row["Action"]["S"] for row in ddb.consent_rows()]
+    # RE_CONSENTED first: agreeing is what causes the replacement, and the row
+    # write that actually destroys the centroid comes after both.
+    assert actions == ["RE_CONSENTED", "DELETED"]
+    assert "Centroid" not in ddb.enrollment_rows()[0]
+
+
+def test_re_consenting_with_no_voiceprint_records_no_deletion(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Nothing was destroyed, so claiming it was would be a false audit row."""
+    ddb = install(monkeypatch, enrollment=consented(status="active", terms="0"))
+    index.handler(event("grantVoiceConsent"), None)
+    assert [row["Action"]["S"] for row in ddb.consent_rows()] == ["RE_CONSENTED"]

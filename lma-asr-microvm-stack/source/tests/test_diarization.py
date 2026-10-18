@@ -1573,7 +1573,34 @@ def test_a_voice_unlike_any_enrolled_one_still_mints_a_new_label() -> None:
     """Enrolment must not capture everybody who speaks."""
     registry = SpeakerRegistry(threshold=0.5)
     registry.enroll("Sarah Lee", [1.0, 0.0])
-    assert registry.assign([0.0, 1.0]) == "spk_1"
+    assert registry.assign([0.0, 1.0]) == "spk_0"
+
+
+def test_minted_labels_start_at_zero_however_many_voices_are_seeded() -> None:
+    """Seeding is not a discovery, so it must not shift the numbering.
+
+    A deployment with five enrolled people would otherwise label the first
+    unknown speaker of every meeting spk_5.
+    """
+    registry = SpeakerRegistry(threshold=0.5)
+    for index, name in enumerate(["A", "B", "C"]):
+        vector = [0.0] * 4
+        vector[index] = 1.0
+        registry.enroll(name, vector)
+    assert registry.assign([0.0, 0.0, 0.0, 1.0]) == "spk_0"
+
+
+def test_a_display_name_that_looks_like_a_voice_id_does_not_collide() -> None:
+    """A display name is free text, so somebody can type "spk_0".
+
+    Minting that label anyway would merge a stranger into an enrolled person's
+    identity.
+    """
+    registry = SpeakerRegistry(threshold=0.5)
+    registry.enroll("spk_0", [1.0, 0.0])
+    minted = registry.assign([0.0, 1.0])
+    assert minted != "spk_0"
+    assert registry.score("spk_0", [1.0, 0.0]) == pytest.approx(1.0)
 
 
 def test_two_enrolled_voices_are_told_apart() -> None:
@@ -1584,16 +1611,51 @@ def test_two_enrolled_voices_are_told_apart() -> None:
     assert registry.assign([0.1, 0.9]) == "Bob Strahan"
 
 
-def test_an_enrolled_voice_counts_toward_the_speaker_cap() -> None:
-    """A session told to expect two speakers and seeded with two voices must not
-    invent a third."""
+def test_an_enrolled_voice_does_not_consume_speaker_cap_room() -> None:
+    """The cap bounds how many speakers a session DISCOVERS, not how many are seeded.
+
+    Counting seeds would exhaust the cap before a word was spoken: the Stream
+    Audio page sends maxSpeakers=4 by default, so any deployment with four
+    enrolled people would start every meeting already at the cap.
+    """
     registry = SpeakerRegistry(threshold=0.9, max_speakers=2)
     registry.enroll("Sarah Lee", [1.0, 0.0])
     registry.enroll("Bob Strahan", [0.0, 1.0])
-    # Resembles neither, but the cap is reached, so the closest wins.
-    assigned = registry.assign([0.7, 0.72])
-    assert assigned in ("Sarah Lee", "Bob Strahan")
-    assert registry.num_speakers == 2
+    first = registry.assign([0.7, 0.72])
+    second = registry.assign([-1.0, 0.05])
+    assert first.startswith("spk_")
+    assert second.startswith("spk_")
+    assert first != second
+    assert registry.minted_speakers == [first, second]
+
+
+def test_reaching_the_cap_never_puts_an_enrolled_name_on_unmatched_speech() -> None:
+    """At the cap the fallback picks a discovered speaker, never a seeded one.
+
+    Force-assigning to a seeded identity would attribute words to a named,
+    identifiable person who may not be in the meeting at all -- the opposite of
+    what enrolment is for, and worse than an extra spk_N.
+    """
+    registry = SpeakerRegistry(threshold=0.95, max_speakers=1)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    minted = registry.assign([0.0, 1.0])
+    assert minted == "spk_0"
+    # Resembles the enrolled voice (0.894) far more than the minted one (0.447),
+    # but clears neither the threshold; the cap is reached, so something must be
+    # chosen, and it must not be the name.
+    probe = [0.8, 0.4]
+    assert registry.score("Sarah Lee", probe) > registry.score(minted, probe)
+    assert registry.score("Sarah Lee", probe) < 0.95
+    assert registry.assign(probe) == "spk_0"
+    assert "Sarah Lee" not in registry.minted_speakers
+
+
+def test_an_enrolled_voice_still_wins_on_a_real_match_at_the_cap() -> None:
+    """The cap must not stop enrolment working -- only stop it guessing."""
+    registry = SpeakerRegistry(threshold=0.5, max_speakers=1)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    assert registry.assign([0.0, 1.0]) == "spk_0"
+    assert registry.assign([0.99, 0.1]) == "Sarah Lee"
 
 
 def test_a_seeded_centroid_is_anchored_against_a_single_stray_utterance() -> None:
@@ -1716,3 +1778,17 @@ def test_a_session_with_no_enrolled_voices_behaves_exactly_as_before() -> None:
     (event,) = rec.accept_pcm(_pcm(1.0))
 
     assert event.speaker == "spk_0"
+
+
+def test_a_seed_from_a_different_embedding_model_matches_nobody() -> None:
+    """A dimension mismatch is incomparability, not a low score.
+
+    Truncating to the shorter vector would yield a number that looks like a
+    similarity and is noise -- and at the cap the nearest such centroid would
+    win, putting a name on speech it has no relationship to.
+    """
+    registry = SpeakerRegistry(threshold=0.5, max_speakers=1)
+    # Seeded from a 3-dimensional embedder; this session's embedder emits 2.
+    registry.enroll("Sarah Lee", [1.0, 0.0, 0.0])
+    assert registry.score("Sarah Lee", [1.0, 0.0]) == 0.0
+    assert registry.assign([1.0, 0.0]) == "spk_0"

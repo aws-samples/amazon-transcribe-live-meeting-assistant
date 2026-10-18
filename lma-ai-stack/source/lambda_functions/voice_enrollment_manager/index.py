@@ -207,6 +207,23 @@ def grant_consent(event, who):
             user_agent=(event.get("request") or {}).get("headers", {}).get("user-agent"),
         )
     )
+    # Agreeing to new terms replaces the stored voiceprint rather than carrying
+    # it over, because it was computed under the terms that have been
+    # superseded. That destroys a biometric, so -- unlike the row write itself
+    # -- it is an event the log has to carry: the whole purpose of the
+    # append-only table is that no centroid disappears without a row saying so.
+    if (existing or {}).get("Centroid"):
+        append_consent(
+            pure.consent_record(
+                subject_id=subject_id,
+                action=pure.ACTION_DELETED,
+                terms_version=(existing or {}).get("TermsVersion", TERMS_VERSION),
+                terms_text="",
+                actor_sub=who["sub"],
+                actor_email=who["email"],
+                recorded_at=_now(),
+            )
+        )
     # Consent is recorded BEFORE any audio is captured, so a record exists even
     # if the person abandons the recording step. Declining is a normal outcome
     # and leaves nothing stored.
@@ -230,9 +247,13 @@ def store_voiceprint(event, who):
         return {"Success": False, "Message": "only you can enrol your own voice"}
 
     existing = read_enrollment(subject_id)
-    if not existing or str(existing.get("TermsVersion")) != str(TERMS_VERSION):
-        # No consent on record for the terms in force, so there is nothing that
-        # permits storing a voiceprint.
+    if not pure.may_store_voiceprint(existing, TERMS_VERSION, _now()):
+        # No standing consent to the terms in force, so there is nothing that
+        # permits storing a voiceprint. A withdrawn or lapsed consent reaches
+        # here too: the row survives a withdrawal, deliberately, so that the
+        # fact of it is not lost -- which means its status has to be read, not
+        # just its terms version. Agreeing again is the way back, and that
+        # appends a consent row.
         return {"Success": False, "Message": "please agree to the terms first"}
 
     display_name = pure.clean_display_name(args.get("DisplayName"))

@@ -12,7 +12,7 @@
  * takes one mono 16 kHz stream per session, so each channel is split out and
  * resampled here. Both steps are pure and stateful-per-call, never per frame.
  */
-import { appendSpeakerLabel, formatSpeakerLabel } from './diarization';
+import { appendSpeakerLabel, formatSpeakerLabel, isVoiceId } from './diarization';
 
 export const ASR_SAMPLE_RATE = 16000;
 
@@ -202,6 +202,12 @@ export class ChannelResampler {
  * a channel took that channel's placeholder name alone, and a reviewer reading such
  * a transcript concluded two correctly separated speakers had been merged.
  *
+ * With voice enrollment on, the engine may instead report the NAME of somebody
+ * who consented to be recognised. A name is not a voice id and is not treated
+ * like one: it stands as the speaker on its own rather than becoming a suffix,
+ * because "Other Participant (Sarah Lee)" says the opposite of what is known —
+ * that she is identified, not that she is some unknown participant.
+ *
  * Stateless: it holds no counter, because nothing needs renumbering.
  */
 export class SpeakerNameRegistry {
@@ -215,6 +221,10 @@ export class SpeakerNameRegistry {
         speakerId: string | null | undefined,
         channelName: string
     ): string {
-        return appendSpeakerLabel(channelName, formatSpeakerLabel(speakerId ?? undefined));
+        const label = formatSpeakerLabel(speakerId ?? undefined);
+        if (label !== undefined && !isVoiceId(label)) {
+            return label;
+        }
+        return appendSpeakerLabel(channelName, label);
     }
 }

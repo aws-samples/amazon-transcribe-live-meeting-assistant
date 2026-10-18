@@ -265,6 +265,36 @@ def is_usable_for_matching(enrollment, current_terms_version, now_iso):
     return True
 
 
+def may_store_voiceprint(enrollment, current_terms_version, now_iso):
+    """Is there a standing consent that permits storing a voiceprint?
+
+    Separate from ``is_usable_for_matching`` because the two ask different
+    questions. That one asks whether an existing voiceprint may be used; this
+    asks whether one may be created, which is true in exactly one state: a
+    consent to the terms in force that has not been withdrawn and has not
+    lapsed.
+
+    The status test is the part that is easy to leave out and expensive to get
+    wrong. A withdrawal and an expiry both keep the row -- that is the whole
+    point of the two-table split, so the fact of the consent is not lost when
+    the biometric is destroyed -- so a check that looks only at the terms
+    version accepts a row whose last recorded action was ``REVOKED``. That would
+    let a voiceprint exist again while the append-only log still says consent
+    was withdrawn, which is precisely the state the log exists to make
+    impossible.
+    """
+    if not enrollment:
+        return False
+    if enrollment.get("Status") not in (STATUS_PENDING, STATUS_ACTIVE):
+        return False
+    if str(enrollment.get("TermsVersion")) != str(current_terms_version):
+        return False
+    expires_at = enrollment.get("ConsentExpiresAt")
+    if expires_at and _parse(expires_at) <= _parse(now_iso):
+        return False
+    return True
+
+
 def needs_reconsent(enrollment, current_terms_version):
     """An active enrollment whose consent is to superseded terms."""
     return bool(

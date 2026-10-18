@@ -228,3 +228,45 @@ def test_a_cognito_failure_is_reported_not_leaked(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_a_comma_separated_allowed_domain_list_is_honoured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AllowedSignUpEmailDomain is documented as a domain OR a comma-separated list.
+
+    Comparing against the whole parameter as one string refused every address
+    on a multi-domain deployment, including ones plainly on the list.
+    """
+    monkeypatch.setattr(invite_mod, "ALLOWED_SIGNUP_EMAIL_DOMAIN", "example.com, example.net")
+    assert invite_mod.validate_email("sarah@example.com") == "sarah@example.com"
+    assert invite_mod.validate_email("priya@example.net") == "priya@example.net"
+    with pytest.raises(ValueError):
+        invite_mod.validate_email("someone@elsewhere.com")
+
+
+def test_a_single_allowed_domain_still_works(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(invite_mod, "ALLOWED_SIGNUP_EMAIL_DOMAIN", "example.com")
+    assert invite_mod.validate_email("sarah@example.com") == "sarah@example.com"
+    with pytest.raises(ValueError):
+        invite_mod.validate_email("sarah@example.net")
+
+
+def test_no_allowed_domain_setting_accepts_any_plausible_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(invite_mod, "ALLOWED_SIGNUP_EMAIL_DOMAIN", "")
+    assert invite_mod.validate_email("sarah@anywhere.example") == "sarah@anywhere.example"
+
+
+def test_a_trailing_newline_is_rejected_as_a_bad_address(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Python's `$` also matches before a trailing newline.
+
+    Without fullmatch, "sarah@example.com\\n" passed the address check and then
+    failed the domain test, which told the admin something that made no sense.
+    """
+    monkeypatch.setattr(invite_mod, "ALLOWED_SIGNUP_EMAIL_DOMAIN", "example.com")
+    with pytest.raises(ValueError, match="email address"):
+        invite_mod.validate_email("sarah@example.com\n")

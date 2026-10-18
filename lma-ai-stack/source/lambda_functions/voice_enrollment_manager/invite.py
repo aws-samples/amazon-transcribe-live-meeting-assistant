@@ -64,15 +64,33 @@ def caller(event):
     }
 
 
+def allowed_domains():
+    """The deployment's permitted sign-up domains, as a list.
+
+    `AllowedSignUpEmailDomain` is documented as "a domain or a comma separated
+    list of domains", and the Cognito pre-sign-up trigger splits it. Comparing
+    against the whole parameter as one string instead would refuse every
+    address on a multi-domain deployment, including ones plainly on the list.
+    """
+    return [
+        domain.strip().lower()
+        for domain in ALLOWED_SIGNUP_EMAIL_DOMAIN.split(",")
+        if domain.strip()
+    ]
+
+
 def validate_email(email):
-    """A plausible address, within the deployment's allowed domain if it has one."""
-    if not email or not EMAIL_PATTERN.match(email):
+    """A plausible address, within the deployment's allowed domains if it has any."""
+    # fullmatch rather than match: Python's `$` also matches before a trailing
+    # newline, so "someone@example.com\n" would otherwise pass here and then
+    # fail the domain test for a reason that makes no sense to the admin.
+    if not email or not EMAIL_PATTERN.fullmatch(email):
         raise ValueError("that does not look like an email address")
-    allowed = ALLOWED_SIGNUP_EMAIL_DOMAIN.strip().lower()
-    if allowed and email.split("@", 1)[1].lower() != allowed:
+    allowed = allowed_domains()
+    if allowed and email.split("@", 1)[1].lower() not in allowed:
         # Same rule the rest of the deployment applies to sign-ups. An
         # invitation must not be a way around it.
-        raise ValueError(f"only {allowed} addresses can be invited")
+        raise ValueError(f"only {', '.join(allowed)} addresses can be invited")
     return email.strip()
 
 
@@ -123,7 +141,9 @@ def invite(event, who):
         # Roll back a user this invitation created, the way user_management does:
         # an account in no group can reach nothing and is just litter. An
         # account that already existed is left alone -- it is not ours to delete.
-        LOGGER.exception("Could not add %s to %s", email, ENROLLEE_GROUP)
+        # The address is not logged: an invitee's email identifies a person, and
+        # the group name plus the stack trace is what diagnosing this needs.
+        LOGGER.exception("Could not add an invitee to %s", ENROLLEE_GROUP)
         if created:
             try:
                 cognito.admin_delete_user(UserPoolId=USER_POOL_ID, Username=email)

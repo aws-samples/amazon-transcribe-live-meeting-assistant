@@ -180,12 +180,22 @@ def _l2_norm(vector: Sequence[float]) -> float:
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    """Cosine similarity in ``[-1, 1]``; ``0.0`` if either vector is degenerate."""
+    """Cosine similarity in ``[-1, 1]``; ``0.0`` if the vectors cannot be compared.
+
+    Vectors of different lengths came from different embedding models, so they
+    have no meaningful similarity. Returning 0.0 says exactly that. Truncating
+    to the shorter one instead would produce a number -- a dot product over a
+    prefix, divided by the full norms -- that looks like a score and is noise,
+    and at the extreme would attribute speech to whichever incomparable centroid
+    happened to score highest.
+    """
+    if len(a) != len(b):
+        return 0.0
     na = _l2_norm(a)
     nb = _l2_norm(b)
     if na == 0.0 or nb == 0.0:
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     return dot / (na * nb)
 
 
@@ -239,6 +249,10 @@ class SpeakerRegistry:
         self._counts: dict[str, int] = {}
         # Insertion order of labels doubles as first-heard order.
         self._labels: list[str] = []
+        # Labels seeded from a stored voiceprint rather than discovered here.
+        # Held separately because the two are not interchangeable: see assign()
+        # and minted_speakers for the two places the distinction matters.
+        self._enrolled: set[str] = set()
 
     @property
     def num_speakers(self) -> int:
@@ -249,6 +263,11 @@ class SpeakerRegistry:
     def speakers(self) -> list[str]:
         """Speaker labels in first-heard order."""
         return list(self._labels)
+
+    @property
+    def minted_speakers(self) -> list[str]:
+        """Labels this session discovered, excluding any seeded voiceprint."""
+        return [label for label in self._labels if label not in self._enrolled]
 
     def centroid(self, speaker: str) -> list[float]:
         """The current mean embedding for ``speaker`` (empty if unknown)."""
@@ -269,9 +288,19 @@ class SpeakerRegistry:
         ``threshold``. Otherwise a new speaker is minted, subject to two guards:
 
         * ``max_speakers``, when set, is a hard promise about how many identities
-          can appear — at the cap the best match wins regardless of score.
+          this session will DISCOVER — at the cap the best match among the
+          discovered ones wins regardless of score.
         * ``require_corroboration`` withholds the first dissimilar embedding
           (see :meth:`_mint_with_corroboration`).
+
+        An enrolled voice is treated differently from a discovered one in both
+        guards, and the difference is deliberate. It can only ever win by
+        clearing ``threshold``, never by being the nearest thing left at the
+        cap, and it does not consume cap room. Force-assigning speech to a
+        seeded identity on no evidence would attribute words to a named,
+        identifiable person who may not even be in the meeting -- a far worse
+        outcome than an extra ``spk_N``, and the reverse of what this feature is
+        for. Nobody is named here without a score that says so.
         """
         if len(embedding) == 0:
             raise ValueError("embedding must be non-empty")
@@ -284,13 +313,27 @@ class SpeakerRegistry:
                 best_score = score
                 best_label = label
 
-        if best_label is not None and (
-            best_score >= self._threshold
-            or (self._max_speakers and len(self._labels) >= self._max_speakers)
-        ):
+        if best_label is not None and best_score >= self._threshold:
             self._pending = None
             self._accumulate(best_label, embedding)
             return best_label
+
+        # At the cap, fall back to the nearest DISCOVERED speaker. Seeded
+        # voices are excluded, so reaching the cap can never put a name on
+        # speech that did not match it.
+        minted = self.minted_speakers
+        if self._max_speakers and len(minted) >= self._max_speakers:
+            fallback: str | None = None
+            fallback_score = -2.0
+            for label in minted:
+                score = self.score(label, embedding)
+                if score > fallback_score:
+                    fallback_score = score
+                    fallback = label
+            if fallback is not None:
+                self._pending = None
+                self._accumulate(fallback, embedding)
+                return fallback
 
         if best_label is not None and self._require_corroboration:
             corroborated = self._mint_with_corroboration(embedding)
@@ -344,9 +387,13 @@ class SpeakerRegistry:
         centroid still adapts to the session -- the same room, microphone and
         codec as the rest of the meeting -- just more slowly.
 
-        Enrolled labels occupy the same namespace as minted ones and count
-        toward ``max_speakers``, so a session told to expect two speakers and
-        seeded with two voices will not invent a third.
+        An enrolled label does NOT consume ``max_speakers``. That cap is a
+        statement about how many people are in the conversation, and seeding a
+        voiceprint says nothing about whether its owner is one of them -- a
+        deployment with more enrolled people than a meeting has participants is
+        the normal case, not an edge case. Counting seeds would exhaust the cap
+        before a word was spoken and force every utterance onto a seeded name;
+        see :meth:`assign`.
         """
         if not label:
             raise ValueError("an enrolled voice needs a label")
@@ -365,11 +412,21 @@ class SpeakerRegistry:
                 f"this session's dimension {existing_dim}"
             )
         self._labels.append(label)
+        self._enrolled.add(label)
         self._sums[label] = [value * weight for value in centroid]
         self._counts[label] = weight
 
     def _mint(self, embedding: Sequence[float]) -> str:
-        label = f"{_SPEAKER_PREFIX}{len(self._labels)}"
+        # Numbered by how many have been minted, not by the label count, so
+        # seeding does not make the first unknown speaker of a meeting spk_5.
+        # The while loop is for the case a display name happens to BE a voice
+        # id: a label is free text, and two speakers sharing one id would merge
+        # an enrolled person with a stranger.
+        index = len(self.minted_speakers)
+        label = f"{_SPEAKER_PREFIX}{index}"
+        while label in self._sums:
+            index += 1
+            label = f"{_SPEAKER_PREFIX}{index}"
         self._labels.append(label)
         self._sums[label] = [0.0] * len(embedding)
         self._counts[label] = 0
