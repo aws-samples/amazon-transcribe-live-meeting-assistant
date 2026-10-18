@@ -7,10 +7,10 @@
  * The enrollment portal's own layout, deliberately without the meetings
  * navigation.
  *
- * Somebody invited to enrol their voice is in the `VoiceEnrollee` group, which
- * can reach this page and nothing else. Rendering the usual side navigation
- * would show them a list of destinations that all fail, and would imply they
- * have access to meeting transcripts when they do not.
+ * Enrolment is somebody's own business: the page shows them their own record
+ * and nothing about anybody else's, and the actions on it are theirs alone.
+ * The usual side navigation is hidden so the page reads as the single,
+ * self-contained task it is.
  */
 import React from 'react';
 import { AppLayout, Flashbar } from '@cloudscape-design/components';

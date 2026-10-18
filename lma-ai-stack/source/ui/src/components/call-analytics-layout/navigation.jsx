@@ -22,7 +22,6 @@ import {
   ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
-  VOICE_ENROLLMENT_ADMIN_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -47,7 +46,6 @@ export const NAV_PATHS = [
   ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
-  VOICE_ENROLLMENT_ADMIN_PATH,
   STREAM_AUDIO_PATH,
   UPLOAD_AUDIO_PATH,
   VIRTUAL_PARTICIPANT_PATH,
@@ -81,8 +79,6 @@ const Navigation = ({ header = callsNavHeader, items, onFollowHandler = defaultO
     activeHref = `#${TRANSCRIPT_SUMMARY_PATH}`;
   } else if (path.includes(USER_MANAGEMENT_PATH)) {
     activeHref = `#${USER_MANAGEMENT_PATH}`;
-  } else if (path.includes(VOICE_ENROLLMENT_ADMIN_PATH)) {
-    activeHref = `#${VOICE_ENROLLMENT_ADMIN_PATH}`;
   } else if (path.includes(CALLS_PATH)) {
     activeHref = `#${CALLS_PATH}`;
   } else if (path.includes(STREAM_AUDIO_PATH)) {

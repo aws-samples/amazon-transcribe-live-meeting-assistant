@@ -28,7 +28,7 @@ title: "Voice Enrollment (Speaker Recognition)"
 - [The consent model](#the-consent-model)
 - [What is stored, and where](#what-is-stored-and-where)
 - [The audit trail](#the-audit-trail)
-- [Inviting people to enrol](#inviting-people-to-enrol)
+- [Who can enrol](#who-can-enrol)
 - [Enrolling a voice](#enrolling-a-voice)
 - [How a match is used](#how-a-match-is-used)
   - [Which voices a meeting is given](#which-voices-a-meeting-is-given)
@@ -54,26 +54,25 @@ including meetings where nobody introduced themselves.
 
 ## The consent model
 
-The hard part of this feature is not the matching. It is that **the person whose
-voice is being enrolled is frequently not an LMA user** — a participant from
-another company, a contractor in a meeting room, a candidate in an interview.
-Letting the meeting host assert "they agreed" on their behalf would make the
-consent record worthless.
+The hard part of this feature is not the matching. It is that a voiceprint is
+biometric data about a person, and letting anybody else assert "they agreed" on
+their behalf would make the consent record worthless.
 
-So consent is **first-party and self-service**. The enrollee authenticates as
-themselves and performs the consent in their own session:
+So consent is **first-party and self-service**. Nobody can enroll anybody else,
+and there is no administrative action that creates a voiceprint:
 
-1. An LMA user **invites** an email address to enroll. This creates a Cognito
-   user in the `VoiceEnrollee` group, which can reach the enrollment portal and
-   nothing else — no meetings, no transcripts, no configuration. The invitation
-   is itself recorded, so who asked whom is auditable.
-2. The invitee signs in to **`/#/voice-enrollment`** and is shown the consent
-   terms in full, including what is stored, what it is used for, how long it is
-   kept and how to withdraw.
-3. They consent by an explicit affirmative action — a checkbox they must tick
+1. An LMA user opens **Enrol My Voice** in the navigation (or goes straight to
+   **`/#/voice-enrollment`**) and is shown the consent terms in full, including
+   what is stored, what it is used for, how long it is kept and how to withdraw.
+2. They consent by an explicit affirmative action — a checkbox they must tick
    plus a button they must press. There is no pre-ticked box and no implied
    consent from continuing.
-4. Only then does the portal offer to record voice samples.
+3. Only then does the portal offer to record voice samples.
+
+**Enrollment is limited to people who already have an account in the
+deployment.** Somebody attending from another company cannot currently enroll,
+because doing so would mean giving them an account here; see
+[limits we hold deliberately](#limits-we-hold-deliberately).
 
 Consent is recorded **before** any audio is captured, so a record exists even if
 the person abandons the recording step. Declining is a normal outcome: the portal
@@ -131,36 +130,22 @@ re-consents.
 **Point-in-time recovery is on**, so the log can be restored to any moment in the
 retention window.
 
-## Inviting people to enrol
+## Who can enrol
 
-Somebody who already has an LMA account can go straight to the portal at
-`#/voice-enrollment` and enrol themselves; they do not need to be invited, and no
-admin has to be involved.
+Anyone with an account in the deployment can enrol their own voice, and nobody
+can enrol anybody else's. **Enrol My Voice** appears in the navigation for every
+user when `EnableVoiceEnrollment` is `true`.
 
-Inviting matters for everybody else — the participant from another company, the
-contractor in a meeting room — because they need an identity of their own before
-they can consent for themselves. **Configuration → Voice Enrollment** (admin
-only, and only present when `EnableVoiceEnrollment` is `true`) takes a list of
-email addresses, one per line or separated by commas; pasting a recipient line
-from a meeting invite works, and a `Sarah Lee <sarah@example.com>` form is
-reduced to the address. Each address is invited separately and reported
-separately, so one that cannot be invited does not cost the others theirs. If
-the deployment restricts sign-ups to one email domain, invitations are held to
-the same rule.
+There is no administrative enrollment action, and that is a property of the
+design rather than a gap in the UI: a consent somebody else gives on your behalf
+is not consent. An admin can revoke on somebody's behalf — for a person who has
+left — which is recorded with the admin as the actor.
 
-An invitation creates a Cognito user in the `VoiceEnrollee` group, which can
-reach the enrollment portal and nothing else — no meetings and no configuration.
-Inviting somebody who already has an account is fine and common; it just records
-the ask.
-
-**An invitation is not a consent.** It creates the ability for somebody to
-decide, and records who asked them. Declining is a normal outcome and leaves
-nothing stored. There is no control on that page, and cannot be one, that
-enrolls anybody: the backend refuses a consent granted by anyone other than its
-subject.
-
-The page does not list who has enrolled. An enrollment is the enrollee's own
-record, and they manage it from the portal.
+**People without an account in the deployment cannot currently enrol.** The
+obvious use for this feature is the participant from another company or the
+contractor in a meeting room, and they are exactly who it does not yet serve,
+because enrolling would mean issuing them an account here. See
+[limits we hold deliberately](#limits-we-hold-deliberately).
 
 ## Enrolling a voice
 
@@ -181,11 +166,19 @@ session is seeded with the active centroids it is allowed to use, each labelled
 with its `DisplayName`. From then on the engine assigns speech to those names
 directly instead of minting `spk_0`.
 
-A match arrives in the transcript as a **suggestion**, not a settled name, with
-`source: voiceprint` — so a reader can always tell how somebody was identified,
-and a wrong match is one click to reject. It is treated exactly like a name
-inferred from the transcript: see
-[finding the names automatically](transcription-and-translation.md#finding-the-names-automatically).
+A match is written as the segment's speaker, in place of the voice id the
+segment would otherwise have carried. It is not currently marked as a match
+rather than a name somebody typed, and it is not offered for confirmation the
+way a name
+[inferred from the transcript](transcription-and-translation.md#finding-the-names-automatically)
+is. Correcting one is therefore the same job as renaming any other speaker, from
+the Speakers panel on the meeting page.
+
+Nothing is named on a guess. A seeded voice is only ever assigned speech whose
+similarity score clears the engine's threshold — it is never the nearest
+remaining option when a speaker cap is reached, and it does not consume cap
+room, because a deployment having more enrolled people than a meeting has
+participants is the normal case.
 
 ### Which voices a meeting is given
 
@@ -199,8 +192,9 @@ list at the start of every meeting and keeps no copy, so a withdrawal applies to
 the very next meeting.
 
 A voiceprint that is sent and never speaks does nothing. Matching is a
-similarity comparison against the voices actually heard, so sending somebody's
-centroid to a meeting they are not in produces no label for them.
+similarity comparison against the voices actually heard, and a score below the
+threshold produces no name, so sending somebody's centroid to a meeting they are
+not in produces no label for them.
 
 Where more than 32 enrollments are permitted, the most recently enrolled are
 sent; the rest of the meeting's voices are named the way they would be without
@@ -243,16 +237,27 @@ organisation that wants a shorter cycle can set one.
 - **Enrollment is never implied.** Attending a meeting, being named in a
   transcript, or having an LMA account does not enroll anybody.
 - **The sample audio is discarded**, as above.
-- **An admin cannot consent for somebody else.** An admin can invite, and can
-  revoke; only the enrollee can grant.
+- **An admin cannot consent for somebody else.** An admin can revoke; only the
+  enrollee can grant, and there is no administrative action that creates a
+  voiceprint.
 - **No cross-deployment sharing.** A centroid stays in the account and table it
   was created in.
+- **People outside the deployment cannot enrol yet.** Enrolling requires an
+  account here, so the external participant and the contractor in a meeting
+  room — the people this feature is most useful for — are not served by it
+  today. Inviting them would mean issuing them credentials to this deployment,
+  which is a larger decision than enrollment, and it is deliberately not part
+  of this feature. Their voices are named the way they were before: by hand on
+  the Speakers panel, or from
+  [what they say in the meeting](transcription-and-translation.md#finding-the-names-automatically).
+- **A match is not yet distinguishable from a typed name.** See
+  [how a match is used](#how-a-match-is-used).
 
 ## Deploying it
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `EnableVoiceEnrollment` | `false` | Creates the tables, the portal, the invitation path and the matching step. While `false`, none of it exists. |
+| `EnableVoiceEnrollment` | `false` | Creates the tables, the portal and the matching step, and adds **Enrol My Voice** to the navigation. While `false`, none of it exists. |
 | `VoiceEnrollmentRetentionDays` | `365` | How long a consent stands before it must be renewed. |
 | `VoiceEnrollmentTermsVersion` | `1` | Bump to require everybody to re-consent to new terms. |
 

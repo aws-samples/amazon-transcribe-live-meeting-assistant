@@ -22,8 +22,5 @@ export const EMBED_PATH = '/embed';
 // person using it is often not an LMA user at all and has access to nothing else
 // -- putting it under configuration would imply otherwise.
 export const VOICE_ENROLLMENT_PATH = '/voice-enrollment';
-// The admin side -- inviting people to enrol. Under /configuration, unlike the
-// portal above, because only an Admin can reach it.
-export const VOICE_ENROLLMENT_ADMIN_PATH = '/configuration/voice-enrollment';
 export const REDIRECT_URL_PARAM = 'redirect';
 export const MEETINGS_QUERY_PATH = `${CALLS_PATH}/query`;

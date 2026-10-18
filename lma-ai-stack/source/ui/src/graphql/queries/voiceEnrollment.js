@@ -63,14 +63,3 @@ export const revokeVoiceConsent = /* GraphQL */ `
     }
   }
 `;
-
-/** Invite somebody to enrol. Admin only, enforced in the schema and again in the Lambda. */
-export const inviteVoiceEnrollee = /* GraphQL */ `
-  mutation InviteVoiceEnrollee($input: InviteVoiceEnrolleeInput!) {
-    inviteVoiceEnrollee(input: $input) {
-      Success
-      Message
-      Status
-    }
-  }
-`;

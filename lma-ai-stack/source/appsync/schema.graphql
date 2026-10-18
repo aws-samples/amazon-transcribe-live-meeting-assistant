@@ -192,7 +192,6 @@ type Mutation @aws_iam {
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
 	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools
-	inviteVoiceEnrollee(input: InviteVoiceEnrolleeInput!): VoiceEnrollmentResult @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	addCallCategory(input: AddCallCategoryInput!): Call
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
@@ -678,12 +677,6 @@ input EnrolMyVoiceInput {
 	# they are never written to S3 or to a table.
 	Samples: [String!]!
 	TotalSeconds: Float!
-}
-
-input InviteVoiceEnrolleeInput {
-	# The address to invite. An invitation creates the ability for that person to
-	# decide for themselves; it is not, and cannot be, a consent on their behalf.
-	Email: String!
 }
 
 input RevokeVoiceConsentInput {
