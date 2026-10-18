@@ -25,12 +25,12 @@ All of the judgement lives in pure.py; this module is the AWS plumbing.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timezone
 
 import boto3
 import requests
-from aws_lambda_powertools import Logger
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.config import Config
@@ -38,7 +38,11 @@ from boto3.dynamodb.types import TypeDeserializer
 
 import pure
 
-LOGGER = Logger(location="%(filename)s:%(lineno)d - %(funcName)s()")
+# Standard logging rather than Powertools: the layer that carries Powertools is
+# built for arm64 only, and this function has no other reason to be pinned to an
+# architecture. Same choice as FetchTranscript.
+LOGGER = logging.getLogger()
+LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 APPSYNC_GRAPHQL_URL = os.environ["APPSYNC_GRAPHQL_URL"]
@@ -101,8 +105,10 @@ def read_segments(call_id):
         start_key = next_key
     if pages >= MAX_TRANSCRIPT_PAGES:
         LOGGER.warning(
-            "Stopped reading transcript at the page limit; it may be incomplete",
-            extra={"call_id": call_id, "pages": pages},
+            "Stopped reading transcript for %s at the %d page limit; "
+            "it may be incomplete",
+            call_id,
+            pages,
         )
     return items
 
@@ -194,8 +200,7 @@ def resolve(call_id, identity=None, force=False):
 
     if not pure.worth_a_model_call(turns, identities, force=force):
         LOGGER.info(
-            "Nothing to name",
-            extra={"call_id": call_id, "turns": len(turns), "forced": force},
+            "Nothing to name for %s (turns=%d, forced=%s)", call_id, len(turns), force
         )
         return {"ok": True, "reason": "nothing to name", "applied": []}
 
@@ -206,27 +211,24 @@ def resolve(call_id, identity=None, force=False):
     now_iso = datetime.now(timezone.utc).isoformat()
     updated, applied = pure.apply_proposals(identities, proposals, turns, now_iso)
 
+    # The gap between proposed and applied is how much the verification
+    # rejected, which is the number worth watching when tuning the prompt.
     LOGGER.info(
-        "Speaker naming pass complete",
-        extra={
-            "call_id": call_id,
-            "turns": len(turns),
-            "open_labels": len(labels),
-            "proposed_by_model": len(proposals),
-            # The gap between these two is how much the verification rejected,
-            # which is the number worth watching when tuning the prompt.
-            "applied": len(applied),
-        },
+        "Speaker naming pass for %s: turns=%d open_labels=%d proposed=%d applied=%d",
+        call_id,
+        len(turns),
+        len(labels),
+        len(proposals),
+        len(applied),
     )
     if applied:
         write_identities(call_id, updated)
     return {"ok": True, "reason": "ok", "applied": applied}
 
 
-@LOGGER.inject_lambda_context
 def handler(event, context):  # pylint: disable=unused-argument
     """Entry point for both the AppSync resolver and the backend invoke."""
-    LOGGER.debug("Speaker name resolver event", extra={"event": event})
+    LOGGER.debug("Speaker name resolver event: %s", json.dumps(event, default=str)[:2000])
 
     # An AppSync Lambda resolver receives the whole context; a backend invoke
     # sends the Kinesis message, which carries CallId at the top level.
@@ -246,7 +248,7 @@ def handler(event, context):  # pylint: disable=unused-argument
         # Naming is an enhancement. The end-of-meeting caller must not have a
         # meeting fail to close because a model call did, and the UI caller gets
         # a message rather than a stack trace.
-        LOGGER.exception("Speaker naming pass failed", extra={"call_id": call_id})
+        LOGGER.exception("Speaker naming pass failed for %s", call_id)
         return {"Success": False, "Message": str(error)[:200], "NamesApplied": 0}
 
     return {

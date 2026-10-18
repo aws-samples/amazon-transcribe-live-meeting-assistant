@@ -20,45 +20,9 @@ import json
 import os
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock
-
 import pytest
 
 
-class StubLogger:
-    """Powertools' Logger, minus Powertools -- it ships in a Lambda layer that
-    is not on the path for a unit test."""
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def debug(self, *args, **kwargs):
-        pass
-
-    def info(self, *args, **kwargs):
-        pass
-
-    def warning(self, *args, **kwargs):
-        pass
-
-    def error(self, *args, **kwargs):
-        pass
-
-    def exception(self, *args, **kwargs):
-        pass
-
-    def inject_lambda_context(self, func=None, **kwargs):
-        """Identity decorator, so the handler stays callable as written."""
-        if func is None:
-            return lambda inner: inner
-        return func
-
-
-# Each dotted name needs its own entry: `from a.b.c import d` imports a, then
-# a.b, then a.b.c, and a stub for `a` alone does not satisfy the later steps.
-sys.modules["aws_lambda_powertools"] = MagicMock(Logger=StubLogger)
-sys.modules["aws_lambda_powertools.utilities"] = MagicMock()
-sys.modules["aws_lambda_powertools.utilities.typing"] = MagicMock(LambdaContext=object)
 
 TABLE = "lma-call-events"
 APPSYNC_URL = "https://example.appsync-api.us-east-1.amazonaws.com/graphql"
