@@ -84,6 +84,7 @@ POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN = getenv(
 )
 
 ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN = getenv("ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN", "")
+SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
 IS_TRANSCRIPT_SUMMARY_ENABLED = getenv("IS_TRANSCRIPT_SUMMARY_ENABLED", "false").lower() == "true"
 
 ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN", "")
@@ -94,6 +95,7 @@ TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY = (
 if (
     TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
     or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
+    or SPEAKER_NAME_RESOLVER_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
     or START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN
     or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN
@@ -1359,6 +1361,35 @@ async def execute_process_event_api_mutation(
         was_already_ended = (
             await get_call_status(message=message, appsync_session=appsync_session) == "ENDED"
         )
+
+        # Name the separated voices once at the end of the meeting.
+        #
+        # Only when summaries are OFF. When they are on, the summary orchestrator
+        # runs the naming pass itself, synchronously, immediately before
+        # summarising -- which is what gets the names into the summary. Doing it
+        # from here as well would pay for a second model call for nothing.
+        #
+        # Fire-and-forget deliberately. A synchronous invoke here would block this
+        # event loop, and with it every other record in the same Kinesis batch
+        # including live segments for other meetings; it would also be retried by
+        # the client's own retry policy if it outran the socket timeout, running
+        # the whole pass several times over. Nothing downstream waits on the
+        # names, so there is nothing to order against.
+        if SPEAKER_NAME_RESOLVER_ARN and not IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended:
+            try:
+                LAMBDA_HOOK_CLIENT.invoke(
+                    FunctionName=SPEAKER_NAME_RESOLVER_ARN,
+                    InvocationType="Event",
+                    Payload=json.dumps(
+                        {"CallId": message.get("CallId"), "Trigger": "meeting-end"}
+                    ),
+                )
+                LOGGER.debug("END Event: queued the speaker name resolver")
+            except Exception:  # pylint: disable=broad-except
+                LOGGER.exception(
+                    "END Event: could not queue speaker naming; continuing to close the meeting",
+                    extra=dict(call_id=message.get("CallId")),
+                )
 
         # Summary first, status second. The invoke is not wrapped in a try, so a
         # transient failure propagates and the record is redelivered — and it has
