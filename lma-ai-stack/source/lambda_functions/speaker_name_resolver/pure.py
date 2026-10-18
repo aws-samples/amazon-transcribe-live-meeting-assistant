@@ -489,15 +489,34 @@ def name_appears_in(name, text):
     Matched loosely and per word, because the transcript is speech: "Sarah Lee"
     is supported by a turn that says "Sara Lee", and a first name alone is enough.
     """
-    # Whole words on both sides. Substring matching was far too generous: "An"
-    # counted the word "and" as support, "Mark" counted "market", and "Al"
-    # counted "also" -- so a short name was supported by almost any turn.
-    spoken = {word for word in re.split(r"[^\w']+", (text or "").casefold()) if word}
-    parts = [part for part in re.split(r"[\s\-']+", (name or "").casefold()) if len(part) > 1]
+    folded_text = (text or "").casefold()
+    folded_name = (name or "").casefold()
+
+    # Chinese, Japanese, Thai, Khmer and Lao are written without spaces between
+    # words, so tokenising makes a whole turn one token and no name can ever
+    # match -- which switched naming off entirely for those languages.
+    # Containment IS the word test there, and the over-matching that makes
+    # substrings unsafe for Latin names ("An" inside "and") does not arise,
+    # because a name in these scripts is not a fragment of unrelated words the
+    # way a two-letter Latin name is.
+    if UNSEGMENTED_SCRIPT.search(folded_name):
+        return len(folded_name) >= 2 and folded_name in folded_text
+
+    # Whole words on both sides for everything else. Substring matching was far
+    # too generous: "An" counted the word "and" as support, "Mark" counted
+    # "market", "Al" counted "also" -- so a short name was supported by almost
+    # any turn.
+    #
+    # Apostrophes are not split out of the name, and are also compared with them
+    # removed: splitting the name but not the text made "O'Brien" fail against a
+    # turn that says "O'Brien".
+    spoken = {word for word in re.split(r"[^\w']+", folded_text) if word}
+    spoken |= {word.replace("'", "") for word in spoken}
+    parts = [part for part in re.split(r"[\s\-]+", folded_name) if len(part) > 1]
     if not parts:
         return False
     for part in parts:
-        if part in spoken:
+        if part in spoken or part.replace("'", "") in spoken:
             return True
         # One transcription slip at the end of a longer word -- which is what
         # "Sarah" versus "Sara" is. Only for names long enough that the stem is
@@ -507,9 +526,23 @@ def name_appears_in(name, text):
     return False
 
 
-# What a self-introduction sounds like. The model is asked for the basis, but a
-# mislabelled one would otherwise apply a CONFIRMED name off the back of a turn
-# that is plainly somebody being addressed -- "That is a great point, Sarah".
+# Scripts written without spaces between words, where tokenising a turn yields
+# one token and containment is the only workable test.
+UNSEGMENTED_SCRIPT = re.compile(
+    "["
+    "぀-ヿ"  # Hiragana, Katakana
+    "㐀-䶿一-鿿豈-﫿"  # CJK ideographs
+    "฀-๿"  # Thai
+    "຀-໿"  # Lao
+    "ក-៿"  # Khmer
+    "]"
+)
+
+# What a self-introduction sounds like IN ENGLISH. A turn that matches is taken
+# as a real introduction and its name is applied; a turn that does not still
+# yields a name, but only as a suggestion. It is deliberately not a veto: the
+# list is English, and refusing on it named nobody at all for "Меня зовут Иван",
+# "我是李明" or "Je m'appelle Sarah".
 SELF_INTRODUCTION_PHRASE = re.compile(
     r"\b("
     r"i'?m|i\s+am|my\s+name|name'?s|this\s+is|it'?s\s+me|call\s+me|"
@@ -697,12 +730,20 @@ def apply_proposals(identities, proposals, turns, now_iso):
             # The cited turn does not contain this name, so nothing in the
             # transcript supports it.
             continue
-        if basis == SELF_INTRODUCTION and not looks_like_a_self_introduction(evidence_turn["text"]):
-            # The model said somebody named themselves, but the turn reads as
-            # them being addressed -- "That is a great point, Sarah". Applying a
-            # CONFIRMED name off that is exactly the mistake the basis is
-            # supposed to prevent, so the claim is not taken on trust.
-            continue
+        # The model said somebody named themselves. Where the turn visibly reads
+        # like an introduction the name is applied; where it does not, the name
+        # is still offered, but only as a SUGGESTION for a human to confirm.
+        #
+        # A downgrade rather than a refusal, and the difference matters: the
+        # phrase list is English, so refusing on it named nobody at all for
+        # "Меня зовут Иван", "我是李明" or "Je m'appelle Sarah". Downgrading keeps
+        # the safety property -- nothing dubious is applied as settled -- without
+        # switching the feature off for everybody not speaking English, and it
+        # also covers the English forms the list misses, like "Sarah Lee from
+        # platform".
+        introduces = basis != SELF_INTRODUCTION or looks_like_a_self_introduction(
+            evidence_turn["text"]
+        )
         existing = updated["identities"].get(key)
         if isinstance(existing, dict) and existing.get("status") == "confirmed":
             if basis != SELF_INTRODUCTION:
@@ -716,7 +757,7 @@ def apply_proposals(identities, proposals, turns, now_iso):
         if name_taken_on_channel(channel, name, key):
             continue
 
-        status = "confirmed" if basis == SELF_INTRODUCTION else "proposed"
+        status = "confirmed" if basis == SELF_INTRODUCTION and introduces else "proposed"
         # Only the model's quote if it is really in that turn. It is shown as the
         # reason to accept a name, so a sentence nobody said would undermine the
         # one decision the human is being asked to make.

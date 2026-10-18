@@ -17,6 +17,13 @@ export default /* GraphQL */ `
         CallCategories
         IssuesDetected
         CallSummaryText
+        # Selected here as well as in getCall, even though only the open meeting
+        # needs it. The meetings-list split panel renders the full meeting
+        # detail from a list-derived object, and a rename made there with this
+        # field absent writes a map with every other name, merge, override and
+        # candidate missing -- destroying them. A little extra payload per
+        # meeting is much cheaper than that.
+        SpeakerIdentities
         CreatedAt
         CustomerPhoneNumber
         Status

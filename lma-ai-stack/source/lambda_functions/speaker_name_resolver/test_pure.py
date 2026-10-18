@@ -1097,9 +1097,10 @@ def test_a_transcription_slip_is_still_allowed_on_a_longer_name() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_a_turn_that_is_plainly_being_addressed_cannot_be_a_self_introduction() -> None:
-    """A mislabelled basis would otherwise apply a CONFIRMED name off the back of
-    "That is a great point, Sarah" -- the exact mistake the basis prevents."""
+def test_a_turn_that_is_plainly_being_addressed_is_only_a_suggestion() -> None:
+    """A mislabelled basis must not apply a CONFIRMED name off the back of
+    "That is a great point, Sarah" -- but the name is still worth offering, so
+    it is downgraded rather than dropped."""
     addressed = pure.build_turns(
         [seg("Other Participant (spk_0)", 0, "That is a great point, Sarah")]
     )
@@ -1109,8 +1110,101 @@ def test_a_turn_that_is_plainly_being_addressed_cannot_be_a_self_introduction() 
         addressed,
         NOW,
     )
-    assert applied == []
-    assert updated["identities"] == {}
+    assert updated["identities"][SPK0]["status"] == "proposed"
+    assert len(applied) == 1
+
+
+def test_a_real_introduction_is_applied_as_confirmed() -> None:
+    updated, _ = pure.apply_proposals(
+        empty(),
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
+    )
+    assert updated["identities"][SPK0]["status"] == "confirmed"
+
+
+def test_a_non_english_introduction_still_names_somebody() -> None:
+    """The phrase list is English. Refusing on it meant that "Меня зовут Иван",
+    "我是李明" and "Je m'appelle Sarah" named nobody at all -- the feature was
+    simply off for anybody not speaking English."""
+    for text, name in (
+        ("Меня зовут Иван Петров", "Иван Петров"),
+        ("Je m'appelle Sarah Lee", "Sarah Lee"),
+        ("Ich bin Sarah Lee", "Sarah Lee"),
+        ("Me llamo Sarah Lee", "Sarah Lee"),
+    ):
+        built = pure.build_turns([seg("Other Participant (spk_0)", 0, text)])
+        updated, applied = pure.apply_proposals(
+            empty(),
+            [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": name}],
+            built,
+            NOW,
+        )
+        assert len(applied) == 1, text
+        # Offered for a human to confirm, not applied as settled.
+        assert updated["identities"][SPK0]["status"] == "proposed", text
+
+
+def test_an_english_introduction_the_phrase_list_misses_is_still_offered() -> None:
+    built = pure.build_turns(
+        [seg("Other Participant (spk_0)", 0, "Sarah Lee, platform engineering")]
+    )
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        built,
+        NOW,
+    )
+    assert len(applied) == 1
+    assert updated["identities"][SPK0]["status"] == "proposed"
+
+
+# --------------------------------------------------------------------------
+# Scripts written without spaces between words
+# --------------------------------------------------------------------------
+
+
+def test_a_name_in_a_script_without_word_spacing_is_supported() -> None:
+    """Tokenising makes a Chinese, Japanese or Thai turn one giant token, so
+    requiring word membership switched naming off entirely for those
+    languages -- the suite passed because only clean_name was covered."""
+    for name, text in (
+        ("李明", "大家好，我是李明"),
+        ("王小明", "我叫王小明"),
+        ("田中", "こんにちは、田中です"),
+        ("สมชาย", "สวัสดีครับผมสมชาย"),
+    ):
+        assert pure.name_appears_in(name, text) is True, name
+
+
+def test_a_name_in_such_a_script_still_has_to_be_present() -> None:
+    assert pure.name_appears_in("李明", "我叫王小明") is False
+
+
+def test_a_name_in_such_a_script_names_somebody_end_to_end() -> None:
+    built = pure.build_turns([seg("Other Participant (spk_0)", 0, "大家好，我是李明")])
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "李明"}],
+        built,
+        NOW,
+    )
+    assert len(applied) == 1
+    assert updated["identities"][SPK0]["name"] == "李明"
+
+
+# --------------------------------------------------------------------------
+# Apostrophes
+# --------------------------------------------------------------------------
+
+
+def test_an_apostrophe_surname_is_supported() -> None:
+    """The name was split on apostrophes but the text was not, so the two sides
+    disagreed and "O'Brien" failed against a turn saying "O'Brien"."""
+    assert pure.name_appears_in("O'Brien", "Hi, I'm Siobhan O'Brien") is True
+    assert pure.name_appears_in("O'Neill", "This is O'Neill speaking") is True
+    assert pure.name_appears_in("Siobhan O'Brien", "I'm Siobhan O'Brien") is True
 
 
 def test_real_introductions_are_recognised() -> None:

@@ -633,3 +633,74 @@ def test_a_pass_whose_names_were_all_superseded_still_records_that_it_ran(
     stored = written[-1][1]
     assert stored["identities"][SPK0]["name"] == "Alice", "the typed name wins"
     assert stored["lastPass"]["turns"] == 2, "and the pass is still stamped"
+
+
+def test_the_button_still_works_on_an_ended_meeting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An ended meeting's transcript can never grow again, so without a bypass
+    every press after the first pass was declined for ever -- including the
+    documented recovery of pasting an attendee list and asking again, which is
+    exactly when the button matters most."""
+    stamped_long_ago = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps(
+                {"identities": {}, "lastPass": {"at": "2026-01-01T00:00:00+00:00", "turns": 2}}
+            )
+        },
+    }
+    _, bedrock, written = install(monkeypatch, meeting=stamped_long_ago)
+    event = {
+        "info": {"fieldName": "resolveSpeakerNames"},
+        "arguments": {"input": {"CallId": CALL_ID, "Force": True}},
+        "identity": {"username": OWNER},
+    }
+    result = index.handler(event, None)
+    assert len(bedrock.prompts) == 1, "the button must reach the model"
+    assert result["NamesApplied"] == 2
+    assert written
+
+
+def test_an_automatic_pass_on_an_ended_meeting_is_still_declined(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only a person pressing the button bypasses the growth gate; the timer
+    must not, or a page left open would pay for a pass every 45 seconds for
+    nothing."""
+    stamped_long_ago = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps(
+                {"identities": {}, "lastPass": {"at": "2026-01-01T00:00:00+00:00", "turns": 2}}
+            )
+        },
+    }
+    _, bedrock, _ = install(monkeypatch, meeting=stamped_long_ago)
+    event = {
+        "info": {"fieldName": "resolveSpeakerNames"},
+        "arguments": {"input": {"CallId": CALL_ID, "Force": False}},
+        "identity": {"username": OWNER},
+    }
+    index.handler(event, None)
+    assert bedrock.prompts == []
+
+
+def test_the_button_is_still_subject_to_the_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """So the bypass is not a way to spend without limit."""
+    just_ran = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps({"identities": {}, "lastPass": {"at": _now_iso(), "turns": 2}})
+        },
+    }
+    _, bedrock, _ = install(monkeypatch, meeting=just_ran)
+    event = {
+        "info": {"fieldName": "resolveSpeakerNames"},
+        "arguments": {"input": {"CallId": CALL_ID, "Force": True}},
+        "identity": {"username": OWNER},
+    }
+    index.handler(event, None)
+    assert bedrock.prompts == []

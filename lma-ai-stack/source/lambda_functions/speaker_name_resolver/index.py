@@ -225,21 +225,20 @@ def resolve(call_id, identity=None, force=False, final=False):
             "Declining a pass for %s: one ran less than %ds ago", call_id, PASS_COOLDOWN_SECONDS
         )
         return {"ok": True, "reason": "a pass ran very recently", "applied": []}
-    if not final and not pure.transcript_has_grown(identities, total_turns):
+    # `force` means a person pressed the button, and it has to bypass this gate
+    # as well as the model shortcut. On an ended meeting the transcript can never
+    # grow again, so without the bypass every press after the first pass was
+    # declined for ever -- including the documented recovery of pasting an
+    # attendee list and asking again, which is exactly when the button matters
+    # most. Deleting segments would strand a meeting the same way. The cooldown
+    # above still applies, so this is not a way to spend without limit.
+    if not final and not force and not pure.transcript_has_grown(identities, total_turns):
         LOGGER.info("Declining a pass for %s: nobody has spoken since the last one", call_id)
         return {"ok": True, "reason": "nothing new said since the last pass", "applied": []}
 
     if not pure.worth_a_model_call(turns, identities, force=force):
         LOGGER.info("Nothing to name for %s (turns=%d, forced=%s)", call_id, len(turns), force)
         return {"ok": True, "reason": "nothing to name", "applied": []}
-    # Stamped whether or not anything is applied below, so a pass that found
-    # nothing still holds the cooldown -- otherwise the cheapest way to spend
-    # money would be to ask repeatedly about a meeting with no introductions.
-    #
-    # The cost is that an empty pass still writes, and therefore still publishes
-    # onUpdateCall to connected clients. That is one message per pass per client,
-    # bounded by the cooldown itself, and the payload is the full Call so nothing
-    # on screen changes. Cheap next to an unbounded number of model calls.
 
     labels = pure.unresolved_voices(turns, identities)
     prompt = pure.build_prompt(turns, labels, identities.get("candidates") or [])

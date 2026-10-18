@@ -142,7 +142,8 @@ Two kinds of evidence are used, and they are **not** treated the same way:
 
 | Evidence | Example | What happens |
 |---|---|---|
-| Someone says who they are | "Hi everyone, I'm Sarah Lee, I run the platform team" | Applied as a name |
+| Someone clearly says who they are | "Hi everyone, I'm Sarah Lee, I run the platform team" | Applied as a name |
+| Someone gives their name less explicitly | "Sarah Lee, platform engineering", "Me llamo Sarah Lee" | Offered as a **suggestion** |
 | Someone is addressed by name | "That's a good point, Sarah" | Offered as a **suggestion** to confirm |
 
 The difference matters. A self-introduction is the speaker naming themselves, which
@@ -164,6 +165,12 @@ the cited turn must exist, it must belong to the voice the model named, and the
 name must actually appear in the words of that turn. A proposal failing any of
 them is discarded, as are non-names like "Speaker 1" and invented evidence
 categories. A third-party mention — "Bob said yesterday that…" — names nobody.
+
+A name is applied outright only when the turn also *reads* like an introduction.
+That test recognises English phrasing, so an introduction in another language, or
+an English one phrased unusually, produces a suggestion rather than a settled
+name. The name is still found either way; it just waits for somebody to agree
+with it.
 
 What that does and does not guarantee is worth being precise about. It means an
 applied name always goes to the voice that spoke the words containing it. It does

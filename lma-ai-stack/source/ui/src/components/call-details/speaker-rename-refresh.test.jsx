@@ -59,9 +59,10 @@ describe('the rename mutation feeds the onUpdateCall broadcast', () => {
 });
 
 /**
- * The guard CallDetails and EmbedCallDetails use to decide whether to replace
- * the meeting they are rendering, extracted so it can be driven directly. It
- * must match the expression in both of those files.
+ * The guard the three views that render CallPanel use to decide whether to
+ * replace the meeting they are showing, extracted so it can be driven directly.
+ * It must match the expression in all of CallDetails.js, EmbedCallDetails.jsx
+ * and EmbedVirtualParticipant.jsx.
  */
 const shouldReplace = (current, incoming) => {
   const timestampAdvanced = incoming?.updatedAt && current.updatedAt < incoming.updatedAt;
