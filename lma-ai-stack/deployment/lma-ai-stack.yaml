@@ -1146,6 +1146,259 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt VoiceEnrollmentManagerFunction.Arn
 
+  # ----------------------------------------------------------------------------
+  # Retention: expire a consent nobody renewed.
+  #
+  # Shares the enrollment manager's code bundle but has its own handler, its own
+  # role and no API path at all. EXPIRED is the one consent action may_grant
+  # allows nobody to perform, so it cannot be triggered by an admin or by the
+  # enrollee -- only by this schedule.
+  # ----------------------------------------------------------------------------
+  VoiceEnrollmentRetentionFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Handler: retention.handler
+      Role: !GetAtt VoiceEnrollmentRetentionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/voice_enrollment_manager
+      Description: Deletes voiceprints whose consent has lapsed
+      MemorySize: 256
+      Timeout: 300
+      Environment:
+        Variables:
+          VOICE_ENROLLMENT_TABLE: !Ref VoiceEnrollmentTable
+          VOICE_CONSENT_LOG_TABLE: !Ref VoiceConsentLogTable
+          VOICE_ENROLLMENT_TERMS_VERSION: !Ref VoiceEnrollmentTermsVersion
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentRetentionFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it runs on a schedule"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; the next scheduled run retries any row that failed"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names and a version"
+    DependsOn:
+      - VoiceEnrollmentRetentionFunctionLogGroup
+
+  VoiceEnrollmentRetentionFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentRetentionFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VoiceEnrollmentRetentionExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Description: Voice Enrollment Retention Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-VoiceEnrollmentRetention
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                  - dynamodb:PutItem
+                Resource: !GetAtt VoiceEnrollmentTable.Arn
+              # Append-only here too: PutItem and nothing else. This role cannot
+              # rewrite the consent history any more than the portal's can.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt VoiceConsentLogTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  VoiceEnrollmentRetentionScheduleRule:
+    Type: AWS::Events::Rule
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Name: !Sub "${AWS::StackName}-VoiceEnrollmentRetention"
+      Description: >-
+        Deletes voiceprints whose consent has lapsed. Daily is enough: the
+        retention period is measured in days, so a few hours either side of the
+        boundary is immaterial, and a lapsed consent stops being used for
+        matching the moment it lapses regardless of when the row is cleaned up.
+      ScheduleExpression: "cron(23 3 * * ? *)"
+      State: ENABLED
+      Targets:
+        - Arn: !GetAtt VoiceEnrollmentRetentionFunction.Arn
+          Id: VoiceEnrollmentRetentionTarget
+
+  VoiceEnrollmentRetentionSchedulePermission:
+    Type: AWS::Lambda::Permission
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      FunctionName: !GetAtt VoiceEnrollmentRetentionFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: !Sub "events.${AWS::URLSuffix}"
+      SourceArn: !GetAtt VoiceEnrollmentRetentionScheduleRule.Arn
+
+  VoiceEnrollmentInviteFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Handler: invite.handler
+      Role: !GetAtt VoiceEnrollmentInviteExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/voice_enrollment_manager
+      Description: Invites somebody to enrol their voice
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          USER_POOL_ID: !Ref UserPoolId
+          VOICE_CONSENT_LOG_TABLE: !Ref VoiceConsentLogTable
+          VOICE_ENROLLMENT_TERMS_VERSION: !Ref VoiceEnrollmentTermsVersion
+          ALLOWED_SIGNUP_EMAIL_DOMAIN: !Ref AllowedSignUpEmailDomain
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentInviteFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; an invitation is retried by the admin"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - a pool id, a table name and two settings"
+    DependsOn:
+      - VoiceEnrollmentInviteFunctionLogGroup
+
+  VoiceEnrollmentInviteFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentInviteFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VoiceEnrollmentInviteExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Description: Voice Enrollment Invite Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-VoiceEnrollmentInvite
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Creating the invitee's account and putting them in the enrollee
+              # group. AdminDeleteUser is needed only to roll back an account
+              # this function itself just created and could not group.
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminCreateUser
+                  - cognito-idp:AdminGetUser
+                  - cognito-idp:AdminAddUserToGroup
+                  - cognito-idp:AdminDeleteUser
+                Resource: !Sub "arn:${AWS::Partition}:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+              # Append-only, like every other writer to this table.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt VoiceConsentLogTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncVoiceEnrollmentInviteRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-AppSyncInvokeVoiceInvite
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt VoiceEnrollmentInviteFunction.Arn
+
+  VoiceEnrollmentInviteDataSource:
+    Type: AWS::AppSync::DataSource
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: VoiceEnrollmentInviteLambda
+      Description: Lambda function for inviteVoiceEnrollee
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncVoiceEnrollmentInviteRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt VoiceEnrollmentInviteFunction.Arn
+
+  InviteVoiceEnrolleeResolver:
+    Type: AWS::AppSync::Resolver
+    Condition: ShouldEnableVoiceEnrollment
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt VoiceEnrollmentInviteDataSource.Name
+      TypeName: Mutation
+      FieldName: inviteVoiceEnrollee
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/voiceEnrollment.js
+
   VoiceEnrollmentTermsResolver:
     Type: AWS::AppSync::Resolver
     Condition: ShouldEnableVoiceEnrollment
