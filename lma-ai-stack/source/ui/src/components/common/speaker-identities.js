@@ -47,6 +47,10 @@ export const emptyIdentities = () => ({
   // Names a user has rejected for a voice, so an automatic pass does not propose
   // the same one straight back. Keyed the same way as `identities`.
   rejected: {},
+  // When the backend last ran a naming pass, and how long the transcript was.
+  // Carried through parse and serialize rather than dropped: a UI write that
+  // lost it would reset the backend's own cost bound on every rename.
+  lastPass: undefined,
 });
 
 /**
@@ -95,6 +99,7 @@ export const parseSpeakerIdentities = (raw) => {
     segmentOverrides:
       source.segmentOverrides && typeof source.segmentOverrides === 'object' ? source.segmentOverrides : {},
     rejected: source.rejected && typeof source.rejected === 'object' ? source.rejected : {},
+    lastPass: source.lastPass && typeof source.lastPass === 'object' ? source.lastPass : undefined,
   };
 };
 

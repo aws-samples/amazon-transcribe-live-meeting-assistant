@@ -502,3 +502,134 @@ def _now_iso():
     from datetime import datetime, timezone
 
     return datetime.now(timezone.utc).isoformat()
+
+
+# --------------------------------------------------------------------------
+# The end-of-meeting pass
+# --------------------------------------------------------------------------
+
+
+def _long_meeting(count=300):
+    return [segment_row("Other Participant (spk_0)", i * 5, f"turn {i}") for i in range(count)]
+
+
+def test_a_long_meeting_does_not_silence_naming_for_ever(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The growth check once compared the TRIMMED list against a stamp taken from
+    it, and both saturate at the trim limit -- so past it every later pass, the
+    button and the end-of-meeting pass were all declined permanently."""
+    rows = _long_meeting()
+    rows[0] = segment_row("Other Participant (spk_0)", 0, "Hi, I'm Sarah Lee")
+    stamped = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps(
+                # A stamp from a previous pass, at the trim limit.
+                {"identities": {}, "lastPass": {"at": "2026-01-01T00:00:00+00:00", "turns": 160}}
+            )
+        },
+    }
+    _, bedrock, written = install(monkeypatch, meeting=stamped, segments=rows)
+    index.handler({"CallId": CALL_ID}, None)
+    assert len(bedrock.prompts) == 1, "a 300-turn meeting must still be read"
+    assert written[0][1]["lastPass"]["turns"] == 300, "the stamp records the WHOLE transcript"
+
+
+def test_the_end_of_meeting_pass_is_not_declined_by_the_cooldown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It runs once per meeting, is not client-driven, and is the pass the
+    summary depends on -- so a browser timer firing 20 seconds earlier must not
+    lose the names from the summary."""
+    recent = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps({"identities": {}, "lastPass": {"at": _now_iso(), "turns": 2}})
+        },
+    }
+    _, bedrock, _ = install(monkeypatch, meeting=recent)
+    index.handler({"CallId": CALL_ID, "Trigger": "meeting-end"}, None)
+    assert len(bedrock.prompts) == 1
+
+
+def test_the_end_of_meeting_pass_runs_even_if_nobody_spoke_since_the_last_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    unchanged = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps(
+                {"identities": {}, "lastPass": {"at": "2026-01-01T00:00:00+00:00", "turns": 2}}
+            )
+        },
+    }
+    _, bedrock, _ = install(monkeypatch, meeting=unchanged)
+    index.handler({"CallId": CALL_ID, "Trigger": "meeting-end"}, None)
+    assert len(bedrock.prompts) == 1
+
+
+def test_a_browser_caller_cannot_claim_to_be_the_end_of_meeting_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Otherwise the cooldown would be one JSON field away from meaningless."""
+    recent = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps({"identities": {}, "lastPass": {"at": _now_iso(), "turns": 2}})
+        },
+    }
+    _, bedrock, _ = install(monkeypatch, meeting=recent)
+    index.handler(
+        {
+            "info": {"fieldName": "resolveSpeakerNames"},
+            "arguments": {"input": {"CallId": CALL_ID, "Force": True, "Trigger": "meeting-end"}},
+            "identity": {"username": OWNER},
+            "Trigger": "meeting-end",
+        },
+        None,
+    )
+    assert bedrock.prompts == []
+
+
+def test_a_pass_whose_names_were_all_superseded_still_records_that_it_ran(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """It cost a model call either way, so leaving no stamp would let the next
+    request pay for another immediately."""
+    # Both voices are renamed by a person while the pass is in flight, so every
+    # inferred name loses the merge.
+    install(monkeypatch)
+    ddb = FakeDynamo(meeting=MEETING_ROW)
+    renamed_during_the_pass = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps(
+                {
+                    "identities": {
+                        SPK0: {"name": "Alice", "status": "confirmed", "source": "manual"},
+                        SPK1: {"name": "Bob", "status": "confirmed", "source": "manual"},
+                    }
+                }
+            )
+        },
+    }
+    reads = {"n": 0}
+
+    def get_item(**kwargs):
+        # First read is before the model call; the second is the re-read just
+        # before the write, by which time the names have been typed.
+        reads["n"] += 1
+        return {"Item": MEETING_ROW if reads["n"] == 1 else renamed_during_the_pass}
+
+    ddb.get_item = get_item
+    written = []
+    monkeypatch.setattr(index, "dynamodb", ddb)
+    monkeypatch.setattr(index, "bedrock", FakeBedrock())
+    monkeypatch.setattr(index, "write_identities", lambda c, i: written.append((c, i)))
+
+    result = index.handler({"CallId": CALL_ID}, None)
+    assert result["NamesApplied"] == 2, "the pass did infer names"
+    stored = written[-1][1]
+    assert stored["identities"][SPK0]["name"] == "Alice", "the typed name wins"
+    assert stored["lastPass"]["turns"] == 2, "and the pass is still stamped"

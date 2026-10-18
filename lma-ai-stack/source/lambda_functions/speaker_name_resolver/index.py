@@ -59,11 +59,17 @@ MAX_TURNS = int(os.environ.get("SPEAKER_NAMING_MAX_TURNS", "160"))
 MAX_TRANSCRIPT_PAGES = 100
 
 # Shortest gap between two passes on one meeting. The timer that drives automatic
-# passes lives in the browser, and a client cannot be trusted to pace a paid
-# model call -- several viewers each run their own, and the mutation can simply be
-# called in a loop. Enforced here so the bound holds whatever the caller does.
-# A user pressing the button is still subject to it; what they override is the
-# "nothing here could name anybody" shortcut, not the cost bound.
+# passes lives in the browser, and several viewers each run their own, so pacing
+# cannot be left to the client: this is what stops a watched meeting paying for a
+# pass every few seconds. A user pressing the button is subject to it too; what
+# the button overrides is the "nothing here could name anybody" shortcut.
+#
+# It is a guard against accidental repeat spend, not a defence against a
+# determined caller. The stamp lives in the meeting's own identity map, which a
+# user with write access to the meeting can overwrite, so somebody who sets out
+# to loop this can. Bounding that properly needs a rate limit at the API, which
+# is a deployment-level control (see the WAF options) rather than something this
+# function can enforce.
 PASS_COOLDOWN_SECONDS = int(os.environ.get("SPEAKER_NAMING_COOLDOWN_SECONDS", "30"))
 
 DESERIALIZER = TypeDeserializer()
@@ -193,7 +199,7 @@ def write_identities(call_id, identities):
     return body
 
 
-def resolve(call_id, identity=None, force=False):
+def resolve(call_id, identity=None, force=False, final=False):
     """Run one naming pass. Returns a small result object for the caller."""
     meeting = read_meeting(call_id)
     if meeting is None:
@@ -202,15 +208,24 @@ def resolve(call_id, identity=None, force=False):
         return {"ok": False, "reason": "not permitted", "applied": []}
 
     identities = pure.parse_identities(meeting.get("SpeakerIdentities"))
-    turns = pure.select_turns(pure.build_turns(read_segments(call_id)), MAX_TURNS)
+    all_turns = pure.build_turns(read_segments(call_id))
+    # The raw size drives the growth check and the stamp; the trimmed list is
+    # only what the model reads. Conflating them silenced naming past the trim
+    # limit, because both sides of the comparison saturated at it.
+    total_turns = len(all_turns)
+    turns = pure.select_turns(all_turns, MAX_TURNS)
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    if pure.within_cooldown(identities, now_iso, PASS_COOLDOWN_SECONDS):
+    # The end-of-meeting pass skips both gates. It runs once per meeting, is not
+    # driven by a client, and is the pass the summary depends on -- declining it
+    # because a browser timer happened to fire 20 seconds earlier would lose the
+    # names from the summary for most meetings anybody had open.
+    if not final and pure.within_cooldown(identities, now_iso, PASS_COOLDOWN_SECONDS):
         LOGGER.info(
             "Declining a pass for %s: one ran less than %ds ago", call_id, PASS_COOLDOWN_SECONDS
         )
         return {"ok": True, "reason": "a pass ran very recently", "applied": []}
-    if not pure.transcript_has_grown(identities, turns):
+    if not final and not pure.transcript_has_grown(identities, total_turns):
         LOGGER.info("Declining a pass for %s: nobody has spoken since the last one", call_id)
         return {"ok": True, "reason": "nothing new said since the last pass", "applied": []}
 
@@ -225,7 +240,6 @@ def resolve(call_id, identity=None, force=False):
     # onUpdateCall to connected clients. That is one message per pass per client,
     # bounded by the cooldown itself, and the payload is the full Call so nothing
     # on screen changes. Cheap next to an unbounded number of model calls.
-    stamp_only = True
 
     labels = pure.unresolved_voices(turns, identities)
     prompt = pure.build_prompt(turns, labels, identities.get("candidates") or [])
@@ -236,29 +250,27 @@ def resolve(call_id, identity=None, force=False):
     # The gap between proposed and applied is how much the verification
     # rejected, which is the number worth watching when tuning the prompt.
     LOGGER.info(
-        "Speaker naming pass for %s: turns=%d open_labels=%d proposed=%d applied=%d",
+        "Speaker naming pass for %s: turns=%d/%d open_labels=%d proposed=%d applied=%d",
         call_id,
         len(turns),
+        total_turns,
         len(labels),
         len(proposals),
         len(applied),
     )
-    if applied:
-        # Re-read before writing. The model call took seconds, and the write
-        # replaces the whole blob with no ordering guard (deliberately, so a
-        # human rename always wins), so writing the snapshot taken before the
-        # model call would quietly discard a name typed in the meantime.
-        latest = pure.parse_identities((read_meeting(call_id) or {}).get("SpeakerIdentities"))
-        new_entries = {entry["key"]: updated["identities"][entry["key"]] for entry in applied}
-        merged, changed = pure.merge_applied_onto(latest, new_entries)
-        if changed:
-            write_identities(call_id, pure.stamp_pass(merged, now_iso, len(turns)))
-        else:
-            LOGGER.info("Every inferred name for %s was superseded while the pass ran", call_id)
-        stamp_only = False
-    if stamp_only:
-        latest = pure.parse_identities((read_meeting(call_id) or {}).get("SpeakerIdentities"))
-        write_identities(call_id, pure.stamp_pass(latest, now_iso, len(turns)))
+    # Re-read before writing. The model call took seconds, and the write replaces
+    # the whole blob with no ordering guard (deliberately, so a human rename
+    # always wins), so writing the snapshot taken before the model call would
+    # quietly discard a name typed in the meantime.
+    latest = pure.parse_identities((read_meeting(call_id) or {}).get("SpeakerIdentities"))
+    new_entries = {entry["key"]: updated["identities"][entry["key"]] for entry in applied}
+    merged, changed = pure.merge_applied_onto(latest, new_entries)
+    if applied and not changed:
+        LOGGER.info("Every inferred name for %s was superseded while the pass ran", call_id)
+    # Stamped unconditionally, including when nothing survived the merge: this
+    # pass cost a model call either way, and leaving no stamp would let the next
+    # request pay for another immediately.
+    write_identities(call_id, pure.stamp_pass(merged, now_iso, total_turns))
     return {"ok": True, "reason": "ok", "applied": applied}
 
 
@@ -274,12 +286,15 @@ def handler(event, context):  # pylint: disable=unused-argument
         raise ValueError("no CallId in event")
 
     identity = event.get("identity")
+    # The backend's end-of-meeting invoke says so, and only the backend can: a
+    # browser caller always arrives with an identity.
+    final = event.get("Trigger") == "meeting-end" and identity is None
     # Only a user pressing the button overrides the "is there anything here
     # worth a model call" shortcut; the automatic passes respect it.
     force = bool(arguments.get("Force")) and identity is not None
 
     try:
-        result = resolve(call_id, identity=identity, force=force)
+        result = resolve(call_id, identity=identity, force=force, final=final)
     except Exception:  # noqa: BLE001 - reported to the caller, see below
         # Naming is an enhancement. The end-of-meeting caller must not have a
         # meeting fail to close because a model call did, and the UI caller gets

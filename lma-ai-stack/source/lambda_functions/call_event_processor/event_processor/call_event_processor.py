@@ -1380,7 +1380,9 @@ async def execute_process_event_api_mutation(
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=SPEAKER_NAME_RESOLVER_ARN,
                     InvocationType="Event",
-                    Payload=json.dumps({"CallId": message.get("CallId")}),
+                    Payload=json.dumps(
+                        {"CallId": message.get("CallId"), "Trigger": "meeting-end"}
+                    ),
                 )
                 LOGGER.debug("END Event: queued the speaker name resolver")
             except Exception:  # pylint: disable=broad-except

@@ -1032,3 +1032,122 @@ def test_a_late_introduction_can_still_be_attributed() -> None:
 
 def test_trimming_is_disabled_by_a_non_positive_limit() -> None:
     assert len(pure.select_turns(turns(), 0)) == len(turns())
+
+
+# --------------------------------------------------------------------------
+# The growth check must not saturate
+#
+# The trimmed list the model reads caps at MAX_TURNS, so comparing it against a
+# stamp taken from it became permanently false past the cap -- which silenced
+# naming for the rest of the meeting, the end-of-meeting pass included.
+# --------------------------------------------------------------------------
+
+
+def test_growth_is_measured_against_the_whole_transcript_not_the_trimmed_list() -> None:
+    stamped_at_the_cap = {**empty(), "lastPass": {"at": NOW, "turns": 160}}
+    assert pure.transcript_has_grown(stamped_at_the_cap, 300) is True
+    assert pure.transcript_has_grown(stamped_at_the_cap, 160) is False
+    assert pure.transcript_has_grown(stamped_at_the_cap, 161) is True
+
+
+def test_a_first_pass_always_counts_as_grown() -> None:
+    assert pure.transcript_has_grown(empty(), 1) is True
+    assert pure.transcript_has_grown({**empty(), "lastPass": {"at": NOW}}, 1) is True
+
+
+def test_a_tiny_turn_limit_does_not_return_more_than_it_was_asked_for() -> None:
+    """turns[-0:] is the whole list, so tail == 0 had to be special-cased."""
+    long_meeting = pure.build_turns(
+        [seg("Other Participant (spk_0)", i * 5, f"turn {i}") for i in range(20)]
+    )
+    for limit in (1, 2, 3):
+        selected = pure.select_turns(long_meeting, limit)
+        assert len(selected) <= limit, limit
+        assert len({t["turn"] for t in selected}) == len(selected), limit
+
+
+# --------------------------------------------------------------------------
+# Supporting a name, after substring matching proved far too generous
+# --------------------------------------------------------------------------
+
+
+def test_a_short_name_is_not_supported_by_a_longer_word_containing_it() -> None:
+    """Measured against the previous version: "An" was supported by the word
+    "and", "Al" by "also", "Mark" by "market", "Alan" by "balance"."""
+    assert pure.name_appears_in("An", "that is a good point and I agree") is False
+    assert pure.name_appears_in("Al", "we should also look at this") is False
+    assert pure.name_appears_in("Mark", "the market moved three percent") is False
+    assert pure.name_appears_in("Alan", "the balance is fine") is False
+    assert pure.name_appears_in("Li", "I like that idea") is False
+
+
+def test_a_name_spoken_as_its_own_word_is_supported() -> None:
+    assert pure.name_appears_in("An", "hi, I'm An, I lead the team") is True
+    assert pure.name_appears_in("Mark", "thanks Mark, go ahead") is True
+    assert pure.name_appears_in("Sarah Lee", "I'm Sarah Lee from platform") is True
+
+
+def test_a_transcription_slip_is_still_allowed_on_a_longer_name() -> None:
+    assert pure.name_appears_in("Sarah Lee", "hi, I'm Sara Lee") is True
+    assert pure.name_appears_in("Priya", "this is Priyah speaking") is True
+
+
+# --------------------------------------------------------------------------
+# A self-introduction has to look like one
+# --------------------------------------------------------------------------
+
+
+def test_a_turn_that_is_plainly_being_addressed_cannot_be_a_self_introduction() -> None:
+    """A mislabelled basis would otherwise apply a CONFIRMED name off the back of
+    "That is a great point, Sarah" -- the exact mistake the basis prevents."""
+    addressed = pure.build_turns(
+        [seg("Other Participant (spk_0)", 0, "That is a great point, Sarah")]
+    )
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah"}],
+        addressed,
+        NOW,
+    )
+    assert applied == []
+    assert updated["identities"] == {}
+
+
+def test_real_introductions_are_recognised() -> None:
+    for text in (
+        "Hi everyone, I'm Sarah Lee",
+        "my name is Sarah Lee",
+        "Sarah Lee here",
+        "this is Sarah Lee",
+        "Sarah Lee speaking",
+        "I'll go first, I am Sarah Lee",
+    ):
+        assert pure.looks_like_a_self_introduction(text) is True, text
+
+
+def test_being_thanked_or_credited_is_not_an_introduction() -> None:
+    for text in (
+        "thanks Sarah",
+        "good point, Sarah",
+        "Sarah, do you want to start",
+        "Sarah said that yesterday",
+    ):
+        assert pure.looks_like_a_self_introduction(text) is False, text
+
+
+def test_being_addressed_does_not_require_an_introduction_phrase() -> None:
+    """The phrase check applies only to self-introductions; the addressed-by-name
+    basis is about the PREVIOUS turn and is only ever a suggestion anyway."""
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [{"basis": pure.ADDRESSED_BY_NAME, "label": SPK0, "turn": 4, "name": "Sarah"}],
+        turns(),
+        NOW,
+    )
+    assert updated["identities"][SPK0]["status"] == "proposed"
+    assert len(applied) == 1
+
+
+def test_a_placeholder_name_with_a_trailing_dot_is_still_rejected() -> None:
+    assert pure.clean_name("n.a.") is None
+    assert pure.clean_name("N.A.") is None

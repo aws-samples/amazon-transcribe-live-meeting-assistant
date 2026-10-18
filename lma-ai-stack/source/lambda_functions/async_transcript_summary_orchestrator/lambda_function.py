@@ -119,7 +119,11 @@ def name_speakers(call_id: str) -> None:
         SPEAKER_NAME_CLIENT.invoke(
             FunctionName=SPEAKER_NAME_RESOLVER_ARN,
             InvocationType="RequestResponse",
-            Payload=json.dumps({"CallId": call_id}),
+            # Marks this as the once-per-meeting pass, which skips the
+            # cooldown and the "has anybody spoken since" gate -- both of those
+            # exist to pace a browser timer, and this is the pass the summary
+            # depends on.
+            Payload=json.dumps({"CallId": call_id, "Trigger": "meeting-end"}),
         )
         LOGGER.debug("Ran the speaker name resolver before summarising")
     except Exception:  # pylint: disable=broad-except

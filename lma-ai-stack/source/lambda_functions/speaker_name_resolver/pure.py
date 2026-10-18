@@ -81,9 +81,17 @@ MAX_NAME_LENGTH = 60
 # Exact placeholders, matched whole and case-insensitively. Kept as a literal set
 # rather than regex alternatives because they contain punctuation that the
 # token separator below deliberately does not allow.
+# Compared with dots and slashes removed, so "N/A", "n.a." and "na" are one
+# entry rather than three that each have to be remembered -- and so the trailing
+# punctuation stripped off a name earlier cannot make an entry unreachable.
 PLACEHOLDER_NAMES = frozenset(
-    {"n/a", "n.a.", "na", "tbd", "tba", "anonymous", "anon", "redacted", "withheld", "?"}
+    {"na", "tbd", "tba", "anonymous", "anon", "redacted", "withheld", "unassigned", "?"}
 )
+
+
+def _placeholder_key(name):
+    return re.sub(r"[./\s]+", "", name.casefold())
+
 
 # Phrases worth sending to a model at all. The miner runs repeatedly during a
 # meeting, and most passes see nothing that could name anybody; this keeps those
@@ -210,6 +218,10 @@ def select_turns(turns, max_turns):
         return list(turns)
     head = max(1, (max_turns * 2) // 3)
     tail = max_turns - head
+    if tail <= 0:
+        # turns[-0:] is the WHOLE list, so a limit this small would return more
+        # than it was asked for, with a duplicated first turn.
+        return list(turns[:head])
     return list(turns[:head]) + list(turns[-tail:])
 
 
@@ -298,13 +310,20 @@ def within_cooldown(identities, now_iso, cooldown_seconds):
     return elapsed < float(cooldown_seconds)
 
 
-def transcript_has_grown(identities, turns):
-    """Has anybody spoken since the last pass?"""
+def transcript_has_grown(identities, total_turns):
+    """Has anybody spoken since the last pass?
+
+    Takes the RAW number of turns in the transcript, never the trimmed list the
+    model sees. Those two are the same only on short meetings: past the trim
+    limit the trimmed length saturates, so comparing it against a stamp taken
+    from it made this permanently false and silenced naming for the rest of the
+    meeting -- the end-of-meeting pass and the button included.
+    """
     stamp = (identities.get("lastPass") or {}) if isinstance(identities, dict) else {}
     previous = stamp.get("turns")
     if not isinstance(previous, int):
         return True
-    return len(turns) > previous
+    return total_turns > previous
 
 
 def stamp_pass(identities, now_iso, turn_count):
@@ -453,7 +472,7 @@ def clean_name(value):
     if len(name.split()) > 4:
         # A name is words, not a sentence.
         return None
-    if name.casefold() in PLACEHOLDER_NAMES:
+    if _placeholder_key(name) in PLACEHOLDER_NAMES:
         return None
     if NON_NAMES.match(name):
         return None
@@ -470,20 +489,39 @@ def name_appears_in(name, text):
     Matched loosely and per word, because the transcript is speech: "Sarah Lee"
     is supported by a turn that says "Sara Lee", and a first name alone is enough.
     """
-    haystack = " ".join((text or "").casefold().split())
+    # Whole words on both sides. Substring matching was far too generous: "An"
+    # counted the word "and" as support, "Mark" counted "market", and "Al"
+    # counted "also" -- so a short name was supported by almost any turn.
+    spoken = {word for word in re.split(r"[^\w']+", (text or "").casefold()) if word}
     parts = [part for part in re.split(r"[\s\-']+", (name or "").casefold()) if len(part) > 1]
     if not parts:
         return False
     for part in parts:
-        if part in haystack:
+        if part in spoken:
             return True
-        # Allow one transcription slip inside a word of four or more letters,
-        # which is what "Sarah" versus "Sara" is.
-        if len(part) >= 4:
-            stem = part[:-1]
-            if stem in haystack:
-                return True
+        # One transcription slip at the end of a longer word -- which is what
+        # "Sarah" versus "Sara" is. Only for names long enough that the stem is
+        # still distinctive.
+        if len(part) >= 5 and any(word == part[:-1] or part == word[:-1] for word in spoken):
+            return True
     return False
+
+
+# What a self-introduction sounds like. The model is asked for the basis, but a
+# mislabelled one would otherwise apply a CONFIRMED name off the back of a turn
+# that is plainly somebody being addressed -- "That is a great point, Sarah".
+SELF_INTRODUCTION_PHRASE = re.compile(
+    r"\b("
+    r"i'?m|i\s+am|my\s+name|name'?s|this\s+is|it'?s\s+me|call\s+me|"
+    r"speaking\b|here\b|joining|i'?ll\s+go|let\s+me\s+introduce"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def looks_like_a_self_introduction(text):
+    """Does this turn contain somebody naming themselves?"""
+    return bool(SELF_INTRODUCTION_PHRASE.search(text or ""))
 
 
 def attribute(proposal, turns_by_number):
@@ -658,6 +696,12 @@ def apply_proposals(identities, proposals, turns, now_iso):
         if not name_appears_in(name, evidence_turn["text"]):
             # The cited turn does not contain this name, so nothing in the
             # transcript supports it.
+            continue
+        if basis == SELF_INTRODUCTION and not looks_like_a_self_introduction(evidence_turn["text"]):
+            # The model said somebody named themselves, but the turn reads as
+            # them being addressed -- "That is a great point, Sarah". Applying a
+            # CONFIRMED name off that is exactly the mistake the basis is
+            # supposed to prevent, so the claim is not taken on trust.
             continue
         existing = updated["identities"].get(key)
         if isinstance(existing, dict) and existing.get("status") == "confirmed":
