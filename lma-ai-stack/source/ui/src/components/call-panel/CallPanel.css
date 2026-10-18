@@ -71,3 +71,13 @@ span.issue-pill {
 .hide-transcript {
     display:none;
 }
+/*
+ * A speaker name that was inferred from the transcript and that nobody has
+ * confirmed. Marked rather than hidden: the name is useful, but presenting a
+ * guess exactly like a name a person typed is what would make automatic
+ * naming actively harmful. Confirm or reject it in the Speakers panel.
+ */
+.transcript-speaker-proposed {
+  border-bottom: 1px dotted currentColor;
+  cursor: help;
+}

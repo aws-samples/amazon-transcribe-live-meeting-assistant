@@ -132,6 +132,7 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     getCallDetailsFromCallIds,
     sendGetTranscriptSegmentsRequest,
     sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
     setLiveTranscriptCallId,
     isCallsListLoading,
     setIsCallsListLoading,
@@ -284,7 +285,15 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
 
     const callsMap = mapCallsAttributes([matching], settings);
     const callDetails = callsMap[0];
-    if (callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt) {
+    // Same guard as CallDetails.js and EmbedCallDetails.jsx: this view renders
+    // CallPanel too, and a speaker rename deliberately does not move UpdatedAt,
+    // so without the second test a rename made here would not re-label until
+    // the page was reloaded -- and a second rename would serialize from the
+    // pre-first-rename map and lose the first name.
+    const timestampAdvanced = callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt;
+    const speakerNamesChanged =
+      callDetails?.speakerIdentities !== undefined && call.speakerIdentities !== callDetails.speakerIdentities;
+    if (timestampAdvanced || speakerNamesChanged) {
       setCall(callDetails);
       if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
         setLiveTranscriptCallId(effectiveCallId);
@@ -302,6 +311,7 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     selectedItems,
     sendGetTranscriptSegmentsRequest,
     sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     setDateRange,

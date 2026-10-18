@@ -21,7 +21,7 @@
  * common separation failure, and naming both rows 'Bob' without merging leaves
  * two Bobs that then confuse every summary.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Autosuggest,
   Badge,
@@ -51,7 +51,30 @@ import {
 
 const MERGE_PLACEHOLDER = { label: 'Same person as…', value: '' };
 
-const SpeakerRow = ({ row, candidates, rosterRows, onRename, onMerge, onToggleLock, disabled }) => {
+/**
+ * How often to look for names while a meeting is running.
+ *
+ * Long enough that a meeting does not spend money on model calls that read
+ * almost the same transcript twice, short enough that a name appears within a
+ * minute or so of somebody introducing themselves. Introductions cluster in the
+ * first minutes, which is also when the first pass lands.
+ */
+const LIVE_PASS_INTERVAL_MS = 45000;
+
+/** How long the outcome of a pass stays in the panel header. */
+const STATUS_VISIBLE_MS = 20000;
+
+const SpeakerRow = ({
+  row,
+  candidates,
+  rosterRows,
+  onRename,
+  onMerge,
+  onToggleLock,
+  onConfirm,
+  onReject,
+  disabled,
+}) => {
   // Local draft so typing is not fighting the subscription: an identity write
   // comes straight back through onUpdateCall, and re-deriving the input value
   // from that on every keystroke would move the caret.
@@ -118,7 +141,17 @@ const SpeakerRow = ({ row, candidates, rosterRows, onRename, onMerge, onToggleLo
         <Box variant="small" color="text-body-secondary">
           {`${row.turns} ${row.turns === 1 ? 'turn' : 'turns'} · ${formatTalkTime(row.talkTimeSeconds)}`}
         </Box>
-        {row.status === 'proposed' && <StatusIndicator type="pending">suggested</StatusIndicator>}
+        {row.status === 'proposed' && (
+          <SpaceBetween direction="horizontal" size="xxs" alignItems="center">
+            <StatusIndicator type="pending">suggested</StatusIndicator>
+            <Button variant="inline-link" onClick={() => onConfirm(row)} disabled={disabled}>
+              Confirm
+            </Button>
+            <Button variant="inline-link" onClick={() => onReject(row)} disabled={disabled}>
+              Not {row.name}
+            </Button>
+          </SpaceBetween>
+        )}
         {row.mergedKeys.length > 0 && (
           <Box variant="small" color="text-body-secondary">
             {`+${row.mergedKeys.length} merged`}
@@ -152,7 +185,7 @@ const SpeakerRow = ({ row, candidates, rosterRows, onRename, onMerge, onToggleLo
   );
 };
 
-const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly }) => {
+const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdentify, readOnly, isLive }) => {
   const identities = useMemo(() => parseSpeakerIdentities(item.speakerIdentities), [item.speakerIdentities]);
   const roster = useMemo(
     () => buildSpeakerRoster(segments, identities, item.callerPhoneNumber),
@@ -162,6 +195,92 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly
   const [saving, setSaving] = useState(false);
   const [pasted, setPasted] = useState('');
   const [attendeesOpen, setAttendeesOpen] = useState(false);
+  const [identifying, setIdentifying] = useState(false);
+  const [identifyStatus, setIdentifyStatus] = useState(null);
+  // Read from inside the interval callback, which captures its closure once and
+  // would never see a state update -- so a slow pass would overlap the next tick.
+  const identifyingRef = useRef(false);
+  // The interval must not depend on the identity of this callback. Holding it in
+  // a ref means a caller that passes a fresh function every render -- which is
+  // the default in React and was the actual bug -- cannot stop the timer
+  // elapsing. The hook that supplies it memoises it as well; this is what makes
+  // the panel correct on its own rather than only in combination.
+  const identifyRef = useRef(onIdentify);
+  identifyRef.current = onIdentify;
+  const statusTimerRef = useRef(undefined);
+  useEffect(() => () => clearTimeout(statusTimerRef.current), []);
+
+  // A voice holding an unconfirmed SUGGESTION is still open: the backend treats
+  // it that way too, specifically so a later self-introduction can upgrade a
+  // guess. Counting it as named would stop the automatic passes exactly when
+  // they still have something to find.
+  const unnamedCount = roster.filter((row) => row.isPlaceholder && (!row.name || row.status === 'proposed')).length;
+
+  /**
+   * Run a naming pass and say what came back.
+   *
+   * The names themselves are not in the response -- the backend writes them, and
+   * they arrive through the same subscription a rename by another user does. So
+   * all this reports is the count, which is the one thing the user cannot see
+   * for themselves when the answer is "none".
+   */
+  const runIdentify = async (force) => {
+    const identify = identifyRef.current;
+    if (!identify) {
+      return;
+    }
+    setIdentifying(true);
+    identifyingRef.current = true;
+    setIdentifyStatus(null);
+    try {
+      const result = await identify({ force });
+      if (!result?.Success) {
+        setIdentifyStatus({ type: 'error', text: 'Could not identify speakers' });
+      } else if (result.NamesApplied > 0) {
+        setIdentifyStatus({
+          type: 'success',
+          text: `Identified ${result.NamesApplied} ${result.NamesApplied === 1 ? 'speaker' : 'speakers'}`,
+        });
+      } else {
+        // The honest answer, rather than silence: the transcript so far simply
+        // does not say who these people are.
+        setIdentifyStatus({ type: 'info', text: 'Nothing in the transcript names them yet' });
+      }
+      // Cleared after a while so a stale "Identified 2 speakers" does not sit in
+      // the header for the rest of the meeting.
+      clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = setTimeout(() => setIdentifyStatus(null), STATUS_VISIBLE_MS);
+    } finally {
+      setIdentifying(false);
+      identifyingRef.current = false;
+    }
+  };
+
+  /**
+   * While a meeting runs, look for names every so often.
+   *
+   * There is no backend scheduler: a pass happens when somebody is watching the
+   * meeting, which is also when seeing the names appear is worth anything. The
+   * end-of-meeting pass covers a meeting nobody had open. Passes stop once every
+   * voice is named, and are not forced, so the backend's own "is there anything
+   * here worth a model call" shortcut still applies.
+   */
+  useEffect(() => {
+    if (!isLive || readOnly || unnamedCount === 0) {
+      return undefined;
+    }
+    const timer = setInterval(() => {
+      if (!identifyingRef.current) {
+        runIdentify(false);
+      }
+    }, LIVE_PASS_INTERVAL_MS);
+    return () => clearInterval(timer);
+    // Keyed only on whether a pass is wanted at all. Neither runIdentify nor
+    // onIdentify appears here on purpose: both change identity on every render,
+    // so depending on either rebuilt the timer on every arriving transcript
+    // segment and it only ever elapsed during silence -- precisely when there is
+    // nothing new to read. Both are reached through refs instead.
+  }, [isLive, readOnly, unnamedCount]);
 
   const namedCount = roster.filter((row) => row.name).length;
 
@@ -204,6 +323,41 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly
     const nextMerges = { ...identities.merges };
     row.mergedKeys.forEach((key) => delete nextMerges[key]);
     return write({ ...identities, merges: nextMerges });
+  };
+
+  /**
+   * Accept a suggested name as the user's own.
+   *
+   * Recorded as source 'manual', which is what stops a later pass revisiting it
+   * -- a human has now looked at this and agreed.
+   */
+  const handleConfirm = (row) => {
+    const entry = identities.identities[row.key];
+    if (!entry) {
+      return undefined;
+    }
+    return write({
+      ...identities,
+      identities: {
+        ...identities.identities,
+        [row.key]: { ...entry, status: 'confirmed', source: 'manual', updatedAt: new Date().toISOString() },
+      },
+    });
+  };
+
+  /**
+   * Reject a suggested name.
+   *
+   * The entry is removed rather than blanked, so the voice reads as unnamed
+   * again -- and remembered as rejected, so the next pass does not propose the
+   * same name straight back.
+   */
+  const handleReject = (row) => {
+    const nextIdentities = { ...identities.identities };
+    delete nextIdentities[row.key];
+    const rejected = { ...(identities.rejected || {}) };
+    rejected[row.key] = [...new Set([...(rejected[row.key] || []), row.name])];
+    return write({ ...identities, identities: nextIdentities, rejected });
   };
 
   const handleToggleLock = (row) => {
@@ -249,6 +403,26 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly
       headerActions={
         <SpaceBetween direction="horizontal" size="xs">
           {saving && <StatusIndicator type="loading">Saving</StatusIndicator>}
+          {!saving && identifyStatus && (
+            // Announced, because the outcome of pressing the button -- especially
+            // "nothing names them yet" -- is the whole feedback for that action.
+            // Through nativeAttributes: Cloudscape's Box accepts neither `role`
+            // nor `ariaLive` as a prop, so passing them directly dropped both
+            // and no live region ever reached the DOM.
+            <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+              <StatusIndicator type={identifyStatus.type}>{identifyStatus.text}</StatusIndicator>
+            </Box>
+          )}
+          {onIdentify && (
+            <Button
+              iconName="search"
+              loading={identifying}
+              disabled={readOnly || saving}
+              onClick={() => runIdentify(true)}
+            >
+              Identify speakers
+            </Button>
+          )}
           <ButtonDropdown
             items={[
               { text: 'Paste attendee list', id: 'attendees', iconName: 'add-plus' },
@@ -288,6 +462,8 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, readOnly
                 onRename={handleRename}
                 onMerge={handleMerge}
                 onToggleLock={handleToggleLock}
+                onConfirm={handleConfirm}
+                onReject={handleReject}
                 disabled={readOnly || saving}
               />
               {row.mergedKeys.length > 0 && !readOnly && (

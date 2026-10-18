@@ -41,6 +41,21 @@ KINESIS_CLIENT: KinesisClient = BOTO3_SESSION.client("kinesis")
 
 TRANSCRIPT_SUMMARY_FUNCTION_ARN = getenv("TRANSCRIPT_SUMMARY_FUNCTION_ARN", "")
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
+SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
+
+# Its own client, because the defaults are wrong for this one call. The resolver
+# can run for its whole timeout, and the shared client's 60s socket timeout plus
+# three retries would turn one slow pass into four complete passes -- four model
+# calls, four writes racing each other. One attempt, and a socket timeout the
+# callee cannot outlive.
+SPEAKER_NAME_CLIENT_CONFIG = BotoCoreConfig(
+    read_timeout=int(getenv("SPEAKER_NAME_READ_TIMEOUT", "75")),
+    retries={"mode": "standard", "max_attempts": 1},
+)
+SPEAKER_NAME_CLIENT: LambdaClient = BOTO3_SESSION.client(
+    "lambda",
+    config=SPEAKER_NAME_CLIENT_CONFIG,
+)
 
 
 def get_call_summary(message: Dict[str, Any]):
@@ -84,6 +99,40 @@ def write_call_summary_to_kds(message: Dict[str, Any]):
     return
 
 
+def name_speakers(call_id: str) -> None:
+    """Name the separated voices before the transcript is summarised.
+
+    Synchronous and ordered ahead of the summary on purpose: the summary reads
+    the transcript through FetchTranscript, which resolves stored speaker names,
+    so running this first is what gets "Sarah Lee" into the summary instead of
+    "Other Participant (spk_0)".
+
+    This runs off the Kinesis path -- this function is itself invoked
+    asynchronously -- so a slow model call delays only this meeting's summary and
+    does not hold up live transcription for anybody.
+
+    Naming is an enhancement; a summary must still be produced if it fails.
+    """
+    if not SPEAKER_NAME_RESOLVER_ARN or not call_id:
+        return
+    try:
+        SPEAKER_NAME_CLIENT.invoke(
+            FunctionName=SPEAKER_NAME_RESOLVER_ARN,
+            InvocationType="RequestResponse",
+            # Marks this as the once-per-meeting pass, which skips the
+            # cooldown and the "has anybody spoken since" gate -- both of those
+            # exist to pace a browser timer, and this is the pass the summary
+            # depends on.
+            Payload=json.dumps({"CallId": call_id, "Trigger": "meeting-end"}),
+        )
+        LOGGER.debug("Ran the speaker name resolver before summarising")
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Speaker naming failed; summarising with whatever names are stored",
+            extra=dict(call_id=call_id),
+        )
+
+
 @LOGGER.inject_lambda_context
 def handler(event, context: LambdaContext):
     # pylint: disable=unused-argument
@@ -91,6 +140,8 @@ def handler(event, context: LambdaContext):
     LOGGER.debug("Transcript summary lambda event", extra={"event": event})
 
     data = json.loads(json.dumps(event))
+
+    name_speakers(data.get("CallId", ""))
 
     call_summary = get_call_summary(message=data)
 
