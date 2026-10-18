@@ -84,6 +84,7 @@ POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN = getenv(
 )
 
 ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN = getenv("ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN", "")
+SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
 IS_TRANSCRIPT_SUMMARY_ENABLED = getenv("IS_TRANSCRIPT_SUMMARY_ENABLED", "false").lower() == "true"
 
 ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN", "")
@@ -1366,6 +1367,25 @@ async def execute_process_event_api_mutation(
         # would skip the summary on the retry and the meeting would end with no
         # summary at all. Ordering it ahead of the status mutation makes the worst
         # case a duplicate summary rather than a missing one.
+        # Name the separated voices before the summary is triggered, so the
+        # summary reads "Sarah Lee" rather than "Other Participant (spk_0)".
+        # Synchronous for that ordering, and wrapped because naming is an
+        # enhancement: a meeting must still close if a model call fails. The
+        # function also swallows its own errors, so this is belt and braces.
+        if SPEAKER_NAME_RESOLVER_ARN and not was_already_ended:
+            try:
+                LAMBDA_HOOK_CLIENT.invoke(
+                    FunctionName=SPEAKER_NAME_RESOLVER_ARN,
+                    InvocationType="RequestResponse",
+                    Payload=json.dumps({"CallId": message.get("CallId")}),
+                )
+                LOGGER.debug("END Event: ran the speaker name resolver")
+            except Exception:  # pylint: disable=broad-except
+                LOGGER.exception(
+                    "END Event: speaker naming failed; continuing to close the meeting",
+                    extra=dict(call_id=message.get("CallId")),
+                )
+
         if IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended:
             LAMBDA_HOOK_CLIENT.invoke(
                 FunctionName=ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN,

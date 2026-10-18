@@ -10,6 +10,7 @@ title: "Transcription & Translation"
 - [Speaker Attribution](#speaker-attribution)
   - [Speaker Identification within a Channel](#speaker-identification-within-a-channel)
   - [Naming the Voices](#naming-the-voices)
+    - [Finding the names automatically](#finding-the-names-automatically)
 - [Language Configuration](#language-configuration)
   - [Single Language](#single-language)
   - [Automatic Single Language Identification](#automatic-single-language-identification)
@@ -122,7 +123,52 @@ you name speakers *after* the summary has run, regenerate the summary to refresh
 it. The transcript on the meeting page, the download, and the assistant's
 questions about the current meeting are all live and need no such step.
 
-The panel also offers:
+### Finding the names automatically
+
+Most meetings start with people saying who they are, to each other rather than to
+any assistant. **Identify speakers** in the Speakers panel reads the transcript
+and looks for exactly that, so a meeting where everyone introduced themselves can
+often be named without typing anything.
+
+It also runs by itself: every 45 seconds while a meeting is live and voices remain
+unnamed, and once more when the meeting ends — the end-of-meeting pass is the most
+accurate, because it sees the whole transcript, and it runs before the summary so
+the summary reads names rather than voice ids. The in-meeting passes only happen
+while somebody has the meeting page open, which is also the only time watching a
+name appear is worth anything; a meeting nobody watched is covered by the
+end-of-meeting pass.
+
+Two kinds of evidence are used, and they are **not** treated the same way:
+
+| Evidence | Example | What happens |
+|---|---|---|
+| Someone says who they are | "Hi everyone, I'm Sarah Lee, I run the platform team" | Applied as a name |
+| Someone is addressed by name | "That's a good point, Sarah" | Offered as a **suggestion** to confirm |
+
+The difference matters. A self-introduction is the speaker naming themselves, which
+is about as unambiguous as evidence gets. Being addressed by name identifies
+whoever spoke the *previous* turn, which depends on the turn boundaries being
+right — and speaker separation does sometimes absorb the first seconds of one
+person's turn into the previous speaker's. So that inference is only ever
+suggested, never applied: a suggested name is shown with a dotted underline in the
+transcript and a **suggested** marker in the panel, with **Confirm** and **Not
+\<name\>** beside it. Rejecting a name also stops it being suggested again.
+
+Names you typed yourself, and names you have locked, are never changed by an
+automatic pass.
+
+Nothing a model returns is taken at face value. It is asked only for a name, which
+kind of evidence supports it, and which numbered turn that evidence is in; the
+attribution is then recomputed from the transcript itself. A name attached to the
+wrong voice, a turn that does not exist, or a non-name like "Speaker 1" is
+discarded rather than applied. A third-party mention — "Bob said yesterday
+that…" — names nobody.
+
+The pass is skipped entirely when no new speech could name anybody, so an
+ordinary meeting does not spend model calls reading the same transcript over and
+over. Pressing the button overrides that.
+
+### The panel also offers
 
 - **Merge** -- fold one voice into another when the engine split a single person
   across two ids. Naming both rows without merging would leave two rows with the

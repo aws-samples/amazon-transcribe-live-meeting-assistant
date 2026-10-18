@@ -44,6 +44,9 @@ export const emptyIdentities = () => ({
   identities: {},
   merges: {},
   segmentOverrides: {},
+  // Names a user has rejected for a voice, so an automatic pass does not propose
+  // the same one straight back. Keyed the same way as `identities`.
+  rejected: {},
 });
 
 /**
@@ -91,6 +94,7 @@ export const parseSpeakerIdentities = (raw) => {
     merges: source.merges && typeof source.merges === 'object' ? source.merges : {},
     segmentOverrides:
       source.segmentOverrides && typeof source.segmentOverrides === 'object' ? source.segmentOverrides : {},
+    rejected: source.rejected && typeof source.rejected === 'object' ? source.rejected : {},
   };
 };
 

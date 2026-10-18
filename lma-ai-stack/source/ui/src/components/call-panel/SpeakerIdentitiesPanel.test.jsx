@@ -53,15 +53,26 @@ const ITEM = { callId: 'c1', callerPhoneNumber: 'Conference Room 3', speakerIden
 
 let onSave;
 
-const renderPanel = ({ item = ITEM, segments = SEGMENTS, readOnly = false } = {}) => {
+let onIdentify;
+
+const renderPanel = ({
+  item = ITEM,
+  segments = SEGMENTS,
+  readOnly = false,
+  identifyResult = { Success: true, NamesApplied: 2 },
+  isLive = false,
+} = {}) => {
   onSave = vi.fn().mockResolvedValue(true);
+  onIdentify = vi.fn().mockResolvedValue(identifyResult);
   render(
     <SpeakerIdentitiesPanel
       item={item}
       segments={segments}
       setToolsOpen={() => {}}
       onSave={onSave}
+      onIdentify={onIdentify}
       readOnly={readOnly}
+      isLive={isLive}
     />,
   );
 };
@@ -203,6 +214,7 @@ describe('SpeakerIdentitiesPanel', () => {
       'candidates',
       'identities',
       'merges',
+      'rejected',
       'segmentOverrides',
       'version',
     ]);
@@ -218,5 +230,91 @@ describe('SpeakerIdentitiesPanel', () => {
   it('says so plainly when no voices have been heard yet', () => {
     renderPanel({ segments: [] });
     expect(screen.getByText(/No speakers yet/)).toBeTruthy();
+  });
+});
+
+describe('identifying speakers from the transcript', () => {
+  it('runs a forced pass when the button is pressed', async () => {
+    // Forced: a person asked, so answer them even if the backend's own shortcut
+    // would have skipped the model.
+    renderPanel();
+    fireEvent.click(screen.getByText('Identify speakers').closest('button'));
+    await waitFor(() => expect(onIdentify).toHaveBeenCalledWith({ force: true }));
+  });
+
+  it('says how many speakers were identified', async () => {
+    renderPanel({ identifyResult: { Success: true, NamesApplied: 2 } });
+    fireEvent.click(screen.getByText('Identify speakers').closest('button'));
+    await waitFor(() => expect(screen.getByText('Identified 2 speakers')).toBeTruthy());
+  });
+
+  it('says plainly when the transcript does not name anybody yet', async () => {
+    // The alternative is silence, which reads as a broken button.
+    renderPanel({ identifyResult: { Success: true, NamesApplied: 0 } });
+    fireEvent.click(screen.getByText('Identify speakers').closest('button'));
+    await waitFor(() => expect(screen.getByText(/Nothing in the transcript names them yet/)).toBeTruthy());
+  });
+
+  it('reports a failed pass', async () => {
+    renderPanel({ identifyResult: { Success: false, NamesApplied: 0 } });
+    fireEvent.click(screen.getByText('Identify speakers').closest('button'));
+    await waitFor(() => expect(screen.getByText('Could not identify speakers')).toBeTruthy());
+  });
+
+  it('offers no button to a user who may only read the meeting', () => {
+    renderPanel({ readOnly: true });
+    expect(screen.getByText('Identify speakers').closest('button').disabled).toBe(true);
+  });
+
+  it('does not start an automatic pass on an ended meeting', () => {
+    vi.useFakeTimers();
+    try {
+      renderPanel({ isLive: false });
+      vi.advanceTimersByTime(120000);
+      expect(onIdentify).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('a suggested name', () => {
+  const proposed = {
+    ...ITEM,
+    speakerIdentities: JSON.stringify({
+      identities: {
+        'CALLER#Other Participant (spk_0)': {
+          name: 'Bob Strahan',
+          status: 'proposed',
+          source: 'addressed-by-name',
+        },
+      },
+    }),
+  };
+
+  it('is marked as suggested rather than shown as settled', () => {
+    renderPanel({ item: proposed });
+    expect(screen.getByText('suggested')).toBeTruthy();
+  });
+
+  it("becomes the user's own name when confirmed", async () => {
+    // Recorded as manual, which is what stops a later pass revisiting it.
+    renderPanel({ item: proposed });
+    fireEvent.click(screen.getByText('Confirm'));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const entry = savedMap().identities['CALLER#Other Participant (spk_0)'];
+    expect(entry.status).toBe('confirmed');
+    expect(entry.source).toBe('manual');
+    expect(entry.name).toBe('Bob Strahan');
+  });
+
+  it('is removed and remembered when rejected', async () => {
+    // Remembered so an automatic pass cannot propose the same name straight back.
+    renderPanel({ item: proposed });
+    fireEvent.click(screen.getByText('Not Bob Strahan'));
+    await waitFor(() => expect(onSave).toHaveBeenCalled());
+    const map = savedMap();
+    expect(map.identities['CALLER#Other Participant (spk_0)']).toBeUndefined();
+    expect(map.rejected['CALLER#Other Participant (spk_0)']).toEqual(['Bob Strahan']);
   });
 });

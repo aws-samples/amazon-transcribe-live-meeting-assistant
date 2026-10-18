@@ -189,6 +189,7 @@ type Mutation @aws_iam {
 	updatePcaUrl(input: UpdatePcaUrlInput!): Call
 	updateAgent(input: UpdateAgentInput!): Call
 	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
+	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
 	addCallCategory(input: AddCallCategoryInput!): Call
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
@@ -636,6 +637,21 @@ input UpdatePcaUrlInput {
 input UpdateSpeakerIdentitiesInput {
 	CallId: ID!
 	SpeakerIdentities: String!
+}
+
+input ResolveSpeakerNamesInput {
+	CallId: ID!
+	# True when a user asked for this pass explicitly. An automatic pass skips the
+	# model when no new speech could name anybody; pressing the button answers the
+	# user regardless. Ignored for a caller without a Cognito identity.
+	Force: Boolean
+}
+
+type ResolveSpeakerNamesOutput @aws_cognito_user_pools
+@aws_iam {
+	Success: Boolean
+	Message: String
+	NamesApplied: Int
 }
 
 input ShareCallInput {

@@ -20,6 +20,7 @@ import onDeleteCall from '../graphql/queries/onDeleteCall';
 import onUnshareCall from '../graphql/queries/onUnshareCall';
 import getTranscriptSegments from '../graphql/queries/getTranscriptSegments';
 import updateSpeakerIdentities from '../graphql/queries/updateSpeakerIdentities';
+import resolveSpeakerNames from '../graphql/queries/resolveSpeakerNames';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
 
@@ -484,6 +485,30 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     }
   };
 
+  /**
+   * Ask the backend to infer speaker names for a meeting.
+   *
+   * Nothing is patched into state here: the resolver writes the names through
+   * updateSpeakerIdentities, so they arrive via onUpdateCall like any other
+   * rename and the transcript re-labels itself. Returns the backend's own count
+   * so the caller can say what happened.
+   */
+  const sendResolveSpeakerNames = async (callId, { force = false } = {}) => {
+    try {
+      const response = await client.graphql({
+        query: resolveSpeakerNames,
+        variables: { input: { CallId: callId, Force: force } },
+      });
+      return response?.data?.resolveSpeakerNames ?? { Success: false, NamesApplied: 0 };
+    } catch (error) {
+      logger.error('failed to resolve speaker names', error);
+      // Deliberately not surfaced as a global error for an automatic pass: it
+      // runs on a timer and a transient failure is not something the user asked
+      // for or can act on. The on-demand caller reports it itself.
+      return { Success: false, Message: 'request failed', NamesApplied: 0 };
+    }
+  };
+
   return {
     calls,
     callTranscriptPerCallId,
@@ -491,6 +516,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     getCallDetailsFromCallIds,
     sendGetTranscriptSegmentsRequest,
     sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)

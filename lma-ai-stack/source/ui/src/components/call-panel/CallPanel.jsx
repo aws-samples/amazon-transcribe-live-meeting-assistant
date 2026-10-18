@@ -501,7 +501,9 @@ const SpeakerRenamePopover = ({ segment, onRenameSpeaker, locked }) => {
       }
     >
       <Button variant="inline-link">
-        <strong>{segment.speaker}</strong>
+        <strong className={segment.speakerProposed ? 'transcript-speaker-proposed' : undefined}>
+          {segment.speaker}
+        </strong>
       </Button>
     </Popover>
   );
@@ -544,7 +546,9 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, o
             <SpeakerRenamePopover segment={segment} onRenameSpeaker={onRenameSpeaker} locked={segment.speakerLocked} />
           ) : (
             <TextContent>
-              <strong>{displayChannel}</strong>
+              <strong className={segment.speakerProposed ? 'transcript-speaker-proposed' : undefined}>
+                {displayChannel}
+              </strong>
             </TextContent>
           )}
           <TextContent>
@@ -806,6 +810,10 @@ const CallInProgressTranscript = ({
         );
         t.speaker = resolved.name;
         t.speakerLocked = resolved.locked;
+        // An inferred name that nobody has confirmed. Rendered differently
+        // below, because showing a guess as indistinguishable from a name a
+        // person typed is the one thing that would make this actively harmful.
+        t.speakerProposed = resolved.status === 'proposed';
 
         return t;
       })
@@ -1703,7 +1711,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
   const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
-  const { sendUpdateSpeakerIdentities } = useCallsContext();
+  const { sendUpdateSpeakerIdentities, sendResolveSpeakerNames } = useCallsContext();
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
   // rebuilds the entire transcript element list.
@@ -1756,6 +1764,11 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
       );
     },
     [speakerIdentities, item.callId, sendUpdateSpeakerIdentities],
+  );
+
+  const identifySpeakers = useCallback(
+    ({ force }) => sendResolveSpeakerNames(item.callId, { force }),
+    [item.callId, sendResolveSpeakerNames],
   );
 
   // Flattened final segments, for the Speakers panel's one-row-per-voice list.
@@ -2248,7 +2261,9 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         segments={transcriptSegmentsForCall}
         setToolsOpen={setToolsOpen}
         onSave={saveSpeakerIdentities}
+        onIdentify={identifySpeakers}
         readOnly={speakerNamesReadOnly}
+        isLive={item.recordingStatusLabel === IN_PROGRESS_STATUS}
       />
       <CallTranscriptContainer
         item={item}
