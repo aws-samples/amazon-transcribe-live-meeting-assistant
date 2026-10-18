@@ -913,3 +913,72 @@ def test_names_are_not_applied_unless_speaker_labels_are_requested(
     )
     response = index.lambda_handler({"CallId": CALL_ID}, None)
     assert response["transcript"] == "\nthe budget is fine"
+
+
+def test_the_local_channel_is_not_labelled_with_the_remote_participants_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Stream Audio form's name belongs to the remote side only.
+
+    A custom-KDS producer can write the placeholder speaker on either channel, so
+    an AGENT-channel segment can carry it too. Substituting the remote name there
+    would attribute the local microphone to the person on the other end -- and
+    the transcript download has always scoped this to CALLER, so doing otherwise
+    here made the exported transcript disagree with every summary.
+    """
+    install(
+        monkeypatch,
+        items=[
+            segment("from the room", 1, channel="CALLER", speaker="Other Participant"),
+            segment("from my mic", 2, channel="AGENT", speaker="Other Participant"),
+        ],
+        metadata={**METADATA, "CustomerPhoneNumber": "Conference Room 3"},
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == (
+        "\nConference Room 3: from the room\nOther Participant: from my mic"
+    )
+
+
+def test_a_name_on_a_merged_voice_covers_every_voice_merged_into_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming is stored on the merge target, so the whole group takes the name."""
+    install(
+        monkeypatch,
+        items=[
+            segment("first", 1, speaker="Other Participant (spk_0)"),
+            segment("second", 2, speaker="Other Participant (spk_1)"),
+            segment("third", 3, speaker="Other Participant (spk_4)"),
+        ],
+        metadata=metadata_with(
+            identities(
+                identities={"CALLER#Other Participant (spk_0)": {"name": "Bob"}},
+                merges={
+                    "CALLER#Other Participant (spk_1)": "CALLER#Other Participant (spk_0)",
+                    # A chain: spk_4 was merged into spk_1, which was merged into spk_0.
+                    "CALLER#Other Participant (spk_4)": "CALLER#Other Participant (spk_1)",
+                },
+            )
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob: first\nBob: second\nBob: third"
+
+
+def test_the_response_log_does_not_carry_the_transcript(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Everything returned here is meeting content; the counts are the useful part."""
+    install(
+        monkeypatch,
+        items=[segment("the acquisition closes on Friday", 1, speaker="Other Participant (spk_0)")],
+        metadata=metadata_with(
+            identities(identities={"CALLER#Other Participant (spk_0)": {"name": "Bob Strahan"}})
+        ),
+    )
+    index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    logged = capsys.readouterr().out
+    assert "Fetch Transcript response:" in logged
+    assert "acquisition closes" not in logged
+    assert "Bob Strahan" not in logged

@@ -10,6 +10,7 @@ import {
   emptyIdentities,
   formatTalkTime,
   hasMultipleVoicesOnAChannel,
+  identityKeyFor,
   parseAttendeeList,
   parseSpeakerIdentities,
   resolveMergeTarget,
@@ -83,6 +84,7 @@ describe('resolveSpeaker', () => {
       name: 'Bob Strahan',
       status: 'confirmed',
       overridden: false,
+      locked: false,
     });
   });
 
@@ -124,6 +126,7 @@ describe('resolveSpeaker', () => {
       name: 'Sarah Lee',
       status: 'confirmed',
       overridden: true,
+      locked: false,
     });
   });
 
@@ -134,6 +137,35 @@ describe('resolveSpeaker', () => {
 
   it('tolerates a missing map entirely', () => {
     expect(resolveSpeakerName(segment, undefined, 'Someone')).toBe('Someone (spk_0)');
+  });
+
+  it('does not read inherited object properties as names', () => {
+    // These maps come straight from JSON.parse, so a bare index would return an
+    // inherited value for a key like 'constructor' -- which is not a name and
+    // which React cannot render.
+    const odd = { ...emptyIdentities(), segmentOverrides: {} };
+    expect(resolveSpeakerName({ ...segment, segmentId: 'constructor' }, odd, 'Someone')).toBe('Someone (spk_0)');
+    expect(resolveMergeTarget('toString', {})).toBe('toString');
+  });
+});
+
+describe('identityKeyFor', () => {
+  it('is the segment key when nothing is merged', () => {
+    expect(identityKeyFor({ channel: 'CALLER', speaker: 'Other Participant (spk_0)' }, emptyIdentities())).toBe(
+      'CALLER#Other Participant (spk_0)',
+    );
+  });
+
+  it('is the MERGE TARGET once the voice has been merged', () => {
+    // Writing to the segment's own key instead would store an entry that
+    // resolution never reads, so the rename would silently do nothing.
+    const map = {
+      ...emptyIdentities(),
+      merges: { 'CALLER#Other Participant (spk_1)': 'CALLER#Other Participant (spk_0)' },
+    };
+    expect(identityKeyFor({ channel: 'CALLER', speaker: 'Other Participant (spk_1)' }, map)).toBe(
+      'CALLER#Other Participant (spk_0)',
+    );
   });
 });
 
@@ -172,6 +204,24 @@ describe('buildSpeakerRoster', () => {
     expect(roster).toHaveLength(2);
     expect(roster[0].turns).toBe(3);
     expect(roster[0].mergedKeys).toEqual(['CALLER#Other Participant (spk_1)']);
+  });
+
+  it('labels a merged row with the target voice, whichever order the segments arrive', () => {
+    // Segments are grouped per channel rather than sorted by time, so the
+    // merged-AWAY voice can be seen first. The row must still describe the voice
+    // the name is stored against.
+    const map = {
+      ...emptyIdentities(),
+      merges: { 'CALLER#Other Participant (spk_1)': 'CALLER#Other Participant (spk_0)' },
+    };
+    const spk1First = [
+      { channel: 'CALLER', speaker: 'Other Participant (spk_1)', startTime: 5, endTime: 7, isPartial: false },
+      { channel: 'CALLER', speaker: 'Other Participant (spk_0)', startTime: 0, endTime: 4, isPartial: false },
+    ];
+    const [merged] = buildSpeakerRoster(spk1First, map, 'Room 3');
+    expect(merged.key).toBe('CALLER#Other Participant (spk_0)');
+    expect(merged.voiceId).toBe('(spk_0)');
+    expect(merged.turns).toBe(2);
   });
 
   it('skips partials, which carry no voice id yet', () => {
@@ -249,20 +299,36 @@ describe('parseAttendeeList', () => {
 });
 
 describe('hasMultipleVoicesOnAChannel', () => {
-  // Decides whether the Speakers panel starts open: only where separation split a
-  // channel is there anything to disambiguate.
-  const row = (channel, key) => ({ channel, key });
+  // Decides whether the Speakers panel starts open: only an UNNAMED voice
+  // carrying an engine voice id is work the panel can do something about.
+  const unnamed = (channel, voiceId) => ({ channel, voiceId, name: '' });
+  const named = (channel, voiceId, name) => ({ channel, voiceId, name });
 
-  it('is true when one channel holds two voices', () => {
-    expect(hasMultipleVoicesOnAChannel([row('CALLER', 'a'), row('CALLER', 'b')])).toBe(true);
+  it('is true when one channel holds two unnamed voices', () => {
+    expect(hasMultipleVoicesOnAChannel([unnamed('CALLER', '(spk_0)'), unnamed('CALLER', '(spk_1)')])).toBe(true);
   });
 
   it('is false for one voice per channel, however many channels', () => {
-    expect(hasMultipleVoicesOnAChannel([row('CALLER', 'a'), row('AGENT', 'b')])).toBe(false);
+    expect(hasMultipleVoicesOnAChannel([unnamed('CALLER', '(spk_0)'), unnamed('AGENT', '(spk_0)')])).toBe(false);
+  });
+
+  it('is false once those voices have been named', () => {
+    // Re-opening a meeting whose speakers are all named should not reopen the
+    // panel as though nothing had been done.
+    expect(hasMultipleVoicesOnAChannel([named('CALLER', '(spk_0)', 'Bob'), named('CALLER', '(spk_1)', 'Sarah')])).toBe(
+      false,
+    );
+  });
+
+  it('is false for a Virtual Participant meeting, where voices already read as people', () => {
+    // A VP names from the meeting roster, so every row has a real name and no
+    // engine voice id. There is nothing to disambiguate.
+    const roster = ['Alice', 'Bob', 'Priya'].map((n) => ({ channel: 'CALLER', voiceId: '', name: n }));
+    expect(hasMultipleVoicesOnAChannel(roster)).toBe(false);
   });
 
   it('is false for a single voice and for no voices at all', () => {
-    expect(hasMultipleVoicesOnAChannel([row('CALLER', 'a')])).toBe(false);
+    expect(hasMultipleVoicesOnAChannel([unnamed('CALLER', '(spk_0)')])).toBe(false);
     expect(hasMultipleVoicesOnAChannel([])).toBe(false);
     expect(hasMultipleVoicesOnAChannel(undefined)).toBe(false);
   });

@@ -70,7 +70,9 @@ const SpeakerRow = ({ row, candidates, rosterRows, onRename, onMerge, onToggleLo
   const mergeOptions = [
     MERGE_PLACEHOLDER,
     ...rosterRows
-      .filter((other) => other.key !== row.key)
+      // Same channel only: the two channels are separate audio sources, and
+      // folding the local microphone into a remote voice is never meant.
+      .filter((other) => other.key !== row.key && other.channel === row.channel)
       .map((other) => ({
         label: other.name || `${other.defaultName} ${other.voiceId}`.trim(),
         value: other.key,

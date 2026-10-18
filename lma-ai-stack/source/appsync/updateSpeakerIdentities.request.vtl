@@ -30,6 +30,11 @@
 #set( $conditionValues = {} )
 #set( $condition = "attribute_exists(#PK)" )
 
+## `contains` over #SharedWith covers both shapes this attribute is stored in:
+## shareCall writes it from a [String] input (a DynamoDB List) while older rows
+## hold a comma-separated String. Verified against a live stack in both shapes --
+## a member is accepted, a non-member refused -- because the DynamoDB reference
+## documents `contains` for String substrings and Set members only.
 #if( $isCognitoUser && !$context.identity.groups.contains("Admin") )
   $util.qr( $conditionNames.put("#Owner", "Owner") )
   $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )

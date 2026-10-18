@@ -67,7 +67,14 @@ const CallDetails = () => {
     if (callsFiltered && callsFiltered?.length) {
       const callsMap = mapCallsAttributes([callsFiltered[0]], settings);
       const callDetails = callsMap[0];
-      if (callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt) {
+      // UpdatedAt advancing is the usual signal that a meeting changed, but it
+      // is not the only one: a speaker rename deliberately leaves UpdatedAt
+      // alone so it cannot interfere with the ordering guard the Kinesis
+      // pipeline's own Call updates rely on. Without the second test a rename
+      // would not reach the transcript until the page was reloaded.
+      const timestampAdvanced = callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt;
+      const speakerNamesChanged = call.speakerIdentities !== callDetails?.speakerIdentities;
+      if (timestampAdvanced || speakerNamesChanged) {
         logger.debug('Updating call', callDetails);
         setCall(callDetails);
       }

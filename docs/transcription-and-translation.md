@@ -114,6 +114,14 @@ read, so a rename is immediate and reversible, and it reaches the meeting
 summary, the Meeting Assistant and the transcript download as well as the screen.
 The underlying voice id is never overwritten.
 
+One path is a snapshot rather than a live read. When a meeting's summary is
+generated, the transcript of that moment is also written to S3 for the Bedrock
+Knowledge Base to ingest, and the Meeting Assistant's meeting-history search
+reads that copy. It carries whatever names were set when it was written, so if
+you name speakers *after* the summary has run, regenerate the summary to refresh
+it. The transcript on the meeting page, the download, and the assistant's
+questions about the current meeting are all live and need no such step.
+
 The panel also offers:
 
 - **Merge** -- fold one voice into another when the engine split a single person

@@ -106,15 +106,31 @@ export const serializeSpeakerIdentities = (identities) =>
  * than one hop: merging A into B and later B into C is a legitimate sequence, and
  * a cycle (however it got written) must terminate rather than hang the render.
  */
+const own = (map, key) =>
+  key !== undefined && Object.prototype.hasOwnProperty.call(map ?? {}, key) ? map[key] : undefined;
+
 export const resolveMergeTarget = (key, merges) => {
   let current = key;
   const seen = new Set([current]);
-  while (merges[current] && !seen.has(merges[current])) {
-    current = merges[current];
+  let next = own(merges, current);
+  while (next && !seen.has(next)) {
+    current = next;
     seen.add(current);
+    next = own(merges, current);
   }
   return current;
 };
+
+/**
+ * The key a name for this segment must be STORED under.
+ *
+ * Not the same as the segment's own key once voices have been merged: the name
+ * lives on the merge target, and resolution reads only the target. Writing to
+ * the segment's own key instead would succeed, change nothing on screen, and
+ * leave an entry the panel never shows.
+ */
+export const identityKeyFor = ({ channel, speaker }, identities) =>
+  resolveMergeTarget(speakerKey(channel, speaker), (identities ?? emptyIdentities()).merges);
 
 /**
  * Display name for one segment, and how much to trust it.
@@ -132,15 +148,17 @@ export const resolveMergeTarget = (key, merges) => {
 export const resolveSpeaker = ({ channel, speaker, segmentId }, identities, fallbackName) => {
   const map = identities ?? emptyIdentities();
 
-  const override = segmentId ? map.segmentOverrides[segmentId] : undefined;
+  const target = resolveMergeTarget(speakerKey(channel, speaker), map.merges);
+  const entry = own(map.identities, target);
+  const locked = entry?.locked === true;
+
+  const override = own(map.segmentOverrides, segmentId);
   if (override) {
-    return { name: override, status: 'confirmed', overridden: true };
+    return { name: override, status: 'confirmed', overridden: true, locked };
   }
 
-  const target = resolveMergeTarget(speakerKey(channel, speaker), map.merges);
-  const entry = map.identities[target];
   if (entry && entry.name) {
-    return { name: entry.name, status: entry.status ?? 'confirmed', overridden: false };
+    return { name: entry.name, status: entry.status ?? 'confirmed', overridden: false, locked };
   }
 
   // No mapping: today's behaviour, including the voice id, which is load-bearing.
@@ -148,9 +166,14 @@ export const resolveSpeaker = ({ channel, speaker, segmentId }, identities, fall
   // two people into one apparent speaker.
   const { base, suffix } = splitDiarizationLabel(speaker);
   if (base === DEFAULT_OTHER_SPEAKER_NAME || base === '') {
-    return { name: `${fallbackName || DEFAULT_OTHER_SPEAKER_NAME}${suffix}`, status: 'unnamed', overridden: false };
+    return {
+      name: `${fallbackName || DEFAULT_OTHER_SPEAKER_NAME}${suffix}`,
+      status: 'unnamed',
+      overridden: false,
+      locked,
+    };
   }
-  return { name: `${base}${suffix}`, status: 'unnamed', overridden: false };
+  return { name: `${base}${suffix}`, status: 'unnamed', overridden: false, locked };
 };
 
 /** Convenience wrapper for the call sites that only want the string. */
@@ -190,9 +213,25 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
       if (key !== target && !existing.mergedKeys.includes(key)) {
         existing.mergedKeys.push(key);
       }
+      if (key === target && !existing.describesTarget) {
+        // The row was created from a merged-away voice, because that voice was
+        // seen first -- segments are grouped per channel, not ordered by time.
+        // Now that the target's own segment has turned up, take the badge and
+        // placeholder from it, so the row is not labelled with the voice id of
+        // something that was folded into it.
+        const fromTarget = splitDiarizationLabel(segment.speaker);
+        existing.storedSpeaker = segment.speaker;
+        existing.voiceId = fromTarget.suffix.trim();
+        existing.defaultName =
+          fromTarget.base === DEFAULT_OTHER_SPEAKER_NAME || fromTarget.base === ''
+            ? fallbackName || DEFAULT_OTHER_SPEAKER_NAME
+            : fromTarget.base;
+        existing.channel = segment.channel;
+        existing.describesTarget = true;
+      }
       return;
     }
-    const entry = map.identities[target];
+    const entry = own(map.identities, target);
     const { base, suffix } = splitDiarizationLabel(segment.speaker);
     rows.set(target, {
       key: target,
@@ -211,6 +250,9 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
       talkTimeSeconds: duration,
       firstHeardAt: segment.startTime ?? 0,
       mergedKeys: key !== target ? [key] : [],
+      // False when the row was seeded from a voice that is merged INTO this one,
+      // meaning its display fields are still provisional.
+      describesTarget: key === target,
     });
   });
 
@@ -291,9 +333,16 @@ export const parseAttendeeList = (text) => {
  */
 export const hasMultipleVoicesOnAChannel = (roster) => {
   const perChannel = {};
-  (roster ?? []).forEach((row) => {
-    perChannel[row.channel] = (perChannel[row.channel] || 0) + 1;
-  });
+  (roster ?? [])
+    // A voice that already reads as a person needs no attention: a Virtual
+    // Participant meeting has one row per attendee under their real name, and
+    // starting expanded with a '(0/5)' counter there would claim there is work
+    // to do when there is none. Only an unnamed voice carrying an engine voice
+    // id counts.
+    .filter((row) => !row.name && row.voiceId)
+    .forEach((row) => {
+      perChannel[row.channel] = (perChannel[row.channel] || 0) + 1;
+    });
   return Object.values(perChannel).some((count) => count > 1);
 };
 

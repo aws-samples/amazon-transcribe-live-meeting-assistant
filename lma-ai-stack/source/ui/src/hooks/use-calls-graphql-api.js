@@ -443,7 +443,12 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
    * next reload silently loses it.
    */
   const sendUpdateSpeakerIdentities = async (callId, serializedIdentities) => {
-    const previous = calls.find((c) => c.CallId === callId)?.SpeakerIdentities;
+    // Captured from inside the updater, not from `calls` in the render closure:
+    // renaming two voices in quick succession (blurring one field straight into
+    // the next) runs both calls against the same stale `calls`, so a closure read
+    // would roll the second failure back to the state before the FIRST rename and
+    // drop a name that was in fact stored.
+    let previous;
     // Patch in place rather than via setCallsDeduped: that helper REPLACES the
     // stored call with the object handed to it, so a two-field payload would
     // strip the rest of the meeting's attributes out of state.
@@ -451,7 +456,10 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
       setCalls((currentCalls) =>
         currentCalls.map((c) => (c.CallId === callId ? { ...c, SpeakerIdentities: value } : c)),
       );
-    patch(serializedIdentities);
+    setCalls((currentCalls) => {
+      previous = currentCalls.find((c) => c.CallId === callId)?.SpeakerIdentities;
+      return currentCalls.map((c) => (c.CallId === callId ? { ...c, SpeakerIdentities: serializedIdentities } : c));
+    });
     try {
       await client.graphql({
         query: updateSpeakerIdentities,
@@ -460,7 +468,12 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
       return true;
     } catch (error) {
       logger.error('failed to update speaker identities', error);
-      setErrorMessage('failed to save speaker names - please try again later');
+      const refused = JSON.stringify(error?.errors ?? error ?? '').includes('condition failure');
+      setErrorMessage(
+        refused
+          ? 'you do not have permission to change speaker names on this meeting'
+          : 'failed to save speaker names - please try again later',
+      );
       patch(previous);
       return false;
     }

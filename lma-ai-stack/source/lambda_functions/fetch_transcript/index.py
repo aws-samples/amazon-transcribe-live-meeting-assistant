@@ -164,13 +164,19 @@ def resolve_merge_target(key, merges):
 
 
 def resolve_speaker_name(row, identities, fallback_name):
-    """Display name for one segment, applying the meeting's identity map."""
+    """Display name for one segment, applying the meeting's identity map.
+
+    Must agree with resolveSpeaker in the UI's speaker-identities.js for the same
+    inputs, including the fallback rules -- a divergence means the transcript on
+    screen and the transcript the summary prompts read disagree about who spoke.
+    """
     override = identities["segmentOverrides"].get(row.get("SegmentId"))
     if override:
         return override
 
     stored = row.get("Speaker") or ""
-    target = resolve_merge_target(speaker_key(row.get("Channel"), stored), identities["merges"])
+    channel = row.get("Channel")
+    target = resolve_merge_target(speaker_key(channel, stored), identities["merges"])
     entry = identities["identities"].get(target)
     if isinstance(entry, dict) and entry.get("name"):
         return entry["name"]
@@ -178,8 +184,16 @@ def resolve_speaker_name(row, identities, fallback_name):
     # No mapping. Keep the voice id: two voices on one channel differ only by it,
     # so dropping it would read as one person in every summary.
     base, suffix = split_diarization_label(stored)
-    if fallback_name and base in (DEFAULT_OTHER_SPEAKER_NAME, ""):
+    # The participant name from the Stream Audio form is the REMOTE side's name,
+    # so it substitutes only on the caller channel; applying it to the local
+    # microphone channel would label that channel with the wrong person.
+    if base == DEFAULT_OTHER_SPEAKER_NAME and channel == "CALLER" and fallback_name:
         return f"{fallback_name}{suffix}"
+    # A segment with no recorded speaker stays unlabelled, which is this
+    # function's long-standing contract: better an unattributed line than an
+    # invented one. This is the one place the UI resolver deliberately differs --
+    # it substitutes the channel's placeholder there, because a transcript row
+    # has to render something in its speaker column and a prompt line does not.
     return stored
 
 

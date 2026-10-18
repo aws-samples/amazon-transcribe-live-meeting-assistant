@@ -360,7 +360,11 @@ const EmbedTranscriptPanel = ({ item, callTranscriptPerCallId }) => {
         // speaker string never fired once a voice id was appended, and assigning
         // the bare name would have dropped the id that keeps two voices on one
         // channel apart.
-        t.speaker = resolveSpeakerName(t, speakerIdentities, item.callerPhoneNumber);
+        t.speaker = resolveSpeakerName(
+          t,
+          speakerIdentities,
+          t.channel === 'CALLER' ? item.callerPhoneNumber : undefined,
+        );
         return t;
       })
       .filter(
@@ -634,7 +638,12 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
     if (call) {
       const callsMap = mapCallsAttributes([matching], settings);
       const callDetails = callsMap[0];
-      if (callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt) {
+      // See the note in CallDetails.js: a speaker rename does not move
+      // UpdatedAt, so the embedded transcript needs the same second test to
+      // re-label without a reload.
+      const timestampAdvanced = callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt;
+      const speakerNamesChanged = call.speakerIdentities !== callDetails?.speakerIdentities;
+      if (timestampAdvanced || speakerNamesChanged) {
         setCall(callDetails);
         if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
           setLiveTranscriptCallId(callId);
