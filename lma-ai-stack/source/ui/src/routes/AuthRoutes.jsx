@@ -27,6 +27,7 @@ import TranscriptSummaryRoutes from './TranscriptSummaryRoutes';
 import UserManagementRoutes from './UserManagementRoutes';
 import EmbedRoutes from './EmbedRoutes';
 import VoiceEnrollmentRoutes from './VoiceEnrollmentRoutes';
+import VoiceEnrollmentAdminRoutes from './VoiceEnrollmentAdminRoutes';
 import ManualActionAlerts from '../components/virtual-participant-layout/ManualActionAlerts';
 
 import {
@@ -47,6 +48,7 @@ import {
   USER_MANAGEMENT_PATH,
   EMBED_PATH,
   VOICE_ENROLLMENT_PATH,
+  VOICE_ENROLLMENT_ADMIN_PATH,
 } from './constants';
 
 const logger = new ConsoleLogger('AuthRoutes');
@@ -95,6 +97,7 @@ const AuthRoutes = ({ redirectParam }) => {
         <Route path={`${USER_MANAGEMENT_PATH}/*`} element={<UserManagementRoutes />} />
         <Route path={`${EMBED_PATH}/*`} element={<EmbedRoutes />} />
         <Route path={`${VOICE_ENROLLMENT_PATH}/*`} element={<VoiceEnrollmentRoutes />} />
+        <Route path={`${VOICE_ENROLLMENT_ADMIN_PATH}/*`} element={<VoiceEnrollmentAdminRoutes />} />
         <Route path="*" element={<Navigate to={DEFAULT_PATH} replace />} />
       </Routes>
     </SettingsContext.Provider>

@@ -1765,6 +1765,10 @@ Resources:
         # bundle). The Transcription Engine page shows it, and the Stream Audio form only
         # reads the streaming-engine switch when it is true.
         AsrEngineAvailable: !If [ShouldEnableMicrovmAsr, "true", "false"]
+        # Whether this deployment has voice enrollment at all. The UI offers the
+        # consent portal and the invitation page only when it is true, since
+        # neither has anything to talk to otherwise.
+        VoiceEnrollmentAvailable: !If [HasVoiceEnrollment, "true", "false"]
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

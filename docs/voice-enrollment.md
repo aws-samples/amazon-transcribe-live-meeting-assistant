@@ -28,8 +28,10 @@ title: "Voice Enrollment (Speaker Recognition)"
 - [The consent model](#the-consent-model)
 - [What is stored, and where](#what-is-stored-and-where)
 - [The audit trail](#the-audit-trail)
+- [Inviting people to enrol](#inviting-people-to-enrol)
 - [Enrolling a voice](#enrolling-a-voice)
 - [How a match is used](#how-a-match-is-used)
+  - [Which voices a meeting is given](#which-voices-a-meeting-is-given)
 - [Withdrawing consent](#withdrawing-consent)
 - [Retention](#retention)
 - [Limits we hold deliberately](#limits-we-hold-deliberately)
@@ -129,6 +131,37 @@ re-consents.
 **Point-in-time recovery is on**, so the log can be restored to any moment in the
 retention window.
 
+## Inviting people to enrol
+
+Somebody who already has an LMA account can go straight to the portal at
+`#/voice-enrollment` and enrol themselves; they do not need to be invited, and no
+admin has to be involved.
+
+Inviting matters for everybody else — the participant from another company, the
+contractor in a meeting room — because they need an identity of their own before
+they can consent for themselves. **Configuration → Voice Enrollment** (admin
+only, and only present when `EnableVoiceEnrollment` is `true`) takes a list of
+email addresses, one per line or separated by commas; pasting a recipient line
+from a meeting invite works, and a `Sarah Lee <sarah@example.com>` form is
+reduced to the address. Each address is invited separately and reported
+separately, so one that cannot be invited does not cost the others theirs. If
+the deployment restricts sign-ups to one email domain, invitations are held to
+the same rule.
+
+An invitation creates a Cognito user in the `VoiceEnrollee` group, which can
+reach the enrollment portal and nothing else — no meetings and no configuration.
+Inviting somebody who already has an account is fine and common; it just records
+the ask.
+
+**An invitation is not a consent.** It creates the ability for somebody to
+decide, and records who asked them. Declining is a normal outcome and leaves
+nothing stored. There is no control on that page, and cannot be one, that
+enrolls anybody: the backend refuses a consent granted by anyone other than its
+subject.
+
+The page does not list who has enrolled. An enrollment is the enrollee's own
+record, and they manage it from the portal.
+
 ## Enrolling a voice
 
 The portal records a short, fixed script — enough speech for a stable voiceprint,
@@ -153,6 +186,30 @@ A match arrives in the transcript as a **suggestion**, not a settled name, with
 and a wrong match is one click to reject. It is treated exactly like a name
 inferred from the transcript: see
 [finding the names automatically](transcription-and-translation.md#finding-the-names-automatically).
+
+### Which voices a meeting is given
+
+A meeting cannot know who is in the room. A transcript captured from a browser
+tab or a desktop app has no attendee list — that is the whole reason the Speakers
+panel offers a pasted one — so a starting session is given every enrollment that
+consent currently permits, up to 32 of them. An enrollment counts only while all
+four of these hold: it is `active`, it has a voiceprint, its `TermsVersion` is
+the one in force, and its consent has not lapsed. The transcriber asks for the
+list at the start of every meeting and keeps no copy, so a withdrawal applies to
+the very next meeting.
+
+A voiceprint that is sent and never speaks does nothing. Matching is a
+similarity comparison against the voices actually heard, so sending somebody's
+centroid to a meeting they are not in produces no label for them.
+
+Where more than 32 enrollments are permitted, the most recently enrolled are
+sent; the rest of the meeting's voices are named the way they would be without
+enrollment. The bound exists so session setup stays quick, not as a limit on how
+many people may enrol.
+
+If the lookup fails or is slow, the meeting starts with voice ids instead. A
+transcript matters more than a label, so nothing about this step can stop a
+meeting being transcribed.
 
 ## Withdrawing consent
 

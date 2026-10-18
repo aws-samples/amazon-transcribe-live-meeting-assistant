@@ -19,6 +19,7 @@ import {
   ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
+  VOICE_ENROLLMENT_ADMIN_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -108,6 +109,18 @@ export const generateNavigationItems = (settings, isAdmin) => {
           text: 'User Management',
           href: `#${USER_MANAGEMENT_PATH}`,
         },
+        // Only offered where the deployment actually stores voiceprints; with
+        // enrollment off there is nobody to invite and no portal to invite them
+        // to.
+        ...(`${settings?.VoiceEnrollmentAvailable}` === 'true'
+          ? [
+              {
+                type: 'link',
+                text: 'Voice Enrollment',
+                href: `#${VOICE_ENROLLMENT_ADMIN_PATH}`,
+              },
+            ]
+          : []),
       ],
     });
   }
