@@ -139,10 +139,16 @@ def consent_record(
         "SubjectId": subject_id,
         "RecordedAt": recorded_at,
         "Action": action,
-        "TermsVersion": str(terms_version),
         "ActorSub": actor_sub,
         "ActorEmail": actor_email or "",
     }
+    # Omitted on the same terms as the hash below, and for the same reason: an
+    # admin may revoke for a subject who has no enrollment at all, and a row
+    # asserting which version they agreed to would be inventing one. Recording
+    # the deployment's current version there says something the row has no
+    # basis for, on a table that cannot be corrected afterwards.
+    if terms_version:
+        record["TermsVersion"] = str(terms_version)
     if terms_sha256:
         record["TermsSha256"] = terms_sha256
     elif terms_text:

@@ -356,7 +356,11 @@ def revoke_consent(event, who):
         pure.consent_record(
             subject_id=subject_id,
             action=pure.ACTION_REVOKED,
-            terms_version=(existing or {}).get("TermsVersion", TERMS_VERSION),
+            # What they agreed to, if anything is recorded. An admin may revoke
+            # for a subject with no enrollment row, and defaulting to the
+            # deployment's current version would assert something this row has
+            # no basis for.
+            terms_version=(existing or {}).get("TermsVersion") or "",
             # The terms the withdrawn consent was given to, not the ones in
             # force now: the row attests to what was withdrawn. A record saying
             # somebody withdrew consent to terms they never saw is worse than

@@ -101,7 +101,7 @@ at all**:
 | `SubjectId` (PK) | Who the record is about. |
 | `RecordedAt` (SK) | ISO timestamp, so the history is ordered and unique per event. |
 | `Action` | `GRANTED`, `RE_CONSENTED`, `REVOKED`, `EXPIRED`, `DELETED`. |
-| `TermsVersion`, `TermsSha256` | Which terms text, and its exact hash. |
+| `TermsVersion`, `TermsSha256` | Which terms text, and its exact hash. **Both are absent** where the row records no terms -- an admin revoking for somebody who never enrolled. An absent field means "not recorded"; a row never asserts terms it has no basis for. |
 | `ActorSub`, `ActorEmail` | The authenticated identity that performed the action. |
 | `SourceIp`, `UserAgent` | Where from. |
 

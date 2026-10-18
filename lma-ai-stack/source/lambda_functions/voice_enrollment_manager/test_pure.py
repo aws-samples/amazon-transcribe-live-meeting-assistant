@@ -601,3 +601,42 @@ def test_a_consent_row_still_records_a_hash_whenever_one_exists() -> None:
         recorded_at=NOW,
     )
     assert shown["TermsSha256"] == pure.terms_fingerprint("the words on screen")
+
+
+def test_a_consent_row_omits_the_terms_version_when_there_is_none_to_record() -> None:
+    """The same rule as the hash, on the same rows.
+
+    An admin may revoke for a subject who has no enrollment at all. A row
+    asserting which version they agreed to would be inventing one, on a table
+    that cannot be corrected afterwards.
+    """
+    row = pure.consent_record(
+        subject_id=ENROLLEE,
+        action=pure.ACTION_REVOKED,
+        terms_version="",
+        terms_text="",
+        actor_sub=ADMIN,
+        actor_email="admin@example.com",
+        recorded_at=NOW,
+    )
+    assert "TermsVersion" not in row
+    assert "TermsSha256" not in row
+    # The row still says who did what, when, and to whom -- which is the point.
+    assert row["Action"] == pure.ACTION_REVOKED
+    assert row["SubjectId"] == ENROLLEE
+    assert row["ActorSub"] == ADMIN
+
+
+def test_a_consent_row_records_the_version_whenever_one_is_known() -> None:
+    row = pure.consent_record(
+        subject_id=ENROLLEE,
+        action=pure.ACTION_REVOKED,
+        terms_version=2,
+        terms_text="",
+        terms_sha256="what-was-agreed",
+        actor_sub=ENROLLEE,
+        actor_email="e@x.com",
+        recorded_at=NOW,
+    )
+    assert row["TermsVersion"] == "2"
+    assert row["TermsSha256"] == "what-was-agreed"

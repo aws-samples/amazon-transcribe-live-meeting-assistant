@@ -309,3 +309,93 @@ def test_vp_live_join(client: LMAClient, request: pytest.FixtureRequest) -> None
         )
     finally:
         client.vp.end(result.id, reason="integ-test live cleanup")
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# 5. Voice enrollment consent lifecycle
+# ────────────────────────────────────────────────────────────────────────────
+
+def test_voice_enrollment_consent_lifecycle(client: LMAClient) -> None:
+    """Grant consent, enrol a voice, withdraw — and check what was STORED.
+
+    The reason this exists as an integration test rather than more unit tests:
+    no amount of review can establish that a consent row lands in DynamoDB,
+    that a MicroVM really computes a voiceprint from real audio, or that a
+    withdrawal really destroys it. The assertions are therefore about the
+    records, because the records are what the consent terms promise.
+
+    Skips cleanly when the deployment does not have voice enrollment: with
+    ``EnableVoiceEnrollment=false`` the tables and the portal do not exist at
+    all, which is the default and not a failure.
+
+    Opt-in on credentials like the streaming probe. Self-cleaning: it withdraws
+    at the end, which deletes the voiceprint it created.
+    """
+    if not cognito_test_user.available(client.region):
+        pytest.skip(f"no Cognito test user — {cognito_test_user.describe_sources()}")
+    try:
+        import pycognito  # noqa: F401
+    except ImportError:
+        pytest.skip("pycognito not installed (pip install -r integ-tests/requirements.txt)")
+
+    credentials = cognito_test_user.resolve(client.region)
+    assert credentials, "cognito_test_user.available() was true but resolve() returned nothing"
+    username, password = credentials
+
+    from voice_enrollment_probe import run_probe
+
+    observed = run_probe(client.stack_name, username, password, region=client.region)
+    if not observed["enabled"]:
+        pytest.skip(
+            f"{client.stack_name} has no voice-enrollment tables "
+            f"(EnableVoiceEnrollment=false, which is the default)"
+        )
+
+    # Consent, before any audio exists.
+    assert observed["granted"], f"grantVoiceConsent failed: {observed['grant_message']}"
+    assert not observed["voiceprint_before_audio"], (
+        "a voiceprint existed before any recording was sent — consent is supposed "
+        "to be recorded first, and nothing stored until samples arrive"
+    )
+
+    # The voiceprint itself. A failure here is usually the embedding path:
+    # enrolling needs EnableMicrovmAsr=true, because that engine computes the
+    # speaker embeddings and Amazon Transcribe exposes none.
+    assert observed["enrolled"], (
+        f"enrolMyVoice failed ({observed['enrol_message']}) after sending "
+        f"{observed['clips']} clips / {observed['seconds']}s. If it says the "
+        f"on-demand engine is missing, set EnableMicrovmAsr=true."
+    )
+    assert observed["status_after_enrol"] == "active", observed["status_after_enrol"]
+    assert observed["centroid_dimensions"] > 0, "no centroid was stored"
+    assert observed["enrollment_pins_terms"], (
+        "the enrollment does not record which terms were agreed to, so the "
+        "matching path cannot tell whether they have changed since"
+    )
+    assert not observed["audio_on_enrollment"], (
+        "audio was stored on the enrollment — the terms promise the recordings "
+        "are discarded"
+    )
+
+    # The audit trail.
+    assert "GRANTED" in observed["actions"] or "RE_CONSENTED" in observed["actions"], (
+        observed["actions"]
+    )
+    assert not observed["biometric_in_log"], (
+        "the consent log holds biometric data; the two-table split exists so a "
+        "withdrawal can destroy the voiceprint and keep the record"
+    )
+    assert not observed["empty_hash_in_log"], (
+        "a consent-log row records the SHA-256 of an empty string, which reads "
+        "as 'the terms shown were empty' rather than 'not recorded'"
+    )
+
+    # Withdrawal, and the way back.
+    assert observed["revoked"], "revokeVoiceConsent failed"
+    assert not observed["centroid_after_revoke"], "the voiceprint survived a withdrawal"
+    assert observed["status_after_revoke"] == "revoked", observed["status_after_revoke"]
+    assert "REVOKED" in observed["actions_after_revoke"], observed["actions_after_revoke"]
+    assert observed["terms_offered_again"], (
+        "no terms are offered after withdrawing, so enrolling again is impossible "
+        "— the terms say withdrawal is reversible"
+    )
