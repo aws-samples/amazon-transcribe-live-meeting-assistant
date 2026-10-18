@@ -29,6 +29,7 @@ from asr_server.diarization import (
     DiarizationConfig,
     DiarizingEngine,
     DiarizingRecognizer,
+    EnrolledVoice,
     SpeakerEmbedder,
     SpeakerEmbedderConfig,
     SpeakerRegistry,
@@ -1549,3 +1550,169 @@ def test_labels_off_still_cuts_a_row_at_the_open_segment_bound() -> None:
     assert finals[0].text == "one two three four"
     assert finals[0].speaker is None
     assert embedder.calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Seeding known voices (voice enrollment)
+#
+# A person who consented and recorded voice samples has a stored voiceprint, so
+# a session can be told about them up front. The property that matters is that
+# their speech is labelled with their NAME from the first word, rather than as
+# spk_0 until somebody names them -- and that seeding cannot corrupt the
+# session's own speaker assignment.
+# ---------------------------------------------------------------------------
+
+
+def test_an_enrolled_voice_is_recognised_from_the_first_utterance() -> None:
+    registry = SpeakerRegistry(threshold=0.5)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    assert registry.assign([0.98, 0.2]) == "Sarah Lee"
+
+
+def test_a_voice_unlike_any_enrolled_one_still_mints_a_new_label() -> None:
+    """Enrolment must not capture everybody who speaks."""
+    registry = SpeakerRegistry(threshold=0.5)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    assert registry.assign([0.0, 1.0]) == "spk_1"
+
+
+def test_two_enrolled_voices_are_told_apart() -> None:
+    registry = SpeakerRegistry(threshold=0.5)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    registry.enroll("Bob Strahan", [0.0, 1.0])
+    assert registry.assign([0.9, 0.1]) == "Sarah Lee"
+    assert registry.assign([0.1, 0.9]) == "Bob Strahan"
+
+
+def test_an_enrolled_voice_counts_toward_the_speaker_cap() -> None:
+    """A session told to expect two speakers and seeded with two voices must not
+    invent a third."""
+    registry = SpeakerRegistry(threshold=0.9, max_speakers=2)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    registry.enroll("Bob Strahan", [0.0, 1.0])
+    # Resembles neither, but the cap is reached, so the closest wins.
+    assigned = registry.assign([0.7, 0.72])
+    assert assigned in ("Sarah Lee", "Bob Strahan")
+    assert registry.num_speakers == 2
+
+
+def test_a_seeded_centroid_is_anchored_against_a_single_stray_utterance() -> None:
+    """At weight 1 one mis-assigned utterance would move the enrolled centroid as
+    much as the whole enrollment did."""
+    anchored = SpeakerRegistry(threshold=-1.0)
+    anchored.enroll("Sarah Lee", [1.0, 0.0], weight=10)
+    anchored.assign([0.0, 1.0])
+    drifted = SpeakerRegistry(threshold=-1.0)
+    drifted.enroll("Sarah Lee", [1.0, 0.0], weight=1)
+    drifted.assign([0.0, 1.0])
+    # Both drifted toward the stray vector; the anchored one far less.
+    assert anchored.centroid("Sarah Lee")[0] > drifted.centroid("Sarah Lee")[0]
+
+
+def test_an_enrolled_centroid_still_adapts_to_the_session() -> None:
+    """Same room, microphone and codec as the rest of the meeting, so it should
+    track -- just slowly."""
+    registry = SpeakerRegistry(threshold=0.5)
+    registry.enroll("Sarah Lee", [1.0, 0.0], weight=4)
+    before = registry.centroid("Sarah Lee")
+    registry.assign([0.9, 0.3])
+    assert registry.centroid("Sarah Lee") != before
+
+
+def test_minted_labels_cannot_collide_with_enrolled_ones() -> None:
+    registry = SpeakerRegistry(threshold=0.99)
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    registry.enroll("Bob Strahan", [0.0, 1.0])
+    minted = {registry.assign([0.6, 0.6]), registry.assign([-1.0, 0.0])}
+    assert not minted & {"Sarah Lee", "Bob Strahan"}
+
+
+def test_the_same_voice_cannot_be_enrolled_twice() -> None:
+    registry = SpeakerRegistry()
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    with pytest.raises(ValueError):
+        registry.enroll("Sarah Lee", [0.0, 1.0])
+
+
+def test_an_enrolled_centroid_of_the_wrong_dimension_is_refused() -> None:
+    """A different embedding model produced it, so it is not comparable."""
+    registry = SpeakerRegistry()
+    registry.enroll("Sarah Lee", [1.0, 0.0])
+    with pytest.raises(ValueError):
+        registry.enroll("Bob Strahan", [1.0, 0.0, 0.0])
+
+
+def test_an_empty_or_unlabelled_enrollment_is_refused() -> None:
+    registry = SpeakerRegistry()
+    with pytest.raises(ValueError):
+        registry.enroll("Sarah Lee", [])
+    with pytest.raises(ValueError):
+        registry.enroll("", [1.0, 0.0])
+    with pytest.raises(ValueError):
+        registry.enroll("Sarah Lee", [1.0, 0.0], weight=0)
+
+
+def test_an_enrolled_session_with_no_speech_leaves_the_voiceprint_untouched() -> None:
+    registry = SpeakerRegistry()
+    registry.enroll("Sarah Lee", [0.6, 0.8], weight=3)
+    assert registry.centroid("Sarah Lee") == pytest.approx([0.6, 0.8])
+
+
+def test_a_session_seeded_with_an_enrolled_voice_labels_it_by_name() -> None:
+    """End to end through the recognizer: somebody who consented and enrolled is
+    named from their first word, with no transcript evidence at all."""
+    inner = ScriptedRecognizer([[_final(0, "hello", 0.0, 1.0)]])
+    embedder = ScriptedEmbedder([VOICE_A])
+    rec = _recognizer(
+        inner,
+        embedder,
+        enrolled_voices=[EnrolledVoice(label="Sarah Lee", vector=tuple(VOICE_A))],
+    )
+
+    (event,) = rec.accept_pcm(_pcm(1.0))
+
+    assert event.speaker == "Sarah Lee"
+    assert event.text == "hello"
+
+
+def test_an_unenrolled_voice_in_a_seeded_session_still_gets_a_label() -> None:
+    """Enrolment must not capture everybody who happens to speak."""
+    inner = ScriptedRecognizer([[_final(0, "hello", 0.0, 1.0)]])
+    embedder = ScriptedEmbedder([VOICE_B])
+    rec = _recognizer(
+        inner,
+        embedder,
+        enrolled_voices=[EnrolledVoice(label="Sarah Lee", vector=tuple(VOICE_A))],
+    )
+
+    (event,) = rec.accept_pcm(_pcm(1.0))
+
+    assert event.speaker not in (None, "Sarah Lee")
+
+
+def test_an_unusable_enrolled_voice_is_skipped_rather_than_failing_the_session() -> None:
+    """Losing a name is a far smaller harm than losing the transcript."""
+    inner = ScriptedRecognizer([[_final(0, "hello", 0.0, 1.0)]])
+    embedder = ScriptedEmbedder([VOICE_A])
+    rec = _recognizer(
+        inner,
+        embedder,
+        enrolled_voices=[
+            EnrolledVoice(label="Broken", vector=()),
+            EnrolledVoice(label="Sarah Lee", vector=tuple(VOICE_A)),
+        ],
+    )
+
+    (event,) = rec.accept_pcm(_pcm(1.0))
+
+    assert event.speaker == "Sarah Lee"
+
+
+def test_a_session_with_no_enrolled_voices_behaves_exactly_as_before() -> None:
+    inner = ScriptedRecognizer([[_final(0, "hello", 0.0, 1.0)]])
+    embedder = ScriptedEmbedder([VOICE_A])
+    rec = _recognizer(inner, embedder)
+
+    (event,) = rec.accept_pcm(_pcm(1.0))
+
+    assert event.speaker == "spk_0"

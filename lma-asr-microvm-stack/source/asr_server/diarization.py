@@ -330,6 +330,44 @@ class SpeakerRegistry:
         self._pending = list(embedding)
         return False
 
+    def enroll(self, label: str, centroid: Sequence[float], *, weight: int = 1) -> None:
+        """Seed a KNOWN voice, so speech is assigned to a name from the first word.
+
+        Used for voice enrollment: a person who consented and recorded samples
+        has a stored voiceprint, and seeding it here means they are labelled
+        immediately rather than as ``spk_0`` until somebody names them.
+
+        ``weight`` is how many observations the seeded centroid counts as. It
+        anchors the identity: at weight 1 a single mis-assigned utterance from
+        the meeting would move the enrolled centroid as much as the enrollment
+        itself did, so an enrolled voice is worth more than one utterance. The
+        centroid still adapts to the session -- the same room, microphone and
+        codec as the rest of the meeting -- just more slowly.
+
+        Enrolled labels occupy the same namespace as minted ones and count
+        toward ``max_speakers``, so a session told to expect two speakers and
+        seeded with two voices will not invent a third.
+        """
+        if not label:
+            raise ValueError("an enrolled voice needs a label")
+        if label in self._sums:
+            raise ValueError(f"speaker {label!r} is already known to this registry")
+        if len(centroid) == 0:
+            raise ValueError("an enrolled voice needs a non-empty centroid")
+        if weight < 1:
+            raise ValueError("weight must be >= 1")
+        existing_dim = next((len(v) for v in self._sums.values()), None)
+        if existing_dim is not None and existing_dim != len(centroid):
+            # A different model produced this vector; refuse rather than
+            # silently compare incomparable things.
+            raise ValueError(
+                f"enrolled centroid dimension {len(centroid)} does not match "
+                f"this session's dimension {existing_dim}"
+            )
+        self._labels.append(label)
+        self._sums[label] = [value * weight for value in centroid]
+        self._counts[label] = weight
+
     def _mint(self, embedding: Sequence[float]) -> str:
         label = f"{_SPEAKER_PREFIX}{len(self._labels)}"
         self._labels.append(label)
@@ -369,6 +407,21 @@ class SpeakerEmbedderConfig:
     sample_rate: int = 16000
     num_threads: int = 1
     provider: str = "cpu"
+
+
+@dataclass(frozen=True)
+class EnrolledVoice:
+    """One known voice a session may be seeded with.
+
+    ``label`` is what appears in the transcript -- the name the person gave when
+    they enrolled -- and ``vector`` is their stored voiceprint. ``weight`` is how
+    many observations the seed counts as, anchoring the identity so a single
+    mis-assigned utterance cannot move it as far as the whole enrollment did.
+    """
+
+    label: str
+    vector: tuple[float, ...]
+    weight: int = 8
 
 
 @dataclass
@@ -612,6 +665,7 @@ class DiarizingRecognizer(Recognizer):
         max_open_segment_ms: int = 20000,
         min_turn_ms: int = 700,
         label_speakers: bool = True,
+        enrolled_voices: Sequence[EnrolledVoice] = (),
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
@@ -627,6 +681,22 @@ class DiarizingRecognizer(Recognizer):
             max_speakers=max_speakers,
             require_corroboration=require_corroboration,
         )
+        # Voices somebody consented to enrol are seeded before any audio
+        # arrives, so their speech carries their name from the first word rather
+        # than spk_0 until a human names it. A malformed seed is skipped rather
+        # than failing the session: losing a name is a far smaller harm than
+        # losing the transcript.
+        for voice in enrolled_voices or ():
+            try:
+                self._registry.enroll(
+                    voice.label, voice.vector, weight=voice.weight
+                )
+            except ValueError:
+                _LOG.warning(
+                    "Ignoring an unusable enrolled voice (label=%r, dim=%d)",
+                    voice.label,
+                    len(voice.vector),
+                )
         self._min_segment_samples = sample_rate * min_segment_ms // 1000
         # Hard ceiling on retained audio. A ``final`` prunes everything up to its
         # end, so this only bites if the inner engine never finalizes (e.g. a very
@@ -1240,6 +1310,7 @@ class DiarizingEngine(RecognizerEngine):
         turn_cut_interval_ms = self._config.turn_cut_interval_ms
         max_open_segment_ms = self._config.max_open_segment_ms
         sample_rate = self._config.embedder.sample_rate
+        enrolled_voices: tuple[EnrolledVoice, ...] = ()
         if config is not None:
             sample_rate = config.sample_rate
             if config.speaker_threshold is not None:
@@ -1258,6 +1329,12 @@ class DiarizingEngine(RecognizerEngine):
                 turn_cut_interval_ms = config.turn_cut_interval_ms
             if config.max_open_segment_ms is not None:
                 max_open_segment_ms = config.max_open_segment_ms
+            enrolled_voices = tuple(
+                EnrolledVoice(
+                    label=seed.label, vector=tuple(seed.vector), weight=seed.weight
+                )
+                for seed in config.enrolled_voices or ()
+            )
         label_speakers = config is None or config.diarize is not False
         return DiarizingRecognizer(
             inner_session,
@@ -1274,6 +1351,7 @@ class DiarizingEngine(RecognizerEngine):
             max_open_segment_ms=max_open_segment_ms,
             min_turn_ms=self._config.min_turn_ms,
             label_speakers=label_speakers,
+            enrolled_voices=enrolled_voices,
         )
 
 

@@ -81,6 +81,7 @@ from asr_server.offline_recognizer import (
 )
 from asr_server.protocol_adapter import ProtocolAdapter, WireMessage
 from asr_server.recognizer import (
+    EnrolledVoiceSeed,
     Recognizer,
     RecognizerEngine,
     SessionConfig,
@@ -490,6 +491,17 @@ class AsrSession:
                     live_turn_cut=config.live_turn_cut,
                     turn_cut_interval_ms=config.turn_cut_interval_ms,
                     max_open_segment_ms=config.max_open_segment_ms,
+                    # Voices a person consented to enrol, so their speech is
+                    # labelled with their name from the first word rather than
+                    # spk_0 until something names it.
+                    enrolled_voices=tuple(
+                        EnrolledVoiceSeed(
+                            label=voice.label,
+                            vector=tuple(voice.vector),
+                            weight=voice.weight,
+                        )
+                        for voice in config.enrolled_voices
+                    ),
                 )
                 self._recognizer = await asyncio.to_thread(
                     self._engine.new_session, session_config
