@@ -196,7 +196,7 @@ def test_consent_to_superseded_terms_stops_being_usable() -> None:
     """The terms changed, so what they agreed to is no longer what we do."""
     assert pure.is_usable_for_matching(active(), 2, NOW) is False
     assert pure.needs_reconsent(active(), 2) is True
-    assert pure.needs_reconsent(active(), 1) is False
+    assert pure.needs_reconsent(active(), 1, None, NOW) is False
 
 
 def test_consent_that_has_aged_out_stops_being_usable() -> None:
@@ -429,3 +429,96 @@ def test_a_consent_row_still_hashes_the_text_when_one_is_shown() -> None:
         recorded_at=NOW,
     )
     assert row["TermsSha256"] == pure.terms_fingerprint("the exact words shown")
+
+
+# --------------------------------------------------------------------------
+# Whenever storing is refused, the terms must be on offer
+#
+# The two are read by different layers -- may_store_voiceprint by the backend,
+# needs_reconsent by the portal -- so a state where one refuses while the other
+# reports nothing to do is a dead end with no way out of it. A pending row
+# waits indefinitely, which makes it the row most likely to be sitting there
+# when the terms move.
+# --------------------------------------------------------------------------
+
+CURRENT_WORDS = pure.terms_fingerprint("the words in force")
+
+
+def _states():
+    """Every state a record can be in, as the two layers see it."""
+    rows = {
+        "pending, terms moved": {"Status": "pending", "TermsSha256": "older"},
+        "pending, terms current": {"Status": "pending", "TermsSha256": CURRENT_WORDS},
+        "pending, version moved": {
+            "Status": "pending",
+            "TermsSha256": CURRENT_WORDS,
+            "TermsVersion": "0",
+        },
+        "active, terms moved": {
+            "Status": "active",
+            "TermsSha256": "older",
+            "ConsentExpiresAt": "2099-01-01T00:00:00Z",
+            "Centroid": [0.1],
+        },
+        "active, current": {
+            "Status": "active",
+            "TermsSha256": CURRENT_WORDS,
+            "ConsentExpiresAt": "2099-01-01T00:00:00Z",
+            "Centroid": [0.1],
+        },
+        "active, lapsed": {
+            "Status": "active",
+            "TermsSha256": CURRENT_WORDS,
+            "ConsentExpiresAt": "2000-01-01T00:00:00Z",
+            "Centroid": [0.1],
+        },
+        "active, no expiry": {
+            "Status": "active",
+            "TermsSha256": CURRENT_WORDS,
+            "Centroid": [0.1],
+        },
+        "revoked": {"Status": "revoked", "TermsSha256": CURRENT_WORDS},
+    }
+    for row in rows.values():
+        row.setdefault("SubjectId", ENROLLEE)
+        row.setdefault("TermsVersion", "1")
+        row.setdefault("DisplayName", "Sarah Lee")
+    return rows
+
+
+@pytest.mark.parametrize("name", sorted(_states()))
+def test_a_refusal_to_store_always_comes_with_a_way_to_consent_again(name) -> None:
+    row = _states()[name]
+    may_store = pure.may_store_voiceprint(row, 1, NOW, CURRENT_WORDS)
+    # What the portal computes: a standing consent hides the terms.
+    portal_hides_terms = row["Status"] in ("pending", "active") and not pure.needs_reconsent(
+        row, 1, CURRENT_WORDS, NOW
+    )
+    assert not (portal_hides_terms and not may_store), (
+        f"{name!r} is a dead end: the backend refuses to store a voiceprint and "
+        f"the portal offers no way to consent again."
+    )
+
+
+def test_a_pending_consent_to_superseded_words_is_asked_again() -> None:
+    """The row that waits indefinitely, so is likeliest to be stranded."""
+    assert pure.needs_reconsent(_states()["pending, terms moved"], 1, CURRENT_WORDS, NOW) is True
+
+
+def test_a_pending_consent_to_the_current_words_is_not_disturbed() -> None:
+    """Somebody mid-enrolment must not be sent back to the terms for no reason."""
+    assert (
+        pure.needs_reconsent(_states()["pending, terms current"], 1, CURRENT_WORDS, NOW) is False
+    )
+
+
+def test_a_pending_row_is_not_treated_as_expired_for_having_no_expiry() -> None:
+    """Nothing is stored yet, so there is nothing to have expired."""
+    pending = _states()["pending, terms current"]
+    assert "ConsentExpiresAt" not in pending
+    assert pure.needs_reconsent(pending, 1, CURRENT_WORDS, NOW) is False
+
+
+def test_a_withdrawn_record_is_not_asked_to_re_consent() -> None:
+    """It already gets the terms, by virtue of having no standing consent."""
+    assert pure.needs_reconsent(_states()["revoked"], 1, CURRENT_WORDS, NOW) is False

@@ -142,7 +142,15 @@ def handler(event, context):  # pylint: disable=unused-argument
             if row.get("Status") == pure.STATUS_ACTIVE
         }
         current = pure.terms_fingerprint(terms_text())
-        if agreed and current not in agreed:
+        if agreed == {None}:
+            # Written before the terms hash was recorded on the enrollment, so
+            # there is nothing to compare. Saying "check your environment"
+            # here would point the reader at the wrong thing entirely.
+            LOGGER.warning(
+                "Active enrollments record no agreed terms, so none can be used. "
+                "They predate that field and their owners must enrol again."
+            )
+        elif agreed and current not in agreed:
             LOGGER.warning(
                 "No enrollment agrees with the terms this function computes. "
                 "Check VOICE_ENROLLMENT_RETENTION_DAYS and "

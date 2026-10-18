@@ -342,13 +342,21 @@ def may_store_voiceprint(
 def needs_reconsent(
     enrollment, current_terms_version, current_terms_sha256=None, now_iso=None
 ):
-    """An active enrollment whose consent is to superseded terms.
+    """An enrollment whose consent no longer stands, and whose owner must agree again.
 
     Superseded by either a version bump or an edit to the words, for the reason
     given in :func:`is_usable_for_matching`: the retention period appears in the
     text, so the two can diverge.
+
+    **Pending rows count, not only active ones.** A consent that was granted but
+    whose voice was never recorded waits indefinitely -- it has no expiry -- so
+    it is the row most likely to be sitting there when the terms move. If this
+    returned False for it, the portal would decide its owner had already
+    consented and hide the terms, while ``may_store_voiceprint`` refused every
+    recording they made with advice they had no way to act on. A gate without a
+    door.
     """
-    if not enrollment or enrollment.get("Status") != STATUS_ACTIVE:
+    if not enrollment or enrollment.get("Status") not in (STATUS_PENDING, STATUS_ACTIVE):
         return False
     if str(enrollment.get("TermsVersion")) != str(current_terms_version):
         return True
@@ -361,7 +369,9 @@ def needs_reconsent(
     # the past, and offered them no way to put it right.
     expires_at = enrollment.get("ConsentExpiresAt")
     if not expires_at:
-        return True
+        # A pending row legitimately has none: nothing has been stored yet, so
+        # there is nothing to expire. Only an active row is suspect without one.
+        return enrollment.get("Status") == STATUS_ACTIVE
     return _parse(expires_at) <= _parse(now_iso or _iso(datetime.now(timezone.utc)))
 
 

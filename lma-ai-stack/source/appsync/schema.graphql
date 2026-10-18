@@ -645,8 +645,8 @@ input UpdatePcaUrlInput {
 #
 # A voiceprint is biometric data, so consent is first-party: the enrollee
 # authenticates as themselves and performs the consent in their own session. An
-# admin can revoke; only the enrollee can grant, and no field here enrols
-# anybody. These fields are served only in a deployment with
+# admin can revoke; only the enrollee can grant, and no field here lets
+# anyone enrol somebody else. These fields are served only in a deployment with
 # EnableVoiceEnrollment=true -- the schema advertises them regardless, so a
 # deployment without it resolves them to null.
 # ----------------------------------------------------------------------------

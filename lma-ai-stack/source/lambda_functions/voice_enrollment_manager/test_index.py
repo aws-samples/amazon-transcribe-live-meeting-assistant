@@ -669,3 +669,44 @@ def test_the_portal_asks_again_when_a_consent_has_aged_out(
     )
     result = index.handler(event("voiceEnrollmentTerms"), None)
     assert result["NeedsReconsent"] is True
+
+
+def test_a_withdrawal_records_the_terms_that_were_withdrawn_from(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Not the terms in force now.
+
+    A row saying somebody withdrew consent to terms they never saw is worse
+    than one saying nothing about the text.
+    """
+    ddb = install(
+        monkeypatch,
+        enrollment=consented(status="active", TermsSha256={"S": "what-they-agreed-to"}),
+    )
+    index.handler(
+        {
+            "info": {"fieldName": "revokeVoiceConsent"},
+            "identity": {"sub": ENROLLEE, "groups": [], "claims": {"email": "e@x.com"}},
+            "arguments": {"input": {}},
+        },
+        None,
+    )
+    revoked = [r for r in ddb.consent_rows() if r["Action"]["S"] == "REVOKED"]
+    assert revoked, [r["Action"]["S"] for r in ddb.consent_rows()]
+    assert revoked[0]["TermsSha256"]["S"] == "what-they-agreed-to"
+
+
+def test_destroying_a_voiceprint_records_the_terms_it_was_created_under(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ddb = install(
+        monkeypatch,
+        enrollment=consented(
+            status="active", terms="0", TermsSha256={"S": "the-older-words"}
+        ),
+    )
+    index.handler(event("grantVoiceConsent"), None)
+    deleted = [r for r in ddb.consent_rows() if r["Action"]["S"] == "DELETED"]
+    assert deleted, [r["Action"]["S"] for r in ddb.consent_rows()]
+    assert deleted[0]["TermsSha256"]["S"] == "the-older-words"
+    assert deleted[0]["TermsSha256"]["S"] != index.pure.terms_fingerprint("")

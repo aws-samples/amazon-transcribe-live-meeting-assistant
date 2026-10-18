@@ -156,6 +156,9 @@ const VoiceEnrollmentPage = () => {
   // terms say withdrawing is reversible, and the retention pass puts everybody
   // in this state eventually.
   const consented = ['pending', 'active'].includes(status) && !state?.NeedsReconsent;
+  // Whether the consent ran out, as distinct from the terms having moved. Both
+  // raise NeedsReconsent, and they need different words.
+  const lapsed = Boolean(state?.ConsentExpiresAt) && new Date(state.ConsentExpiresAt) <= new Date();
 
   const giveConsent = async () => {
     setBusy(true);
@@ -331,9 +334,15 @@ const VoiceEnrollmentPage = () => {
         )}
 
         {state?.NeedsReconsent && (
-          <Alert type="info" header="The terms have changed">
-            What you agreed to before is not what this deployment does now, so your voiceprint is not being used. Read
-            the terms below and decide again.
+          /* Two different reasons reach this flag, and telling somebody their
+             terms changed when their consent simply ran out is telling them
+             something untrue about why they are being asked again. */
+          <Alert type="info" header={lapsed ? 'Your consent has expired' : 'The terms have changed'}>
+            {lapsed
+              ? `Consent lasts a fixed period and yours has run out, so your voiceprint is no longer
+                 being used. Read the terms below and decide again.`
+              : `What you agreed to before is not what this deployment does now, so your voiceprint is
+                 not being used. Read the terms below and decide again.`}
           </Alert>
         )}
 

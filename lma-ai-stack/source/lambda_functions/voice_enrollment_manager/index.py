@@ -233,7 +233,11 @@ def grant_consent(event, who):
                 subject_id=subject_id,
                 action=pure.ACTION_DELETED,
                 terms_version=(existing or {}).get("TermsVersion", TERMS_VERSION),
+                # The terms the destroyed voiceprint was created under, not the
+                # ones in force now. Hashing "" would record e3b0c442... on
+                # every such row, which reads as "the terms shown were empty".
                 terms_text="",
+                terms_sha256=(existing or {}).get("TermsSha256") or None,
                 actor_sub=who["sub"],
                 actor_email=who["email"],
                 recorded_at=_now(),
@@ -353,7 +357,12 @@ def revoke_consent(event, who):
             subject_id=subject_id,
             action=pure.ACTION_REVOKED,
             terms_version=(existing or {}).get("TermsVersion", TERMS_VERSION),
-            terms_text=terms_text(),
+            # The terms the withdrawn consent was given to, not the ones in
+            # force now: the row attests to what was withdrawn. A record saying
+            # somebody withdrew consent to terms they never saw is worse than
+            # one saying nothing about the text at all.
+            terms_text="",
+            terms_sha256=(existing or {}).get("TermsSha256") or None,
             actor_sub=who["sub"],
             actor_email=who["email"],
             recorded_at=_now(),
