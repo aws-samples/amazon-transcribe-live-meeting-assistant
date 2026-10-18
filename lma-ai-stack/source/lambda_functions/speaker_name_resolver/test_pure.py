@@ -52,6 +52,8 @@ MEETING = [
     seg("Other Participant (spk_1)", 5, "I own the data ingestion side of things"),
     seg("Other Participant (spk_0)", 10, "We are on track for the October release"),
     seg("Other Participant (spk_1)", 15, "That is a good point, Sarah, I agree"),
+    seg("Other Participant (spk_0)", 20, "Thanks Sarah Lee, that is settled then"),
+    seg("Other Participant (spk_1)", 25, "Just to be clear, I'm Sarah Lee as well"),
 ]
 
 
@@ -72,7 +74,7 @@ def test_turns_are_numbered_in_spoken_order() -> None:
     """Turn numbers are what attribution is recomputed from, so the order is
     load-bearing rather than cosmetic."""
     numbered = [(t["turn"], t["key"]) for t in turns()]
-    assert numbered == [(1, SPK0), (2, SPK1), (3, SPK0), (4, SPK1)]
+    assert numbered == [(1, SPK0), (2, SPK1), (3, SPK0), (4, SPK1), (5, SPK0), (6, SPK1)]
 
 
 def test_turn_order_does_not_depend_on_the_order_segments_were_stored() -> None:
@@ -84,7 +86,10 @@ def test_turn_order_does_not_depend_on_the_order_segments_were_stored() -> None:
 def test_segments_sharing_a_start_time_are_ordered_deterministically() -> None:
     """Two passes over the same data must number turns identically, or the model's
     cited turn number would point somewhere else on verification."""
-    tied = [seg("A (spk_0)", 1, "first", segment_id="b"), seg("A (spk_1)", 1, "second", segment_id="a")]
+    tied = [
+        seg("A (spk_0)", 1, "first", segment_id="b"),
+        seg("A (spk_1)", 1, "second", segment_id="a"),
+    ]
     first = [t["segment_id"] for t in pure.build_turns(tied)]
     second = [t["segment_id"] for t in pure.build_turns(list(reversed(tied)))]
     assert first == second
@@ -178,7 +183,8 @@ def test_on_demand_overrides_the_heuristic() -> None:
 
 def test_a_self_introduction_names_the_speaker_of_that_turn() -> None:
     key, evidence = pure.attribute(
-        {"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"}, by_number()
+        {"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"},
+        by_number(),
     )
     assert key == SPK0
     assert evidence["turn"] == 1
@@ -186,7 +192,9 @@ def test_a_self_introduction_names_the_speaker_of_that_turn() -> None:
 
 def test_being_addressed_names_the_PREVIOUS_speaker_not_the_one_talking() -> None:
     """'That is a good point, Sarah' is said by spk_1 about spk_0."""
-    key, _ = pure.attribute({"basis": pure.ADDRESSED_BY_NAME, "turn": 4}, by_number())
+    key, _ = pure.attribute(
+        {"basis": pure.ADDRESSED_BY_NAME, "label": SPK0, "turn": 4}, by_number()
+    )
     assert key == SPK0
 
 
@@ -309,7 +317,15 @@ def test_a_self_introduction_is_applied_as_confirmed() -> None:
     """The speaker said their own name; that is as good as evidence gets."""
     updated, applied = pure.apply_proposals(
         empty(),
-        [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee", "quote": "I'm Sarah Lee"}],
+        [
+            {
+                "basis": pure.SELF_INTRODUCTION,
+                "label": SPK0,
+                "turn": 1,
+                "name": "Sarah Lee",
+                "quote": "I'm Sarah Lee",
+            }
+        ],
         turns(),
         NOW,
     )
@@ -328,7 +344,10 @@ def test_being_addressed_is_only_ever_proposed() -> None:
     """This inference rides on the turn boundaries being right, and in live
     testing they were not always, so a human confirms it."""
     updated, _ = pure.apply_proposals(
-        empty(), [{"basis": pure.ADDRESSED_BY_NAME, "turn": 4, "name": "Sarah"}], turns(), NOW
+        empty(),
+        [{"basis": pure.ADDRESSED_BY_NAME, "label": SPK0, "turn": 4, "name": "Sarah"}],
+        turns(),
+        NOW,
     )
     assert updated["identities"][SPK0]["status"] == "proposed"
 
@@ -342,7 +361,7 @@ def test_a_name_a_human_typed_is_never_overwritten() -> None:
     }
     updated, applied = pure.apply_proposals(
         identities,
-        [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Somebody Else"}],
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
         turns(),
         NOW,
     )
@@ -356,7 +375,10 @@ def test_a_locked_name_is_never_overwritten() -> None:
         "identities": {SPK0: {"name": "Sarah Lee", "status": "proposed", "locked": True}},
     }
     updated, applied = pure.apply_proposals(
-        identities, [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Wrong"}], turns(), NOW
+        identities,
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
     )
     assert updated["identities"][SPK0]["name"] == "Sarah Lee"
     assert applied == []
@@ -373,7 +395,7 @@ def test_a_self_introduction_may_upgrade_an_earlier_proposal() -> None:
     }
     updated, _ = pure.apply_proposals(
         identities,
-        [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"}],
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
         turns(),
         NOW,
     )
@@ -392,7 +414,10 @@ def test_a_weaker_proposal_does_not_overwrite_a_confirmed_name() -> None:
         },
     }
     updated, applied = pure.apply_proposals(
-        identities, [{"basis": pure.ADDRESSED_BY_NAME, "turn": 4, "name": "Sara"}], turns(), NOW
+        identities,
+        [{"basis": pure.ADDRESSED_BY_NAME, "label": SPK0, "turn": 4, "name": "Sarah"}],
+        turns(),
+        NOW,
     )
     assert updated["identities"][SPK0]["name"] == "Sarah Lee"
     assert applied == []
@@ -404,8 +429,8 @@ def test_one_name_cannot_be_given_to_two_voices_on_a_channel() -> None:
     updated, applied = pure.apply_proposals(
         empty(),
         [
-            {"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"},
-            {"basis": pure.SELF_INTRODUCTION, "turn": 2, "name": "Sarah Lee"},
+            {"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"},
+            {"basis": pure.ADDRESSED_BY_NAME, "label": SPK1, "turn": 5, "name": "Sarah Lee"},
         ],
         turns(),
         NOW,
@@ -420,8 +445,8 @@ def test_a_self_introduction_wins_the_uniqueness_check_over_a_weaker_claim() -> 
     updated, _ = pure.apply_proposals(
         empty(),
         [
-            {"basis": pure.ADDRESSED_BY_NAME, "turn": 4, "name": "Sarah Lee"},
-            {"basis": pure.SELF_INTRODUCTION, "turn": 2, "name": "Sarah Lee"},
+            {"basis": pure.ADDRESSED_BY_NAME, "label": SPK0, "turn": 4, "name": "Sarah Lee"},
+            {"basis": pure.SELF_INTRODUCTION, "label": SPK1, "turn": 6, "name": "Sarah Lee"},
         ],
         turns(),
         NOW,
@@ -443,8 +468,13 @@ def test_the_same_name_on_different_channels_is_allowed() -> None:
     updated, applied = pure.apply_proposals(
         empty(),
         [
-            {"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"},
-            {"basis": pure.SELF_INTRODUCTION, "turn": 2, "name": "Sarah Lee"},
+            {"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"},
+            {
+                "basis": pure.SELF_INTRODUCTION,
+                "label": "AGENT#Other Participant (spk_0)",
+                "turn": 2,
+                "name": "Sarah Lee",
+            },
         ],
         two_channels,
         NOW,
@@ -455,7 +485,17 @@ def test_the_same_name_on_different_channels_is_allowed() -> None:
 def test_a_voice_that_already_reads_as_a_person_is_left_alone() -> None:
     roster = pure.build_turns([seg("Alice (spk_0)", 0, "Hi, I'm actually Bob")])
     updated, applied = pure.apply_proposals(
-        empty(), [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Bob"}], roster, NOW
+        empty(),
+        [
+            {
+                "basis": pure.SELF_INTRODUCTION,
+                "label": "CALLER#Alice (spk_0)",
+                "turn": 1,
+                "name": "Bob",
+            }
+        ],
+        roster,
+        NOW,
     )
     assert applied == []
     assert updated["identities"] == {}
@@ -465,7 +505,10 @@ def test_the_stored_map_is_not_mutated() -> None:
     identities = {**empty(), "candidates": ["Sarah Lee"]}
     before = repr(identities)
     pure.apply_proposals(
-        identities, [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"}], turns(), NOW
+        identities,
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
     )
     assert repr(identities) == before
 
@@ -478,7 +521,10 @@ def test_merges_overrides_and_candidates_survive_a_pass() -> None:
         "segmentOverrides": {"s15": "Priya Raman"},
     }
     updated, _ = pure.apply_proposals(
-        identities, [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"}], turns(), NOW
+        identities,
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
     )
     assert updated["candidates"] == ["Sarah Lee", "Priya Raman"]
     assert updated["merges"] == {SPK2: SPK1}
@@ -588,7 +634,7 @@ def test_a_name_the_user_rejected_is_not_proposed_again() -> None:
     identities = {**empty(), "rejected": {SPK0: ["Sarah Lee"]}}
     updated, applied = pure.apply_proposals(
         identities,
-        [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"}],
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
         turns(),
         NOW,
     )
@@ -600,7 +646,7 @@ def test_a_rejection_does_not_block_a_different_name_for_that_voice() -> None:
     identities = {**empty(), "rejected": {SPK0: ["Sara Leigh"]}}
     updated, applied = pure.apply_proposals(
         identities,
-        [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"}],
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
         turns(),
         NOW,
     )
@@ -611,6 +657,378 @@ def test_a_rejection_does_not_block_a_different_name_for_that_voice() -> None:
 def test_rejections_survive_a_pass() -> None:
     identities = {**empty(), "rejected": {SPK1: ["Wrong Person"]}}
     updated, _ = pure.apply_proposals(
-        identities, [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"}], turns(), NOW
+        identities,
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
     )
     assert updated["rejected"] == {SPK1: ["Wrong Person"]}
+
+
+# --------------------------------------------------------------------------
+# What the verification actually guarantees
+#
+# The model chooses the turn and the turn chooses the voice, so two further
+# cross-checks are what stop the model choosing the voice on its own: a
+# self-introduction must name the label it claims, and the name must appear in
+# the words of the turn cited. Both cases below defeated an earlier version.
+# --------------------------------------------------------------------------
+
+
+def test_a_self_introduction_with_no_label_names_nobody() -> None:
+    """Without a label there is nothing to cross-check the cited turn against, so
+    the model alone would be choosing the voice."""
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [{"basis": pure.SELF_INTRODUCTION, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
+    )
+    assert applied == []
+    assert updated["identities"] == {}
+
+
+def test_being_addressed_with_no_label_names_nobody() -> None:
+    updated, applied = pure.apply_proposals(
+        empty(), [{"basis": pure.ADDRESSED_BY_NAME, "turn": 4, "name": "Sarah"}], turns(), NOW
+    )
+    assert applied == []
+    assert updated["identities"] == {}
+
+
+def test_a_name_that_is_not_in_the_cited_turn_is_dropped() -> None:
+    """A self-consistent citation for a name nobody said. This is the shape of a
+    real boundary error: the diarizer put "and I'm Priya Raman" inside another
+    speaker's segment, so a proposal naming that segment's voice Priya looks
+    internally consistent and is still wrong.
+    """
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Priya Raman"}],
+        turns(),
+        NOW,
+    )
+    assert applied == []
+    assert SPK0 not in updated["identities"]
+
+
+def test_a_name_the_transcript_misheard_slightly_is_still_accepted() -> None:
+    """The transcript is speech: "Sarah Lee" is supported by a turn that says
+    "Sara Lee", and refusing that would reject most real introductions."""
+    misheard = pure.build_turns([seg("Other Participant (spk_0)", 0, "Hi, I'm Sara Lee")])
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        misheard,
+        NOW,
+    )
+    assert updated["identities"][SPK0]["name"] == "Sarah Lee"
+    assert len(applied) == 1
+
+
+def test_a_first_name_alone_is_enough_support() -> None:
+    assert pure.name_appears_in("Sarah Lee", "thanks Sarah, go on") is True
+
+
+def test_a_name_absent_from_the_words_is_not_supported() -> None:
+    assert pure.name_appears_in("Priya Raman", "I own the data ingestion side") is False
+    assert pure.name_appears_in("", "anything") is False
+    assert pure.name_appears_in("Bob", None) is False
+
+
+def test_an_initial_is_not_treated_as_support() -> None:
+    """A single letter appears in almost any sentence."""
+    assert pure.name_appears_in("A", "that is a good point") is False
+
+
+# --------------------------------------------------------------------------
+# Merged voices
+# --------------------------------------------------------------------------
+
+
+def test_an_introduction_on_a_merged_away_voice_names_the_target() -> None:
+    """The usual reason to merge is that the engine split one person, so the
+    introduction very often sits on the half that was merged away. Dropping it
+    threw away the best evidence in the meeting."""
+    identities = {**empty(), "merges": {SPK1: SPK0}}
+    updated, applied = pure.apply_proposals(
+        identities,
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK1, "turn": 6, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
+    )
+    assert updated["identities"][SPK0]["name"] == "Sarah Lee"
+    assert SPK1 not in updated["identities"]
+    assert applied == [
+        {"key": SPK0, "name": "Sarah Lee", "status": "confirmed", "basis": pure.SELF_INTRODUCTION}
+    ]
+
+
+def test_a_merge_cycle_does_not_hang_the_pass() -> None:
+    identities = {**empty(), "merges": {SPK0: SPK1, SPK1: SPK0}}
+    pure.apply_proposals(
+        identities,
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
+    )
+
+
+# --------------------------------------------------------------------------
+# A stored map is arbitrary JSON a client wrote
+# --------------------------------------------------------------------------
+
+
+def test_a_stored_entry_whose_name_is_not_a_string_does_not_break_the_pass() -> None:
+    """updateSpeakerIdentities accepts any JSON string, so a client can write
+    this -- and it must not permanently disable naming for that meeting."""
+    identities = {**empty(), "identities": {SPK1: {"name": 123}}}
+    updated, applied = pure.apply_proposals(
+        identities,
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
+    )
+    assert updated["identities"][SPK0]["name"] == "Sarah Lee"
+    assert len(applied) == 1
+
+
+def test_a_stored_entry_that_is_not_a_dict_does_not_break_the_pass() -> None:
+    identities = {**empty(), "identities": {SPK1: "just a string"}}
+    pure.unresolved_voices(turns(), identities)
+    updated, _ = pure.apply_proposals(
+        identities,
+        [{"basis": pure.SELF_INTRODUCTION, "label": SPK0, "turn": 1, "name": "Sarah Lee"}],
+        turns(),
+        NOW,
+    )
+    assert updated["identities"][SPK0]["name"] == "Sarah Lee"
+
+
+# --------------------------------------------------------------------------
+# The evidence shown to a human
+# --------------------------------------------------------------------------
+
+
+def test_a_quote_the_turn_does_not_contain_is_replaced_with_the_turn() -> None:
+    """The quote is shown as the reason to accept a name, so a sentence nobody
+    said would undermine the one decision the human is asked to make."""
+    updated, _ = pure.apply_proposals(
+        empty(),
+        [
+            {
+                "basis": pure.SELF_INTRODUCTION,
+                "label": SPK0,
+                "turn": 1,
+                "name": "Sarah Lee",
+                "quote": "my name is Dave and I am the CEO",
+            }
+        ],
+        turns(),
+        NOW,
+    )
+    quote = updated["identities"][SPK0]["evidence"]["quote"]
+    assert quote == turns()[0]["text"]
+
+
+def test_a_real_quote_from_the_turn_is_kept() -> None:
+    updated, _ = pure.apply_proposals(
+        empty(),
+        [
+            {
+                "basis": pure.SELF_INTRODUCTION,
+                "label": SPK0,
+                "turn": 1,
+                "name": "Sarah Lee",
+                "quote": "I'm Sarah Lee",
+            }
+        ],
+        turns(),
+        NOW,
+    )
+    assert updated["identities"][SPK0]["evidence"]["quote"] == "I'm Sarah Lee"
+
+
+# --------------------------------------------------------------------------
+# Name hygiene, after the rewrite that removed a pathological regex
+# --------------------------------------------------------------------------
+
+
+def test_classifying_a_name_is_fast_whatever_it_contains() -> None:
+    """An earlier form of this check backtracked exponentially: a 28-character
+    run of digits took 96 seconds, enough to exhaust the function's whole
+    timeout, and the value came from a model reading untrusted text."""
+    import time
+
+    for probe in ("1" * 59, ("1 " * 40)[:59], ("speaker_" * 10)[:59], ("1-" * 40)[:59], "a" * 59):
+        started = time.monotonic()
+        pure.clean_name(probe)
+        assert time.monotonic() - started < 0.05, probe
+
+
+def test_a_name_in_any_script_is_accepted() -> None:
+    """Testing for [A-Za-z] silently switched naming off for Chinese, Cyrillic,
+    Arabic, Greek and Indic meetings."""
+    for name in ("张伟", "Иван Петров", "أحمد", "Ανδρέας", "नरेन्द्र", "Renée", "Müller"):
+        assert pure.clean_name(name) == name
+
+
+def test_a_short_real_name_is_accepted() -> None:
+    """'An' is a common Vietnamese and Chinese given name, and was rejected as a
+    generic word."""
+    assert pure.clean_name("An") == "An"
+    assert pure.clean_name("Al") == "Al"
+
+
+def test_generic_names_are_still_rejected_in_combination() -> None:
+    for bad in (
+        "Speaker 1",
+        "speaker_2",
+        "Person 2",
+        "spk_0",
+        "unidentified male",
+        "the other person",
+        "Unknown Speaker",
+        "N/A",
+        "TBD",
+        "Anonymous",
+    ):
+        assert pure.clean_name(bad) is None, bad
+
+
+# --------------------------------------------------------------------------
+# Writing without clobbering
+#
+# A pass reads the map, spends seconds on a model call, then writes. The write
+# replaces the whole blob with no ordering guard -- deliberately, so a human
+# rename always wins -- so only the keys this pass changed may be applied, onto
+# whatever is stored by then.
+# --------------------------------------------------------------------------
+
+
+def test_a_rename_typed_during_the_pass_is_not_discarded() -> None:
+    latest = {
+        **empty(),
+        "identities": {SPK1: {"name": "Alice", "status": "confirmed", "source": "manual"}},
+    }
+    merged, changed = pure.merge_applied_onto(
+        latest, {SPK0: {"name": "Sarah Lee", "status": "confirmed"}}
+    )
+    assert merged["identities"][SPK1]["name"] == "Alice"
+    assert merged["identities"][SPK0]["name"] == "Sarah Lee"
+    assert changed is True
+
+
+def test_a_rename_of_the_same_voice_during_the_pass_wins() -> None:
+    """The person watching is better informed than the pass that started before
+    they typed."""
+    latest = {
+        **empty(),
+        "identities": {SPK0: {"name": "Alice", "status": "confirmed", "source": "manual"}},
+    }
+    merged, changed = pure.merge_applied_onto(
+        latest, {SPK0: {"name": "Sarah Lee", "status": "confirmed"}}
+    )
+    assert merged["identities"][SPK0]["name"] == "Alice"
+    assert changed is False
+
+
+def test_a_suggestion_does_not_overwrite_a_confirmed_name_that_arrived_meanwhile() -> None:
+    latest = {**empty(), "identities": {SPK0: {"name": "Alice", "status": "confirmed"}}}
+    merged, changed = pure.merge_applied_onto(
+        latest, {SPK0: {"name": "Sarah", "status": "proposed"}}
+    )
+    assert merged["identities"][SPK0]["name"] == "Alice"
+    assert changed is False
+
+
+def test_a_name_rejected_during_the_pass_is_not_written() -> None:
+    latest = {**empty(), "rejected": {SPK0: ["Sarah Lee"]}}
+    merged, changed = pure.merge_applied_onto(
+        latest, {SPK0: {"name": "Sarah Lee", "status": "confirmed"}}
+    )
+    assert SPK0 not in merged["identities"]
+    assert changed is False
+
+
+def test_merging_preserves_everything_else_in_the_stored_map() -> None:
+    latest = {
+        **empty(),
+        "candidates": ["Priya Raman"],
+        "merges": {SPK2: SPK1},
+        "segmentOverrides": {"s5": "Bob"},
+        "rejected": {SPK1: ["Wrong"]},
+    }
+    merged, _ = pure.merge_applied_onto(
+        latest, {SPK0: {"name": "Sarah Lee", "status": "confirmed"}}
+    )
+    assert merged["candidates"] == ["Priya Raman"]
+    assert merged["merges"] == {SPK2: SPK1}
+    assert merged["segmentOverrides"] == {"s5": "Bob"}
+    assert merged["rejected"] == {SPK1: ["Wrong"]}
+
+
+def test_merging_nothing_reports_no_change() -> None:
+    merged, changed = pure.merge_applied_onto(empty(), {})
+    assert changed is False
+    assert merged["identities"] == {}
+
+
+# --------------------------------------------------------------------------
+# Trimming a long transcript
+# --------------------------------------------------------------------------
+
+
+def test_a_short_transcript_is_passed_whole() -> None:
+    assert len(pure.select_turns(turns(), 160)) == len(turns())
+
+
+def test_a_long_transcript_keeps_the_opening_and_the_most_recent_turns() -> None:
+    """Head only meant that past the limit every pass saw identical input, so the
+    end-of-meeting pass was no better than the first and a late introduction
+    could never be found."""
+    long_meeting = pure.build_turns(
+        [seg("Other Participant (spk_0)", i * 5, f"turn {i}") for i in range(300)]
+    )
+    selected = pure.select_turns(long_meeting, 30)
+    assert len(selected) == 30
+    assert selected[0]["turn"] == 1
+    assert selected[-1]["turn"] == 300
+
+
+def test_trimming_preserves_turn_numbers_rather_than_renumbering() -> None:
+    """They are what attribution is recomputed from, and the prompt shows them."""
+    long_meeting = pure.build_turns(
+        [seg("Other Participant (spk_0)", i * 5, f"turn {i}") for i in range(300)]
+    )
+    selected = pure.select_turns(long_meeting, 30)
+    by_number = {t["turn"]: t for t in selected}
+    for turn in selected:
+        assert by_number[turn["turn"]] is turn
+    assert pure.format_transcript(selected).startswith("[1] ")
+
+
+def test_a_late_introduction_can_still_be_attributed() -> None:
+    """The point of keeping the tail."""
+    rows = [seg("Other Participant (spk_0)", i * 5, f"turn {i}") for i in range(200)]
+    rows.append(seg("Other Participant (spk_1)", 2000, "By the way, I'm Priya Raman"))
+    selected = pure.select_turns(pure.build_turns(rows), 30)
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [
+            {
+                "basis": pure.SELF_INTRODUCTION,
+                "label": SPK1,
+                "turn": selected[-1]["turn"],
+                "name": "Priya Raman",
+            }
+        ],
+        selected,
+        NOW,
+    )
+    assert updated["identities"][SPK1]["name"] == "Priya Raman"
+    assert len(applied) == 1
+
+
+def test_trimming_is_disabled_by_a_non_positive_limit() -> None:
+    assert len(pure.select_turns(turns(), 0)) == len(turns())

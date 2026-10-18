@@ -22,6 +22,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 
+/* eslint-disable react/prop-types */
+
 const SEGMENTS = [
   {
     channel: 'CALLER',
@@ -264,6 +266,106 @@ describe('identifying speakers from the transcript', () => {
   it('offers no button to a user who may only read the meeting', () => {
     renderPanel({ readOnly: true });
     expect(screen.getByText('Identify speakers').closest('button').disabled).toBe(true);
+  });
+
+  it('runs an unforced pass on a timer while the meeting is live', async () => {
+    // The behaviour with no test before: the interval was keyed on a callback
+    // recreated every render, so it was torn down and rebuilt on every arriving
+    // transcript segment and only ever elapsed during silence.
+    vi.useFakeTimers();
+    try {
+      renderPanel({ isLive: true, identifyResult: { Success: true, NamesApplied: 0 } });
+      expect(onIdentify).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(46000);
+      expect(onIdentify).toHaveBeenCalledWith({ force: false });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the timer running even when the callback changes identity', async () => {
+    // The actual bug: the interval depended on a prop that React recreates on
+    // every render, and a live meeting re-renders on every arriving segment, so
+    // the timer was reset faster than it could elapse.
+    vi.useFakeTimers();
+    try {
+      const calls = [];
+      const Harness = ({ tick }) => (
+        <SpeakerIdentitiesPanel
+          item={ITEM}
+          segments={SEGMENTS}
+          setToolsOpen={() => {}}
+          onSave={vi.fn()}
+          // A new function identity on every render, as a plain inline callback
+          // would be.
+          onIdentify={() => {
+            calls.push(tick);
+            return Promise.resolve({ Success: true, NamesApplied: 0 });
+          }}
+          readOnly={false}
+          isLive
+        />
+      );
+      const { rerender } = render(<Harness tick={0} />);
+      // Re-render repeatedly, as arriving transcript segments would.
+      // Sequential on purpose: each re-render must follow the tick before it.
+      /* eslint-disable no-await-in-loop */
+      for (let i = 1; i <= 8; i += 1) {
+        await vi.advanceTimersByTimeAsync(6000);
+        rerender(<Harness tick={i} />);
+      }
+      /* eslint-enable no-await-in-loop */
+      expect(calls.length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops the automatic passes once every voice is confirmed', () => {
+    vi.useFakeTimers();
+    try {
+      renderPanel({
+        isLive: true,
+        item: {
+          ...ITEM,
+          speakerIdentities: JSON.stringify({
+            identities: {
+              'CALLER#Other Participant (spk_0)': { name: 'Bob', status: 'confirmed' },
+              'CALLER#Other Participant (spk_1)': { name: 'Sarah', status: 'confirmed' },
+            },
+          }),
+        },
+      });
+      vi.advanceTimersByTime(120000);
+      expect(onIdentify).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps running while a voice holds only an unconfirmed suggestion', async () => {
+    // The backend treats a suggestion as still open, so a later
+    // self-introduction can upgrade it. The UI must agree or it stops early.
+    vi.useFakeTimers();
+    try {
+      renderPanel({
+        isLive: true,
+        identifyResult: { Success: true, NamesApplied: 0 },
+        item: {
+          ...ITEM,
+          speakerIdentities: JSON.stringify({
+            identities: {
+              'CALLER#Other Participant (spk_0)': { name: 'Bob', status: 'proposed' },
+              'CALLER#Other Participant (spk_1)': { name: 'Sarah', status: 'proposed' },
+            },
+          }),
+        },
+      });
+      await vi.advanceTimersByTimeAsync(46000);
+      expect(onIdentify).toHaveBeenCalledWith({ force: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('does not start an automatic pass on an ended meeting', () => {

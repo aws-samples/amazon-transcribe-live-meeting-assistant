@@ -21,7 +21,7 @@
  * common separation failure, and naming both rows 'Bob' without merging leaves
  * two Bobs that then confuse every summary.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Autosuggest,
   Badge,
@@ -60,6 +60,9 @@ const MERGE_PLACEHOLDER = { label: 'Same person as…', value: '' };
  * first minutes, which is also when the first pass lands.
  */
 const LIVE_PASS_INTERVAL_MS = 45000;
+
+/** How long the outcome of a pass stays in the panel header. */
+const STATUS_VISIBLE_MS = 20000;
 
 const SpeakerRow = ({
   row,
@@ -194,8 +197,24 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
   const [attendeesOpen, setAttendeesOpen] = useState(false);
   const [identifying, setIdentifying] = useState(false);
   const [identifyStatus, setIdentifyStatus] = useState(null);
+  // Read from inside the interval callback, which captures its closure once and
+  // would never see a state update -- so a slow pass would overlap the next tick.
+  const identifyingRef = useRef(false);
+  // The interval must not depend on the identity of this callback. Holding it in
+  // a ref means a caller that passes a fresh function every render -- which is
+  // the default in React and was the actual bug -- cannot stop the timer
+  // elapsing. The hook that supplies it memoises it as well; this is what makes
+  // the panel correct on its own rather than only in combination.
+  const identifyRef = useRef(onIdentify);
+  identifyRef.current = onIdentify;
+  const statusTimerRef = useRef(undefined);
+  useEffect(() => () => clearTimeout(statusTimerRef.current), []);
 
-  const unnamedCount = roster.filter((row) => !row.name && row.isPlaceholder).length;
+  // A voice holding an unconfirmed SUGGESTION is still open: the backend treats
+  // it that way too, specifically so a later self-introduction can upgrade a
+  // guess. Counting it as named would stop the automatic passes exactly when
+  // they still have something to find.
+  const unnamedCount = roster.filter((row) => row.isPlaceholder && (!row.name || row.status === 'proposed')).length;
 
   /**
    * Run a naming pass and say what came back.
@@ -206,13 +225,15 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
    * for themselves when the answer is "none".
    */
   const runIdentify = async (force) => {
-    if (!onIdentify) {
+    const identify = identifyRef.current;
+    if (!identify) {
       return;
     }
     setIdentifying(true);
+    identifyingRef.current = true;
     setIdentifyStatus(null);
     try {
-      const result = await onIdentify({ force });
+      const result = await identify({ force });
       if (!result?.Success) {
         setIdentifyStatus({ type: 'error', text: 'Could not identify speakers' });
       } else if (result.NamesApplied > 0) {
@@ -225,8 +246,13 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
         // does not say who these people are.
         setIdentifyStatus({ type: 'info', text: 'Nothing in the transcript names them yet' });
       }
+      // Cleared after a while so a stale "Identified 2 speakers" does not sit in
+      // the header for the rest of the meeting.
+      clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = setTimeout(() => setIdentifyStatus(null), STATUS_VISIBLE_MS);
     } finally {
       setIdentifying(false);
+      identifyingRef.current = false;
     }
   };
 
@@ -240,19 +266,21 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
    * here worth a model call" shortcut still applies.
    */
   useEffect(() => {
-    if (!onIdentify || !isLive || readOnly || unnamedCount === 0) {
+    if (!isLive || readOnly || unnamedCount === 0) {
       return undefined;
     }
     const timer = setInterval(() => {
-      if (!identifying) {
+      if (!identifyingRef.current) {
         runIdentify(false);
       }
     }, LIVE_PASS_INTERVAL_MS);
     return () => clearInterval(timer);
-    // Deliberately keyed on whether a pass is wanted at all, not on runIdentify
-    // or identifying: including those would tear down and rebuild the timer on
-    // every pass, so the interval would never actually elapse.
-  }, [onIdentify, isLive, readOnly, unnamedCount]);
+    // Keyed only on whether a pass is wanted at all. Neither runIdentify nor
+    // onIdentify appears here on purpose: both change identity on every render,
+    // so depending on either rebuilt the timer on every arriving transcript
+    // segment and it only ever elapsed during silence -- precisely when there is
+    // nothing new to read. Both are reached through refs instead.
+  }, [isLive, readOnly, unnamedCount]);
 
   const namedCount = roster.filter((row) => row.name).length;
 
@@ -376,7 +404,11 @@ const SpeakerIdentitiesPanel = ({ item, segments, setToolsOpen, onSave, onIdenti
         <SpaceBetween direction="horizontal" size="xs">
           {saving && <StatusIndicator type="loading">Saving</StatusIndicator>}
           {!saving && identifyStatus && (
-            <StatusIndicator type={identifyStatus.type}>{identifyStatus.text}</StatusIndicator>
+            // Announced, because the outcome of pressing the button -- especially
+            // "nothing names them yet" -- is the whole feedback for that action.
+            <Box role="status" ariaLive="polite">
+              <StatusIndicator type={identifyStatus.type}>{identifyStatus.text}</StatusIndicator>
+            </Box>
           )}
           {onIdentify && (
             <Button

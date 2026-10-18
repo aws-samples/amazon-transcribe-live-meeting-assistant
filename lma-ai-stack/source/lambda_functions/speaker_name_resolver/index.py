@@ -30,13 +30,12 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+import pure
 import requests
+from boto3.dynamodb.types import TypeDeserializer
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.config import Config
-from boto3.dynamodb.types import TypeDeserializer
-
-import pure
 
 # Standard logging rather than Powertools: the layer that carries Powertools is
 # built for arm64 only, and this function has no other reason to be pinned to an
@@ -50,14 +49,22 @@ BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION_OVERRIDE") or os.environ["AWS_REGION"]
 
 # Upper bound on turns handed to the model. A long meeting's whole transcript
-# would be both slow and mostly irrelevant -- naming evidence clusters at the
-# start, where people introduce themselves. When a transcript is longer than
-# this the FIRST turns are kept, not the last, for that reason.
+# would be both slow and mostly expensive for no gain -- naming evidence
+# clusters at the start, where people introduce themselves. Past this limit the
+# opening turns and the most recent ones are kept; see select_turns for why both.
 MAX_TURNS = int(os.environ.get("SPEAKER_NAMING_MAX_TURNS", "160"))
 
 # Same page cap and reasoning as FetchTranscript: a table that keeps handing back
 # a continuation key must not spin this function for its whole timeout.
 MAX_TRANSCRIPT_PAGES = 100
+
+# Shortest gap between two passes on one meeting. The timer that drives automatic
+# passes lives in the browser, and a client cannot be trusted to pace a paid
+# model call -- several viewers each run their own, and the mutation can simply be
+# called in a loop. Enforced here so the bound holds whatever the caller does.
+# A user pressing the button is still subject to it; what they override is the
+# "nothing here could name anybody" shortcut, not the cost bound.
+PASS_COOLDOWN_SECONDS = int(os.environ.get("SPEAKER_NAMING_COOLDOWN_SECONDS", "30"))
 
 DESERIALIZER = TypeDeserializer()
 
@@ -105,8 +112,7 @@ def read_segments(call_id):
         start_key = next_key
     if pages >= MAX_TRANSCRIPT_PAGES:
         LOGGER.warning(
-            "Stopped reading transcript for %s at the %d page limit; "
-            "it may be incomplete",
+            "Stopped reading transcript for %s at the %d page limit; it may be incomplete",
             call_id,
             pages,
         )
@@ -196,19 +202,35 @@ def resolve(call_id, identity=None, force=False):
         return {"ok": False, "reason": "not permitted", "applied": []}
 
     identities = pure.parse_identities(meeting.get("SpeakerIdentities"))
-    turns = pure.build_turns(read_segments(call_id))[:MAX_TURNS]
+    turns = pure.select_turns(pure.build_turns(read_segments(call_id)), MAX_TURNS)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if pure.within_cooldown(identities, now_iso, PASS_COOLDOWN_SECONDS):
+        LOGGER.info(
+            "Declining a pass for %s: one ran less than %ds ago", call_id, PASS_COOLDOWN_SECONDS
+        )
+        return {"ok": True, "reason": "a pass ran very recently", "applied": []}
+    if not pure.transcript_has_grown(identities, turns):
+        LOGGER.info("Declining a pass for %s: nobody has spoken since the last one", call_id)
+        return {"ok": True, "reason": "nothing new said since the last pass", "applied": []}
 
     if not pure.worth_a_model_call(turns, identities, force=force):
-        LOGGER.info(
-            "Nothing to name for %s (turns=%d, forced=%s)", call_id, len(turns), force
-        )
+        LOGGER.info("Nothing to name for %s (turns=%d, forced=%s)", call_id, len(turns), force)
         return {"ok": True, "reason": "nothing to name", "applied": []}
+    # Stamped whether or not anything is applied below, so a pass that found
+    # nothing still holds the cooldown -- otherwise the cheapest way to spend
+    # money would be to ask repeatedly about a meeting with no introductions.
+    #
+    # The cost is that an empty pass still writes, and therefore still publishes
+    # onUpdateCall to connected clients. That is one message per pass per client,
+    # bounded by the cooldown itself, and the payload is the full Call so nothing
+    # on screen changes. Cheap next to an unbounded number of model calls.
+    stamp_only = True
 
     labels = pure.unresolved_voices(turns, identities)
     prompt = pure.build_prompt(turns, labels, identities.get("candidates") or [])
     raw = call_bedrock(prompt)
     proposals = pure.parse_model_response(raw)
-    now_iso = datetime.now(timezone.utc).isoformat()
     updated, applied = pure.apply_proposals(identities, proposals, turns, now_iso)
 
     # The gap between proposed and applied is how much the verification
@@ -222,7 +244,21 @@ def resolve(call_id, identity=None, force=False):
         len(applied),
     )
     if applied:
-        write_identities(call_id, updated)
+        # Re-read before writing. The model call took seconds, and the write
+        # replaces the whole blob with no ordering guard (deliberately, so a
+        # human rename always wins), so writing the snapshot taken before the
+        # model call would quietly discard a name typed in the meantime.
+        latest = pure.parse_identities((read_meeting(call_id) or {}).get("SpeakerIdentities"))
+        new_entries = {entry["key"]: updated["identities"][entry["key"]] for entry in applied}
+        merged, changed = pure.merge_applied_onto(latest, new_entries)
+        if changed:
+            write_identities(call_id, pure.stamp_pass(merged, now_iso, len(turns)))
+        else:
+            LOGGER.info("Every inferred name for %s was superseded while the pass ran", call_id)
+        stamp_only = False
+    if stamp_only:
+        latest = pure.parse_identities((read_meeting(call_id) or {}).get("SpeakerIdentities"))
+        write_identities(call_id, pure.stamp_pass(latest, now_iso, len(turns)))
     return {"ok": True, "reason": "ok", "applied": applied}
 
 
@@ -244,12 +280,18 @@ def handler(event, context):  # pylint: disable=unused-argument
 
     try:
         result = resolve(call_id, identity=identity, force=force)
-    except Exception as error:  # noqa: BLE001 - reported to the caller, see below
+    except Exception:  # noqa: BLE001 - reported to the caller, see below
         # Naming is an enhancement. The end-of-meeting caller must not have a
         # meeting fail to close because a model call did, and the UI caller gets
         # a message rather than a stack trace.
+        # Logged in full; the caller gets a message rather than a service error,
+        # which would otherwise put DynamoDB and AppSync internals in a browser.
         LOGGER.exception("Speaker naming pass failed for %s", call_id)
-        return {"Success": False, "Message": str(error)[:200], "NamesApplied": 0}
+        return {
+            "Success": False,
+            "Message": "could not identify speakers just now",
+            "NamesApplied": 0,
+        }
 
     return {
         "Success": result["ok"],

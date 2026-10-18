@@ -501,7 +501,14 @@ const SpeakerRenamePopover = ({ segment, onRenameSpeaker, locked }) => {
       }
     >
       <Button variant="inline-link">
-        <strong className={segment.speakerProposed ? 'transcript-speaker-proposed' : undefined}>
+        <strong
+          className={segment.speakerProposed ? 'transcript-speaker-proposed' : undefined}
+          title={
+            segment.speakerProposed
+              ? 'Suggested from the transcript. Confirm or reject it in the Speakers panel.'
+              : undefined
+          }
+        >
           {segment.speaker}
         </strong>
       </Button>
@@ -546,7 +553,14 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, o
             <SpeakerRenamePopover segment={segment} onRenameSpeaker={onRenameSpeaker} locked={segment.speakerLocked} />
           ) : (
             <TextContent>
-              <strong className={segment.speakerProposed ? 'transcript-speaker-proposed' : undefined}>
+              <strong
+                className={segment.speakerProposed ? 'transcript-speaker-proposed' : undefined}
+                title={
+                  segment.speakerProposed
+                    ? 'Suggested from the transcript. Confirm or reject it in the Speakers panel.'
+                    : undefined
+                }
+              >
                 {displayChannel}
               </strong>
             </TextContent>

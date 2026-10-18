@@ -20,9 +20,8 @@ import json
 import os
 import sys
 from pathlib import Path
+
 import pytest
-
-
 
 TABLE = "lma-call-events"
 APPSYNC_URL = "https://example.appsync-api.us-east-1.amazonaws.com/graphql"
@@ -80,14 +79,28 @@ def segment_row(speaker, start, text, channel="CALLER", segment_id=None):
 
 
 SEGMENTS = [
-    segment_row("Other Participant (spk_0)", 0, "Hi everyone, I'm Sarah Lee, I run the platform team"),
+    segment_row(
+        "Other Participant (spk_0)", 0, "Hi everyone, I'm Sarah Lee, I run the platform team"
+    ),
     segment_row("Other Participant (spk_1)", 5, "And I'm Priya Raman, I own data ingestion"),
 ]
 
 MODEL_ANSWER = json.dumps(
     [
-        {"label": SPK0, "name": "Sarah Lee", "basis": "self-introduction", "turn": 1, "quote": "I'm Sarah Lee"},
-        {"label": SPK1, "name": "Priya Raman", "basis": "self-introduction", "turn": 2, "quote": "I'm Priya Raman"},
+        {
+            "label": SPK0,
+            "name": "Sarah Lee",
+            "basis": "self-introduction",
+            "turn": 1,
+            "quote": "I'm Sarah Lee",
+        },
+        {
+            "label": SPK1,
+            "name": "Priya Raman",
+            "basis": "self-introduction",
+            "turn": 2,
+            "quote": "I'm Priya Raman",
+        },
     ]
 )
 
@@ -186,15 +199,19 @@ def test_segments_are_read_from_every_page(monkeypatch: pytest.MonkeyPatch) -> N
 # --------------------------------------------------------------------------
 
 
-def test_nothing_is_written_when_the_model_names_nobody(
+def test_no_names_are_stored_when_the_model_names_nobody(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A pass that infers nothing must not write, or it would publish an
-    onUpdateCall to every client for no change."""
+    """A pass that infers nothing stores no names -- but it does record that it
+    ran, so the cooldown holds. Otherwise the cheapest way to spend money would
+    be to ask repeatedly about a meeting that has no introductions in it."""
     _, _, written = install(monkeypatch, answer="[]")
     result = index.handler({"CallId": CALL_ID}, None)
     assert result["NamesApplied"] == 0
-    assert written == []
+    assert len(written) == 1
+    _, stored = written[0]
+    assert stored["identities"] == {}
+    assert stored["lastPass"]["turns"] == 2
 
 
 def test_a_transcript_with_no_naming_language_does_not_call_the_model(
@@ -321,7 +338,10 @@ def test_a_failing_model_call_does_not_raise(monkeypatch: pytest.MonkeyPatch) ->
     _, _, written = install(monkeypatch, error=RuntimeError("bedrock unavailable"))
     result = index.handler({"CallId": CALL_ID}, None)
     assert result["Success"] is False
-    assert "bedrock unavailable" in result["Message"]
+    # The service's own error text is logged, not returned: it would otherwise
+    # put DynamoDB and AppSync internals in a browser.
+    assert "bedrock" not in result["Message"]
+    assert result["Message"] == "could not identify speakers just now"
     assert written == []
 
 
@@ -334,7 +354,7 @@ def test_a_failing_write_does_not_raise(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(index, "write_identities", explode)
     result = index.handler({"CallId": CALL_ID}, None)
     assert result["Success"] is False
-    assert "appsync" in result["Message"]
+    assert "appsync" not in result["Message"]
 
 
 def test_a_model_answer_that_is_not_json_names_nobody(
@@ -343,18 +363,25 @@ def test_a_model_answer_that_is_not_json_names_nobody(
     _, _, written = install(monkeypatch, answer="I could not work out who anyone is.")
     result = index.handler({"CallId": CALL_ID}, None)
     assert result["NamesApplied"] == 0
-    assert written == []
+    assert written[0][1]["identities"] == {}
 
 
 def test_a_model_naming_a_label_that_does_not_exist_names_nobody(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     hostile = json.dumps(
-        [{"label": "CALLER#Ghost (spk_9)", "name": "Ghost", "basis": "self-introduction", "turn": 1}]
+        [
+            {
+                "label": "CALLER#Ghost (spk_9)",
+                "name": "Ghost",
+                "basis": "self-introduction",
+                "turn": 1,
+            }
+        ]
     )
     _, _, written = install(monkeypatch, answer=hostile)
     assert index.handler({"CallId": CALL_ID}, None)["NamesApplied"] == 0
-    assert written == []
+    assert written[0][1]["identities"] == {}
 
 
 # --------------------------------------------------------------------------
@@ -384,3 +411,94 @@ def test_the_button_overrides_the_shortcut_but_an_automatic_pass_does_not(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+# --------------------------------------------------------------------------
+# Bounding what a client can spend
+# --------------------------------------------------------------------------
+
+
+def test_a_pass_that_ran_moments_ago_is_declined(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The timer driving automatic passes lives in the browser, and a client
+    cannot be trusted to pace a paid model call -- several viewers each run their
+    own, and the mutation can simply be called in a loop."""
+    recent = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps({"identities": {}, "lastPass": {"at": _now_iso(), "turns": 1}})
+        },
+    }
+    _, bedrock, written = install(monkeypatch, meeting=recent)
+    result = index.handler({"CallId": CALL_ID, "Force": True}, None)
+    assert bedrock.prompts == []
+    assert written == []
+    assert "recently" in result["Message"]
+
+
+def test_the_button_cannot_bypass_the_cooldown(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pressing the button overrides the "nothing here could name anybody"
+    shortcut, not the cost bound."""
+    recent = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps({"identities": {}, "lastPass": {"at": _now_iso(), "turns": 1}})
+        },
+    }
+    _, bedrock, _ = install(monkeypatch, meeting=recent)
+    event = {
+        "arguments": {"input": {"CallId": CALL_ID, "Force": True}},
+        "identity": {"username": OWNER},
+    }
+    index.handler(event, None)
+    assert bedrock.prompts == []
+
+
+def test_a_pass_is_declined_when_nobody_has_spoken_since_the_last_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The cooldown has elapsed, but the transcript is the same, so another pass
+    provably cannot learn anything."""
+    stale = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps(
+                {"identities": {}, "lastPass": {"at": "2026-01-01T00:00:00+00:00", "turns": 2}}
+            )
+        },
+    }
+    _, bedrock, written = install(monkeypatch, meeting=stale)
+    result = index.handler({"CallId": CALL_ID, "Force": True}, None)
+    assert bedrock.prompts == []
+    assert written == []
+    assert "nothing new" in result["Message"]
+
+
+def test_a_pass_runs_once_the_transcript_has_grown(monkeypatch: pytest.MonkeyPatch) -> None:
+    grown = {
+        **MEETING_ROW,
+        "SpeakerIdentities": {
+            "S": json.dumps(
+                {"identities": {}, "lastPass": {"at": "2026-01-01T00:00:00+00:00", "turns": 1}}
+            )
+        },
+    }
+    _, bedrock, written = install(monkeypatch, meeting=grown)
+    assert index.handler({"CallId": CALL_ID}, None)["NamesApplied"] == 2
+    assert len(bedrock.prompts) == 1
+    assert written[0][1]["lastPass"]["turns"] == 2
+
+
+def test_a_malformed_last_pass_stamp_does_not_block_naming(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for stamp in ('{"lastPass": "nonsense"}', '{"lastPass": {"at": "not a date"}}', "{}"):
+        odd = {**MEETING_ROW, "SpeakerIdentities": {"S": stamp}}
+        _, bedrock, _ = install(monkeypatch, meeting=odd)
+        index.handler({"CallId": CALL_ID}, None)
+        assert len(bedrock.prompts) == 1, stamp
+
+
+def _now_iso():
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()

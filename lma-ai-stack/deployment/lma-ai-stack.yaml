@@ -2015,6 +2015,10 @@ Resources:
             ]
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           BOTO_READ_TIMEOUT: 60
+          SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
+          # Must exceed the resolver's own 60s timeout, so a pass that is still
+          # running is never abandoned and retried from here.
+          SPEAKER_NAME_READ_TIMEOUT: 75
       Timeout: 240
       MemorySize: 128
       Handler: lambda_function.handler
@@ -2085,6 +2089,12 @@ Resources:
                   Resource:
                     - !GetAtt BedrockSummaryLambda.Arn
                 - Ref: AWS::NoValue
+              # Named before the transcript is summarised, so the summary reads
+              # names rather than the engine's voice ids.
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt SpeakerNameResolverFunction.Arn
 
 
   ##########################################################################
@@ -3600,10 +3610,11 @@ Resources:
       CodeUri: ../source/lambda_functions/speaker_name_resolver
       Description: Infers speaker names from the transcript and stores them on the meeting
       MemorySize: 512
-      # A model call over a long transcript, plus the paged transcript read. The
-      # end-of-meeting caller invokes this synchronously, so it is bounded well
-      # below the Kinesis visibility window.
-      Timeout: 120
+      # A model call over a bounded number of turns, plus the paged transcript
+      # read. Deliberately shorter than the summary orchestrator's socket timeout
+      # for this invoke (SPEAKER_NAME_READ_TIMEOUT, 75s), so the caller never
+      # gives up on a pass that is still running and retries it.
+      Timeout: 60
       Environment:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
@@ -3613,6 +3624,17 @@ Resources:
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/SpeakerNameResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a function whose work is re-runnable on demand"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names, an endpoint and a model id"
     DependsOn:
       - SpeakerNameResolverFunctionLogGroup
 
@@ -3654,14 +3676,18 @@ Resources:
                 Action:
                   - appsync:GraphQL
                 Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateSpeakerIdentities"
+              # Scoped the same way BedrockSummaryLambda and
+              # MeetingInvitationParser scope the identical call, since
+              # BedrockModelId may name a foundation model, a custom model or an
+              # inference profile. Only converse() is called, so the streaming
+              # action is not granted.
               - Effect: Allow
                 Action:
-                  # Resource is not scopable to a model here: the model id is a
-                  # stack parameter and may name an inference profile, whose ARN
-                  # is not derivable from the id.
                   - bedrock:InvokeModel
-                  - bedrock:InvokeModelWithResponseStream
-                Resource: "*"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
               - Effect: Allow
                 Action:
                   - kms:Decrypt

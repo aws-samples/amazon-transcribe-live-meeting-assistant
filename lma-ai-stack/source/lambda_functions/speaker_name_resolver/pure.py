@@ -50,17 +50,40 @@ ADDRESSED_BY_NAME = "addressed-by-name"
 # A name the model returned that is not a name. Models reach for these when the
 # transcript does not actually support an attribution, and an unnamed voice is
 # far better than a voice called "Speaker 1".
+# A string with no letters in it at all -- digits, spaces and punctuation only.
+# Checked FIRST, and separately, which is what keeps digit runs out of the
+# alternation below: a repeated group containing `\d+` next to a separator that
+# could match empty backtracks exponentially, and a 28-character value measured
+# at 96 seconds, enough on its own to exhaust this function's timeout. `\W` is
+# Unicode-aware here, so a name in any script survives this test.
+NO_LETTERS = re.compile(r"^[\W\d_]+$", re.UNICODE)
+
+# Words that are a role or a placeholder rather than somebody's name.
 GENERIC_WORD = (
     r"unknown|unidentified|unnamed|speaker|participant|attendee|guest|caller|agent|host|"
-    r"person|male|female|man|woman|voice|other|the|a|an|n/?a|none|null|"
-    r"spk|\d+|one|two|three|four|five|six|seven|eight|nine|ten"
+    r"person|male|female|man|woman|voice|other|the|none|null|spk|"
+    r"one|two|three|four|five|six|seven|eight|nine|ten|\d+"
 )
-# A "name" made up entirely of generic words and numbers is not a name, in any
-# combination: "unknown", "Speaker 1", "unidentified male", "the other person".
-NON_NAMES = re.compile(rf"^(({GENERIC_WORD})[\s_-]*)+$", re.IGNORECASE)
+# A "name" made up entirely of generic words is not a name, in any combination:
+# "unknown", "Speaker one", "unidentified male", "the other person".
+#
+# The separator is `[\s_-]+`, requiring at least one character, and the group
+# repeats a separator-plus-token pair rather than a token alone. That is what
+# makes `\d+` safe to include here: every position is unambiguous, because a run
+# of digits with no separator in it can only be one token. The earlier form,
+# `((WORD)[\s_-]*)+` with an optional separator, let the engine split the same run
+# in exponentially many ways -- a 28-character value took 96 seconds.
+NON_NAMES = re.compile(rf"^({GENERIC_WORD})([\s_-]+({GENERIC_WORD}))*$", re.IGNORECASE | re.UNICODE)
 
 # Longest name worth storing. Beyond this the model has returned a sentence.
 MAX_NAME_LENGTH = 60
+
+# Exact placeholders, matched whole and case-insensitively. Kept as a literal set
+# rather than regex alternatives because they contain punctuation that the
+# token separator below deliberately does not allow.
+PLACEHOLDER_NAMES = frozenset(
+    {"n/a", "n.a.", "na", "tbd", "tba", "anonymous", "anon", "redacted", "withheld", "?"}
+)
 
 # Phrases worth sending to a model at all. The miner runs repeatedly during a
 # meeting, and most passes see nothing that could name anybody; this keeps those
@@ -113,6 +136,9 @@ def parse_identities(raw):
     for section in ("identities", "merges", "segmentOverrides", "rejected"):
         value = parsed.get(section)
         out[section] = value if isinstance(value, dict) else {}
+    last_pass = parsed.get("lastPass")
+    if isinstance(last_pass, dict):
+        out["lastPass"] = last_pass
     return out
 
 
@@ -165,6 +191,28 @@ def build_turns(segments):
     return rows
 
 
+def select_turns(turns, max_turns):
+    """Trim a long transcript to the turns most likely to name somebody.
+
+    Naming evidence clusters at the start, where people introduce themselves, so
+    a simple head slice is nearly right -- but only nearly. Taking the head alone
+    means that past the limit every pass sees byte-identical input, so the
+    end-of-meeting pass is no better than the first one and a late introduction
+    ("by the way, I'm Priya") can never be found. So keep the head and the most
+    recent turns, which both covers that and keeps later passes able to learn
+    something.
+
+    Turn numbers are preserved, not renumbered: they are what attribution is
+    recomputed from, and the prompt shows the same numbers. A gap in the middle
+    is visible to the model and harmless -- it cites a number that exists.
+    """
+    if max_turns <= 0 or len(turns) <= max_turns:
+        return list(turns)
+    head = max(1, (max_turns * 2) // 3)
+    tail = max_turns - head
+    return list(turns[:head]) + list(turns[-tail:])
+
+
 def voices_in(turns):
     """Every distinct voice key in the transcript, in first-heard order."""
     seen = {}
@@ -202,13 +250,17 @@ def unresolved_voices(turns, identities):
     named = {
         key
         for key, entry in (identities.get("identities") or {}).items()
-        if isinstance(entry, dict) and entry.get("name") and entry.get("status") != "proposed"
+        if isinstance(entry, dict)
+        and isinstance(entry.get("name"), str)
+        and entry["name"]
+        and entry.get("status") != "proposed"
     }
     merges = identities.get("merges") or {}
     out = []
     for key in voices_in(turns):
         if merges.get(key):
-            # Folded into another voice; the target is what carries the name.
+            # Folded into another voice; the target is what carries the name, and
+            # it is reached through its own segments.
             continue
         if key in named or key in settled_keys(identities):
             continue
@@ -221,6 +273,51 @@ def unresolved_voices(turns, identities):
             continue
         out.append(key)
     return out
+
+
+def within_cooldown(identities, now_iso, cooldown_seconds):
+    """Has a pass run too recently to be worth paying for another?
+
+    Enforced here rather than in the browser, because the browser is where the
+    timer lives and a client cannot be trusted to pace a paid model call. Each
+    pass stamps the map, and a pass that reads the same transcript again a few
+    seconds later cannot learn anything new.
+
+    A pass is also pointless if the transcript has not grown, so the stamp
+    records the turn count too: a cooldown that has elapsed still does not earn a
+    model call if nobody has said anything since.
+    """
+    stamp = (identities.get("lastPass") or {}) if isinstance(identities, dict) else {}
+    ran_at = stamp.get("at")
+    if not ran_at:
+        return False
+    try:
+        elapsed = (_parse_iso(now_iso) - _parse_iso(ran_at)).total_seconds()
+    except (TypeError, ValueError):
+        return False
+    return elapsed < float(cooldown_seconds)
+
+
+def transcript_has_grown(identities, turns):
+    """Has anybody spoken since the last pass?"""
+    stamp = (identities.get("lastPass") or {}) if isinstance(identities, dict) else {}
+    previous = stamp.get("turns")
+    if not isinstance(previous, int):
+        return True
+    return len(turns) > previous
+
+
+def stamp_pass(identities, now_iso, turn_count):
+    """Record that a pass ran, so the next one can decline cheaply."""
+    stamped = dict(identities)
+    stamped["lastPass"] = {"at": now_iso, "turns": int(turn_count)}
+    return stamped
+
+
+def _parse_iso(value):
+    from datetime import datetime
+
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
 def worth_a_model_call(turns, identities, force=False):
@@ -344,12 +441,49 @@ def clean_name(value):
     name = " ".join(value.split()).strip(" .,:;-\"'")
     if not name or len(name) > MAX_NAME_LENGTH:
         return None
+    # Cheapest and most restrictive tests first, so nothing expensive ever sees a
+    # pathological value.
+    if NO_LETTERS.match(name):
+        return None
+    # A letter in ANY script. Testing for [A-Za-z] made every name in a non-Latin
+    # script unnameable, which silently switched this feature off for Chinese,
+    # Cyrillic, Arabic, Greek and Indic meetings.
+    if not any(character.isalpha() for character in name):
+        return None
+    if len(name.split()) > 4:
+        # A name is words, not a sentence.
+        return None
+    if name.casefold() in PLACEHOLDER_NAMES:
+        return None
     if NON_NAMES.match(name):
         return None
-    # A name is words, not a sentence; and it must contain a letter.
-    if not re.search(r"[A-Za-z]", name) or len(name.split()) > 4:
-        return None
     return name
+
+
+def name_appears_in(name, text):
+    """Is this name actually in those words?
+
+    The last gap in the verification: the model picks the turn and the turn picks
+    the voice, so a plausible-looking citation for a name nobody said would still
+    be applied. Matching the name against the cited turn closes it.
+
+    Matched loosely and per word, because the transcript is speech: "Sarah Lee"
+    is supported by a turn that says "Sara Lee", and a first name alone is enough.
+    """
+    haystack = " ".join((text or "").casefold().split())
+    parts = [part for part in re.split(r"[\s\-']+", (name or "").casefold()) if len(part) > 1]
+    if not parts:
+        return False
+    for part in parts:
+        if part in haystack:
+            return True
+        # Allow one transcription slip inside a word of four or more letters,
+        # which is what "Sarah" versus "Sara" is.
+        if len(part) >= 4:
+            stem = part[:-1]
+            if stem in haystack:
+                return True
+    return False
 
 
 def attribute(proposal, turns_by_number):
@@ -379,9 +513,10 @@ def attribute(proposal, turns_by_number):
         return None, None
 
     if basis == SELF_INTRODUCTION:
-        # The speaker named themselves, so the evidence turn IS the voice. If the
-        # model also told us a label, it has to agree.
-        if proposal.get("label") and proposal["label"] != turn["key"]:
+        # The speaker named themselves, so the evidence turn IS the voice -- but
+        # the model chose the turn, so without a label to cross-check against,
+        # the model alone would be choosing the voice. Require it.
+        if proposal.get("label") != turn["key"]:
             return None, None
         return turn["key"], turn
 
@@ -393,11 +528,69 @@ def attribute(proposal, turns_by_number):
             # Somebody saying "good point, Sarah" in the middle of their own run
             # tells us nothing about who they were talking to.
             return None, None
-        if proposal.get("label") and proposal["label"] != previous["key"]:
+        if proposal.get("label") != previous["key"]:
             return None, None
         return previous["key"], turn
 
     return None, None
+
+
+def resolve_merge_target(key, merges):
+    """Follow a merge chain to the voice that actually holds the name.
+
+    Mirrors resolveMergeTarget in the UI, including stopping on a cycle. Needed
+    here because the usual reason to merge two voices is that the engine split
+    one person -- so an introduction very often sits on the half that was merged
+    away, and dropping it would throw away the best evidence in the meeting.
+    """
+    current = key
+    seen = {current}
+    while merges.get(current) and merges[current] not in seen:
+        current = merges[current]
+        seen.add(current)
+    return current
+
+
+def merge_applied_onto(latest, applied_entries):
+    """Fold just this pass's new names onto a freshly read map.
+
+    A pass reads the stored map, spends several seconds on a model call, then
+    writes. Writing the whole blob from the stale snapshot silently discarded any
+    rename a user typed during that window -- and the write is deliberately
+    last-write-wins, so nothing would report it. Only the keys this pass actually
+    changed are applied, onto whatever is stored now, and a name that arrived in
+    the meantime wins because it is settled and this is not.
+    """
+    merged = {
+        "version": latest.get("version", 1),
+        "candidates": list(latest.get("candidates") or []),
+        "identities": dict(latest.get("identities") or {}),
+        "merges": dict(latest.get("merges") or {}),
+        "segmentOverrides": dict(latest.get("segmentOverrides") or {}),
+        "rejected": dict(latest.get("rejected") or {}),
+    }
+    if isinstance(latest.get("lastPass"), dict):
+        merged["lastPass"] = dict(latest["lastPass"])
+    protected = settled_keys(latest)
+    changed = False
+    for key, entry in (applied_entries or {}).items():
+        if key in protected:
+            # Somebody named this voice while the pass was running.
+            continue
+        existing = merged["identities"].get(key)
+        if (
+            isinstance(existing, dict)
+            and existing.get("status") == "confirmed"
+            and entry.get("status") != "confirmed"
+        ):
+            continue
+        rejected_here = merged["rejected"].get(key) or []
+        name = entry.get("name")
+        if any(str(name).casefold() == str(r).casefold() for r in rejected_here):
+            continue
+        merged["identities"][key] = entry
+        changed = True
+    return merged, changed
 
 
 def apply_proposals(identities, proposals, turns, now_iso):
@@ -423,6 +616,8 @@ def apply_proposals(identities, proposals, turns, now_iso):
         "segmentOverrides": dict(identities.get("segmentOverrides") or {}),
         "rejected": dict(identities.get("rejected") or {}),
     }
+    if isinstance(identities.get("lastPass"), dict):
+        updated["lastPass"] = dict(identities["lastPass"])
     turns_by_number = {t["turn"]: t for t in turns}
     nameable = set(unresolved_voices(turns, identities))
     protected = settled_keys(identities)
@@ -434,7 +629,10 @@ def apply_proposals(identities, proposals, turns, now_iso):
                 continue
             if key.split("#", 1)[0] != channel:
                 continue
-            if (entry.get("name") or "").casefold() == name.casefold():
+            stored = entry.get("name")
+            # A stored map is arbitrary JSON a client wrote, so an entry whose
+            # name is not a string must not take naming down for this meeting.
+            if isinstance(stored, str) and stored.casefold() == name.casefold():
                 return True
         return False
 
@@ -450,7 +648,16 @@ def apply_proposals(identities, proposals, turns, now_iso):
         if basis not in (SELF_INTRODUCTION, ADDRESSED_BY_NAME):
             continue
         key, evidence_turn = attribute(proposal, turns_by_number)
-        if key is None or key not in nameable or key in protected:
+        if key is None:
+            continue
+        # An introduction on a voice that has been merged into another names the
+        # target, not the merged-away half.
+        key = resolve_merge_target(key, updated["merges"])
+        if key not in nameable or key in protected:
+            continue
+        if not name_appears_in(name, evidence_turn["text"]):
+            # The cited turn does not contain this name, so nothing in the
+            # transcript supports it.
             continue
         existing = updated["identities"].get(key)
         if isinstance(existing, dict) and existing.get("status") == "confirmed":
@@ -466,14 +673,19 @@ def apply_proposals(identities, proposals, turns, now_iso):
             continue
 
         status = "confirmed" if basis == SELF_INTRODUCTION else "proposed"
+        # Only the model's quote if it is really in that turn. It is shown as the
+        # reason to accept a name, so a sentence nobody said would undermine the
+        # one decision the human is being asked to make.
         quote = proposal.get("quote")
+        if not isinstance(quote, str) or quote.casefold() not in evidence_turn["text"].casefold():
+            quote = evidence_turn["text"]
         updated["identities"][key] = {
             "name": name,
             "status": status,
             "source": basis,
             "updatedAt": now_iso,
             "evidence": {
-                "quote": (quote if isinstance(quote, str) else evidence_turn["text"])[:200],
+                "quote": quote[:200],
                 "segmentId": evidence_turn["segment_id"],
                 "turn": evidence_turn["turn"],
             },

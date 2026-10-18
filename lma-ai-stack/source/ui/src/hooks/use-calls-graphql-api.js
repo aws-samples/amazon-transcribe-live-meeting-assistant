@@ -5,7 +5,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import useAppContext from '../contexts/app';
 
 import listCallsDateRange from '../graphql/queries/listCallsDateRange';
@@ -493,7 +493,12 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
    * rename and the transcript re-labels itself. Returns the backend's own count
    * so the caller can say what happened.
    */
-  const sendResolveSpeakerNames = async (callId, { force = false } = {}) => {
+  // Memoised, unlike its neighbours in this hook, because the Speakers panel
+  // uses it as the dependency of an interval. A fresh identity each render would
+  // tear down and rebuild that interval on every arriving transcript segment, so
+  // it would only ever elapse during silence -- which is exactly when there is
+  // nothing new to read.
+  const sendResolveSpeakerNames = useCallback(async (callId, { force = false } = {}) => {
     try {
       const response = await client.graphql({
         query: resolveSpeakerNames,
@@ -507,7 +512,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
       // for or can act on. The on-demand caller reports it itself.
       return { Success: false, Message: 'request failed', NamesApplied: 0 };
     }
-  };
+  }, []);
 
   return {
     calls,

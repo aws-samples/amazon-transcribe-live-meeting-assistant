@@ -157,18 +157,29 @@ transcript and a **suggested** marker in the panel, with **Confirm** and **Not
 Names you typed yourself, and names you have locked, are never changed by an
 automatic pass.
 
-Nothing a model returns is taken at face value. It is asked only for a name, which
-kind of evidence supports it, and which numbered turn that evidence is in; the
-attribution is then recomputed from the transcript itself. A name attached to the
-wrong voice, a turn that does not exist, or a non-name like "Speaker 1" is
-discarded rather than applied. A third-party mention — "Bob said yesterday
-that…" — names nobody.
+Nothing a model returns is taken at face value. It is asked only for a name,
+which kind of evidence supports it, and which numbered turn that evidence is in.
+Three things are then checked against the transcript before anything is applied:
+the cited turn must exist, it must belong to the voice the model named, and the
+name must actually appear in the words of that turn. A proposal failing any of
+them is discarded, as are non-names like "Speaker 1" and invented evidence
+categories. A third-party mention — "Bob said yesterday that…" — names nobody.
+
+What that does and does not guarantee is worth being precise about. It means an
+applied name always goes to the voice that spoke the words containing it. It does
+not mean a wrong name is impossible: the model still chooses which turn to cite,
+so a genuinely ambiguous passage can still be read wrongly. That is why only
+self-introductions are applied, and why everything weaker is a suggestion.
+
+On a long meeting the opening turns and the most recent ones are used rather than
+the whole transcript — introductions cluster at the start, and keeping the recent
+end means a late "by the way, I'm Priya" is still found.
 
 The pass is skipped entirely when no new speech could name anybody, so an
 ordinary meeting does not spend model calls reading the same transcript over and
 over. Pressing the button overrides that.
 
-### The panel also offers
+The panel also offers:
 
 - **Merge** -- fold one voice into another when the engine split a single person
   across two ids. Naming both rows without merging would leave two rows with the
