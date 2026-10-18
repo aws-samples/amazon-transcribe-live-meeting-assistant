@@ -749,6 +749,13 @@ Outputs:
         !GetAtt BedrockSummaryLambda.Arn,
         !Ref EndOfCallLambdaHookFunctionArn,
       ]
+  VoiceEnrollmentSeedsFunctionArn:
+    Description: >-
+      ARN of the function the WebSocket transcriber asks for the enrolled voices
+      a starting meeting may label by name. Empty when voice enrollment is off,
+      which is how the transcriber knows not to ask.
+    Value:
+      !If [ShouldEnableVoiceEnrollment, !GetAtt VoiceEnrollmentSeedsFunction.Arn, ""]
   LocalUITestingEnv:
     Description: Copy to create .env file for local UI testing
     Value: !Sub
@@ -1262,6 +1269,92 @@ Resources:
       Action: lambda:InvokeFunction
       Principal: !Sub "events.${AWS::URLSuffix}"
       SourceArn: !GetAtt VoiceEnrollmentRetentionScheduleRule.Arn
+
+  # Read by the WebSocket transcriber when a meeting's ASR sessions open, to
+  # learn which enrolled voices consent currently lets it label by name. Going
+  # through a function rather than letting the transcriber read the table keeps
+  # the consent rules in one implementation, and keeps read access to the
+  # biometrics with the voice-enrollment roles.
+  VoiceEnrollmentSeedsFunction:
+    Type: AWS::Serverless::Function
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Handler: seeds.handler
+      Role: !GetAtt VoiceEnrollmentSeedsExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/voice_enrollment_manager
+      Description: Lists the enrolled voices a transcription session may label by name
+      MemorySize: 256
+      # A meeting's first audio is buffered while this answers, so the budget is
+      # short on purpose: a slow reply costs transcript latency, and no reply at
+      # all only costs the names.
+      Timeout: 10
+      Environment:
+        Variables:
+          VOICE_ENROLLMENT_TABLE: !Ref VoiceEnrollmentTable
+          VOICE_CONSENT_LOG_TABLE: !Ref VoiceConsentLogTable
+          VOICE_ENROLLMENT_TERMS_VERSION: !Ref VoiceEnrollmentTermsVersion
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentSeedsFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it is called once per meeting"
+    # checkov:skip=CKV_AWS_116: "DLQ not required; the caller treats no answer as no enrolled voices and transcribes normally"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names and a version"
+    DependsOn:
+      - VoiceEnrollmentSeedsFunctionLogGroup
+
+  VoiceEnrollmentSeedsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/VoiceEnrollmentSeedsFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  VoiceEnrollmentSeedsExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: ShouldEnableVoiceEnrollment
+    Properties:
+      Description: Voice Enrollment Session Seeds Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-VoiceEnrollmentSeeds
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Read only. This role answers a question about the enrollments
+              # and is given no way to change one, so a meeting starting can
+              # never alter somebody's consent or their voiceprint.
+              - Effect: Allow
+                Action:
+                  - dynamodb:Scan
+                Resource: !GetAtt VoiceEnrollmentTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   VoiceEnrollmentInviteFunction:
     Type: AWS::Serverless::Function

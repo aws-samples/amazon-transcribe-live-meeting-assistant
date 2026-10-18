@@ -371,6 +371,42 @@ Parameters:
       English only; requires a region with AWS Lambda MicroVMs. See
       docs/microvm-asr.md.
 
+  EnableVoiceEnrollment:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Let people enrol their voice so they are labelled by name in meetings from
+      their first word. A voiceprint is biometric data about a person: while this
+      is false the enrollment table, the consent log and the consent portal do
+      not exist in the deployment at all. Turning it on creates obligations that
+      are yours -- biometric data is separately regulated in many jurisdictions
+      and typically requires informed consent before collection, a published
+      retention schedule and deletion on request. See docs/voice-enrollment.md.
+      Matching also needs EnableMicrovmAsr=true, since Amazon Transcribe exposes
+      no speaker embedding.
+
+  VoiceEnrollmentRetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 1
+    MaxValue: 3650
+    Description: >-
+      How long a voice-enrollment consent stands before it must be renewed. When
+      it lapses the voiceprint is deleted and the person is asked to consent
+      again. Consent that never expires is not meaningfully informed.
+
+  VoiceEnrollmentTermsVersion:
+    Type: String
+    Default: "1"
+    AllowedPattern: "^[A-Za-z0-9._-]{1,32}$"
+    Description: >-
+      Bump this to require everybody to re-consent. An enrollment whose consent
+      is to a superseded version stops being used for matching until its owner
+      agrees to the current terms.
+
   ModelValidation:
     Type: String
     Default: "true"
@@ -999,6 +1035,12 @@ Metadata:
         Parameters:
           - EnableMicrovmAsr
       - Label:
+          default: Voice enrollment (biometric; off by default)
+        Parameters:
+          - EnableVoiceEnrollment
+          - VoiceEnrollmentRetentionDays
+          - VoiceEnrollmentTermsVersion
+      - Label:
           default: WebSocket Transcriber Service Scaling
         Parameters:
           - TranscriberDesiredTaskCount
@@ -1136,6 +1178,12 @@ Metadata:
         default: Transcription Custom Language Model Name
       EnableMicrovmAsr:
         default: Deploy the on-demand speech engine (EXPERIMENTAL)
+      EnableVoiceEnrollment:
+        default: Enable voice enrollment (stores biometric data)
+      VoiceEnrollmentRetentionDays:
+        default: Voice Enrollment Consent Validity In Days
+      VoiceEnrollmentTermsVersion:
+        default: Voice Enrollment Terms Version
       ModelValidation:
         default: Amazon Bedrock Model Validation
       TranscriptLambdaHookFunctionArn:
@@ -2719,6 +2767,9 @@ Resources:
         MCPServerCallbackURLs: !Ref MCPServerCallbackURLs
         CognitoUserPoolDomain: !GetAtt COGNITOSTACK.Outputs.CognitoUserPoolDomain
         VoiceAssistantActivationMode: !Ref VoiceAssistantActivationMode
+        EnableVoiceEnrollment: !Ref EnableVoiceEnrollment
+        VoiceEnrollmentRetentionDays: !Ref VoiceEnrollmentRetentionDays
+        VoiceEnrollmentTermsVersion: !Ref VoiceEnrollmentTermsVersion
         LogLevel: !Ref LogLevel
 
   BEDROCKKB:
@@ -2887,6 +2938,9 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
           - ""
+        # Empty when voice enrollment is off, which is how the transcriber knows
+        # not to ask. The AI stack decides that, since the enrollments live there.
+        VoiceEnrollmentSeedsFunctionArn: !GetAtt AISTACK.Outputs.VoiceEnrollmentSeedsFunctionArn
         PcaS3BucketName: ""
         PcaTranscriptsPrefix: ""
         PcaPlaybackAudioFilePrefix: ""

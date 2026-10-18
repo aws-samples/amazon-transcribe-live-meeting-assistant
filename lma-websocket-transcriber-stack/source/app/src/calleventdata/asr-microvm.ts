@@ -24,6 +24,8 @@ import { AsrRuntimeConfig } from './asr-config';
 import { CallMetaData, SocketCallData } from './eventtypes';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
 import { diarizationEnabledFor } from './diarization';
+// Type-only in the other direction, so this is not a runtime cycle.
+import { fetchEnrolledVoices } from './voice-enrollment';
 import { normalizeErrorForLogging } from '../utils/common';
 import {
     ASR_CHANNEL_IDS,
@@ -806,12 +808,20 @@ export const startMicrovmAsr = async (
         diarize: diarizationEnabledFor(channelId, settings),
         maxSpeakers: resolveMaxSpeakers(callMetadata.maxSpeakers, 0),
     });
+    // Started here and awaited after the lease, so asking who has enrolled runs
+    // alongside the MicroVM boot instead of adding to it. Resolves to an empty
+    // list when enrollment is off, and on any failure.
+    const enrolledVoices = fetchEnrolledVoices(callMetadata.callId, server);
     const registry = new SpeakerNameRegistry();
+    const options = new Map<AsrChannelId, AsrSessionOptions>();
     const sessions = new Map<AsrChannelId, AsrChannelSession>();
     // The endpoint is filled in by updateLease() once the MicroVM is running; the
     // sessions only need it to connect, and until then they buffer.
     const pendingLease: AsrLease = { endpointUrl: '' };
     for (const channelId of ASR_CHANNEL_IDS) {
+        // Held in the map rather than rebuilt per use, so the enrolled voices
+        // filled in below reach the object the session actually reads.
+        options.set(channelId, optionsFor(channelId));
         sessions.set(
             channelId,
             new AsrChannelSession(
@@ -820,7 +830,7 @@ export const startMicrovmAsr = async (
                 channelId,
                 pendingLease,
                 registry,
-                optionsFor(channelId)
+                options.get(channelId) as AsrSessionOptions
             )
         );
     }
@@ -850,6 +860,17 @@ export const startMicrovmAsr = async (
         session.updateLease(lease);
     }
 
+    // Both channels get the same seeds: somebody who enrolled may be on the
+    // microphone or in the meeting audio, and each channel is an independent
+    // session with its own view of who is speaking. Set before start(), which
+    // is when the config is sent.
+    const voices = await enrolledVoices;
+    if (voices.length > 0) {
+        for (const channelOptions of options.values()) {
+            channelOptions.enrolledVoices = voices;
+        }
+    }
+
     const results = await Promise.all(
         [...sessions.values()].map((session) => session.start())
     );
@@ -862,7 +883,7 @@ export const startMicrovmAsr = async (
     }
 
     const diarized = [...sessions.entries()]
-        .filter(([channelId]) => optionsFor(channelId).diarize)
+        .filter(([channelId]) => options.get(channelId)?.diarize)
         .map(([channelId]) => channelId);
     server.log.info(
         `[ASR]: [${callMetadata.callId}] - MicroVM ASR active on ${sessions.size} channel(s), client rate ${callMetadata.samplingRate}Hz, diarized channel(s)=${diarized.length ? diarized.join(',') : 'none'}`

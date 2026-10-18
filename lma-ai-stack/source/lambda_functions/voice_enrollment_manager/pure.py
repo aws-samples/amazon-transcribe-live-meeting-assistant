@@ -295,6 +295,41 @@ def seedable_voices(enrollments, current_terms_version, now_iso):
     return out
 
 
+def session_seeds(enrollments, current_terms_version, now_iso, limit):
+    """`seedable_voices`, ordered and bounded for one transcription session.
+
+    The limit is a guard against a table that has grown past what session setup
+    should spend time on, not a product rule -- a deployment with more enrolled
+    people than this is served by the transcript miner for the rest.
+
+    Which ones survive the cut therefore matters, and the order is by
+    enrollment date, newest first. Nothing here knows who is in the room: a
+    meeting recorded from a browser tab has no attendee list, which is the whole
+    reason the Speakers panel takes a pasted one. Recency is the only signal
+    available, and it is a weak proxy for somebody still being around to speak.
+    Ties break on subject id so the set is stable rather than dependent on the
+    order a Scan happened to return.
+    """
+    usable = [
+        enrollment
+        for enrollment in enrollments or []
+        if is_usable_for_matching(enrollment, current_terms_version, now_iso)
+    ]
+    usable.sort(
+        key=lambda e: (
+            # EnrolledAt is set when the voiceprint is stored; ConsentedAt only
+            # exists on a row that never got that far, which cannot be seeded
+            # anyway. The fallback is so a hand-written or migrated row still
+            # sorts somewhere deterministic rather than all landing on "".
+            str(e.get("EnrolledAt") or e.get("ConsentedAt") or ""),
+            str(e.get("SubjectId") or ""),
+        ),
+        reverse=True,
+    )
+    bounded = usable[: max(0, int(limit))]
+    return seedable_voices(bounded, current_terms_version, now_iso), len(usable)
+
+
 def expired_subjects(enrollments, now_iso):
     """Active enrollments whose consent has aged out, for the retention pass."""
     return [
