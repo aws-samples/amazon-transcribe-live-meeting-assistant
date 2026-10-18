@@ -299,38 +299,88 @@ describe('parseAttendeeList', () => {
 });
 
 describe('hasMultipleVoicesOnAChannel', () => {
-  // Decides whether the Speakers panel starts open: only an UNNAMED voice
-  // carrying an engine voice id is work the panel can do something about.
-  const unnamed = (channel, voiceId) => ({ channel, voiceId, name: '' });
-  const named = (channel, voiceId, name) => ({ channel, voiceId, name });
+  // Decides whether the Speakers panel starts open. Rows are built through
+  // buildSpeakerRoster rather than hand-made, so this cannot pass against a row
+  // shape the roster never actually produces -- which is how an earlier version
+  // of these tests passed for the wrong reason.
+  const seg = (speaker, start_, channel = 'CALLER') => ({
+    channel,
+    speaker,
+    startTime: start_,
+    endTime: start_ + 3,
+    isPartial: false,
+  });
+  const roster = (segments, identities = emptyIdentities()) => buildSpeakerRoster(segments, identities, 'Room 3');
 
-  it('is true when one channel holds two unnamed voices', () => {
-    expect(hasMultipleVoicesOnAChannel([unnamed('CALLER', '(spk_0)'), unnamed('CALLER', '(spk_1)')])).toBe(true);
+  it('is true when one channel holds two unnamed placeholder voices', () => {
+    expect(
+      hasMultipleVoicesOnAChannel(roster([seg('Other Participant (spk_0)', 0), seg('Other Participant (spk_1)', 5)])),
+    ).toBe(true);
   });
 
   it('is false for one voice per channel, however many channels', () => {
-    expect(hasMultipleVoicesOnAChannel([unnamed('CALLER', '(spk_0)'), unnamed('AGENT', '(spk_0)')])).toBe(false);
+    expect(
+      hasMultipleVoicesOnAChannel(
+        roster([seg('Other Participant (spk_0)', 0), seg('Other Participant (spk_0)', 5, 'AGENT')]),
+      ),
+    ).toBe(false);
   });
 
   it('is false once those voices have been named', () => {
     // Re-opening a meeting whose speakers are all named should not reopen the
     // panel as though nothing had been done.
-    expect(hasMultipleVoicesOnAChannel([named('CALLER', '(spk_0)', 'Bob'), named('CALLER', '(spk_1)', 'Sarah')])).toBe(
-      false,
-    );
+    const named = {
+      ...emptyIdentities(),
+      identities: {
+        'CALLER#Other Participant (spk_0)': { name: 'Bob' },
+        'CALLER#Other Participant (spk_1)': { name: 'Sarah' },
+      },
+    };
+    expect(
+      hasMultipleVoicesOnAChannel(
+        roster([seg('Other Participant (spk_0)', 0), seg('Other Participant (spk_1)', 5)], named),
+      ),
+    ).toBe(false);
   });
 
-  it('is false for a Virtual Participant meeting, where voices already read as people', () => {
-    // A VP names from the meeting roster, so every row has a real name and no
-    // engine voice id. There is nothing to disambiguate.
-    const roster = ['Alice', 'Bob', 'Priya'].map((n) => ({ channel: 'CALLER', voiceId: '', name: n }));
-    expect(hasMultipleVoicesOnAChannel(roster)).toBe(false);
+  it('is false for a Virtual Participant meeting, whose voices carry roster names', () => {
+    // A VP names from the meeting roster, so the stored speaker already reads as
+    // a person -- but it STILL carries an engine voice id, which is why the voice
+    // id alone cannot be the test.
+    const vp = roster([seg('Alice (spk_0)', 0), seg('Bob (spk_0)', 5), seg('Priya (spk_1)', 10)]);
+    expect(vp.every((row) => row.voiceId)).toBe(true);
+    expect(hasMultipleVoicesOnAChannel(vp)).toBe(false);
+  });
+
+  it('is false when the client supplied its own channel name', () => {
+    // e.g. the Stream Audio client sending an address as the channel name.
+    expect(
+      hasMultipleVoicesOnAChannel(roster([seg('alex@example.com (spk_0)', 0), seg('alex@example.com (spk_1)', 5)])),
+    ).toBe(false);
   });
 
   it('is false for a single voice and for no voices at all', () => {
-    expect(hasMultipleVoicesOnAChannel([unnamed('CALLER', '(spk_0)')])).toBe(false);
+    expect(hasMultipleVoicesOnAChannel(roster([seg('Other Participant (spk_0)', 0)]))).toBe(false);
     expect(hasMultipleVoicesOnAChannel([])).toBe(false);
     expect(hasMultipleVoicesOnAChannel(undefined)).toBe(false);
+  });
+});
+
+describe('buildSpeakerRoster channel scoping', () => {
+  it('does not offer the remote participant name as a local-channel placeholder', () => {
+    // The Stream Audio form's name is the remote side's. Using it for an
+    // AGENT-channel voice would make the panel's placeholder disagree with the
+    // transcript beside it, which shows the generic placeholder there.
+    const rows = buildSpeakerRoster(
+      [
+        { channel: 'CALLER', speaker: 'Other Participant', startTime: 0, endTime: 3, isPartial: false },
+        { channel: 'AGENT', speaker: 'Other Participant', startTime: 5, endTime: 8, isPartial: false },
+      ],
+      emptyIdentities(),
+      'Conference Room 3',
+    );
+    expect(rows.find((r) => r.channel === 'CALLER').defaultName).toBe('Conference Room 3');
+    expect(rows.find((r) => r.channel === 'AGENT').defaultName).toBe('Other Participant');
   });
 });
 

@@ -197,6 +197,12 @@ const NAMEABLE_CHANNELS = ['CALLER', 'AGENT'];
 export const buildSpeakerRoster = (segments, identities, fallbackName) => {
   const map = identities ?? emptyIdentities();
   const rows = new Map();
+  // The participant name from the Stream Audio form is the REMOTE side's, so it
+  // substitutes for the placeholder on the caller channel only -- the same rule
+  // every transcript reader applies. Without the channel test the panel's
+  // placeholder for a local-channel voice would disagree with the transcript
+  // beside it.
+  const fallbackFor = (channel) => (channel === 'CALLER' ? fallbackName : undefined);
 
   (segments ?? []).forEach((segment) => {
     if (segment.isPartial || !NAMEABLE_CHANNELS.includes(segment.channel)) {
@@ -220,12 +226,11 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
         // placeholder from it, so the row is not labelled with the voice id of
         // something that was folded into it.
         const fromTarget = splitDiarizationLabel(segment.speaker);
+        const generic = fromTarget.base === DEFAULT_OTHER_SPEAKER_NAME || fromTarget.base === '';
         existing.storedSpeaker = segment.speaker;
         existing.voiceId = fromTarget.suffix.trim();
-        existing.defaultName =
-          fromTarget.base === DEFAULT_OTHER_SPEAKER_NAME || fromTarget.base === ''
-            ? fallbackName || DEFAULT_OTHER_SPEAKER_NAME
-            : fromTarget.base;
+        existing.defaultName = generic ? fallbackFor(segment.channel) || DEFAULT_OTHER_SPEAKER_NAME : fromTarget.base;
+        existing.isPlaceholder = generic;
         existing.channel = segment.channel;
         existing.describesTarget = true;
       }
@@ -240,7 +245,13 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
       voiceId: suffix.trim(),
       // What the transcript shows for this voice when it has no name yet.
       defaultName:
-        base === DEFAULT_OTHER_SPEAKER_NAME || base === '' ? fallbackName || DEFAULT_OTHER_SPEAKER_NAME : base,
+        base === DEFAULT_OTHER_SPEAKER_NAME || base === ''
+          ? fallbackFor(segment.channel) || DEFAULT_OTHER_SPEAKER_NAME
+          : base,
+      // True when the stored speaker is the generic placeholder rather than
+      // something that already reads as a person (a meeting-roster name, or an
+      // address the client supplied). Drives whether the panel has work to do.
+      isPlaceholder: base === DEFAULT_OTHER_SPEAKER_NAME || base === '',
       name: entry?.name ?? '',
       status: entry?.name ? entry.status ?? 'confirmed' : 'unnamed',
       source: entry?.source,
@@ -334,12 +345,13 @@ export const parseAttendeeList = (text) => {
 export const hasMultipleVoicesOnAChannel = (roster) => {
   const perChannel = {};
   (roster ?? [])
-    // A voice that already reads as a person needs no attention: a Virtual
-    // Participant meeting has one row per attendee under their real name, and
-    // starting expanded with a '(0/5)' counter there would claim there is work
-    // to do when there is none. Only an unnamed voice carrying an engine voice
-    // id counts.
-    .filter((row) => !row.name && row.voiceId)
+    // A voice that already reads as a person needs no attention. A Virtual
+    // Participant meeting has one row per attendee under their meeting-roster
+    // name, and a client can supply its own channel name (an email address, say)
+    // -- both still carry an engine voice id, so the voice id alone does not
+    // distinguish them. What matters is whether the stored speaker is still the
+    // generic placeholder and nobody has named it.
+    .filter((row) => !row.name && row.isPlaceholder)
     .forEach((row) => {
       perChannel[row.channel] = (perChannel[row.channel] || 0) + 1;
     });

@@ -191,9 +191,14 @@ def resolve_speaker_name(row, identities, fallback_name):
         return f"{fallback_name}{suffix}"
     # A segment with no recorded speaker stays unlabelled, which is this
     # function's long-standing contract: better an unattributed line than an
-    # invented one. This is the one place the UI resolver deliberately differs --
-    # it substitutes the channel's placeholder there, because a transcript row
-    # has to render something in its speaker column and a prompt line does not.
+    # invented one.
+    #
+    # This is the one place the UI resolver deliberately differs. There, an empty
+    # stored speaker takes the same branch as the placeholder, so a caller-channel
+    # segment renders under the Stream Audio participant name (and otherwise under
+    # the generic placeholder) -- a transcript row has to put something in its
+    # speaker column, whereas a prompt line reads better with no attribution than
+    # with a guessed one.
     return stored
 
 

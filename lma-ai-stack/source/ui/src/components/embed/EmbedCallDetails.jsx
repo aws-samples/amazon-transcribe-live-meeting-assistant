@@ -640,9 +640,11 @@ const EmbedCallDetails = ({ params, sendToParent }) => {
       const callDetails = callsMap[0];
       // See the note in CallDetails.js: a speaker rename does not move
       // UpdatedAt, so the embedded transcript needs the same second test to
-      // re-label without a reload.
+      // re-label without a reload -- and the same undefined guard, since this
+      // view runs its own meeting-list load.
       const timestampAdvanced = callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt;
-      const speakerNamesChanged = call.speakerIdentities !== callDetails?.speakerIdentities;
+      const speakerNamesChanged =
+        callDetails?.speakerIdentities !== undefined && call.speakerIdentities !== callDetails.speakerIdentities;
       if (timestampAdvanced || speakerNamesChanged) {
         setCall(callDetails);
         if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {

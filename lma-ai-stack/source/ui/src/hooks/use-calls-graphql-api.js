@@ -452,10 +452,6 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     // Patch in place rather than via setCallsDeduped: that helper REPLACES the
     // stored call with the object handed to it, so a two-field payload would
     // strip the rest of the meeting's attributes out of state.
-    const patch = (value) =>
-      setCalls((currentCalls) =>
-        currentCalls.map((c) => (c.CallId === callId ? { ...c, SpeakerIdentities: value } : c)),
-      );
     setCalls((currentCalls) => {
       previous = currentCalls.find((c) => c.CallId === callId)?.SpeakerIdentities;
       return currentCalls.map((c) => (c.CallId === callId ? { ...c, SpeakerIdentities: serializedIdentities } : c));
@@ -474,7 +470,16 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
           ? 'you do not have permission to change speaker names on this meeting'
           : 'failed to save speaker names - please try again later',
       );
-      patch(previous);
+      // Roll back only if what is on screen is still what THIS call put there.
+      // Two renames can be in flight at once (blurring one field straight into
+      // the next), and a blind revert would discard a later write that succeeded.
+      setCalls((currentCalls) =>
+        currentCalls.map((c) =>
+          c.CallId === callId && c.SpeakerIdentities === serializedIdentities
+            ? { ...c, SpeakerIdentities: previous }
+            : c,
+        ),
+      );
       return false;
     }
   };

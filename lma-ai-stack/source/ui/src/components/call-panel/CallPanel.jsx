@@ -870,6 +870,13 @@ const CallInProgressTranscript = ({
     translateOn,
     updateFlag,
     speakerIdentities,
+    // The elements carry the inline-rename affordance, so they have to be
+    // rebuilt when it changes. isAdminUser resolves asynchronously, so readOnly
+    // flips from true to false shortly after first render; without it here an
+    // admin viewing someone else's ended meeting would keep elements built
+    // while the answer was still "no".
+    readOnly,
+    onRenameSpeaker,
   ]);
 
   useEffect(() => {

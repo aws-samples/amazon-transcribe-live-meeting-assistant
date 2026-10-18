@@ -58,6 +58,53 @@ describe('the rename mutation feeds the onUpdateCall broadcast', () => {
   });
 });
 
+/**
+ * The guard CallDetails and EmbedCallDetails use to decide whether to replace
+ * the meeting they are rendering, extracted so it can be driven directly. It
+ * must match the expression in both of those files.
+ */
+const shouldReplace = (current, incoming) => {
+  const timestampAdvanced = incoming?.updatedAt && current.updatedAt < incoming.updatedAt;
+  const speakerNamesChanged =
+    incoming?.speakerIdentities !== undefined && current.speakerIdentities !== incoming.speakerIdentities;
+  return Boolean(timestampAdvanced || speakerNamesChanged);
+};
+
+describe('the meeting-refresh guard', () => {
+  const NAMED = '{"identities":{"CALLER#Other Participant (spk_0)":{"name":"Bob"}}}';
+  const loaded = { updatedAt: '2026-10-17T12:00:00.000Z', speakerIdentities: NAMED };
+
+  it('replaces the meeting when the names changed but the timestamp did not', () => {
+    // A rename deliberately does not move UpdatedAt, so this is the only signal.
+    const renamed = { updatedAt: loaded.updatedAt, speakerIdentities: `${NAMED} ` };
+    expect(shouldReplace(loaded, renamed)).toBe(true);
+  });
+
+  it('does NOT replace it from a meeting-list copy that carries no names', () => {
+    // listCallsDateRange omits SpeakerIdentities, and a list refresh empties the
+    // calls array before repopulating it, so the list-derived copy of an open
+    // meeting routinely has undefined here. Treating that as "the names were
+    // cleared" blanks every name on screen until the page is reloaded.
+    const fromList = { updatedAt: loaded.updatedAt, speakerIdentities: undefined };
+    expect(shouldReplace(loaded, fromList)).toBe(false);
+  });
+
+  it('still replaces it when the timestamp advances, names or no names', () => {
+    const later = { updatedAt: '2026-10-17T12:30:00.000Z', speakerIdentities: undefined };
+    expect(shouldReplace(loaded, later)).toBe(true);
+  });
+
+  it('replaces it when the names are genuinely cleared', () => {
+    // Clearing every name stores an empty map, not undefined, so it is a change.
+    const cleared = { updatedAt: loaded.updatedAt, speakerIdentities: '{"identities":{}}' };
+    expect(shouldReplace(loaded, cleared)).toBe(true);
+  });
+
+  it('does not replace it when nothing changed', () => {
+    expect(shouldReplace(loaded, { ...loaded })).toBe(false);
+  });
+});
+
 describe('a renamed meeting still maps to a usable row', () => {
   it('throws nothing and keeps status and start time when only the names changed', () => {
     // The regression this guards: a payload missing Status/CreatedAt maps to an
