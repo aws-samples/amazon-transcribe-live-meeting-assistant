@@ -449,6 +449,16 @@ def _states():
     rows = {
         "pending, terms moved": {"Status": "pending", "TermsSha256": "older"},
         "pending, terms current": {"Status": "pending", "TermsSha256": CURRENT_WORDS},
+        # Reachable: this branch's own seeds diagnostic exists for enrollments
+        # that predate the hash field. A one-sided leniency about an absent
+        # hash -- strict when storing, lenient when deciding what to show --
+        # recreates the dead end with every suite green.
+        "pending, no recorded terms": {"Status": "pending"},
+        "active, no recorded terms": {
+            "Status": "active",
+            "ConsentExpiresAt": "2099-01-01T00:00:00Z",
+            "Centroid": [0.1],
+        },
         "pending, version moved": {
             "Status": "pending",
             "TermsSha256": CURRENT_WORDS,
@@ -483,6 +493,8 @@ def _states():
         row.setdefault("SubjectId", ENROLLEE)
         row.setdefault("TermsVersion", "1")
         row.setdefault("DisplayName", "Sarah Lee")
+        # Deliberately NOT defaulting TermsSha256: its absence is one of the
+        # states under test.
     return rows
 
 
@@ -522,3 +534,70 @@ def test_a_pending_row_is_not_treated_as_expired_for_having_no_expiry() -> None:
 def test_a_withdrawn_record_is_not_asked_to_re_consent() -> None:
     """It already gets the terms, by virtue of having no standing consent."""
     assert pure.needs_reconsent(_states()["revoked"], 1, CURRENT_WORDS, NOW) is False
+
+
+def test_an_active_record_with_no_recorded_expiry_is_asked_again() -> None:
+    """Pins the rule the previous round added, whose line this round rewrote.
+
+    An active row that records no expiry cannot be shown to be in date, so it
+    is refused for matching; its owner therefore has to be asked again, or the
+    voiceprint sits unusable with nothing offering a way to renew it. The
+    property test above is one-directional and goes vacuous for this row.
+    """
+    row = _states()["active, no expiry"]
+    assert "ConsentExpiresAt" not in row
+    assert pure.needs_reconsent(row, 1, CURRENT_WORDS, NOW) is True
+    assert pure.is_usable_for_matching(row, 1, NOW, CURRENT_WORDS) is False
+
+
+def test_a_pending_record_with_no_recorded_terms_is_asked_again() -> None:
+    """Written before the hash field existed, so what was agreed is unknown."""
+    row = _states()["pending, no recorded terms"]
+    assert pure.needs_reconsent(row, 1, CURRENT_WORDS, NOW) is True
+
+
+def test_a_consent_row_omits_the_terms_hash_when_there_is_none_to_record() -> None:
+    """Rather than recording the hash of the empty string.
+
+    e3b0c442... reads as "the terms shown were empty" rather than "not
+    recorded", and this table is append-only, so a wrong value cannot be
+    corrected afterwards.
+    """
+    row = pure.consent_record(
+        subject_id=ENROLLEE,
+        action=pure.ACTION_REVOKED,
+        terms_version=1,
+        terms_text="",
+        terms_sha256=None,
+        actor_sub=ADMIN,
+        actor_email="admin@example.com",
+        recorded_at=NOW,
+    )
+    assert "TermsSha256" not in row
+    assert pure.terms_fingerprint("") not in row.values()
+
+
+def test_a_consent_row_still_records_a_hash_whenever_one_exists() -> None:
+    """The omission must be narrow: either input is enough to record one."""
+    carried = pure.consent_record(
+        subject_id=ENROLLEE,
+        action=pure.ACTION_EXPIRED,
+        terms_version=1,
+        terms_text="",
+        terms_sha256="what-was-agreed",
+        actor_sub="system:retention",
+        actor_email="",
+        recorded_at=NOW,
+    )
+    assert carried["TermsSha256"] == "what-was-agreed"
+
+    shown = pure.consent_record(
+        subject_id=ENROLLEE,
+        action=pure.ACTION_GRANTED,
+        terms_version=1,
+        terms_text="the words on screen",
+        actor_sub=ENROLLEE,
+        actor_email="e@x.com",
+        recorded_at=NOW,
+    )
+    assert shown["TermsSha256"] == pure.terms_fingerprint("the words on screen")

@@ -115,11 +115,18 @@ def consent_record(
     and none is accepted. A caller that wants to store a voiceprint uses
     :func:`enrollment_record` instead.
 
-    ``terms_sha256`` is for rows where no terms were shown -- an expiry, which
-    the deployment performs with nobody present. Those carry forward the hash
-    the consent itself recorded, so the row says which terms lapsed. Hashing an
-    empty string instead produced e3b0c442... on every such row, which is
-    indistinguishable from "the terms shown were empty".
+    ``terms_sha256`` is for rows where no terms were shown -- an expiry or a
+    withdrawal, which record what was agreed to rather than what is on screen.
+    Those carry forward the hash the consent itself recorded, so the row says
+    which terms it was about.
+
+    Where there is neither a hash to carry nor any text -- a record written
+    before the hash field existed, or an admin acting on a subject with no
+    enrollment row at all -- the field is **omitted**. Hashing the empty string
+    would write e3b0c442..., which reads as "the terms shown were empty" rather
+    than "not recorded", and this table is append-only so it cannot be
+    corrected afterwards. An absent field is the honest representation, and
+    nothing reads it: the log's key is SubjectId + RecordedAt.
     """
     if action not in CONSENT_ACTIONS:
         raise ValueError(f"unknown consent action: {action!r}")
@@ -133,10 +140,13 @@ def consent_record(
         "RecordedAt": recorded_at,
         "Action": action,
         "TermsVersion": str(terms_version),
-        "TermsSha256": terms_sha256 or terms_fingerprint(terms_text),
         "ActorSub": actor_sub,
         "ActorEmail": actor_email or "",
     }
+    if terms_sha256:
+        record["TermsSha256"] = terms_sha256
+    elif terms_text:
+        record["TermsSha256"] = terms_fingerprint(terms_text)
     if source_ip:
         record["SourceIp"] = source_ip
     if user_agent:

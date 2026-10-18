@@ -373,3 +373,45 @@ describe('bounds on what can be recorded', () => {
     expect(stop).toHaveBeenCalled();
   });
 });
+
+describe('why somebody is being asked to consent again', () => {
+  // Two different situations raise NeedsReconsent, and they need different
+  // words: telling somebody their terms changed when their consent simply ran
+  // out is telling them something untrue about why they are back here.
+
+  it('says the consent expired when the expiry has passed', async () => {
+    renderWith(
+      state({
+        Status: 'active',
+        NeedsReconsent: true,
+        ConsentExpiresAt: '2000-01-01T00:00:00Z',
+        DisplayName: 'Sarah Lee',
+      }),
+    );
+    await waitFor(() => expect(screen.getByText(/Your consent has expired/)).toBeTruthy());
+    expect(screen.getByText(/run out/)).toBeTruthy();
+    expect(screen.queryByText(/The terms have changed/)).toBeNull();
+    // And the way forward is on the page.
+    expect(screen.getByRole('checkbox')).toBeTruthy();
+  });
+
+  it('says the terms changed when the consent is still in date', async () => {
+    renderWith(
+      state({
+        Status: 'active',
+        NeedsReconsent: true,
+        ConsentExpiresAt: '2099-01-01T00:00:00Z',
+        DisplayName: 'Sarah Lee',
+      }),
+    );
+    await waitFor(() => expect(screen.getByText(/The terms have changed/)).toBeTruthy());
+    expect(screen.queryByText(/Your consent has expired/)).toBeNull();
+  });
+
+  it('says the terms changed for a pending record, which has no expiry', async () => {
+    // Nothing is stored yet, so nothing can have expired.
+    renderWith(state({ Status: 'pending', NeedsReconsent: true, ConsentExpiresAt: '' }));
+    await waitFor(() => expect(screen.getByText(/The terms have changed/)).toBeTruthy());
+    expect(screen.queryByText(/Your consent has expired/)).toBeNull();
+  });
+});
