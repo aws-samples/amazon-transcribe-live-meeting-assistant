@@ -199,6 +199,30 @@ runtime switches (engine for streaming meetings, engine for Virtual Participants
 Participant voice separation) live on the Transcription Engine admin page and take effect on the
 next meeting with no stack update.
 
+## Voice Enrollment
+
+> [!IMPORTANT]
+> Off by default, and turning it on means storing biometric data about people.
+> Read [Voice Enrollment](voice-enrollment.md) before enabling it.
+
+Lets somebody record a voice sample once, with their own explicit consent, so
+they are labelled by name from their first word in later meetings. While
+`EnableVoiceEnrollment` is `false` the tables, the consent portal and the
+matching step do not exist in the deployment at all.
+
+| Parameter | Description | Default | Allowed Values |
+|-----------|-------------|---------|----------------|
+| EnableVoiceEnrollment | Creates the enrollment table, the append-only consent log and the enrollment portal, and adds **Enrol My Voice** to the navigation | false | true, false |
+| VoiceEnrollmentRetentionDays | How long a consent stands before it must be renewed. When it lapses the voiceprint is deleted and the person is asked again. Changing this changes the consent terms, which state the period, so everybody is asked to agree again at the new one | 365 | 1–3650 |
+| VoiceEnrollmentTermsVersion | Bump to require everybody to re-consent. An enrollment agreeing to a superseded version stops being used for matching until its owner agrees to the current terms | 1 | 1–32 characters of `A-Za-z0-9._-` |
+
+Both enrolling and matching need `EnableMicrovmAsr=true`, because that engine is
+what computes speaker embeddings -- one to build a voiceprint, the other to
+compare against it. Amazon Transcribe exposes none, so with enrollment on and
+that engine off, the tables, the portal and the consent log all exist and work,
+and the step that would create a voiceprint reports that the engine is
+missing.
+
 ## End-of-Call Summary
 
 | Parameter | Description | Default | Allowed Values |

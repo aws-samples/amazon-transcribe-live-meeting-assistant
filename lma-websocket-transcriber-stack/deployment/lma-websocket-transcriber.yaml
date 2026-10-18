@@ -290,6 +290,15 @@ Parameters:
       (Optional) ARN of the MicroVM ASR session launcher. When empty, meetings are
       always transcribed by Amazon Transcribe streaming.
 
+  VoiceEnrollmentSeedsFunctionArn:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) ARN of the function that lists the enrolled voices a starting
+      meeting may label by name. When empty, voice enrollment is off for this
+      deployment and meetings label separated voices as spk_0, spk_1 and so on
+      until somebody names them.
+
   AsrConfigTableName:
     Type: String
     Default: ""
@@ -517,6 +526,7 @@ Conditions:
   # Audio-only deployments keep the original, cheaper shape.
   ShouldEnableVideoRecording: !Equals [!Ref EnableVideoRecording, "true"]
   ShouldEnableMicrovmAsr: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
+  HasVoiceEnrollment: !Not [!Equals [!Ref VoiceEnrollmentSeedsFunctionArn, ""]]
   HasAsrConfigTable: !Not [!Equals [!Ref AsrConfigTableName, ""]]
   ShouldEnableTranscriberAutoScaling:
     !Equals [!Ref TranscriberAutoScalingEnabled, "true"]
@@ -1210,6 +1220,16 @@ Resources:
               Effect: Allow
               Resource: !Ref AsrLauncherFunctionArn
             - !Ref AWS::NoValue
+          # Ask which enrolled voices a starting meeting may label by name.
+          # Invoke on that one function and nothing else: the task is given no
+          # access to the enrollment table or its key, so the voiceprints reach
+          # it only as the answer to this call.
+          - !If
+            - HasVoiceEnrollment
+            - Action: lambda:InvokeFunction
+              Effect: Allow
+              Resource: !Ref VoiceEnrollmentSeedsFunctionArn
+            - !Ref AWS::NoValue
           # Runtime diarization overrides, read once per meeting (and cached).
           - !If
             - HasAsrConfigTable
@@ -1358,6 +1378,11 @@ Resources:
               Value: !Ref AsrLauncherFunctionArn
             - Name: ASR_CONFIG_TABLE_NAME
               Value: !Ref AsrConfigTableName
+            # Voice enrollment. Empty unless the deployment has it switched on,
+            # in which case a meeting asks this function at session start which
+            # enrolled voices consent lets it label by name.
+            - Name: VOICE_ENROLLMENT_SEEDS_FUNCTION_ARN
+              Value: !Ref VoiceEnrollmentSeedsFunctionArn
             - Name: WS_LOG_LEVEL
               Value: !Ref LogLevel
             - Name: DEBUG
@@ -1740,6 +1765,10 @@ Resources:
         # bundle). The Transcription Engine page shows it, and the Stream Audio form only
         # reads the streaming-engine switch when it is true.
         AsrEngineAvailable: !If [ShouldEnableMicrovmAsr, "true", "false"]
+        # Whether this deployment has voice enrollment at all. The UI offers
+        # the consent portal only when it is true, since it has nothing to talk
+        # to otherwise.
+        VoiceEnrollmentAvailable: !If [HasVoiceEnrollment, "true", "false"]
     UpdateReplacePolicy: Delete
     DeletionPolicy: Delete
 

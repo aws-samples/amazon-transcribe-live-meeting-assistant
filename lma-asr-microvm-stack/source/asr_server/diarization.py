@@ -180,12 +180,22 @@ def _l2_norm(vector: Sequence[float]) -> float:
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    """Cosine similarity in ``[-1, 1]``; ``0.0`` if either vector is degenerate."""
+    """Cosine similarity in ``[-1, 1]``; ``0.0`` if the vectors cannot be compared.
+
+    Vectors of different lengths came from different embedding models, so they
+    have no meaningful similarity. Returning 0.0 says exactly that. Truncating
+    to the shorter one instead would produce a number -- a dot product over a
+    prefix, divided by the full norms -- that looks like a score and is noise,
+    and at the extreme would attribute speech to whichever incomparable centroid
+    happened to score highest.
+    """
+    if len(a) != len(b):
+        return 0.0
     na = _l2_norm(a)
     nb = _l2_norm(b)
     if na == 0.0 or nb == 0.0:
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b, strict=False))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     return dot / (na * nb)
 
 
@@ -239,6 +249,10 @@ class SpeakerRegistry:
         self._counts: dict[str, int] = {}
         # Insertion order of labels doubles as first-heard order.
         self._labels: list[str] = []
+        # Labels seeded from a stored voiceprint rather than discovered here.
+        # Held separately because the two are not interchangeable: see assign()
+        # and minted_speakers for the two places the distinction matters.
+        self._enrolled: set[str] = set()
 
     @property
     def num_speakers(self) -> int:
@@ -249,6 +263,11 @@ class SpeakerRegistry:
     def speakers(self) -> list[str]:
         """Speaker labels in first-heard order."""
         return list(self._labels)
+
+    @property
+    def minted_speakers(self) -> list[str]:
+        """Labels this session discovered, excluding any seeded voiceprint."""
+        return [label for label in self._labels if label not in self._enrolled]
 
     def centroid(self, speaker: str) -> list[float]:
         """The current mean embedding for ``speaker`` (empty if unknown)."""
@@ -269,9 +288,19 @@ class SpeakerRegistry:
         ``threshold``. Otherwise a new speaker is minted, subject to two guards:
 
         * ``max_speakers``, when set, is a hard promise about how many identities
-          can appear — at the cap the best match wins regardless of score.
+          this session will DISCOVER — at the cap the best match among the
+          discovered ones wins regardless of score.
         * ``require_corroboration`` withholds the first dissimilar embedding
           (see :meth:`_mint_with_corroboration`).
+
+        An enrolled voice is treated differently from a discovered one in both
+        guards, and the difference is deliberate. It can only ever win by
+        clearing ``threshold``, never by being the nearest thing left at the
+        cap, and it does not consume cap room. Force-assigning speech to a
+        seeded identity on no evidence would attribute words to a named,
+        identifiable person who may not even be in the meeting -- a far worse
+        outcome than an extra ``spk_N``, and the reverse of what this feature is
+        for. Nobody is named here without a score that says so.
         """
         if len(embedding) == 0:
             raise ValueError("embedding must be non-empty")
@@ -284,21 +313,42 @@ class SpeakerRegistry:
                 best_score = score
                 best_label = label
 
-        if best_label is not None and (
-            best_score >= self._threshold
-            or (self._max_speakers and len(self._labels) >= self._max_speakers)
-        ):
+        if best_label is not None and best_score >= self._threshold:
             self._pending = None
             self._accumulate(best_label, embedding)
             return best_label
 
-        if best_label is not None and self._require_corroboration:
+        # At the cap, fall back to the nearest DISCOVERED speaker. Seeded
+        # voices are excluded, so reaching the cap can never put a name on
+        # speech that did not match it.
+        minted = self.minted_speakers
+        if self._max_speakers and len(minted) >= self._max_speakers:
+            fallback: str | None = None
+            fallback_score = -2.0
+            for label in minted:
+                score = self.score(label, embedding)
+                if score > fallback_score:
+                    fallback_score = score
+                    fallback = label
+            if fallback is not None:
+                self._pending = None
+                self._accumulate(fallback, embedding)
+                return fallback
+
+        if minted and self._require_corroboration:
             corroborated = self._mint_with_corroboration(embedding)
             if not corroborated:
-                # Attribute to the closest existing speaker for now WITHOUT folding
-                # this embedding into that centroid: it may well belong to someone
-                # new, and polluting the centroid would hurt both identities.
-                return best_label
+                # Attribute to the closest DISCOVERED speaker for now WITHOUT
+                # folding this embedding into that centroid: it may well belong
+                # to someone new, and polluting the centroid would hurt both
+                # identities.
+                #
+                # Seeded voices are excluded here for the same reason as in the
+                # cap fallback above. This is the guard the docstring's "in both
+                # guards" refers to, and leaving `best_label` in place put an
+                # enrolled person's name on a stranger's first utterance at a
+                # score of 0.0 against a 0.5 threshold.
+                return max(minted, key=lambda label: self.score(label, embedding))
 
         return self._mint(embedding)
 
@@ -330,8 +380,60 @@ class SpeakerRegistry:
         self._pending = list(embedding)
         return False
 
+    def enroll(self, label: str, centroid: Sequence[float], *, weight: int = 1) -> None:
+        """Seed a KNOWN voice, so speech is assigned to a name from the first word.
+
+        Used for voice enrollment: a person who consented and recorded samples
+        has a stored voiceprint, and seeding it here means they are labelled
+        immediately rather than as ``spk_0`` until somebody names them.
+
+        ``weight`` is how many observations the seeded centroid counts as. It
+        anchors the identity: at weight 1 a single mis-assigned utterance from
+        the meeting would move the enrolled centroid as much as the enrollment
+        itself did, so an enrolled voice is worth more than one utterance. The
+        centroid still adapts to the session -- the same room, microphone and
+        codec as the rest of the meeting -- just more slowly.
+
+        An enrolled label does NOT consume ``max_speakers``. That cap is a
+        statement about how many people are in the conversation, and seeding a
+        voiceprint says nothing about whether its owner is one of them -- a
+        deployment with more enrolled people than a meeting has participants is
+        the normal case, not an edge case. Counting seeds would exhaust the cap
+        before a word was spoken and force every utterance onto a seeded name;
+        see :meth:`assign`.
+        """
+        if not label:
+            raise ValueError("an enrolled voice needs a label")
+        if label in self._sums:
+            raise ValueError(f"speaker {label!r} is already known to this registry")
+        if len(centroid) == 0:
+            raise ValueError("an enrolled voice needs a non-empty centroid")
+        if weight < 1:
+            raise ValueError("weight must be >= 1")
+        existing_dim = next((len(v) for v in self._sums.values()), None)
+        if existing_dim is not None and existing_dim != len(centroid):
+            # A different model produced this vector; refuse rather than
+            # silently compare incomparable things.
+            raise ValueError(
+                f"enrolled centroid dimension {len(centroid)} does not match "
+                f"this session's dimension {existing_dim}"
+            )
+        self._labels.append(label)
+        self._enrolled.add(label)
+        self._sums[label] = [value * weight for value in centroid]
+        self._counts[label] = weight
+
     def _mint(self, embedding: Sequence[float]) -> str:
-        label = f"{_SPEAKER_PREFIX}{len(self._labels)}"
+        # Numbered by how many have been minted, not by the label count, so
+        # seeding does not make the first unknown speaker of a meeting spk_5.
+        # The while loop is for the case a display name happens to BE a voice
+        # id: a label is free text, and two speakers sharing one id would merge
+        # an enrolled person with a stranger.
+        index = len(self.minted_speakers)
+        label = f"{_SPEAKER_PREFIX}{index}"
+        while label in self._sums:
+            index += 1
+            label = f"{_SPEAKER_PREFIX}{index}"
         self._labels.append(label)
         self._sums[label] = [0.0] * len(embedding)
         self._counts[label] = 0
@@ -369,6 +471,21 @@ class SpeakerEmbedderConfig:
     sample_rate: int = 16000
     num_threads: int = 1
     provider: str = "cpu"
+
+
+@dataclass(frozen=True)
+class EnrolledVoice:
+    """One known voice a session may be seeded with.
+
+    ``label`` is what appears in the transcript -- the name the person gave when
+    they enrolled -- and ``vector`` is their stored voiceprint. ``weight`` is how
+    many observations the seed counts as, anchoring the identity so a single
+    mis-assigned utterance cannot move it as far as the whole enrollment did.
+    """
+
+    label: str
+    vector: tuple[float, ...]
+    weight: int = 8
 
 
 @dataclass
@@ -612,6 +729,7 @@ class DiarizingRecognizer(Recognizer):
         max_open_segment_ms: int = 20000,
         min_turn_ms: int = 700,
         label_speakers: bool = True,
+        enrolled_voices: Sequence[EnrolledVoice] = (),
     ) -> None:
         if sample_rate <= 0:
             raise ValueError("sample_rate must be positive")
@@ -627,6 +745,22 @@ class DiarizingRecognizer(Recognizer):
             max_speakers=max_speakers,
             require_corroboration=require_corroboration,
         )
+        # Voices somebody consented to enrol are seeded before any audio
+        # arrives, so their speech carries their name from the first word rather
+        # than spk_0 until a human names it. A malformed seed is skipped rather
+        # than failing the session: losing a name is a far smaller harm than
+        # losing the transcript.
+        for voice in enrolled_voices or ():
+            try:
+                self._registry.enroll(
+                    voice.label, voice.vector, weight=voice.weight
+                )
+            except ValueError:
+                _LOG.warning(
+                    "Ignoring an unusable enrolled voice (label=%r, dim=%d)",
+                    voice.label,
+                    len(voice.vector),
+                )
         self._min_segment_samples = sample_rate * min_segment_ms // 1000
         # Hard ceiling on retained audio. A ``final`` prunes everything up to its
         # end, so this only bites if the inner engine never finalizes (e.g. a very
@@ -1240,6 +1374,7 @@ class DiarizingEngine(RecognizerEngine):
         turn_cut_interval_ms = self._config.turn_cut_interval_ms
         max_open_segment_ms = self._config.max_open_segment_ms
         sample_rate = self._config.embedder.sample_rate
+        enrolled_voices: tuple[EnrolledVoice, ...] = ()
         if config is not None:
             sample_rate = config.sample_rate
             if config.speaker_threshold is not None:
@@ -1258,6 +1393,12 @@ class DiarizingEngine(RecognizerEngine):
                 turn_cut_interval_ms = config.turn_cut_interval_ms
             if config.max_open_segment_ms is not None:
                 max_open_segment_ms = config.max_open_segment_ms
+            enrolled_voices = tuple(
+                EnrolledVoice(
+                    label=seed.label, vector=tuple(seed.vector), weight=seed.weight
+                )
+                for seed in config.enrolled_voices or ()
+            )
         label_speakers = config is None or config.diarize is not False
         return DiarizingRecognizer(
             inner_session,
@@ -1274,6 +1415,7 @@ class DiarizingEngine(RecognizerEngine):
             max_open_segment_ms=max_open_segment_ms,
             min_turn_ms=self._config.min_turn_ms,
             label_speakers=label_speakers,
+            enrolled_voices=enrolled_voices,
         )
 
 

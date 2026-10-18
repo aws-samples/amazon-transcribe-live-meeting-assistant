@@ -19,6 +19,7 @@ import {
   ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
+  VOICE_ENROLLMENT_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
 
@@ -69,6 +70,21 @@ export const generateNavigationItems = (settings, isAdmin) => {
       ],
     },
   ];
+
+  // Enrolling your own voice is self-service and open to every user, not an
+  // admin task: a voiceprint is biometric data about a person, so only that
+  // person can consent to it being stored. Offered only where the deployment
+  // has enrollment switched on, since the portal has nothing to talk to
+  // otherwise. External rather than nested, because the page is a standalone
+  // task with its own layout.
+  if (`${settings?.VoiceEnrollmentAvailable}` === 'true') {
+    navigationItems.push({
+      type: 'link',
+      text: 'Enrol My Voice',
+      href: `#${VOICE_ENROLLMENT_PATH}`,
+      external: true,
+    });
+  }
 
   // Add Configuration section (admin only)
   if (isAdmin) {

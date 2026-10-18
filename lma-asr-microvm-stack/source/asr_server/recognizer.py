@@ -118,6 +118,21 @@ class Event:
 
 
 @dataclass(frozen=True)
+class EnrolledVoiceSeed:
+    """A known voice and the name to label it with.
+
+    Set only by a deployment with voice enrollment turned on, and only for people
+    who consented to it. ``weight`` is how many observations the seed counts as,
+    which anchors the identity so a single mis-assigned utterance cannot move it
+    as far as the whole enrollment did.
+    """
+
+    label: str
+    vector: tuple[float, ...]
+    weight: int = 8
+
+
+@dataclass(frozen=True)
 class SessionConfig:
     """Per-connection recogniser knobs negotiated during the handshake.
 
@@ -163,6 +178,10 @@ class SessionConfig:
     turn_cut_interval_ms: int | None = None
     max_open_segment_ms: int | None = None
     diarize: bool | None = None
+    # Voices a person consented to enrol, to be recognised by name from the first
+    # word. Per-session for the obvious reason: who is in the meeting is a
+    # property of the meeting, not of the image.
+    enrolled_voices: tuple[EnrolledVoiceSeed, ...] = ()
 
 
 class SessionConfigError(ValueError):

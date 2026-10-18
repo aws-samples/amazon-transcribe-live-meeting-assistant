@@ -36,11 +36,13 @@ import {
     buildSpeakerWindows,
     diarizationEnabledFor,
     formatSpeakerLabel,
+    isVoiceId,
     runTranscript,
     selectEmittableWindows,
     smoothSpeakerRuns,
     speakerWindowOrigin,
 } from './diarization';
+import { SpeakerNameRegistry } from './asr-audio';
 import { CHANNEL_MIC, CHANNEL_SYSTEM } from './eventtypes';
 
 // --- helpers ---------------------------------------------------------------
@@ -480,4 +482,47 @@ test('the settled high-water mark never goes backwards', () => {
     const shrunk = buildSpeakerWindows(resultItems([[0, 10, 5.0]]), false);
     const selection = selectEmittableWindows(shrunk, true, 2);
     assert.equal(selection.settledEmitted, 2, 'mark must not decrease');
+});
+
+// --- Enrolled names are not voice ids --------------------------------------
+// With voice enrollment on, the engine reports the enrolled person's NAME in
+// the field that otherwise carries a voice id. Prefixing it produced
+// "spk_Sarah Lee", and the transcript then read
+// "Other Participant (spk_Sarah Lee)" -- the one seam between the engine and
+// the written segment that no test covered.
+
+test('an enrolled name is not turned into a voice id', () => {
+    assert.equal(formatSpeakerLabel('Sarah Lee'), 'Sarah Lee');
+    assert.equal(formatSpeakerLabel('李雷'), '李雷');
+    assert.equal(formatSpeakerLabel('Mary-Jane Olu'), 'Mary-Jane Olu');
+});
+
+test('a name is distinguished from a voice id', () => {
+    assert.equal(isVoiceId('spk_0'), true);
+    assert.equal(isVoiceId('spk_29'), true);
+    assert.equal(isVoiceId('Sarah Lee'), false);
+    // A display name somebody typed to look like an id is still not one here;
+    // the engine guarantees a minted id never collides with a seeded label.
+    assert.equal(isVoiceId(undefined), false);
+});
+
+test('an enrolled name stands as the speaker, not as a suffix', () => {
+    // "Other Participant (Sarah Lee)" says the opposite of what is known.
+    const registry = new SpeakerNameRegistry();
+    assert.equal(registry.nameFor('ch_0', 'Sarah Lee', 'Other Participant'), 'Sarah Lee');
+});
+
+test('a voice id is still appended to the channel name', () => {
+    const registry = new SpeakerNameRegistry();
+    assert.equal(
+        registry.nameFor('ch_0', 'spk_0', 'Other Participant'),
+        'Other Participant (spk_0)'
+    );
+    assert.equal(registry.nameFor('ch_1', '0', 'alex@example.com'), 'alex@example.com (spk_0)');
+});
+
+test('no label at all leaves the channel name alone', () => {
+    const registry = new SpeakerNameRegistry();
+    assert.equal(registry.nameFor('ch_0', undefined, 'Other Participant'), 'Other Participant');
+    assert.equal(registry.nameFor('ch_0', null, 'Other Participant'), 'Other Participant');
 });

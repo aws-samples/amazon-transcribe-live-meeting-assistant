@@ -107,3 +107,20 @@ appeared in the UI. The probe is reusable standalone:
   so they add no new packages to the repo.
 - For the manual/observational Zoom checklist (active-speaker, chat commands,
   DOM selectors), see `docs/dependency-upgrade-validation-runbook.md`.
+
+## Voice enrollment consent lifecycle
+
+`test_voice_enrollment_consent_lifecycle` grants consent, enrols a voice from
+Polly-synthesised speech, and withdraws — then reads DynamoDB to check what was
+actually stored, because the stored records are what the consent terms promise.
+It exists as an integration test rather than more unit tests precisely because
+no amount of review can establish that a consent row lands in the table, that a
+MicroVM really computes a voiceprint from real audio, or that a withdrawal
+really destroys it.
+
+Requires `LMA_TEST_USERNAME` / `LMA_TEST_PASSWORD` like the streaming probe, and
+a stack with `EnableVoiceEnrollment=true` **and** `EnableMicrovmAsr=true` —
+enrolling needs the on-demand engine, because that is what computes speaker
+embeddings. It skips cleanly on a deployment without the feature, which is the
+default. Self-cleaning: it withdraws at the end, which deletes the voiceprint it
+created.

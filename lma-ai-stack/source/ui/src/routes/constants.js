@@ -18,5 +18,10 @@ export const TRANSCRIPT_SUMMARY_PATH = '/configuration/transcript-summary';
 export const USER_MANAGEMENT_PATH = '/configuration/user-management';
 export const DEFAULT_PATH = CALLS_PATH;
 export const EMBED_PATH = '/embed';
+// The enrollment portal. Top-level rather than under /configuration, because
+// enrolling your own voice is something every user does for themselves, not an
+// administrative task -- only the person whose voice it is can consent to it
+// being stored.
+export const VOICE_ENROLLMENT_PATH = '/voice-enrollment';
 export const REDIRECT_URL_PARAM = 'redirect';
 export const MEETINGS_QUERY_PATH = `${CALLS_PATH}/query`;

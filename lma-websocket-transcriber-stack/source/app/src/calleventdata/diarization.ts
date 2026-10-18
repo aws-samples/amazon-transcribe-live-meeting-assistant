@@ -125,13 +125,28 @@ export const anyChannelDiarized = (settings: DiarizationSettings | undefined): b
  * keeps working if the streaming API ever changes shape. Returns undefined for
  * anything unusable rather than emitting `spk_undefined`.
  */
+/** A bare voice index, as Amazon Transcribe reports it ("0", "29"). */
+const BARE_VOICE_INDEX = /^\d+$/;
+
 export const formatSpeakerLabel = (raw: string | undefined): string | undefined => {
     const trimmed = (raw ?? '').trim();
     if (trimmed.length === 0) {
         return undefined;
     }
-    return trimmed.startsWith('spk_') ? trimmed : `spk_${trimmed}`;
+    // Only a bare index gets the prefix. Amazon Transcribe reports "0"; the
+    // on-demand engine reports "spk_0" already; and with voice enrollment on it
+    // reports the enrolled person's NAME, which must not be turned into
+    // "spk_Sarah Lee". Prefixing anything non-numeric was safe only while every
+    // label was one of the first two.
+    if (BARE_VOICE_INDEX.test(trimmed)) {
+        return `spk_${trimmed}`;
+    }
+    return trimmed;
 };
+
+/** Whether a formatted label is a voice id rather than a person's name. */
+export const isVoiceId = (label: string | undefined): boolean =>
+    label !== undefined && /^spk_\d+$/.test(label);
 
 /** Append a diarization label to a channel's base speaker name, if there is one. */
 export const appendSpeakerLabel = (baseLabel: string, label: string | undefined): string =>

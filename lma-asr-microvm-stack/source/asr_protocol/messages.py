@@ -18,6 +18,22 @@ from pydantic import BaseModel, Field, PositiveInt, TypeAdapter
 # --- Client -> server ------------------------------------------------------
 
 
+class EnrolledVoiceConfig(BaseModel):
+    """One known voice the session should recognise from the first word.
+
+    Sent only by a deployment with voice enrollment turned on, and only for
+    people who consented to it. ``label`` is the name to put in the transcript,
+    and ``vector`` is their stored voiceprint, which must match the dimension of
+    the session's own embedding model.
+    """
+
+    label: str = Field(min_length=1, max_length=64)
+    vector: list[float] = Field(min_length=1)
+    # How many observations the seed counts as, anchoring the identity so one
+    # mis-assigned utterance cannot move it as far as the whole enrollment did.
+    weight: PositiveInt = 8
+
+
 class Config(BaseModel):
     """Session config: query params AND/OR the optional first text frame (R2)."""
 
@@ -64,6 +80,10 @@ class Config(BaseModel):
     # Withhold the first embedding that matches nobody until a second one agrees
     # with it. ``None`` means "use the server's configured value".
     require_corroboration: bool | None = None
+    # Voices to recognise by name from the first word. Capped so a malformed or
+    # hostile config cannot make session setup unbounded work; a meeting with
+    # more enrolled attendees than this is better served by the transcript miner.
+    enrolled_voices: list[EnrolledVoiceConfig] = Field(default_factory=list, max_length=32)
     # Split one endpointed utterance into a row per speaker turn, retroactively at
     # the end of the utterance.
     split_on_speaker_change: bool | None = None

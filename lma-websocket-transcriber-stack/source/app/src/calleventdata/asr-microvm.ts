@@ -24,6 +24,8 @@ import { AsrRuntimeConfig } from './asr-config';
 import { CallMetaData, SocketCallData } from './eventtypes';
 import { TranscriptSegmentRecord, diarizationSettingsFor, writeSegmentToKds } from './transcribe';
 import { diarizationEnabledFor } from './diarization';
+// Type-only in the other direction, so this is not a runtime cycle.
+import { fetchEnrolledVoices } from './voice-enrollment';
 import { normalizeErrorForLogging } from '../utils/common';
 import {
     ASR_CHANNEL_IDS,
@@ -83,7 +85,40 @@ interface AsrSessionOptions {
     diarize: boolean;
     /** Cap on distinct voices for this channel; 0 discovers as many as appear. */
     maxSpeakers: number;
+    /**
+     * Voices somebody consented to enrol, so their speech carries their name
+     * from the first word instead of `spk_0` until a human renames it.
+     *
+     * Empty unless the deployment has voice enrollment switched on AND the
+     * person has an active consent to the terms currently in force -- the
+     * decision about which enrollments may be used is made before this, by the
+     * code that reads them, not here.
+     */
+    enrolledVoices?: EnrolledVoice[];
 }
+
+/** One known voice and the name to label it with. */
+export interface EnrolledVoice {
+    label: string;
+    vector: number[];
+    /**
+     * How many observations the seed counts as. Anchors the identity so one
+     * mis-assigned utterance cannot move an enrolled centroid as far as the
+     * whole enrollment did, while still letting it adapt to this meeting's room
+     * and microphone.
+     */
+    weight?: number;
+}
+
+/**
+ * Cap on seeds sent to one session.
+ *
+ * A guard against a configuration or a query returning more than a meeting
+ * plausibly has, not a product limit: a meeting with more enrolled attendees
+ * than this is better served by the transcript miner, and session setup should
+ * not become unbounded work.
+ */
+export const MAX_ENROLLED_VOICES = 32;
 
 export interface AsrSessionSet {
     lease: AsrLease;
@@ -111,6 +146,52 @@ interface AsrServerMessage {
     segments?: number;
     effective_config?: { diarize?: boolean; sample_rate?: number };
 }
+
+/**
+ * The seeds to put on the wire: valid, deduplicated and bounded.
+ *
+ * A malformed seed is dropped rather than failing the session -- losing a name
+ * is a far smaller harm than losing the transcript, and the engine takes the
+ * same view. Two enrollments with the same display name are both kept: dropping
+ * one would silently discard somebody's enrollment, and the engine keeps them
+ * apart by their vectors regardless of what they are called.
+ */
+export const enrolledVoicesForConfig = (voices?: EnrolledVoice[]): EnrolledVoice[] => {
+    if (!voices || voices.length === 0) {
+        return [];
+    }
+    const usable = voices.filter(
+        (voice) =>
+            typeof voice?.label === 'string' &&
+            voice.label.trim().length > 0 &&
+            Array.isArray(voice.vector) &&
+            voice.vector.length > 0 &&
+            voice.vector.every((value) => Number.isFinite(value))
+    );
+    // Dimensions must agree, or the engine is comparing vectors a different
+    // model produced. The majority dimension wins, since a single odd seed is
+    // far likelier to be the stale one.
+    const counts = new Map<number, number>();
+    for (const voice of usable) {
+        counts.set(voice.vector.length, (counts.get(voice.vector.length) ?? 0) + 1);
+    }
+    let dimension = 0;
+    let best = 0;
+    for (const [size, count] of counts) {
+        if (count > best) {
+            best = count;
+            dimension = size;
+        }
+    }
+    return usable
+        .filter((voice) => voice.vector.length === dimension)
+        .slice(0, MAX_ENROLLED_VOICES)
+        .map((voice) => ({
+            label: voice.label.trim(),
+            vector: voice.vector,
+            weight: voice.weight && voice.weight > 0 ? voice.weight : 8,
+        }));
+};
 
 export const isMicrovmAsrConfigured = (): boolean =>
     ASR_LAUNCHER_FUNCTION_ARN.length > 0 || ASR_DIRECT_ENDPOINT.length > 0;
@@ -505,6 +586,12 @@ export class AsrChannelSession {
                 word_timestamps: false,
                 diarize: this.options.diarize,
                 max_speakers: this.options.maxSpeakers,
+                // Voices this meeting is allowed to recognise by name. Omitted
+                // entirely when there are none, so a deployment without voice
+                // enrollment sends exactly the config it sent before.
+                ...(enrolledVoicesForConfig(this.options.enrolledVoices).length > 0
+                    ? { enrolled_voices: enrolledVoicesForConfig(this.options.enrolledVoices) }
+                    : {}),
                 // Nothing else. The threshold, utterance floor and turn-cut
                 // behaviour are the bundle's calibrated operating point baked
                 // into the image; omitting them here is what keeps that in force.
@@ -721,12 +808,20 @@ export const startMicrovmAsr = async (
         diarize: diarizationEnabledFor(channelId, settings),
         maxSpeakers: resolveMaxSpeakers(callMetadata.maxSpeakers, 0),
     });
+    // Started here and awaited after the lease, so asking who has enrolled runs
+    // alongside the MicroVM boot instead of adding to it. Resolves to an empty
+    // list when enrollment is off, and on any failure.
+    const enrolledVoices = fetchEnrolledVoices(callMetadata.callId, server);
     const registry = new SpeakerNameRegistry();
+    const options = new Map<AsrChannelId, AsrSessionOptions>();
     const sessions = new Map<AsrChannelId, AsrChannelSession>();
     // The endpoint is filled in by updateLease() once the MicroVM is running; the
     // sessions only need it to connect, and until then they buffer.
     const pendingLease: AsrLease = { endpointUrl: '' };
     for (const channelId of ASR_CHANNEL_IDS) {
+        // Held in the map rather than rebuilt per use, so the enrolled voices
+        // filled in below reach the object the session actually reads.
+        options.set(channelId, optionsFor(channelId));
         sessions.set(
             channelId,
             new AsrChannelSession(
@@ -735,7 +830,7 @@ export const startMicrovmAsr = async (
                 channelId,
                 pendingLease,
                 registry,
-                optionsFor(channelId)
+                options.get(channelId) as AsrSessionOptions
             )
         );
     }
@@ -765,6 +860,17 @@ export const startMicrovmAsr = async (
         session.updateLease(lease);
     }
 
+    // Both channels get the same seeds: somebody who enrolled may be on the
+    // microphone or in the meeting audio, and each channel is an independent
+    // session with its own view of who is speaking. Set before start(), which
+    // is when the config is sent.
+    const voices = await enrolledVoices;
+    if (voices.length > 0) {
+        for (const channelOptions of options.values()) {
+            channelOptions.enrolledVoices = voices;
+        }
+    }
+
     const results = await Promise.all(
         [...sessions.values()].map((session) => session.start())
     );
@@ -777,7 +883,7 @@ export const startMicrovmAsr = async (
     }
 
     const diarized = [...sessions.entries()]
-        .filter(([channelId]) => optionsFor(channelId).diarize)
+        .filter(([channelId]) => options.get(channelId)?.diarize)
         .map(([channelId]) => channelId);
     server.log.info(
         `[ASR]: [${callMetadata.callId}] - MicroVM ASR active on ${sessions.size} channel(s), client rate ${callMetadata.samplingRate}Hz, diarized channel(s)=${diarized.length ? diarized.join(',') : 'none'}`

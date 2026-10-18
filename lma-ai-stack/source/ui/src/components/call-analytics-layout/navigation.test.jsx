@@ -7,10 +7,10 @@ import { describe, it, expect } from 'vitest';
 
 import { NAV_PATHS } from './navigation';
 import { generateNavigationItems } from '../common/navigation-items';
-import { DESKTOP_CAPTURE_APP_PATH, ASR_CONFIG_PATH } from '../../routes/constants';
+import { DESKTOP_CAPTURE_APP_PATH, ASR_CONFIG_PATH, VOICE_ENROLLMENT_PATH } from '../../routes/constants';
 
 // Pages whose route deliberately renders no side navigation.
-const NO_SIDE_NAV = new Set([DESKTOP_CAPTURE_APP_PATH]);
+const NO_SIDE_NAV = new Set([DESKTOP_CAPTURE_APP_PATH, VOICE_ENROLLMENT_PATH]);
 
 describe('side navigation visibility', () => {
   it('renders on every internal page it links to', () => {
@@ -18,7 +18,7 @@ describe('side navigation visibility', () => {
     // <Navigation />, but the component returns null off NAV_PATHS, and only the
     // activeHref branch had been added for the new path. Any admin nav link that
     // is an internal route must also be a path the navigation renders on.
-    const links = generateNavigationItems({ AsrEngineAvailable: 'true' }, true)
+    const links = generateNavigationItems({ AsrEngineAvailable: 'true', VoiceEnrollmentAvailable: 'true' }, true)
       .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
       .filter((item) => item.type === 'link' && item.href.startsWith('#/') && !item.external)
       .map((item) => item.href.slice(1));
@@ -36,5 +36,19 @@ describe('side navigation visibility', () => {
 
     expect(hrefs({ AsrEngineAvailable: 'true' })).toContain(ASR_CONFIG_PATH);
     expect(hrefs({})).not.toContain(ASR_CONFIG_PATH);
+  });
+
+  it('offers the enrollment portal only where the deployment stores voiceprints', () => {
+    const hrefs = (settings, isAdmin = true) =>
+      generateNavigationItems(settings, isAdmin)
+        .flatMap((entry) => (entry.type === 'section' ? entry.items : [entry]))
+        .filter((item) => item.type === 'link')
+        .map((item) => item.href.slice(1));
+
+    expect(hrefs({ VoiceEnrollmentAvailable: 'true' })).toContain(VOICE_ENROLLMENT_PATH);
+    expect(hrefs({})).not.toContain(VOICE_ENROLLMENT_PATH);
+    // Enrolling your own voice is self-service, not an admin task: only the
+    // person whose voice it is can consent to it being stored.
+    expect(hrefs({ VoiceEnrollmentAvailable: 'true' }, false)).toContain(VOICE_ENROLLMENT_PATH);
   });
 });
