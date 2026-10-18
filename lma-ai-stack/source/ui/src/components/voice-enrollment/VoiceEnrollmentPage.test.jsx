@@ -270,3 +270,24 @@ describe('an active enrolment', () => {
     expect(screen.queryByText(/Read each line aloud/)).toBeNull();
   });
 });
+
+describe('having enough speech to enrol', () => {
+  // The backend refuses under MIN_SECONDS, so somebody who has read every line
+  // and is still short has done what was asked and is being told it is not
+  // enough. Reading pace varies more than any fixed script can allow for.
+
+  it('gives the reader more lines than the minimum strictly needs', async () => {
+    // Four lines at a brisk pace measured 18.7s against a 20s minimum, which
+    // left a fast reader with every line ticked and nothing left to read.
+    renderWith(state({ Status: 'pending' }));
+    await waitFor(() => expect(screen.getByText(/Read each line aloud/)).toBeTruthy());
+    const lines = screen.getAllByRole('listitem');
+    expect(lines.length).toBeGreaterThan(4);
+  });
+
+  it('does not nag about the script before anything is recorded', async () => {
+    renderWith(state({ Status: 'pending' }));
+    await waitFor(() => expect(screen.getByText(/Read each line aloud/)).toBeTruthy());
+    expect(screen.queryByText(/That is every line/)).toBeNull();
+  });
+});

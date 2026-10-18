@@ -71,6 +71,8 @@ const SCRIPT = [
   'I would like a large coffee, two slices of toast, and the morning paper, please.',
   'Thursday afternoon was unusually warm, so we walked along the river to the bridge.',
   'Seventeen, forty-two, ninety-eight, three hundred and six, one thousand and five.',
+  'My train leaves from platform nine at quarter past six, which gives us just enough time.',
+  'She bought eight yellow jugs, a huge rug, and a thick woollen blanket at the market.',
 ];
 
 const VoiceEnrollmentPage = () => {
@@ -361,6 +363,19 @@ const VoiceEnrollmentPage = () => {
                   ))}
                 </ol>
               </TextContent>
+
+              {/* Somebody who has read every line and is still short has done
+                  what was asked and is being told it is not enough, with
+                  nothing left to read. The script is long enough that this
+                  should not happen, but reading pace varies more than any
+                  fixed script can allow for, so say what to do rather than
+                  leaving them at "19s of 20s" with every line ticked. */}
+              {clips.length >= SCRIPT.length && !enough && (
+                <Alert type="info">
+                  That is every line. Record any of them again — it is the amount of speech that matters, not which
+                  words.
+                </Alert>
+              )}
 
               <SpaceBetween direction="horizontal" size="xs" alignItems="center">
                 {recording ? (
