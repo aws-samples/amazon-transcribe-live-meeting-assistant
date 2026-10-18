@@ -5,7 +5,7 @@
  */
 import { ConsoleLogger } from 'aws-amplify/utils';
 import { generateClient } from 'aws-amplify/api';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Badge,
@@ -34,8 +34,14 @@ import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import markdownRehypePlugins from '../common/markdown-plugins';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
-import { COMPREHEND_PII_TYPES, DEFAULT_OTHER_SPEAKER_NAME, LANGUAGE_CODES } from '../common/constants';
-import { splitDiarizationLabel } from '../common/utilities';
+import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
+import {
+  identityKeyFor,
+  parseSpeakerIdentities,
+  resolveSpeaker,
+  serializeSpeakerIdentities,
+} from '../common/speaker-identities';
+import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
 
 import RecordingPlayer from '../recording-player';
 import VideoPlayer from '../video-player';
@@ -418,7 +424,90 @@ const TranscriptContent = ({ segment, translateCache }) => {
   );
 };
 
-const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis }) => {
+/**
+ * Rename the voice behind one segment, from the segment itself.
+ *
+ * Correcting a name where you are reading it is the natural gesture; making
+ * someone leave the transcript and find the Speakers panel is not. The wording
+ * spells out how many segments move, because the instinct is to assume you are
+ * editing the one line in front of you -- naming is per voice, and the
+ * single-segment option is the escape hatch for the case where separation put
+ * one turn on the wrong voice.
+ */
+const SpeakerRenamePopover = ({ segment, onRenameSpeaker, locked }) => {
+  const [draft, setDraft] = useState('');
+  const [onlyThisSegment, setOnlyThisSegment] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Clearing the draft is what signals the save landed: the field's placeholder
+  // is the segment's current speaker, which re-renders to the new name. The
+  // result is awaited so a rejected write does not read as a successful one.
+  const save = async () => {
+    if (!draft.trim()) {
+      return;
+    }
+    setSaving(true);
+    try {
+      const ok = await onRenameSpeaker(segment, draft.trim(), onlyThisSegment);
+      if (ok !== false) {
+        setDraft('');
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Popover
+      triggerType="custom"
+      position="bottom"
+      size="medium"
+      dismissButton={false}
+      content={
+        <SpaceBetween direction="vertical" size="xs">
+          {locked && (
+            <Box variant="small" color="text-status-info">
+              This name is locked. Unlock it in the Speakers panel to change it.
+            </Box>
+          )}
+          <FormField
+            label="Speaker name"
+            description={
+              onlyThisSegment
+                ? 'Applies to this segment only.'
+                : 'Applies to every segment from this voice, including earlier ones.'
+            }
+          >
+            <Input
+              value={draft}
+              onChange={({ detail }) => setDraft(detail.value)}
+              onKeyDown={({ detail }) => {
+                if (detail.key === 'Enter') {
+                  save();
+                }
+              }}
+              placeholder={`${segment.speaker}`.trim()}
+              disabled={saving || locked}
+              autoFocus
+            />
+          </FormField>
+          <Toggle checked={onlyThisSegment} onChange={({ detail }) => setOnlyThisSegment(detail.checked)}>
+            Only this segment
+          </Toggle>
+          <Button variant="primary" disabled={!draft.trim() || saving || locked} loading={saving} onClick={save}>
+            Save
+          </Button>
+        </SpaceBetween>
+      }
+    >
+      <Button variant="inline-link">
+        <strong>{segment.speaker}</strong>
+      </Button>
+    </Popover>
+  );
+};
+
+const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis, onRenameSpeaker, readOnly }) => {
   const { channel } = segment;
 
   if (channel === 'CATEGORY_MATCH') {
@@ -451,9 +540,13 @@ const TranscriptSegment = ({ segment, translateCache, enableSentimentAnalysis })
       {getSentimentImage(segment, enableSentimentAnalysis)}
       <SpaceBetween direction="vertical" size="xxs" className={channelClass}>
         <SpaceBetween direction="horizontal" size="xs">
-          <TextContent>
-            <strong>{displayChannel}</strong>
-          </TextContent>
+          {onRenameSpeaker && !readOnly && (channel === 'AGENT' || channel === 'CALLER') ? (
+            <SpeakerRenamePopover segment={segment} onRenameSpeaker={onRenameSpeaker} locked={segment.speakerLocked} />
+          ) : (
+            <TextContent>
+              <strong>{displayChannel}</strong>
+            </TextContent>
+          )}
           <TextContent>
             {`${getTimestampFromSeconds(segment.startTime)} -
               ${getTimestampFromSeconds(segment.endTime)}`}
@@ -494,6 +587,11 @@ const appendToPreviousSegment = ({ previous, current }) => {
   previous.transcript += ` ${current.transcript}`;
   previous.endTime = current.endTime;
   previous.isPartial = current.isPartial;
+  // Keep every id that went into this block. A merged block renders under the
+  // first segment's id, so a "only this segment" rename recorded against that id
+  // alone would cover only part of the text the user was looking at -- visibly so
+  // in the transcript download, which does not merge.
+  previous.mergedSegmentIds = [...(previous.mergedSegmentIds || [previous.segmentId]), current.segmentId];
 };
 
 const CallInProgressTranscript = ({
@@ -506,6 +604,9 @@ const CallInProgressTranscript = ({
   translateOn,
   collapseSentiment,
   enableSentimentAnalysis,
+  speakerIdentities,
+  onRenameSpeaker,
+  readOnly,
 }) => {
   const bottomRef = useRef();
   const containerRef = useRef();
@@ -682,15 +783,29 @@ const CallInProgressTranscript = ({
         t.agentTranscript = agentTranscript;
         t.targetLanguage = targetLanguage;
         t.translateOn = translateOn;
-        // In streaming audio the speaker will just be "Other participant", override this with the
-        // name the user chose if needed.
-        // Compare the BASE name: with per-channel speaker identification on the
-        // speaker arrives as 'Other Participant (spk_0)', which an exact match
-        // would miss. The label is re-attached so the substitution keeps it.
-        const { base: speakerBase, suffix: speakerLabel } = splitDiarizationLabel(t.speaker);
-        if (speakerBase === DEFAULT_OTHER_SPEAKER_NAME || speakerBase === '') {
-          t.speaker = `${item.callerPhoneNumber || DEFAULT_OTHER_SPEAKER_NAME}${speakerLabel}`;
-        }
+        // Resolve the stored speaker to a display name. This covers both the
+        // meeting's speaker identity map (a voice a user has named) and the older
+        // behaviour of substituting the participant name typed on the Stream Audio
+        // form for the 'Other Participant' placeholder. Resolution happens on
+        // read, which is what makes naming a voice apply to segments that were
+        // written before the name was known.
+        // Capture the stored speaker before overwriting it: it is what the
+        // identity map is keyed on, so the popover on this segment needs it to
+        // rename the voice.
+        // The key a name is stored under, resolved THROUGH any merge -- writing
+        // to the segment's own key once it has been merged would store an entry
+        // nothing reads.
+        t.speakerKey = identityKeyFor(t, speakerIdentities);
+        // callerPhoneNumber is the remote side's name, so it substitutes for the
+        // placeholder on the CALLER channel only. The download path has always
+        // scoped it this way; the other readers now match.
+        const resolved = resolveSpeaker(
+          t,
+          speakerIdentities,
+          t.channel === 'CALLER' ? item.callerPhoneNumber : undefined,
+        );
+        t.speaker = resolved.name;
+        t.speakerLocked = resolved.locked;
 
         return t;
       })
@@ -710,6 +825,8 @@ const CallInProgressTranscript = ({
             translateCache={translateCache}
             enableSentimentAnalysis={enableSentimentAnalysis}
             participantName={item.callerPhoneNumber}
+            onRenameSpeaker={onRenameSpeaker}
+            readOnly={readOnly}
           />
         ),
       );
@@ -742,7 +859,25 @@ const CallInProgressTranscript = ({
 
   useEffect(() => {
     setTurnByTurnSegments(getTurnByTurnSegments);
-  }, [callTranscriptPerCallId, item.recordingStatusLabel, targetLanguage, agentTranscript, translateOn, updateFlag]);
+    // speakerIdentities belongs here: naming a voice has to re-label the
+    // segments already on screen, which is the whole point of resolving the
+    // speaker on read. Without it a rename would only affect later segments.
+  }, [
+    callTranscriptPerCallId,
+    item.recordingStatusLabel,
+    targetLanguage,
+    agentTranscript,
+    translateOn,
+    updateFlag,
+    speakerIdentities,
+    // The elements carry the inline-rename affordance, so they have to be
+    // rebuilt when it changes. isAdminUser resolves asynchronously, so readOnly
+    // flips from true to false shortly after first render; without it here an
+    // admin viewing someone else's ended meeting would keep elements built
+    // while the answer was still "no".
+    readOnly,
+    onRenameSpeaker,
+  ]);
 
   useEffect(() => {
     // prettier-ignore
@@ -1254,6 +1389,9 @@ const getTranscriptContent = ({
   translateOn,
   collapseSentiment,
   enableSentimentAnalysis,
+  speakerIdentities,
+  onRenameSpeaker,
+  readOnly,
 }) => {
   switch (item.recordingStatusLabel) {
     case DONE_STATUS:
@@ -1270,6 +1408,9 @@ const getTranscriptContent = ({
           translateOn={translateOn}
           collapseSentiment={collapseSentiment}
           enableSentimentAnalysis={enableSentimentAnalysis}
+          speakerIdentities={speakerIdentities}
+          onRenameSpeaker={onRenameSpeaker}
+          readOnly={readOnly}
         />
       );
   }
@@ -1287,6 +1428,9 @@ const CallTranscriptContainer = ({
   setShowVNCPreview,
   vpData,
   loadingVP,
+  speakerIdentities,
+  onRenameSpeaker,
+  readOnly,
 }) => {
   // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
@@ -1409,6 +1553,9 @@ const CallTranscriptContainer = ({
           translateOn,
           collapseSentiment,
           enableSentimentAnalysis,
+          speakerIdentities,
+          onRenameSpeaker,
+          readOnly,
         })}
       </Container>
       {getAgentAssistPanel(item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP)}
@@ -1555,6 +1702,66 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
   const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
   const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
+
+  const { sendUpdateSpeakerIdentities } = useCallsContext();
+  // Memoised on the raw string: created in the component body it would be a new
+  // object identity every render, and it is a dependency of the effect that
+  // rebuilds the entire transcript element list.
+  const speakerIdentities = useMemo(() => parseSpeakerIdentities(item.speakerIdentities), [item.speakerIdentities]);
+
+  const saveSpeakerIdentities = (serialized) => sendUpdateSpeakerIdentities(item.callId, serialized);
+
+  // Presentation only -- it greys out controls the write would reject anyway.
+  // The rule itself is enforced as a condition on the mutation. Shared by the
+  // Speakers panel and the transcript's inline rename so the two agree.
+  const speakerNamesReadOnly =
+    !isAdminUser && item.owner !== user?.username && !item.sharedWith?.includes(user?.username);
+
+  /**
+   * Apply a rename made from a transcript segment.
+   *
+   * Two different writes behind one gesture: by default the name is attached to
+   * the VOICE, which relabels every segment that voice produced; with "only this
+   * segment" it is recorded against the segment id instead, for the case where
+   * speaker separation attributed a single turn to the wrong voice and no
+   * voice-level rename can fix it.
+   */
+  // Memoised because it is a dependency of the effect that rebuilds the entire
+  // transcript element list. A fresh identity each render would rebuild it on
+  // every unrelated re-render of this page -- the calls context is reconstructed
+  // on each render of the layout above, so those are frequent.
+  const handleRenameSpeaker = useCallback(
+    (segment, name, onlyThisSegment) => {
+      if (onlyThisSegment) {
+        const overrides = { ...speakerIdentities.segmentOverrides };
+        (segment.mergedSegmentIds || [segment.segmentId]).forEach((id) => {
+          overrides[id] = name;
+        });
+        return saveSpeakerIdentities(serializeSpeakerIdentities({ ...speakerIdentities, segmentOverrides: overrides }));
+      }
+      return saveSpeakerIdentities(
+        serializeSpeakerIdentities({
+          ...speakerIdentities,
+          identities: {
+            ...speakerIdentities.identities,
+            [segment.speakerKey]: {
+              ...(speakerIdentities.identities[segment.speakerKey] || {}),
+              name,
+              status: 'confirmed',
+              source: 'manual',
+              updatedAt: new Date().toISOString(),
+            },
+          },
+        }),
+      );
+    },
+    [speakerIdentities, item.callId, sendUpdateSpeakerIdentities],
+  );
+
+  // Flattened final segments, for the Speakers panel's one-row-per-voice list.
+  const transcriptSegmentsForCall = Object.values(callTranscriptPerCallId[item.callId] || {}).flatMap(
+    (channel) => channel.segments || [],
+  );
 
   // prettier-ignore
   const customRetryStrategy = new StandardRetryStrategy(
@@ -2036,6 +2243,13 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           )}
         </Grid>
       )}
+      <SpeakerIdentitiesPanel
+        item={item}
+        segments={transcriptSegmentsForCall}
+        setToolsOpen={setToolsOpen}
+        onSave={saveSpeakerIdentities}
+        readOnly={speakerNamesReadOnly}
+      />
       <CallTranscriptContainer
         item={item}
         setToolsOpen={setToolsOpen}
@@ -2048,6 +2262,9 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         setShowVNCPreview={setShowVNCPreview}
         vpData={vpData}
         loadingVP={loadingVP}
+        speakerIdentities={speakerIdentities}
+        onRenameSpeaker={handleRenameSpeaker}
+        readOnly={speakerNamesReadOnly}
       />
     </SpaceBetween>
   );

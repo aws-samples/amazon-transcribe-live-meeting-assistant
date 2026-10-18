@@ -1,0 +1,68 @@
+## Write the per-meeting speaker identity map.
+##
+## This has its own template rather than sharing updateCall.request.vtl for two
+## reasons. That template SETs every key present in the input, which is safe only
+## because every mutation using it is reachable by IAM callers alone; this field
+## is written from the browser, so the update is spelled out attribute by
+## attribute instead. And a browser caller has to be held to the same access rule
+## the read path applies in getCall.response.vtl -- Admin, the meeting's owner, or
+## a user it has been shared with -- which is expressed below as a DynamoDB
+## condition so the check and the write are one atomic operation.
+##
+## UpdatedAt is deliberately NOT written here, and not used as a guard. Every
+## other Call update carries `#UpdatedAt < :UpdatedAt` so that out-of-order events
+## from the Kinesis pipeline cannot clobber newer state. A speaker rename is not
+## one of those events: it is a deliberate user action, and last-write-wins by the
+## person doing the renaming is the behaviour wanted. Leaving UpdatedAt alone also
+## keeps a rename from interacting with that guard in either direction -- renaming
+## during a live meeting neither fails because the pipeline moved UpdatedAt ahead,
+## nor causes the next aggregation update to be rejected because the rename did.
+#set( $PK = "c#${ctx.args.input.CallId}" )
+
+## A Lambda calling with IAM credentials arrives as an assumed role; a signed-in
+## user arrives through Cognito. Same detection as getCall.response.vtl.
+#set( $isCognitoUser = true )
+#if( $context.identity.userArn && $context.identity.userArn.contains(":assumed-role/") )
+  #set( $isCognitoUser = false )
+#end
+
+#set( $conditionNames = { "#PK": "PK" } )
+#set( $conditionValues = {} )
+#set( $condition = "attribute_exists(#PK)" )
+
+## `contains` over #SharedWith covers both shapes this attribute is stored in:
+## shareCall writes it from a [String] input (a DynamoDB List) while older rows
+## hold a comma-separated String. Verified against a live stack in both shapes --
+## a member is accepted, a non-member refused -- because the DynamoDB reference
+## documents `contains` for String substrings and Set members only.
+#if( $isCognitoUser && !$context.identity.groups.contains("Admin") )
+  $util.qr( $conditionNames.put("#Owner", "Owner") )
+  $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )
+  $util.qr( $conditionValues.put(":caller", $util.dynamodb.toDynamoDB($context.identity.username)) )
+  #set( $condition = "${condition} AND (#Owner = :caller OR contains(#SharedWith, :caller))" )
+#end
+
+{
+  "version" : "2018-05-29",
+  "operation" : "UpdateItem",
+  "key": {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($PK)
+  },
+  "update" : {
+    "expression": "SET #SpeakerIdentities = :SpeakerIdentities",
+    "expressionNames": {
+      "#SpeakerIdentities": "SpeakerIdentities"
+    },
+    "expressionValues": {
+      ":SpeakerIdentities": $util.dynamodb.toDynamoDBJson($ctx.args.input.SpeakerIdentities)
+    }
+  },
+  "condition": {
+    "expression": "$condition",
+    "expressionNames": $utils.toJson($conditionNames)
+    #if( !${conditionValues.isEmpty()} )
+      , "expressionValues": $utils.toJson($conditionValues)
+    #end
+  }
+}

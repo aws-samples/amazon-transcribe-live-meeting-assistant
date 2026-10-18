@@ -19,6 +19,7 @@ import onShareMeetings from '../graphql/queries/onShareMeetings';
 import onDeleteCall from '../graphql/queries/onDeleteCall';
 import onUnshareCall from '../graphql/queries/onUnshareCall';
 import getTranscriptSegments from '../graphql/queries/getTranscriptSegments';
+import updateSpeakerIdentities from '../graphql/queries/updateSpeakerIdentities';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
 
@@ -66,16 +67,31 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     return t >= new Date(startDateIso).getTime() && t <= new Date(endDateIso).getTime();
   };
 
+  /**
+   * Replace calls in state with freshly fetched ones.
+   *
+   * An incoming call object REPLACES the stored one, so a field that the query or
+   * subscription which produced it did not select would be dropped from state.
+   * The fields listed here are carried over from the existing object for that
+   * reason: ListPK/ListSK come only from the list query, and SpeakerIdentities is
+   * deliberately left out of the list query (it would ship a name map for every
+   * meeting in the range when only the open one needs it), so a list refresh
+   * would otherwise blank the names on the meeting being viewed.
+   */
   const setCallsDeduped = (callValues) => {
     setCalls((currentCalls) => {
       const callValuesCallIds = callValues.map((c) => c.CallId);
       return [
         ...currentCalls.filter((c) => !callValuesCallIds.includes(c.CallId)),
-        ...callValues.map((call) => ({
-          ...call,
-          ListPK: call.ListPK || currentCalls.find((c) => c.CallId === call.CallId)?.ListPK,
-          ListSK: call.ListSK || currentCalls.find((c) => c.CallId === call.CallId)?.ListSK,
-        })),
+        ...callValues.map((call) => {
+          const existing = currentCalls.find((c) => c.CallId === call.CallId);
+          return {
+            ...call,
+            ListPK: call.ListPK || existing?.ListPK,
+            ListSK: call.ListSK || existing?.ListSK,
+            SpeakerIdentities: call.SpeakerIdentities || existing?.SpeakerIdentities,
+          };
+        }),
       ];
     });
   };
@@ -417,12 +433,64 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     }
   };
 
+  /**
+   * Write a meeting's speaker identity map.
+   *
+   * State is updated optimistically so the transcript re-labels on the keystroke
+   * that confirmed the name rather than on the subscription round trip. Other
+   * clients get the same change pushed through onUpdateCall. A rejected write is
+   * rolled back, because leaving a name on screen that was never stored means the
+   * next reload silently loses it.
+   */
+  const sendUpdateSpeakerIdentities = async (callId, serializedIdentities) => {
+    // Captured from inside the updater, not from `calls` in the render closure:
+    // renaming two voices in quick succession (blurring one field straight into
+    // the next) runs both calls against the same stale `calls`, so a closure read
+    // would roll the second failure back to the state before the FIRST rename and
+    // drop a name that was in fact stored.
+    let previous;
+    // Patch in place rather than via setCallsDeduped: that helper REPLACES the
+    // stored call with the object handed to it, so a two-field payload would
+    // strip the rest of the meeting's attributes out of state.
+    setCalls((currentCalls) => {
+      previous = currentCalls.find((c) => c.CallId === callId)?.SpeakerIdentities;
+      return currentCalls.map((c) => (c.CallId === callId ? { ...c, SpeakerIdentities: serializedIdentities } : c));
+    });
+    try {
+      await client.graphql({
+        query: updateSpeakerIdentities,
+        variables: { input: { CallId: callId, SpeakerIdentities: serializedIdentities } },
+      });
+      return true;
+    } catch (error) {
+      logger.error('failed to update speaker identities', error);
+      const refused = JSON.stringify(error?.errors ?? error ?? '').includes('condition failure');
+      setErrorMessage(
+        refused
+          ? 'you do not have permission to change speaker names on this meeting'
+          : 'failed to save speaker names - please try again later',
+      );
+      // Roll back only if what is on screen is still what THIS call put there.
+      // Two renames can be in flight at once (blurring one field straight into
+      // the next), and a blind revert would discard a later write that succeeded.
+      setCalls((currentCalls) =>
+        currentCalls.map((c) =>
+          c.CallId === callId && c.SpeakerIdentities === serializedIdentities
+            ? { ...c, SpeakerIdentities: previous }
+            : c,
+        ),
+      );
+      return false;
+    }
+  };
+
   return {
     calls,
     callTranscriptPerCallId,
     isCallsListLoading,
     getCallDetailsFromCallIds,
     sendGetTranscriptSegmentsRequest,
+    sendUpdateSpeakerIdentities,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)

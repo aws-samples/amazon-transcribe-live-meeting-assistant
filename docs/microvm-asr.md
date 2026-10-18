@@ -616,8 +616,13 @@ name and gains the suffix when the label arrives, rather than displaying somebod
 name in the meantime.
 
 Labels are per meeting and per channel, and they are not identities. Mapping them onto
-real names — from the participant list, or by asking a model — is a separate step, and
-it works far better when every label is distinct.
+real names is a separate step, and it works far better when every label is distinct.
+The **Speakers** panel on the meeting page is where that mapping is made: it lists one
+row per voice and applies a name to every segment that voice produced, past and future
+alike. See
+[Naming the Voices](transcription-and-translation.md#naming-the-voices) — it is
+engine-independent, so it reads the same whether these labels came from here or from
+Amazon Transcribe.
 
 **A Virtual Participant with its voice assistant runs two sessions**, like Stream Audio's
 two channels: meeting audio on `CALLER`, named from the roster by the row's start time

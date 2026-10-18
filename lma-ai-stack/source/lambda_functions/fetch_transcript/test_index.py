@@ -23,6 +23,7 @@ asserted, since the channel and partial-segment filters are applied server-side.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import sys
 from decimal import Decimal
@@ -678,3 +679,306 @@ def test_markup_at_the_start_of_a_segment_leaves_no_leading_space() -> None:
     )
     assert data == ["\nthe budget is fine"]
     assert not data[0].startswith("\n ")
+
+
+# --------------------------------------------------------------------------
+# Speaker identities
+#
+# A diarized meeting stores a voice id rather than a name, so a conference-room
+# transcript reads 'Other Participant (spk_0)'. Names live in a map on the
+# meeting row and are applied here, on read. This function is the only path the
+# summary prompts, the knowledge-base export and the meeting assistant take, so a
+# name resolved in the browser but not here would mean the UI said 'Bob' while
+# every summary still said 'spk_0'.
+# --------------------------------------------------------------------------
+
+
+def identities(**sections):
+    """Serialize a speaker identity map the way the UI writes it."""
+    blob = {"version": 1, "candidates": [], "identities": {}, "merges": {}, "segmentOverrides": {}}
+    blob.update(sections)
+    return json.dumps(blob)
+
+
+def metadata_with(raw):
+    return {**METADATA, "SpeakerIdentities": raw}
+
+
+def test_a_named_voice_is_labelled_with_its_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    install(
+        monkeypatch,
+        items=[segment("the budget is fine", 1, speaker="Other Participant (spk_0)")],
+        metadata=metadata_with(
+            identities(identities={"CALLER#Other Participant (spk_0)": {"name": "Bob Strahan"}})
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob Strahan: the budget is fine"
+
+
+def test_two_voices_on_one_channel_get_their_own_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The case the feature exists for: several people on one microphone."""
+    install(
+        monkeypatch,
+        items=[
+            segment("shall we start", 1, speaker="Other Participant (spk_0)"),
+            segment("yes go ahead", 2, speaker="Other Participant (spk_1)"),
+        ],
+        metadata=metadata_with(
+            identities(
+                identities={
+                    "CALLER#Other Participant (spk_0)": {"name": "Bob"},
+                    "CALLER#Other Participant (spk_1)": {"name": "Sarah"},
+                }
+            )
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob: shall we start\nSarah: yes go ahead"
+
+
+def test_the_same_voice_id_on_two_channels_is_not_confused(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Voice ids restart at spk_0 per channel, so the channel is part of the key."""
+    install(
+        monkeypatch,
+        items=[
+            segment("from the room", 1, channel="CALLER", speaker="Other Participant (spk_0)"),
+            segment("from my mic", 2, channel="AGENT", speaker="Me (spk_0)"),
+        ],
+        metadata=metadata_with(
+            identities(
+                identities={
+                    "CALLER#Other Participant (spk_0)": {"name": "Bob"},
+                    "AGENT#Me (spk_0)": {"name": "Sarah"},
+                }
+            )
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob: from the room\nSarah: from my mic"
+
+
+def test_an_unnamed_voice_keeps_its_voice_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dropping the id would read as one person in every summary."""
+    install(
+        monkeypatch,
+        items=[
+            segment("shall we start", 1, speaker="Other Participant (spk_0)"),
+            segment("yes go ahead", 2, speaker="Other Participant (spk_1)"),
+        ],
+        metadata=metadata_with(None),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == (
+        "\nOther Participant (spk_0): shall we start\nOther Participant (spk_1): yes go ahead"
+    )
+
+
+def test_two_voices_merged_onto_one_person_share_a_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    install(
+        monkeypatch,
+        items=[
+            segment("shall we start", 1, speaker="Other Participant (spk_0)"),
+            segment("as I was saying", 2, speaker="Other Participant (spk_3)"),
+        ],
+        metadata=metadata_with(
+            identities(
+                identities={"CALLER#Other Participant (spk_0)": {"name": "Bob"}},
+                merges={"CALLER#Other Participant (spk_3)": "CALLER#Other Participant (spk_0)"},
+            )
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob: shall we start\nBob: as I was saying"
+
+
+def test_a_single_segment_override_wins_over_the_voice_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Separation does occasionally put one turn on the wrong voice."""
+    install(
+        monkeypatch,
+        items=[
+            segment("mine", 1, speaker="Other Participant (spk_0)", SegmentId="seg-1"),
+            segment("actually hers", 2, speaker="Other Participant (spk_0)", SegmentId="seg-2"),
+        ],
+        metadata=metadata_with(
+            identities(
+                identities={"CALLER#Other Participant (spk_0)": {"name": "Bob"}},
+                segmentOverrides={"seg-2": "Sarah"},
+            )
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob: mine\nSarah: actually hers"
+
+
+def test_the_participant_name_from_the_stream_audio_form_is_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The UI has always substituted this for the placeholder; summaries now match.
+
+    Without it a summary names 'Other Participant' while the transcript on screen
+    names the person, and a reader cannot tell they are the same meeting.
+    """
+    install(
+        monkeypatch,
+        items=[segment("the budget is fine", 1, speaker="Other Participant (spk_0)")],
+        metadata={**METADATA, "CustomerPhoneNumber": "Conference Room 3"},
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nConference Room 3 (spk_0): the budget is fine"
+
+
+def test_a_name_wins_over_the_participant_name_from_the_form(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(
+        monkeypatch,
+        items=[segment("the budget is fine", 1, speaker="Other Participant (spk_0)")],
+        metadata={
+            **METADATA,
+            "CustomerPhoneNumber": "Conference Room 3",
+            "SpeakerIdentities": identities(
+                identities={"CALLER#Other Participant (spk_0)": {"name": "Bob Strahan"}}
+            ),
+        },
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob Strahan: the budget is fine"
+
+
+def test_a_meeting_written_before_speaker_names_existed_is_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    install(monkeypatch, items=[segment("hello", 1, speaker="Alice")], metadata=METADATA)
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nAlice: hello"
+
+
+def test_an_unparseable_identity_map_leaves_the_transcript_readable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A corrupt attribute must cost the names, not the transcript."""
+    install(
+        monkeypatch,
+        items=[segment("hello", 1, speaker="Other Participant (spk_0)")],
+        metadata=metadata_with("{not json"),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nOther Participant (spk_0): hello"
+
+
+def test_an_identity_map_of_the_wrong_shape_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for raw in ('"a string"', "[1, 2]", '{"identities": "not a dict"}', "null"):
+        install(
+            monkeypatch,
+            items=[segment("hello", 1, speaker="Other Participant (spk_0)")],
+            metadata=metadata_with(raw),
+        )
+        response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+        assert response["transcript"] == "\nOther Participant (spk_0): hello"
+
+
+def test_a_merge_cycle_terminates(monkeypatch: pytest.MonkeyPatch) -> None:
+    """However a cycle got written, it must not hang the function."""
+    install(
+        monkeypatch,
+        items=[segment("hello", 1, speaker="Other Participant (spk_0)")],
+        metadata=metadata_with(
+            identities(
+                merges={
+                    "CALLER#Other Participant (spk_0)": "CALLER#b",
+                    "CALLER#b": "CALLER#Other Participant (spk_0)",
+                }
+            )
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nOther Participant (spk_0): hello"
+
+
+def test_names_are_not_applied_unless_speaker_labels_are_requested(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A caller that asked for bare text gets bare text, names or no names."""
+    install(
+        monkeypatch,
+        items=[segment("the budget is fine", 1, speaker="Other Participant (spk_0)")],
+        metadata=metadata_with(
+            identities(identities={"CALLER#Other Participant (spk_0)": {"name": "Bob"}})
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID}, None)
+    assert response["transcript"] == "\nthe budget is fine"
+
+
+def test_the_local_channel_is_not_labelled_with_the_remote_participants_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Stream Audio form's name belongs to the remote side only.
+
+    A custom-KDS producer can write the placeholder speaker on either channel, so
+    an AGENT-channel segment can carry it too. Substituting the remote name there
+    would attribute the local microphone to the person on the other end -- and
+    the transcript download has always scoped this to CALLER, so doing otherwise
+    here made the exported transcript disagree with every summary.
+    """
+    install(
+        monkeypatch,
+        items=[
+            segment("from the room", 1, channel="CALLER", speaker="Other Participant"),
+            segment("from my mic", 2, channel="AGENT", speaker="Other Participant"),
+        ],
+        metadata={**METADATA, "CustomerPhoneNumber": "Conference Room 3"},
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == (
+        "\nConference Room 3: from the room\nOther Participant: from my mic"
+    )
+
+
+def test_a_name_on_a_merged_voice_covers_every_voice_merged_into_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming is stored on the merge target, so the whole group takes the name."""
+    install(
+        monkeypatch,
+        items=[
+            segment("first", 1, speaker="Other Participant (spk_0)"),
+            segment("second", 2, speaker="Other Participant (spk_1)"),
+            segment("third", 3, speaker="Other Participant (spk_4)"),
+        ],
+        metadata=metadata_with(
+            identities(
+                identities={"CALLER#Other Participant (spk_0)": {"name": "Bob"}},
+                merges={
+                    "CALLER#Other Participant (spk_1)": "CALLER#Other Participant (spk_0)",
+                    # A chain: spk_4 was merged into spk_1, which was merged into spk_0.
+                    "CALLER#Other Participant (spk_4)": "CALLER#Other Participant (spk_1)",
+                },
+            )
+        ),
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    assert response["transcript"] == "\nBob: first\nBob: second\nBob: third"
+
+
+def test_the_response_log_does_not_carry_the_transcript(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Everything returned here is meeting content; the counts are the useful part."""
+    install(
+        monkeypatch,
+        items=[segment("the acquisition closes on Friday", 1, speaker="Other Participant (spk_0)")],
+        metadata=metadata_with(
+            identities(identities={"CALLER#Other Participant (spk_0)": {"name": "Bob Strahan"}})
+        ),
+    )
+    index.lambda_handler({"CallId": CALL_ID, "IncludeSpeaker": True}, None)
+    logged = capsys.readouterr().out
+    assert "Fetch Transcript response:" in logged
+    assert "acquisition closes" not in logged
+    assert "Bob Strahan" not in logged
