@@ -229,6 +229,7 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
         const generic = fromTarget.base === DEFAULT_OTHER_SPEAKER_NAME || fromTarget.base === '';
         existing.storedSpeaker = segment.speaker;
         existing.voiceId = fromTarget.suffix.trim();
+        existing.baseName = fromTarget.base;
         existing.defaultName = generic ? fallbackFor(segment.channel) || DEFAULT_OTHER_SPEAKER_NAME : fromTarget.base;
         existing.isPlaceholder = generic;
         existing.channel = segment.channel;
@@ -243,6 +244,8 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
       channel: segment.channel,
       storedSpeaker: segment.speaker,
       voiceId: suffix.trim(),
+      // The channel's own name, with the engine's voice id stripped off.
+      baseName: base,
       // What the transcript shows for this voice when it has no name yet.
       defaultName:
         base === DEFAULT_OTHER_SPEAKER_NAME || base === ''
@@ -343,19 +346,26 @@ export const parseAttendeeList = (text) => {
  * disambiguate. It starts open only where it has work to do.
  */
 export const hasMultipleVoicesOnAChannel = (roster) => {
-  const perChannel = {};
+  // The diagnostic signal is two UNNAMED voices that share a channel AND a base
+  // name, differing only by the engine's voice id -- that is one audio source
+  // the engine has split into several people, which is exactly what the panel
+  // disambiguates.
+  //
+  // Neither looser rule works. Counting rows per channel opens the panel on a
+  // Virtual Participant meeting, where each attendee is already a row under
+  // their meeting-roster name. Counting rows that carry a voice id does the
+  // same, because roster names carry one too. Requiring the generic placeholder
+  // goes too far the other way: a client that supplies its own channel name --
+  // an address, say -- produces 'alex@example.com (spk_0)' and '(spk_1)', which
+  // is two real people behind one tab and does need naming.
+  const groups = {};
   (roster ?? [])
-    // A voice that already reads as a person needs no attention. A Virtual
-    // Participant meeting has one row per attendee under their meeting-roster
-    // name, and a client can supply its own channel name (an email address, say)
-    // -- both still carry an engine voice id, so the voice id alone does not
-    // distinguish them. What matters is whether the stored speaker is still the
-    // generic placeholder and nobody has named it.
-    .filter((row) => !row.name && row.isPlaceholder)
+    .filter((row) => !row.name && row.voiceId)
     .forEach((row) => {
-      perChannel[row.channel] = (perChannel[row.channel] || 0) + 1;
+      const group = `${row.channel}#${row.baseName}`;
+      groups[group] = (groups[group] || 0) + 1;
     });
-  return Object.values(perChannel).some((count) => count > 1);
+  return Object.values(groups).some((count) => count > 1);
 };
 
 /** mm:ss for a talk-time total. */

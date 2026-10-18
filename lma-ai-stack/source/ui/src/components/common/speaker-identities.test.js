@@ -352,11 +352,18 @@ describe('hasMultipleVoicesOnAChannel', () => {
     expect(hasMultipleVoicesOnAChannel(vp)).toBe(false);
   });
 
-  it('is false when the client supplied its own channel name', () => {
-    // e.g. the Stream Audio client sending an address as the channel name.
+  it('is TRUE when a client-supplied channel name was split into two voices', () => {
+    // 'alex@example.com (spk_0)' and '(spk_1)' is two real people behind one
+    // tab. They need naming just as much as two placeholder voices do, even
+    // though the base name already looks like a person.
     expect(
       hasMultipleVoicesOnAChannel(roster([seg('alex@example.com (spk_0)', 0), seg('alex@example.com (spk_1)', 5)])),
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it('is false when two voices on a channel are different people already', () => {
+    // A Virtual Participant meeting: distinct base names, so nothing is split.
+    expect(hasMultipleVoicesOnAChannel(roster([seg('Alice (spk_0)', 0), seg('Bob (spk_0)', 5)]))).toBe(false);
   });
 
   it('is false for a single voice and for no voices at all', () => {

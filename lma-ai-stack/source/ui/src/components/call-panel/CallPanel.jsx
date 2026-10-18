@@ -1726,30 +1726,37 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
    * speaker separation attributed a single turn to the wrong voice and no
    * voice-level rename can fix it.
    */
-  const handleRenameSpeaker = (segment, name, onlyThisSegment) => {
-    if (onlyThisSegment) {
-      const overrides = { ...speakerIdentities.segmentOverrides };
-      (segment.mergedSegmentIds || [segment.segmentId]).forEach((id) => {
-        overrides[id] = name;
-      });
-      return saveSpeakerIdentities(serializeSpeakerIdentities({ ...speakerIdentities, segmentOverrides: overrides }));
-    }
-    return saveSpeakerIdentities(
-      serializeSpeakerIdentities({
-        ...speakerIdentities,
-        identities: {
-          ...speakerIdentities.identities,
-          [segment.speakerKey]: {
-            ...(speakerIdentities.identities[segment.speakerKey] || {}),
-            name,
-            status: 'confirmed',
-            source: 'manual',
-            updatedAt: new Date().toISOString(),
+  // Memoised because it is a dependency of the effect that rebuilds the entire
+  // transcript element list. A fresh identity each render would rebuild it on
+  // every unrelated re-render of this page -- the calls context is reconstructed
+  // on each render of the layout above, so those are frequent.
+  const handleRenameSpeaker = useCallback(
+    (segment, name, onlyThisSegment) => {
+      if (onlyThisSegment) {
+        const overrides = { ...speakerIdentities.segmentOverrides };
+        (segment.mergedSegmentIds || [segment.segmentId]).forEach((id) => {
+          overrides[id] = name;
+        });
+        return saveSpeakerIdentities(serializeSpeakerIdentities({ ...speakerIdentities, segmentOverrides: overrides }));
+      }
+      return saveSpeakerIdentities(
+        serializeSpeakerIdentities({
+          ...speakerIdentities,
+          identities: {
+            ...speakerIdentities.identities,
+            [segment.speakerKey]: {
+              ...(speakerIdentities.identities[segment.speakerKey] || {}),
+              name,
+              status: 'confirmed',
+              source: 'manual',
+              updatedAt: new Date().toISOString(),
+            },
           },
-        },
-      }),
-    );
-  };
+        }),
+      );
+    },
+    [speakerIdentities, item.callId, sendUpdateSpeakerIdentities],
+  );
 
   // Flattened final segments, for the Speakers panel's one-row-per-voice list.
   const transcriptSegmentsForCall = Object.values(callTranscriptPerCallId[item.callId] || {}).flatMap(
