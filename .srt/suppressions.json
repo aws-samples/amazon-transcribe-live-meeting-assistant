@@ -39761,16 +39761,30 @@
   {
     "source": "Bandit",
     "path": "integ-tests/test_ci_plumbing.py",
-    "line": 103,
+    "line": 102,
+    "issue": "Possible hardcoded password: 'pw'",
+    "fix": "Remove hardcoded password strings from source code. Create a .env file named after the Python file (e.g., for script.py create script.env in the same directory) containing the ACTUAL secret values extracted from the code. Update the Python code to: 1) add 'from dotenv import load_dotenv' import if not present, 2) call load_dotenv('script.env') near the top of the file to load the environment file, 3) use os.environ.get() to read the values. Add *.env to the project root .gitignore.",
+    "check_id": "B105",
+    "priority": "High",
+    "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
+    "status": "suppressed",
+    "firstDetectedAt": "2026-10-15T23:26:33.401Z",
+    "assessmentCount": 1,
+    "suppressionReason": "Reviewed 2026-10-19 against the code (fix/756-macos-edit-shortcuts). Same decision as 2026-10-07, at the lines the strings moved to. False positive: the strings are placeholder values in unit tests of the CI credential resolver, returned by a stubbed Secrets Manager response; none is a real credential."
+  },
+  {
+    "source": "Bandit",
+    "path": "integ-tests/test_ci_plumbing.py",
+    "line": 107,
     "issue": "Possible hardcoded password: 'secret-pw'",
     "fix": "Remove hardcoded password strings from source code. Create a .env file named after the Python file (e.g., for script.py create script.env in the same directory) containing the ACTUAL secret values extracted from the code. Update the Python code to: 1) add 'from dotenv import load_dotenv' import if not present, 2) call load_dotenv('script.env') near the top of the file to load the environment file, 3) use os.environ.get() to read the values. Add *.env to the project root .gitignore.",
     "check_id": "B105",
     "priority": "High",
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
-    "firstDetectedAt": "2026-10-07T14:07:11.629Z",
+    "firstDetectedAt": "2026-10-15T23:26:33.401Z",
     "assessmentCount": 1,
-    "suppressionReason": "Reviewed 2026-10-07 against the code (feature/microvm-asr-followups). False positive: the strings are placeholder values in unit tests of the CI credential resolver, returned by stubbed Secrets Manager and STS responses; none is a real credential."
+    "suppressionReason": "Reviewed 2026-10-19 against the code (fix/756-macos-edit-shortcuts). Same decision as 2026-10-07, at the lines the strings moved to. False positive: the strings are placeholder values in unit tests of the CI credential resolver, returned by a stubbed Secrets Manager response; none is a real credential."
   },
   {
     "source": "Bandit",
@@ -39803,30 +39817,16 @@
   {
     "source": "Bandit",
     "path": "integ-tests/test_ci_plumbing.py",
-    "line": 90,
+    "line": 94,
     "issue": "Possible hardcoded password: 'from-the-secret'",
     "fix": "Remove hardcoded password strings from source code. Create a .env file named after the Python file (e.g., for script.py create script.env in the same directory) containing the ACTUAL secret values extracted from the code. Update the Python code to: 1) add 'from dotenv import load_dotenv' import if not present, 2) call load_dotenv('script.env') near the top of the file to load the environment file, 3) use os.environ.get() to read the values. Add *.env to the project root .gitignore.",
     "check_id": "B105",
     "priority": "High",
     "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
     "status": "suppressed",
-    "firstDetectedAt": "2026-10-07T14:07:11.627Z",
+    "firstDetectedAt": "2026-10-15T23:26:33.400Z",
     "assessmentCount": 1,
-    "suppressionReason": "Reviewed 2026-10-07 against the code (feature/microvm-asr-followups). False positive: the strings are placeholder values in unit tests of the CI credential resolver, returned by stubbed Secrets Manager and STS responses; none is a real credential."
-  },
-  {
-    "source": "Bandit",
-    "path": "integ-tests/test_ci_plumbing.py",
-    "line": 98,
-    "issue": "Possible hardcoded password: 'pw'",
-    "fix": "Remove hardcoded password strings from source code. Create a .env file named after the Python file (e.g., for script.py create script.env in the same directory) containing the ACTUAL secret values extracted from the code. Update the Python code to: 1) add 'from dotenv import load_dotenv' import if not present, 2) call load_dotenv('script.env') near the top of the file to load the environment file, 3) use os.environ.get() to read the values. Add *.env to the project root .gitignore.",
-    "check_id": "B105",
-    "priority": "High",
-    "references": "https://bandit.readthedocs.io/en/1.9.4/plugins/b105_hardcoded_password_string.html",
-    "status": "suppressed",
-    "firstDetectedAt": "2026-10-07T14:07:11.629Z",
-    "assessmentCount": 1,
-    "suppressionReason": "Reviewed 2026-10-07 against the code (feature/microvm-asr-followups). False positive: the strings are placeholder values in unit tests of the CI credential resolver, returned by stubbed Secrets Manager and STS responses; none is a real credential."
+    "suppressionReason": "Reviewed 2026-10-19 against the code (fix/756-macos-edit-shortcuts). Same decision as 2026-10-07, at the lines the strings moved to. False positive: the strings are placeholder values in unit tests of the CI credential resolver, returned by a stubbed Secrets Manager response; none is a real credential."
   },
   {
     "source": "Bandit",
