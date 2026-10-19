@@ -85,10 +85,32 @@ about thirty seconds, so the live transcript can show the roster name alone for
 that long before it splits into voices. Nothing is lost — the split arrives with
 the final — but a watcher sees it late.
 
-Accuracy depends on the audio. A room heard through a speakerphone, compressed
-by the meeting platform and mixed with everyone else, is the hardest input
-separation gets, so people sitting further from the microphone separate less
-reliably than remote attendees do.
+Accuracy depends on the audio, and on which engine. A room heard through a
+speakerphone, compressed by the meeting platform and mixed with everyone else,
+is the hardest input separation gets.
+
+Measured on a deployed stack with four synthesised voices mixed onto one
+channel, 33 seconds, identical audio to both engines:
+
+| Engine | Distinct labels for 4 voices | Time-weighted purity |
+|---|---|---|
+| Amazon Transcribe | 2 | 57% |
+| [On-demand engine](microvm-asr.md) | 3 | 79% |
+
+Purity here is the share of labelled time whose label maps to a single real
+person; 100% would mean every label belongs to exactly one speaker. **Prefer the
+on-demand engine for rooms.** On Amazon Transcribe each label straddled more
+than one person, so naming those rows attaches a real name to a substantial
+share of somebody else's words — which is worse than the unseparated
+`Conference Room`, because that at least claims nothing it cannot support.
+
+Both engines merged the speaker whose turns were under about a second
+("Agreed.", "Fine by me."): too little audio to characterise a voice. Expect
+short interjections to be attributed to whoever spoke around them.
+
+Synthesised voices may be more alike than real ones and the test had no room
+reverb or background noise, so treat the figures as directional rather than a
+guarantee for your room.
 
 Where the two signals disagree, the finer boundary wins. A voice label that runs
 across a change of platform speaker is split at the change, because an
