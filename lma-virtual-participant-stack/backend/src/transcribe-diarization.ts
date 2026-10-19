@@ -38,7 +38,27 @@
  * and 0.1-0.9 s, against real turns of 6-42 words and 1.2-13.4 s.
  */
 
-import { formatSpeakerLabel } from './asr-microvm-client.js';
+/** A bare voice index, as Amazon Transcribe reports it ("0", "29"). */
+const BARE_VOICE_INDEX = /^\d+$/;
+
+/**
+ * Normalise a voice id to the `spk_N` form used everywhere else in LMA.
+ *
+ * Only a bare index is prefixed. Amazon Transcribe reports "0"; the on-demand
+ * engine reports "spk_0" already; and with voice enrollment on it reports the
+ * enrolled person's NAME, which must not become "spk_Sarah Lee".
+ *
+ * Defined here rather than imported from the engine client so this module pulls
+ * in no AWS SDK and is genuinely testable on its own -- the client reads twenty
+ * environment variables and three SDKs at import time.
+ */
+export const formatSpeakerLabel = (raw: string | null | undefined): string | undefined => {
+    const trimmed = (raw ?? '').trim();
+    if (trimmed.length === 0) {
+        return undefined;
+    }
+    return BARE_VOICE_INDEX.test(trimmed) ? `spk_${trimmed}` : trimmed;
+};
 
 /** The subset of a Transcribe result item this module needs. */
 export type TranscribeItem = {
@@ -234,19 +254,99 @@ export const buildDiarizedSegments = (
         rosterNameAt: (absoluteStart: number) => string;
         thresholds?: RunThresholds;
         nameFor: (rosterName: string, label: string | undefined) => string;
+        /** True for a partial result: Transcribe labels nothing on one. */
+        isPartial?: boolean;
     },
 ): Record<string, DiarizedSegment> => {
+    const runs = options.isPartial
+        ? // Transcribe labels nothing on a partial. Ignoring any label that
+          // does arrive makes the one-run-at-index-0 shape hold by
+          // construction rather than by trusting the service to keep behaving
+          // as measured -- and if it ever did label a partial, the extra
+          // pieces would be orphaned in the transcript for ever, marked
+          // in-progress, visible on screen and missing from summaries.
+          [{ label: undefined, items, words: 0, startTime: 0, endTime: 0 }].map(unlabelledRun)
+        : diarizedRuns(items, options.thresholds ?? DEFAULT_RUN_THRESHOLDS);
+
     const segments: Record<string, DiarizedSegment> = {};
-    diarizedRuns(items, options.thresholds ?? DEFAULT_RUN_THRESHOLDS).forEach((run, runIndex) => {
-        const startTime = run.startTime + options.timeOffsetSeconds;
-        const segmentId = `${options.resultId}-r${runIndex}`;
-        segments[segmentId] = {
-            SegmentId: segmentId,
-            Speaker: options.nameFor(options.rosterNameAt(startTime), run.label),
-            StartTime: startTime,
-            EndTime: run.endTime + options.timeOffsetSeconds,
-            Transcript: runTranscript(run),
-        };
-    });
+    let pieceIndex = 0;
+    for (const run of runs) {
+        // A run says which VOICE is talking. The roster says which PARTICIPANT
+        // the platform reports. Composing them means intersecting both
+        // boundaries, not letting one win: a label that spans a roster change
+        // -- which is what diarization under-segmentation looks like on a
+        // downmixed meeting stream -- would otherwise attribute a whole turn to
+        // whoever happened to be talking when the run began, losing an
+        // attribution the roster had right. Splitting here can only ever ADD
+        // boundaries relative to the undiarized path, never remove one.
+        for (const piece of splitRunByRoster(run, options.timeOffsetSeconds, options.rosterNameAt)) {
+            const segmentId = `${options.resultId}-r${pieceIndex}`;
+            segments[segmentId] = {
+                SegmentId: segmentId,
+                Speaker: options.nameFor(piece.roster, run.label),
+                StartTime: piece.startTime,
+                EndTime: piece.endTime,
+                Transcript: runTranscript({ ...run, items: piece.items }),
+            };
+            pieceIndex += 1;
+        }
+    }
     return segments;
+};
+
+/** One contiguous stretch of a run attributed to a single roster participant. */
+type RosterPiece = {
+    roster: string;
+    items: TranscribeItem[];
+    startTime: number;
+    endTime: number;
+};
+
+const unlabelledRun = (run: SpeakerRun): SpeakerRun => {
+    const { startTime, endTime } = runTimes(run.items);
+    return { ...run, label: undefined, startTime, endTime };
+};
+
+/**
+ * Cut a run wherever the roster participant changes under it.
+ *
+ * Unlabelled and untimed items (punctuation) stay with the piece in progress,
+ * so no text moves and no piece is created for them alone.
+ */
+const splitRunByRoster = (
+    run: SpeakerRun,
+    timeOffsetSeconds: number,
+    rosterNameAt: (absoluteStart: number) => string,
+): RosterPiece[] => {
+    const pieces: RosterPiece[] = [];
+    for (const item of run.items) {
+        const timed = item.Type === 'pronunciation';
+        const start = (item.StartTime ?? 0) + timeOffsetSeconds;
+        const end = (item.EndTime ?? 0) + timeOffsetSeconds;
+        const current = pieces.length > 0 ? pieces[pieces.length - 1] : undefined;
+        if (current !== undefined && (!timed || rosterNameAt(start) === current.roster)) {
+            current.items.push(item);
+            if (timed) {
+                current.endTime = Math.max(current.endTime, end);
+            }
+            continue;
+        }
+        pieces.push({
+            roster: rosterNameAt(start),
+            items: [item],
+            startTime: timed ? start : run.startTime + timeOffsetSeconds,
+            endTime: timed ? end : run.endTime + timeOffsetSeconds,
+        });
+    }
+    if (pieces.length === 0) {
+        return [
+            {
+                roster: rosterNameAt(run.startTime + timeOffsetSeconds),
+                items: run.items,
+                startTime: run.startTime + timeOffsetSeconds,
+                endTime: run.endTime + timeOffsetSeconds,
+            },
+        ];
+    }
+    return pieces;
 };

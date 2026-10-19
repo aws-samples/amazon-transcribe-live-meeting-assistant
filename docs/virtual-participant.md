@@ -4,7 +4,6 @@ title: "Virtual Participant"
 
 # Virtual Participant
 
-
 ## Table of Contents
 
 - [Overview](#overview)
@@ -60,10 +59,18 @@ speaker.
 apart the distinct voices behind one attendee and labels them
 `Conference Room (spk_0)`, `Conference Room (spk_1)` and so on — the roster name
 for who the platform says is talking, the voice id for which voice within it.
-From there the names come from the
-[Speakers panel](transcription-and-translation.md#naming-the-voices), from
-[what people say](transcription-and-translation.md#finding-the-names-automatically),
-or from a [voiceprint](voice-enrollment.md).
+
+Name them on the
+[Speakers panel](transcription-and-translation.md#naming-the-voices), which
+lists one row per voice and relabels every segment that voice produced.
+
+The other two naming routes do **not** apply to a Virtual Participant today, and
+it is worth knowing which:
+[naming from what people say](transcription-and-translation.md#finding-the-names-automatically)
+only considers voices whose base name is a placeholder such as
+`Other Participant`, and a VP's base name is always a real roster name; and
+[voiceprints](voice-enrollment.md) are seeded only into streaming sessions, not
+into a VP's.
 
 It works on either transcription engine. On Amazon Transcribe the turns are
 recovered from Transcribe's own per-item speaker labels; on the
@@ -71,12 +78,24 @@ recovered from Transcribe's own per-item speaker labels; on the
 Either way the switch is read once at the start of each meeting, so it takes
 effect on the next meeting with no redeployment.
 
-Two limits are worth knowing. Labels arrive only when a segment finalises, so
-the live transcript shows the roster name alone for a few seconds before it
-splits. And accuracy depends on the audio: a room heard through a speakerphone,
-compressed by the meeting platform and mixed with everyone else, is the hardest
-input separation gets, so people sitting further from the microphone separate
-less reliably than remote attendees do.
+Three limits are worth knowing.
+
+Labels arrive only when a segment finalises. Amazon Transcribe caps a result at
+about thirty seconds, so the live transcript can show the roster name alone for
+that long before it splits into voices. Nothing is lost — the split arrives with
+the final — but a watcher sees it late.
+
+Accuracy depends on the audio. A room heard through a speakerphone, compressed
+by the meeting platform and mixed with everyone else, is the hardest input
+separation gets, so people sitting further from the microphone separate less
+reliably than remote attendees do.
+
+Where the two signals disagree, the finer boundary wins. A voice label that runs
+across a change of platform speaker is split at the change, because an
+over-split turn can be merged on the Speakers panel and a merged one cannot be
+separated. In assistant mode on Amazon Transcribe the assistant's own speech
+shares the meeting channel, so it too acquires a voice id; on the on-demand
+engine it has its own channel and never does.
 
 ## Supported Platforms
 

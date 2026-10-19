@@ -5,77 +5,54 @@
  */
 
 /**
- * The wiring that makes both engines honour one switch.
+ * The two wiring facts that cannot be observed behaviourally.
  *
- * `diarizeVirtualParticipant` used to be read only when opening an on-demand
- * engine session, so on a deployment using Amazon Transcribe -- the default --
- * turning it on did nothing at all and nothing said so. Asserted at the source
- * level, like scribe-asr-channels.test.ts, because these modules build AWS
- * clients at import time.
+ * Everything about what the writer EMITS is in kinesis-diarized-segments.ts,
+ * driving the real module. Only these two live in `startTranscription`, which
+ * needs a live meeting, a browser and Amazon Transcribe to reach.
+ *
+ * Source-text assertions are weak and this file is deliberately small because
+ * of it: an earlier, larger version of it passed while the feature was
+ * completely dead, while failing on a rename of a local variable. Each
+ * assertion here strips comments first, so a commented-out line cannot satisfy
+ * it -- which is exactly how the `ShowSpeakerLabel` check used to pass with the
+ * request removed.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 
-const read = (name: string): string =>
-    readFileSync(new URL(`./${name}`, import.meta.url).pathname.replace('/dist/', '/src/'), 'utf8');
-
-const scribe = read('scribe.ts');
-const kinesis = read('kinesis-stream.ts');
+/** `scribe.ts` with comments removed, so a commented line proves nothing. */
+const code = ((): string => {
+    const raw = readFileSync(
+        new URL('./scribe.ts', import.meta.url).pathname.replace('/dist/', '/src/'),
+        'utf8',
+    );
+    return raw
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .map((line) => line.replace(/\/\/.*$/, ''))
+        .join('\n');
+})();
 
 test('the Transcribe path is told whether to separate voices', () => {
     // Read from the same switch the on-demand path passes to its session, so a
-    // deployment cannot have it on for one engine and off for the other.
-    assert.match(scribe, /setDiarization\(switches\.diarizeVirtualParticipant\)/);
+    // deployment cannot have separation on for one engine and off for the other.
+    assert.match(code, /setDiarization\(\s*switches\.diarizeVirtualParticipant\s*\)/);
 });
 
-test('the switch is read once per meeting, before either engine is chosen', () => {
-    const fetchAt = scribe.indexOf('await fetchAsrRuntimeSwitches()');
-    const setAt = scribe.indexOf('setDiarization(switches.diarizeVirtualParticipant)');
-    const engineAt = scribe.indexOf("resolveVpAsrEngine(switches) === 'microvm'");
-    assert.ok(fetchAt > -1 && setAt > -1 && engineAt > -1);
-    assert.ok(fetchAt < setAt, 'the switch must be fetched before it is applied');
-    assert.ok(
-        setAt < engineAt,
-        'applied before the engine branch, so the Transcribe fallback is covered too',
-    );
+test('it is applied before either engine is chosen', () => {
+    // So the Amazon Transcribe fallback is covered too, not just the branch
+    // that was taken first.
+    const applied = code.search(/setDiarization\(\s*switches\./);
+    const engine = code.indexOf("resolveVpAsrEngine(switches) === 'microvm'");
+    assert.ok(applied > -1 && engine > -1, 'both call sites must be present');
+    assert.ok(applied < engine);
 });
 
-test('Transcribe is still asked for the labels this now consumes', () => {
-    // The request was always there; the labels were thrown away. Removing it
-    // would silently turn every diarized VP meeting back into one speaker.
-    assert.match(scribe, /ShowSpeakerLabel: true/);
-});
-
-test('separation is off unless the deployment asks for it', () => {
-    // A deployment that has not turned it on must get exactly today's
-    // attribution, so the default has to be false and the setter strict.
-    assert.match(kinesis, /private diarize = false;/);
-    assert.match(kinesis, /this\.diarize = enabled === true;/);
-});
-
-test('the undiarized path is untouched by the branch', () => {
-    // The original item loop and its binary-search segment assembly must still
-    // be reachable, since that is what every deployment uses today.
-    assert.match(kinesis, /if \(this\.diarize\) \{/);
-    assert.match(kinesis, /this\.addItemToSegment\(item, segments, timeOffsetSeconds\)/);
-});
-
-test('the diarized branch resets the roster timeline on a final result', () => {
-    // The undiarized path resets after its item loop; the diarized branch
-    // returns early, so it has to do the same or the timeline grows for the
-    // whole meeting and segment ids drift.
-    const start = kinesis.indexOf('if (this.diarize) {');
-    const end = kinesis.indexOf('const alternative = result.Alternatives[0];', start);
-    assert.ok(start > -1 && end > start);
-    const branch = kinesis.slice(start, end);
-    assert.match(branch, /if \(!result\.IsPartial\)/);
-    assert.match(branch, /this\.startTimes = \[\];/);
-});
-
-test('the roster name comes from the timeline the undiarized path already keeps', () => {
-    // One source for "who did the platform say was talking", so a diarized and
-    // an undiarized segment name the same participant for the same moment.
-    assert.match(kinesis, /private rosterNameAt\(/);
-    assert.match(kinesis, /this\.binarySearch\(this\.startTimes, absoluteStart\)/);
+test('Transcribe is still asked for the labels this feature consumes', () => {
+    // The request was always there and the labels were thrown away. Removing it
+    // now would silently turn every diarized VP meeting back into one speaker,
+    // and no behavioural test can see it without a live Transcribe session.
+    assert.match(code, /ShowSpeakerLabel:\s*true/);
 });

@@ -164,28 +164,12 @@ export async function fetchAsrRuntimeSwitches(
 
 // --- speaker labels ---------------------------------------------------------
 
-/** A bare voice index, as Amazon Transcribe reports it ("0", "29"). */
-const BARE_VOICE_INDEX = /^\d+$/;
-
-/**
- * Normalise a voice id to the `spk_N` form used everywhere else in LMA.
- *
- * Only a bare index gets the prefix. Amazon Transcribe reports "0"; the
- * on-demand engine reports "spk_0" already; and with voice enrollment on it
- * reports the enrolled person's NAME, which must not become "spk_Sarah Lee".
- * Matches the WebSocket transcriber's formatter, which had the same defect.
- */
-export const formatSpeakerLabel = (raw: string | null | undefined): string | undefined => {
-    const trimmed = (raw ?? '').trim();
-    if (trimmed.length === 0) {
-        return undefined;
-    }
-    return BARE_VOICE_INDEX.test(trimmed) ? `spk_${trimmed}` : trimmed;
-};
+export { formatSpeakerLabel } from './transcribe-diarization.js';
+import { formatSpeakerLabel as labelOf } from './transcribe-diarization.js';
 
 /** Roster name plus the engine's voice id when diarization is on, in the transcriber's label format. */
 export const speakerNameFor = (rosterName: string, voiceId: string | null | undefined): string => {
-    const label = formatSpeakerLabel(voiceId);
+    const label = labelOf(voiceId);
     return label === undefined ? rosterName : `${rosterName} (${label})`;
 };
 

@@ -416,7 +416,14 @@ class KinesisStreamManager {
     if (this.startTimes.length === 0) {
       return fallback;
     }
-    let index = this.binarySearch(this.startTimes, absoluteStart) - 1;
+    // Upper bound, not the lower bound the undiarized path uses. A roster entry
+    // is pushed with the start time of the word at which the change was
+    // noticed, so an exact tie means "this speaker from here on"; resolving a
+    // tie to the PREVIOUS speaker named every turn after a roster change with
+    // the name of the person before it. The undiarized path keeps its
+    // lower-bound search, because changing a shared helper would alter the
+    // behaviour every deployment has today.
+    let index = this.upperBound(this.startTimes, absoluteStart) - 1;
     if (index < 0) {
       index = 0;
     }
@@ -441,12 +448,18 @@ class KinesisStreamManager {
    */
   private diarizedSegments(speakerName: string, result: any, timeOffsetSeconds: number): any {
     const items: TranscribeItem[] = result.Alternatives?.[0]?.Items ?? [];
-    const resultId = result.ResultId ?? `vp-${timeOffsetSeconds}`;
+    // The fallback varies per result, like the WebSocket transcriber's. Keying
+    // it on the session offset instead made every result in a session collapse
+    // onto one id, because that offset is constant for the whole session -- so
+    // a missing ResultId would have turned a whole meeting into one row rather
+    // than merely losing the partial/final alignment.
+    const resultId = result.ResultId ?? `vp-${result.StartTime ?? 0}`;
     const segments = buildDiarizedSegments(items, {
       resultId,
       timeOffsetSeconds,
       rosterNameAt: (startTime) => this.rosterNameAt(startTime, speakerName),
       nameFor: speakerNameFor,
+      isPartial: result.IsPartial === true,
     });
 
     if (process.env.DEBUG) {
@@ -536,6 +549,21 @@ class KinesisStreamManager {
     segments[segmentId].Transcript += item.Content;
 
     return segments;
+  }
+
+  /** Index of the first element strictly greater than `target` (bisect_right). */
+  private upperBound(arr: number[], target: number): number {
+    let left = 0;
+    let right = arr.length;
+    while (left < right) {
+      const mid = Math.floor((left + right) / 2);
+      if (arr[mid] <= target) {
+        left = mid + 1;
+      } else {
+        right = mid;
+      }
+    }
+    return left;
   }
 
   private binarySearch(arr: number[], target: number): number {

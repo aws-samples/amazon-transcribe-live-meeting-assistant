@@ -308,23 +308,121 @@ describe('segments for a result', () => {
         assert.ok((segment?.EndTime ?? 0) > 120);
     });
 
-    it('asks for the roster name at each run start, not once for the result', () => {
-        // A result can span a roster change; each turn should get the name in
-        // effect when it began.
-        const asked: number[] = [];
+    it('attributes each turn to the roster name in effect when it began', () => {
+        // Roster boundary coincides with the label boundary here, so the two
+        // signals agree and there are two turns.
         const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
             resultId: 'res-3',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => {
-                asked.push(start);
-                return start < 5 ? 'Alex' : 'Conference Room';
-            },
+            rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Conference Room'),
             nameFor,
         });
-        assert.deepEqual(asked, [0, 10]);
         assert.deepEqual(
             Object.values(segments).map((segment) => segment.Speaker),
             ['Alex (spk_0)', 'Conference Room (spk_1)'],
+        );
+    });
+
+    it('honours a roster change that falls inside one voice run', () => {
+        // Both signals are real and they can disagree about where a turn ends.
+        // Taking the intersection means the finer boundary wins, which is the
+        // conservative choice: an over-split turn can be merged in the Speakers
+        // panel, a merged one cannot be separated.
+        const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
+            resultId: 'res-3b',
+            timeOffsetSeconds: 0,
+            rosterNameAt: (start) => (start < 5 ? 'Alex' : 'Conference Room'),
+            nameFor,
+        });
+        assert.deepEqual(
+            Object.values(segments).map((segment) => segment.Speaker),
+            ['Alex (spk_0)', 'Conference Room (spk_0)', 'Conference Room (spk_1)'],
+        );
+        // Still no text lost.
+        assert.equal(
+            Object.values(segments)
+                .map((segment) => segment.Transcript)
+                .join(' ')
+                .split(' ')
+                .filter(Boolean).length,
+            12,
+        );
+    });
+
+    it('splits one voice label across a roster change rather than merging it', () => {
+        // THE case the first draft got wrong. Transcribe under-segmenting two
+        // remote attendees onto one label is its normal failure on a downmixed
+        // stream; letting the label win attributed the second person's whole
+        // turn to the first -- an attribution the roster had right, and which
+        // the undiarized path gets right today.
+        const segments = buildDiarizedSegments(
+            [...turn('0', 6, 0), ...turn('0', 6, 10)],
+            {
+                resultId: 'res-4',
+                timeOffsetSeconds: 0,
+                rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Beth'),
+                nameFor,
+            },
+        );
+        assert.deepEqual(
+            Object.values(segments).map((segment) => segment.Speaker),
+            ['Alex (spk_0)', 'Beth (spk_0)'],
+        );
+        assert.deepEqual(
+            Object.values(segments).map((segment) => segment.Transcript.split(' ')[0]),
+            ['w00', 'w00'],
+        );
+    });
+
+    it('subdividing by roster can only add boundaries, never lose text', () => {
+        const items = [...turn('0', 6, 0), punctuation('.'), ...turn('0', 6, 10)];
+        const merged = buildDiarizedSegments(items, {
+            resultId: 'res-5',
+            timeOffsetSeconds: 0,
+            rosterNameAt: () => 'Room',
+            nameFor,
+        });
+        const split = buildDiarizedSegments(items, {
+            resultId: 'res-5',
+            timeOffsetSeconds: 0,
+            rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Beth'),
+            nameFor,
+        });
+        assert.equal(Object.keys(merged).length, 1);
+        assert.equal(Object.keys(split).length, 2);
+        const text = (segments: Record<string, { Transcript: string }>) =>
+            Object.values(segments)
+                .map((segment) => segment.Transcript)
+                .join(' ');
+        assert.equal(text(split), text(merged));
+    });
+
+    it('ignores any label on a partial, so it stays one piece', () => {
+        // Transcribe does not label partials. If it ever did, the extra pieces
+        // would be orphaned in the transcript for ever, marked in-progress.
+        const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
+            resultId: 'res-6',
+            timeOffsetSeconds: 0,
+            rosterNameAt: () => 'Conference Room',
+            nameFor,
+            isPartial: true,
+        });
+        assert.deepEqual(Object.keys(segments), ['res-6-r0']);
+        assert.equal(Object.values(segments)[0]?.Speaker, 'Conference Room');
+    });
+
+    it('a partial still splits on a roster change', () => {
+        // The roster signal is available on a partial even though labels are not.
+        const segments = buildDiarizedSegments(turn('0', 12, 0), {
+            resultId: 'res-7',
+            timeOffsetSeconds: 0,
+            rosterNameAt: (start) => (start < 6 ? 'Alex' : 'Beth'),
+            nameFor,
+            isPartial: true,
+        });
+        assert.deepEqual(
+            Object.values(segments).map((segment) => segment.Speaker),
+            ['Alex', 'Beth'],
         );
     });
 
