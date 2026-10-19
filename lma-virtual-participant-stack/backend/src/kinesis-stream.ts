@@ -60,6 +60,18 @@ export interface KinesisRecord {
 // Local testing mode
 const isLocalTest = process.env.LOCAL_TEST === 'true';
 
+/**
+ * Whether to emit per-result diagnostics.
+ *
+ * `DEBUG` is honoured because that is the habit for a local run; `LOG_LEVEL`
+ * is what a deployment actually sets, through the stack's LogLevel parameter.
+ * Gating only on the former meant the separation log could not be switched on
+ * in a deployment at all -- which is the only place a real room's audio exists
+ * to be diagnosed.
+ */
+const diagnosticsOn = (): boolean =>
+  Boolean(process.env.DEBUG) || (process.env.LOG_LEVEL || '').toUpperCase() === 'DEBUG';
+
 class KinesisStreamManager {
   private kinesisClient: KinesisClient;
   private callId: string;
@@ -465,7 +477,7 @@ class KinesisStreamManager {
       isPartial: result.IsPartial === true,
     });
 
-    if (process.env.DEBUG) {
+    if (diagnosticsOn()) {
       const labels = Object.values(segments).map((segment) => segment.Speaker);
       console.log(
         `[DIARIZATION] result=${resultId} partial=${result.IsPartial === true} ` +

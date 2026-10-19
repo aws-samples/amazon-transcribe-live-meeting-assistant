@@ -18,7 +18,7 @@
  * shipping code path.
  */
 import { strict as assert } from 'node:assert';
-import { beforeEach, describe, it } from 'node:test';
+import { afterEach, beforeEach, describe, it } from 'node:test';
 
 process.env.LOCAL_TEST = 'true';
 delete process.env.CALL_DATA_STREAM_NAME;
@@ -269,5 +269,52 @@ describe('every segment the writer starts, it finishes', () => {
         const first = await emit('Conference Room', result(turn('0', 6, 0), { startTime: 0 }), 0);
         const second = await emit('Conference Room', result(turn('0', 6, 0), { startTime: 0 }), 300);
         assert.notEqual(first[0]?.SegmentId, second[0]?.SegmentId);
+    });
+});
+
+describe('the separation diagnostic can be switched on in a deployment', () => {
+    // It was gated on a DEBUG variable the VP container never receives, so the
+    // one tool for working out why a room separated badly was unreachable
+    // exactly where rooms exist. The stack sets LOG_LEVEL.
+    const saved = { debug: process.env.DEBUG, level: process.env.LOG_LEVEL };
+
+    afterEach(() => {
+        if (saved.debug === undefined) delete process.env.DEBUG;
+        else process.env.DEBUG = saved.debug;
+        if (saved.level === undefined) delete process.env.LOG_LEVEL;
+        else process.env.LOG_LEVEL = saved.level;
+    });
+
+    it('logs the per-result breakdown when the deployment log level is DEBUG', async () => {
+        delete process.env.DEBUG;
+        process.env.LOG_LEVEL = 'DEBUG';
+        manager.setDiarization(true);
+        const lines: string[] = [];
+        const original = console.log;
+        console.log = (...args: unknown[]) => lines.push(args.join(' '));
+        try {
+            await emit('Conference Room', result(turn('0', 6, 0), { resultId: 'R-log' }));
+        } finally {
+            console.log = original;
+        }
+        assert.ok(
+            lines.some((line) => line.includes('[DIARIZATION]')),
+            'no [DIARIZATION] line was emitted at LOG_LEVEL=DEBUG',
+        );
+    });
+
+    it('stays quiet at the default log level', async () => {
+        delete process.env.DEBUG;
+        process.env.LOG_LEVEL = 'INFO';
+        manager.setDiarization(true);
+        const lines: string[] = [];
+        const original = console.log;
+        console.log = (...args: unknown[]) => lines.push(args.join(' '));
+        try {
+            await emit('Conference Room', result(turn('0', 6, 0), { resultId: 'R-quiet' }));
+        } finally {
+            console.log = original;
+        }
+        assert.ok(!lines.some((line) => line.includes('[DIARIZATION]')));
     });
 });

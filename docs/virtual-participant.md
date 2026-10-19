@@ -112,6 +112,12 @@ Synthesised voices may be more alike than real ones and the test had no room
 reverb or background noise, so treat the figures as directional rather than a
 guarantee for your room.
 
+To see how a particular room separated, set the stack's **LogLevel** parameter
+to `DEBUG`. The Virtual Participant then logs one `[DIARIZATION]` line per
+Transcribe result, giving the number of segments it produced and the speaker it
+assigned to each — which is what tells you whether the labels or the platform's
+active-speaker signal is the thing going wrong.
+
 Where the two signals disagree, the finer boundary wins: a voice label running
 across a change of platform speaker is split at the change. A turn split in two
 can be put right with **Only this segment** on the meeting page, which is the
