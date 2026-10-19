@@ -271,14 +271,49 @@ export const buildDiarizedSegments = (
     const segments: Record<string, DiarizedSegment> = {};
     let pieceIndex = 0;
     for (const run of runs) {
+        if (options.isPartial) {
+            // A partial is exactly one piece, at index 0, whatever the roster
+            // did under it. That is what keeps it aligned with its final.
+            //
+            // Splitting a partial by roster broke the alignment, and did so in
+            // the one direction that cannot be recovered. The roster timeline
+            // is not guaranteed to be time-ordered -- an entry is stamped with
+            // the start time of the last item of whichever result was in hand,
+            // and a result ending in punctuation has no time, so the entry
+            // lands at zero -- so a partial could emit r0 AND r1 while the
+            // final emitted only r0. The leftover r1 then sits in the live
+            // transcript for ever marked in-progress: a duplicate of words the
+            // final already carried, attributed to the wrong participant,
+            // excluded from summaries and absent from the Speakers panel where
+            // it could have been corrected.
+            //
+            // The cost is that the live transcript shows one roster name until
+            // the final arrives, which is the experience the documentation
+            // already describes.
+            const segmentId = `${options.resultId}-r0`;
+            segments[segmentId] = {
+                SegmentId: segmentId,
+                Speaker: options.nameFor(
+                    options.rosterNameAt(firstSpokenTime(run.items, options.timeOffsetSeconds)),
+                    run.label,
+                ),
+                StartTime: run.startTime + options.timeOffsetSeconds,
+                EndTime: run.endTime + options.timeOffsetSeconds,
+                Transcript: runTranscript(run),
+            };
+            return segments;
+        }
         // A run says which VOICE is talking. The roster says which PARTICIPANT
         // the platform reports. Composing them means intersecting both
         // boundaries, not letting one win: a label that spans a roster change
         // -- which is what diarization under-segmentation looks like on a
         // downmixed meeting stream -- would otherwise attribute a whole turn to
         // whoever happened to be talking when the run began, losing an
-        // attribution the roster had right. Splitting here can only ever ADD
-        // boundaries relative to the undiarized path, never remove one.
+        // attribution the roster had right. A turn split in two can be put
+        // right with "Only this segment" on the meeting page; a turn merged
+        // under one name cannot be separated at all. Splitting here can only
+        // ever ADD
+        // boundaries relative to the run structure, never remove one.
         for (const piece of splitRunByRoster(run, options.timeOffsetSeconds, options.rosterNameAt)) {
             const segmentId = `${options.resultId}-r${pieceIndex}`;
             segments[segmentId] = {
@@ -318,11 +353,18 @@ const splitRunByRoster = (
     timeOffsetSeconds: number,
     rosterNameAt: (absoluteStart: number) => string,
 ): RosterPiece[] => {
+    // Where a leading item has no time of its own -- punctuation, or any item
+    // Transcribe did not timestamp -- the piece takes the run's first SPOKEN
+    // time. Reading `?? 0` as a real time instead resolved the roster at the
+    // start of the SESSION, and seeded the piece with the whole run's span, so
+    // a run beginning with punctuation produced a segment that overlapped the
+    // next one entirely and could be attributed to the wrong participant.
+    const anchor = firstSpokenTime(run.items, timeOffsetSeconds, run.startTime);
     const pieces: RosterPiece[] = [];
     for (const item of run.items) {
-        const timed = item.Type === 'pronunciation';
-        const start = (item.StartTime ?? 0) + timeOffsetSeconds;
-        const end = (item.EndTime ?? 0) + timeOffsetSeconds;
+        const timed = item.Type === 'pronunciation' && item.StartTime !== undefined;
+        const start = timed ? (item.StartTime as number) + timeOffsetSeconds : anchor;
+        const end = timed ? (item.EndTime ?? item.StartTime ?? 0) + timeOffsetSeconds : anchor;
         const current = pieces.length > 0 ? pieces[pieces.length - 1] : undefined;
         if (current !== undefined && (!timed || rosterNameAt(start) === current.roster)) {
             current.items.push(item);
@@ -331,17 +373,13 @@ const splitRunByRoster = (
             }
             continue;
         }
-        pieces.push({
-            roster: rosterNameAt(start),
-            items: [item],
-            startTime: timed ? start : run.startTime + timeOffsetSeconds,
-            endTime: timed ? end : run.endTime + timeOffsetSeconds,
-        });
+        pieces.push({ roster: rosterNameAt(start), items: [item], startTime: start, endTime: end });
     }
     if (pieces.length === 0) {
+        // Only reachable for a run with no items at all.
         return [
             {
-                roster: rosterNameAt(run.startTime + timeOffsetSeconds),
+                roster: rosterNameAt(anchor),
                 items: run.items,
                 startTime: run.startTime + timeOffsetSeconds,
                 endTime: run.endTime + timeOffsetSeconds,
@@ -349,4 +387,24 @@ const splitRunByRoster = (
         ];
     }
     return pieces;
+};
+
+/**
+ * Absolute start of the first item that carries a time, else `fallback`.
+ *
+ * "No time" means unknown, not zero. Treating a missing timestamp as the start
+ * of the session is what put punctuation-led pieces at the beginning of a
+ * meeting and resolved their speaker from the wrong end of the roster.
+ */
+const firstSpokenTime = (
+    items: TranscribeItem[],
+    timeOffsetSeconds: number,
+    fallback = 0,
+): number => {
+    for (const item of items) {
+        if (item.Type === 'pronunciation' && item.StartTime !== undefined) {
+            return item.StartTime + timeOffsetSeconds;
+        }
+    }
+    return fallback + timeOffsetSeconds;
 };

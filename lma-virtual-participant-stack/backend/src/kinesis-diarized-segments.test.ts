@@ -195,3 +195,79 @@ describe('with voice separation on', () => {
         assert.deepEqual(emitted, items.map((item) => item.Content));
     });
 });
+
+describe('every segment the writer starts, it finishes', () => {
+    // The property that keeps the live transcript clean, asserted end to end
+    // rather than per-call: a row emitted as in-progress must eventually be
+    // emitted again as final, or it sits there for ever showing words the
+    // final already carried, attributed to the wrong participant, excluded
+    // from summaries and absent from the Speakers panel.
+    beforeEach(() => manager.setDiarization(true));
+
+    const partialThenFinal = async (rosterPerCall: string[]) => {
+        const all: Record_[] = [];
+        const push = async (speaker: string, res: unknown) => {
+            sent.length = 0;
+            await manager.sendTranscriptSegment(speaker, res, 0);
+            all.push(...sent.filter((record) => record.EventType === 'ADD_TRANSCRIPT_SEGMENT'));
+        };
+        const base = [word('hello', undefined, 10, 10.5), word('everyone', undefined, 10.6, 11.2)];
+        await push(rosterPerCall[0]!, result(base, { isPartial: true, resultId: 'res-x' }));
+        await push(
+            rosterPerCall[1]!,
+            result([...base, word('so', undefined, 11.3, 11.7)], { isPartial: true, resultId: 'res-x' }),
+        );
+        // The final's last item is punctuation, which carries no time -- the
+        // shape that made the roster timeline non-monotonic.
+        await push(
+            rosterPerCall[2]!,
+            result(
+                [
+                    word('hello', '0', 10, 10.5),
+                    word('everyone', '0', 10.6, 11.2),
+                    word('so', '0', 11.3, 11.7),
+                    word('yes', '0', 13, 13.6),
+                ],
+                { resultId: 'res-x' },
+            ),
+        );
+        const finalised = new Set(all.filter((r) => !r.IsPartial).map((r) => r.SegmentId));
+        return [...new Set(all.filter((r) => r.IsPartial).map((r) => r.SegmentId))].filter(
+            (id) => !finalised.has(id as string),
+        );
+    };
+
+    it('leaves nothing in progress when the active speaker changes mid-utterance', async () => {
+        const orphans = await partialThenFinal(['Conference Room', 'Alex', 'Conference Room']);
+        assert.deepEqual(orphans, []);
+    });
+
+    it('leaves nothing in progress when the active speaker is steady', async () => {
+        const orphans = await partialThenFinal(['Conference Room', 'Conference Room', 'Conference Room']);
+        assert.deepEqual(orphans, []);
+    });
+
+    it('passes the partial flag through, so a labelled partial cannot split', async () => {
+        // Transcribe does not label partials today. If it ever did, the writer
+        // must still emit one piece -- which only holds if it tells the builder
+        // the result is partial.
+        sent.length = 0;
+        await manager.sendTranscriptSegment(
+            'Conference Room',
+            result([...turn('0', 6, 0), ...turn('1', 6, 10)], { isPartial: true, resultId: 'res-y' }),
+            0,
+        );
+        const ids = sent
+            .filter((record) => record.EventType === 'ADD_TRANSCRIPT_SEGMENT')
+            .map((record) => record.SegmentId);
+        assert.deepEqual(ids, ['res-y-r0']);
+    });
+
+    it('gives two sessions distinct fallback ids across a reconnect', async () => {
+        // StartTime resets to 0 on reconnect, so the session offset has to be
+        // part of the key or session 2's first result overwrites session 1's.
+        const first = await emit('Conference Room', result(turn('0', 6, 0), { startTime: 0 }), 0);
+        const second = await emit('Conference Room', result(turn('0', 6, 0), { startTime: 0 }), 300);
+        assert.notEqual(first[0]?.SegmentId, second[0]?.SegmentId);
+    });
+});

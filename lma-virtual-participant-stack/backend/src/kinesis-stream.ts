@@ -453,7 +453,10 @@ class KinesisStreamManager {
     // onto one id, because that offset is constant for the whole session -- so
     // a missing ResultId would have turned a whole meeting into one row rather
     // than merely losing the partial/final alignment.
-    const resultId = result.ResultId ?? `vp-${result.StartTime ?? 0}`;
+    // Both parts matter: StartTime resets to 0 on every reconnect, so without
+    // the session offset the first result of session 2 collides with the first
+    // of session 1.
+    const resultId = result.ResultId ?? `vp-${timeOffsetSeconds}-${result.StartTime ?? 0}`;
     const segments = buildDiarizedSegments(items, {
       resultId,
       timeOffsetSeconds,

@@ -411,8 +411,14 @@ describe('segments for a result', () => {
         assert.equal(Object.values(segments)[0]?.Speaker, 'Conference Room');
     });
 
-    it('a partial still splits on a roster change', () => {
-        // The roster signal is available on a partial even though labels are not.
+    it('a partial is ONE piece even when the roster changed under it', () => {
+        // Inverted deliberately: an earlier version split a partial by roster,
+        // which broke its alignment with the final in the one direction that
+        // cannot be recovered. The roster timeline is not guaranteed to be
+        // time-ordered, so a partial could emit r0 AND r1 while the final
+        // emitted only r0 -- leaving a duplicate row in the live transcript for
+        // ever, marked in-progress, attributed to the wrong participant, and
+        // absent from the Speakers panel where it could be corrected.
         const segments = buildDiarizedSegments(turn('0', 12, 0), {
             resultId: 'res-7',
             timeOffsetSeconds: 0,
@@ -420,10 +426,43 @@ describe('segments for a result', () => {
             nameFor,
             isPartial: true,
         });
-        assert.deepEqual(
-            Object.values(segments).map((segment) => segment.Speaker),
-            ['Alex', 'Beth'],
+        assert.deepEqual(Object.keys(segments), ['res-7-r0']);
+        assert.equal(Object.values(segments)[0]?.Speaker, 'Alex');
+    });
+
+    it('a run beginning with punctuation does not claim the whole run span', () => {
+        // "No timestamp" means unknown, not zero. Reading it as zero resolved
+        // the roster at the start of the SESSION and seeded the piece with the
+        // run's whole span, so it overlapped the next piece entirely.
+        const segments = buildDiarizedSegments(
+            [punctuation(','), ...turn('0', 4, 10), ...turn('0', 4, 20)],
+            {
+                resultId: 'res-8',
+                timeOffsetSeconds: 0,
+                rosterNameAt: (start) => (start < 20 ? 'Alex' : 'Beth'),
+                nameFor,
+            },
         );
+        const pieces = Object.values(segments);
+        assert.deepEqual(
+            pieces.map((piece) => piece.Speaker),
+            ['Alex (spk_0)', 'Beth (spk_0)'],
+        );
+        // The leading comma joins the first piece and does not stretch it over
+        // the second.
+        assert.ok(pieces[0]!.EndTime <= pieces[1]!.StartTime, 'pieces must not overlap');
+        assert.ok(pieces[0]!.Transcript.startsWith(','));
+    });
+
+    it('a punctuation-only run is one piece at the run time, not at zero', () => {
+        const segments = buildDiarizedSegments([punctuation('.')], {
+            resultId: 'res-8b',
+            timeOffsetSeconds: 5,
+            rosterNameAt: (start) => (start < 5 ? 'Wrong' : 'Right'),
+            nameFor,
+        });
+        assert.equal(Object.keys(segments).length, 1);
+        assert.equal(Object.values(segments)[0]?.Speaker, 'Right');
     });
 
     it('carries the full text of each turn', () => {
@@ -442,5 +481,32 @@ describe('segments for a result', () => {
         const segments = build([...turn('0', 6, 0), ...turn('1', 1, 6), ...turn('0', 6, 7)]);
         assert.equal(Object.keys(segments).length, 1);
         assert.equal(Object.values(segments)[0]?.Speaker, 'Conference Room (spk_0)');
+    });
+});
+
+describe('an item with no timestamp', () => {
+    const nameFor = (roster: string, label: string | undefined) =>
+        label === undefined ? roster : `${roster} (${label})`;
+
+    it('is not treated as happening at the start of the session', () => {
+        // "No timestamp" means unknown. Reading it as zero put the piece at the
+        // beginning of the meeting and resolved its speaker from the wrong end
+        // of the roster. Transcribe always timestamps pronunciations, so this
+        // is robustness rather than a live case -- which is exactly the kind of
+        // guard that rots without a test.
+        const untimed = { Content: 'mumble', Type: 'pronunciation' };
+        const segments = buildDiarizedSegments(
+            [untimed, ...turn('0', 4, 30)],
+            {
+                resultId: 'res-9',
+                timeOffsetSeconds: 0,
+                rosterNameAt: (start) => (start < 30 ? 'Wrong' : 'Right'),
+                nameFor,
+            },
+        );
+        const speakers = Object.values(segments).map((segment) => segment.Speaker);
+        assert.ok(!speakers.includes('Wrong (spk_0)'), `resolved at zero: ${speakers.join(', ')}`);
+        assert.deepEqual(speakers, ['Right (spk_0)']);
+        assert.ok(Object.values(segments)[0]!.StartTime >= 30);
     });
 });

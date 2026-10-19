@@ -81,9 +81,9 @@ effect on the next meeting with no redeployment.
 Three limits are worth knowing.
 
 Labels arrive only when a segment finalises. Amazon Transcribe caps a result at
-about thirty seconds, so the live transcript can show the roster name alone for
-that long before it splits into voices. Nothing is lost — the split arrives with
-the final — but a watcher sees it late.
+about thirty seconds, so the live transcript can show one roster name, and no
+voice ids, for that long before the row splits into voices. The words themselves
+are not lost; a watcher simply sees the separation late.
 
 Accuracy depends on the audio, and on which engine. A room heard through a
 speakerphone, compressed by the meeting platform and mixed with everyone else,
@@ -112,10 +112,13 @@ Synthesised voices may be more alike than real ones and the test had no room
 reverb or background noise, so treat the figures as directional rather than a
 guarantee for your room.
 
-Where the two signals disagree, the finer boundary wins. A voice label that runs
-across a change of platform speaker is split at the change, because an
-over-split turn can be merged on the Speakers panel and a merged one cannot be
-separated. In assistant mode on Amazon Transcribe the assistant's own speech
+Where the two signals disagree, the finer boundary wins: a voice label running
+across a change of platform speaker is split at the change. A turn split in two
+can be put right with **Only this segment** on the meeting page, which is the
+affordance for a single turn attributed to the wrong voice; a turn merged under
+one name cannot be separated at all. (Renaming on the Speakers panel would not
+help here — it is per voice, so it would rename every turn that voice produced,
+not the one that was misattributed.) In assistant mode on Amazon Transcribe the assistant's own speech
 shares the meeting channel, so it too acquires a voice id; on the on-demand
 engine it has its own channel and never does.
 
