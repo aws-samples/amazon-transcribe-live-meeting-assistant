@@ -294,7 +294,9 @@ export const buildDiarizedSegments = (
             segments[segmentId] = {
                 SegmentId: segmentId,
                 Speaker: options.nameFor(
-                    options.rosterNameAt(firstSpokenTime(run.items, options.timeOffsetSeconds)),
+                    options.rosterNameAt(
+                        firstSpokenTime(run.items, options.timeOffsetSeconds, run.startTime),
+                    ),
                     run.label,
                 ),
                 StartTime: run.startTime + options.timeOffsetSeconds,
@@ -312,8 +314,7 @@ export const buildDiarizedSegments = (
         // attribution the roster had right. A turn split in two can be put
         // right with "Only this segment" on the meeting page; a turn merged
         // under one name cannot be separated at all. Splitting here can only
-        // ever ADD
-        // boundaries relative to the run structure, never remove one.
+        // ever ADD boundaries relative to the run structure, never remove one.
         for (const piece of splitRunByRoster(run, options.timeOffsetSeconds, options.rosterNameAt)) {
             const segmentId = `${options.resultId}-r${pieceIndex}`;
             segments[segmentId] = {
@@ -390,16 +391,19 @@ const splitRunByRoster = (
 };
 
 /**
- * Absolute start of the first item that carries a time, else `fallback`.
+ * Absolute start of the first item that carries a time.
  *
- * "No time" means unknown, not zero. Treating a missing timestamp as the start
- * of the session is what put punctuation-led pieces at the beginning of a
- * meeting and resolved their speaker from the wrong end of the roster.
+ * With no timed item at all it returns `fallback + timeOffsetSeconds`, so the
+ * caller decides what "unknown" means -- and every caller must pass the run's
+ * own start, because the default of 0 would mean the start of the SESSION.
+ * Treating a missing timestamp that way is what put punctuation-led pieces at
+ * the beginning of a meeting and resolved their speaker from the wrong end of
+ * the roster.
  */
 const firstSpokenTime = (
     items: TranscribeItem[],
     timeOffsetSeconds: number,
-    fallback = 0,
+    fallback: number,
 ): number => {
     for (const item of items) {
         if (item.Type === 'pronunciation' && item.StartTime !== undefined) {

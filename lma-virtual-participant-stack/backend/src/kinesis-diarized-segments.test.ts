@@ -217,8 +217,12 @@ describe('every segment the writer starts, it finishes', () => {
             rosterPerCall[1]!,
             result([...base, word('so', undefined, 11.3, 11.7)], { isPartial: true, resultId: 'res-x' }),
         );
-        // The final's last item is punctuation, which carries no time -- the
-        // shape that made the roster timeline non-monotonic.
+        // The final MUST end with punctuation. That item carries no time, so
+        // the roster entry this result pushes is stamped at zero, which is what
+        // makes the roster timeline non-monotonic and is the whole mechanism
+        // under test. An earlier version of this test ended the final with a
+        // timestamped word, which left the timeline monotonic -- so it passed
+        // with the defect present and guarded nothing.
         await push(
             rosterPerCall[2]!,
             result(
@@ -227,6 +231,7 @@ describe('every segment the writer starts, it finishes', () => {
                     word('everyone', '0', 10.6, 11.2),
                     word('so', '0', 11.3, 11.7),
                     word('yes', '0', 13, 13.6),
+                    { Content: '.', Type: 'punctuation' } as ReturnType<typeof word>,
                 ],
                 { resultId: 'res-x' },
             ),
@@ -316,5 +321,70 @@ describe('the separation diagnostic can be switched on in a deployment', () => {
             console.log = original;
         }
         assert.ok(!lines.some((line) => line.includes('[DIARIZATION]')));
+    });
+});
+
+describe('a partial after a reconnect', () => {
+    // The partial branch computes its own StartTime/EndTime, and nothing
+    // exercised them with a non-zero offset -- the existing offset test uses a
+    // final. Transcribe resets item times to 0 on every reconnect, so a partial
+    // stamped on the session-relative timeline sorts to the wrong place in the
+    // live transcript.
+    beforeEach(() => manager.setDiarization(true));
+
+    it('is stamped on the meeting timeline, not the session timeline', async () => {
+        const records = await emit(
+            'Conference Room',
+            result(turn(undefined, 4, 0), { isPartial: true, resultId: 'res-rc' }),
+            300,
+        );
+        assert.equal(records.length, 1);
+        assert.ok(
+            (records[0]?.StartTime ?? 0) >= 300,
+            `partial stamped at ${records[0]?.StartTime}, before the session offset`,
+        );
+        assert.ok((records[0]?.EndTime ?? 0) >= (records[0]?.StartTime ?? 0), 'span inverted');
+    });
+
+    it('does not collide with the same result id in a later session', async () => {
+        const first = await emit(
+            'Conference Room',
+            result(turn(undefined, 4, 0), { isPartial: true }),
+            0,
+        );
+        const second = await emit(
+            'Conference Room',
+            result(turn(undefined, 4, 0), { isPartial: true }),
+            300,
+        );
+        assert.notEqual(first[0]?.SegmentId, second[0]?.SegmentId);
+    });
+});
+
+describe('results that arrive with no id of their own', () => {
+    // Transcribe always sends a ResultId, so this is near-dead code -- but it
+    // has to degrade to "a different row", because a colliding id makes a whole
+    // meeting overwrite itself onto one transcript row.
+    beforeEach(() => manager.setDiarization(true));
+
+    it('separates two results that lack both an id and a start time', async () => {
+        const first = await emit('Conference Room', result(turn('0', 6, 0), {}), 0);
+        const second = await emit('Conference Room', result(turn('0', 6, 0), {}), 0);
+        assert.notEqual(first[0]?.SegmentId, second[0]?.SegmentId);
+    });
+
+    it('keeps a partial and its final on the same row', async () => {
+        // The same result object re-delivered must not get two ids, or the
+        // partial is orphaned.
+        const shared = result(turn(undefined, 4, 0), { isPartial: true });
+        sent.length = 0;
+        await manager.sendTranscriptSegment('Conference Room', shared, 0);
+        const partialId = sent.find((r) => r.EventType === 'ADD_TRANSCRIPT_SEGMENT')?.SegmentId;
+        shared.IsPartial = false;
+        shared.Alternatives[0].Items = turn('0', 6, 0);
+        sent.length = 0;
+        await manager.sendTranscriptSegment('Conference Room', shared, 0);
+        const finalId = sent.find((r) => r.EventType === 'ADD_TRANSCRIPT_SEGMENT')?.SegmentId;
+        assert.equal(partialId, finalId);
     });
 });

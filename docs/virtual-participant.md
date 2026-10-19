@@ -124,9 +124,11 @@ can be put right with **Only this segment** on the meeting page, which is the
 affordance for a single turn attributed to the wrong voice; a turn merged under
 one name cannot be separated at all. (Renaming on the Speakers panel would not
 help here — it is per voice, so it would rename every turn that voice produced,
-not the one that was misattributed.) In assistant mode on Amazon Transcribe the assistant's own speech
-shares the meeting channel, so it too acquires a voice id; on the on-demand
-engine it has its own channel and never does.
+not the one that was misattributed.)
+
+In assistant mode on Amazon Transcribe the assistant's own speech shares the
+meeting channel, so it too acquires a voice id; on the on-demand engine it has
+its own channel and never does.
 
 ## Supported Platforms
 

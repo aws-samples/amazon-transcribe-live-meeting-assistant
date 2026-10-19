@@ -96,6 +96,8 @@ class KinesisStreamManager {
   // unless the deployment's VP voice-separation switch is on, so a deployment
   // that has not asked for it keeps exactly today's attribution.
   private diarize = false;
+  // Separates results that arrive with neither a ResultId nor a StartTime.
+  private fallbackIdCounter = 0;
 
   constructor() {
     // In local test mode, explicitly use default provider which checks credentials file first
@@ -360,7 +362,7 @@ class KinesisStreamManager {
           StartTime: (segment as any).StartTime !== null ? (segment as any).StartTime : 0,
           EndTime: (segment as any).EndTime !== null ? (segment as any).EndTime : 0,
           Transcript: (segment as any).Transcript,
-          IsPartial: transcriptResult.IsPartial || false,
+          IsPartial: KinesisStreamManager.isPartialResult(transcriptResult),
           CreatedAt: new Date().toISOString(),
           UpdatedAt: new Date().toISOString(),
           Sentiment: null,
@@ -464,6 +466,44 @@ class KinesisStreamManager {
    * rename the segment between partial and final and orphan the partial, which
    * would then sit in the UI for ever marked in-progress.
    */
+  /**
+   * Whether a result is still in progress.
+   *
+   * Derived once and shared, because the places that used to decide it
+   * independently did not agree: the builder tested `=== true`, the record
+   * written to Kinesis used `|| false`, and the resets used `!`. Any truthy
+   * non-boolean therefore split a result as if it were final while every
+   * resulting row was stamped in progress. The SDK deserialises this field to
+   * a real boolean, so it was unreachable through Amazon Transcribe -- but a
+   * property that holds "by construction" should not rest on a wire type.
+   */
+  private static isPartialResult(result: any): boolean {
+    return Boolean(result?.IsPartial);
+  }
+
+  /**
+   * A stable, unique id for a result that arrived without one.
+   *
+   * Keyed on the session offset and the result's own start time where it has
+   * them, with a counter to separate results that have neither. Memoised on
+   * the result object so a partial and its final -- which is the same object
+   * re-delivered -- resolve to the same id rather than to two.
+   */
+  private fallbackResultId(result: any, timeOffsetSeconds: number): string {
+    if (typeof result.__lmaFallbackId === 'string') {
+      return result.__lmaFallbackId;
+    }
+    this.fallbackIdCounter += 1;
+    const id = `vp-${timeOffsetSeconds}-${result.StartTime ?? 0}-${this.fallbackIdCounter}`;
+    try {
+      Object.defineProperty(result, '__lmaFallbackId', { value: id, enumerable: false });
+    } catch {
+      // A frozen result cannot be memoised; a fresh id per delivery is still
+      // better than two results sharing one.
+    }
+    return id;
+  }
+
   private diarizedSegments(speakerName: string, result: any, timeOffsetSeconds: number): any {
     const items: TranscribeItem[] = result.Alternatives?.[0]?.Items ?? [];
     // The fallback varies per result, like the WebSocket transcriber's. Keying
@@ -471,22 +511,26 @@ class KinesisStreamManager {
     // onto one id, because that offset is constant for the whole session -- so
     // a missing ResultId would have turned a whole meeting into one row rather
     // than merely losing the partial/final alignment.
-    // Both parts matter: StartTime resets to 0 on every reconnect, so without
-    // the session offset the first result of session 2 collides with the first
-    // of session 1.
-    const resultId = result.ResultId ?? `vp-${timeOffsetSeconds}-${result.StartTime ?? 0}`;
+    // Transcribe always sends a ResultId, so the fallback is close to dead
+    // code -- but it has to degrade to "a different row" rather than "the same
+    // row", because the failure mode of a colliding id is that a whole meeting
+    // overwrites itself onto one transcript row. The session offset alone was
+    // not enough: two results in one session that both lack StartTime share a
+    // key. The counter makes the key unique by construction, and is per
+    // in-flight result so a partial and its final still agree.
+    const resultId = result.ResultId ?? this.fallbackResultId(result, timeOffsetSeconds);
     const segments = buildDiarizedSegments(items, {
       resultId,
       timeOffsetSeconds,
       rosterNameAt: (startTime) => this.rosterNameAt(startTime, speakerName),
       nameFor: speakerNameFor,
-      isPartial: result.IsPartial === true,
+      isPartial: KinesisStreamManager.isPartialResult(result),
     });
 
     if (diagnosticsOn()) {
       const labels = Object.values(segments).map((segment) => segment.Speaker);
       console.log(
-        `[DIARIZATION] result=${resultId} partial=${result.IsPartial === true} ` +
+        `[DIARIZATION] result=${resultId} partial=${KinesisStreamManager.isPartialResult(result)} ` +
           `items=${items.length} segments=${labels.length} speakers=${labels.join(',')}`,
       );
     }
@@ -510,7 +554,7 @@ class KinesisStreamManager {
       // The roster bookkeeping above still runs, because rosterNameAt reads the
       // timeline it maintains and the non-partial reset below depends on it.
       const diarized = this.diarizedSegments(speakerName, result, timeOffsetSeconds);
-      if (!result.IsPartial) {
+      if (!KinesisStreamManager.isPartialResult(result)) {
         this.currentSpeakerName = null;
         this.speakers = [];
         this.startTimes = [];
@@ -530,7 +574,7 @@ class KinesisStreamManager {
     }
     
     // If it's a non partial result, then re-initialize globals
-    if (!result.IsPartial) {
+    if (!KinesisStreamManager.isPartialResult(result)) {
       console.log("INFO: Non partial result - Resetting speaker and start times");
       this.currentSpeakerName = null;
       this.speakers = [];

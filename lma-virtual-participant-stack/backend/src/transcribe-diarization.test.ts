@@ -510,3 +510,43 @@ describe('an item with no timestamp', () => {
         assert.ok(Object.values(segments)[0]!.StartTime >= 30);
     });
 });
+
+describe('a partial with nothing timed in it', () => {
+    const nameFor = (roster: string, label: string | undefined) =>
+        label === undefined ? roster : `${roster} (${label})`;
+
+    it('is named from the run, not from the start of the session', () => {
+        // "No timed item" has to mean "use the run's own time". Defaulting to
+        // zero means the start of the SESSION, which on a reconnected meeting
+        // is minutes earlier and names the row after whoever was talking then.
+        // A punctuation-only run takes its span from the items it has, so give
+        // the item a time to make the run's own start non-zero -- which is what
+        // the fallback is for.
+        const segments = buildDiarizedSegments(
+            [{ Content: '.', Type: 'punctuation', StartTime: 40, EndTime: 40 }],
+            {
+                resultId: 'res-p',
+                timeOffsetSeconds: 300,
+                rosterNameAt: (start) => (start < 339 ? 'Earlier' : 'Now'),
+                nameFor,
+                isPartial: true,
+            },
+        );
+        const speaker = Object.values(segments)[0]?.Speaker;
+        assert.notEqual(speaker, 'Earlier', 'resolved at the session start');
+        assert.equal(speaker, 'Now');
+    });
+
+    it('is stamped on the meeting timeline', () => {
+        const segments = buildDiarizedSegments([punctuation('.')], {
+            resultId: 'res-p2',
+            timeOffsetSeconds: 300,
+            rosterNameAt: () => 'Conference Room',
+            nameFor,
+            isPartial: true,
+        });
+        const piece = Object.values(segments)[0]!;
+        assert.ok(piece.StartTime >= 300);
+        assert.ok(piece.EndTime >= piece.StartTime);
+    });
+});
