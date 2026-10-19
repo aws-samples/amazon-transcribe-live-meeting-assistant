@@ -1,6 +1,8 @@
 import { KinesisClient, PutRecordCommand, PutRecordsCommand } from '@aws-sdk/client-kinesis';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
+import { speakerNameFor } from './asr-microvm-client.js';
+import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 
 export interface TranscriptSegment {
   channel: string;
@@ -72,6 +74,10 @@ class KinesisStreamManager {
   private currentSpeakerName: string | null = null;
   private speakers: string[] = [];
   private startTimes: number[] = [];
+  // Whether to recover speaker turns from Transcribe's per-item labels. Off
+  // unless the deployment's VP voice-separation switch is on, so a deployment
+  // that has not asked for it keeps exactly today's attribution.
+  private diarize = false;
 
   constructor() {
     // In local test mode, explicitly use default provider which checks credentials file first
@@ -387,6 +393,72 @@ class KinesisStreamManager {
     await this.sendRecord(record);
   }
 
+  /**
+   * Turn on recovery of speaker turns from Transcribe's per-item labels.
+   *
+   * Set once per meeting from the deployment's VP voice-separation switch, so
+   * the two engines honour the same control: the on-demand engine reads it when
+   * opening its session, and this path reads it here.
+   */
+  setDiarization(enabled: boolean): void {
+    this.diarize = enabled === true;
+  }
+
+  /**
+   * The roster name in effect at an absolute time.
+   *
+   * Reuses the timeline the roster bookkeeping already maintains -- speakers[]
+   * paired with startTimes[] -- rather than introducing a second source, so
+   * diarized and undiarized segments name the same participant for the same
+   * moment.
+   */
+  private rosterNameAt(absoluteStart: number, fallback: string): string {
+    if (this.startTimes.length === 0) {
+      return fallback;
+    }
+    let index = this.binarySearch(this.startTimes, absoluteStart) - 1;
+    if (index < 0) {
+      index = 0;
+    }
+    return this.speakers[index] ?? fallback;
+  }
+
+  /**
+   * One segment per recovered speaker turn, named `roster (spk_N)`.
+   *
+   * Composes both signals the way the on-demand engine does: the roster says
+   * which participant the platform reports, the voice label says which voice
+   * within it. For a conference room sharing one speakerphone that is the only
+   * thing that separates the people in the room.
+   *
+   * Segment ids are keyed on Transcribe's own `ResultId` plus the run index,
+   * NOT on the speaker name. That is what keeps a partial aligned with its
+   * final: partials carry no labels, so a partial is always one run at index 0
+   * and is cleanly replaced by the final's first piece, while later pieces
+   * arrive as new segments. Keying on anything derived from the label would
+   * rename the segment between partial and final and orphan the partial, which
+   * would then sit in the UI for ever marked in-progress.
+   */
+  private diarizedSegments(speakerName: string, result: any, timeOffsetSeconds: number): any {
+    const items: TranscribeItem[] = result.Alternatives?.[0]?.Items ?? [];
+    const resultId = result.ResultId ?? `vp-${timeOffsetSeconds}`;
+    const segments = buildDiarizedSegments(items, {
+      resultId,
+      timeOffsetSeconds,
+      rosterNameAt: (startTime) => this.rosterNameAt(startTime, speakerName),
+      nameFor: speakerNameFor,
+    });
+
+    if (process.env.DEBUG) {
+      const labels = Object.values(segments).map((segment) => segment.Speaker);
+      console.log(
+        `[DIARIZATION] result=${resultId} partial=${result.IsPartial === true} ` +
+          `items=${items.length} segments=${labels.length} speakers=${labels.join(',')}`,
+      );
+    }
+    return segments;
+  }
+
   private processTranscriptionResults(speakerName: string, result: any, timeOffsetSeconds = 0): any {
     const segments: any = {};
 
@@ -398,6 +470,18 @@ class KinesisStreamManager {
       this.speakers.push(speakerName);
       const lastItem = result.Alternatives[0].Items[result.Alternatives[0].Items.length - 1];
       this.startTimes.push((lastItem.StartTime ?? 0) + timeOffsetSeconds);
+    }
+
+    if (this.diarize) {
+      // The roster bookkeeping above still runs, because rosterNameAt reads the
+      // timeline it maintains and the non-partial reset below depends on it.
+      const diarized = this.diarizedSegments(speakerName, result, timeOffsetSeconds);
+      if (!result.IsPartial) {
+        this.currentSpeakerName = null;
+        this.speakers = [];
+        this.startTimes = [];
+      }
+      return diarized;
     }
 
     const alternative = result.Alternatives[0];

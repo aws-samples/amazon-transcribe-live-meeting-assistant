@@ -4,10 +4,12 @@ title: "Virtual Participant"
 
 # Virtual Participant
 
+
 ## Table of Contents
 
 - [Overview](#overview)
 - [When to use Virtual Participant](#when-to-use-virtual-participant)
+- [Several people behind one attendee](#several-people-behind-one-attendee)
 - [Supported Platforms](#supported-platforms)
 - [Joining a Meeting](#joining-a-meeting)
 - [Status Lifecycle](#status-lifecycle)
@@ -45,6 +47,36 @@ The Virtual Participant (VP) is a headless Chrome browser that joins meetings as
 - **Open VP live view**: Use the Meeting Assistant's "Open VP live view" feature to see the bot's browser view of the meeting in real time.
 
 See [Meeting Sources](meeting-sources.md) for the full comparison.
+
+## Several people behind one attendee
+
+A Virtual Participant names speakers from the meeting roster, which is exact for
+an ordinary remote attendee and useless for a conference room: everybody sharing
+one speakerphone shares one roster entry, so a whole room arrives as a single
+speaker.
+
+**Virtual Participant voice separation** on
+**Configuration ▸ Transcription Engine** fixes that. With it on, the VP tells
+apart the distinct voices behind one attendee and labels them
+`Conference Room (spk_0)`, `Conference Room (spk_1)` and so on — the roster name
+for who the platform says is talking, the voice id for which voice within it.
+From there the names come from the
+[Speakers panel](transcription-and-translation.md#naming-the-voices), from
+[what people say](transcription-and-translation.md#finding-the-names-automatically),
+or from a [voiceprint](voice-enrollment.md).
+
+It works on either transcription engine. On Amazon Transcribe the turns are
+recovered from Transcribe's own per-item speaker labels; on the
+[on-demand engine](microvm-asr.md) they come from that engine's own separation.
+Either way the switch is read once at the start of each meeting, so it takes
+effect on the next meeting with no redeployment.
+
+Two limits are worth knowing. Labels arrive only when a segment finalises, so
+the live transcript shows the roster name alone for a few seconds before it
+splits. And accuracy depends on the audio: a room heard through a speakerphone,
+compressed by the meeting platform and mixed with everyone else, is the hardest
+input separation gets, so people sitting further from the microphone separate
+less reliably than remote attendees do.
 
 ## Supported Platforms
 
