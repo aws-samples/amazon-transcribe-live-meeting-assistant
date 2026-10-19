@@ -68,6 +68,12 @@ const isLocalTest = process.env.LOCAL_TEST === 'true';
  * Gating only on the former meant the separation log could not be switched on
  * in a deployment at all -- which is the only place a real room's audio exists
  * to be diagnosed.
+ *
+ * Used only by the diarized path. The two pre-existing `process.env.DEBUG`
+ * gates elsewhere in this file are left as they are on purpose: widening them
+ * would start writing transcript text to the logs of every deployment that
+ * sets LogLevel=DEBUG, which is a change to existing behaviour and not this
+ * change's business.
  */
 const diagnosticsOn = (): boolean =>
   Boolean(process.env.DEBUG) || (process.env.LOG_LEVEL || '').toUpperCase() === 'DEBUG';
