@@ -19,6 +19,24 @@ import { NodeHttp2Handler } from '@smithy/node-http-handler';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
+import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+
+/**
+ * Whether the assistant is given a `mute` tool it can call when a participant
+ * asks it to stop talking.
+ *
+ * Registered in both conversational meeting modes. `group` has had it since the
+ * mode was introduced; `normal` — which is what a `wake_phrase` deployment runs
+ * — needs it too, because that is where people are in a meeting with the
+ * assistant and want to be able to tell it to be quiet.
+ *
+ * Translator mode is excluded: its `mute` is a different tool with different
+ * semantics (pause/resume on an exact trigger phrase), registered one state at
+ * a time by `setupInitialEvents`.
+ */
+export function hasStopTalkingTool(meetingMode: MeetingMode): boolean {
+    return meetingMode === 'normal' || meetingMode === 'group';
+}
 
 /**
  * Which region to reach Amazon Nova Sonic in.
@@ -472,97 +490,12 @@ export class NovaAgent implements VoiceAssistantProvider {
       },
     };
 
-    const translatorMode = (this.meetingMode === 'translator');
+    const tools = this.buildToolSpecs();
 
-    // Tool configuration:
-    //   - Strands agent: only in non-translator modes when Strands ARN is configured.
-    //   - Group-mode mute (legacy): only in group meeting mode.
-    //   - Translator mute/unmute: only in translator mode — exposes `mute` and
-    //     `unmute` so the speaker can pause/resume translations with a strict
-    //     trigger phrase ("translator mute" / "translator unmute").
-    const wantStrands = (this.strandsLambdaArn && !translatorMode);
-    const wantGroupMute = this.groupMeetingMode;
-    const wantTranslatorMuteUnmute = translatorMode;
-
-    if (wantStrands || wantGroupMute || wantTranslatorMuteUnmute) {
+    if (tools.length > 0) {
       promptStartEvent.event.promptStart.toolUseOutputConfiguration = {
         mediaType: 'application/json',
       };
-
-      const tools: any[] = [];
-
-      // Add Strands agent tool if configured
-      if (wantStrands) {
-        tools.push({
-          toolSpec: {
-            name: 'strands_agent',
-            description: 'Delegate complex queries to the Strands agent, which has access to document search, meeting history, web search, and other specialized tools. Use this for questions about documents, past meetings, current information from the web, or any query requiring specialized knowledge or data access.',
-            inputSchema: {
-              json: JSON.stringify({
-                type: 'object',
-                properties: {
-                  query: {
-                    type: 'string',
-                    description: 'The user\'s question or request to be processed by the Strands agent',
-                  },
-                },
-                required: ['query'],
-              }),
-            },
-          },
-        });
-      }
-
-      // Group-mode mute tool (legacy behavior — natural-language "be quiet" matching)
-      if (wantGroupMute) {
-        tools.push({
-          toolSpec: {
-            name: 'mute',
-            description: 'Mute yourself immediately. Call this ONLY when a user explicitly asks you to stop, stop talking, be quiet, shut up, mute yourself, etc.',
-            inputSchema: {
-              json: JSON.stringify({
-                type: 'object',
-                properties: {},
-              }),
-            },
-          },
-        });
-      }
-
-      // Translator mode: register only the tool relevant to the current state.
-      // Exposing only one tool prevents the model from spontaneously calling
-      // the opposite transition (e.g. self-unmuting while paused).
-      if (wantTranslatorMuteUnmute) {
-        const mutePhraseList = this.translatorMutePhrases.map(p => `"${p}"`).join(' or ');
-        const unmutePhraseList = this.translatorUnmutePhrases.map(p => `"${p}"`).join(' or ');
-        if (this._translatorState === 'UNMUTED') {
-          tools.push({
-            toolSpec: {
-              name: 'mute',
-              description: `Mute yourself. Call this tool if and only if you hear the exact phrase ${mutePhraseList}. Do not call this tool for any other reason.`,
-              inputSchema: {
-                json: JSON.stringify({
-                  type: 'object',
-                  properties: {},
-                }),
-              },
-            },
-          });
-        } else {
-          tools.push({
-            toolSpec: {
-              name: 'unmute',
-              description: `Unmute yourself. Call this tool if and only if you hear the exact phrase ${unmutePhraseList}. Do not call this tool for any other reason.`,
-              inputSchema: {
-                json: JSON.stringify({
-                  type: 'object',
-                  properties: {},
-                }),
-              },
-            },
-          });
-        }
-      }
 
       promptStartEvent.event.promptStart.toolConfiguration = {
         tools: tools,
@@ -571,15 +504,9 @@ export class NovaAgent implements VoiceAssistantProvider {
         },
       };
 
-      if (wantStrands) {
-        console.log('✓ Strands agent tool configured in promptStart');
-      }
-      if (wantGroupMute) {
-        console.log('✓ Group-mode mute tool configured in promptStart');
-      }
-      if (wantTranslatorMuteUnmute) {
-        console.log('✓ Translator-mode mute/unmute tools configured in promptStart');
-      }
+      console.log(
+        `✓ Tools configured in promptStart: ${tools.map((t: any) => t.toolSpec.name).join(', ')}`,
+      );
     }
 
     this.addEventToQueue(promptStartEvent);
@@ -658,6 +585,92 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log('Initial events setup complete');
   }
 
+  /**
+   * The tool specs to register on the Nova prompt for the current meeting mode
+   * and translator state.
+   *
+   *   - Strands agent: non-translator modes, when a Strands ARN is configured.
+   *   - Stop-talking `mute`: every conversational mode (`normal` and `group`).
+   *   - Translator `mute` / `unmute`: translator mode only, one at a time —
+   *     exposing just the tool for the current state keeps the model from
+   *     spontaneously calling the opposite transition (e.g. self-unmuting
+   *     while paused).
+   */
+  private buildToolSpecs(): any[] {
+    const translatorMode = (this.meetingMode === 'translator');
+    const tools: any[] = [];
+
+    if (this.strandsLambdaArn && !translatorMode) {
+      tools.push({
+        toolSpec: {
+          name: 'strands_agent',
+          description: 'Delegate complex queries to the Strands agent, which has access to document search, meeting history, web search, and other specialized tools. Use this for questions about documents, past meetings, current information from the web, or any query requiring specialized knowledge or data access.',
+          inputSchema: {
+            json: JSON.stringify({
+              type: 'object',
+              properties: {
+                query: {
+                  type: 'string',
+                  description: 'The user\'s question or request to be processed by the Strands agent',
+                },
+              },
+              required: ['query'],
+            }),
+          },
+        },
+      });
+    }
+
+    if (hasStopTalkingTool(this.meetingMode)) {
+      tools.push({
+        toolSpec: {
+          name: 'mute',
+          description: 'Mute yourself immediately. Call this ONLY when a participant explicitly asks YOU to stop, stop talking, be quiet, shut up, mute yourself, etc. The request must be addressed to you, by name or wake phrase, or be a direct reply to something you just said. Do NOT call this when participants say such things to each other.',
+          inputSchema: {
+            json: JSON.stringify({
+              type: 'object',
+              properties: {},
+            }),
+          },
+        },
+      });
+    }
+
+    if (translatorMode) {
+      const mutePhraseList = this.translatorMutePhrases.map(p => `"${p}"`).join(' or ');
+      const unmutePhraseList = this.translatorUnmutePhrases.map(p => `"${p}"`).join(' or ');
+      if (this._translatorState === 'UNMUTED') {
+        tools.push({
+          toolSpec: {
+            name: 'mute',
+            description: `Mute yourself. Call this tool if and only if you hear the exact phrase ${mutePhraseList}. Do not call this tool for any other reason.`,
+            inputSchema: {
+              json: JSON.stringify({
+                type: 'object',
+                properties: {},
+              }),
+            },
+          },
+        });
+      } else {
+        tools.push({
+          toolSpec: {
+            name: 'unmute',
+            description: `Unmute yourself. Call this tool if and only if you hear the exact phrase ${unmutePhraseList}. Do not call this tool for any other reason.`,
+            inputSchema: {
+              json: JSON.stringify({
+                type: 'object',
+                properties: {},
+              }),
+            },
+          },
+        });
+      }
+    }
+
+    return tools;
+  }
+
   private buildSystemPromptContent(): string {
     // Translator mode REPLACES the base system prompt. Each translator state
     // (UNMUTED / MUTED) gets its own focused prompt with no mention of the
@@ -724,18 +737,21 @@ export class NovaAgent implements VoiceAssistantProvider {
     let systemPromptContent = '';
     
     // Add group meeting mode instructions (simplified - wake phrase detection handled by our code)
+    // Stop-request handling is not repeated here: it lives in the STOP REQUESTS
+    // block below, shared by every mode that registers the `mute` tool.
     if (this.groupMeetingMode) {
       systemPromptContent += 'GROUP MEETING MODE:\n' +
         'You are in a group meeting where multiple people are talking. ' +
         'You will hear all conversation, but your audio output is managed externally - ' +
         'you will only be heard when someone addresses you by name.\n' +
-        'Just respond naturally to whatever you hear. Keep responses concise.\n' +
-        'If someone explicitly asks you to stop talking, be quiet, or mute yourself, call the mute tool.\n\n';
+        'Just respond naturally to whatever you hear. Keep responses concise.\n\n';
     }
-    
+
     // Add base system prompt
     systemPromptContent += this.systemPrompt;
-    
+
+    const stopToolAvailable = hasStopTalkingTool(this.meetingMode);
+
     // Add interruption handling instructions (applies to all modes)
     systemPromptContent += '\n\nINTERRUPTION HANDLING:\n' +
       'When a user interrupts you mid-response (you will see { "interrupted" : true }):\n' +
@@ -743,9 +759,36 @@ export class NovaAgent implements VoiceAssistantProvider {
       '   - "Got it" or "Sure" or "Okay" (if they\'re correcting you)\n' +
       '   - "Of course" or "Absolutely" (if they\'re asking something new)\n' +
       '   - Keep it to 1-2 words for minimal interruption\n' +
-      '2. THEN proceed with their new request\n' +
+      (stopToolAvailable
+        // An interruption that asks for silence must not be treated as the
+        // preface to a new request, or the acknowledgement is followed by a
+        // paragraph of explanation and the assistant never actually stops.
+        ? '2. If the interruption was asking you to stop, stop talking, be quiet, shut up or mute '
+          + 'yourself, follow STOP REQUESTS below instead of continuing.\n'
+          + '3. Otherwise, proceed with their new request\n'
+        : '2. THEN proceed with their new request\n') +
       'This provides instant feedback and shows you\'re responsive.\n';
-    
+
+    // Add stop-request handling. Registered wherever the `mute` tool is, so the
+    // prompt and the tool set cannot drift apart.
+    if (stopToolAvailable) {
+      systemPromptContent += '\n\nSTOP REQUESTS:\n' +
+        'When someone asks YOU to stop, stop talking, be quiet, shut up or mute yourself:\n' +
+        '1. Say exactly one short word - "Okay" - and nothing else.\n' +
+        '2. Call the `mute` tool.\n' +
+        '3. Then stay silent. Do NOT explain yourself, do NOT summarize what you were saying, '
+        + 'do NOT offer further help, and do NOT ask whether they need anything else.\n' +
+        'A request to stop is a request for silence, not the start of a new request. '
+        + 'Someone will say your wake phrase again when they want you back.\n' +
+        // You hear the whole meeting, so most of what is said is not aimed at
+        // you. Acting on a "be quiet" meant for another participant would take
+        // the assistant out of the meeting, and in an always_active deployment
+        // only a wake phrase brings it back.
+        'Only act on a request that is addressed to YOU - by name or wake phrase, or as a '
+        + 'direct reply to something you just said. Participants telling EACH OTHER to be quiet '
+        + 'is ordinary meeting conversation: stay as you are and do NOT call the `mute` tool.\n';
+    }
+
     // Add Strands agent tool instructions
     if (this.strandsLambdaArn) {
       systemPromptContent += '\n\nIMPORTANT: You have access to the strands_agent tool for handling information requests.\n\n' +
@@ -957,9 +1000,8 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private containsWakePhrase(text: string): boolean {
-    const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
-    const wakePhrases = wakePhraseEnv.split(',').map((p: string) => p.trim().toLowerCase());
-    
+    const wakePhrases = configuredWakePhrases();
+
     // Normalize input: strip punctuation and collapse whitespace
     // This handles transcription artifacts like "hey, alex" or "ok. alex"
     const normalized = text.toLowerCase()
@@ -971,8 +1013,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log('🔍 DEBUG containsWakePhrase():');
     console.log(`   Input text: "${text}"`);
     console.log(`   Normalized (punctuation stripped): "${normalized}"`);
-    console.log(`   Wake phrases from env: "${wakePhraseEnv}"`);
-    console.log(`   Parsed wake phrases: [${wakePhrases.map(p => `"${p}"`).join(', ')}]`);
+    console.log(`   Configured wake phrases: [${wakePhrases.map(p => `"${p}"`).join(', ')}]`);
     
     // Use word boundary matching to avoid false positives
     // "okay" should NOT match "ok alex"
@@ -1325,19 +1366,8 @@ export class NovaAgent implements VoiceAssistantProvider {
                 // This is the PRIMARY mechanism for unmuting in group meeting mode.
                 // We watch Nova's FINAL USER transcripts for wake phrases and unmute/mute
                 // entirely from our code - no tool calls needed (eliminates infinite loops).
-                if (currentTurn.role === 'USER' && this.groupMeetingMode && this.containsWakePhrase(currentTurn.content)) {
-                  if (this._isMuted) {
-                    console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
-                    this._isMuted = false;
-                    // Start conversation session if not already active
-                    if (!this.conversationActive) {
-                      this.startConversationSession();
-                    }
-                  }
-                  this.resetConversationTimeout();
-                } else if (currentTurn.role === 'USER' && !this.groupMeetingMode && this.containsWakePhrase(currentTurn.content)) {
-                  // Non-group meeting mode: just reset timeout
-                  this.resetConversationTimeout();
+                if (currentTurn.role === 'USER') {
+                  this.handleUserTurnWakePhrase(currentTurn.content);
                 }
               }
               
@@ -1359,6 +1389,55 @@ export class NovaAgent implements VoiceAssistantProvider {
     } catch (error) {
       console.error('Error processing response stream:', error);
     }
+  }
+
+  /**
+   * React to a wake phrase in a FINAL user transcript turn.
+   *
+   * In group meeting mode this is the PRIMARY unmute trigger: the agent starts
+   * muted and is made audible entirely from our code, with no tool call (which
+   * is what eliminates the infinite loops the tool-driven version had). In
+   * normal mode it is how the agent becomes audible again after being asked to
+   * stop talking, which is the only route available in always_active mode
+   * because activate() returns early there.
+   *
+   * In both modes the utterance that asked for silence must not be the thing
+   * that undoes it: "Hey Alex, stop talking" contains a wake phrase, and the
+   * mute it triggers can land either side of this turn.
+   *
+   * That protection rests on the stop being recognisable here by the same
+   * strict matcher, so it holds for the phrasings the matcher covers. A stop
+   * the model honours from the prompt alone — wording the matcher does not list
+   * — is only safe while this turn is seen before the tool call it provokes. If
+   * a live meeting ever shows that order flipping, the fix is to ignore
+   * wake-phrase unmutes for a short window after a `mute('tool')`.
+   */
+  private handleUserTurnWakePhrase(content: string): void {
+    if (!this.containsWakePhrase(content)) {
+      return;
+    }
+
+    const askedToStop = isStopTalkingRequest(content, configuredWakePhrases());
+
+    if (this.groupMeetingMode) {
+      if (this._isMuted && !askedToStop) {
+        console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
+        this._isMuted = false;
+        // Start conversation session if not already active
+        if (!this.conversationActive) {
+          this.startConversationSession();
+        }
+      }
+      this.resetConversationTimeout();
+      return;
+    }
+
+    if (this.meetingMode === 'normal' && this._isMuted && !askedToStop) {
+      this.unmute('wake phrase in user speech');
+    }
+    // No conversation timeout to re-arm: the auto-mute timer belongs to group
+    // mode, which returned above, and is the only mode that goes back to muted
+    // on its own.
   }
 
   private async processToolUseAsync(toolUseId: string, toolName: string, toolUseContent: any): Promise<void> {
@@ -1529,10 +1608,23 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private async handleMuteTool(toolUseId: string): Promise<void> {
     console.log('🔇 Mute tool called - muting agent');
-    // Play the mute confirmation tone BEFORE engaging the audio gate, so the
-    // beep itself isn't dropped and is heard by the meeting before silence.
-    this.playConfirmationTone('mute');
-    // Give pacat a moment to flush the beep before we tear the stream down.
+    // Only translator mode gets an audible cue, sounded before the audio gate
+    // engages so the beep itself isn't dropped. That mode replaces the base
+    // system prompt and so carries no STOP REQUESTS block, leaving the tone the
+    // room's only sign that the pause took effect. The conversational modes
+    // answer "Okay" out loud instead, and the transcript route in scribe.ts
+    // silences the assistant without a tone, so sounding one here would make
+    // one request land two ways depending on which route reached the gate
+    // first.
+    if (this.meetingMode === 'translator') {
+      this.playConfirmationTone('mute');
+    }
+    // mute() tears down the pacat stream, so wait either way: this is what lets
+    // the tone, or the spoken "Okay" the conversational prompt asks for, reach
+    // the meeting instead of dying in the buffer. Only this path can offer that
+    // — scribe.ts mutes the moment it recognises a stop in the transcript, and
+    // silencing promptly is worth more there than the courtesy word, so the
+    // "Okay" is best-effort overall and the docs say so.
     await new Promise(resolve => setTimeout(resolve, 280));
     this.mute('tool');
 
@@ -1704,7 +1796,13 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   /** Plays a confirmation tone directly to the meeting audio sink, bypassing
-   *  Nova entirely. Used for translator-mode mute/unmute audible cues. */
+   *  Nova entirely.
+   *
+   *  Translator mode's pause and resume cues are the only callers: that mode
+   *  replaces the base system prompt, so it has no spoken acknowledgement and
+   *  the tone is the room's only confirmation. The conversational modes say
+   *  "Okay" out loud instead, and `unmute` is registered as a tool only in
+   *  translator mode, so neither tone reaches them. */
   private playConfirmationTone(kind: 'mute' | 'unmute'): void {
     const sampleRate = parseInt(process.env.NOVA_PLAYBACK_RATE || '16000');
     let pcm: Buffer;
@@ -1911,6 +2009,18 @@ export class NovaAgent implements VoiceAssistantProvider {
     
     this._isActivated = true;
 
+    // Being addressed by wake phrase is how the agent becomes audible again
+    // after it was asked to stop talking — otherwise a single stop request
+    // would silence it for the rest of the meeting.
+    //
+    // Only in `normal` mode: `group` owns its own muted-until-addressed state
+    // machine (and starts muted by design) and `translator` is driven by its
+    // explicit pause/resume trigger phrases. Both of those run always_active,
+    // where this method returns above.
+    if (this.meetingMode === 'normal' && this._isMuted) {
+      this.unmute('wake phrase activation');
+    }
+
     // Handle initial context by sending as text message
     if (initialContext) {
       const question = this.extractQuestion(initialContext);
@@ -1939,9 +2049,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       .trim();
     
     // Remove wake phrases dynamically from environment
-    const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
-    const wakePhrases = wakePhraseEnv.split(',').map((p: string) => p.trim().toLowerCase());
-    for (const phrase of wakePhrases) {
+    for (const phrase of configuredWakePhrases()) {
       cleaned = cleaned.replace(phrase, '').trim();
     }
     
@@ -2133,6 +2241,12 @@ export class NovaAgent implements VoiceAssistantProvider {
     } catch (err) {
       console.warn('stopPacatStream during mute() failed (non-fatal):', err);
     }
+    // The avatar buffers its own copy of the speech for lip-sync, so without
+    // this it keeps mouthing the rest of an utterance nobody can hear. Same
+    // call the barge-in path makes.
+    if (simliAvatar.isConnected()) {
+      simliAvatar.clearAudioBuffer().catch(() => {});
+    }
   }
 
   /**
@@ -2149,5 +2263,26 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   isMuted(): boolean {
     return this._isMuted;
+  }
+
+  /**
+   * Act on a participant asking the agent to stop talking (see
+   * VoiceAssistantProvider.requestStopTalking).
+   *
+   * In `normal` and `group` mode this silences the agent; it becomes audible
+   * again the next time it is addressed by wake phrase.
+   */
+  requestStopTalking(reason?: string): boolean {
+    // Translator mode declines. Its pause/resume is a state machine keyed on
+    // exact trigger phrases: muting from here would leave _translatorState
+    // saying UNMUTED with only the `mute` tool registered, so the resume phrase
+    // would have no tool to call and the translator would never speak again.
+    if (this.meetingMode === 'translator') {
+      console.log('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
+      return false;
+    }
+
+    this.mute(reason || 'stop requested');
+    return true;
   }
 }

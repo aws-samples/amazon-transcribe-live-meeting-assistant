@@ -6,6 +6,7 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { simliAvatar } from './simli-avatar.js';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
+import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
@@ -275,12 +276,26 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         // In translator mode we don't gate on wake phrases — every utterance
         // triggers a translation.
         if (this.meetingMode === 'group' && userText && this.containsWakePhrase(userText)) {
-          if (this._isMuted) {
+          // "Hey Alex, stop talking" contains the wake phrase, so without this
+          // guard the utterance that asked for silence would itself make the
+          // agent audible again.
+          const askedToStop = isStopTalkingRequest(userText, configuredWakePhrases());
+          if (this._isMuted && !askedToStop) {
             console.log('🔓 Wake phrase detected in user transcript - proactively unmuting agent');
             this._isMuted = false;
             if (!this.conversationActive) this.startConversationSession();
           }
           this.resetConversationTimeout();
+        } else if (this.meetingMode === 'normal' && userText && this.containsWakePhrase(userText)) {
+          // Normal mode: a fresh wake phrase is how the agent becomes audible
+          // again after a stop request, which matters most in always_active
+          // mode where activate() is never called. No conversation timeout is
+          // armed here: the auto-mute timer belongs to group mode, which is the
+          // only mode that returns to muted on its own, and
+          // resetConversationTimeout() ignores every other mode anyway.
+          if (this._isMuted && !isStopTalkingRequest(userText, configuredWakePhrases())) {
+            this.unmute('wake phrase in user transcript');
+          }
         }
         break;
       }
@@ -669,6 +684,15 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     
     this._isActivated = true;
 
+    // Being addressed by wake phrase is how the agent becomes audible again
+    // after it was asked to stop talking. Only in `normal` mode: `group` owns
+    // its own muted-until-addressed state machine and `translator` is driven
+    // by trigger phrases, and both run always_active where this method returns
+    // above.
+    if (this.meetingMode === 'normal' && this._isMuted) {
+      this.unmute('wake phrase activation');
+    }
+
     // Handle initial context by sending as text message
     if (initialContext) {
       const question = this.extractQuestion(initialContext);
@@ -757,8 +781,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   // ---- Group-meeting wake-phrase helpers (parity with Nova agent) ----
 
   private containsWakePhrase(text: string): boolean {
-    const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
-    const wakePhrases = wakePhraseEnv.split(',').map((p: string) => p.trim().toLowerCase());
+    const wakePhrases = configuredWakePhrases();
     const normalized = text.toLowerCase()
       .replace(/[,.\?!;:'"]/g, ' ')
       .replace(/\s+/g, ' ')
@@ -835,6 +858,11 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       console.log(`🔇 Dropping ${this.audioQueue.length} queued audio chunks on mute`);
       this.audioQueue = [];
     }
+    // The avatar buffers its own copy of the speech for lip-sync, so without
+    // this it keeps mouthing the rest of an utterance nobody can hear.
+    if (simliAvatar.isConnected()) {
+      simliAvatar.clearAudioBuffer().catch(() => {});
+    }
   }
 
   /**
@@ -853,5 +881,30 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
   isMuted(): boolean {
     return this._isMuted;
+  }
+
+  /**
+   * Act on a participant asking the agent to stop talking (see
+   * VoiceAssistantProvider.requestStopTalking).
+   *
+   * This is the only stop mechanism available on this provider: the ElevenLabs
+   * agent's prompt and tools are configured in the ElevenLabs dashboard, so LMA
+   * cannot register a `mute` tool or amend its instructions the way it can for
+   * Nova Sonic. In `normal` mode the agent becomes audible again the next time
+   * it is addressed by wake phrase.
+   */
+  requestStopTalking(reason?: string): boolean {
+    if (!this.enabled) {
+      return false;
+    }
+    // Translator mode declines, matching Nova Sonic: its pause/resume belongs
+    // to the trigger-phrase state machine, not to this route.
+    if (this.meetingMode === 'translator') {
+      console.log('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
+      return false;
+    }
+
+    this.mute(reason || 'stop requested');
+    return true;
   }
 }

@@ -62,4 +62,9 @@ export class NoOpAgent implements VoiceAssistantProvider {
   isMuted(): boolean {
     return false;
   }
+
+  requestStopTalking(_reason?: string): boolean {
+    // No-op - there is nothing speaking to silence
+    return false;
+  }
 }
