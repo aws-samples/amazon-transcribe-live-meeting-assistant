@@ -1342,7 +1342,7 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         if not kb_id:
             return ""
         
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-5-5')
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID')
         
@@ -1475,7 +1475,7 @@ def handler(event, context):
         transcript_kb_id = os.environ.get('TRANSCRIPT_KB_ID', '')
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID', '')
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-5-5')
         tavily_api_key = os.environ.get('TAVILY_API_KEY', '')
         
         # Fetch meeting transcript from DynamoDB
@@ -2008,7 +2008,7 @@ def fallback_bedrock_response(transcript: str, user_input: str, call_id: str) ->
     """
     try:
         bedrock_client = boto3.client('bedrock-runtime')
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-5-5')
         
         # Prepare the prompt
         prompt = f"""You are an AI assistant helping during a meeting.

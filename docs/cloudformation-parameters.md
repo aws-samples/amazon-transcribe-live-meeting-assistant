@@ -63,7 +63,7 @@ always covered, and at any plausible meeting volume the cap is never reached. Se
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | MeetingAssistService | Meeting assistant service type | STRANDS_BEDROCK | STRANDS_BEDROCK, STRANDS_BEDROCK_WITH_KB (Create), STRANDS_BEDROCK_WITH_KB (Use Existing) |
-| MeetingAssistServiceBedrockModelID | LLM model used by the meeting assistant | Claude Haiku 4.5 | See [Bedrock model choices](#bedrock-model-choices) |
+| MeetingAssistServiceBedrockModelID | LLM model used by the meeting assistant | Claude Haiku 5.5 | See [Bedrock model choices](#bedrock-model-choices) |
 | MeetingAssistWakePhrase | Regular expression pattern that activates the meeting assistant | OK Assistant | Valid regex pattern |
 | TavilyApiKey | API key for the Tavily web search tool | (none) | Valid API key string |
 | BedrockGuardrailId | Optional Bedrock guardrail identifier | (none) | Valid guardrail ID |
@@ -228,14 +228,14 @@ missing.
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | EndOfCallTranscriptSummary | Method used to generate end-of-call summaries | BEDROCK | BEDROCK, LAMBDA |
-| BedrockModelId | Bedrock model used for summarization | Claude Haiku 4.5 | See [Bedrock model choices](#bedrock-model-choices) |
+| BedrockModelId | Bedrock model used for summarization | Claude Haiku 5.5 | See [Bedrock model choices](#bedrock-model-choices) |
 | EndOfCallLambdaHookFunctionArn | ARN of a custom Lambda function for summarization (when using LAMBDA mode) | (none) | Valid Lambda ARN |
 
 ### Bedrock model choices
 
 `BedrockModelId` (summaries, pasted meeting invitations and the speaker-naming
 pass) and `MeetingAssistServiceBedrockModelID` (the Meeting Assistant agent)
-offer the same list. Both default to `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
+offer the same list. Both default to `global.anthropic.claude-haiku-5-5`.
 
 | Family | Model IDs |
 |---|---|
@@ -257,7 +257,9 @@ roughly three to four times the output tokens it does on Claude 4.5 at the same
 size, and their tokenizer counts a given transcript as roughly a quarter more
 input tokens. A per-meeting bill several times larger is the normal outcome of
 selecting one; the quality of the summary is what you are buying. If cost
-matters more than the last increment of quality, stay on Claude Haiku 4.5.
+matters more than the last increment of quality, set both parameters to
+`global.anthropic.claude-haiku-4-5-20251001-v1:0`, the default before this
+release.
 
 Claude 3.x models were withdrawn from both lists in v0.3.0 and are no longer
 selectable. A stack still configured with one cannot be updated until the

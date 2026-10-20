@@ -172,7 +172,7 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    Default: "global.anthropic.claude-haiku-5-5"
     Type: String
     # Kept in step with the BedrockModelId parameter of the same name in
     # lma-main.yaml, which is where every deployment sets it: lma-main passes its
@@ -206,7 +206,7 @@ Parameters:
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective) and Claude 4+ (cutting-edge).
       Some models require inference profiles.
-      Defaults to 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+      Defaults to 'global.anthropic.claude-haiku-5-5'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""

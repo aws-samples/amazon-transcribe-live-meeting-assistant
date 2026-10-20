@@ -20,9 +20,7 @@ logger.setLevel(logging.INFO)
 # BEDROCK_MODEL_ID is always supplied by the template, which passes the stack's
 # BedrockModelId parameter through; the literal below is reached only by a local
 # invocation that sets no environment, so it tracks the parameter's own default.
-BEDROCK_MODEL_ID = os.environ.get(
-    "BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-)
+BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
 BEDROCK_REGION = os.environ.get(
     "BEDROCK_REGION_OVERRIDE", os.environ.get("AWS_REGION", "us-east-1")
 )
