@@ -538,6 +538,8 @@ Resources:
       Handler: image_version_pruner.lambda_handler
       Runtime: python3.12
       # Deletes are serialised and a blocked one is retried over several passes.
+      # The handler stops and reports while 30s remain, so it does not rely on
+      # this being generous enough for the worst case.
       Timeout: 600
       MemorySize: 256
       TracingConfig:
@@ -560,9 +562,11 @@ Resources:
       ImageArn: !GetAtt AsrMicrovmImage.ImageArn
       # How many versions to leave behind beyond the active one.
       KeepVersions: 5
-      # Carried only so that a new source zip -- which is what adds a version in
-      # the first place -- also re-runs the prune.
-      SourceCodeLocation: !GetAtt AsrImageSource.SourceUri
+      # Carried only to trigger the prune. A custom resource is only invoked
+      # when one of its properties changes, and this one changes exactly when a
+      # rebuild has added a version -- including rebuilds caused by a property
+      # change rather than new source, which the source location would miss.
+      LatestActiveImageVersion: !GetAtt AsrMicrovmImage.LatestActiveImageVersion
 
   ##########################################################################
   # Session control plane called by the WebSocket transcriber

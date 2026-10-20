@@ -2143,6 +2143,14 @@ Resources:
                   - lambda:DeleteMicrovmImageVersion
                 Resource: !GetAtt VPMicrovmImage.ImageArn
 
+  VPMicrovmImagePrunerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseMicrovmLaunchType
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VPMicrovmImagePruner"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   VPMicrovmImagePrunerFunction:
     Type: AWS::Lambda::Function
     Condition: UseMicrovmLaunchType
@@ -2161,9 +2169,14 @@ Resources:
     # checkov:skip=CKV_AWS_116: "DLQ not required for a Cfn custom resource that reports its own outcome"
     # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
     Properties:
+      FunctionName: !Sub "${LMAStackName}-VPMicrovmImagePruner"
+      LoggingConfig:
+        LogGroup: !Ref VPMicrovmImagePrunerLogGroup
       Handler: image_version_pruner.lambda_handler
       Runtime: python3.12
       # Deletes are serialised and a blocked one is retried over several passes.
+      # The handler stops and reports while 30s remain, so it does not rely on
+      # this being generous enough for the worst case.
       Timeout: 600
       MemorySize: 256
       TracingConfig:
@@ -2187,9 +2200,11 @@ Resources:
       ImageArn: !GetAtt VPMicrovmImage.ImageArn
       # How many versions to leave behind beyond the active one.
       KeepVersions: 5
-      # Carried only so that a new source zip -- which is what adds a version in
-      # the first place -- also re-runs the prune.
-      SourceCodeLocation: !Ref MicrovmSourceCodeLocation
+      # Carried only to trigger the prune. A custom resource is only invoked
+      # when one of its properties changes, and this one changes exactly when a
+      # rebuild has added a version -- including rebuilds caused by a property
+      # change rather than new source, which the source location would miss.
+      LatestActiveImageVersion: !GetAtt VPMicrovmImage.LatestActiveImageVersion
 
   # EventBridge Scheduler assumes this to invoke the launcher for meetings booked
   # in advance (the MICROVM equivalent of TargetECSRole, which Scheduler uses to

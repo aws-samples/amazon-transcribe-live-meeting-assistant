@@ -95,10 +95,13 @@ class MicrovmClient:
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")
-            code = ""
+            # The error type arrives in the x-amzn-errortype header; the body
+            # usually carries only a message, so reading just the body leaves
+            # `code` empty. Prefer the header and fall back to the body.
+            code = (exc.headers.get("x-amzn-errortype") or "").split(":")[0]
             try:
                 parsed = json.loads(detail)
-                code = parsed.get("__type") or parsed.get("code") or ""
+                code = code or parsed.get("__type") or parsed.get("code") or ""
                 detail = parsed.get("message") or parsed.get("Message") or detail
             except (ValueError, AttributeError):
                 pass
@@ -157,6 +160,11 @@ class MicrovmClient:
         An image holds at most 50 versions, and every rebuild of the same image
         adds one, so a long-lived stack needs to know what is there before it
         can make room.
+
+        `max_results` must be between 1 and 50; the service rejects anything
+        larger with a ValidationException rather than clamping it. The service
+        also returns a trailing `nextToken` with an empty final page, so a
+        caller that pages until the token is absent makes one extra call.
         """
         ident = urllib.parse.quote(image_identifier, safe="")
         query = {

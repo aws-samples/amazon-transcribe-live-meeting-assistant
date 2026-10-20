@@ -171,6 +171,35 @@ def test_http_error_is_wrapped_with_status_and_message(module) -> None:
     assert "quota exceeded" in str(excinfo.value)
 
 
+def test_error_type_is_read_from_the_response_header(module) -> None:
+    """A rest-json service names the error in x-amzn-errortype, not the body.
+
+    Callers that branch on the error type -- the version pruner retries a
+    refusal from the base-image chain -- get nothing if only the body is read,
+    because the body usually carries just a message.
+    """
+    import io
+    import urllib.error
+
+    client = module.MicrovmClient(region="us-west-2", session=mock.MagicMock())
+    body = json.dumps({"message": "version is in use as a base image"})
+    err = urllib.error.HTTPError(
+        "https://x",
+        409,
+        "Conflict",
+        {"x-amzn-errortype": "ConflictException:http://internal.amazon.com/coral/"},
+        io.BytesIO(body.encode()),
+    )
+    with mock.patch("urllib.request.urlopen", side_effect=err):
+        with mock.patch.object(module.SigV4Auth, "add_auth"):
+            with pytest.raises(module.MicrovmError) as excinfo:
+                client.delete_microvm_image_version("img-1", "3.0")
+    # The trailing shape info is dropped, leaving the type on its own.
+    assert excinfo.value.code == "ConflictException"
+    assert excinfo.value.status == 409
+    assert "in use as a base image" in str(excinfo.value)
+
+
 def test_missing_credentials_raises_a_clear_error(module) -> None:
     session = mock.MagicMock()
     session.get_credentials.return_value = None
