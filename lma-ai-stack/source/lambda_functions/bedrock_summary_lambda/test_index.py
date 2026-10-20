@@ -45,7 +45,7 @@ os.environ.setdefault("FETCH_TRANSCRIPT_LAMBDA_ARN", FETCH_ARN)
 os.environ.setdefault("S3_BUCKET_NAME", BUCKET)
 os.environ.setdefault("S3_PREFIX", PREFIX)
 os.environ.setdefault("LLM_PROMPT_TEMPLATE_TABLE_NAME", TABLE_NAME)
-# PROCESS_TRANSCRIPT and TOKEN_COUNT are deliberately left unset: their defaults
+# PROCESS_TRANSCRIPT is deliberately left unset: its default
 # are asserted below.
 
 HERE = Path(__file__).resolve().parent
@@ -610,32 +610,31 @@ def test_the_transcript_request_names_the_call_and_asks_for_speaker_labels(
     assert json.loads(request["Payload"]) == {
         "CallId": CALL_ID,
         "ProcessTranscript": False,
-        "TokenCount": 0,
         "IncludeSpeaker": True,
     }
 
 
-def test_the_transcript_is_not_truncated_unless_a_token_count_is_configured() -> None:
-    """Truncation drops the end of the meeting, where decisions usually land.
+def test_the_whole_transcript_is_requested() -> None:
+    """No word budget travels with the request any more.
 
-    Zero means "send it all"; the stack sets a non-zero count only for models
-    with a small context window.
+    There used to be one, for models whose context window could not hold a
+    meeting. It cut the end, which is where decisions land, and it was off in
+    every shipped deployment. Asserted as an absence so it is not reinstated
+    by reflex.
     """
-    assert index.TOKEN_COUNT == 0
+    assert not hasattr(index, "TOKEN_COUNT")
     assert index.PROCESS_TRANSCRIPT is False
 
 
-def test_a_configured_token_count_is_passed_through_to_the_truncation_step(
+def test_the_transcript_request_carries_no_token_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Truncation happens in the fetch function, so the count must travel with it."""
     fake_lambda = FakeLambdaClient()
     install(monkeypatch, lambda_client=fake_lambda)
-    monkeypatch.setattr(index, "TOKEN_COUNT", 12000)
     monkeypatch.setattr(index, "PROCESS_TRANSCRIPT", True)
     index.get_transcripts(CALL_ID)
     payload = json.loads(fake_lambda.requests[0]["Payload"])
-    assert payload["TokenCount"] == 12000
+    assert "TokenCount" not in payload
     assert payload["ProcessTranscript"] is True
 
 

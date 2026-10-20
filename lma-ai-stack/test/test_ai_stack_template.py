@@ -238,25 +238,29 @@ def test_the_bedrock_model_choices_match_the_main_templates(template: dict, main
     )
 
 
-def test_the_bedrock_model_defaults_match_across_the_templates(
+def test_the_summary_model_default_matches_across_the_templates(
     template: dict, main_template: dict
 ):
-    """All three model parameters default to the same model, and should move together.
+    """The two `BedrockModelId` defaults are the same parameter and must agree.
 
-    lma-main.yaml's two defaults are what an operator accepting the defaults gets,
-    for summaries and for the Meeting Assistant respectively; the nested AI
-    stack's is only reached by a standalone deployment of that template. Changing
-    one and not the others gives a deployment two different models for jobs that
-    were meant to behave alike, which no deploy-time check would catch.
+    `lma-main.yaml` passes its value straight into the nested AI stack, so the
+    nested default is reached only by deploying that template standalone. If the
+    two drift, a standalone deployment summarises with a different model from
+    the one the documented path uses, and no deploy-time check would catch it.
+
+    The Meeting Assistant's default is deliberately NOT included. It is chosen
+    for a different job: summarisation is batch work where answer quality
+    dominates, while the assistant answers mid-meeting and is sometimes spoken
+    aloud, so its time to first token is what matters. The two are free to
+    differ, and `test_every_model_parameter_defaults_to_one_of_its_own_choices`
+    is what keeps each of them valid.
     """
-    defaults = {
-        "lma-ai-stack.yaml BedrockModelId": template["Parameters"]["BedrockModelId"]["Default"],
-        "lma-main.yaml BedrockModelId": main_template["Parameters"]["BedrockModelId"]["Default"],
-        "lma-main.yaml MeetingAssistServiceBedrockModelID": main_template["Parameters"][
-            "MeetingAssistServiceBedrockModelID"
-        ]["Default"],
-    }
-    assert len(set(defaults.values())) == 1, f"model defaults have drifted apart: {defaults}"
+    nested = template["Parameters"]["BedrockModelId"]["Default"]
+    main = main_template["Parameters"]["BedrockModelId"]["Default"]
+    assert nested == main, (
+        f"BedrockModelId defaults have drifted: lma-ai-stack.yaml has {nested!r}, "
+        f"lma-main.yaml has {main!r}"
+    )
 
 
 @pytest.mark.parametrize(

@@ -253,21 +253,12 @@ def remove_html(transcript_string):
     "wise". Worse, most of its saving came from deleting every "like", including
     the meaning-bearing ones -- "looks like it needs sign-off" lost its verb.
 
-    There is also no token pressure for it to relieve: TOKEN_COUNT defaults to 0
-    (no truncation) and the model's maxTokens bounds the output, not the input.
-    If transcript quality needs improving, that belongs in the ASR
+    There is also no token pressure for it to relieve: nothing trims the
+    transcript on the way in, and the model's maxTokens bounds the output, not
+    the input. If transcript quality needs improving, that belongs in the ASR
     configuration, not in a regex over its output.
     """
     return re.sub(html_remover, "", transcript_string)
-
-
-def truncate_number_of_words(transcript_string, truncateLength):
-    # findall can retain carriage returns
-    data = re.findall(r"\S+|\n|.|,", transcript_string)
-    if truncateLength > 0:
-        data = data[0:truncateLength]
-    print("Token Count: " + str(len(data)))
-    return "".join(data)
 
 
 def lambda_handler(event, context):
@@ -276,9 +267,6 @@ def lambda_handler(event, context):
     # Setup model input data using text (utterances) received from LCA
     data = json.loads(json.dumps(event))
     callid = data["CallId"]
-    tokenCount = 0
-    if "TokenCount" in data:
-        tokenCount = data["TokenCount"]
 
     preProcess = False
     if "ProcessTranscript" in data:
@@ -294,7 +282,6 @@ def lambda_handler(event, context):
     transcripts = get_transcripts(callid)
     transcripts = preprocess_transcripts(transcripts, preProcess, includeSpeaker, metadata)
     transcript_string = "".join(transcripts)
-    transcript_string = truncate_number_of_words(transcript_string, tokenCount)
     response = {"transcript": transcript_string, "metadata": metadata}
     # Log the shape of the response rather than the response. Everything this
     # function returns is meeting content, and the counts are what is actually
@@ -311,7 +298,6 @@ if __name__ == "__main__":
     lambda_handler(
         {
             "CallId": "2359fb61-f612-4fe9-bce2-839061c328f9",
-            "TokenCount": 0,
             "ProcessTranscript": False,
             "LastNTurns": 20,
         },

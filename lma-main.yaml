@@ -464,7 +464,7 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    Default: "global.anthropic.claude-sonnet-5-5"
     Type: String
     AllowedValues:
       - "amazon.nova-micro-v1:0"
@@ -494,7 +494,7 @@ Parameters:
       Some models require inference profiles. The Claude 5 generation reasons before it answers,
       which raises summary quality but also raises output token use several-fold, so it costs
       more per meeting than Claude 4.5 at the same size.
-      Defaults to 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+      Defaults to 'global.anthropic.claude-sonnet-5-5'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""

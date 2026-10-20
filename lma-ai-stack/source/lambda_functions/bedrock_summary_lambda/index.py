@@ -24,7 +24,6 @@ logger.setLevel(logging.ERROR)
 BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ["FETCH_TRANSCRIPT_LAMBDA_ARN"]
 PROCESS_TRANSCRIPT = os.getenv("PROCESS_TRANSCRIPT", "False") == "True"
-TOKEN_COUNT = int(os.getenv("TOKEN_COUNT", "0"))  # default 0 - do not truncate.
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 S3_PREFIX = os.environ["S3_PREFIX"]
 
@@ -109,7 +108,6 @@ def get_transcripts(callId):
     payload = {
         "CallId": callId,
         "ProcessTranscript": PROCESS_TRANSCRIPT,
-        "TokenCount": TOKEN_COUNT,
         "IncludeSpeaker": True,
     }
     print("Invoking lambda", payload)

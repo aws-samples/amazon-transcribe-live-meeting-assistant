@@ -235,7 +235,20 @@ missing.
 
 `BedrockModelId` (summaries, pasted meeting invitations and the speaker-naming
 pass) and `MeetingAssistServiceBedrockModelID` (the Meeting Assistant agent)
-offer the same list. Both default to `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
+offer the same list, but they no longer share a default, because they are
+chosen for different jobs. `BedrockModelId` (summaries) defaults to
+`global.anthropic.claude-sonnet-5-5`: summarisation is batch work where the
+quality of the answer is what matters. `MeetingAssistServiceBedrockModelID`
+(the Meeting Assistant) stays on `global.anthropic.claude-haiku-4-5-20251001-v1:0`,
+because that path answers mid-meeting and is sometimes spoken aloud, so its
+time to first token is what matters; measured against a real transcript it
+begins replying in about 0.9s, against 1.2s for Sonnet 5.5 and 2.7s for
+Haiku 5.5, both of which reason before answering.
+
+Summaries cost more on Sonnet 5.5 than on Haiku 4.5 — roughly 27% more input
+tokens, and two to three times the output tokens, for a noticeably longer
+summary. Set `BedrockModelId` to `global.anthropic.claude-haiku-4-5-20251001-v1:0`
+to keep the previous behaviour.
 
 | Family | Model IDs |
 |---|---|

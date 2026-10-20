@@ -172,7 +172,7 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    Default: "global.anthropic.claude-sonnet-5-5"
     Type: String
     # Kept in step with the BedrockModelId parameter of the same name in
     # lma-main.yaml, which is where every deployment sets it: lma-main passes its
@@ -2276,7 +2276,6 @@ Resources:
         Variables:
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           FETCH_TRANSCRIPT_LAMBDA_ARN: !GetAtt FetchTranscript.Arn
-          TOKEN_COUNT: "0"
           PROCESS_TRANSCRIPT: "True"
           LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
           S3_BUCKET_NAME: !Ref S3BucketName
