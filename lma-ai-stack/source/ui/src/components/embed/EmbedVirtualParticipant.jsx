@@ -133,6 +133,8 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     sendGetTranscriptSegmentsRequest,
     sendUpdateSpeakerIdentities,
     sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
     setLiveTranscriptCallId,
     isCallsListLoading,
     setIsCallsListLoading,
@@ -293,7 +295,10 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     const timestampAdvanced = callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt;
     const speakerNamesChanged =
       callDetails?.speakerIdentities !== undefined && call.speakerIdentities !== callDetails.speakerIdentities;
-    if (timestampAdvanced || speakerNamesChanged) {
+    const summaryChanged =
+      (callDetails?.callSummaryText !== undefined && call.callSummaryText !== callDetails.callSummaryText) ||
+      (callDetails?.callSummaryState !== undefined && call.callSummaryState !== callDetails.callSummaryState);
+    if (timestampAdvanced || speakerNamesChanged || summaryChanged) {
       setCall(callDetails);
       if (callDetails?.recordingStatusLabel === IN_PROGRESS_STATUS) {
         setLiveTranscriptCallId(effectiveCallId);
@@ -312,6 +317,8 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
     sendGetTranscriptSegmentsRequest,
     sendUpdateSpeakerIdentities,
     sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     setDateRange,

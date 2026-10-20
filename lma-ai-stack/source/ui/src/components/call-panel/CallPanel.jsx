@@ -34,6 +34,14 @@ import { TranslateClient, TranslateTextCommand } from '@aws-sdk/client-translate
 import { StandardRetryStrategy } from '@aws-sdk/middleware-retry';
 import markdownRehypePlugins from '../common/markdown-plugins';
 import { getEmailFormattedSummary, getMarkdownSummary, getTextFileFormattedMeetingDetails } from '../common/summary';
+import {
+  SOURCE_MANUAL,
+  STATUS_IDLE,
+  isHandEdited,
+  isRegenerating,
+  parseSummaryState,
+  regenerationFailure,
+} from '../common/summary-state';
 import { COMPREHEND_PII_TYPES, LANGUAGE_CODES } from '../common/constants';
 import {
   identityKeyFor,
@@ -192,9 +200,102 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
   );
 };
 
+/**
+ * How long the local "starting" state bridges the gap to the backend's own mark.
+ *
+ * Pressing Regenerate returns before the run finishes -- summarising calls a
+ * model once per prompt template and outlives a GraphQL request -- so progress
+ * after that point is read from the meeting's stored summary state, which
+ * arrives through onUpdateCall. This covers only the second or two before that
+ * mark lands, and is a safety net for the case where it never does.
+ */
+const REGENERATE_HANDOVER_MS = 30000;
+
+// Exported for its own tests: regenerating is an asynchronous run whose
+// progress and failure are read back from the meeting rather than from the
+// mutation's answer, and that handover is worth driving directly.
 // eslint-disable-next-line arrow-body-style
-const CallSummary = ({ item }) => {
+export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
   const [setCopySuccess] = useState(false);
+
+  const summaryState = useMemo(() => parseSummaryState(item.callSummaryState), [item.callSummaryState]);
+  // Local, and deliberately not the only source of progress: a second browser
+  // tab, or another user, learns that a run is going from the stored state.
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
+
+  const regenerating = starting || isRegenerating(summaryState);
+  const failure = startError || regenerationFailure(summaryState);
+  const handEdited = isHandEdited(summaryState);
+
+  // Hand over from the local flag to the stored state as soon as anything about
+  // the summary changes -- which the backend's "running" mark is. Keyed on the
+  // raw strings so a re-render with an identical summary does not reset it.
+  const fingerprint = `${item.callSummaryText ?? ''}|${item.callSummaryState ?? ''}`;
+  const fingerprintAtStart = useRef(null);
+  useEffect(() => {
+    if (!starting) {
+      return undefined;
+    }
+    if (fingerprintAtStart.current !== null && fingerprint !== fingerprintAtStart.current) {
+      setStarting(false);
+      return undefined;
+    }
+    const timer = setTimeout(() => setStarting(false), REGENERATE_HANDOVER_MS);
+    return () => clearTimeout(timer);
+  }, [starting, fingerprint]);
+
+  const startRegeneration = async () => {
+    setConfirmReplace(false);
+    setStartError(null);
+    fingerprintAtStart.current = fingerprint;
+    setStarting(true);
+    const result = await onRegenerate();
+    if (!result?.Success) {
+      // Said out loud rather than left as a stopped spinner: the commonest
+      // refusals are "a run is already going" and "not permitted", and neither
+      // is something the user can work out from the button going quiet.
+      setStartError(result?.Message || 'could not regenerate the summary');
+      setStarting(false);
+    }
+  };
+
+  const handleRegenerateClick = () => {
+    // A hand-written summary is somebody's own work, and regenerating discards
+    // it, so that case asks first. A generated one has nothing to lose.
+    if (handEdited) {
+      setConfirmReplace(true);
+      return;
+    }
+    startRegeneration();
+  };
+
+  const beginEditing = () => {
+    // Seeded with the text as rendered, not the raw stored value: a summary
+    // produced from several prompt templates is stored as a JSON object, and
+    // asking somebody to edit JSON to fix a sentence would be absurd. Saving
+    // therefore turns a structured summary into the plain markdown document it
+    // was being read as, which is what a hand-written summary is.
+    setDraft(getMarkdownSummary(item.callSummaryText));
+    setStartError(null);
+    setEditing(true);
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      const saved = await onSave(draft);
+      if (saved) {
+        setEditing(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const copyToClipboard = async () => {
     try {
@@ -248,7 +349,50 @@ const CallSummary = ({ item }) => {
             </Link>
           }
           actions={
-            <SpaceBetween size="xxs" direction="horizontal">
+            <SpaceBetween size="xxs" direction="horizontal" alignItems="center">
+              {regenerating && <StatusIndicator type="loading">Regenerating</StatusIndicator>}
+              {!regenerating && failure && (
+                // Announced, because the outcome of pressing Regenerate -- and
+                // especially a refusal -- is the whole feedback for that action.
+                // Through nativeAttributes: Cloudscape's Box accepts neither
+                // `role` nor `ariaLive` as a prop.
+                <Box nativeAttributes={{ role: 'status', 'aria-live': 'polite' }}>
+                  <StatusIndicator type="error">{failure}</StatusIndicator>
+                </Box>
+              )}
+              {!regenerating && !failure && handEdited && !editing && <Badge color="blue">Edited</Badge>}
+              {editing ? (
+                <SpaceBetween size="xxs" direction="horizontal">
+                  <Button onClick={() => setEditing(false)} disabled={saving}>
+                    Cancel
+                  </Button>
+                  <Button variant="primary" onClick={saveEdit} loading={saving}>
+                    Save summary
+                  </Button>
+                </SpaceBetween>
+              ) : (
+                <SpaceBetween size="xxs" direction="horizontal">
+                  {onRegenerate && (
+                    <Button
+                      iconName="refresh"
+                      loading={regenerating}
+                      disabled={readOnly || saving}
+                      onClick={handleRegenerateClick}
+                    >
+                      Regenerate
+                    </Button>
+                  )}
+                  {onSave && (
+                    <Button
+                      iconName="edit"
+                      disabled={readOnly || regenerating || !item.callSummaryText}
+                      onClick={beginEditing}
+                    >
+                      Edit
+                    </Button>
+                  )}
+                </SpaceBetween>
+              )}
               {item.callSummaryText && (
                 <ButtonDropdown
                   items={[
@@ -270,13 +414,50 @@ const CallSummary = ({ item }) => {
         </Header>
       }
     >
+      {/* Mounted only while it is wanted: Cloudscape renders a Modal's footer
+          even when it is not visible, so a permanently mounted one leaves a
+          second "Regenerate" button in the page for a click to land on. */}
+      {confirmReplace && (
+        <Modal
+          visible
+          onDismiss={() => setConfirmReplace(false)}
+          header="Replace the edited summary?"
+          footer={
+            <Box float="right">
+              <SpaceBetween size="xs" direction="horizontal">
+                <Button onClick={() => setConfirmReplace(false)}>Cancel</Button>
+                <Button variant="primary" onClick={startRegeneration}>
+                  Regenerate
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+        >
+          This summary was edited by hand. Regenerating replaces it with a newly generated one, and the edited text
+          cannot be recovered.
+        </Modal>
+      )}
       <Grid gridDefinition={[{ colspan: { default: 12 } }]}>
         <Tabs
           tabs={[
             {
               label: 'Transcript Summary',
               id: 'summary',
-              content: (
+              content: editing ? (
+                <FormField
+                  label="Meeting summary"
+                  description="Markdown. Saving replaces the summary everywhere it is read, the download included."
+                  stretch
+                >
+                  <Textarea
+                    value={draft}
+                    onChange={({ detail }) => setDraft(detail.value)}
+                    rows={16}
+                    disabled={saving}
+                    ariaLabel="Meeting summary text"
+                  />
+                </FormField>
+              ) : (
                 <div>
                   <div>
                     {/* eslint-disable-next-line react/no-array-index-key */}
@@ -1753,7 +1934,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
   const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
-  const { sendUpdateSpeakerIdentities, sendResolveSpeakerNames } = useCallsContext();
+  const { sendUpdateSpeakerIdentities, sendResolveSpeakerNames, sendUpdateCallSummary, sendRegenerateCallSummary } =
+    useCallsContext();
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
   // rebuilds the entire transcript element list.
@@ -1761,9 +1943,28 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
   const saveSpeakerIdentities = (serialized) => sendUpdateSpeakerIdentities(item.callId, serialized);
 
+  /**
+   * Store a summary somebody wrote by hand.
+   *
+   * Recorded as source 'manual', which is what puts the Edited badge on the
+   * panel and what makes a later regeneration ask before replacing it.
+   */
+  const saveCallSummary = (text) =>
+    sendUpdateCallSummary(item.callId, text, {
+      source: SOURCE_MANUAL,
+      status: STATUS_IDLE,
+      updatedAt: new Date().toISOString(),
+    });
+
+  const regenerateCallSummaryForItem = useCallback(
+    () => sendRegenerateCallSummary(item.callId),
+    [item.callId, sendRegenerateCallSummary],
+  );
+
   // Presentation only -- it greys out controls the write would reject anyway.
-  // The rule itself is enforced as a condition on the mutation. Shared by the
-  // Speakers panel and the transcript's inline rename so the two agree.
+  // The rule itself is enforced as a condition on the mutation (and, for the
+  // regeneration, in the Lambda behind it). Shared by the Speakers panel, the
+  // transcript's inline rename and the summary controls so all three agree.
   const speakerNamesReadOnly =
     !isAdminUser && item.owner !== user?.username && !item.sharedWith?.includes(user?.username);
 
@@ -2270,7 +2471,16 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           showHeader
         />
       ) : (
-        <CallSummary item={item} />
+        <CallSummary
+          item={item}
+          // Conditional on the context actually supplying the writer. Three
+          // separate components build the calls context by enumerating its
+          // fields, and a control wired to a missing one would render and then
+          // throw on the click rather than not being offered.
+          onSave={sendUpdateCallSummary ? saveCallSummary : undefined}
+          onRegenerate={sendRegenerateCallSummary ? regenerateCallSummaryForItem : undefined}
+          readOnly={speakerNamesReadOnly}
+        />
       )}
 
       {(enableSentimentAnalysis || enableVoiceTone) && (

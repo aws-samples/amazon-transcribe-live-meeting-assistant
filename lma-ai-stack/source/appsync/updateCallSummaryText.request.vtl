@@ -1,0 +1,101 @@
+## Write a meeting's summary text and/or the small state object beside it.
+##
+## This has its own template rather than sharing updateCall.request.vtl for the
+## same two reasons updateSpeakerIdentities does. That template SETs every key
+## present in the input, which is safe only because every mutation using it is
+## reachable by IAM callers alone; these fields are written from the browser, so
+## the update is spelled out attribute by attribute instead. And a browser caller
+## has to be held to the same access rule the read path applies in
+## getCall.response.vtl -- Admin, the meeting's owner, or a user it has been
+## shared with -- which is expressed below as a DynamoDB condition so the check
+## and the write are one atomic operation.
+##
+## Either field may be omitted, and that is load-bearing rather than
+## convenience: a regeneration that fails records the failure in
+## CallSummaryState and writes no text, which is what leaves the previous
+## summary standing.
+##
+## UpdatedAt is deliberately NOT written here, and not used as a guard, matching
+## updateSpeakerIdentities. Every Call update fed by the Kinesis pipeline carries
+## `#UpdatedAt < :UpdatedAt` so out-of-order events cannot clobber newer state.
+## Editing or regenerating a summary is not one of those events: it is a
+## deliberate user action, and last-write-wins by the person doing it is the
+## behaviour wanted. Leaving UpdatedAt alone also keeps an edit from interacting
+## with that guard in either direction.
+#set( $PK = "c#${ctx.args.input.CallId}" )
+
+## Set in an #if rather than from `!$util.isNull(...)` inside the #set, which is
+## the shape the rest of this directory uses for a boolean (see $isCognitoUser
+## below) and leaves no doubt about how Velocity evaluates a unary not.
+#set( $hasText = false )
+#if( !$util.isNull($ctx.args.input.CallSummaryText) )
+  #set( $hasText = true )
+#end
+#set( $hasState = false )
+#if( !$util.isNull($ctx.args.input.CallSummaryState) )
+  #set( $hasState = true )
+#end
+#if( !$hasText && !$hasState )
+  $util.error("updateCallSummaryText needs CallSummaryText, CallSummaryState or both", "BadRequest")
+#end
+
+## A Lambda calling with IAM credentials arrives as an assumed role; a signed-in
+## user arrives through Cognito. Same detection as getCall.response.vtl.
+#set( $isCognitoUser = true )
+#if( $context.identity.userArn && $context.identity.userArn.contains(":assumed-role/") )
+  #set( $isCognitoUser = false )
+#end
+
+#set( $conditionNames = { "#PK": "PK" } )
+#set( $conditionValues = {} )
+#set( $condition = "attribute_exists(#PK)" )
+
+## `contains` over #SharedWith covers both shapes this attribute is stored in:
+## shareCall writes it from a [String] input (a DynamoDB List) while older rows
+## hold a comma-separated String.
+#if( $isCognitoUser && !$context.identity.groups.contains("Admin") )
+  $util.qr( $conditionNames.put("#Owner", "Owner") )
+  $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )
+  $util.qr( $conditionValues.put(":caller", $util.dynamodb.toDynamoDB($context.identity.username)) )
+  #set( $condition = "${condition} AND (#Owner = :caller OR contains(#SharedWith, :caller))" )
+#end
+
+## Built by hand rather than with a List and a join: Velocity has no string join
+## over a java.util.List, and the comma has to land only between the clauses.
+#set( $expNames = {} )
+#set( $expValues = {} )
+#set( $expression = "SET" )
+#if( $hasText )
+  $util.qr( $expNames.put("#CallSummaryText", "CallSummaryText") )
+  $util.qr( $expValues.put(":CallSummaryText", $util.dynamodb.toDynamoDB($ctx.args.input.CallSummaryText)) )
+  #set( $expression = "${expression} #CallSummaryText = :CallSummaryText" )
+  #if( $hasState )
+    #set( $expression = "${expression}," )
+  #end
+#end
+#if( $hasState )
+  $util.qr( $expNames.put("#CallSummaryState", "CallSummaryState") )
+  $util.qr( $expValues.put(":CallSummaryState", $util.dynamodb.toDynamoDB($ctx.args.input.CallSummaryState)) )
+  #set( $expression = "${expression} #CallSummaryState = :CallSummaryState" )
+#end
+
+{
+  "version" : "2018-05-29",
+  "operation" : "UpdateItem",
+  "key": {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($PK)
+  },
+  "update" : {
+    "expression": "$expression",
+    "expressionNames": $utils.toJson($expNames),
+    "expressionValues": $utils.toJson($expValues)
+  },
+  "condition": {
+    "expression": "$condition",
+    "expressionNames": $utils.toJson($conditionNames)
+    #if( !${conditionValues.isEmpty()} )
+      , "expressionValues": $utils.toJson($conditionValues)
+    #end
+  }
+}

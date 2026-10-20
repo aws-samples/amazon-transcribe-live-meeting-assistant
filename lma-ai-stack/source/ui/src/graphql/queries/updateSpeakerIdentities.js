@@ -29,6 +29,7 @@ export default /* GraphQL */ `
       CallCategories
       IssuesDetected
       CallSummaryText
+      CallSummaryState
       SpeakerIdentities
       Status
       UpdatedAt

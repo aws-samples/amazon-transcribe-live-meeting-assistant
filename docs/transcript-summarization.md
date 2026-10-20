@@ -7,6 +7,10 @@ title: "Transcript Summarization"
 ## Table of Contents
 
 - [Overview](#overview)
+- [Regenerating and Editing a Summary](#regenerating-and-editing-a-summary)
+  - [Regenerate](#regenerate)
+  - [Edit](#edit)
+  - [Who Can Do It](#who-can-do-it)
 - [BEDROCK Option (Default)](#bedrock-option-default)
   - [Prompt Template Storage](#prompt-template-storage)
   - [Attribute Naming Convention](#attribute-naming-convention)
@@ -22,6 +26,40 @@ title: "Transcript Summarization"
 ## Overview
 
 LMA summarizes meeting transcripts automatically when a meeting ends, and on-demand via UI buttons during or after meetings. Two summarization options are available: **BEDROCK** (default) and **LAMBDA**.
+
+A meeting's summary is generated once, from the transcript and the prompt templates as they were at the time. The Meeting Summary panel on the meeting page lets you run it again, or write the summary yourself.
+
+## Regenerating and Editing a Summary
+
+### Regenerate
+
+**Regenerate** on the Meeting Summary panel re-runs summarization against the transcript and the prompt templates **as they are now**. Use it when the stored summary no longer reflects the meeting:
+
+- Someone has named the separated speaker voices on the [Speakers panel](transcription-and-translation.md#naming-the-voices), so the transcript now reads "Sarah Lee" where it read `spk_0`. The summary was written before those names existed.
+- An administrator has changed the summary prompt templates, by adding a section or rewording one.
+- The meeting was summarized while it was still running, and has since continued.
+
+Regenerating goes through the same summarizer the end-of-meeting summary uses -- the Bedrock summarizer, or your own function under the LAMBDA option -- with nothing but the meeting id, so it reads the current transcript and the current prompts rather than a copy of either.
+
+It also **refreshes the Bedrock Knowledge Base snapshot**. The copy of the transcript and summary written to S3 for the Knowledge Base to ingest is taken when the summary runs, and the Meeting Assistant's meeting-history search reads that copy; regenerating writes it again with whatever speaker names are stored now. Ingestion into the Knowledge Base itself is on the schedule set by the stack's S3 sync parameter, so the refreshed copy becomes searchable at the next sync rather than immediately.
+
+Three things are worth knowing about how it behaves:
+
+- **It is not instant.** Summarization calls the model once per prompt template, which routinely takes longer than a web request allows, so pressing the button starts a run in the background and the panel shows **Regenerating** until the new summary arrives. The new summary appears by itself -- there is nothing to reload.
+- **Only one run at a time.** While a run is going the button is disabled, including in another browser tab and for another user looking at the same meeting. A run that never reports back stops blocking new ones after twenty minutes.
+- **A failed run keeps the previous summary.** If the model cannot be reached or the summarizer returns nothing usable, the panel shows the error and the stored summary is left exactly as it was. A summary that was there is never replaced by an error message.
+
+### Edit
+
+**Edit** opens the summary as text you can change, and **Save summary** stores it. What you save is what every reader of the summary then shows: the meeting page, the summary download, the Word and email exports, and the embeddable meeting panel.
+
+The editor is seeded with the summary as you are reading it, in Markdown. A summary produced from several prompt templates is stored as a structured object with one entry per section; saving an edit replaces that with the plain Markdown document, which is what a hand-written summary is. The section headings are ordinary Markdown bold text in the editor and you can add, remove or reword them.
+
+A hand-edited summary is marked **Edited** on the panel, and regenerating one asks for confirmation first, because regenerating replaces it and the edited text cannot be recovered. Regenerating a generated summary does not ask.
+
+### Who Can Do It
+
+Both controls are available to a meeting's **owner**, a user the meeting has been **shared with**, and an **administrator** -- the same rule that decides who can see a meeting at all and who can name its speakers. For anyone else the controls are not offered, and the write is refused by the API even if it is attempted directly.
 
 ## BEDROCK Option (Default)
 

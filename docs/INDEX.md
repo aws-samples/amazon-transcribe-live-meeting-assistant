@@ -25,7 +25,7 @@ title: "LMA Documentation"
 - [On-demand ASR & Speaker Diarization (MicroVM)](microvm-asr.md) — Experimental alternative to Amazon Transcribe streaming: per-voice speaker labels from an ASR + diarization engine on AWS Lambda MicroVMs, with a swappable model
 - [Voice Enrollment (Speaker Recognition)](voice-enrollment.md) — Optional and off by default: people enrol their own voice, with first-party consent and an append-only consent log, so they are labelled by name from their first word
 - [Meeting Assistant](meeting-assistant.md) — Strands agent chat interface, built-in tools, Knowledge Base, Guardrails, model selection, wake phrase, custom prompts
-- [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, custom prompt templates, Lambda-based summarization
+- [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, regenerating and editing a stored summary, custom prompt templates, Lambda-based summarization
 - [Meetings Query Tool](meetings-query-tool.md) — Semantic search across past meetings via transcript knowledge base
 
 ### Meeting Sources

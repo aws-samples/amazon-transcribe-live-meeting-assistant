@@ -50,6 +50,8 @@ const CallAnalyticsLayout = () => {
     sendGetTranscriptSegmentsRequest,
     sendUpdateSpeakerIdentities,
     sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
     totalCallCount,
     totalCallCountTruncated,
   } = useCallsGraphQlApi({ initialDateRange });
@@ -66,6 +68,8 @@ const CallAnalyticsLayout = () => {
     sendGetTranscriptSegmentsRequest,
     sendUpdateSpeakerIdentities,
     sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     setDateRange,

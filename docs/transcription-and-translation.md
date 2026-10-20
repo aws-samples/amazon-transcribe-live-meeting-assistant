@@ -119,8 +119,10 @@ One path is a snapshot rather than a live read. When a meeting's summary is
 generated, the transcript of that moment is also written to S3 for the Bedrock
 Knowledge Base to ingest, and the Meeting Assistant's meeting-history search
 reads that copy. It carries whatever names were set when it was written, so if
-you name speakers *after* the summary has run, regenerate the summary to refresh
-it. The transcript on the meeting page, the download, and the assistant's
+you name speakers *after* the summary has run, press **Regenerate** on the
+Meeting Summary panel to refresh it -- see
+[Regenerating and Editing a Summary](transcript-summarization.md#regenerating-and-editing-a-summary).
+The transcript on the meeting page, the download, and the assistant's
 questions about the current meeting are all live and need no such step.
 
 ### Finding the names automatically

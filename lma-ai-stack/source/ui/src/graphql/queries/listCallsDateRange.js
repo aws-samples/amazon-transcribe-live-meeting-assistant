@@ -17,6 +17,12 @@ export default /* GraphQL */ `
         CallCategories
         IssuesDetected
         CallSummaryText
+        # Selected here for the same reason SpeakerIdentities is, below: a list
+        # refresh REPLACES the stored meeting, so a field the list query omits
+        # is blanked on the meeting being viewed -- which here would make a
+        # hand-edited summary read as generated and hide a regeneration in
+        # flight.
+        CallSummaryState
         # Selected here as well as in getCall, even though only the open meeting
         # needs it. The meetings-list split panel renders the full meeting
         # detail from a list-derived object, and a rename made there with this

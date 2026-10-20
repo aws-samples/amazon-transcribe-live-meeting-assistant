@@ -19,6 +19,7 @@ const mapCallsAttributes = (calls, settings) => {
       CallCategories: callCategories,
       IssuesDetected: issuesDetected,
       CallSummaryText: callSummaryText,
+      CallSummaryState: callSummaryState,
       SpeakerIdentities: speakerIdentities,
       CreatedAt: callTimestamp,
       CustomerPhoneNumber: callerPhoneNumber,
@@ -56,6 +57,10 @@ const mapCallsAttributes = (calls, settings) => {
       alertCount,
       issuesDetected,
       callSummaryText,
+      // Raw JSON string; parsed by the readers via parseSummaryState, so a
+      // meeting with no state at all reads as a generated summary with nothing
+      // running rather than breaking the mapping.
+      callSummaryState,
       // Raw JSON string; parsed by the readers via parseSpeakerIdentities so a
       // malformed blob degrades to "no names" instead of breaking the mapping.
       speakerIdentities,

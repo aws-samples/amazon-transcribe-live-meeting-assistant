@@ -68,10 +68,12 @@ const CallDetails = () => {
       const callsMap = mapCallsAttributes([callsFiltered[0]], settings);
       const callDetails = callsMap[0];
       // UpdatedAt advancing is the usual signal that a meeting changed, but it
-      // is not the only one: a speaker rename deliberately leaves UpdatedAt
-      // alone so it cannot interfere with the ordering guard the Kinesis
-      // pipeline's own Call updates rely on. Without the second test a rename
-      // would not reach the transcript until the page was reloaded.
+      // is not the only one: a speaker rename and a summary edit or
+      // regeneration all deliberately leave UpdatedAt alone, so they cannot
+      // interfere with the ordering guard the Kinesis pipeline's own Call
+      // updates rely on. Without the further tests a rename would not reach the
+      // transcript, and a regenerated summary would not reach the summary
+      // panel, until the page was reloaded.
       //
       // `undefined` means "this copy carries no information about the names",
       // NOT "the names were cleared. The meeting-list query deliberately omits
@@ -82,7 +84,10 @@ const CallDetails = () => {
       const timestampAdvanced = callDetails?.updatedAt && call.updatedAt < callDetails.updatedAt;
       const speakerNamesChanged =
         callDetails?.speakerIdentities !== undefined && call.speakerIdentities !== callDetails.speakerIdentities;
-      if (timestampAdvanced || speakerNamesChanged) {
+      const summaryChanged =
+        (callDetails?.callSummaryText !== undefined && call.callSummaryText !== callDetails.callSummaryText) ||
+        (callDetails?.callSummaryState !== undefined && call.callSummaryState !== callDetails.callSummaryState);
+      if (timestampAdvanced || speakerNamesChanged || summaryChanged) {
         logger.debug('Updating call', callDetails);
         setCall(callDetails);
       }

@@ -21,8 +21,11 @@ import onUnshareCall from '../graphql/queries/onUnshareCall';
 import getTranscriptSegments from '../graphql/queries/getTranscriptSegments';
 import updateSpeakerIdentities from '../graphql/queries/updateSpeakerIdentities';
 import resolveSpeakerNames from '../graphql/queries/resolveSpeakerNames';
+import updateCallSummaryText from '../graphql/queries/updateCallSummaryText';
+import regenerateCallSummary from '../graphql/queries/regenerateCallSummary';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
+import { serializeSummaryState } from '../components/common/summary-state';
 
 const client = generateClient();
 const logger = new ConsoleLogger('useCallsGraphQlApi');
@@ -78,6 +81,12 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
    * deliberately left out of the list query (it would ship a name map for every
    * meeting in the range when only the open one needs it), so a list refresh
    * would otherwise blank the names on the meeting being viewed.
+   *
+   * CallSummaryState is carried over for a different reason: the Kinesis
+   * pipeline's Call mutations are published to onUpdateCall too, and they select
+   * their own fixed field list, so a status or aggregation update arriving
+   * during a live meeting would otherwise blank it -- making a hand-edited
+   * summary read as generated and hiding a regeneration in flight.
    */
   const setCallsDeduped = (callValues) => {
     setCalls((currentCalls) => {
@@ -91,6 +100,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
             ListPK: call.ListPK || existing?.ListPK,
             ListSK: call.ListSK || existing?.ListSK,
             SpeakerIdentities: call.SpeakerIdentities || existing?.SpeakerIdentities,
+            CallSummaryState: call.CallSummaryState || existing?.CallSummaryState,
           };
         }),
       ];
@@ -514,6 +524,77 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     }
   }, []);
 
+  /**
+   * Store a meeting's summary text, and record that a person wrote it.
+   *
+   * State is updated optimistically so the edited text appears on the keystroke
+   * that saved it rather than on the subscription round trip. Other clients get
+   * the same change pushed through onUpdateCall. A rejected write is rolled
+   * back, because leaving text on screen that was never stored means the next
+   * reload silently loses it.
+   */
+  const sendUpdateCallSummary = async (callId, text, state) => {
+    const serializedState = serializeSummaryState(state);
+    // Captured from inside the updater, not from `calls` in the render closure,
+    // for the same reason the speaker identity write does it: two saves can be
+    // in flight at once, and a closure read would roll the second failure back
+    // past the first success.
+    let previousText;
+    let previousState;
+    setCalls((currentCalls) => {
+      const existing = currentCalls.find((c) => c.CallId === callId);
+      previousText = existing?.CallSummaryText;
+      previousState = existing?.CallSummaryState;
+      return currentCalls.map((c) =>
+        c.CallId === callId ? { ...c, CallSummaryText: text, CallSummaryState: serializedState } : c,
+      );
+    });
+    try {
+      await client.graphql({
+        query: updateCallSummaryText,
+        variables: { input: { CallId: callId, CallSummaryText: text, CallSummaryState: serializedState } },
+      });
+      return true;
+    } catch (error) {
+      logger.error('failed to update the meeting summary', error);
+      const refused = JSON.stringify(error?.errors ?? error ?? '').includes('condition failure');
+      setErrorMessage(
+        refused
+          ? 'you do not have permission to edit the summary of this meeting'
+          : 'failed to save the summary - please try again later',
+      );
+      // Roll back only if what is on screen is still what THIS call put there.
+      setCalls((currentCalls) =>
+        currentCalls.map((c) =>
+          c.CallId === callId && c.CallSummaryText === text
+            ? { ...c, CallSummaryText: previousText, CallSummaryState: previousState }
+            : c,
+        ),
+      );
+      return false;
+    }
+  };
+
+  /**
+   * Ask the backend to summarise a meeting again.
+   *
+   * Nothing is patched into state here: the run outlives the request, and the
+   * new summary arrives through onUpdateCall like an end-of-meeting one does.
+   * Returns the backend's own answer so the caller can say what happened.
+   */
+  const sendRegenerateCallSummary = useCallback(async (callId) => {
+    try {
+      const response = await client.graphql({
+        query: regenerateCallSummary,
+        variables: { input: { CallId: callId } },
+      });
+      return response?.data?.regenerateCallSummary ?? { Success: false, Message: 'no answer from the server' };
+    } catch (error) {
+      logger.error('failed to start regenerating the summary', error);
+      return { Success: false, Message: 'request failed' };
+    }
+  }, []);
+
   return {
     calls,
     callTranscriptPerCallId,
@@ -522,6 +603,8 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     sendGetTranscriptSegmentsRequest,
     sendUpdateSpeakerIdentities,
     sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)
