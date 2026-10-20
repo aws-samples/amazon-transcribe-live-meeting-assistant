@@ -2111,6 +2111,86 @@ Resources:
           Terminate: ENABLED
           TerminateTimeoutInSeconds: 30
 
+  # Keeps the image below its 50-version cap. Each rebuild adds a version, so a
+  # stack deployed often would otherwise reach the cap and the next image build
+  # would fail -- stopping the update at the first resource it touches.
+  VPMicrovmImagePrunerRole:
+    Type: AWS::IAM::Role
+    Condition: UseMicrovmLaunchType
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        - !GetAtt LogsPolicy.PolicyArn
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: MicrovmImageVersions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:GetMicrovmImage
+                  - lambda:ListMicrovmImageVersions
+                  - lambda:DeleteMicrovmImageVersion
+                Resource: !GetAtt VPMicrovmImage.ImageArn
+
+  VPMicrovmImagePrunerFunction:
+    Type: AWS::Lambda::Function
+    Condition: UseMicrovmLaunchType
+    Metadata:
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: 'python3.12 is an actively supported Lambda runtime per AWS'
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Function does not require VPC access as it only interacts with AWS services via APIs
+          - id: W92
+            reason: Function does not require reserved concurrency as it runs once per stack operation
+    # checkov:skip=CKV_AWS_115: "Function runs once per stack operation; reserved concurrency not required"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a Cfn custom resource that reports its own outcome"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    Properties:
+      Handler: image_version_pruner.lambda_handler
+      Runtime: python3.12
+      # Deletes are serialised and a blocked one is retried over several passes.
+      Timeout: 600
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Role: !GetAtt VPMicrovmImagePrunerRole.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        # The same deployment package as the launcher: the handler imports
+        # microvm_client.py, which ships alongside it.
+        S3Bucket: !Ref ArtifactBucket
+        S3Key: !Ref MicrovmLauncherS3Key
+
+  VPMicrovmImagePruner:
+    Type: Custom::MicrovmImageVersionPruner
+    Condition: UseMicrovmLaunchType
+    Properties:
+      ServiceToken: !GetAtt VPMicrovmImagePrunerFunction.Arn
+      # The GetAtt is what orders this after the image, so no DependsOn.
+      ImageArn: !GetAtt VPMicrovmImage.ImageArn
+      # How many versions to leave behind beyond the active one.
+      KeepVersions: 5
+      # Carried only so that a new source zip -- which is what adds a version in
+      # the first place -- also re-runs the prune.
+      SourceCodeLocation: !Ref MicrovmSourceCodeLocation
+
   # EventBridge Scheduler assumes this to invoke the launcher for meetings booked
   # in advance (the MICROVM equivalent of TargetECSRole, which Scheduler uses to
   # call ecs:RunTask on the ECS launch types).

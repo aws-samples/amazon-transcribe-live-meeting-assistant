@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Deployments that use the on-demand MicroVM compute now tidy up old image versions themselves.** A MicroVM image keeps at most 50 versions and each rebuild adds one, so a stack redeployed often eventually ran out of room and the next deployment stopped at the image build. Both the Virtual Participant and the ASR stacks now remove the surplus versions after the image is built, keeping the version in use plus the five most recent so a rollback still has somewhere to go. It runs as part of the deployment and needs no action from you; if it cannot run, it says so in its log and the deployment continues. Only deployments with `VPLaunchType=MICROVM` or `EnableMicrovmAsr=true` have these images at all.
+
 - **Meeting summaries now use the participant name you typed on the Stream Audio form.** The web UI has always shown that name in place of the `Other Participant` placeholder, but the transcript handed to the summary prompts and the Meeting Assistant kept the placeholder, so a summary could name "Other Participant" for a meeting whose transcript on screen named the person. Both now read the same. Summaries of streaming meetings will read slightly differently after this update; stored transcripts are unchanged.
 
 ### Fixed

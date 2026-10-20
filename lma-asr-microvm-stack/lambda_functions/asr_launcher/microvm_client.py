@@ -5,12 +5,14 @@
 
 WHY THIS EXISTS
 ---------------
-`boto3.client("lambda-microvms")` raises UnknownServiceError on the Lambda
-python3.12 runtime: the service launched 2026-06 and the runtime's bundled
-botocore has no service model for it. The obvious fixes (a boto3 layer, or real
-deployment packages) both add build machinery to a stack that currently has
-none — the VP template is plain CloudFormation with no SAM transform and no
-build step, and its Lambdas are inline `Code: ZipFile`.
+botocore carries a `lambda-microvms` service model from 1.43.115 (2026-10-19),
+so `boto3.client("lambda-microvms")` works wherever a botocore that new is
+installed. The Lambda runtimes are the problem: their bundled botocore lags the
+latest release by months, and on python3.12 today the call still raises
+UnknownServiceError. The obvious fixes — a boto3 layer, or real deployment
+packages — both add build machinery to a stack that currently has none, since
+the VP template is plain CloudFormation with no SAM transform and no build step,
+and its Lambdas are inline `Code: ZipFile`.
 
 None of that is necessary. The API is ordinary REST-JSON on the *standard Lambda
 endpoint*: its service model declares `endpointPrefix: lambda` and
@@ -20,9 +22,10 @@ SigV4 signer, both of which every Lambda runtime already has.
 Verified against the live service (2026-08-08): GetMicrovmImage returned HTTP 200
 with plain botocore SigV4 and no additional dependencies.
 
-If a future runtime bundles a boto3 that knows `lambda-microvms`, this module can
-be deleted and replaced with `boto3.client("lambda-microvms")` — the method names
-and payloads here mirror the SDK's deliberately.
+Once the runtimes ship a botocore that knows the service, this module can be
+deleted and replaced with `boto3.client("lambda-microvms")` — the method names
+and payloads here mirror the SDK's deliberately, and the paths are taken from
+that same service model.
 """
 
 from __future__ import annotations
@@ -141,3 +144,44 @@ class MicrovmClient:
     def get_microvm_image(self, image_identifier: str) -> dict:
         ident = urllib.parse.quote(image_identifier, safe="")
         return self._call("GET", f"/{API_VERSION}/microvm-images/{ident}")
+
+    def list_microvm_image_versions(
+        self,
+        image_identifier: str,
+        *,
+        max_results: int | None = None,
+        next_token: str | None = None,
+    ) -> dict:
+        """ListMicrovmImageVersions. Returns `{"items": [...], "nextToken": ...}`.
+
+        An image holds at most 50 versions, and every rebuild of the same image
+        adds one, so a long-lived stack needs to know what is there before it
+        can make room.
+        """
+        ident = urllib.parse.quote(image_identifier, safe="")
+        query = {
+            key: str(value)
+            for key, value in (("maxResults", max_results), ("nextToken", next_token))
+            if value is not None
+        }
+        path = f"/{API_VERSION}/microvm-images/{ident}/versions"
+        if query:
+            path = f"{path}?{urllib.parse.urlencode(query)}"
+        return self._call("GET", path)
+
+    def delete_microvm_image_version(
+        self, image_identifier: str, image_version: str
+    ) -> dict:
+        """DeleteMicrovmImageVersion.
+
+        Versions form a chain: each one records the version it was built on
+        top of. A version that another version still names as its base cannot
+        be removed, so deleting a span of them means working oldest-first and
+        retrying — see `prune_microvm_image_versions` in the pruner, which is
+        the only caller that needs to care.
+        """
+        ident = urllib.parse.quote(image_identifier, safe="")
+        version = urllib.parse.quote(image_version, safe="")
+        return self._call(
+            "DELETE", f"/{API_VERSION}/microvm-images/{ident}/versions/{version}"
+        )
