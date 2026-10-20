@@ -89,14 +89,15 @@ Provide one or more seed URLs for the web crawler to index. Configure the crawl 
 
 Choose the Bedrock foundation model that powers the Meeting Assistant. Set the model via the **MeetingAssistServiceBedrockModelID** CloudFormation parameter. Supported models include:
 
-- Amazon Nova Micro
-- Amazon Nova Lite
-- Amazon Nova Pro
-- Anthropic Claude Sonnet 4.5
-- Anthropic Claude Opus 4
-- Anthropic Claude Haiku 4.5
+- Amazon Nova Micro, Nova Lite, Nova Pro, Nova Premier and Nova 2 Lite
+- Anthropic Claude Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4, Opus 4.1 and Opus 4.6
+- Anthropic Claude Haiku 5.5, Sonnet 5.5 and Opus 5.5
 
-The model selection affects response quality, latency, and cost. Lighter models (Nova Micro, Claude Haiku 4.5) are faster and less expensive, while more capable models (Claude Opus 4, Claude Sonnet 4.5) provide higher-quality responses for complex queries.
+Each Claude and Nova entry is offered in both its `global.` and its `us.` inference-profile form; pick the one that suits where your deployment runs.
+
+The model selection affects response quality, latency, and cost. Lighter models (Nova Micro, Claude Haiku) are faster and less expensive, while more capable models (Claude Opus, Claude Sonnet) provide higher-quality responses for complex queries.
+
+The Claude 5 generation reasons before it answers. That improves answers on questions that need several steps, but the reasoning is itself billed as output, so the same question costs several times as much output as it does on Claude 4.5 at the same size. Claude 5 models also use a different tokenizer that counts a given transcript as roughly a quarter more input tokens. Expect a higher per-meeting bill if you move to one, and treat the quality gain as the thing you are buying.
 
 ## Bedrock Guardrails
 

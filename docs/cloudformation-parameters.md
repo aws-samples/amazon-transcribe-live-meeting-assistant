@@ -63,7 +63,7 @@ always covered, and at any plausible meeting volume the cap is never reached. Se
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | MeetingAssistService | Meeting assistant service type | STRANDS_BEDROCK | STRANDS_BEDROCK, STRANDS_BEDROCK_WITH_KB (Create), STRANDS_BEDROCK_WITH_KB (Use Existing) |
-| MeetingAssistServiceBedrockModelID | LLM model used by the meeting assistant | Claude Haiku 4.5 | Supported Bedrock model IDs |
+| MeetingAssistServiceBedrockModelID | LLM model used by the meeting assistant | Claude Haiku 4.5 | See [Bedrock model choices](#bedrock-model-choices) |
 | MeetingAssistWakePhrase | Regular expression pattern that activates the meeting assistant | OK Assistant | Valid regex pattern |
 | TavilyApiKey | API key for the Tavily web search tool | (none) | Valid API key string |
 | BedrockGuardrailId | Optional Bedrock guardrail identifier | (none) | Valid guardrail ID |
@@ -228,8 +228,41 @@ missing.
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
 | EndOfCallTranscriptSummary | Method used to generate end-of-call summaries | BEDROCK | BEDROCK, LAMBDA |
-| BedrockModelId | Bedrock model used for summarization | Claude Haiku 4.5 | Supported Bedrock model IDs |
+| BedrockModelId | Bedrock model used for summarization | Claude Haiku 4.5 | See [Bedrock model choices](#bedrock-model-choices) |
 | EndOfCallLambdaHookFunctionArn | ARN of a custom Lambda function for summarization (when using LAMBDA mode) | (none) | Valid Lambda ARN |
+
+### Bedrock model choices
+
+`BedrockModelId` (summaries, pasted meeting invitations and the speaker-naming
+pass) and `MeetingAssistServiceBedrockModelID` (the Meeting Assistant agent)
+offer the same list. Both default to `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
+
+| Family | Model IDs |
+|---|---|
+| Amazon Nova | `amazon.nova-micro-v1:0`, `amazon.nova-lite-v1:0`, `amazon.nova-pro-v1:0`, `us.amazon.nova-premier-v1:0`, `global.amazon.nova-2-lite-v1:0`, `us.amazon.nova-2-lite-v1:0` |
+| Claude 4 — `us.` | `us.anthropic.claude-opus-4-20250514-v1:0`, `us.anthropic.claude-opus-4-1-20250805-v1:0`, `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-opus-4-6-v1` |
+| Claude 4 — `global.` | `global.anthropic.claude-haiku-4-5-20251001-v1:0`, `global.anthropic.claude-sonnet-4-5-20250929-v1:0`, `global.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-opus-4-6-v1` |
+| Claude 5 — `us.` | `us.anthropic.claude-haiku-5-5`, `us.anthropic.claude-sonnet-5-5`, `us.anthropic.claude-opus-5-5` |
+| Claude 5 — `global.` | `global.anthropic.claude-haiku-5-5`, `global.anthropic.claude-sonnet-5-5`, `global.anthropic.claude-opus-5-5` |
+
+A `global.` profile routes to whichever region has capacity; a `us.` profile
+keeps inference within the United States. Pick the one your data-residency
+position allows. Whichever you choose, you must first enable access to that
+model in the Amazon Bedrock console for the region you deploy into — see
+[Amazon Bedrock Model Access](prerequisites-and-deployment.md#amazon-bedrock-model-access).
+
+**What the Claude 5 generation costs.** These models reason before they answer.
+The reasoning is billed as output, so one summary of the same meeting consumes
+roughly three to four times the output tokens it does on Claude 4.5 at the same
+size, and their tokenizer counts a given transcript as roughly a quarter more
+input tokens. A per-meeting bill several times larger is the normal outcome of
+selecting one; the quality of the summary is what you are buying. If cost
+matters more than the last increment of quality, stay on Claude Haiku 4.5.
+
+Claude 3.x models were withdrawn from both lists in v0.3.0 and are no longer
+selectable. A stack still configured with one cannot be updated until the
+parameter is changed to a supported value — see
+[Version Migration Notes](stack-updates-and-upgrades.md#v030).
 
 ## Virtual Participant
 

@@ -36,7 +36,10 @@ Parameters:
 
   MeetingAssistServiceBedrockModelID:
     Type: String
-    Default: "anthropic.claude-3-sonnet-20240229-v1:0"
+    # lma-main.yaml always passes this through, so the default is only reached by
+    # a standalone deployment of this template. It tracks lma-main's own default
+    # rather than naming a model no longer offered there.
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 
   TavilyApiKey:
     Type: String
