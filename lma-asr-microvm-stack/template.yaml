@@ -472,6 +472,105 @@ Resources:
           Terminate: ENABLED
           TerminateTimeoutInSeconds: 30
 
+  # Keeps the image below its 50-version cap. Each rebuild adds a version, so a
+  # stack deployed often would otherwise reach the cap and the next image build
+  # would fail -- stopping the update at the first resource it touches.
+  AsrMicrovmImagePrunerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: MicrovmImageVersions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:GetMicrovmImage
+                  - lambda:ListMicrovmImageVersions
+                  - lambda:DeleteMicrovmImageVersion
+                Resource: !GetAtt AsrMicrovmImage.ImageArn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/lambda/*"
+
+  AsrMicrovmImagePrunerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/AsrMicrovmImagePruner"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
+  AsrMicrovmImagePrunerFunction:
+    Type: AWS::Lambda::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W58
+            reason: "Log write permissions are granted inline on the execution role"
+          - id: W89
+            reason: "Reaches AWS public APIs only; VPC attachment is not required"
+          - id: W92
+            reason: "Runs once per stack operation"
+      cdk_nag:
+        rules_to_suppress:
+          - id: AwsSolutions-L1
+            reason: "python3.12 is an actively supported Lambda runtime"
+    # checkov:skip=CKV_AWS_115: "Function runs once per stack operation; reserved concurrency not required"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a Cfn custom resource that reports its own outcome"
+    # checkov:skip=CKV_AWS_117: "VPC access not required; reaches AWS public APIs only"
+    Properties:
+      LoggingConfig:
+        LogGroup: !Ref AsrMicrovmImagePrunerLogGroup
+      Handler: image_version_pruner.lambda_handler
+      Runtime: python3.12
+      # Deletes are serialised and a blocked one is retried over several passes.
+      # The handler stops and reports while 30s remain, so it does not rely on
+      # this being generous enough for the worst case.
+      Timeout: 600
+      MemorySize: 256
+      TracingConfig:
+        Mode: Active
+      Role: !GetAtt AsrMicrovmImagePrunerRole.Arn
+      Environment:
+        Variables:
+          LOG_LEVEL: !Ref LogLevel
+      Code:
+        # The same deployment package as the launcher: the handler imports
+        # microvm_client.py, which ships alongside it.
+        S3Bucket: !Ref LambdaArtifactBucket
+        S3Key: !Ref AsrLauncherS3Key
+
+  AsrMicrovmImagePruner:
+    Type: Custom::MicrovmImageVersionPruner
+    Properties:
+      ServiceToken: !GetAtt AsrMicrovmImagePrunerFunction.Arn
+      # The GetAtt is what orders this after the image, so no DependsOn.
+      ImageArn: !GetAtt AsrMicrovmImage.ImageArn
+      # How many versions to leave behind beyond the active one.
+      KeepVersions: 5
+      # Carried only to trigger the prune. A custom resource is only invoked
+      # when one of its properties changes, and this one changes on every
+      # successful rebuild -- including rebuilds caused by a property change
+      # rather than new source, which the source location would miss. A rebuild
+      # whose version FAILS consumes a version number without changing this,
+      # so a long run of consecutive failures would not be pruned until the
+      # next success.
+      LatestActiveImageVersion: !GetAtt AsrMicrovmImage.LatestActiveImageVersion
+
   ##########################################################################
   # Session control plane called by the WebSocket transcriber
   ##########################################################################

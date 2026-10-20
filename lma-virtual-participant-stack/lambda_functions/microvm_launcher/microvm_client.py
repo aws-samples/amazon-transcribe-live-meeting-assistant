@@ -5,12 +5,14 @@
 
 WHY THIS EXISTS
 ---------------
-`boto3.client("lambda-microvms")` raises UnknownServiceError on the Lambda
-python3.12 runtime: the service launched 2026-06 and the runtime's bundled
-botocore has no service model for it. The obvious fixes (a boto3 layer, or real
-deployment packages) both add build machinery to a stack that currently has
-none — the VP template is plain CloudFormation with no SAM transform and no
-build step, and its Lambdas are inline `Code: ZipFile`.
+botocore carries a `lambda-microvms` service model from 1.43.115 (2026-10-19),
+so `boto3.client("lambda-microvms")` works wherever a botocore that new is
+installed. The Lambda runtimes are the problem: their bundled botocore lags the
+latest release by months, and on python3.12 today the call still raises
+UnknownServiceError. The obvious fixes — a boto3 layer, or real deployment
+packages — both add build machinery to a stack that currently has none, since
+the VP template is plain CloudFormation with no SAM transform and no build step,
+and its Lambdas are inline `Code: ZipFile`.
 
 None of that is necessary. The API is ordinary REST-JSON on the *standard Lambda
 endpoint*: its service model declares `endpointPrefix: lambda` and
@@ -20,9 +22,10 @@ SigV4 signer, both of which every Lambda runtime already has.
 Verified against the live service (2026-08-08): GetMicrovmImage returned HTTP 200
 with plain botocore SigV4 and no additional dependencies.
 
-If a future runtime bundles a boto3 that knows `lambda-microvms`, this module can
-be deleted and replaced with `boto3.client("lambda-microvms")` — the method names
-and payloads here mirror the SDK's deliberately.
+Once the runtimes ship a botocore that knows the service, this module can be
+deleted and replaced with `boto3.client("lambda-microvms")` — the method names
+and payloads here mirror the SDK's deliberately, and the paths are taken from
+that same service model.
 """
 
 from __future__ import annotations
@@ -38,6 +41,9 @@ from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 
 API_VERSION = "2025-09-09"
+# Socket timeout for a single call. Exported because a caller that budgets its
+# own time has to know how long one call can take before returning.
+REQUEST_TIMEOUT_SECONDS = 30
 # Both the endpoint prefix and the SigV4 signing name are "lambda", not
 # "lambda-microvms" — taken from the service model, not guessed.
 SIGNING_NAME = "lambda"
@@ -87,15 +93,27 @@ class MicrovmClient:
             url, data=payload, method=method, headers=dict(signed.headers)
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(
+                request, timeout=REQUEST_TIMEOUT_SECONDS
+            ) as response:
                 raw = response.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")
+            # The error type arrives in the x-amzn-errortype header; the body
+            # usually carries only a message, so reading just the body leaves
+            # `code` empty. Prefer the header and fall back to the body. Both
+            # reads are guarded so that a malformed error response surfaces as
+            # a MicrovmError, which is what every caller handles, rather than
+            # as a different exception escaping from in here.
             code = ""
             try:
+                code = (exc.headers.get("x-amzn-errortype") or "").split(":")[0]
+            except (AttributeError, TypeError):
+                pass
+            try:
                 parsed = json.loads(detail)
-                code = parsed.get("__type") or parsed.get("code") or ""
+                code = code or parsed.get("__type") or parsed.get("code") or ""
                 detail = parsed.get("message") or parsed.get("Message") or detail
             except (ValueError, AttributeError):
                 pass
@@ -141,3 +159,49 @@ class MicrovmClient:
     def get_microvm_image(self, image_identifier: str) -> dict:
         ident = urllib.parse.quote(image_identifier, safe="")
         return self._call("GET", f"/{API_VERSION}/microvm-images/{ident}")
+
+    def list_microvm_image_versions(
+        self,
+        image_identifier: str,
+        *,
+        max_results: int | None = None,
+        next_token: str | None = None,
+    ) -> dict:
+        """ListMicrovmImageVersions. Returns `{"items": [...], "nextToken": ...}`.
+
+        An image holds at most 50 versions, and every rebuild of the same image
+        adds one, so a long-lived stack needs to know what is there before it
+        can make room.
+
+        `max_results` must be between 1 and 50; the service rejects anything
+        larger with a ValidationException rather than clamping it. The service
+        also returns a trailing `nextToken` with an empty final page, so a
+        caller that pages until the token is absent makes one extra call.
+        """
+        ident = urllib.parse.quote(image_identifier, safe="")
+        query = {
+            key: str(value)
+            for key, value in (("maxResults", max_results), ("nextToken", next_token))
+            if value is not None
+        }
+        path = f"/{API_VERSION}/microvm-images/{ident}/versions"
+        if query:
+            path = f"{path}?{urllib.parse.urlencode(query)}"
+        return self._call("GET", path)
+
+    def delete_microvm_image_version(
+        self, image_identifier: str, image_version: str
+    ) -> dict:
+        """DeleteMicrovmImageVersion.
+
+        Versions form a chain: each one records the version it was built on
+        top of. A version that another version still names as its base cannot
+        be removed, so deleting a span of them means working oldest-first and
+        retrying — see `prune_microvm_image_versions` in the pruner, which is
+        the only caller that needs to care.
+        """
+        ident = urllib.parse.quote(image_identifier, safe="")
+        version = urllib.parse.quote(image_version, safe="")
+        return self._call(
+            "DELETE", f"/{API_VERSION}/microvm-images/{ident}/versions/{version}"
+        )

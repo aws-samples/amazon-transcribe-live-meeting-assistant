@@ -4,10 +4,11 @@
 """Unit tests for the SigV4-based Lambda MicroVMs client (no AWS calls).
 
 The client exists because `boto3.client("lambda-microvms")` raises
-UnknownServiceError on the Lambda python3.12 runtime — its bundled botocore has
-no service model for a service that launched 2026-06. These tests pin the wire
-contract (paths, methods, signing name) against the published service model, so
-a hand-rolled client cannot silently drift from the real API.
+UnknownServiceError on the Lambda python3.12 runtime: botocore only gained the
+service model in 1.43.115 (2026-10-19), and the runtimes' bundled botocore lags
+well behind that. These tests pin the wire contract (paths, methods, signing
+name) against the published service model, so a hand-rolled client cannot
+silently drift from the real API.
 """
 
 from __future__ import annotations
@@ -63,6 +64,18 @@ def test_endpoint_uses_the_standard_lambda_host(module) -> None:
             "GET",
             "/2025-09-09/microvm-images/img-1",
         ),
+        (
+            "list_microvm_image_versions",
+            ("img-1",),
+            "GET",
+            "/2025-09-09/microvm-images/img-1/versions",
+        ),
+        (
+            "delete_microvm_image_version",
+            ("img-1", "7.0"),
+            "DELETE",
+            "/2025-09-09/microvm-images/img-1/versions/7.0",
+        ),
     ],
 )
 def test_request_paths_match_the_service_model(
@@ -107,6 +120,39 @@ def test_identifiers_are_url_encoded(module) -> None:
     assert "%3A" in path
 
 
+def test_list_versions_puts_pagination_in_the_query_string(module) -> None:
+    """maxResults and nextToken are querystring members in the service model."""
+    client = module.MicrovmClient(region="us-west-2", session=mock.MagicMock())
+    with mock.patch.object(client, "_call", return_value={"items": []}) as called:
+        client.list_microvm_image_versions("img-1", max_results=100, next_token="abc")
+    path = called.call_args[0][1]
+    assert path.startswith("/2025-09-09/microvm-images/img-1/versions?")
+    assert "maxResults=100" in path
+    assert "nextToken=abc" in path
+
+
+def test_list_versions_omits_the_query_string_when_unpaginated(module) -> None:
+    client = module.MicrovmClient(region="us-west-2", session=mock.MagicMock())
+    with mock.patch.object(client, "_call", return_value={"items": []}) as called:
+        client.list_microvm_image_versions("img-1")
+    assert called.call_args[0][1] == "/2025-09-09/microvm-images/img-1/versions"
+
+
+def test_version_paths_url_encode_the_image_arn(module) -> None:
+    """Both version operations are addressed by ARN, whose colons must escape."""
+    client = module.MicrovmClient(region="us-west-2", session=mock.MagicMock())
+    arn = "arn:aws:lambda:us-west-2:123456789012:microvm-image:my-image"
+    for call in (
+        lambda c: c.list_microvm_image_versions(arn),
+        lambda c: c.delete_microvm_image_version(arn, "3.0"),
+    ):
+        with mock.patch.object(client, "_call", return_value={}) as called:
+            call(client)
+        path = called.call_args[0][1]
+        assert ":" not in path, f"ARN colons must be percent-encoded, got {path}"
+        assert "%3A" in path
+
+
 def test_http_error_is_wrapped_with_status_and_message(module) -> None:
     import urllib.error
 
@@ -123,6 +169,36 @@ def test_http_error_is_wrapped_with_status_and_message(module) -> None:
     assert excinfo.value.status == 402
     assert excinfo.value.code == "ServiceQuotaExceededException"
     assert "quota exceeded" in str(excinfo.value)
+
+
+def test_error_type_is_read_from_the_response_header(module) -> None:
+    """A rest-json service names the error in x-amzn-errortype, not the body.
+
+    Callers that branch on the error type -- the version pruner retries a
+    refusal from the base-image chain -- get nothing if only the body is read,
+    because the body usually carries just a message.
+    """
+    import io
+    import urllib.error
+
+    client = module.MicrovmClient(region="us-west-2", session=mock.MagicMock())
+    body = json.dumps({"message": "version is in use as a base image"})
+    err = urllib.error.HTTPError(
+        "https://x",
+        409,
+        "Conflict",
+        {"x-amzn-errortype": "ConflictException:https://example.com/shape/"},
+        io.BytesIO(body.encode()),
+    )
+    with mock.patch("urllib.request.urlopen", side_effect=err):
+        with mock.patch.object(module.SigV4Auth, "add_auth"):
+            with pytest.raises(module.MicrovmError) as excinfo:
+                client.delete_microvm_image_version("img-1", "3.0")
+    # The service appends a shape reference after a colon; it is dropped,
+    # leaving the type on its own.
+    assert excinfo.value.code == "ConflictException"
+    assert excinfo.value.status == 409
+    assert "in use as a base image" in str(excinfo.value)
 
 
 def test_missing_credentials_raises_a_clear_error(module) -> None:

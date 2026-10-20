@@ -1595,3 +1595,62 @@ def test_launcher_never_raises_after_starting_a_microvm(launcher: str) -> None:
     assert "try:" in poll and "except" in poll, (
         "the wait-for-RUNNING poll must swallow transient GetMicrovm failures"
     )
+
+
+def test_the_pruner_reruns_whenever_a_version_has_been_added(template: dict) -> None:
+    """The trigger property has to be the thing a rebuild changes.
+
+    A custom resource is only invoked when one of its properties changes. The
+    image adds a version whenever ANY of its properties change -- a hook
+    timeout, a memory floor, an environment variable -- not only when the
+    source zip does, so keying the prune on the source location would skip
+    exactly the rebuilds that go unnoticed. The active version changes on every
+    successful rebuild, which is when there is something to prune.
+    """
+    props = template["Resources"]["VPMicrovmImagePruner"]["Properties"]
+    trigger = json.dumps(props.get("LatestActiveImageVersion"))
+    assert "VPMicrovmImage" in trigger and "LatestActiveImageVersion" in trigger
+    # The source location is not a sufficient trigger on its own.
+    assert "MicrovmSourceCodeLocation" not in json.dumps(props)
+
+
+def test_the_pruner_never_deletes_the_image_it_prunes(template: dict) -> None:
+    """Scoped to the one image, and to reading and removing versions only."""
+    statements = template["Resources"]["VPMicrovmImagePrunerRole"]["Properties"][
+        "Policies"
+    ][0]["PolicyDocument"]["Statement"]
+    actions = {a for s in statements for a in s["Action"]}
+    assert actions == {
+        "lambda:GetMicrovmImage",
+        "lambda:ListMicrovmImageVersions",
+        "lambda:DeleteMicrovmImageVersion",
+    }
+    assert "lambda:DeleteMicrovmImage" not in actions
+    for statement in statements:
+        assert statement["Resource"] != "*", "scope these to the image"
+        assert "VPMicrovmImage" in json.dumps(statement["Resource"])
+
+
+def test_the_pruner_logs_to_a_retained_encrypted_group(template: dict) -> None:
+    """Its log is the only record of what a prune did, or why it did nothing."""
+    resources = template["Resources"]
+    group = resources["VPMicrovmImagePrunerLogGroup"]
+    assert group["Condition"] == "UseMicrovmLaunchType"
+    assert group["Properties"]["RetentionInDays"] == {
+        "Ref": "CloudWatchLogsExpirationInDays"
+    }
+    assert group["Properties"]["KmsKeyId"] == {"Ref": "CustomerManagedEncryptionKeyArn"}
+    function = resources["VPMicrovmImagePrunerFunction"]["Properties"]
+    assert function["LoggingConfig"]["LogGroup"] == {
+        "Ref": "VPMicrovmImagePrunerLogGroup"
+    }, "without this the function logs to an auto-created, unencrypted group"
+    assert "FunctionName" in function
+
+
+def test_every_log_group_in_the_template_has_its_own_name(template: dict) -> None:
+    names = [
+        json.dumps(resource["Properties"]["LogGroupName"])
+        for resource in template["Resources"].values()
+        if resource["Type"] == "AWS::Logs::LogGroup"
+    ]
+    assert len(names) == len(set(names)), f"two log groups share a name: {names}"
