@@ -69,11 +69,9 @@ const isLocalTest = process.env.LOCAL_TEST === 'true';
  * in a deployment at all -- which is the only place a real room's audio exists
  * to be diagnosed.
  *
- * Used only by the diarized path. The two pre-existing `process.env.DEBUG`
- * gates elsewhere in this file are left as they are on purpose: widening them
- * would start writing transcript text to the logs of every deployment that
- * sets LogLevel=DEBUG, which is a change to existing behaviour and not this
- * change's business.
+ * Used only by the diarized path, which logs participant names and no
+ * transcript text. The two `process.env.DEBUG` gates elsewhere in this file
+ * are deliberately separate and keep their own condition.
  */
 const diagnosticsOn = (): boolean =>
   Boolean(process.env.DEBUG) || (process.env.LOG_LEVEL || '').toUpperCase() === 'DEBUG';
@@ -436,11 +434,14 @@ class KinesisStreamManager {
     }
     // Upper bound, not the lower bound the undiarized path uses. A roster entry
     // is pushed with the start time of the word at which the change was
-    // noticed, so an exact tie means "this speaker from here on"; resolving a
-    // tie to the PREVIOUS speaker named every turn after a roster change with
-    // the name of the person before it. The undiarized path keeps its
-    // lower-bound search, because changing a shared helper would alter the
-    // behaviour every deployment has today.
+    // noticed, so an exact tie means "this speaker from here on". Resolving a
+    // tie to the PREVIOUS speaker misattributes only the words at exactly that
+    // timestamp -- but because the entry is stamped from the last item of the
+    // partial in hand, those are the opening words of the new speaker's turn,
+    // which the roster splitter then peels off as a short segment under the
+    // previous participant's name. The undiarized path keeps its lower-bound
+    // search, because changing a shared helper would alter the behaviour every
+    // deployment has today.
     let index = this.upperBound(this.startTimes, absoluteStart) - 1;
     if (index < 0) {
       index = 0;
@@ -466,19 +467,31 @@ class KinesisStreamManager {
   /**
    * A stable id for a result that arrived without one.
    *
-   * Keyed on the first item's start time, because that is the one thing a
-   * partial and its final both carry: a final repeats its partial's items, so
-   * the first item's time is identical, while two different results start at
-   * different moments. Two requirements have to hold at once -- a partial and
-   * its final must share an id, and two different results must not -- and
-   * anything stateful fails one of them. A counter made every delivery unique,
-   * which orphaned the partial; memoising on the result object does not help,
-   * because the SDK deserialises a fresh object per TranscriptEvent, so a
-   * partial and its final are never the same object.
+   * Keyed on the result's own start time, falling back to the first timed
+   * item's, because that is the one thing a partial and its final both carry:
+   * a final repeats its partial's items, so the first item's time is the same,
+   * while two different results start at different moments. Two requirements
+   * have to hold at once -- a partial and its final must share an id, and two
+   * different results must not -- and anything stateful fails one of them. A
+   * counter makes every delivery unique, which orphans the partial; memoising
+   * on the result object does not help either, because the SDK deserialises a
+   * fresh object per TranscriptEvent, so a partial and its final are never the
+   * same object.
    *
-   * Transcribe always sends a ResultId, so none of this is reachable through
-   * the service. It exists so the degradation is "a different row" rather than
-   * "the same row", because a colliding id makes a meeting overwrite itself.
+   * Two cases this does NOT cover, stated rather than claimed away. If
+   * Transcribe re-decodes the leading word's timestamp between the partial and
+   * the final, the two get different ids and the partial is orphaned. And if a
+   * result carries no StartTime and no timed item at all, the anchor is 0, so
+   * two such results in one session collide -- there is nothing in a result
+   * with no times and no id that distinguishes it from another while still
+   * matching its own final, so this is a limit of the fallback rather than a
+   * choice between designs.
+   *
+   * Both need `ResultId` to be absent, and Transcribe always sends one, so
+   * none of this is reachable through the service. The fallback exists so that
+   * a result without an id still lands on a row of its own wherever it can,
+   * because the failure mode of a colliding id is a meeting overwriting itself
+   * onto one transcript row.
    */
   private static fallbackResultId(result: any, timeOffsetSeconds: number): string {
     const items = result?.Alternatives?.[0]?.Items ?? [];
@@ -507,18 +520,7 @@ class KinesisStreamManager {
    */
   private diarizedSegments(speakerName: string, result: any, timeOffsetSeconds: number): any {
     const items: TranscribeItem[] = result.Alternatives?.[0]?.Items ?? [];
-    // The fallback varies per result, like the WebSocket transcriber's. Keying
-    // it on the session offset instead made every result in a session collapse
-    // onto one id, because that offset is constant for the whole session -- so
-    // a missing ResultId would have turned a whole meeting into one row rather
-    // than merely losing the partial/final alignment.
-    // Transcribe always sends a ResultId, so the fallback is close to dead
-    // code -- but it has to degrade to "a different row" rather than "the same
-    // row", because the failure mode of a colliding id is that a whole meeting
-    // overwrites itself onto one transcript row. The session offset alone was
-    // not enough: two results in one session that both lack StartTime share a
-    // key. The counter makes the key unique by construction, and is per
-    // in-flight result so a partial and its final still agree.
+    // See fallbackResultId for what it is keyed on and what it does not cover.
     const resultId =
       result.ResultId ?? KinesisStreamManager.fallbackResultId(result, timeOffsetSeconds);
     const segments = buildDiarizedSegments(items, {

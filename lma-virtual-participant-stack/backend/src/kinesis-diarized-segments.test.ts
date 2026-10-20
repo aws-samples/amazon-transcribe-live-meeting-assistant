@@ -94,6 +94,26 @@ describe('with voice separation off', () => {
         assert.equal(records.length, 1);
         assert.equal(records[0]?.Speaker, 'Conference Room');
     });
+
+    it('resolves a roster tie to the PREVIOUS speaker, as it does today', async () => {
+        // The diarized path deliberately uses the opposite tie-break, and the
+        // two searches sit next to each other in the writer. Pinned so that
+        // unifying them -- the natural tidy-up to reach for -- cannot silently
+        // change the attribution every deployment has now. If this needs
+        // changing, it is a behaviour change for existing meetings and belongs
+        // in its own commit with its own note, not in a refactor.
+        manager.speakers = ['Alex', 'Beth'];
+        manager.startTimes = [0, 10];
+        manager.currentSpeakerName = 'Beth';
+        const records = await emit('Beth', result(turn(undefined, 4, 10), { isPartial: true }));
+        // The word at exactly 10 goes to Alex and the rest to Beth: a
+        // lower-bound search resolves the tie backwards, which is why the
+        // diarized path uses the upper bound instead.
+        assert.deepEqual(
+            records.map((record) => record.Speaker),
+            ['Alex', 'Beth'],
+        );
+    });
 });
 
 describe('with voice separation on', () => {

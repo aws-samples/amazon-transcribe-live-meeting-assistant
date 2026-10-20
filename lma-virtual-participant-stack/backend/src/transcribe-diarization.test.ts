@@ -454,7 +454,11 @@ describe('segments for a result', () => {
         assert.ok(pieces[0]!.Transcript.startsWith(','));
     });
 
-    it('a punctuation-only run is one piece at the run time, not at zero', () => {
+    it('a punctuation-only run resolves its roster at or after the session offset', () => {
+        // Named for what it checks. A run with nothing timed in it has no
+        // position of its own, so the only guarantee available is that the
+        // roster is not resolved before the session started -- see the test
+        // below for where such a run is actually stamped.
         const segments = buildDiarizedSegments([punctuation('.')], {
             resultId: 'res-8b',
             timeOffsetSeconds: 5,
@@ -463,6 +467,63 @@ describe('segments for a result', () => {
         });
         assert.equal(Object.keys(segments).length, 1);
         assert.equal(Object.values(segments)[0]?.Speaker, 'Right');
+    });
+
+    it('a punctuation-only run is stamped at the session offset, having no time of its own', () => {
+        // Pinned rather than endorsed: punctuation carries no timestamp, so a
+        // result whose every item is punctuation gives the builder nothing to
+        // position it by and the segment lands at the start of the session.
+        // Transcribe has not been observed to send one. Recorded here so the
+        // behaviour is known rather than discovered, and so that giving such a
+        // run a better position later is a deliberate change with a test to
+        // update.
+        const segments = buildDiarizedSegments([punctuation('.')], {
+            resultId: 'res-8c',
+            timeOffsetSeconds: 300,
+            rosterNameAt: () => 'Room',
+            nameFor,
+        });
+        const [piece] = Object.values(segments);
+        assert.equal(piece?.StartTime, 300);
+        assert.equal(piece?.EndTime, 300);
+    });
+
+    it('untimed punctuation mid-run stays with the piece in progress', () => {
+        // Punctuation in the middle of a turn has no timestamp, so it cannot be
+        // placed on the roster timeline. It has to join the piece being built;
+        // resolving the roster for it instead would test it against the roster
+        // at the RUN's start, which for a run the roster changed under means a
+        // piece that starts over, going backwards in time and splitting a
+        // sentence at its comma.
+        // The comma sits AFTER the roster change, so the roster at the run's
+        // start ('Alex') differs from the piece it belongs to ('Beth'). That is
+        // what makes the two behaviours distinguishable: placed before the
+        // change they agree.
+        const segments = buildDiarizedSegments(
+            [
+                word('Right', '0', 0, 1),
+                word('then', '0', 1, 2),
+                word('lets', '0', 2, 3),
+                word('move', '0', 20, 21),
+                word('on', '0', 21, 22),
+                punctuation(','),
+                word('now', '0', 22, 23),
+            ],
+            {
+                resultId: 'res-8d',
+                timeOffsetSeconds: 0,
+                rosterNameAt: (start) => (start < 20 ? 'Alex' : 'Beth'),
+                nameFor,
+            },
+        );
+        const pieces = Object.values(segments);
+        assert.deepEqual(
+            pieces.map((piece) => piece.Speaker),
+            ['Alex (spk_0)', 'Beth (spk_0)'],
+        );
+        assert.ok(pieces[1]!.Transcript.includes(','), 'the comma belongs to the turn it is in');
+        assert.ok(pieces[0]!.EndTime <= pieces[1]!.StartTime, 'pieces must not overlap');
+        assert.ok(pieces[1]!.StartTime >= 20, 'the second piece must not start before its words');
     });
 
     it('carries the full text of each turn', () => {
