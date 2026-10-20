@@ -572,3 +572,16 @@ test('after an outage longer than the buffer, the newest audio is kept and rows 
         await asr.close();
     }
 });
+
+test('an enrolled name is not turned into a voice id', () => {
+    // With voice enrollment on, the engine reports the enrolled person's NAME
+    // in the field that otherwise carries a voice id. Prefixing it produced
+    // "spk_Sarah Lee"; the WebSocket transcriber had the same defect.
+    assert.equal(speakerNameFor('Conference Room', 'Sarah Lee'), 'Conference Room (Sarah Lee)');
+    assert.equal(speakerNameFor('Conference Room', '李雷'), 'Conference Room (李雷)');
+});
+
+test('a bare Transcribe index still becomes spk_N', () => {
+    assert.equal(speakerNameFor('Conference Room', '0'), 'Conference Room (spk_0)');
+    assert.equal(speakerNameFor('Conference Room', '29'), 'Conference Room (spk_29)');
+});

@@ -164,18 +164,12 @@ export async function fetchAsrRuntimeSwitches(
 
 // --- speaker labels ---------------------------------------------------------
 
-/** Normalise an engine voice id to the `spk_N` form used everywhere else in LMA. */
-export const formatSpeakerLabel = (raw: string | null | undefined): string | undefined => {
-    const trimmed = (raw ?? '').trim();
-    if (trimmed.length === 0) {
-        return undefined;
-    }
-    return trimmed.startsWith('spk_') ? trimmed : `spk_${trimmed}`;
-};
+export { formatSpeakerLabel } from './transcribe-diarization.js';
+import { formatSpeakerLabel as labelOf } from './transcribe-diarization.js';
 
 /** Roster name plus the engine's voice id when diarization is on, in the transcriber's label format. */
 export const speakerNameFor = (rosterName: string, voiceId: string | null | undefined): string => {
-    const label = formatSpeakerLabel(voiceId);
+    const label = labelOf(voiceId);
     return label === undefined ? rosterName : `${rosterName} (${label})`;
 };
 

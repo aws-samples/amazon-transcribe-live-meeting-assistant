@@ -2328,6 +2328,13 @@ Resources:
               Value: !Ref CustomVocabularyName
             - Name: ASR_LAUNCHER_FUNCTION_ARN
               Value: !Ref AsrLauncherFunctionArn
+            # The container's own diagnostics, including the per-result
+            # separation log, were gated on a DEBUG variable nothing set -- so
+            # the one tool for working out why a room separated badly could not
+            # be switched on in a deployment at all. Driven by the stack's
+            # LogLevel parameter, like every Lambda here.
+            - Name: LOG_LEVEL
+              Value: !Ref LogLevel
             - Name: LMA_IDENTITY
               Value: !Ref LMAIdentity
             - Name: INTRO_MESSAGE

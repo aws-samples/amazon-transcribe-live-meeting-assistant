@@ -8,6 +8,7 @@ title: "Virtual Participant"
 
 - [Overview](#overview)
 - [When to use Virtual Participant](#when-to-use-virtual-participant)
+- [Several people behind one attendee](#several-people-behind-one-attendee)
 - [Supported Platforms](#supported-platforms)
 - [Joining a Meeting](#joining-a-meeting)
 - [Status Lifecycle](#status-lifecycle)
@@ -45,6 +46,93 @@ The Virtual Participant (VP) is a headless Chrome browser that joins meetings as
 - **Open VP live view**: Use the Meeting Assistant's "Open VP live view" feature to see the bot's browser view of the meeting in real time.
 
 See [Meeting Sources](meeting-sources.md) for the full comparison.
+
+## Several people behind one attendee
+
+A Virtual Participant names speakers from the meeting roster, which is exact for
+an ordinary remote attendee and useless for a conference room: everybody sharing
+one speakerphone shares one roster entry, so a whole room arrives as a single
+speaker.
+
+**Virtual Participant voice separation** on
+**Configuration ▸ Transcription Engine** fixes that. With it on, the VP tells
+apart the distinct voices behind one attendee and labels them
+`Conference Room (spk_0)`, `Conference Room (spk_1)` and so on — the roster name
+for who the platform says is talking, the voice id for which voice within it.
+
+Name them on the
+[Speakers panel](transcription-and-translation.md#naming-the-voices), which
+lists one row per voice and relabels every segment that voice produced.
+
+The other two naming routes do **not** apply to a Virtual Participant today, and
+it is worth knowing which:
+[naming from what people say](transcription-and-translation.md#finding-the-names-automatically)
+only considers voices whose base name is a placeholder such as
+`Other Participant`, and a VP's base name is always a real roster name; and
+[voiceprints](voice-enrollment.md) are seeded only into streaming sessions, not
+into a VP's.
+
+It works on either transcription engine. On Amazon Transcribe the turns are
+recovered from Transcribe's own per-item speaker labels; on the
+[on-demand engine](microvm-asr.md) they come from that engine's own separation.
+Either way the switch is read once at the start of each meeting, so it takes
+effect on the next meeting with no redeployment.
+
+Three limits are worth knowing.
+
+Labels arrive only when a segment finalises. Amazon Transcribe caps a result at
+about thirty seconds, so the live transcript can show one roster name, and no
+voice ids, for that long before the row splits into voices. The words themselves
+are not lost; a watcher simply sees the separation late.
+
+Accuracy depends on the audio, and on which engine. A room heard through a
+speakerphone, compressed by the meeting platform and mixed with everyone else,
+is the hardest input separation gets.
+
+Measured on a deployed stack with four synthesised voices mixed onto one
+channel, 33 seconds, identical audio to both engines:
+
+| Engine | Distinct labels for 4 voices | Time-weighted purity |
+|---|---|---|
+| Amazon Transcribe | 2 | 57% |
+| [On-demand engine](microvm-asr.md) | 3 | 79% |
+
+Purity here is the share of labelled time whose label maps to a single real
+person; 100% would mean every label belongs to exactly one speaker. **Prefer the
+on-demand engine for rooms.** On Amazon Transcribe each label straddled more
+than one person, so naming those rows attaches a real name to a substantial
+share of somebody else's words — which is worse than the unseparated
+`Conference Room`, because that at least claims nothing it cannot support.
+
+Both engines merged the speaker whose turns were under about a second
+("Agreed.", "Fine by me."): too little audio to characterise a voice. Expect
+short interjections to be attributed to whoever spoke around them.
+
+Synthesised voices may be more alike than real ones and the test had no room
+reverb or background noise, so treat the figures as directional rather than a
+guarantee for your room.
+
+To see how a particular room separated, set the stack's **LogLevel** parameter
+to `DEBUG`. The Virtual Participant then logs one `[DIARIZATION]` line per
+Transcribe result, giving the number of segments it produced and the speaker it
+assigned to each — which is what tells you whether the labels or the platform's
+active-speaker signal is the thing going wrong.
+
+Note what that writes: the speaker names on those lines are **participant
+names**, so at `DEBUG` they reach CloudWatch Logs. No transcript text is
+written by this line. Turn the level back down once you have what you need.
+
+Where the two signals disagree, the finer boundary wins: a voice label running
+across a change of platform speaker is split at the change. A turn split in two
+can be put right with **Only this segment** on the meeting page, which is the
+affordance for a single turn attributed to the wrong voice; a turn merged under
+one name cannot be separated at all. (Renaming on the Speakers panel would not
+help here — it is per voice, so it would rename every turn that voice produced,
+not the one that was misattributed.)
+
+In assistant mode on Amazon Transcribe the assistant's own speech shares the
+meeting channel, so it too acquires a voice id; on the on-demand engine it has
+its own channel and never does.
 
 ## Supported Platforms
 

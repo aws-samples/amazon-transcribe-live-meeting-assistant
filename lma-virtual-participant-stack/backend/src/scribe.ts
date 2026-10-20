@@ -338,6 +338,14 @@ export class TranscriptionService {
         // The deployment's runtime switch, read per meeting; ASR_ENGINE overrides it
         // per VP. A MicroVM that cannot be acquired falls through to Amazon Transcribe.
         const switches = await fetchAsrRuntimeSwitches();
+        // The same switch both engines honour. On the on-demand engine it is
+        // passed into the session below; on Amazon Transcribe it tells the
+        // segment builder to recover turns from the per-item speaker labels,
+        // which this path has always requested and never read.
+        kinesisStreamManager.setDiarization(switches.diarizeVirtualParticipant);
+        if (switches.diarizeVirtualParticipant) {
+            console.log('[DIARIZATION] VP voice separation is on for this meeting');
+        }
         if (resolveVpAsrEngine(switches) === 'microvm') {
             const ran = await this.runMicrovmTranscription(recordingStream, switches.diarizeVirtualParticipant);
             if (ran) {
