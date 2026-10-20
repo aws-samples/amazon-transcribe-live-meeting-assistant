@@ -550,3 +550,61 @@ describe('a partial with nothing timed in it', () => {
         assert.ok(piece.EndTime >= piece.StartTime);
     });
 });
+
+describe('the roster is resolved on the meeting timeline, not the session one', () => {
+    // Both of these guard the MAIN path, where items do carry times. Transcribe
+    // resets item times to 0 on every reconnect, so dropping the session offset
+    // makes the roster lookup compare session-relative times against a timeline
+    // of absolute ones -- and names rows after whoever was talking minutes
+    // earlier. Both lines survived mutation before these tests existed.
+    const nameFor = (roster: string, label: string | undefined) =>
+        label === undefined ? roster : `${roster} (${label})`;
+    // The roster changes at an absolute 310s. Items sit at 5-10s within a
+    // session that began at 300s, so they land after the change only if the
+    // offset is applied.
+    const rosterNameAt = (start: number) => (start < 310 ? 'Before' : 'After');
+
+    it('applies the offset when splitting a final by roster', () => {
+        const segments = buildDiarizedSegments(turn('0', 6, 10), {
+            resultId: 'res-off1',
+            timeOffsetSeconds: 300,
+            rosterNameAt,
+            nameFor,
+        });
+        assert.deepEqual(
+            Object.values(segments).map((segment) => segment.Speaker),
+            ['After (spk_0)'],
+        );
+    });
+
+    it('applies the offset when naming a partial', () => {
+        const unlabelled = Array.from({ length: 6 }, (_u, i) =>
+            word(`p${i}`, undefined, 10 + i, 10 + i + 0.9),
+        );
+        const segments = buildDiarizedSegments(unlabelled, {
+            resultId: 'res-off2',
+            timeOffsetSeconds: 300,
+            rosterNameAt,
+            nameFor,
+            isPartial: true,
+        });
+        assert.deepEqual(
+            Object.values(segments).map((segment) => segment.Speaker),
+            ['After'],
+        );
+    });
+
+    it('splits a final at an absolute roster boundary', () => {
+        // Two turns either side of 310 absolute: 5s and 15s within the session.
+        const segments = buildDiarizedSegments([...turn('0', 4, 5), ...turn('0', 4, 15)], {
+            resultId: 'res-off3',
+            timeOffsetSeconds: 300,
+            rosterNameAt,
+            nameFor,
+        });
+        assert.deepEqual(
+            Object.values(segments).map((segment) => segment.Speaker),
+            ['Before (spk_0)', 'After (spk_0)'],
+        );
+    });
+});

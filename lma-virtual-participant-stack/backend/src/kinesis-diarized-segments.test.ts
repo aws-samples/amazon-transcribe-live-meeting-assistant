@@ -248,6 +248,11 @@ describe('every segment the writer starts, it finishes', () => {
     });
 
     it('leaves nothing in progress when the active speaker is steady', async () => {
+        // A happy-path check, NOT a guard: with one roster entry the splitter
+        // produces one piece whether or not the partial branch guards against
+        // splitting, so reverting the fix leaves this green. The test above is
+        // the one that detects it; this one catches a different class of
+        // breakage, where even the simple case stops finalising.
         const orphans = await partialThenFinal(['Conference Room', 'Conference Room', 'Conference Room']);
         assert.deepEqual(orphans, []);
     });
@@ -363,28 +368,50 @@ describe('a partial after a reconnect', () => {
 
 describe('results that arrive with no id of their own', () => {
     // Transcribe always sends a ResultId, so this is near-dead code -- but it
-    // has to degrade to "a different row", because a colliding id makes a whole
-    // meeting overwrite itself onto one transcript row.
+    // has to satisfy BOTH requirements at once, and the SDK hands over a fresh
+    // object per TranscriptEvent, so every test here uses DISTINCT objects.
+    // An earlier version memoised an id on the result object and passed only
+    // because its test mutated one object and emitted it twice, which is the
+    // one shape production cannot produce.
     beforeEach(() => manager.setDiarization(true));
 
-    it('separates two results that lack both an id and a start time', async () => {
+    it('keeps a partial and its final on the same row, as separate objects', async () => {
+        // The final repeats the partial's items, so the first item's start time
+        // is the thing both deliveries share.
+        const partial = await emit(
+            'Conference Room',
+            result(turn(undefined, 4, 7), { isPartial: true }),
+            0,
+        );
+        const final = await emit(
+            'Conference Room',
+            result([...turn('0', 4, 7), { Content: '.', Type: 'punctuation' } as ReturnType<typeof word>], {}),
+            0,
+        );
+        assert.equal(partial.length, 1);
+        assert.equal(
+            partial[0]?.SegmentId,
+            final[0]?.SegmentId,
+            'the final must replace the partial, not orphan it',
+        );
+    });
+
+    it('separates two results that start at different moments', async () => {
         const first = await emit('Conference Room', result(turn('0', 6, 0), {}), 0);
-        const second = await emit('Conference Room', result(turn('0', 6, 0), {}), 0);
+        const second = await emit('Conference Room', result(turn('0', 6, 40), {}), 0);
         assert.notEqual(first[0]?.SegmentId, second[0]?.SegmentId);
     });
 
-    it('keeps a partial and its final on the same row', async () => {
-        // The same result object re-delivered must not get two ids, or the
-        // partial is orphaned.
-        const shared = result(turn(undefined, 4, 0), { isPartial: true });
-        sent.length = 0;
-        await manager.sendTranscriptSegment('Conference Room', shared, 0);
-        const partialId = sent.find((r) => r.EventType === 'ADD_TRANSCRIPT_SEGMENT')?.SegmentId;
-        shared.IsPartial = false;
-        shared.Alternatives[0].Items = turn('0', 6, 0);
-        sent.length = 0;
-        await manager.sendTranscriptSegment('Conference Room', shared, 0);
-        const finalId = sent.find((r) => r.EventType === 'ADD_TRANSCRIPT_SEGMENT')?.SegmentId;
-        assert.equal(partialId, finalId);
+    it('separates the same moment in two different sessions', async () => {
+        // Transcribe resets item times to 0 on reconnect, so the session
+        // offset is what tells the two apart.
+        const first = await emit('Conference Room', result(turn('0', 6, 0), {}), 0);
+        const second = await emit('Conference Room', result(turn('0', 6, 0), {}), 300);
+        assert.notEqual(first[0]?.SegmentId, second[0]?.SegmentId);
+    });
+
+    it('prefers the start time the result reports, when it has one', async () => {
+        const records = await emit('Conference Room', result(turn('0', 6, 10), { startTime: 99 }), 0);
+        assert.ok(records[0]?.SegmentId?.includes('99'), records[0]?.SegmentId ?? '(no id)');
     });
 });

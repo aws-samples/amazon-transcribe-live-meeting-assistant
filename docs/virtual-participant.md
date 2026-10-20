@@ -118,6 +118,10 @@ Transcribe result, giving the number of segments it produced and the speaker it
 assigned to each — which is what tells you whether the labels or the platform's
 active-speaker signal is the thing going wrong.
 
+Note what that writes: the speaker names on those lines are **participant
+names**, so at `DEBUG` they reach CloudWatch Logs. No transcript text is
+written by this line. Turn the level back down once you have what you need.
+
 Where the two signals disagree, the finer boundary wins: a voice label running
 across a change of platform speaker is split at the change. A turn split in two
 can be put right with **Only this segment** on the meeting page, which is the

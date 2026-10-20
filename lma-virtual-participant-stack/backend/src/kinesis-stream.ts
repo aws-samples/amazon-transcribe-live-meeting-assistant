@@ -96,8 +96,6 @@ class KinesisStreamManager {
   // unless the deployment's VP voice-separation switch is on, so a deployment
   // that has not asked for it keeps exactly today's attribution.
   private diarize = false;
-  // Separates results that arrive with neither a ResultId nor a StartTime.
-  private fallbackIdCounter = 0;
 
   constructor() {
     // In local test mode, explicitly use default provider which checks credentials file first
@@ -451,22 +449,6 @@ class KinesisStreamManager {
   }
 
   /**
-   * One segment per recovered speaker turn, named `roster (spk_N)`.
-   *
-   * Composes both signals the way the on-demand engine does: the roster says
-   * which participant the platform reports, the voice label says which voice
-   * within it. For a conference room sharing one speakerphone that is the only
-   * thing that separates the people in the room.
-   *
-   * Segment ids are keyed on Transcribe's own `ResultId` plus the run index,
-   * NOT on the speaker name. That is what keeps a partial aligned with its
-   * final: partials carry no labels, so a partial is always one run at index 0
-   * and is cleanly replaced by the final's first piece, while later pieces
-   * arrive as new segments. Keying on anything derived from the label would
-   * rename the segment between partial and final and orphan the partial, which
-   * would then sit in the UI for ever marked in-progress.
-   */
-  /**
    * Whether a result is still in progress.
    *
    * Derived once and shared, because the places that used to decide it
@@ -482,28 +464,47 @@ class KinesisStreamManager {
   }
 
   /**
-   * A stable, unique id for a result that arrived without one.
+   * A stable id for a result that arrived without one.
    *
-   * Keyed on the session offset and the result's own start time where it has
-   * them, with a counter to separate results that have neither. Memoised on
-   * the result object so a partial and its final -- which is the same object
-   * re-delivered -- resolve to the same id rather than to two.
+   * Keyed on the first item's start time, because that is the one thing a
+   * partial and its final both carry: a final repeats its partial's items, so
+   * the first item's time is identical, while two different results start at
+   * different moments. Two requirements have to hold at once -- a partial and
+   * its final must share an id, and two different results must not -- and
+   * anything stateful fails one of them. A counter made every delivery unique,
+   * which orphaned the partial; memoising on the result object does not help,
+   * because the SDK deserialises a fresh object per TranscriptEvent, so a
+   * partial and its final are never the same object.
+   *
+   * Transcribe always sends a ResultId, so none of this is reachable through
+   * the service. It exists so the degradation is "a different row" rather than
+   * "the same row", because a colliding id makes a meeting overwrite itself.
    */
-  private fallbackResultId(result: any, timeOffsetSeconds: number): string {
-    if (typeof result.__lmaFallbackId === 'string') {
-      return result.__lmaFallbackId;
-    }
-    this.fallbackIdCounter += 1;
-    const id = `vp-${timeOffsetSeconds}-${result.StartTime ?? 0}-${this.fallbackIdCounter}`;
-    try {
-      Object.defineProperty(result, '__lmaFallbackId', { value: id, enumerable: false });
-    } catch {
-      // A frozen result cannot be memoised; a fresh id per delivery is still
-      // better than two results sharing one.
-    }
-    return id;
+  private static fallbackResultId(result: any, timeOffsetSeconds: number): string {
+    const items = result?.Alternatives?.[0]?.Items ?? [];
+    const firstTimed = items.find(
+      (item: any) => item?.Type === 'pronunciation' && item.StartTime !== undefined,
+    );
+    const anchor = result?.StartTime ?? firstTimed?.StartTime ?? 0;
+    return `vp-${timeOffsetSeconds}-${anchor}`;
   }
 
+  /**
+   * One segment per recovered speaker turn, named `roster (spk_N)`.
+   *
+   * Composes both signals the way the on-demand engine does: the roster says
+   * which participant the platform reports, the voice label says which voice
+   * within it. For a conference room sharing one speakerphone that is the only
+   * thing that separates the people in the room.
+   *
+   * Segment ids are keyed on Transcribe's own `ResultId` plus the run index,
+   * NOT on the speaker name. That is what keeps a partial aligned with its
+   * final: a partial is always one piece at index 0 and is cleanly replaced by
+   * the final's first piece, while later pieces arrive as new segments. Keying
+   * on anything derived from the label would rename the segment between partial
+   * and final and orphan the partial, which would then sit in the UI for ever
+   * marked in-progress.
+   */
   private diarizedSegments(speakerName: string, result: any, timeOffsetSeconds: number): any {
     const items: TranscribeItem[] = result.Alternatives?.[0]?.Items ?? [];
     // The fallback varies per result, like the WebSocket transcriber's. Keying
@@ -518,7 +519,8 @@ class KinesisStreamManager {
     // not enough: two results in one session that both lack StartTime share a
     // key. The counter makes the key unique by construction, and is per
     // in-flight result so a partial and its final still agree.
-    const resultId = result.ResultId ?? this.fallbackResultId(result, timeOffsetSeconds);
+    const resultId =
+      result.ResultId ?? KinesisStreamManager.fallbackResultId(result, timeOffsetSeconds);
     const segments = buildDiarizedSegments(items, {
       resultId,
       timeOffsetSeconds,
