@@ -9,13 +9,20 @@ import re
 from datetime import datetime, timedelta
 
 import boto3
+from bedrock_compat import INVITATION_PARSER_MAX_TOKENS, build_inference_config, extract_text
 from botocore.config import Config
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Environment variables
-BEDROCK_MODEL_ID = os.environ.get("BEDROCK_MODEL_ID", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+#
+# BEDROCK_MODEL_ID is always supplied by the template, which passes the stack's
+# BedrockModelId parameter through; the literal below is reached only by a local
+# invocation that sets no environment, so it tracks the parameter's own default.
+BEDROCK_MODEL_ID = os.environ.get(
+    "BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+)
 BEDROCK_REGION = os.environ.get(
     "BEDROCK_REGION_OVERRIDE", os.environ.get("AWS_REGION", "us-east-1")
 )
@@ -33,8 +40,8 @@ bedrock = boto3.client(
 
 
 def get_generated_text(response):
-    """Extract generated text from Bedrock response"""
-    return response["output"]["message"]["content"][0]["text"]
+    """Extract generated text from Bedrock response, excluding any reasoning block"""
+    return extract_text(response)
 
 
 def call_bedrock(prompt_data):
@@ -45,7 +52,9 @@ def call_bedrock(prompt_data):
     message = {"role": "user", "content": [{"text": prompt_data}]}
 
     response = bedrock.converse(
-        modelId=modelId, messages=[message], inferenceConfig={"maxTokens": 1024, "temperature": 0}
+        modelId=modelId,
+        messages=[message],
+        inferenceConfig=build_inference_config(modelId, INVITATION_PARSER_MAX_TOKENS),
     )
 
     generated_text = get_generated_text(response)

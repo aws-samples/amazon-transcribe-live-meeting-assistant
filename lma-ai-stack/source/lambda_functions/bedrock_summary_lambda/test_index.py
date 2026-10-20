@@ -58,6 +58,7 @@ def _load_module():
     ``import index`` resolves to whichever directory happens to come first on
     sys.path.
     """
+    sys.path.insert(0, str(HERE))
     spec = importlib.util.spec_from_file_location("bedrock_summary_index", HERE / "index.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -353,7 +354,10 @@ def test_the_request_names_the_configured_model_and_a_deterministic_configuratio
     """Model id and inference configuration change answers without erroring.
 
     temperature 0 is what makes two summaries of the same meeting agree, and
-    maxTokens is the ceiling on summary length; both are silent if wrong.
+    maxTokens is the ceiling on summary length; both are silent if wrong. The
+    configured model here is a Nova one, which takes a temperature, so this pins
+    the shape sent to a model that accepts one -- the reasoning-capable Claude
+    generations get a different shape, asserted below.
     """
     bedrock, _ = install(monkeypatch)
     index.call_bedrock("a prompt")
@@ -361,9 +365,38 @@ def test_the_request_names_the_configured_model_and_a_deterministic_configuratio
         {
             "modelId": MODEL_ID,
             "messages": [{"role": "user", "content": [{"text": "a prompt"}]}],
-            "inferenceConfig": {"maxTokens": 512, "temperature": 0},
+            "inferenceConfig": {"maxTokens": 4096, "temperature": 0},
         }
     ]
+
+
+def test_no_temperature_is_sent_to_a_model_that_rejects_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude 5 and later refuse a request whose inferenceConfig carries temperature.
+
+    Not a quality setting but a hard failure: every summary on a stack configured
+    with one of those models would come back as the error string.
+    """
+    monkeypatch.setattr(index, "BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
+    bedrock, _ = install(monkeypatch)
+    index.call_bedrock("a prompt")
+    assert bedrock.requests[0]["inferenceConfig"] == {"maxTokens": 4096}
+
+
+def test_the_budget_leaves_room_for_reasoning_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reasoning is billed against maxTokens and is produced before any text.
+
+    Measured on a real transcript, a reasoning model spent more than 2,048 output
+    tokens on one summary and returned nothing at all under the 512 this used to
+    send. A budget below the observed need produces an empty summary rather than
+    an error, so the figure is pinned here.
+    """
+    bedrock, _ = install(monkeypatch)
+    index.call_bedrock("a prompt")
+    assert bedrock.requests[0]["inferenceConfig"]["maxTokens"] >= 2048
 
 
 def test_the_bedrock_client_retries_throttled_requests_many_times() -> None:
@@ -398,9 +431,44 @@ def test_the_bedrock_client_is_built_for_the_regions_runtime_endpoint() -> None:
 # --------------------------------------------------------------------------
 
 
-def test_the_summary_is_read_from_the_first_content_block() -> None:
+def test_the_summary_is_every_text_block_joined_in_order() -> None:
+    """The API does not promise exactly one text block, so all of them are read."""
     response = {
-        "output": {"message": {"content": [{"text": "the summary"}, {"text": "trailing"}]}},
+        "output": {"message": {"content": [{"text": "the summary"}, {"text": " continued"}]}},
+        "stopReason": "end_turn",
+    }
+    assert index.get_generated_text(response) == "the summary continued"
+
+
+def test_a_reasoning_block_is_not_part_of_the_summary() -> None:
+    """A reasoning-capable model puts its reasoning in a block before the text.
+
+    Reading by position would store the model's working as the meeting summary,
+    or raise, depending on which key that block happens to carry. Only text
+    blocks are read.
+    """
+    response = {
+        "output": {
+            "message": {
+                "content": [
+                    {"reasoningContent": {"reasoningText": {"text": "let me think"}}},
+                    {"text": "the summary"},
+                ]
+            }
+        },
+        "stopReason": "end_turn",
+    }
+    assert index.get_generated_text(response) == "the summary"
+
+
+def test_a_single_text_block_still_reads_the_same_way() -> None:
+    """Whether a reasoning block appears is prompt-dependent, not model-dependent.
+
+    The same model answers a short prompt with one text block and a long
+    transcript with reasoning first, so both shapes have to work.
+    """
+    response = {
+        "output": {"message": {"content": [{"text": "the summary"}]}},
         "stopReason": "end_turn",
     }
     assert index.get_generated_text(response) == "the summary"
@@ -414,8 +482,23 @@ def test_the_summary_is_read_from_the_first_content_block() -> None:
         {"output": {"message": {"content": []}}},
         {"output": {"message": {"content": [{}]}}},
         {"output": {"message": {"content": "not a list"}}},
+        {
+            "output": {
+                "message": {
+                    "content": [{"reasoningContent": {"reasoningText": {"text": "thinking"}}}]
+                }
+            },
+            "stopReason": "max_tokens",
+        },
     ],
-    ids=["empty", "no-message", "no-blocks", "block-without-text", "blocks-not-a-list"],
+    ids=[
+        "empty",
+        "no-message",
+        "no-blocks",
+        "block-without-text",
+        "blocks-not-a-list",
+        "reasoning-only-budget-exhausted",
+    ],
 )
 def test_a_response_of_an_unexpected_shape_is_rejected_rather_than_summarized(
     response,
@@ -423,9 +506,12 @@ def test_a_response_of_an_unexpected_shape_is_rejected_rather_than_summarized(
     """No partial or coerced reading of a response the model did not produce.
 
     Anything other than the documented converse shape has to raise so the caller
-    reports an error, rather than storing a fragment as the meeting summary.
+    reports an error, rather than storing a fragment as the meeting summary. The
+    last case is the one a reasoning model produces when the whole budget went on
+    reasoning: there is no text to store, and a blank string overwriting a good
+    summary is worse than a reported error.
     """
-    with pytest.raises((KeyError, IndexError, TypeError)):
+    with pytest.raises(ValueError):
         index.get_generated_text(response)
 
 

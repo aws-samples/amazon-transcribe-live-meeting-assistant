@@ -218,3 +218,78 @@ class TestUnsupportedPlatformRejection(unittest.TestCase):
 
         self.assertTrue(result["success"])
         self.assertIsNone(result["data"]["meetingPlatform"])
+
+
+class TestBedrockRequestShape(unittest.TestCase):
+    """What is sent to Bedrock, and how the answer is read back.
+
+    Two settings differ between model generations and neither is visible until a
+    deployment selects the other kind. The reasoning-capable Claude models reject
+    an inferenceConfig that carries a temperature, and they may answer with a
+    reasoning block ahead of the text block, so reading the answer by position
+    stops working. The model is whichever BedrockModelId the stack was deployed
+    with, so both kinds reach this function.
+    """
+
+    def setUp(self):
+        self.requests = []
+        self.blocks = [{"text": '{"meetingPlatform": "ZOOM"}'}]
+        self.stop_reason = "end_turn"
+        self._real_bedrock = index.bedrock
+        self._real_model = index.BEDROCK_MODEL_ID
+
+        test_case = self
+
+        class FakeBedrock:
+            def converse(self, **kwargs):
+                test_case.requests.append(kwargs)
+                return {
+                    "output": {"message": {"content": test_case.blocks}},
+                    "stopReason": test_case.stop_reason,
+                }
+
+        index.bedrock = FakeBedrock()
+
+    def tearDown(self):
+        index.bedrock = self._real_bedrock
+        index.BEDROCK_MODEL_ID = self._real_model
+
+    def test_a_temperature_is_sent_to_a_model_that_accepts_one(self):
+        """Parsing an invitation is extraction, so the same text should parse alike."""
+        index.BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        index.call_bedrock("a prompt")
+        self.assertEqual(self.requests[0]["inferenceConfig"]["temperature"], 0)
+
+    def test_no_temperature_is_sent_to_a_model_that_rejects_one(self):
+        """Claude 5 and later refuse the request rather than ignoring the setting."""
+        index.BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-5-5"
+        index.call_bedrock("a prompt")
+        self.assertNotIn("temperature", self.requests[0]["inferenceConfig"])
+
+    def test_the_budget_leaves_room_for_reasoning_tokens(self):
+        """Reasoning is billed against maxTokens and is produced before any text."""
+        index.call_bedrock("a prompt")
+        self.assertGreaterEqual(self.requests[0]["inferenceConfig"]["maxTokens"], 2048)
+
+    def test_the_answer_is_read_past_a_reasoning_block(self):
+        self.blocks = [
+            {"reasoningContent": {"reasoningText": {"text": "this looks like a Zoom link"}}},
+            {"text": '{"meetingPlatform": "ZOOM"}'},
+        ]
+        self.assertEqual(index.call_bedrock("a prompt"), '{"meetingPlatform": "ZOOM"}')
+
+    def test_the_answer_is_still_read_from_a_lone_text_block(self):
+        """Whether a reasoning block appears is prompt-dependent, so both shapes work."""
+        self.blocks = [{"text": '{"meetingPlatform": "ZOOM"}'}]
+        self.assertEqual(index.call_bedrock("a prompt"), '{"meetingPlatform": "ZOOM"}')
+
+    def test_a_response_of_nothing_but_reasoning_is_rejected(self):
+        """What a reasoning model returns when the whole budget went on reasoning.
+
+        Raising keeps the handler's error path in charge; an empty string here
+        would be reported as a successfully parsed invitation with no fields.
+        """
+        self.blocks = [{"reasoningContent": {"reasoningText": {"text": "thinking"}}}]
+        self.stop_reason = "max_tokens"
+        with self.assertRaises(ValueError):
+            index.call_bedrock("a prompt")

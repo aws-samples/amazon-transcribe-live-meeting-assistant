@@ -12,6 +12,7 @@ import os
 import re
 
 import boto3
+from bedrock_compat import SUMMARY_MAX_TOKENS, build_inference_config, extract_text
 from botocore.config import Config
 
 logger = logging.getLogger()
@@ -125,7 +126,8 @@ def get_transcripts(callId):
 
 
 def get_generated_text(response):
-    return response["output"]["message"]["content"][0]["text"]
+    """The summary text, with any reasoning block the model emitted left out."""
+    return extract_text(response)
 
 
 def call_bedrock(prompt_data):
@@ -134,7 +136,9 @@ def call_bedrock(prompt_data):
     message = {"role": "user", "content": [{"text": prompt_data}]}
 
     response = bedrock.converse(
-        modelId=modelId, messages=[message], inferenceConfig={"maxTokens": 512, "temperature": 0}
+        modelId=modelId,
+        messages=[message],
+        inferenceConfig=build_inference_config(modelId, SUMMARY_MAX_TOKENS),
     )
     generated_text = get_generated_text(response)
     print("Bedrock response: ", json.dumps(generated_text))

@@ -32,6 +32,7 @@ from datetime import datetime, timezone
 import boto3
 import pure
 import requests
+from bedrock_compat import SPEAKER_NAMING_MAX_TOKENS, build_inference_config, extract_text
 from boto3.dynamodb.types import TypeDeserializer
 from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
@@ -150,13 +151,19 @@ def caller_may_edit(meeting, identity):
 
 
 def call_bedrock(prompt):
-    """One model call. Temperature 0: this is extraction, not writing."""
+    """One model call.
+
+    Temperature 0 where the model accepts it: this is extraction, not writing, and
+    two passes over one meeting should agree. Only the text blocks are read -- the
+    output is parsed into an identity map, so a reasoning block reaching the parser
+    would corrupt attribution rather than just read oddly.
+    """
     response = bedrock.converse(
         modelId=BEDROCK_MODEL_ID,
         messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig={"maxTokens": 1024, "temperature": 0},
+        inferenceConfig=build_inference_config(BEDROCK_MODEL_ID, SPEAKER_NAMING_MAX_TOKENS),
     )
-    return response["output"]["message"]["content"][0]["text"]
+    return extract_text(response)
 
 
 def write_identities(call_id, identities):

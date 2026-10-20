@@ -16,6 +16,12 @@ from boto3.dynamodb.conditions import Key, Attr
 from typing import Dict, Any, Optional
 import logging
 from datetime import datetime
+from bedrock_compat import (
+    MEETING_ASSIST_FALLBACK_MAX_TOKENS,
+    accepts_temperature,
+    build_inference_config,
+    extract_text,
+)
 
 # Import MCP server loader
 try:
@@ -45,6 +51,10 @@ bedrock_agent_runtime = boto3.client('bedrock-agent-runtime')
 APPSYNC_GRAPHQL_URL = os.environ.get('APPSYNC_GRAPHQL_URL', '')
 EVENT_API_HTTP_URL = os.environ.get('EVENT_API_HTTP_URL', '')
 ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
+
+# Sampling temperature for the assistant's answers, on the models that accept one.
+# Above zero because this path is conversational rather than extractive.
+AGENT_TEMPERATURE = 0.3
 
 # Optional Bedrock Guardrail, set from the BedrockGuardrailId / BedrockGuardrailVersion
 # CloudFormation parameters. Both are empty by default.
@@ -1694,13 +1704,22 @@ def handler(event, context):
             # arguments the Strands Agents SDK uses to populate the Converse
             # API's guardrailConfig. They are only present when both
             # CloudFormation parameters were supplied; see get_guardrail_config().
+            #
+            # temperature is passed only to models that accept it. Strands puts it
+            # straight into the Converse API's inferenceConfig, and the
+            # reasoning-capable Claude generations reject a request that carries it,
+            # so a model selected from the newer end of the
+            # MeetingAssistServiceBedrockModelID list would otherwise fail every
+            # turn. See bedrock_compat.accepts_temperature.
             guardrail_config = get_guardrail_config()
-            bedrock_model = BedrockModel(
-                model_id=model_id,
-                temperature=0.3,
-                streaming=ENABLE_STREAMING,
-                **guardrail_config
-            )
+            model_kwargs = {
+                'model_id': model_id,
+                'streaming': ENABLE_STREAMING,
+                **guardrail_config,
+            }
+            if accepts_temperature(model_id):
+                model_kwargs['temperature'] = AGENT_TEMPERATURE
+            bedrock_model = BedrockModel(**model_kwargs)
             if guardrail_config:
                 logger.info(
                     f"Bedrock model configured: {model_id} "
@@ -2027,15 +2046,14 @@ Please provide a helpful response based on the meeting context. Keep it concise 
         response = bedrock_client.converse(
             modelId=model_id,
             messages=[message],
-            inferenceConfig={
-                'temperature': 0.3,
-                'maxTokens': 500
-            },
+            inferenceConfig=build_inference_config(
+                model_id, MEETING_ASSIST_FALLBACK_MAX_TOKENS, AGENT_TEMPERATURE
+            ),
             **converse_kwargs
         )
-        
-        # Extract response text
-        response_text = response['output']['message']['content'][0]['text']
+
+        # Extract response text, leaving out any reasoning block
+        response_text = extract_text(response)
         
         logger.info(f"Fallback Bedrock response: {response_text}")
         
