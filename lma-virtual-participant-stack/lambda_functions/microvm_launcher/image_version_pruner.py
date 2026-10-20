@@ -45,7 +45,11 @@ import time
 import urllib.error
 import urllib.request
 
-from microvm_client import MicrovmClient, MicrovmError
+from microvm_client import (
+    REQUEST_TIMEOUT_SECONDS as CLIENT_TIMEOUT_SECONDS,
+    MicrovmClient,
+    MicrovmError,
+)
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO").upper())
@@ -71,7 +75,12 @@ PASS_PAUSE_SECONDS = 2
 # Stop and report while there is still time to answer CloudFormation. A custom
 # resource that never responds leaves the stack waiting an hour and then fails
 # it, which is worse than leaving versions behind.
-MIN_REMAINING_MS = 30_000
+#
+# The reserve has to cover the worst case of what happens after the check: one
+# delete can hang for the client's full socket timeout, and the response PUT
+# can take another, so a reserve equal to a single timeout would permit a
+# delete to start and then leave nothing at all for the reply.
+MIN_REMAINING_MS = (2 * CLIENT_TIMEOUT_SECONDS + 10) * 1000
 # States that mean the version is already on its way out, so leave it alone.
 GONE_STATES = frozenset({"DELETING", "DELETED"})
 
@@ -94,9 +103,14 @@ def _list_all_versions(client: MicrovmClient, image_arn: str) -> list[dict]:
         page = client.list_microvm_image_versions(
             image_arn, max_results=MAX_RESULTS_PER_PAGE, next_token=next_token
         )
-        versions.extend(page.get("items") or [])
         token = page.get("nextToken")
-        if not token or token == next_token:
+        if token is not None and token == next_token:
+            # A token that never clears would otherwise page for ever, and
+            # re-counting the same page would inflate the totals.
+            logger.warning("stopped paging on a repeated token")
+            return versions
+        versions.extend(page.get("items") or [])
+        if not token:
             return versions
         next_token = token
     logger.warning("stopped paging after %d pages", MAX_PAGES)
@@ -134,8 +148,10 @@ def _versions_to_delete(
     candidates.sort(key=_age_key)
     # The active version is excluded above, so it is already safe. If the image
     # reported no active version, though, nothing has been held back yet, and
-    # an image with no versions left cannot be launched at all -- so in that
-    # case keep at least the newest rather than trusting a blank answer.
+    # an image stripped of every version cannot be launched at all -- so in
+    # that case keep at least the newest rather than trusting a blank answer.
+    # It only guarantees a version remains, not that it is a usable one: a
+    # version can be FAILED or still building, and this does not inspect that.
     floor = 0 if active_version else 1
     surplus = len(candidates) - max(keep, floor)
     if surplus <= 0:
@@ -169,11 +185,11 @@ def prune_microvm_image_versions(
         if attempt:
             time.sleep(PASS_PAUSE_SECONDS)
         still_blocked: list[str] = []
-        for version in blocked:
-            if _remaining_ms(context) < MIN_REMAINING_MS:
+        for index, version in enumerate(blocked):
+            if out_of_time or _remaining_ms(context) < MIN_REMAINING_MS:
                 out_of_time = True
-                still_blocked.append(version)
-                continue
+                still_blocked.extend(blocked[index:])
+                break
             try:
                 client.delete_microvm_image_version(image_arn, version)
                 deleted.append(version)

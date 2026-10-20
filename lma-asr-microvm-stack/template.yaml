@@ -563,9 +563,12 @@ Resources:
       # How many versions to leave behind beyond the active one.
       KeepVersions: 5
       # Carried only to trigger the prune. A custom resource is only invoked
-      # when one of its properties changes, and this one changes exactly when a
-      # rebuild has added a version -- including rebuilds caused by a property
-      # change rather than new source, which the source location would miss.
+      # when one of its properties changes, and this one changes on every
+      # successful rebuild -- including rebuilds caused by a property change
+      # rather than new source, which the source location would miss. A rebuild
+      # whose version FAILS consumes a version number without changing this,
+      # so a long run of consecutive failures would not be pruned until the
+      # next success.
       LatestActiveImageVersion: !GetAtt AsrMicrovmImage.LatestActiveImageVersion
 
   ##########################################################################

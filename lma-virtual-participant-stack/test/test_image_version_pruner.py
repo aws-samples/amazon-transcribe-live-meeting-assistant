@@ -25,22 +25,48 @@ LAUNCHER_DIR = (
 )
 
 
+def _load(name: str, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
 @pytest.fixture(scope="module")
 def module():
-    # The pruner imports microvm_client, which ships beside it in the same
-    # deployment package, so put that directory on the path first.
+    """The pruner, with the `microvm_client` that ships beside it.
+
+    The client is loaded explicitly from this directory rather than left to
+    `sys.path`. Several copies of that filename exist in the repository, one
+    per deployment package, and whichever test ran first would otherwise
+    decide which one the pruner imported -- so the suite could pass against a
+    copy this package does not ship. In the Lambda only one is on the path.
+    """
+    previous = sys.modules.get("microvm_client")
     sys.path.insert(0, str(LAUNCHER_DIR))
-    spec = importlib.util.spec_from_file_location(
-        "image_version_pruner", LAUNCHER_DIR / "image_version_pruner.py"
-    )
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules["image_version_pruner"] = mod
-    spec.loader.exec_module(mod)
-    yield mod
-    sys.path.remove(str(LAUNCHER_DIR))
+    try:
+        _load("microvm_client", LAUNCHER_DIR / "microvm_client.py")
+        yield _load("image_version_pruner", LAUNCHER_DIR / "image_version_pruner.py")
+    finally:
+        sys.path.remove(str(LAUNCHER_DIR))
+        if previous is None:
+            sys.modules.pop("microvm_client", None)
+        else:
+            sys.modules["microvm_client"] = previous
 
 
 IMAGE_ARN = "arn:aws:lambda:us-west-2:123456789012:microvm-image:lma-vp"
+
+
+@pytest.fixture
+def urlopen():
+    response = mock.MagicMock()
+    response.status = 200
+    response.__enter__ = lambda self: self
+    response.__exit__ = lambda *a: None
+    with mock.patch("urllib.request.urlopen", return_value=response) as patched:
+        yield patched
 
 
 def version(number: str, created, state: str = "SUCCESSFUL") -> dict:
@@ -178,6 +204,35 @@ def test_stops_while_there_is_still_time_to_report(module) -> None:
     assert client.delete_microvm_image_version.call_count == 2
 
 
+def test_the_handler_hands_the_deadline_to_the_prune(module, urlopen) -> None:
+    """Otherwise the deadline guard is dead code that still passes its tests.
+
+    `context` is how the remaining budget reaches the prune, and the absence of
+    one means "no limit" by design, so dropping the argument disables the guard
+    silently -- there is no error and no behaviour change in any test that
+    injects a context directly.
+    """
+    with mock.patch.object(module, "MicrovmClient"), mock.patch.object(
+        module, "prune_microvm_image_versions",
+        return_value={"TotalVersions": 1, "ActiveVersion": "1", "Deleted": 0, "Remaining": 1},
+    ) as pruned:
+        context = mock.MagicMock()
+        module.lambda_handler(_event(), context)
+    passed = list(pruned.call_args[0]) + list(pruned.call_args.kwargs.values())
+    assert context in passed, "the Lambda context must reach the prune"
+
+
+def test_reserves_longer_than_a_single_call_can_take(module) -> None:
+    """The reserve has to outlast what happens after the check.
+
+    A delete may consume the client's whole socket timeout, and the reply to
+    CloudFormation is another call on top of that. A reserve equal to one
+    timeout would let a delete start and leave nothing for the reply, which is
+    the hang this guard exists to prevent.
+    """
+    assert module.MIN_REMAINING_MS > module.CLIENT_TIMEOUT_SECONDS * 1000 * 2
+
+
 def test_runs_to_completion_when_the_context_reports_no_deadline(module) -> None:
     versions = [version(str(n), 1700000000 + n) for n in range(1, 6)]
     client = fake_client(versions, active="9")
@@ -306,16 +361,6 @@ def _event(request_type="Create", **properties) -> dict:
         "LogicalResourceId": "VPMicrovmImagePruner",
         "ResourceProperties": {"ImageArn": IMAGE_ARN, **properties},
     }
-
-
-@pytest.fixture
-def urlopen():
-    response = mock.MagicMock()
-    response.status = 200
-    response.__enter__ = lambda self: self
-    response.__exit__ = lambda *a: None
-    with mock.patch("urllib.request.urlopen", return_value=response) as patched:
-        yield patched
 
 
 def test_reports_success_after_pruning(module, urlopen) -> None:

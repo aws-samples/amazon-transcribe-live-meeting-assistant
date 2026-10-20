@@ -41,6 +41,9 @@ from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 
 API_VERSION = "2025-09-09"
+# Socket timeout for a single call. Exported because a caller that budgets its
+# own time has to know how long one call can take before returning.
+REQUEST_TIMEOUT_SECONDS = 30
 # Both the endpoint prefix and the SigV4 signing name are "lambda", not
 # "lambda-microvms" — taken from the service model, not guessed.
 SIGNING_NAME = "lambda"
@@ -90,15 +93,24 @@ class MicrovmClient:
             url, data=payload, method=method, headers=dict(signed.headers)
         )
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(
+                request, timeout=REQUEST_TIMEOUT_SECONDS
+            ) as response:
                 raw = response.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode(errors="replace")
             # The error type arrives in the x-amzn-errortype header; the body
             # usually carries only a message, so reading just the body leaves
-            # `code` empty. Prefer the header and fall back to the body.
-            code = (exc.headers.get("x-amzn-errortype") or "").split(":")[0]
+            # `code` empty. Prefer the header and fall back to the body. Both
+            # reads are guarded so that a malformed error response surfaces as
+            # a MicrovmError, which is what every caller handles, rather than
+            # as a different exception escaping from in here.
+            code = ""
+            try:
+                code = (exc.headers.get("x-amzn-errortype") or "").split(":")[0]
+            except (AttributeError, TypeError):
+                pass
             try:
                 parsed = json.loads(detail)
                 code = code or parsed.get("__type") or parsed.get("code") or ""

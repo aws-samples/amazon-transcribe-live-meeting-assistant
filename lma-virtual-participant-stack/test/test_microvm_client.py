@@ -187,14 +187,15 @@ def test_error_type_is_read_from_the_response_header(module) -> None:
         "https://x",
         409,
         "Conflict",
-        {"x-amzn-errortype": "ConflictException:http://internal.amazon.com/coral/"},
+        {"x-amzn-errortype": "ConflictException:https://example.com/shape/"},
         io.BytesIO(body.encode()),
     )
     with mock.patch("urllib.request.urlopen", side_effect=err):
         with mock.patch.object(module.SigV4Auth, "add_auth"):
             with pytest.raises(module.MicrovmError) as excinfo:
                 client.delete_microvm_image_version("img-1", "3.0")
-    # The trailing shape info is dropped, leaving the type on its own.
+    # The service appends a shape reference after a colon; it is dropped,
+    # leaving the type on its own.
     assert excinfo.value.code == "ConflictException"
     assert excinfo.value.status == 409
     assert "in use as a base image" in str(excinfo.value)
