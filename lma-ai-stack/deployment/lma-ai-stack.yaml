@@ -4349,7 +4349,9 @@ Resources:
       CodeUri: ../source/lambda_functions/summary_regenerator
       Description: Re-runs a meeting's summary on demand and stores the result
       MemorySize: 256
-      # The Bedrock summariser it waits on may itself run for its full 900s.
+      # Lambda's maximum. The Bedrock summariser it waits on has the same
+      # ceiling, which is why SUMMARY_READ_TIMEOUT below stops the wait early
+      # rather than matching it.
       Timeout: 900
       Environment:
         Variables:
@@ -4363,9 +4365,11 @@ Resources:
               !GetAtt BedrockSummaryLambda.Arn,
               !Ref EndOfCallLambdaHookFunctionArn,
             ]
-          # Must exceed the summariser's own 900s timeout so a slow run is
-          # never abandoned and started again.
-          SUMMARY_READ_TIMEOUT: 905
+          # Deliberately shorter than this function's own Timeout, so that a
+          # summariser which never answers is abandoned with enough time left
+          # to record the failure on the meeting. Both functions stop at
+          # Lambda's 900s maximum, so waiting one out in full is not possible.
+          SUMMARY_READ_TIMEOUT: 780
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/SummaryRegeneratorFunction

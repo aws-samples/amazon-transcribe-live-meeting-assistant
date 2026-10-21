@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from botocore.credentials import Credentials
 
 TABLE = "lma-call-events"
 APPSYNC_URL = "https://example.appsync-api.us-east-1.amazonaws.com/graphql"
@@ -55,6 +56,10 @@ def _load():
 
 
 index = _load()
+
+# Captured before any test replaces it, for the one test that wants the real
+# write under a stubbed transport rather than the stub install() puts in.
+REAL_WRITE_SUMMARY = index.write_summary
 
 CALL_ID = "meeting-1"
 OWNER = "owner@example.com"
@@ -435,6 +440,52 @@ def test_a_failed_run_keeps_a_manual_mark(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 # ── the write goes through AppSync ──────────────────────────────────────────
+#
+# These exercise the real SigV4 signing, so they need credentials. Static ones
+# are injected here rather than left to botocore's search of the environment:
+# that search succeeds on a developer machine that happens to be logged in and
+# raises NoCredentialsError on a build runner, so a test relying on it is
+# testing the developer's shell. `make test-lambdas` runs with no AWS and no
+# network, which is the contract these have to meet.
+
+
+class StaticCredentialSession:
+    """A boto3 Session stand-in with fixed credentials and no config to read."""
+
+    region_name = "us-east-1"
+
+    @staticmethod
+    def get_credentials():
+        return Credentials(
+            access_key="test-access-key-id",
+            secret_key="test-secret-access-key",
+            token="test-session-token",
+        )
+
+
+@pytest.fixture(autouse=True)
+def static_signing_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sign every write in this module with known credentials.
+
+    Autouse so a write reached from any test in the file -- not only the ones
+    below -- is signed deterministically.
+    """
+    monkeypatch.setattr(index, "signing_session", StaticCredentialSession())
+    # The backoff is real time, and these tests drive it to its limit.
+    monkeypatch.setattr(index, "APPSYNC_WRITE_BACKOFF_SECONDS", 0)
+
+
+def test_signing_needs_no_ambient_credentials() -> None:
+    """The guard on the fixture above.
+
+    If the module ever resolves credentials somewhere other than
+    `signing_session`, the fixture stops covering it and the tests here go back
+    to depending on whichever credentials the process happens to have.
+    """
+    source = (Path(__file__).resolve().parent / "index.py").read_text(encoding="utf-8")
+    assert source.count("boto3.Session()") == 1
+    assert "signing_session = boto3.Session()" in source
+    assert "signing_session.get_credentials()" in source
 
 
 def test_the_result_is_written_through_appsync(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -537,7 +588,6 @@ def test_a_refused_write_is_not_retried(monkeypatch: pytest.MonkeyPatch) -> None
         return FakeResponse()
 
     monkeypatch.setattr(index.requests, "post", fake_post)
-    monkeypatch.setattr(index.time, "sleep", lambda _seconds: None)
     with pytest.raises(RuntimeError):
         index.write_summary(CALL_ID, text="text")
     assert len(attempts) == 1
@@ -562,9 +612,66 @@ def test_an_unreachable_endpoint_is_retried_before_the_summary_is_given_up_on(
         return FakeResponse()
 
     monkeypatch.setattr(index.requests, "post", fake_post)
-    monkeypatch.setattr(index.time, "sleep", lambda _seconds: None)
     index.write_summary(CALL_ID, text="text")
     assert len(attempts) == index.APPSYNC_WRITE_ATTEMPTS
+
+
+def test_every_attempt_is_signed_afresh(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retry seconds after the first attempt must not carry the first
+    attempt's signature, which SigV4 dates."""
+    signatures = []
+
+    class FakeResponse:
+        @staticmethod
+        def json():
+            return {"data": {}}
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        signatures.append(headers["Authorization"])
+        if len(signatures) < index.APPSYNC_WRITE_ATTEMPTS:
+            raise OSError("connection reset")
+        return FakeResponse()
+
+    monkeypatch.setattr(index.requests, "post", fake_post)
+    index.write_summary(CALL_ID, text="text")
+    assert len(signatures) == index.APPSYNC_WRITE_ATTEMPTS
+    # Signed, and signed with the credentials injected here rather than
+    # whatever the process could find.
+    assert all("test-access-key-id" in signature for signature in signatures)
+
+
+def test_each_attempt_waits_only_as_long_as_the_configured_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The number the worst-case budget is calculated from, so it has to be the
+    number actually passed to the request."""
+    timeouts = []
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        timeouts.append(timeout)
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(index.requests, "post", fake_post)
+    with pytest.raises(RuntimeError):
+        index.write_summary(CALL_ID, text="text")
+    assert timeouts == [index.APPSYNC_WRITE_TIMEOUT_SECONDS] * index.APPSYNC_WRITE_ATTEMPTS
+
+
+def test_the_backoff_doubles_and_does_not_follow_the_last_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Waiting after the final attempt would spend the budget on nothing."""
+    slept = []
+
+    def never_answers(*args, **kwargs):
+        raise OSError("connection reset")
+
+    monkeypatch.setattr(index, "APPSYNC_WRITE_BACKOFF_SECONDS", 1)
+    monkeypatch.setattr(index.time, "sleep", slept.append)
+    monkeypatch.setattr(index.requests, "post", never_answers)
+    with pytest.raises(RuntimeError):
+        index.write_summary(CALL_ID, text="text")
+    assert slept == [1, 2]
 
 
 def test_an_endpoint_that_never_answers_eventually_raises(
@@ -577,10 +684,43 @@ def test_an_endpoint_that_never_answers_eventually_raises(
         raise OSError("connection reset")
 
     monkeypatch.setattr(index.requests, "post", fake_post)
-    monkeypatch.setattr(index.time, "sleep", lambda _seconds: None)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as raised:
         index.write_summary(CALL_ID, text="text")
     assert len(attempts) == index.APPSYNC_WRITE_ATTEMPTS
+    # The last transport error is carried out, so the log says what went wrong
+    # rather than only that something did.
+    assert "connection reset" in str(raised.value)
+
+
+def test_a_failed_run_still_records_the_failure_when_the_first_write_is_slow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The whole budget, end to end: a summariser that never answers and a
+    first write attempt that has to be retried still leaves the meeting with a
+    recorded failure rather than a run that vanished."""
+    posted = []
+
+    class FakeResponse:
+        @staticmethod
+        def json():
+            return {"data": {}}
+
+    def fake_post(url, data=None, headers=None, timeout=None):
+        posted.append(json.loads(data))
+        if len(posted) < 2:
+            raise OSError("connection reset")
+        return FakeResponse()
+
+    install(monkeypatch, error=RuntimeError("timed out waiting for the summariser"))
+    # install() stubs write_summary; this test wants the real one, captured at
+    # import before anything replaced it.
+    monkeypatch.setattr(index, "write_summary", REAL_WRITE_SUMMARY)
+    monkeypatch.setattr(index.requests, "post", fake_post)
+    assert index.handler(RUN_EVENT, FakeContext())["ok"] is False
+    assert len(posted) == 2
+    state = json.loads(posted[-1]["variables"]["input"]["CallSummaryState"])
+    assert state["status"] == index.STATUS_FAILED
+    assert "CallSummaryText" not in posted[-1]["variables"]["input"]
 
 
 def test_the_run_is_queued_with_a_client_that_cannot_duplicate_it() -> None:

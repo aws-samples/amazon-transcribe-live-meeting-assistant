@@ -71,9 +71,15 @@ TRANSCRIPT_SUMMARY_FUNCTION_ARN = os.environ.get("TRANSCRIPT_SUMMARY_FUNCTION_AR
 # longer than the summary function's own 900s ceiling.
 STALE_RUN_SECONDS = int(os.environ.get("SUMMARY_REGENERATION_STALE_SECONDS", "1200"))
 
-# How many times to try storing a result before giving up on it. See
-# write_summary for why this is retried here rather than by Lambda.
+# Storing a result: how many attempts, how long each waits for an answer, and
+# the base of the backoff between them (doubling, so 1s then 2s). See
+# write_summary for why this is retried here rather than by Lambda. Named rather
+# than inlined because the worst case they add up to has to fit inside this
+# function's own timeout alongside the wait for the summariser -- there is a test
+# for that sum.
 APPSYNC_WRITE_ATTEMPTS = 3
+APPSYNC_WRITE_TIMEOUT_SECONDS = 20
+APPSYNC_WRITE_BACKOFF_SECONDS = 1
 
 # What the configured summary function hands back when it could not produce a
 # summary. The Bedrock summariser catches everything and returns this rather
@@ -100,12 +106,16 @@ dynamodb = boto3.client("dynamodb")
 lambda_client = boto3.client(
     "lambda",
     config=Config(
-        # Longer than the summary function's own timeout (900s for the Bedrock
-        # summariser), and no retries, so a slow run is never abandoned and
-        # started again -- which would pay for a second set of model calls and
-        # have two writes race each other. Same reasoning as the orchestrator's
-        # dedicated client for the speaker-naming invoke.
-        read_timeout=int(os.environ.get("SUMMARY_READ_TIMEOUT", "905")),
+        # Deliberately SHORTER than the summary function's own ceiling. Both
+        # functions stop at Lambda's 900s maximum, so waiting the summariser out
+        # in full is not possible: this one would be killed mid-wait, having
+        # written nothing, leaving the meeting marked as regenerating until that
+        # mark went stale. Giving up with time in hand instead means a stuck
+        # summariser produces a reported failure. Safe to abandon only because
+        # max_attempts is 1 -- the orchestrator's longer socket timeout for the
+        # speaker-naming invoke exists to stop a retry re-running the callee,
+        # and there are no retries here to stop.
+        read_timeout=int(os.environ.get("SUMMARY_READ_TIMEOUT", "780")),
         retries={"mode": "standard", "max_attempts": 1},
     ),
 )
@@ -117,6 +127,13 @@ lambda_client = boto3.client(
 starter_client = boto3.client(
     "lambda", config=Config(retries={"mode": "standard", "max_attempts": 1})
 )
+
+# The session used to sign the writes back to AppSync. At module scope so that
+# a test can replace it with one carrying static credentials: creating it in
+# write_summary left the signing step resolving credentials from whatever
+# ambient chain the process happened to have, which a test cannot control and a
+# build runner does not have.
+signing_session = boto3.Session()
 
 
 def _deserialize(item):
@@ -274,7 +291,6 @@ def write_summary(call_id, text=None, state=None):
     if state is not None:
         variables["input"]["CallSummaryState"] = json.dumps(state)
     payload = json.dumps({"query": query, "variables": variables})
-    session = boto3.Session()
     last_error = None
     for attempt in range(APPSYNC_WRITE_ATTEMPTS):
         # Signed inside the loop so a retry does not carry a signature from
@@ -285,13 +301,15 @@ def write_summary(call_id, text=None, state=None):
             data=payload,
             headers={"Content-Type": "application/json"},
         )
-        SigV4Auth(session.get_credentials(), "appsync", session.region_name).add_auth(request)
+        SigV4Auth(
+            signing_session.get_credentials(), "appsync", signing_session.region_name
+        ).add_auth(request)
         try:
             response = requests.post(
                 APPSYNC_GRAPHQL_URL,
                 data=payload,
                 headers=dict(request.headers),
-                timeout=20,
+                timeout=APPSYNC_WRITE_TIMEOUT_SECONDS,
             )
             body = response.json()
         except Exception as error:  # noqa: BLE001 - retried, then re-raised below
@@ -302,7 +320,7 @@ def write_summary(call_id, text=None, state=None):
             return body
         if attempt + 1 < APPSYNC_WRITE_ATTEMPTS:
             LOGGER.warning("Could not reach AppSync to store the summary; retrying")
-            time.sleep(2**attempt)
+            time.sleep(APPSYNC_WRITE_BACKOFF_SECONDS * 2**attempt)
     raise RuntimeError(f"updateCallSummaryText could not be reached: {last_error}")
 
 

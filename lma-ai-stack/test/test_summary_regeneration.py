@@ -74,27 +74,59 @@ def summary_vtl() -> str:
 # ── the two Lambdas' timeouts have to agree ─────────────────────────────────
 
 
-def test_the_regenerator_outlives_the_summariser_it_waits_on(resources: dict) -> None:
-    """It invokes the summariser synchronously, so a shorter timeout here would
-    kill a run that was about to succeed and report it as a failure."""
+def _read_timeout(resources: dict) -> int:
+    env = resources["SummaryRegeneratorFunction"]["Properties"]["Environment"]["Variables"]
+    return int(env["SUMMARY_READ_TIMEOUT"])
+
+
+def _constant(regenerator: str, name: str) -> int:
+    return int(re.search(rf"^{name} = (\d+)$", regenerator, re.M).group(1))
+
+
+def test_the_regenerator_stops_waiting_for_the_summariser_before_its_own_deadline(
+    resources: dict,
+) -> None:
+    """Both functions stop at Lambda's 900s ceiling, so waiting the summariser
+    out in full is not possible: this one would be killed mid-wait having
+    written nothing, and the meeting would stay marked as regenerating until
+    that mark went stale. It gives up with time in hand instead."""
     regen = resources["SummaryRegeneratorFunction"]["Properties"]["Timeout"]
-    summariser = resources["BedrockSummaryLambda"]["Properties"]["Timeout"]
-    assert regen >= summariser, (
-        f"the regenerator stops at {regen}s but waits on a summariser that may "
-        f"run for {summariser}s"
+    assert _read_timeout(resources) < regen
+
+
+def test_the_regenerator_keeps_enough_of_its_deadline_to_record_an_outcome(
+    resources: dict, regenerator: str
+) -> None:
+    """The whole budget: the wait for the summariser plus the worst case of
+    storing the result has to fit inside this function's timeout, or a run that
+    went wrong ends as a killed Lambda and no explanation on the meeting."""
+    attempts = _constant(regenerator, "APPSYNC_WRITE_ATTEMPTS")
+    per_attempt = _constant(regenerator, "APPSYNC_WRITE_TIMEOUT_SECONDS")
+    backoff_base = _constant(regenerator, "APPSYNC_WRITE_BACKOFF_SECONDS")
+    # Backoff doubles and does not follow the final attempt.
+    backoff = sum(backoff_base * 2**attempt for attempt in range(attempts - 1))
+    worst_case = _read_timeout(resources) + attempts * per_attempt + backoff
+    regen = resources["SummaryRegeneratorFunction"]["Properties"]["Timeout"]
+    assert worst_case < regen, (
+        f"a run can take {worst_case}s but the function stops at {regen}s, so "
+        f"the failure would never be recorded"
     )
 
 
-def test_the_socket_timeout_exceeds_the_summarisers_own_timeout(resources: dict) -> None:
-    """Otherwise a slow run is abandoned mid-flight; with retries that would be
-    a second set of model calls and two writes racing each other."""
-    env = resources["SummaryRegeneratorFunction"]["Properties"]["Environment"]["Variables"]
-    read_timeout = int(env["SUMMARY_READ_TIMEOUT"])
-    summariser = resources["BedrockSummaryLambda"]["Properties"]["Timeout"]
-    assert read_timeout > summariser
+def test_the_stale_mark_outlasts_the_longest_possible_run(
+    resources: dict, regenerator: str
+) -> None:
+    """Otherwise a run still going is treated as abandoned and a second one is
+    accepted beside it."""
+    regen = resources["SummaryRegeneratorFunction"]["Properties"]["Timeout"]
+    stale = int(re.search(r'SUMMARY_REGENERATION_STALE_SECONDS", "(\d+)"', regenerator).group(1))
+    assert stale > regen
 
 
 def test_the_regenerator_cannot_retry_the_summariser(regenerator: str) -> None:
+    """Which is what makes abandoning it safe: the orchestrator's longer socket
+    timeout for the speaker-naming invoke exists to stop a retry re-running the
+    callee, and there are no retries here to stop."""
     config = re.search(r"read_timeout=.*?retries=\{[^}]*\}", regenerator, re.S)
     assert config, "the dedicated client config is gone"
     assert '"max_attempts": 1' in config.group(0)
