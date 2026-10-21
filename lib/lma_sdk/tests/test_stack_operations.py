@@ -200,6 +200,72 @@ class TestStackDeploy:
         assert "ParameterValue" not in param_dict["AdminEmail"]
         assert result.success is True
 
+    def test_deploy_reports_that_an_unchanged_stack_was_not_changed(self, client):
+        """A no-op update is a success, but it must not look like a deployment.
+
+        CloudFormation refuses an update that would change nothing. That is the
+        right outcome for an interactive deploy of an unchanged working copy, so
+        it stays `success=True` — but a pipeline that deploys in order to test
+        what it just built needs to tell the two apart. Reported as a separate
+        flag rather than inferred from the message, which callers cannot branch
+        on safely.
+        """
+        mock_cfn = MagicMock()
+        client.session.client.return_value = mock_cfn
+        mock_cfn.describe_stacks.return_value = {
+            "Stacks": [{
+                "StackName": "test-lma-stack",
+                "StackId": "arn:id",
+                "StackStatus": "UPDATE_COMPLETE",
+                "Outputs": [],
+                "Parameters": [],
+                "Tags": [],
+            }]
+        }
+        mock_cfn.get_template_summary.return_value = {"Parameters": []}
+        mock_cfn.exceptions.ClientError = botocore.exceptions.ClientError
+        mock_cfn.update_stack.side_effect = botocore.exceptions.ClientError(
+            {"Error": {"Code": "ValidationError",
+                       "Message": "No updates are to be performed."}},
+            "UpdateStack",
+        )
+
+        result = client.stack.deploy(
+            template_url="https://s3.amazonaws.com/bucket/template.yaml",
+            wait=False,
+        )
+
+        assert result.success is True
+        assert result.changed is False, (
+            "an update CloudFormation declined must report changed=False, or a "
+            "pipeline cannot tell a deployment from a no-op"
+        )
+
+    def test_deploy_reports_a_real_update_as_changed(self, client):
+        """The flag has to distinguish, so the ordinary path must set it true."""
+        mock_cfn = MagicMock()
+        client.session.client.return_value = mock_cfn
+        mock_cfn.describe_stacks.return_value = {
+            "Stacks": [{
+                "StackName": "test-lma-stack",
+                "StackId": "arn:id",
+                "StackStatus": "UPDATE_COMPLETE",
+                "Outputs": [],
+                "Parameters": [],
+                "Tags": [],
+            }]
+        }
+        mock_cfn.get_template_summary.return_value = {"Parameters": []}
+        mock_cfn.update_stack.return_value = {"StackId": "arn:id"}
+
+        result = client.stack.deploy(
+            template_url="https://s3.amazonaws.com/bucket/template.yaml",
+            wait=False,
+        )
+
+        assert result.success is True
+        assert result.changed is True
+
     def test_deploy_update_overrides_only_provided_params(self, client):
         """deploy() overrides only explicitly provided params, keeps others as previous."""
         mock_cfn = MagicMock()

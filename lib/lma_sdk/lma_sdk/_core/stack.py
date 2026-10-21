@@ -257,12 +257,18 @@ class StackManager:
                     action = "UPDATE"
                 except botocore.exceptions.ClientError as e:
                     if "No updates are to be performed" in str(e):
+                        logger.warning(
+                            "Stack '%s' was not updated: CloudFormation found no "
+                            "changes between the deployed template and this one.",
+                            name,
+                        )
                         return StackDeployResult(
                             success=True,
                             stack_name=name,
                             status="UPDATE_COMPLETE",
                             message="No updates needed — stack is already up to date.",
                             operation="UPDATE",
+                            changed=False,
                         )
                     raise
             else:

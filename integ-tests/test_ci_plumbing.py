@@ -561,3 +561,102 @@ def test_the_agent_is_off_unless_explicitly_enabled(monkeypatch):
         )
         is None
     )
+
+
+# ---------------------------------------------------------------------------
+# The nightly pipeline's own configuration
+# ---------------------------------------------------------------------------
+
+
+def _nightly_deploy_command() -> str:
+    """The nightly deploy job's `lma deploy` command line, comments stripped.
+
+    Read as text rather than parsed: the file uses YAML anchors and GitLab's
+    own `!reference` tags, and the assertions below are about which flags are
+    on a command line, which does not need a parse.
+
+    Comments are removed first, and deliberately so. The job carries a comment
+    explaining why each flag is there, naming the flags -- so a substring
+    search over the raw job passes even with the flag deleted from the command,
+    which is exactly the sort of test that looks like a guard and is not.
+    """
+    config = (Path(__file__).resolve().parents[1] / ".gitlab-ci.yml").read_text()
+    job = config.split("nightly_deploy:", 1)[1].split("\nnightly_integ_tests:", 1)[0]
+    lines = [
+        line for line in job.splitlines() if not line.lstrip().lstrip("-").strip().startswith("#")
+    ]
+    return "\n".join(lines)
+
+
+def test_the_nightly_deploy_refuses_to_pass_off_an_unchanged_stack() -> None:
+    """The nightly deploys so the suite can test what was just built.
+
+    If CloudFormation declines the update as a no-op, the stack keeps running
+    the code it already had and every result afterwards describes that older
+    code while the summary says otherwise. The flag is what turns that into a
+    red pipeline, and nothing else in the run can detect it -- which is why it
+    is asserted here rather than left to review.
+    """
+    deploy_job = _nightly_deploy_command()
+    assert "lma deploy" in deploy_job, "could not locate the nightly deploy command"
+    assert "--fail-if-unchanged" in deploy_job, (
+        "the nightly deploy must fail when CloudFormation finds no changes, or a "
+        "stack that has stopped tracking develop reports green"
+    )
+
+
+def test_the_nightly_deploy_waits_for_the_stack_before_testing_it() -> None:
+    """Without --wait the suite races the update it just started."""
+    assert "--wait" in _nightly_deploy_command()
+
+
+def test_a_skip_from_an_off_by_default_feature_is_not_an_environment_gap() -> None:
+    """`--no-skips` must distinguish a gap from a feature nobody enabled.
+
+    The flag exists so a run that exercised nothing cannot report green. But a
+    test for a feature that is off by default has nothing to exercise until
+    somebody opts in, and enabling it on the nightly stack is a decision about
+    that stack's deploy time and cost. Without this exemption, merging such a
+    test turns every nightly run red and the only ways out are reverting the
+    test or dropping `--no-skips` entirely.
+    """
+    import conftest
+
+    assert conftest._is_deselected_by_marker(_marked("optional_feature")) is True
+    assert conftest._is_deselected_by_marker(_marked("live")) is True
+    # A skip with no marker is still a gap, which is the whole point.
+    assert conftest._is_deselected_by_marker(_marked(None)) is False
+
+
+def _marked(name):
+    """A stand-in for a pytest item carrying (or lacking) one marker."""
+
+    class Item:
+        def get_closest_marker(self, marker):
+            return object() if name is not None and marker == name else None
+
+    return Item()
+
+
+def test_the_voice_enrollment_test_is_marked_as_an_optional_feature() -> None:
+    """It needs EnableVoiceEnrollment, which is off by default.
+
+    Asserted on the source rather than by collecting the suite, which would
+    need AWS credentials.
+    """
+    source = (
+        Path(__file__).resolve().parent / "test_lma_integration.py"
+    ).read_text()
+    head = source.split("def test_voice_enrollment_consent_lifecycle", 1)[0]
+    assert head.rstrip().endswith("@pytest.mark.optional_feature"), (
+        "test_voice_enrollment_consent_lifecycle must carry the "
+        "optional_feature marker, or --no-skips reports its clean skip as a "
+        "failure on every deployment that has not enabled the feature"
+    )
+
+
+def test_every_marker_used_in_the_suite_is_registered() -> None:
+    """An unregistered marker is silently ignored, so the exemption would lapse."""
+    registered = (Path(__file__).resolve().parent / "pytest.ini").read_text()
+    for marker in ("live", "optional_feature"):
+        assert f"    {marker}:" in registered, f"{marker} is not registered in pytest.ini"

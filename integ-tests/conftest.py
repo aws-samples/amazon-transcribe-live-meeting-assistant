@@ -91,14 +91,29 @@ def pytest_runtest_makereport(  # pylint: disable=unused-argument
 
 
 def _is_deselected_by_marker(item: pytest.Item) -> bool:
-    """Whether the skip came from ``-m``/``--vp-meeting-id`` gating, not a gap.
+    """Whether a skip is a deliberate exclusion rather than an environment gap.
 
-    ``make integ-tests`` passes ``-m "not live"``, which *deselects* rather than
-    skips, so it does not reach here. An explicit ``live`` marker still might if
-    the suite is invoked another way, and a run that has deliberately excluded
-    real-meeting tests should not fail because of them.
+    ``--no-skips`` exists to catch gaps — a lapsed secret, a dropped dependency
+    — by refusing to report green on a run that exercised nothing. Two kinds of
+    skip are not gaps and must stay skips:
+
+    ``live``
+        Needs a real meeting. ``make integ-tests`` passes ``-m "not live"``,
+        which *deselects* rather than skips and so never reaches here, but an
+        explicit marker still might if the suite is invoked another way.
+
+    ``optional_feature``
+        Needs a stack feature that is off by default. The resources do not
+        exist unless somebody opted in, so the test has nothing to assert
+        against and its skip says so. Without this, adding a test for an
+        off-by-default feature turns every nightly run red until the feature
+        is enabled on the nightly stack — which is a decision about that
+        stack's cost and deploy time, not something a new test should force.
     """
-    return item.get_closest_marker("live") is not None
+    return any(
+        item.get_closest_marker(name) is not None
+        for name in ("live", "optional_feature")
+    )
 
 
 @pytest.fixture(scope="session")

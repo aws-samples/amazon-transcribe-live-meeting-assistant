@@ -315,6 +315,7 @@ def test_vp_live_join(client: LMAClient, request: pytest.FixtureRequest) -> None
 # 5. Voice enrollment consent lifecycle
 # ────────────────────────────────────────────────────────────────────────────
 
+@pytest.mark.optional_feature
 def test_voice_enrollment_consent_lifecycle(client: LMAClient) -> None:
     """Grant consent, enrol a voice, withdraw — and check what was STORED.
 
