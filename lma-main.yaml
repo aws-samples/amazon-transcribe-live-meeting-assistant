@@ -52,6 +52,39 @@ Parameters:
       generation reasons before it answers, which raises answer quality but also raises output
       token use several-fold, so it costs more per meeting than Claude 4.5 at the same size.
 
+  MeetingAssistKnowledgeBaseModelID:
+    Type: String
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    # A knowledge base supplies its own orchestration and generation prompt
+    # templates, and RetrieveAndGenerate rejects any model those templates do not
+    # cover, so the models usable here are a narrower set than the agent can run
+    # on and the list must stay a subset of
+    # MeetingAssistServiceBedrockModelID's.
+    #
+    # Which models those are is a property of the individual model, not of its
+    # generation: us.anthropic.claude-opus-4-1-20250805-v1:0 is refused while
+    # us.anthropic.claude-opus-4-6-v1 is accepted, and both are Claude 4. So every
+    # id below has been verified by a RetrieveAndGenerate call against a live
+    # knowledge base (us-west-2, 2026-10-21) and nothing is added without one;
+    # test_meeting_assist_kb_model.py holds the evidence and fails if this list
+    # and that record disagree.
+    AllowedValues:
+      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "us.anthropic.claude-sonnet-4-6"
+      - "us.anthropic.claude-opus-4-6-v1"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "global.anthropic.claude-sonnet-4-6"
+      - "global.anthropic.claude-opus-4-6-v1"
+    Description: >-
+      Select the Bedrock model the Meeting Assistant's knowledge bases use to generate an answer
+      from what they retrieve -- the document-search tool and the past-meeting-search tool. This
+      is separate from MeetingAssistServiceBedrockModelID so that the agent can run on any model
+      it supports, including models a knowledge base cannot generate with. Whether a knowledge
+      base can generate with a model is a property of that model, so only models verified against
+      a live knowledge base are offered here. Enable access to the model you pick in the Amazon
+      Bedrock console for your region.
+
   TavilyApiKey:
     Type: String
     NoEcho: true
@@ -1152,6 +1185,7 @@ Metadata:
         Parameters:
           - MeetingAssistService
           - MeetingAssistServiceBedrockModelID
+          - MeetingAssistKnowledgeBaseModelID
           - TavilyApiKey
           - TavilyApiKeySecretArn
           - AssistantWakePhraseRegEx
@@ -1295,6 +1329,8 @@ Metadata:
         default: Meeting Assist Service
       MeetingAssistServiceBedrockModelID:
         default: Meeting Assist Service Bedrock Model ID
+      MeetingAssistKnowledgeBaseModelID:
+        default: Meeting Assist Knowledge Base Bedrock Model ID
       TavilyApiKey:
         default: Tavily API Key for Web Search (STRANDS_BEDROCK only)
       TavilyApiKeySecretArn:
@@ -2240,6 +2276,11 @@ Resources:
       ModelValidation: !Ref ModelValidation
       BedrockModelIds:
         - !Ref MeetingAssistServiceBedrockModelID # Meeting assistant
+        # Meeting Assistant knowledge base answer generation. Listed separately
+        # because it need not be the agent's model; when the two parameters hold
+        # the same id this validates it twice, which costs one extra short
+        # Converse call per deployment and keeps the list declarative.
+        - !Ref MeetingAssistKnowledgeBaseModelID
         - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB embeddings
         - !Ref BedrockModelId # Meeting summarization
 
@@ -3246,6 +3287,7 @@ Resources:
             - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
+        MeetingAssistKnowledgeBaseModelID: !Ref MeetingAssistKnowledgeBaseModelID
         # The ARN of the secret holding the key, never the key: whichever form
         # the operator used, the meeting-assist function fetches the value for
         # itself. Empty when web search is not configured.

@@ -99,6 +99,21 @@ The model selection affects response quality, latency, and cost. Lighter models 
 
 The Claude 5 generation reasons before it answers. That improves answers on questions that need several steps, but the reasoning is itself billed as output, so the same question costs several times as much output as it does on Claude 4.5 at the same size. Claude 5 models also use a different tokenizer that counts a given transcript as roughly a quarter more input tokens. Expect a higher per-meeting bill if you move to one, and treat the quality gain as the thing you are buying.
 
+### The knowledge-base model
+
+The assistant's two knowledge-base tools -- `document_search` over your documents and `meeting_history` over past meeting transcripts -- do not use the agent's model. A Bedrock Knowledge Base generates its own answer from what it retrieves, driven by the orchestration and generation prompt templates the knowledge base supplies, and those templates do not cover every model the agent's own API will accept. The model they use is set by the separate **MeetingAssistKnowledgeBaseModelID** parameter:
+
+| Model IDs offered |
+|---|
+| `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-opus-4-6-v1` |
+| `global.anthropic.claude-haiku-4-5-20251001-v1:0`, `global.anthropic.claude-sonnet-4-5-20250929-v1:0`, `global.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-opus-4-6-v1` |
+
+Whether a knowledge base can generate with a given model is a property of that individual model and cannot be read off its family or version: Claude Opus 4.1 is refused, for instance, while Claude Opus 4.6 is accepted. The list above is therefore not a rule but a record -- each of those IDs has been verified by a live knowledge-base call -- and it is deliberately shorter than the agent's list. A model being added to **MeetingAssistServiceBedrockModelID** does not make it available here.
+
+The parameter defaults to `global.anthropic.claude-haiku-4-5-20251001-v1:0`. Because the two parameters are independent, you can run the agent on any model it supports -- including the Claude 5 generation, which knowledge bases do not accept -- and leave retrieval on a model that works; the knowledge-base tools keep working either way. Enable access to both models in the Amazon Bedrock console for your region: the deployment converses with each of them before the nested stacks are created, and reports one your account cannot reach as a parameter-validation failure.
+
+If the knowledge-base model is ever set to a model a knowledge base cannot generate with -- only reachable by deploying `lma-meetingassist-setup-stack/template.yaml` on its own, since the top-level parameter does not offer one -- the affected tool is not offered to the agent at all, and the function's log records the model ID and the parameter to change. Past meetings can still be listed chronologically in that state, because the `recent_meetings_list` tool reads DynamoDB and does not involve a knowledge base.
+
 ## Bedrock Guardrails
 
 Optionally configure Amazon Bedrock Guardrails to apply content filtering and safety controls to the assistant's responses.

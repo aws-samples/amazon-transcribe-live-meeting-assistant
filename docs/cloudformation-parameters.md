@@ -65,6 +65,7 @@ always covered, and at any plausible meeting volume the cap is never reached. Se
 |-----------|-------------|---------|----------------|
 | MeetingAssistService | Meeting assistant service type | STRANDS_BEDROCK | STRANDS_BEDROCK, STRANDS_BEDROCK_WITH_KB (Create), STRANDS_BEDROCK_WITH_KB (Use Existing) |
 | MeetingAssistServiceBedrockModelID | LLM model used by the meeting assistant | Claude Haiku 4.5 | See [Bedrock model choices](#bedrock-model-choices) |
+| MeetingAssistKnowledgeBaseModelID | LLM model the assistant's knowledge bases generate their answers with -- the document-search and past-meeting-search tools | Claude Haiku 4.5 | See [The knowledge-base model](meeting-assistant.md#the-knowledge-base-model) |
 | MeetingAssistWakePhrase | Regular expression pattern that activates the meeting assistant | OK Assistant | Valid regex pattern |
 | TavilyApiKey | API key for the Tavily web search tool. Stored in a Secrets Manager secret named `<stack-name>/integrations/tavily-api-key`; the meeting assist function is given the secret's ARN and fetches the key itself. Leave blank to leave web search unavailable | (none) | Empty, or 20+ characters of `[a-zA-Z0-9_-]` |
 | TavilyApiKeySecretArn | ARN of a Secrets Manager secret you have already provisioned holding the Tavily API key, used instead of `TavilyApiKey`. Supply one form or the other, not both | (none) | Empty, or a Secrets Manager secret ARN |
@@ -259,6 +260,14 @@ to keep the previous behaviour.
 | Claude 4 — `global.` | `global.anthropic.claude-haiku-4-5-20251001-v1:0`, `global.anthropic.claude-sonnet-4-5-20250929-v1:0`, `global.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-opus-4-6-v1` |
 | Claude 5 — `us.` | `us.anthropic.claude-haiku-5-5`, `us.anthropic.claude-sonnet-5-5`, `us.anthropic.claude-opus-5-5` |
 | Claude 5 — `global.` | `global.anthropic.claude-haiku-5-5`, `global.anthropic.claude-sonnet-5-5`, `global.anthropic.claude-opus-5-5` |
+
+`MeetingAssistKnowledgeBaseModelID` is not part of this list. It names the model
+the Meeting Assistant's knowledge bases generate an answer with, and a Bedrock
+Knowledge Base can be driven with fewer models than the agent itself runs on --
+per individual model, not by family or version, so the shorter list there is a
+record of what has been verified rather than a rule. Adding a model to the two
+parameters above does not add it there. See
+[The knowledge-base model](meeting-assistant.md#the-knowledge-base-model).
 
 A `global.` profile routes to whichever region has capacity; a `us.` profile
 keeps inference within the United States. Pick the one your data-residency

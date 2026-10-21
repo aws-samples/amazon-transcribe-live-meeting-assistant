@@ -41,6 +41,15 @@ Parameters:
     # rather than naming a model no longer offered there.
     Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 
+  MeetingAssistKnowledgeBaseModelID:
+    Type: String
+    # The model the Bedrock Knowledge Bases generate their answers with, kept
+    # separate from the agent's model above because RetrieveAndGenerate accepts a
+    # narrower set of models than Converse does. AllowedValues are stated in
+    # lma-main.yaml, which always passes this through; as above, the default here
+    # is only reached by a standalone deployment of this template.
+    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+
   TavilyApiKeySecretArn:
     Type: String
     Default: ""
@@ -375,6 +384,7 @@ Resources:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
           MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
+          KB_MODEL_ID: !Ref MeetingAssistKnowledgeBaseModelID
           KB_ID: !Ref BedrockKnowledgeBaseId
           KB_REGION: !Ref AWS::Region
           KB_ACCOUNT_ID: !Ref AWS::AccountId

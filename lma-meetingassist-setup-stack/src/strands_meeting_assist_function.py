@@ -20,6 +20,7 @@ from bedrock_compat import (
     MEETING_ASSIST_FALLBACK_MAX_TOKENS,
     accepts_temperature,
     build_inference_config,
+    claude_major_version,
     extract_text,
 )
 import tavily_secret
@@ -57,6 +58,31 @@ ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 # Above zero because this path is conversational rather than extractive.
 AGENT_TEMPERATURE = 0.3
 
+# Fallback for KB_MODEL_ID, reached only by a deployment whose environment does not
+# set it. Tracks the default of the MeetingAssistKnowledgeBaseModelID parameter.
+DEFAULT_KB_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+
+# Claude generation from which a model is assumed to require custom prompt
+# templates. This is a default for ids nobody has checked, not the boundary: see
+# kb_model_supports_retrieve_and_generate().
+KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR = 5
+
+# Models known to be refused by a live knowledge base that the generation default
+# above does not already cover. Claude Opus 4.1 returns the same "custom prompt
+# templates must be provided" ValidationException as the Claude 5.5 models, while
+# Claude Opus 4.6 is accepted, so a generation number alone cannot decide this.
+#
+# The us. profile is the measured one (us-west-2, 2026-10-21; its inference
+# profile exists in that account, so this is a refusal and not an availability
+# problem). Its global. twin is listed with it by inference, since every earlier
+# measurement found the two profile forms of one model behaving alike, and
+# withholding a tool for an id LMA does not offer anywhere is the harmless
+# direction to be wrong in.
+KB_MODELS_REQUIRING_CUSTOM_PROMPTS = frozenset({
+    'us.anthropic.claude-opus-4-1-20250805-v1:0',
+    'global.anthropic.claude-opus-4-1-20250805-v1:0',
+})
+
 # Optional Bedrock Guardrail, set from the BedrockGuardrailId / BedrockGuardrailVersion
 # CloudFormation parameters. Both are empty by default.
 BEDROCK_GUARDRAIL_ID = os.environ.get('BEDROCK_GUARDRAIL_ID', '').strip()
@@ -92,6 +118,57 @@ def get_guardrail_config() -> Dict[str, str]:
             'guardrail_version': BEDROCK_GUARDRAIL_VERSION,
         }
     return {}
+
+
+def build_kb_model_arn(model_id: str, kb_region: str, kb_account_id: str) -> str:
+    """The ``modelArn`` a RetrieveAndGenerate call generates its answer with.
+
+    A bare foundation-model id is addressed in the model catalogue, which has no
+    account in its ARN; anything else is an inference profile, which lives in the
+    deployment's own account.
+    """
+    if model_id.startswith("anthropic"):
+        return f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
+    return f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
+
+
+def kb_model_supports_retrieve_and_generate(model_id: str) -> bool:
+    """Whether a Bedrock Knowledge Base can generate an answer with ``model_id``.
+
+    A Knowledge Base supplies its own orchestration and generation prompt
+    templates, and asking RetrieveAndGenerate for a model those templates do not
+    cover returns a ValidationException stating that custom prompt templates must
+    be provided for both Orchestration and Generation. Which models those are is a
+    property of the individual model: Claude Opus 4.1 is refused and Claude Opus
+    4.6 is accepted, though both are Claude 4, and every Claude 5.5 id is refused
+    in both its ``global.`` and its ``us.`` form. The inference-profile prefix
+    makes no difference either way.
+
+    The agent's own model is unaffected and may be any of them: it reaches Bedrock
+    through Converse, which carries no such requirement. That difference is why
+    the knowledge-base model is a CloudFormation parameter of its own
+    (MeetingAssistKnowledgeBaseModelID) rather than the agent's, and that
+    parameter -- whose AllowedValues are the ids verified against a live knowledge
+    base -- is what normally decides this. This function is the backstop for a
+    value that did not come through it, such as a standalone deployment of the
+    nested template.
+
+    Two rules, in order: an id known to be refused is refused, and otherwise a
+    Claude generation at or above ``KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR`` is
+    assumed to be. The assumption is there because the two failure directions are
+    not symmetrical, the same reasoning bedrock_compat.accepts_temperature sets
+    out: treating a usable model as unusable costs one tool and is logged, while
+    treating an unusable one as usable costs every call that tool makes. It is a
+    default for ids nobody has checked and not a claim about where the boundary
+    lies -- there is no generational boundary to claim. Anything that is not a
+    Claude model keeps the knowledge base's defaults.
+    """
+    if model_id in KB_MODELS_REQUIRING_CUSTOM_PROMPTS:
+        return False
+    major = claude_major_version(model_id)
+    if major is None:
+        return True
+    return major < KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR
 
 
 def apply_kb_guardrail(kb_input: Dict[str, Any]) -> Dict[str, Any]:
@@ -252,11 +329,27 @@ class ThinkingStepHookProvider:
             logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
-def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, model_id: str,
+def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, kb_model_id: str,
                                 call_id: str = None, message_id: str = None):
-    """Factory function to create document search tool with closure"""
+    """Factory function to create document search tool with closure.
+
+    Returns None when ``kb_model_id`` cannot drive RetrieveAndGenerate, so the
+    caller offers the agent no document_search tool at all. A tool that is offered
+    but cannot answer is worse than an absent one: the agent spends a turn calling
+    it and reads the failure back as though it were retrieved material.
+    """
+    if not kb_model_supports_retrieve_and_generate(kb_model_id):
+        logger.error(
+            "document_search is not being offered to the agent: knowledge-base model '%s' "
+            "requires custom Orchestration and Generation prompt templates, which LMA does "
+            "not supply. Set the MeetingAssistKnowledgeBaseModelID CloudFormation parameter "
+            "to a model a knowledge base can generate with.",
+            kb_model_id,
+        )
+        return None
+
     from strands import tool
-    
+
     @tool
     def document_search(query: str) -> str:
         """Search company knowledge base for internal documents, policies, procedures, or reference materials.
@@ -288,13 +381,11 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
             
             logger.info(f"Document search tool executing: {query}")
-            
-            # Determine model ARN based on model type
-            if model_id.startswith("anthropic"):
-                model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-            else:
-                model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-            
+
+            # The knowledge base generates its answer with its own model, not the
+            # agent's. See kb_model_supports_retrieve_and_generate().
+            model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
             # Query knowledge base
             kb_input = {
                 "input": {'text': query},
@@ -328,9 +419,22 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
             return result
             
         except Exception as e:
-            logger.error(f"Error in document search: {str(e)}")
-            return f"Error retrieving documents: {str(e)}"
-    
+            logger.error(
+                "document_search failed: retrieve_and_generate on knowledge base %s with "
+                "model '%s' raised %s: %s",
+                kb_id, kb_model_id, type(e).__name__, e,
+            )
+            # Phrased so the agent cannot mistake it for retrieved material. The
+            # previous wording began "Error retrieving documents" and was followed
+            # by the exception text, which reads enough like content that the
+            # model answered from it.
+            return (
+                "DOCUMENT_SEARCH_FAILED. No documents were retrieved and this text is not "
+                "a search result -- it carries no knowledge base content. Tell the user "
+                "that document search is unavailable right now instead of answering from "
+                f"this. Cause: {type(e).__name__}: {e}"
+            )
+
     return document_search
 
 
@@ -475,10 +579,29 @@ def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str, call_
 
 
 def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_account_id: str,
-                                model_id: str, user_email: str, call_id: str = None, message_id: str = None):
-    """Factory function to create meeting history tool with closure"""
+                                kb_model_id: str, user_email: str, call_id: str = None,
+                                message_id: str = None):
+    """Factory function to create meeting history tool with closure.
+
+    Returns None when ``kb_model_id`` cannot drive RetrieveAndGenerate, so the
+    agent is offered no meeting_history tool. The transcript knowledge base is
+    created by default, which makes this the tool most often affected: offered but
+    unable to answer, it was called on most interactions and its failure read back
+    as though past meetings had been searched and found wanting.
+    """
+    if not kb_model_supports_retrieve_and_generate(kb_model_id):
+        logger.error(
+            "meeting_history is not being offered to the agent: knowledge-base model '%s' "
+            "requires custom Orchestration and Generation prompt templates, which LMA does "
+            "not supply. Set the MeetingAssistKnowledgeBaseModelID CloudFormation parameter "
+            "to a model a knowledge base can generate with. The recent_meetings_list tool "
+            "is unaffected, so chronological listing of past meetings still works.",
+            kb_model_id,
+        )
+        return None
+
     from strands import tool
-    
+
     @tool
     def meeting_history(query: str, call_ids: str = "") -> str:
         """Search past meeting transcripts and summaries with semantic search and user-based access control.
@@ -518,15 +641,13 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             logger.info(f"🔍 DEBUG: KB Configuration:")
             logger.info(f"   transcript_kb_id: {transcript_kb_id}")
             logger.info(f"   kb_region: {kb_region}")
-            logger.info(f"   model_id: {model_id}")
+            logger.info(f"   kb_model_id: {kb_model_id}")
             logger.info(f"   user_email (filter): {user_email}")
-            
-            # Determine model ARN based on model type
-            if model_id.startswith("anthropic"):
-                model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-            else:
-                model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-            
+
+            # The knowledge base generates its answer with its own model, not the
+            # agent's. See kb_model_supports_retrieve_and_generate().
+            model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
             logger.info(f"   model_arn: {model_arn}")
             
             # Query with user-based access control filter
@@ -584,9 +705,22 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             return result
             
         except Exception as e:
-            logger.error(f"Error in meeting history search: {str(e)}")
-            error_msg = f"Error retrieving meeting history: {str(e)}"
-            
+            logger.error(
+                "meeting_history failed: retrieve_and_generate on transcript knowledge base "
+                "%s with model '%s' raised %s: %s",
+                transcript_kb_id, kb_model_id, type(e).__name__, e,
+            )
+            # Phrased so the agent cannot mistake it for a search result. The
+            # previous wording began "Error retrieving meeting history" and was
+            # followed by the exception text, which reads enough like an answer
+            # that the model summarised it as though past meetings had been read.
+            error_msg = (
+                "MEETING_HISTORY_SEARCH_FAILED. No past meetings were searched and this "
+                "text is not a search result -- it carries no meeting content. Tell the "
+                "user that past-meeting search is unavailable right now instead of "
+                f"answering from this. Cause: {type(e).__name__}: {e}"
+            )
+
             # Send error thinking step
             if call_id and message_id and APPSYNC_GRAPHQL_URL:
                 from datetime import datetime
@@ -1337,22 +1471,23 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
 def query_knowledge_base(user_input: str, call_id: str) -> str:
     """
     Query Bedrock Knowledge Base for relevant context
+
+    Nothing in this module calls this today; the per-meeting context it fetches is
+    reached through the current_meeting_transcript tool instead. It is kept on the
+    knowledge-base model for the same reason the two tools are, so that re-enabling
+    it cannot reintroduce the coupling to the agent's model.
     """
     try:
         kb_id = os.environ.get('KB_ID')
         if not kb_id:
             return ""
-        
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+
+        kb_model_id = os.environ.get('KB_MODEL_ID', DEFAULT_KB_MODEL_ID)
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID')
-        
-        # Determine model ARN based on model type
-        if model_id.startswith("anthropic"):
-            model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-        else:
-            model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-        
+
+        model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
         # Query knowledge base
         kb_input = {
             "input": {
@@ -1477,6 +1612,9 @@ def handler(event, context):
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID', '')
         model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+        # The model the knowledge bases generate with, which is deliberately
+        # separate from the agent's: see kb_model_supports_retrieve_and_generate().
+        kb_model_id = os.environ.get('KB_MODEL_ID', DEFAULT_KB_MODEL_ID)
         # Whether the web search tool is available is decided from the secret's
         # ARN alone, so a deployment without a Tavily API key makes no Secrets
         # Manager call. The key itself is read inside the tool, on the first
@@ -1635,17 +1773,21 @@ def handler(event, context):
             except Exception as e:
                 logger.warning(f"Could not enable web search tool: {str(e)}")
         
-        # Add document retrieval tool if KB configured
+        # Add document retrieval tool if KB configured. The factory returns None
+        # when the knowledge-base model cannot generate an answer, in which case
+        # the agent is offered no such tool rather than one that cannot answer.
         if kb_id:
-            tools.append(create_document_search_tool(
+            document_search_tool = create_document_search_tool(
                 kb_id=kb_id,
                 kb_region=kb_region,
                 kb_account_id=kb_account_id,
-                model_id=model_id,
+                kb_model_id=kb_model_id,
                 call_id=call_id,
                 message_id=message_id
-            ))
-            logger.info("Document retrieval tool enabled")
+            )
+            if document_search_tool is not None:
+                tools.append(document_search_tool)
+                logger.info(f"Document retrieval tool enabled (KB model: {kb_model_id})")
         
         # Add recent meetings list tool if DynamoDB table and transcript KB configured
         if dynamodb_table_name and transcript_kb_id and user_email:
@@ -1657,18 +1799,21 @@ def handler(event, context):
             ))
             logger.info("Recent meetings list tool enabled")
         
-        # Add meeting history tool if transcript KB configured
+        # Add meeting history tool if transcript KB configured. As above, the
+        # factory returns None when the knowledge-base model cannot generate.
         if transcript_kb_id and user_email:
-            tools.append(create_meeting_history_tool(
+            meeting_history_tool = create_meeting_history_tool(
                 transcript_kb_id=transcript_kb_id,
                 kb_region=kb_region,
                 kb_account_id=kb_account_id,
-                model_id=model_id,
+                kb_model_id=kb_model_id,
                 user_email=user_email,
                 call_id=call_id,
                 message_id=message_id
-            ))
-            logger.info("Meeting history tool enabled")
+            )
+            if meeting_history_tool is not None:
+                tools.append(meeting_history_tool)
+                logger.info(f"Meeting history tool enabled (KB model: {kb_model_id})")
         
         # Add current meeting transcript tool
         if dynamodb_table_name:
