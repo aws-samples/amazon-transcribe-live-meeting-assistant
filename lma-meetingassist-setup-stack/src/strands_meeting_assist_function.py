@@ -194,19 +194,138 @@ def apply_kb_guardrail(kb_input: Dict[str, Any]) -> Dict[str, Any]:
     }
     return kb_input
 
-# Module-level reusable AppSync client (avoids recreating SigV4 auth on every call)
-_appsync_client = None
+def new_appsync_client(url: str):
+    """A fresh AppSync GraphQL client for ``url``.
 
-def _get_appsync_client():
-    """Get or create a reusable AppSync GraphQL client."""
-    global _appsync_client
-    if _appsync_client is None and APPSYNC_GRAPHQL_URL:
-        from asst_gql_client import AppsyncRequestsGqlClient
-        _appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-    return _appsync_client
+    One seam for constructing a client, so that the publisher below is the only
+    thing deciding how long one lives.
+    """
+    from asst_gql_client import AppsyncRequestsGqlClient
+    return AppsyncRequestsGqlClient(url=url, fetch_schema_from_transport=False)
+
+
+class AppsyncPublisher:
+    """One AppSync connection, reused for the mutations of a single invocation.
+
+    gql's ``Client.execute`` opens a transport session, runs the mutation and
+    closes the session again, and the requests transport's session is where the
+    TLS connection lives. Publishing a streamed answer token by token through
+    ``Client.execute`` therefore costs one TLS handshake per token: measured
+    against the deployed function's logs, 0.107s per streamed chunk, which on a
+    median answer is of the order of ten seconds spent connecting. Holding one
+    session open for the whole answer leaves a single handshake.
+
+    **Scoped to one invocation, deliberately, rather than cached at module
+    level.** AppSyncIAMAuthentication resolves credentials once, when the client
+    is constructed, and signs every later request with that object. In the Lambda
+    environment those come from botocore's environment-variable provider, which
+    returns static credentials unless AWS_CREDENTIAL_EXPIRATION is set -- and
+    Lambda does not set it -- so a client held at module level would go on signing
+    with whatever was resolved at cold start. This function is kept warm by
+    periodic warmup pings, so its execution environments are long-lived by design,
+    which is exactly the case where that matters. A publisher per invocation
+    always signs with the credentials the environment holds now, and still removes
+    all but one of the handshakes, because one invocation is one answer.
+
+    A failed mutation discards the session instead of keeping one whose state is
+    unknown: the next publish opens a fresh one, so a single failure costs one
+    reconnect rather than the remainder of the answer.
+    """
+
+    def __init__(self, url: str):
+        self._url = url
+        self._client = None
+        self._session = None
+
+    def _connect(self):
+        if self._session is None:
+            client = new_appsync_client(self._url)
+            # connect_sync() hands back a session that stays open until it is
+            # closed, unlike Client.execute(), which opens and closes one per call.
+            self._session = client.connect_sync()
+            self._client = client
+        return self._session
+
+    def execute(self, document, variables: Dict[str, Any]):
+        """Run one mutation on the shared session, reconnecting if it is gone."""
+        session = self._connect()
+        try:
+            return session.execute(document, variable_values=variables)
+        except Exception:
+            self.close()
+            raise
+
+    def close(self):
+        """Release the session. Safe to call more than once, and after a failure."""
+        client, self._client, self._session = self._client, None, None
+        if client is None:
+            return
+        try:
+            client.close_sync()
+        except Exception as e:
+            # Nothing is retried on the way out: the connection is being
+            # abandoned either way, and raising here would mask whatever ended
+            # the stream.
+            logger.warning(f"Error closing AppSync client: {str(e)}")
+
+
+# Parsed once per execution environment rather than per published token: the
+# document is a constant, and gql re-parses the string on every gql() call.
+_CHAT_TOKEN_MUTATION = None
+
+
+def get_chat_token_mutation():
+    """The addChatToken mutation document, parsed on first use."""
+    global _CHAT_TOKEN_MUTATION
+    if _CHAT_TOKEN_MUTATION is None:
+        from gql import gql
+        _CHAT_TOKEN_MUTATION = gql("""
+        mutation AddChatToken($input: AddChatTokenInput!) {
+            addChatToken(input: $input) {
+                CallId
+                MessageId
+                Token
+                IsComplete
+                Sequence
+                Timestamp
+                ThinkingStep {
+                    Type
+                    Content
+                    ToolName
+                    ToolInput
+                    ToolResult
+                    Success
+                }
+            }
+        }
+        """)
+    return _CHAT_TOKEN_MUTATION
+
+
+def subscriber_message_id(transcript_segment_args: Dict[str, Any]) -> Optional[str]:
+    """The MessageId a UI subscriber could be listening on, or None if there is none.
+
+    ``onAddChatToken`` takes both a CallId and a MessageId and both are required,
+    so a published token only ever reaches a subscriber that knows the MessageId
+    in advance. Every caller that has one supplies it in ``transcript_segment_args``:
+    the chat path generates it (``chat-<uuid>``) and returns it to the browser to
+    subscribe with, and the wake-phrase path supplies the SegmentId it is about to
+    write. The Virtual Participant's voice assistant invokes this function
+    directly with no ``transcript_segment_args`` at all, waits for the whole
+    RequestResponse payload and hands the single returned string to its speech
+    model, so nothing is listening and nothing persists the tokens -- addChatToken
+    resolves against a NONE data source that only broadcasts.
+
+    Returning None for that caller is what lets the streaming publish be skipped
+    where it has no audience. It is decided from the payload rather than from a
+    guess about who sent it, and in the direction that fails safe: an unrecognised
+    caller that does supply an id keeps its tokens published.
+    """
+    return (
+        transcript_segment_args.get('MessageId')
+        or transcript_segment_args.get('SegmentId')
+        or None
+    )
 
 
 def send_thinking_step_async(call_id: str, message_id: str, thinking_step: Dict[str, Any], sequence: int):
@@ -1290,47 +1409,21 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str, messag
     return control_vp_browser
 
 
-def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
+def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool,
+                               sequence: int, publisher: Optional[AppsyncPublisher] = None):
     """
     Send a chat token to AppSync for real-time streaming
+
+    ``publisher`` is the AppsyncPublisher holding the connection this answer's
+    tokens go out on; the streaming loop creates one and passes it for every
+    token. Without one a connection is opened and closed for this single token,
+    which is what any other caller wants and what the whole stream used to do.
     """
     try:
         if not APPSYNC_GRAPHQL_URL:
             logger.warning("APPSYNC_GRAPHQL_URL not configured, skipping token streaming")
             return
-        
-        from asst_gql_client import AppsyncRequestsGqlClient
-        from datetime import datetime
-        from gql import gql
-        
-        # Initialize AppSync client
-        appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-        
-        # GraphQL mutation - parse it into an AST
-        mutation = gql("""
-        mutation AddChatToken($input: AddChatTokenInput!) {
-            addChatToken(input: $input) {
-                CallId
-                MessageId
-                Token
-                IsComplete
-                Sequence
-                Timestamp
-                ThinkingStep {
-                    Type
-                    Content
-                    ToolName
-                    ToolInput
-                    ToolResult
-                    Success
-                }
-            }
-        }
-        """)
-        
+
         variables = {
             'input': {
                 'CallId': call_id,
@@ -1340,11 +1433,14 @@ def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_com
                 'Sequence': sequence
             }
         }
-        
-        # Execute mutation
-        result = appsync_client.execute(mutation, variable_values=variables)
+
+        mutation = get_chat_token_mutation()
+        if publisher is None:
+            new_appsync_client(APPSYNC_GRAPHQL_URL).execute(mutation, variable_values=variables)
+        else:
+            publisher.execute(mutation, variables)
         logger.debug(f"Sent token {sequence} to AppSync: {token[:50]}...")
-        
+
     except Exception as e:
         logger.error(f"Error sending token to AppSync: {str(e)}")
 
@@ -1367,38 +1463,17 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
             logger.warning("APPSYNC_GRAPHQL_URL not configured, skipping thinking step streaming")
             return
         
-        from asst_gql_client import AppsyncRequestsGqlClient
-        from datetime import datetime
-        from gql import gql
-        
-        # Initialize AppSync client
-        appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-        
-        # Use addChatToken mutation but with empty token and thinking step data
-        mutation = gql("""
-        mutation AddChatToken($input: AddChatTokenInput!) {
-            addChatToken(input: $input) {
-                CallId
-                MessageId
-                Token
-                IsComplete
-                Sequence
-                Timestamp
-                ThinkingStep {
-                    Type
-                    Content
-                    ToolName
-                    ToolInput
-                    ToolResult
-                    Success
-                }
-            }
-        }
-        """)
-        
+        # A connection of its own, not the streaming publisher's: these are sent
+        # from tool bodies and from background threads (send_thinking_step_async),
+        # and a requests session is not safe to share across threads. There are a
+        # few of these per answer rather than one per token, so they are not what
+        # the measured per-chunk cost was about.
+        appsync_client = new_appsync_client(APPSYNC_GRAPHQL_URL)
+
+        # The same addChatToken mutation the tokens use, with an empty token and
+        # the thinking step attached.
+        mutation = get_chat_token_mutation()
+
         # Create thinking step data
         thinking_step_data = {
             'Type': thinking_step.get('type', 'unknown'),
@@ -1421,7 +1496,7 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
         }
         
         # Execute mutation
-        result = appsync_client.execute(mutation, variable_values=variables)
+        appsync_client.execute(mutation, variable_values=variables)
         logger.debug(f"Sent thinking step {sequence} ({thinking_step.get('type')}) via ChatToken")
         
     except Exception as e:
@@ -1624,10 +1699,14 @@ def handler(event, context):
         # Fetch meeting transcript from DynamoDB
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
         
-        # Get message ID early for tool wrappers and status updates
+        # Get message ID early for tool wrappers and status updates. A caller that
+        # supplies no id of its own has no subscriber either; see
+        # subscriber_message_id(). The synthetic id is still used for logging and
+        # for the thinking-step sequence counters.
         transcript_segment_args = event.get('transcript_segment_args', {})
-        message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
-        
+        subscriber_id = subscriber_message_id(transcript_segment_args)
+        message_id = subscriber_id or f"msg-{call_id}"
+
         # Initialize tools list (includes both regular tools and MCP clients)
         tools = []
         
@@ -1847,10 +1926,8 @@ def handler(event, context):
             from strands import Agent
             from strands.models import BedrockModel
             
-            # Get message ID for streaming - use MessageId if provided, otherwise fall back to SegmentId
-            transcript_segment_args = event.get('transcript_segment_args', {})
-            message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
-            
+            # message_id and subscriber_id were resolved above, from the same event.
+
             logger.info(f"Using MessageId for streaming: {message_id}")
             logger.info(f"Tools enabled: {len(tools)}")
             
@@ -1927,19 +2004,30 @@ def handler(event, context):
             else:
                 context_message = f"User Request: {user_input}"
             
-            # Handle streaming vs non-streaming
-            if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
+            # Handle streaming vs non-streaming. Tokens are only streamed when
+            # some caller is listening for them: onAddChatToken requires the
+            # MessageId, so a caller that supplied none cannot be subscribed, and
+            # the mutation persists nothing. The Virtual Participant's voice
+            # assistant is that caller -- it waits for the whole response payload
+            # and speaks the single string this returns -- so it takes the
+            # non-streaming path and the answer reaches it unchanged.
+            if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL and subscriber_id:
                 logger.info("Streaming mode enabled - sending tokens to AppSync")
-                
+
                 # Import asyncio for async streaming
                 import asyncio
-                
+
+                # One AppSync connection for every token of this answer, created
+                # here so it can be closed whether the stream finishes or raises.
+                # See AppsyncPublisher.
+                token_publisher = AppsyncPublisher(APPSYNC_GRAPHQL_URL)
+
                 async def stream_response():
                     from datetime import datetime
                     sequence = 0
                     thinking_sequence = 0
                     full_response = []
-                    
+
                     # Use stream_async to get async iterator
                     async for event in agent.stream_async(context_message):
                         logger.debug(f"Stream event received: {type(event)} - {event}")
@@ -2014,10 +2102,11 @@ def handler(event, context):
                                     message_id=message_id,
                                     token=token_text,
                                     is_complete=False,
-                                    sequence=sequence
+                                    sequence=sequence,
+                                    publisher=token_publisher
                                 )
                                 sequence += 1
-                        
+
                         # Handle string events (simple text tokens)
                         elif isinstance(event, str):
                             full_response.append(event)
@@ -2026,27 +2115,39 @@ def handler(event, context):
                                 message_id=message_id,
                                 token=event,
                                 is_complete=False,
-                                sequence=sequence
+                                sequence=sequence,
+                                publisher=token_publisher
                             )
                             sequence += 1
-                    
+
                     # Send completion token
                     send_chat_token_to_appsync(
                         call_id=call_id,
                         message_id=message_id,
                         token='',  # nosec B106 - Empty string is not a hardcoded password, it's a completion marker
                         is_complete=True,
-                        sequence=sequence
+                        sequence=sequence,
+                        publisher=token_publisher
                     )
-                    
+
                     logger.info(f"Streaming complete. Response tokens: {sequence}, Thinking steps: {thinking_sequence}")
                     return ''.join(full_response)
-                
+
                 # Run the async streaming function
-                response_text = asyncio.run(stream_response())
+                try:
+                    response_text = asyncio.run(stream_response())
+                finally:
+                    token_publisher.close()
                 
             else:
-                # Non-streaming mode (current behavior)
+                # Non-streaming mode (current behavior). Also the path taken when
+                # streaming is configured but the caller supplied no MessageId, so
+                # no subscription for these tokens can exist.
+                if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL and not subscriber_id:
+                    logger.info(
+                        "The caller supplied no MessageId, so no subscriber can be listening "
+                        "for this answer's tokens; answering without publishing a token stream"
+                    )
                 response = agent(context_message)
                 
                 # Convert AgentResult to string if needed

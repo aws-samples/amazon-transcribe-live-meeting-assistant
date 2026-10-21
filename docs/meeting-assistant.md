@@ -17,6 +17,7 @@ title: "Meeting Assistant"
   - [S3 Data Source](#s3-data-source)
   - [Web Crawler](#web-crawler)
 - [Model Selection](#model-selection)
+  - [The knowledge-base model](#the-knowledge-base-model)
 - [Bedrock Guardrails](#bedrock-guardrails)
 - [Custom LLM Prompt Templates](#custom-llm-prompt-templates)
 - [Chat Shortcut Button Configuration](#chat-shortcut-button-configuration)
@@ -48,6 +49,8 @@ The wake phrase pattern is configurable via the **Meeting Assist Wake Phrase Reg
 ### Chat Interface
 
 Type questions directly in the chat panel on the meeting details page. The assistant streams its response in real time with token-by-token streaming, providing a conversational experience. The chat interface provides full access to all built-in tools.
+
+Each token is published through the `addChatToken` AppSync mutation and delivered to the browser over an `onAddChatToken` subscription, which is keyed on both the meeting and the message. All the tokens of one answer are published over a single connection to AppSync, opened when the answer starts and closed when it finishes. Callers that do not subscribe -- the Virtual Participant's voice assistant invokes the assistant directly and speaks the complete answer it gets back -- are answered without a token stream being published, since the mutation broadcasts to subscribers and stores nothing. The answer itself is identical either way.
 
 ### Chat Shortcut Buttons
 

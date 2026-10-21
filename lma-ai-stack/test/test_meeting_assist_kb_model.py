@@ -292,13 +292,14 @@ def strands_stub():
     (the real one returns a callable wrapper, so returning the function itself
     keeps a tool body directly callable) and `strands.models`, whose `BedrockModel`
     the handler constructs. `Agent` is left for the handler test to supply.
+
+    The object registered in sys.modules is the one returned, so that a second
+    test file standing `strands` in does not end up patching a different object
+    from the one `from strands import Agent` resolves to.
     """
-    stub = types.ModuleType("strands")
+    stub = sys.modules.setdefault("strands", types.ModuleType("strands"))
     stub.tool = lambda func: func
-    models = types.ModuleType("strands.models")
-    stub.models = models
-    sys.modules.setdefault("strands", stub)
-    sys.modules.setdefault("strands.models", models)
+    stub.models = sys.modules.setdefault("strands.models", types.ModuleType("strands.models"))
     return stub
 
 
