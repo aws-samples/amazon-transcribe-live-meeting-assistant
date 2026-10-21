@@ -134,21 +134,40 @@ class FakeDynamo:
 
 
 class FakeBedrock:
-    def __init__(self, answer=MODEL_ANSWER, error=None):
+    def __init__(self, answer=MODEL_ANSWER, error=None, blocks=None, stop_reason="end_turn"):
         self.answer = answer
         self.error = error
+        # When given, the exact content blocks to return instead of a single text
+        # block -- used to replay what a reasoning-capable model sends back.
+        self.blocks = blocks
+        self.stop_reason = stop_reason
         self.prompts = []
+        self.requests = []
 
     def converse(self, **kwargs):  # noqa: D102
+        self.requests.append(kwargs)
         self.prompts.append(kwargs["messages"][0]["content"][0]["text"])
         if self.error:
             raise self.error
-        return {"output": {"message": {"content": [{"text": self.answer}]}}}
+        blocks = self.blocks if self.blocks is not None else [{"text": self.answer}]
+        return {
+            "output": {"message": {"content": blocks}},
+            "stopReason": self.stop_reason,
+        }
 
 
-def install(monkeypatch, meeting=None, segments=None, answer=MODEL_ANSWER, error=None, pages=None):
+def install(
+    monkeypatch,
+    meeting=None,
+    segments=None,
+    answer=MODEL_ANSWER,
+    error=None,
+    pages=None,
+    blocks=None,
+    stop_reason="end_turn",
+):
     ddb = FakeDynamo(meeting=meeting, segments=segments, pages=pages)
-    bedrock = FakeBedrock(answer=answer, error=error)
+    bedrock = FakeBedrock(answer=answer, error=error, blocks=blocks, stop_reason=stop_reason)
     written = []
     monkeypatch.setattr(index, "dynamodb", ddb)
     monkeypatch.setattr(index, "bedrock", bedrock)
@@ -192,6 +211,92 @@ def test_segments_are_read_from_every_page(monkeypatch: pytest.MonkeyPatch) -> N
     ddb, _, _ = install(monkeypatch, segments=many, pages=2)
     index.handler({"CallId": CALL_ID}, None)
     assert len(ddb.queries) == 3
+
+
+# --------------------------------------------------------------------------
+# What the model is sent, and how its answer is read
+#
+# Two settings differ between model generations and both are invisible until a
+# deployment picks the other kind: the reasoning-capable Claude models reject a
+# temperature outright, and they may answer with a reasoning block ahead of the
+# text. This function's answer is parsed into an identity map, so reasoning text
+# reaching the parser would mis-attribute names rather than merely read oddly.
+# --------------------------------------------------------------------------
+
+
+def test_a_temperature_is_sent_to_a_model_that_accepts_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Naming is extraction, so two passes over one meeting should agree."""
+    monkeypatch.setattr(index, "BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    _, bedrock, _ = install(monkeypatch)
+    index.handler({"CallId": CALL_ID}, None)
+    assert bedrock.requests[0]["inferenceConfig"]["temperature"] == 0
+
+
+def test_no_temperature_is_sent_to_a_model_that_rejects_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Claude 5 and later refuse the request rather than ignoring the setting."""
+    monkeypatch.setattr(index, "BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
+    _, bedrock, _ = install(monkeypatch)
+    index.handler({"CallId": CALL_ID}, None)
+    assert "temperature" not in bedrock.requests[0]["inferenceConfig"]
+
+
+def test_the_budget_leaves_room_for_reasoning_tokens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reasoning is billed against maxTokens and comes before any text.
+
+    Measured on a transcript of the same order as the one this prompt carries, a
+    reasoning model spent over 2,048 output tokens before answering.
+    """
+    _, bedrock, _ = install(monkeypatch)
+    index.handler({"CallId": CALL_ID}, None)
+    assert bedrock.requests[0]["inferenceConfig"]["maxTokens"] >= 2048
+
+
+def test_names_are_read_past_a_reasoning_block(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The answer is the text block, wherever in the response it sits."""
+    _, _, written = install(
+        monkeypatch,
+        blocks=[
+            {"reasoningContent": {"reasoningText": {"text": "Sarah introduces herself first"}}},
+            {"text": MODEL_ANSWER},
+        ],
+    )
+    result = index.handler({"CallId": CALL_ID}, None)
+    assert result == {"Success": True, "Message": "ok", "NamesApplied": 2}
+    assert written[0][1]["identities"][SPK0]["name"] == "Sarah Lee"
+
+
+def test_names_are_still_read_from_a_lone_text_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Whether a reasoning block appears is prompt-dependent, so both shapes work."""
+    _, _, written = install(monkeypatch, blocks=[{"text": MODEL_ANSWER}])
+    result = index.handler({"CallId": CALL_ID}, None)
+    assert result["NamesApplied"] == 2
+    assert written[0][1]["identities"][SPK1]["name"] == "Priya Raman"
+
+
+def test_a_response_of_nothing_but_reasoning_names_nobody(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What a reasoning model returns when the whole budget went on reasoning.
+
+    There is no answer to parse, so the pass has to fail rather than treat an
+    empty string as "nobody could be named".
+    """
+    _, _, written = install(
+        monkeypatch,
+        blocks=[{"reasoningContent": {"reasoningText": {"text": "thinking"}}}],
+        stop_reason="max_tokens",
+    )
+    result = index.handler({"CallId": CALL_ID}, None)
+    assert result["Success"] is False
+    assert written == []
 
 
 # --------------------------------------------------------------------------

@@ -36,13 +36,21 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "us.anthropic.claude-sonnet-4-6"
       - "us.anthropic.claude-opus-4-6-v1"
+      - "us.anthropic.claude-haiku-5-5"
+      - "us.anthropic.claude-sonnet-5-5"
+      - "us.anthropic.claude-opus-5-5"
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.anthropic.claude-sonnet-4-6"
       - "global.anthropic.claude-opus-4-6-v1"
+      - "global.anthropic.claude-haiku-5-5"
+      - "global.anthropic.claude-sonnet-5-5"
+      - "global.anthropic.claude-opus-5-5"
     Description: >-
       Select a Bedrock LLM model for the meeting assistant. Includes Nova models (cost-effective)
-      and Claude 4+ models (cutting-edge). Some models require inference profiles.
+      and Claude 4+ models (cutting-edge). Some models require inference profiles. The Claude 5
+      generation reasons before it answers, which raises answer quality but also raises output
+      token use several-fold, so it costs more per meeting than Claude 4.5 at the same size.
 
   TavilyApiKey:
     Type: String
@@ -456,7 +464,7 @@ Parameters:
       ARN below.
 
   BedrockModelId:
-    Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    Default: "global.anthropic.claude-sonnet-5-5"
     Type: String
     AllowedValues:
       - "amazon.nova-micro-v1:0"
@@ -470,14 +478,23 @@ Parameters:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "us.anthropic.claude-sonnet-4-6"
       - "us.anthropic.claude-opus-4-6-v1"
+      - "us.anthropic.claude-haiku-5-5"
+      - "us.anthropic.claude-sonnet-5-5"
+      - "us.anthropic.claude-opus-5-5"
       - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
       - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "global.anthropic.claude-sonnet-4-6"
       - "global.anthropic.claude-opus-4-6-v1"
+      - "global.anthropic.claude-haiku-5-5"
+      - "global.anthropic.claude-sonnet-5-5"
+      - "global.anthropic.claude-opus-5-5"
     Description: >
       If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
       of supported models. Includes Nova models (cost-effective) and Claude 4+ (cutting-edge).
-      Some models require inference profiles. Defaults to 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+      Some models require inference profiles. The Claude 5 generation reasons before it answers,
+      which raises summary quality but also raises output token use several-fold, so it costs
+      more per meeting than Claude 4.5 at the same size.
+      Defaults to 'global.anthropic.claude-sonnet-5-5'
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""

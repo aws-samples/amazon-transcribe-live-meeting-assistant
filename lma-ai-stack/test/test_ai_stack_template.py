@@ -206,6 +206,131 @@ def test_every_output_the_main_template_consumes_is_declared(template: dict):
     assert not missing, f"lma-main.yaml consumes outputs this template does not declare: {missing}"
 
 
+@pytest.fixture(scope="module")
+def main_template() -> dict:
+    return yaml.load(MAIN_TEMPLATE.read_text(), Loader=_CfnLoader)
+
+
+def test_the_bedrock_model_choices_match_the_main_templates(template: dict, main_template: dict):
+    """The other cross-template contract: both templates list the selectable models.
+
+    lma-main.yaml passes its own `BedrockModelId` straight through to this stack
+    (`BedrockModelId: !Ref BedrockModelId` on the AISTACK resource), so this
+    template's `AllowedValues` has to admit everything lma-main offers. A value
+    offered there and missing here fails the nested stack's update on parameter
+    validation — in the parent's eyes, 35-40 minutes into a deploy, followed by a
+    rollback.
+
+    Asserted as equality rather than containment because the two lists are meant
+    to be the same list. They have drifted before: this template kept offering
+    Claude 3.x models for several releases after lma-main.yaml stopped, which was
+    invisible precisely because the direction of the drift was the harmless one.
+    If a model should genuinely be selectable in one template only, this is the
+    test to change deliberately.
+    """
+    here = template["Parameters"]["BedrockModelId"]["AllowedValues"]
+    there = main_template["Parameters"]["BedrockModelId"]["AllowedValues"]
+    assert len(here) >= 15, f"only {len(here)} model choices — did the list move?"
+    assert set(here) == set(there), (
+        "BedrockModelId AllowedValues differ between this template and "
+        f"lma-main.yaml. Only here: {sorted(set(here) - set(there))}. "
+        f"Only in lma-main.yaml: {sorted(set(there) - set(here))}"
+    )
+
+
+def test_the_summary_model_default_matches_across_the_templates(
+    template: dict, main_template: dict
+):
+    """The two `BedrockModelId` defaults are the same parameter and must agree.
+
+    `lma-main.yaml` passes its value straight into the nested AI stack, so the
+    nested default is reached only by deploying that template standalone. If the
+    two drift, a standalone deployment summarises with a different model from
+    the one the documented path uses, and no deploy-time check would catch it.
+
+    The Meeting Assistant's default is deliberately NOT included. It is chosen
+    for a different job: summarisation is batch work where answer quality
+    dominates, while the assistant answers mid-meeting and is sometimes spoken
+    aloud, so its time to first token is what matters. The two are free to
+    differ, and `test_every_model_parameter_defaults_to_one_of_its_own_choices`
+    is what keeps each of them valid.
+    """
+    nested = template["Parameters"]["BedrockModelId"]["Default"]
+    main = main_template["Parameters"]["BedrockModelId"]["Default"]
+    assert nested == main, (
+        f"BedrockModelId defaults have drifted: lma-ai-stack.yaml has {nested!r}, "
+        f"lma-main.yaml has {main!r}"
+    )
+
+
+@pytest.mark.parametrize(
+    "template_name, parameter",
+    [
+        ("lma-ai-stack.yaml", "BedrockModelId"),
+        ("lma-main.yaml", "BedrockModelId"),
+        ("lma-main.yaml", "MeetingAssistServiceBedrockModelID"),
+    ],
+)
+def test_every_model_parameter_defaults_to_one_of_its_own_choices(
+    template: dict, main_template: dict, template_name: str, parameter: str
+):
+    """A default outside its own AllowedValues fails validation on every deploy.
+
+    It cannot be caught by deploying with the parameter set, which is how these
+    are normally exercised, so it would only surface for somebody accepting the
+    defaults.
+    """
+    source = template if template_name == "lma-ai-stack.yaml" else main_template
+    spec = source["Parameters"][parameter]
+    assert spec["Default"] in spec["AllowedValues"], (
+        f"{template_name} {parameter} defaults to {spec['Default']!r}, "
+        f"which is not one of its AllowedValues"
+    )
+
+
+def test_the_claude_5_models_are_selectable(template: dict, main_template: dict):
+    """Both the `us.` and `global.` form of each, in both templates.
+
+    A model offered in only one of the two regional forms is a trap for a
+    deployment in a region the other form does not cover, and the pair is cheap
+    to keep complete.
+    """
+    expected = {
+        f"{prefix}.anthropic.claude-{size}-5-5"
+        for prefix in ("us", "global")
+        for size in ("haiku", "sonnet", "opus")
+    }
+    for name, source, parameters in (
+        ("lma-ai-stack.yaml", template, ("BedrockModelId",)),
+        ("lma-main.yaml", main_template, ("BedrockModelId", "MeetingAssistServiceBedrockModelID")),
+    ):
+        for parameter in parameters:
+            allowed = set(source["Parameters"][parameter]["AllowedValues"])
+            assert expected <= allowed, (
+                f"{name} {parameter} is missing {sorted(expected - allowed)}"
+            )
+
+
+def test_no_claude_3_models_remain_selectable(template: dict, main_template: dict):
+    """Claude 3.x was withdrawn from the model selectors in v0.3.0.
+
+    lma-main.yaml dropped them then; this template did not, and went on offering
+    eight of them. Nothing could reach them — lma-main supplies this stack's value
+    — so the list was simply stale. This keeps it that way.
+    """
+    for name, source, parameters in (
+        ("lma-ai-stack.yaml", template, ("BedrockModelId",)),
+        ("lma-main.yaml", main_template, ("BedrockModelId", "MeetingAssistServiceBedrockModelID")),
+    ):
+        for parameter in parameters:
+            stale = sorted(
+                value
+                for value in source["Parameters"][parameter]["AllowedValues"]
+                if re.search(r"claude-3[-.]", value)
+            )
+            assert not stale, f"{name} {parameter} still offers withdrawn models: {stale}"
+
+
 def test_every_function_code_uri_exists_on_disk(resources: dict):
     """`sam build` resolves these relative to the template; a stale path fails the build."""
     missing = []

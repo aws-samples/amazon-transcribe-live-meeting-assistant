@@ -12,6 +12,7 @@ import os
 import re
 
 import boto3
+from bedrock_compat import SUMMARY_MAX_TOKENS, build_inference_config, extract_text
 from botocore.config import Config
 
 logger = logging.getLogger()
@@ -23,7 +24,6 @@ logger.setLevel(logging.ERROR)
 BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ["FETCH_TRANSCRIPT_LAMBDA_ARN"]
 PROCESS_TRANSCRIPT = os.getenv("PROCESS_TRANSCRIPT", "False") == "True"
-TOKEN_COUNT = int(os.getenv("TOKEN_COUNT", "0"))  # default 0 - do not truncate.
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 S3_PREFIX = os.environ["S3_PREFIX"]
 
@@ -108,7 +108,6 @@ def get_transcripts(callId):
     payload = {
         "CallId": callId,
         "ProcessTranscript": PROCESS_TRANSCRIPT,
-        "TokenCount": TOKEN_COUNT,
         "IncludeSpeaker": True,
     }
     print("Invoking lambda", payload)
@@ -125,7 +124,8 @@ def get_transcripts(callId):
 
 
 def get_generated_text(response):
-    return response["output"]["message"]["content"][0]["text"]
+    """The summary text, with any reasoning block the model emitted left out."""
+    return extract_text(response)
 
 
 def call_bedrock(prompt_data):
@@ -134,7 +134,9 @@ def call_bedrock(prompt_data):
     message = {"role": "user", "content": [{"text": prompt_data}]}
 
     response = bedrock.converse(
-        modelId=modelId, messages=[message], inferenceConfig={"maxTokens": 512, "temperature": 0}
+        modelId=modelId,
+        messages=[message],
+        inferenceConfig=build_inference_config(modelId, SUMMARY_MAX_TOKENS),
     )
     generated_text = get_generated_text(response)
     print("Bedrock response: ", json.dumps(generated_text))

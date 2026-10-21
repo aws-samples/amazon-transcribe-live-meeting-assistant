@@ -44,7 +44,7 @@ Before deploying LMA, you must enable access to the following foundation models 
 **Required models:**
 
 - **Amazon Titan Text Embeddings V2** -- Used for generating text embeddings in the knowledge base.
-- **Anthropic Claude models (Claude 4+)** -- LMA supports Claude Sonnet 4.5, Claude Opus 4, and Claude Haiku 4.5 for the meeting assistant and summarization.
+- **Anthropic Claude models (Claude 4+)** -- LMA supports the Claude 4 generation (Haiku 4.5, Sonnet 4.5, Sonnet 4.6, Opus 4, Opus 4.1, Opus 4.6) and the Claude 5 generation (Haiku 5.5, Sonnet 5.5, Opus 5.5) for the meeting assistant and summarization. Enable access to whichever you intend to select; the default is Claude Haiku 4.5.
 - **Amazon Nova models** -- Supported as alternative LLM options for the meeting assistant and summarization.
 
 To enable model access:

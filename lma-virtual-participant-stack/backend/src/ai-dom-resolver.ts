@@ -11,6 +11,7 @@ import {
   DeleteItemCommand,
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
+import { buildClaudeInvokeParams } from './bedrock-model-compat.js';
 
 export type Platform = 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME';
 
@@ -473,8 +474,7 @@ async function invokeClaude(
 
   const body = {
     anthropic_version: 'bedrock-2023-05-31',
-    max_tokens: 600,
-    temperature: 0,
+    ...buildClaudeInvokeParams(DEFAULT_MODEL_ID),
     messages,
   };
 

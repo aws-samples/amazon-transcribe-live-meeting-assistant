@@ -468,58 +468,40 @@ def test_a_segment_that_processes_away_to_nothing_adds_no_blank_line(
 # --------------------------------------------------------------------------
 
 
-def test_the_transcript_is_returned_whole_when_no_token_count_is_given(
+def test_the_whole_transcript_is_returned(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Truncation drops the end of the meeting, where decisions tend to land.
+    """Nothing trims the transcript on the way to the model.
 
-    Callers that fit the whole meeting in the model's context window omit the
-    count, and zero means the same thing.
+    There used to be a word-budget cut here, from a time when context windows
+    were small. It dropped the end of the meeting, which is where decisions
+    tend to land, and it was disabled in every shipped deployment. The models
+    LMA supports take a whole meeting, so the transcript is passed through
+    entire and `maxTokens` bounds only the reply.
     """
     items = [segment("good morning everyone", 1), segment("we ship on Friday", 2)]
-    whole = "\ngood morning everyone\nwe ship on Friday"
-    without_count, _ = run(monkeypatch, items)
-    with_zero, _ = run(monkeypatch, items, TokenCount=0)
-    assert without_count["transcript"] == whole
-    assert with_zero["transcript"] == whole
+    response, _ = run(monkeypatch, items)
+    assert response["transcript"] == "\ngood morning everyone\nwe ship on Friday"
 
 
-def test_a_token_count_keeps_the_start_of_the_meeting_and_drops_the_rest(
+def test_a_token_count_in_the_event_no_longer_trims_anything(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The budget counts words, newlines and the spaces between them alike.
+    """An old caller passing the retired field gets the whole meeting, not an error.
 
-    The exact cut is asserted because it decides how much of the meeting a
-    small-context model is told about: the first six tokens of this transcript are
-    the leading newline, two words and the two spaces around them.
+    The field was part of this function's event contract, so a customer's own
+    end-of-call hook may still send it. Ignoring it is right; failing on it, or
+    silently honouring it again, is not.
     """
-    response, _ = run(
-        monkeypatch,
-        [segment("good morning everyone here", 1), segment("we ship on Friday", 2)],
-        TokenCount=6,
-    )
-    assert response["transcript"] == "\ngood morning everyone"
+    items = [segment("alpha", 1), segment("beta", 2), segment("gamma", 3)]
+    whole = "\nalpha\nbeta\ngamma"
+    ignored, _ = run(monkeypatch, items, TokenCount=4)
+    assert ignored["transcript"] == whole
 
 
-def test_the_token_count_spans_the_whole_transcript_not_each_segment(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The budget is the model's context window, so it applies once, at the end."""
-    response, _ = run(
-        monkeypatch,
-        [segment("alpha", 1), segment("beta", 2), segment("gamma", 3)],
-        TokenCount=4,
-    )
-    assert response["transcript"] == "\nalpha\nbeta"
-
-
-def test_a_token_count_larger_than_the_transcript_changes_nothing() -> None:
-    assert index.truncate_number_of_words("\nalpha\nbeta", 1000) == "\nalpha\nbeta"
-
-
-def test_truncation_preserves_the_newlines_inside_the_kept_text() -> None:
-    """Turn boundaries have to survive the cut, or the tail reads as one turn."""
-    assert index.truncate_number_of_words("\nalpha\nbeta\ngamma", 4) == "\nalpha\nbeta"
+def test_the_truncation_helper_is_gone() -> None:
+    """Pinned so it is not reintroduced as a convenience."""
+    assert not hasattr(index, "truncate_number_of_words")
 
 
 # --------------------------------------------------------------------------

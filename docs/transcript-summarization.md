@@ -25,7 +25,7 @@ LMA summarizes meeting transcripts automatically when a meeting ends, and on-dem
 
 ## BEDROCK Option (Default)
 
-The BEDROCK option uses the selected Amazon Bedrock foundation model (default: Claude Haiku 4.5) to generate meeting summaries from prompt templates.
+The BEDROCK option uses the selected Amazon Bedrock foundation model (default: Claude Haiku 4.5) to generate meeting summaries from prompt templates. Set the model with the **BedrockModelId** parameter; see [CloudFormation Parameters](cloudformation-parameters.md#end-of-call-summary) for the full list of choices and what the Claude 5 generation costs.
 
 ### Prompt Template Storage
 
