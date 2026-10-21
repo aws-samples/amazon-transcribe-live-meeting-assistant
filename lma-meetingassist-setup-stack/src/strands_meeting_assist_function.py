@@ -83,6 +83,13 @@ KB_MODELS_REQUIRING_CUSTOM_PROMPTS = frozenset({
     'global.anthropic.claude-opus-4-1-20250805-v1:0',
 })
 
+# Upper bound on Query pages for one meeting's transcript. A 1 MB page holds a
+# great many segments, so this is far above any real meeting; it exists so that a
+# table which keeps handing back a continuation key cannot spin this function for
+# its whole timeout. Matches the limit the fetch_transcript Lambda applies to the
+# same read.
+MAX_TRANSCRIPT_PAGES = 100
+
 # Optional Bedrock Guardrail, set from the BedrockGuardrailId / BedrockGuardrailVersion
 # CloudFormation parameters. Both are empty by default.
 BEDROCK_GUARDRAIL_ID = os.environ.get('BEDROCK_GUARDRAIL_ID', '').strip()
@@ -1509,19 +1516,48 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
     try:
         table = dynamodb.Table(dynamodb_table_name)
         pk = f'trs#{call_id}'
-        
-        # Query for transcript segments
-        response = table.query(
-            KeyConditionExpression=Key('PK').eq(pk),
-            FilterExpression=(
-                (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT')) 
+
+        # Read every page, not just the first. DynamoDB caps a Query response at
+        # 1 MB of items *read* and applies FilterExpression only afterwards, and
+        # the partial segments excluded here are numerous, so they spend the
+        # budget without appearing in the result: even a moderately long meeting
+        # spans several pages. A single query therefore hands the agent the
+        # opening stretch of the meeting as though it were the whole thing, with
+        # nothing to say otherwise. Mirrors get_transcripts() in
+        # lma-ai-stack/source/lambda_functions/fetch_transcript/index.py.
+        query_args = {
+            'KeyConditionExpression': Key('PK').eq(pk),
+            'FilterExpression': (
+                (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT'))
                 & Attr('IsPartial').eq(False)
+            ),
+        }
+        items = []
+        start_key = None
+        pages = 0
+        while pages < MAX_TRANSCRIPT_PAGES:
+            response = table.query(
+                **query_args,
+                **({'ExclusiveStartKey': start_key} if start_key else {}),
             )
-        )
-        
+            items.extend(response.get('Items', []))
+            pages += 1
+            next_key = response.get('LastEvaluatedKey')
+            if not next_key or next_key == start_key:
+                # A key identical to the one just used would ask for the same page
+                # again forever. Stop rather than spin.
+                break
+            start_key = next_key
+        if pages >= MAX_TRANSCRIPT_PAGES:
+            logger.warning(
+                "Stopped reading the transcript for %s at the %d page limit; "
+                "the transcript handed to the assistant may be incomplete",
+                call_id, MAX_TRANSCRIPT_PAGES,
+            )
+
         # Sort by EndTime and format transcript
-        items = sorted(response.get('Items', []), key=lambda x: x.get('EndTime', 0))
-        
+        items = sorted(items, key=lambda x: x.get('EndTime', 0))
+
         transcript_parts = []
         for item in items:
             speaker = item.get('Speaker', 'Unknown')
@@ -1535,7 +1571,10 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
                 transcript_parts.append(f"{speaker}: {transcript}")
         
         full_transcript = '\n'.join(transcript_parts)
-        logger.info(f"Fetched transcript for {call_id}: {len(full_transcript)} characters")
+        logger.info(
+            f"Fetched transcript for {call_id}: {len(full_transcript)} characters "
+            f"from {len(items)} segments over {pages} page(s)"
+        )
         
         return full_transcript
         
