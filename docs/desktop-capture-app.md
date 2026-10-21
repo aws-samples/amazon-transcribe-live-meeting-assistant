@@ -297,7 +297,8 @@ Menu-bar item:
   your browser).
 - While recording, the icon turns **red** so it's obvious at a glance.
 - **Right-click** the item for **Quit** (kept out of the popover so it isn't
-  confused with *Stop*).
+  confused with *Stop*). Quitting while recording — from here, the Dock or
+  **⌘Q** — stops the recording first, as *Stop* does.
 
 Dock icon:
 
@@ -315,6 +316,11 @@ Dock icon:
 > a way to see recording state and stop the recording. If your menu bar is
 > crowded, you can also **⌘-drag** the LMA menu-bar icon further right so it's
 > among the last to be hidden.
+
+While the app is in front, the standard macOS shortcuts work: **⌘C**, **⌘V**,
+**⌘X**, **⌘A** and **⌘Z** in any field — including pasting into the sign-in form
+from a password manager — **⌘,** for Settings, **⌘W** to close a window and
+**⌘Q** to quit.
 
 Popover options:
 
