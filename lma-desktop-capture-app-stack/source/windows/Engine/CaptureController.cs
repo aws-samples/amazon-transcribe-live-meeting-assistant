@@ -221,7 +221,7 @@ public sealed class CaptureController
         if (string.IsNullOrEmpty(Config.AccessToken)) { SetState(State.Err("Not signed in")); return; }
         SetState(State.Starting);
 
-        if (!string.IsNullOrEmpty(callId)) Config.CallId = callId!;
+        Config.CallId = Config.SessionCallId(callId, Config.ConfiguredCallId, DateTime.UtcNow);
         ActiveCallId = Config.CallId;
 
         // Apply Settings overrides: speaker labels ride the START frame as

@@ -262,6 +262,24 @@ enum SelfTest {
               rejected(.http(500, "InternalErrorException: try again")), "false")
         check("malformed response → retryable", rejected(.malformed("no AuthenticationResult")), "false")
 
+        let first = Date(timeIntervalSince1970: 1_792_400_000)
+        let later = first.addingTimeInterval(3600)
+        check("default callId uses the session start time",
+              Config.sessionCallId(requested: nil, configured: "", now: later),
+              Config.defaultCallId(at: later))
+        check("two default sessions get distinct callIds",
+              "\(Config.sessionCallId(requested: nil, configured: "", now: first) != Config.sessionCallId(requested: nil, configured: "", now: later))",
+              "true")
+        check("empty meeting name takes the default callId",
+              Config.sessionCallId(requested: "", configured: "", now: later),
+              Config.defaultCallId(at: later))
+        check("meeting name wins over a configured callId",
+              Config.sessionCallId(requested: "Standup - 10:00", configured: "Fixed", now: later),
+              "Standup - 10:00")
+        check("configured callId is kept across sessions",
+              Config.sessionCallId(requested: nil, configured: "Fixed", now: later),
+              "Fixed")
+
         print(failures == 0 ? "\nAll self-tests PASSED ✓" : "\n\(failures) self-test(s) FAILED ✗")
         return failures == 0 ? 0 : 1
     }
