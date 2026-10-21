@@ -482,11 +482,18 @@ nightly_deploy:
     # lib/lma_sdk/lma_sdk/_core/publish.py), and a value derived from one
     # source cannot go stale against it.
     - echo "Deploying $LMA_TEMPLATE_URL"
+    # --fail-if-unchanged is the point of this job. Without it a deploy that
+    # CloudFormation declines as a no-op reports success, the suite then runs
+    # against whatever the stack was already running, and the Slack summary
+    # says the stack "was built and deployed from this commit" when it was not.
+    # A stack that silently stops tracking `develop` is worse than a red
+    # pipeline, because the green one is read as evidence about the branch.
     - >
       .venv/bin/lma deploy
       --stack-name "$LMA_INTEG_STACK"
       --region "$AWS_DEFAULT_REGION"
       --template-url "$LMA_TEMPLATE_URL"
+      --fail-if-unchanged
       --wait
 
   after_script: *nightly_slack_post

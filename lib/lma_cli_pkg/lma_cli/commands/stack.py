@@ -415,6 +415,16 @@ def outputs_cmd(ctx, stack_name, region, as_json):
     default=False,
     help="Skip CloudFormation template validation (used with --from-code).",
 )
+@click.option(
+    "--fail-if-unchanged",
+    is_flag=True,
+    default=False,
+    help=(
+        "Exit non-zero if CloudFormation found nothing to update. For a pipeline "
+        "that deploys in order to test what it just built, an unchanged stack "
+        "means the tests describe the code it was already running."
+    ),
+)
 @click.pass_context
 def deploy_cmd(
     ctx,
@@ -435,6 +445,7 @@ def deploy_cmd(
     clean_build,
     allow_untracked,
     no_validate_template,
+    fail_if_unchanged,
 ):
     """Deploy or update the LMA CloudFormation stack.
 
@@ -613,7 +624,14 @@ def deploy_cmd(
                 )
 
             # Check if deploy was a no-op
-            if result.success and result.status in ("UPDATE_COMPLETE",):
+            if result.success and not result.changed:
+                if fail_if_unchanged:
+                    print_error(
+                        "CloudFormation found no changes, so the stack still runs "
+                        "the code it had. Refusing to report a deployment that did "
+                        "not happen."
+                    )
+                    sys.exit(1)
                 print_success(result.message)
                 return
 
@@ -661,6 +679,14 @@ def deploy_cmd(
                     no_rollback=no_rollback,
                     role_arn=role_arn,
                 )
+
+            if result.success and not result.changed and fail_if_unchanged:
+                print_error(
+                    "CloudFormation found no changes, so the stack still runs the "
+                    "code it had. Refusing to report a deployment that did not "
+                    "happen."
+                )
+                sys.exit(1)
 
             is_success = result.success or result.status.endswith("_IN_PROGRESS")
             if is_success:
