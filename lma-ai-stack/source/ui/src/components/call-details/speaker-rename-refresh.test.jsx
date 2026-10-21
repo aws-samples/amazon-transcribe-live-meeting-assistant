@@ -194,10 +194,10 @@ describe('every provider of the calls context supplies the summary writers', () 
 
   it.each(providers)('%s destructures and re-exports both', async (provider) => {
     const source = await read(provider);
-    for (const name of ['sendUpdateCallSummary', 'sendRegenerateCallSummary', 'sendUpdateSpeakerIdentities']) {
+    ['sendUpdateCallSummary', 'sendRegenerateCallSummary', 'sendUpdateSpeakerIdentities'].forEach((name) => {
       // Twice: once out of the hook, once into the context value.
       expect(source.split(`${name},`).length - 1).toBeGreaterThanOrEqual(2);
-    }
+    });
   });
 });
 
