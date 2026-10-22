@@ -58,6 +58,7 @@ import { SentimentTrendIcon } from '../sentiment-trend-icon/SentimentTrendIcon';
 import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
+import { AccessDenied } from '../common/AdminOnly';
 import awsExports from '../../aws-exports';
 import {
   downloadTranscriptAsExcel,
@@ -980,8 +981,10 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
   const [alertMessage, setAlertMessage] = useState(null);
   const [alertType, setAlertType] = useState('success');
 
-  // Check if user is admin (Amplify v6 pattern)
-  const { isAdmin } = useUserGroups();
+  // Check if user is admin (Amplify v6 pattern). `isAdminLoading` distinguishes
+  // "not yet known" from "not an admin": the session resolves asynchronously, so
+  // acting on isAdmin before then would show an admin the denial on first render.
+  const { isAdmin, isLoading: isAdminLoading } = useUserGroups();
 
   const loadButtonConfiguration = async () => {
     setIsLoading(true);
@@ -1358,15 +1361,22 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           footer={
             <Box float="right">
               <SpaceBetween direction="horizontal" size="xs">
-                <Button variant="normal" onClick={handleReset} disabled={isLoading}>
-                  Reset to Defaults
-                </Button>
+                {/* The chat buttons are shared by everyone in the account, so only an
+                    Admin can save them; a non-admin gets the explanation below instead
+                    of controls whose save would be refused. */}
+                {isAdmin && (
+                  <Button variant="normal" onClick={handleReset} disabled={isLoading}>
+                    Reset to Defaults
+                  </Button>
+                )}
                 <Button variant="link" onClick={() => setShowEditModal(false)}>
-                  Cancel
+                  {isAdmin ? 'Cancel' : 'Close'}
                 </Button>
-                <Button variant="primary" onClick={handleSave} disabled={isLoading}>
-                  Save Changes
-                </Button>
+                {isAdmin && (
+                  <Button variant="primary" onClick={handleSave} disabled={isLoading}>
+                    Save Changes
+                  </Button>
+                )}
               </SpaceBetween>
             </Box>
           }
@@ -1376,20 +1386,26 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
               {alertMessage}
             </Alert>
 
-            <Box>
-              Customize the suggestion buttons that appear in the chat. Changes will apply to all users. Set prompt to
-              &quot;NONE&quot; to hide a button.
-            </Box>
-
-            {isLoading ? (
-              <Box textAlign="center">Loading...</Box>
+            {!isAdminLoading && !isAdmin ? (
+              <AccessDenied feature="the chat buttons" />
             ) : (
-              <SpaceBetween size="m">
-                {renderButtonEditors()}
-                <Button variant="normal" iconName="add-plus" onClick={handleAddButton}>
-                  Add Button
-                </Button>
-              </SpaceBetween>
+              <>
+                <Box>
+                  Customize the suggestion buttons that appear in the chat. Changes will apply to all users. Set prompt
+                  to &quot;NONE&quot; to hide a button.
+                </Box>
+
+                {isLoading || isAdminLoading ? (
+                  <Box textAlign="center">Loading...</Box>
+                ) : (
+                  <SpaceBetween size="m">
+                    {renderButtonEditors()}
+                    <Button variant="normal" iconName="add-plus" onClick={handleAddButton}>
+                      Add Button
+                    </Button>
+                  </SpaceBetween>
+                )}
+              </>
             )}
           </SpaceBetween>
         </Modal>

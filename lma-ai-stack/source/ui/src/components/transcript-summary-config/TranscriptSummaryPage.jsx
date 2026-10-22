@@ -20,6 +20,8 @@ import {
   Icon,
 } from '@cloudscape-design/components';
 
+import AdminOnly from '../common/AdminOnly';
+
 const client = generateClient();
 const getLLMPromptTemplateQuery = `
   query GetLLMPromptTemplate($LLMPromptTemplateId: ID!) {
@@ -56,7 +58,7 @@ const parseTemplateConfig = (config) => {
   return entries.sort((a, b) => a.number - b.number);
 };
 
-const TranscriptSummaryPage = () => {
+const TranscriptSummaryPageContent = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -297,5 +299,14 @@ const TranscriptSummaryPage = () => {
     </SpaceBetween>
   );
 };
+
+// The summary prompts apply to every meeting summary in this account, so the page
+// is for Admin users; everyone else is told so instead of being shown a form whose
+// save would be refused.
+const TranscriptSummaryPage = () => (
+  <AdminOnly feature="the transcript summary prompts">
+    <TranscriptSummaryPageContent />
+  </AdminOnly>
+);
 
 export default TranscriptSummaryPage;

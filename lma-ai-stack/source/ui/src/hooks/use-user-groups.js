@@ -18,10 +18,17 @@ const logger = new ConsoleLogger('useUserGroups');
  * With the Amplify v6 pattern:
  *   (await fetchAuthSession()).tokens.idToken.payload['cognito:groups']
  *
- * @returns {{ userGroups: string[], isAdmin: boolean }}
+ * The session is read asynchronously, so `isAdmin` is `false` until it resolves.
+ * `isLoading` says which `false` this is -- "not yet known" or "not an admin" --
+ * so a caller that renders something different for each can wait for the answer
+ * rather than acting on the placeholder. It starts `true` and becomes `false`
+ * once the session has been read, successfully or not.
+ *
+ * @returns {{ userGroups: string[], isAdmin: boolean, isLoading: boolean }}
  */
 const useUserGroups = () => {
   const [userGroups, setUserGroups] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchGroups = async () => {
@@ -34,6 +41,8 @@ const useUserGroups = () => {
       } catch (error) {
         logger.error('Error fetching user groups:', error);
         setUserGroups([]);
+      } finally {
+        setIsLoading(false);
       }
     };
     fetchGroups();
@@ -41,7 +50,7 @@ const useUserGroups = () => {
 
   const isAdmin = userGroups.includes('Admin');
 
-  return { userGroups, isAdmin };
+  return { userGroups, isAdmin, isLoading };
 };
 
 export default useUserGroups;

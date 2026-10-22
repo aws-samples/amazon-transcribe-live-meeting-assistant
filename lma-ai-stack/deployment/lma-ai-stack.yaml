@@ -3802,6 +3802,7 @@ Resources:
       Environment:
         Variables:
           CHAT_BUTTON_CONFIG_TABLE_NAME: !Ref ChatButtonConfigTableName
+          ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UpdateChatButtonConfigResolverFunction
@@ -3910,6 +3911,7 @@ Resources:
       Environment:
         Variables:
           NOVA_SONIC_CONFIG_TABLE_NAME: !Ref NovaSonicConfigTableName
+          ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UpdateNovaSonicConfigResolverFunction
@@ -4059,6 +4061,7 @@ Resources:
       Environment:
         Variables:
           ASR_CONFIG_TABLE_NAME: !Ref AsrConfigTableName
+          ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UpdateAsrConfigResolverFunction
@@ -4411,6 +4414,7 @@ Resources:
       Environment:
         Variables:
           LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
+          ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UpdateLLMPromptTemplateResolverFunction

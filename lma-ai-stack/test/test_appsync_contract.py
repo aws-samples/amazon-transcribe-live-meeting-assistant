@@ -118,6 +118,108 @@ def schema_fields(schema_sdl: str) -> dict[str, set[str]]:
     return fields
 
 
+@pytest.fixture(scope="module")
+def field_nodes(schema_sdl: str) -> dict[tuple[str, str], object]:
+    """Map of (type name, field name) -> AST node, so directives stay readable.
+
+    `schema_fields` above keeps only names; the group-restriction tests need the
+    directives attached to each field, which the built schema does not expose
+    for AppSync's auth directives.
+    """
+    nodes: dict[tuple[str, str], object] = {}
+    for node in parse(schema_sdl).definitions:
+        if isinstance(node, (ObjectTypeDefinitionNode, ObjectTypeExtensionNode)):
+            for field in node.fields or []:
+                nodes[(node.name.value, field.name.value)] = field
+    return nodes
+
+
+# ── administrative operations are pinned to the Admin group ─────────────────
+
+# Each of these changes, or reads, something that is account-wide: one stored
+# configuration record drives every meeting in the deployment, and the user
+# operations act on the Cognito pool itself. They are pinned to the "Admin"
+# group in the SDL, and the resolver behind each one re-checks the same claim, so
+# the directive is one of two independent places the constraint lives. This test
+# is what holds the SDL half in place.
+ADMIN_ONLY_FIELDS = [
+    ("Mutation", "updateAsrConfig"),
+    ("Mutation", "updateChatButtonConfig"),
+    ("Mutation", "updateLLMPromptTemplate"),
+    ("Mutation", "updateNovaSonicConfig"),
+    ("Mutation", "installMCPServer"),
+    ("Mutation", "uninstallMCPServer"),
+    ("Mutation", "updateMCPServer"),
+    ("Mutation", "initOAuthFlow"),
+    ("Mutation", "handleOAuthCallback"),
+    ("Mutation", "createUser"),
+    ("Mutation", "deleteUser"),
+    ("Query", "getLLMPromptTemplate"),
+    ("Query", "getNovaSonicConfig"),
+    ("Query", "listUsers"),
+]
+
+# Reads every signed-in user performs in the course of using the product, so the
+# group argument is deliberately absent and adding one would remove a feature:
+#
+# * getChatButtonConfig -- the Meeting Assist chat panel renders its quick-action
+#   buttons from this record for whoever is viewing the meeting.
+# * getAsrConfig -- the Stream Audio and Upload Audio forms read which engine is
+#   selected, because the capture sample rate and the speaker-count field depend
+#   on it. The Virtual Participant task role reads it with SigV4 as well, which
+#   is a separate authorization mode and would be unaffected either way.
+UNRESTRICTED_READS = [
+    ("Query", "getChatButtonConfig"),
+    ("Query", "getAsrConfig"),
+]
+
+
+def _cognito_groups(field) -> tuple[str, ...] | None:
+    """The `cognito_groups` argument of a field's `@aws_cognito_user_pools`.
+
+    `None` when the field carries no such directive, and an empty tuple when it
+    carries the directive without a group argument.
+    """
+    for directive in field.directives:
+        if directive.name.value != "aws_cognito_user_pools":
+            continue
+        for argument in directive.arguments:
+            if argument.name.value == "cognito_groups":
+                return tuple(value.value for value in argument.value.values)
+        return ()
+    return None
+
+
+@pytest.mark.parametrize("type_name,field_name", ADMIN_ONLY_FIELDS, ids=lambda part: str(part))
+def test_administrative_operation_is_restricted_to_the_admin_group(
+    type_name: str, field_name: str, field_nodes: dict[tuple[str, str], object]
+) -> None:
+    field = field_nodes.get((type_name, field_name))
+    assert field is not None, f"{SCHEMA.name} no longer declares {type_name}.{field_name}"
+    groups = _cognito_groups(field)
+    assert groups is not None, (
+        f"{type_name}.{field_name} carries no @aws_cognito_user_pools directive"
+    )
+    assert "Admin" in groups, (
+        f"{type_name}.{field_name} is an administrative operation, so its "
+        f'@aws_cognito_user_pools directive must name cognito_groups: ["Admin"]; '
+        f"it names {list(groups)}"
+    )
+
+
+@pytest.mark.parametrize("type_name,field_name", UNRESTRICTED_READS, ids=lambda part: str(part))
+def test_read_used_by_every_signed_in_user_is_available_to_every_group(
+    type_name: str, field_name: str, field_nodes: dict[tuple[str, str], object]
+) -> None:
+    """Narrowing one of these to a group would remove a feature for most users."""
+    field = field_nodes.get((type_name, field_name))
+    assert field is not None, f"{SCHEMA.name} no longer declares {type_name}.{field_name}"
+    assert _cognito_groups(field) == (), (
+        f"{type_name}.{field_name} is read by every signed-in user, so its "
+        f"@aws_cognito_user_pools directive must not name a group"
+    )
+
+
 # ── resolvers declared in the template ──────────────────────────────────────
 
 # Resource blocks are indented two spaces under `Resources:`; splitting on that

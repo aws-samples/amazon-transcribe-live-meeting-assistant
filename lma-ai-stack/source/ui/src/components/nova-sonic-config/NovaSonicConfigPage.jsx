@@ -21,6 +21,8 @@ import {
   ExpandableSection,
 } from '@cloudscape-design/components';
 
+import AdminOnly from '../common/AdminOnly';
+
 const client = generateClient();
 const PROMPT_MODE_OPTIONS = [
   { label: 'Base', value: 'base' },
@@ -69,7 +71,7 @@ const meetingModeFromData = (data) => {
   return 'normal';
 };
 
-const NovaSonicConfigPage = () => {
+const NovaSonicConfigPageContent = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -403,5 +405,14 @@ const NovaSonicConfigPage = () => {
     </SpaceBetween>
   );
 };
+
+// The voice assistant's prompt, model and voice apply to every meeting in this
+// account, so the page is for Admin users; everyone else is told so instead of
+// being shown a form whose save would be refused.
+const NovaSonicConfigPage = () => (
+  <AdminOnly feature="the Nova Sonic voice assistant configuration">
+    <NovaSonicConfigPageContent />
+  </AdminOnly>
+);
 
 export default NovaSonicConfigPage;

@@ -21,6 +21,7 @@ import {
 } from '@cloudscape-design/components';
 
 import useSettingsContext from '../../contexts/settings';
+import AdminOnly from '../common/AdminOnly';
 
 const client = generateClient();
 const CONFIG_ID = 'CustomAsrConfig';
@@ -70,7 +71,7 @@ const ENGINE_ITEMS = [
   },
 ];
 
-const AsrConfigPage = () => {
+const AsrConfigPageContent = () => {
   const { settings } = useSettingsContext();
   const engineDeployed = `${settings?.AsrEngineAvailable}` === 'true';
   // A transcription-only bundle deploys the engine without speaker labels.
@@ -244,5 +245,14 @@ const AsrConfigPage = () => {
     </Container>
   );
 };
+
+// Which engine transcribes each kind of meeting is a deployment-wide setting, so
+// the page is for Admin users; everyone else is told so instead of being shown a
+// form whose save would be refused.
+const AsrConfigPage = () => (
+  <AdminOnly feature="the Transcription Engine configuration">
+    <AsrConfigPageContent />
+  </AdminOnly>
+);
 
 export default AsrConfigPage;

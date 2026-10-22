@@ -5,9 +5,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
-import sys
 from pathlib import Path
 from unittest import mock
 
@@ -16,23 +16,69 @@ import pytest
 os.environ.setdefault("ASR_CONFIG_TABLE_NAME", "asr-config")
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
-sys.path.insert(0, str(Path(__file__).parent))
-
+# Loaded by path under a unique name: each config resolver's handler module is
+# called `index.py`, so a plain `import index` would resolve to whichever one a
+# shared test session imported first.
+_SPEC = importlib.util.spec_from_file_location(
+    "update_asr_config_resolver_index", Path(__file__).parent / "index.py"
+)
+index = importlib.util.module_from_spec(_SPEC)
 with mock.patch("boto3.resource"):
-    import index  # noqa: E402
+    _SPEC.loader.exec_module(index)
+
+ADMIN_IDENTITY = {"claims": {"cognito:groups": ["Admin"], "email": "admin@example.com"}}
+
+# Attributes the resolver stamps on every write; the field-level assertions below
+# are about the configuration itself, so they are dropped first.
+AUDIT_ATTRIBUTES = ("UpdatedBy", "UpdatedAt")
 
 
-def invoke(config: object, config_id: str = "CustomAsrConfig") -> tuple[dict, dict]:
+def config_only(stored: dict) -> dict:
+    return {key: value for key, value in stored.items() if key not in AUDIT_ATTRIBUTES}
+
+
+def invoke(
+    config: object,
+    config_id: str = "CustomAsrConfig",
+    identity: object = ADMIN_IDENTITY,
+) -> tuple[dict, dict]:
     """Run the resolver against a fake table; returns (response, stored item)."""
     stored: dict = {}
     table = mock.Mock()
     table.put_item.side_effect = lambda Item: stored.update(Item)  # noqa: N803
     with mock.patch.object(index.dynamodb, "Table", return_value=table):
         response = index.lambda_handler(
-            {"arguments": {"input": {"AsrConfigId": config_id, "ConfigData": json.dumps(config)}}},
+            {
+                "identity": identity,
+                "arguments": {
+                    "input": {"AsrConfigId": config_id, "ConfigData": json.dumps(config)}
+                },
+            },
             None,
         )
     return response, stored
+
+
+def refuse(identity: object) -> None:
+    """Assert the resolver refuses `identity` and writes nothing."""
+    table = mock.Mock()
+    with (
+        mock.patch.object(index.dynamodb, "Table", return_value=table),
+        pytest.raises(Exception, match="Unauthorized"),
+    ):
+        index.lambda_handler(
+            {
+                "identity": identity,
+                "arguments": {
+                    "input": {
+                        "AsrConfigId": "CustomAsrConfig",
+                        "ConfigData": json.dumps({"streamingEngineMicrovm": True}),
+                    }
+                },
+            },
+            None,
+        )
+    table.put_item.assert_not_called()
 
 
 def test_the_switches_are_stored_as_booleans() -> None:
@@ -45,7 +91,7 @@ def test_the_switches_are_stored_as_booleans() -> None:
     )
 
     assert response == {"AsrConfigId": "CustomAsrConfig", "Success": True}
-    assert stored == {
+    assert config_only(stored) == {
         "AsrConfigId": "CustomAsrConfig",
         "streamingEngineMicrovm": True,
         "virtualParticipantEngineMicrovm": False,
@@ -77,7 +123,7 @@ def test_a_value_that_is_not_a_boolean_is_dropped_rather_than_coerced() -> None:
         }
     )
 
-    assert stored == {"AsrConfigId": "CustomAsrConfig"}
+    assert config_only(stored) == {"AsrConfigId": "CustomAsrConfig"}
 
 
 def test_retired_tuning_fields_are_filtered_out() -> None:
@@ -95,7 +141,7 @@ def test_retired_tuning_fields_are_filtered_out() -> None:
         }
     )
 
-    assert set(stored) == {"AsrConfigId", "streamingEngineMicrovm"}
+    assert set(config_only(stored)) == {"AsrConfigId", "streamingEngineMicrovm"}
 
 
 def test_only_the_custom_record_can_be_written() -> None:
@@ -110,7 +156,12 @@ def test_malformed_json_is_rejected() -> None:
         pytest.raises(Exception, match="Invalid JSON"),
     ):
         index.lambda_handler(
-            {"arguments": {"input": {"AsrConfigId": "CustomAsrConfig", "ConfigData": "{not json"}}},
+            {
+                "identity": ADMIN_IDENTITY,
+                "arguments": {
+                    "input": {"AsrConfigId": "CustomAsrConfig", "ConfigData": "{not json"}
+                },
+            },
             None,
         )
     table.put_item.assert_not_called()
@@ -129,3 +180,108 @@ def test_the_allow_list_is_exactly_the_three_switches() -> None:
         "virtualParticipantEngineMicrovm",
         "diarizeVirtualParticipant",
     }
+
+
+# ── group membership ────────────────────────────────────────────────────────
+
+
+def test_a_member_of_the_admin_group_is_admitted() -> None:
+    response, _ = invoke({"streamingEngineMicrovm": True}, identity=ADMIN_IDENTITY)
+
+    assert response == {"AsrConfigId": "CustomAsrConfig", "Success": True}
+
+
+def test_a_single_group_claim_sent_as_a_string_is_admitted() -> None:
+    """AppSync delivers cognito:groups as a bare string for a one-group caller."""
+    response, _ = invoke(
+        {"streamingEngineMicrovm": True},
+        identity={"claims": {"cognito:groups": "Admin", "email": "admin@example.com"}},
+    )
+
+    assert response["Success"] is True
+
+
+def test_a_comma_joined_group_claim_is_admitted() -> None:
+    response, _ = invoke(
+        {"streamingEngineMicrovm": True},
+        identity={"claims": {"cognito:groups": "Users,Admin"}},
+    )
+
+    assert response["Success"] is True
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {"claims": {"cognito:groups": ["Users"]}},
+        {"claims": {"cognito:groups": []}},
+        {"claims": {"cognito:groups": "users"}},
+        {"claims": {"cognito:groups": "SuperAdmins"}},
+    ],
+)
+def test_a_caller_outside_the_admin_group_is_refused(identity: dict) -> None:
+    refuse(identity)
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        {},
+        {"claims": {}},
+        {"claims": None},
+        {"claims": {"sub": "u1"}},
+        {"claims": {"cognito:groups": 17}},
+        None,
+    ],
+)
+def test_a_request_with_no_readable_group_claim_is_refused(identity: object) -> None:
+    """Absent or unreadable group membership is refused, not treated as unrestricted."""
+    refuse(identity)
+
+
+def test_group_membership_in_the_arguments_does_not_admit_a_caller() -> None:
+    """Only the identity block is consulted, so a claim in the input carries nothing."""
+    table = mock.Mock()
+    with (
+        mock.patch.object(index.dynamodb, "Table", return_value=table),
+        pytest.raises(Exception, match="Unauthorized"),
+    ):
+        index.lambda_handler(
+            {
+                "identity": {"claims": {"cognito:groups": ["Users"]}},
+                "arguments": {
+                    "input": {
+                        "AsrConfigId": "CustomAsrConfig",
+                        "ConfigData": json.dumps({"streamingEngineMicrovm": True}),
+                        "cognito:groups": ["Admin"],
+                    }
+                },
+            },
+            None,
+        )
+    table.put_item.assert_not_called()
+
+
+# ── audit attributes ────────────────────────────────────────────────────────
+
+
+def test_the_written_record_names_the_identity_that_saved_it() -> None:
+    _, stored = invoke({"streamingEngineMicrovm": True})
+
+    assert stored["UpdatedBy"] == "admin@example.com"
+    assert stored["UpdatedAt"].endswith("Z")
+
+
+def test_the_subject_identifies_the_saver_when_no_email_claim_is_present() -> None:
+    _, stored = invoke(
+        {"streamingEngineMicrovm": True},
+        identity={"claims": {"cognito:groups": ["Admin"], "sub": "11111111-2222"}},
+    )
+
+    assert stored["UpdatedBy"] == "11111111-2222"
+
+
+def test_audit_attributes_come_from_the_identity_not_the_request() -> None:
+    _, stored = invoke({"streamingEngineMicrovm": True, "UpdatedBy": "someone-else@example.com"})
+
+    assert stored["UpdatedBy"] == "admin@example.com"

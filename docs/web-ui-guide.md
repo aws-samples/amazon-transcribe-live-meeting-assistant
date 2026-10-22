@@ -189,6 +189,21 @@ Live translation applies to the transcript panel and updates as new segments arr
 
 The following configuration pages are available to admin users only.
 
+Each of them edits an account-wide record — one stored item drives every meeting
+in the deployment — so saving a change requires membership of the **Admin**
+Cognito group. The requirement is enforced by the API, not just by the menu: the
+AppSync field pins the operation to the group and the resolver behind it checks
+the caller's group membership again, so the two are independent. A user outside
+the group who opens one of these pages gets a short message naming the setting
+instead of a form. Add someone to the group on
+[User Management](user-management.md) if they need to change these settings.
+
+Every saved record carries `UpdatedBy` — the saver's email address, or their
+Cognito subject where the token carries no email — and `UpdatedAt` in ISO-8601
+UTC. Both are taken from the signed-in identity rather than from the request.
+Each page writes the whole record on save, so where two administrators edit the
+same setting at once the later save is the one that stands.
+
 ### MCP Servers
 
 **Route**: `/#/configuration/mcp-servers`
