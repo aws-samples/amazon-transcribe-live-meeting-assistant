@@ -35,7 +35,7 @@ const UserManagementRoutes = () => {
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}
         content={
-          <AdminOnly feature="user management">
+          <AdminOnly feature="users and their roles">
             <SpaceBetween size="l">
               <UserManagementPage />
             </SpaceBetween>

@@ -343,6 +343,53 @@ def test_only_keys_in_the_sequence_form_are_treated_as_prompts(
     assert prompts_sent(bedrock) == ["real prompt"]
 
 
+def test_a_key_that_is_not_a_prompt_or_bookkeeping_is_reported(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Selecting by the 'N#Title' form is narrower than the reader used to be.
+
+    A key with no sequence number was previously used as a prompt, titled with
+    the whole key. Only a hand edit in DynamoDB can store one -- the UI writes
+    'N#Title' and nothing else -- so the key is skipped, but it is reported
+    rather than dropped silently, since whoever added it is the person who needs
+    to know it is not in use.
+    """
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "real prompt"}),
+        custom=ddb_item(**{"MyHandAddedSection": "please summarize the risks"}),
+    )
+    index.generate_summary("T", None)
+
+    assert prompts_sent(bedrock) == ["real prompt"]
+    logged = capsys.readouterr().out
+    assert "MyHandAddedSection" in logged
+    assert "N#Title" in logged
+
+
+def test_the_records_own_attributes_are_not_reported_as_unused_prompts(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """The partition key, the guidance text and the audit attributes belong there.
+
+    Reporting them would put a line in every summary's log and train an operator
+    to ignore the one that matters.
+    """
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"*Information*": "edit these in the UI", "1#Summary": "real prompt"}),
+        custom=ddb_item(
+            **{"UpdatedBy": "admin@example.com", "UpdatedAt": "2026-10-22T18:30:00.000000Z"}
+        ),
+    )
+    index.generate_summary("T", None)
+
+    assert prompts_sent(bedrock) == ["real prompt"]
+    assert "Not using" not in capsys.readouterr().out
+
+
 def test_templates_are_read_from_the_configured_table(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

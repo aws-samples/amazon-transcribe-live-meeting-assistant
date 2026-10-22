@@ -38,6 +38,15 @@ CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
 # writer agree on which attributes of the item are prompts.
 PROMPT_KEY_PATTERN = re.compile(r"^\d+#")
 
+# The item's other attributes, which are bookkeeping rather than prompts: the
+# partition key, the seeded guidance text, and the record of who last saved it.
+# Used only to keep the log quiet about them -- selection is the pattern above,
+# not this set -- so that a key which is neither a prompt nor one of these gets
+# a line of its own. The only way to store such a key is to add it to the table
+# by hand, and the operator who did that is the one who needs to know it is not
+# being used as a prompt.
+NON_PROMPT_KEYS = frozenset({"LLMPromptTemplateId", "*Information*", "UpdatedBy", "UpdatedAt"})
+
 # Optional environment variables allow region / endpoint override for bedrock Boto3
 BEDROCK_REGION = (
     os.environ["BEDROCK_REGION_OVERRIDE"]
@@ -109,6 +118,12 @@ def get_templates_from_dynamodb(prompt_override):
                         index = k.find("#")
                         k_stripped = k[index + 1 :]
                         templates.append({k_stripped: prompt})
+                elif k not in NON_PROMPT_KEYS:
+                    print(
+                        f"Not using '{k}' as a summary prompt: a prompt is stored "
+                        "under a key of the form 'N#Title', where N is a sequence "
+                        "number that orders the sections of the summary."
+                    )
         except Exception as e:
             print("Exception:", e)
             raise (e)

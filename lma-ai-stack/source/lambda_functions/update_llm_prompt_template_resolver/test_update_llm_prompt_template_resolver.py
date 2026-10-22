@@ -181,6 +181,39 @@ def test_a_caller_outside_the_admin_group_is_refused(identity: dict) -> None:
     refuse(identity)
 
 
+def test_a_refusal_is_logged_without_the_caller_s_email_address(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """The log line identifies the caller by Cognito subject.
+
+    An address in CloudWatch would outlive the decision it explains, on a
+    retention period set deployment-wide. UpdatedBy on the stored item is the
+    durable record of who changed a setting, and is where the address belongs.
+    """
+    refuse(
+        {
+            "claims": {
+                "cognito:groups": ["Users"],
+                "email": "someone@example.com",
+                "cognito:username": "someone@example.com",
+                "sub": "11111111-2222",
+            }
+        }
+    )
+
+    logged = capsys.readouterr().out
+    assert "someone@example.com" not in logged
+    assert "11111111-2222" in logged
+
+
+def test_the_written_record_keeps_the_email_address(capsys: pytest.CaptureFixture) -> None:
+    """The counterpart: the address is not dropped, only kept out of the log."""
+    _, stored = invoke(TEMPLATES, identity=ADMIN_IDENTITY)
+
+    assert stored["UpdatedBy"] == "admin@example.com"
+    assert "admin@example.com" not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "identity",
     [

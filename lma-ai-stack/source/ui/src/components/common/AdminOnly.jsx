@@ -14,12 +14,21 @@ import useUserGroups from '../../hooks/use-user-groups';
  *
  * `feature` names what the page configures, so the message says which setting
  * to ask an administrator about rather than just "access denied".
+ *
+ * The message is about *changing* the setting, which is what the group
+ * restriction covers. Several of these values are read by every user through
+ * some other surface -- the Transcription Engine selection decides the capture
+ * sample rate on the Stream Audio form, and the chat buttons are rendered in
+ * every viewer's chat panel -- so saying only an Admin may see them would be
+ * wrong. Nor does this say the setting applies to every meeting in the account:
+ * it is true of the configuration records but not of user management, which
+ * uses this same component.
  */
 export const AccessDenied = ({ feature = undefined }) => (
   <Box padding="xl">
     <Alert type="error" header="Access denied">
-      Only <strong>Admin</strong> users can view{feature ? ` ${feature}` : ' this page'}. These settings apply to every
-      meeting in this account. Ask an administrator if you need them changed.
+      Only <strong>Admin</strong> users can change{feature ? ` ${feature}` : ' this configuration'}. Ask an
+      administrator if you need a change made.
     </Alert>
   </Box>
 );

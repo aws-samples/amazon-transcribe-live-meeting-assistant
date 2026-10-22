@@ -67,7 +67,18 @@ def _get_caller_identity(event: Dict[str, Any]) -> Dict[str, Any]:
         or identity.get("sub")
         or ""
     )
-    return {"actor": actor, "groups": list(groups), "is_admin": ADMIN_GROUP in groups}
+    # Deliberately the Cognito subject alone, with no fall back to an email or a
+    # username that may be one. It identifies the caller in a log line without
+    # putting an address into CloudWatch, whose retention is a deployment-wide
+    # setting; `actor` above carries the address, and the UpdatedBy attribute on
+    # the stored item is where the durable record of who changed what belongs.
+    subject = claims.get("sub") or identity.get("sub") or ""
+    return {
+        "actor": actor,
+        "subject": subject,
+        "groups": list(groups),
+        "is_admin": ADMIN_GROUP in groups,
+    }
 
 
 def _require_admin(caller: Dict[str, Any]) -> None:
@@ -76,7 +87,10 @@ def _require_admin(caller: Dict[str, Any]) -> None:
     Keeps the schema directive from being the only place the constraint exists.
     """
     if not caller["is_admin"]:
-        print(f"Caller '{caller['actor']}' is not a member of the {ADMIN_GROUP} group")
+        print(
+            f"Caller {caller['subject'] or '(no subject claim)'} is not a member of "
+            f"the {ADMIN_GROUP} group (groups={caller['groups']})"
+        )
         raise ForbiddenError(
             f"Unauthorized: only members of the {ADMIN_GROUP} group can update "
             "the ASR configuration"
@@ -150,7 +164,11 @@ def lambda_handler(event: dict, context: Any) -> dict:
         item.update(_audit_attributes(caller))
 
         table.put_item(Item=item)
-        print(f"Updated ASR config: {json.dumps({k: str(v) for k, v in item.items()})}")
+        # The switches only. Logging the whole item would put the saver's email
+        # address into CloudWatch; UpdatedBy on the item is the record of who
+        # saved it, and it is already durable there.
+        switches = {key: str(item[key]) for key in sorted(ALLOWED_FIELDS) if key in item}
+        print(f"Updated ASR config {config_id}: {json.dumps(switches)}")
         return {"AsrConfigId": config_id, "Success": True}
 
     except Exception as exc:

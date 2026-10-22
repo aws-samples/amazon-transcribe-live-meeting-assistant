@@ -1352,7 +1352,22 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           </Box>
         </Container>
 
-        {/* Edit Buttons Modal */}
+        {/*
+          Edit Buttons Modal.
+
+          The chat buttons are shared by everyone in the account, so saving them
+          is an Admin operation, enforced on the AppSync field and in the
+          resolver behind it.
+
+          The !isAdmin branches below are a backstop, not a path a user takes
+          today: the only thing that opens this dialog is the actions dropdown
+          above, which is itself rendered only for an Admin, so a non-admin
+          cannot reach it. They are here because this panel is built in one
+          function and reused, and an entry point added later without that gate
+          is exactly the mistake worth surviving -- the dialog then explains
+          itself instead of offering a form whose save the resolver refuses.
+          Nothing user-facing should be documented as reachable through it.
+        */}
         <Modal
           visible={showEditModal}
           onDismiss={() => setShowEditModal(false)}
@@ -1361,9 +1376,6 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           footer={
             <Box float="right">
               <SpaceBetween direction="horizontal" size="xs">
-                {/* The chat buttons are shared by everyone in the account, so only an
-                    Admin can save them; a non-admin gets the explanation below instead
-                    of controls whose save would be refused. */}
                 {isAdmin && (
                   <Button variant="normal" onClick={handleReset} disabled={isLoading}>
                     Reset to Defaults

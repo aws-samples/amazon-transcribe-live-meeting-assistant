@@ -189,20 +189,28 @@ Live translation applies to the transcript panel and updates as new segments arr
 
 The following configuration pages are available to admin users only.
 
-Each of them edits an account-wide record — one stored item drives every meeting
-in the deployment — so saving a change requires membership of the **Admin**
-Cognito group. The requirement is enforced by the API, not just by the menu: the
+**Nova Sonic**, **Transcript Summary**, **Transcription Engine** and **Chat
+Buttons** each edit one account-wide record — a single stored item drives every
+meeting in the deployment — so saving a change requires membership of the
+**Admin** Cognito group. That is enforced by the API, not just by the menu: the
 AppSync field pins the operation to the group and the resolver behind it checks
-the caller's group membership again, so the two are independent. A user outside
-the group who opens one of these pages gets a short message naming the setting
-instead of a form. Add someone to the group on
-[User Management](user-management.md) if they need to change these settings.
+the caller's group membership again, so the two are independent. Add someone to
+the group on [User Management](user-management.md) if they need to change these
+settings.
 
-Every saved record carries `UpdatedBy` — the saver's email address, or their
-Cognito subject where the token carries no email — and `UpdatedAt` in ISO-8601
-UTC. Both are taken from the signed-in identity rather than from the request.
-Each page writes the whole record on save, so where two administrators edit the
-same setting at once the later save is the one that stands.
+On the first three pages, a user outside the group sees a short message naming
+the setting in place of the form. The Chat Buttons dialog is reached from a menu
+that only an Admin is shown, so nothing about it changes for other users.
+
+Each of those four records carries `UpdatedBy` — the saver's email address, or
+their Cognito subject where the token carries no email — and `UpdatedAt` in
+ISO-8601 UTC. Both are taken from the signed-in identity rather than from the
+request. Each page writes the whole record on save, so where two administrators
+edit the same setting at once, the later save is the one that stands.
+
+The other two pages in this section work differently and none of the above
+applies to them: **MCP Servers** manages one row per installed server, and
+**User Management** acts on the Cognito user pool directly.
 
 ### MCP Servers
 
@@ -232,6 +240,26 @@ Manage the prompt templates used for generating meeting summaries:
 - View default prompts provided by LMA
 - Create custom prompt templates
 - Edit and delete existing custom templates
+
+A prompt template is stored under a key of the form `N#Title`, where `N` orders
+the sections of the summary. A key in any other form is not used as a prompt and
+is reported in the summary function's log.
+
+### Transcription Engine
+
+**Route**: `/#/configuration/asr`
+
+Choose which engine transcribes each kind of meeting. Experimental, and shown
+only when the on-demand speech engine is deployed (`EnableMicrovmAsr=true`):
+
+- Pick Amazon Transcribe or the on-demand engine for streaming meetings — Stream
+  Audio, the Chrome extension and the Desktop Capture apps
+- Pick the engine for Virtual Participants independently
+- Turn on voice separation for a Virtual Participant, so several people behind
+  one attendee are labelled individually
+
+Changes apply to meetings started after you save. See
+[MicroVM ASR](microvm-asr.md) for full documentation.
 
 ### User Management
 
