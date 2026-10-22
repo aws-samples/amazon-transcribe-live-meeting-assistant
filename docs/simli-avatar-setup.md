@@ -17,7 +17,7 @@ This guide walks you through setting up the Simli avatar integration for the LMA
 - LMA deployed (version 0.2.31 and above)
 - A voice assistant configured and working (`amazon_nova_sonic` or `elevenlabs`)
 - Simli account with API access
-- **Both** `SimliApiKey` and `SimliFaceId` set on the stack — the avatar is only enabled when both parameters are non-empty. Setting just one (e.g. only the API key) will silently leave the avatar disabled and the Virtual Participant will join with no camera.
+- **Both** an API key (as either `SimliApiKey` or `SimliApiKeySecretArn`) and `SimliFaceId` set on the stack — the avatar is only enabled when both are non-empty. Setting just one (e.g. only the API key) will silently leave the avatar disabled and the Virtual Participant will join with no camera.
 
 ## How It Works
 
@@ -128,7 +128,7 @@ The following environment variables are set automatically by CloudFormation but 
 1. Go to AWS CloudFormation console
 2. Find your LMA stack
 3. Verify the nested Virtual Participant stack deployed successfully
-4. Check that `SimliApiKey` and `SimliFaceId` parameters are set
+4. Check that `SimliFaceId` is set, and that the API key is set as either `SimliApiKey` or `SimliApiKeySecretArn`
 
 ### 3.2 Test the Avatar
 

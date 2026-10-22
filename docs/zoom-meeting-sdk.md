@@ -24,7 +24,7 @@ The SDK method renders the real Zoom client into the same browser tab, so the **
 
 Enablement follows the same "set the keys and it turns on" pattern as the Simli avatar:
 
-- When **both** `ZoomMeetingSdkClientId` and `ZoomMeetingSdkClientSecret` are set, Zoom meetings join via the SDK.
+- When **both** `ZoomMeetingSdkClientId` and the client secret are set, Zoom meetings join via the SDK. The client secret can be supplied either as `ZoomMeetingSdkClientSecret` or as `ZoomMeetingSdkClientSecretArn`; either one enables the SDK join.
 - When either is blank, Zoom meetings use the default web-client automation.
 
 An optional task-definition env var `MEETING_ZOOM_METHOD` can force a method regardless of credentials:

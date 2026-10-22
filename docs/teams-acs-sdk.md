@@ -22,7 +22,7 @@ The SDK method renders a full meeting UI (video gallery, active-speaker highligh
 
 Enablement follows the same "set the key and it turns on" pattern as the Zoom Meeting SDK:
 
-- When `AcsConnectionString` is set, Teams meetings join via the ACS SDK.
+- When the connection string is set — as either `AcsConnectionString` or `AcsConnectionStringSecretArn` — Teams meetings join via the ACS SDK.
 - When it is blank, Teams meetings use the default web-client automation.
 
 An optional task-definition env var `MEETING_TEAMS_METHOD` can force a method regardless of credentials:

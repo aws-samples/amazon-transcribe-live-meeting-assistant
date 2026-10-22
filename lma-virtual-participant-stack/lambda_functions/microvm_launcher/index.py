@@ -274,7 +274,13 @@ def _write_config_to_registry(vp_id: str, config: dict) -> bool:
 
     Written BEFORE RunMicrovm so it is present when the container's /run hook
     fires. The registry table is KMS-encrypted and TTL'd, which matters because
-    the config includes three Cognito JWTs and the meeting password.
+    the config includes three Cognito JWTs, the meeting password, and the
+    integration credentials resolved by _integration_secrets (the ElevenLabs
+    and Simli API keys, the Zoom Meeting SDK client secret and the ACS
+    connection string, for whichever of those the deployment configured). This
+    is how a MicroVM is given values that the ECS agent sets directly in the
+    container on the other launch types -- see
+    docs/infrastructure-and-security.md#integration-credentials.
     """
     try:
         dynamodb.update_item(

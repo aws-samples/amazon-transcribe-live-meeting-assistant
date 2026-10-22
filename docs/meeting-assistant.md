@@ -169,16 +169,29 @@ other, not both.
 ### Rotating the key
 
 Generate a new key at [tavily.com](https://tavily.com), put it in the
-**TavilyApiKey** parameter, and apply the stack update. The update replaces the
-Lambda's configuration, which retires the existing execution environments, so
-the new key is in use from the next invocation.
+**TavilyApiKey** parameter, and apply the stack update, which stores a new
+version of the secret. You can also store the new version directly in Secrets
+Manager instead — if you do, set the CloudFormation parameter to match, or the
+next stack update writes the old value back.
 
-You can also store the new version directly in Secrets Manager. A warm function
-keeps the previously cached key until its execution environment is recycled, so
-expect a few minutes before the change is universal — and set the
-CloudFormation parameter to match, or the next stack update writes the old
-value back. See
-[Integration Credentials](infrastructure-and-security.md#integration-credentials).
+The new key then takes effect **as the function's execution environments
+recycle**, because each one caches the key on its first web search. How long
+that takes is up to Lambda and depends on your traffic; under steady use an
+environment can stay warm for hours. A stack update does not hasten it: the
+function is configured with the secret's ARN, and that does not change when the
+value does, so there is nothing for Lambda to replace. To put the new key in
+use immediately, change the function's configuration directly, which is what
+makes Lambda start new execution environments:
+
+```bash
+aws lambda update-function-configuration \
+  --function-name STRANDS-<stack-name>-MeetingAssist \
+  --description "Tavily key rotated $(date -u +%FT%TZ)"
+```
+
+This differs from the four Virtual Participant credentials, which are read at
+the start of each meeting and so are picked up by the next meeting to start.
+See [Integration Credentials](infrastructure-and-security.md#rotating-a-credential).
 
 ## Related Documentation
 

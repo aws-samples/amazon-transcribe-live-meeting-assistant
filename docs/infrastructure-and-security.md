@@ -192,32 +192,51 @@ A secret you provide must:
 
 ### Rotating a credential
 
-There are two ways to roll a key, and they differ in when it takes effect.
-
-**Through the stack (recommended).** Update the CloudFormation parameter with
-the new value and apply the stack update. CloudFormation stores a new version
-of the secret. No new task definition revision and no forced ECS deployment are
-needed: Virtual Participant tasks are started one per meeting, and the current
-version of the secret is read at the start of each one, so the next meeting to
-start uses the new value. That holds on every launch type — under
-`VPLaunchType=MICROVM` the launcher resolves the secrets per launch for exactly
-this reason. For the Tavily key, the stack update replaces the Lambda's
-configuration, which retires the existing execution environments, so the new
-key is in use on the next invocation.
-
-**Directly in Secrets Manager.** Store a new version of the secret in the
-Secrets Manager console or with
+**Storing the new value.** Either update the CloudFormation parameter and apply
+the stack update, which stores a new version of the secret for you, or store
+the new version yourself in the Secrets Manager console or with
 `aws secretsmanager put-secret-value --secret-id <stack-name>/integrations/<name>`.
-Virtual Participant meetings started after that point use the new value; a
-meeting already in progress keeps the value it started with. The meeting
-assistant picks the new key up on its next cold start, so a warm function can
-keep using the previous key for a few minutes — invoke-and-wait, or apply a
-stack update, if you need it to switch immediately.
 
-> If you rotate directly in Secrets Manager, also set the CloudFormation
-> parameter to the new value (or move to the matching `...SecretArn` parameter
-> and manage the secret entirely yourself). Otherwise the next stack update
-> writes the parameter's older value back over the rotated one.
+> If you store it yourself, also set the CloudFormation parameter to the new
+> value (or move to the matching `...SecretArn` parameter and manage the secret
+> entirely yourself). Otherwise the next stack update writes the parameter's
+> older value back over the rotated one.
+
+**When it takes effect** differs between the four Virtual Participant
+credentials and the Tavily key, because they are read at different times. It is
+worth knowing which is which before you rotate.
+
+*The four Virtual Participant credentials* — ElevenLabs, Simli, the Zoom
+Meeting SDK client secret and the ACS connection string — are read at the start
+of each meeting's task, and a Virtual Participant task runs one meeting. So the
+**next meeting to start uses the new value**, with no new task definition
+revision and no forced ECS deployment. That holds on every launch type: under
+`VPLaunchType=MICROVM` the launcher resolves the secrets per launch for exactly
+this reason. A meeting already in progress finishes on the value it started
+with.
+
+*The Tavily key* is read by the meeting assist Lambda on the first web search
+each execution environment performs and cached there for that environment's
+life, so it **takes effect as execution environments recycle**. How long that
+takes is up to Lambda and depends on the deployment's traffic — under steady
+use an environment can stay warm for hours.
+
+A stack update does not hasten it. The function is configured with the secret's
+ARN, which does not change when the value does, so updating `TavilyApiKey`
+leaves the function's configuration identical and Lambda has no reason to
+replace anything. If you need the new key in use immediately, change the
+function's configuration directly, which is what makes Lambda start new
+execution environments:
+
+```bash
+aws lambda update-function-configuration \
+  --function-name STRANDS-<stack-name>-MeetingAssist \
+  --description "Tavily key rotated $(date -u +%FT%TZ)"
+```
+
+That edits a stack-managed resource out of band, so CloudFormation will report
+drift on the description until a later stack update resets it. Nothing else
+about the function changes.
 
 ## Networking
 
