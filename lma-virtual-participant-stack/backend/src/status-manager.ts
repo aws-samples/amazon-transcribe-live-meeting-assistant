@@ -158,6 +158,38 @@ export const resumedStatus = (recordedStatus?: string | null): VpStatus =>
 export const shouldClearStatusDetail = (status: string, statusDetail?: string): boolean =>
   !statusDetail && (HEALTHY_VP_STATUSES as readonly string[]).includes(status);
 
+/**
+ * The fields every mutation on the VP record selects, shared so that no write
+ * can be narrower than the UI is subscribed to.
+ *
+ * An AppSync subscription delivers the fields the *mutation* selected: one the
+ * subscriber asked for that the mutation did not return arrives as null. Most
+ * of the UI merges an update into what it already has and treats a null as "no
+ * news", but `ManualActionAlerts` rebuilds its alert from the payload — so a
+ * write that did not select the prompt fields would have it rebuild a live
+ * prompt from nulls, replacing the specific message with generic text and
+ * re-firing the desktop notification. Since this PR deliberately lets a join
+ * sub-step be written while a prompt is open, that is reachable.
+ *
+ * One list rather than per-mutation lists is the point: the next write added
+ * here cannot forget. `vp-status-updates.test.ts` checks this list against the
+ * subscription's own selection set, read from the UI, and checks that every
+ * mutation in this file uses it.
+ */
+const SUBSCRIBED_FIELDS = `
+            id
+            meetingName
+            meetingPlatform
+            status
+            Owner
+            SharedWith
+            manualActionType
+            manualActionMessage
+            manualActionTimeoutSeconds
+            manualActionStartTime
+            errorMessage
+            updatedAt`;
+
 export class VirtualParticipantStatusManager {
   private participantId: string;
   private graphqlEndpoint: string;
@@ -296,18 +328,12 @@ export class VirtualParticipantStatusManager {
       // Update with new status while preserving CallId and VNC fields.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
             CallId
             vncEndpoint
             vncPort
             vncReady
-            errorMessage
             endTrigger
-            updatedAt
-            Owner
-            SharedWith
           }
         }
       `;
@@ -552,13 +578,8 @@ export class VirtualParticipantStatusManager {
     try {
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
             CallId
-            updatedAt
-            Owner
-            SharedWith
           }
         }
       `;
@@ -641,13 +662,7 @@ export class VirtualParticipantStatusManager {
     try {
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
-            errorMessage
-            updatedAt
-            Owner
-            SharedWith
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
           }
         }
       `;
@@ -732,21 +747,12 @@ export class VirtualParticipantStatusManager {
       // Update with MANUAL_ACTION_REQUIRED status and metadata.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
             CallId
             vncEndpoint
             vncPort
             vncReady
-            manualActionType
-            manualActionMessage
-            manualActionTimeoutSeconds
-            manualActionStartTime
             statusBeforeManualAction
-            updatedAt
-            Owner
-            SharedWith
           }
         }
       `;
@@ -843,20 +849,11 @@ export class VirtualParticipantStatusManager {
 
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
             CallId
             vncEndpoint
             vncPort
             vncReady
-            manualActionType
-            manualActionMessage
-            manualActionTimeoutSeconds
-            manualActionStartTime
-            updatedAt
-            Owner
-            SharedWith
           }
         }
       `;
@@ -1537,15 +1534,10 @@ export class VirtualParticipantStatusManager {
       // Update VP with vncReady flag and full URL.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-          updateVirtualParticipant(input: $input) {
-            id
-            status
+          updateVirtualParticipant(input: $input) {${SUBSCRIBED_FIELDS}
+            CallId
             vncEndpoint
             vncReady
-            CallId
-            updatedAt
-            Owner
-            SharedWith
           }
         }
       `;

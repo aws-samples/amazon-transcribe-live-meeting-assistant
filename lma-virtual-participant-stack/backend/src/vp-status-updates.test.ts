@@ -99,6 +99,9 @@ test('the status union and the UI status map describe the same statuses', () => 
   // string with no icon or colour; one the UI knows that the container cannot
   // name is a status nothing can reach.
   const rendered = statusesRenderedByTheUi();
+  // Guards the parser, not the vocabulary: a regex that stopped matching would
+  // otherwise make this pass by comparing nothing. The size of the set is
+  // asserted only here, so adding a status means editing one count.
   assert.equal(rendered.length, 18, 'the UI status map was not parsed as expected');
   assert.deepEqual([...VP_STATUSES].sort(), [...rendered].sort());
 });
@@ -306,6 +309,57 @@ test('no status write rewinds a VP that is already further along', async () => {
     const { manager, sent } = harness({ id: VP_ID, status: VP_STATUS.ACTIVE });
     await call(manager);
     assert.equal(onlyMutationInput(sent).status, undefined);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// What a write tells its subscribers
+// ---------------------------------------------------------------------------
+
+/** This file's own source, for assertions about the mutations it declares. */
+const statusManagerSource = (): string =>
+  readFileSync(new URL('../src/status-manager.ts', new URL('.', import.meta.url)), 'utf8');
+
+/** The fields the UI's VP subscription asks for, read from its source. */
+const subscribedFields = (): string[] => {
+  const url = new URL(
+    '../../../lma-ai-stack/source/ui/src/components/virtual-participant-layout/ManualActionAlerts.jsx',
+    new URL('.', import.meta.url),
+  );
+  const source = readFileSync(url, 'utf8');
+  const start = source.indexOf('const ON_UPDATE_VP');
+  assert.ok(start >= 0, 'ON_UPDATE_VP was not found — the path in this test needs updating');
+  const block = source.slice(start, source.indexOf('`;', start));
+  return [...block.matchAll(/^ {6}(\w+)$/gm)].map((match) => match[1]);
+};
+
+test('every mutation selects at least the fields the UI subscribes to', () => {
+  // An AppSync subscription delivers what the *mutation* selected: a field the
+  // subscriber asked for and the mutation did not arrives as null. The alert
+  // component rebuilds its alert from that payload rather than merging it, so a
+  // write narrower than the subscription would have it rebuild a live prompt
+  // from nulls — generic text in place of the real message, and the desktop
+  // notification fired again. Sharing one selection set is what prevents that;
+  // this asserts the shared set covers the subscription and that every mutation
+  // uses it.
+  const source = statusManagerSource();
+  const subscribed = subscribedFields();
+  assert.ok(subscribed.length >= 10, `only parsed ${subscribed.length} subscribed fields`);
+
+  const start = source.indexOf('const SUBSCRIBED_FIELDS = `');
+  assert.ok(start >= 0, 'SUBSCRIBED_FIELDS was not found');
+  const shared = source.slice(start, source.indexOf('`;', start));
+  const missing = subscribed.filter((field) => !new RegExp(`^\\s+${field}$`, 'm').test(shared));
+  assert.deepEqual(missing, [], 'SUBSCRIBED_FIELDS does not cover the subscription');
+
+  const mutations = source.split('mutation UpdateVirtualParticipant').slice(1);
+  assert.equal(mutations.length, 6, 'the mutation count in this test needs updating');
+  for (const [index, mutation] of mutations.entries()) {
+    const selection = mutation.slice(0, mutation.indexOf('`;'));
+    assert.ok(
+      selection.includes('${SUBSCRIBED_FIELDS}'),
+      `mutation ${index + 1} declares its own selection set instead of the shared one`,
+    );
   }
 });
 

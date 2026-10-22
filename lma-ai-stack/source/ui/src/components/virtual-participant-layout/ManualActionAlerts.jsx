@@ -30,6 +30,16 @@ const client = generateClient();
  */
 export const shouldClearManualAlert = (status) => !!status && status !== 'MANUAL_ACTION_REQUIRED';
 
+/**
+ * Whether an update says a prompt is open without saying anything about it.
+ *
+ * A subscription payload carries the fields the mutation selected; one that did
+ * not select the prompt fields reports the status and nulls. Such an update
+ * cannot be acted on — there is nothing to show, and nothing to conclude from
+ * its absence either.
+ */
+export const isUndescribedPrompt = (vp) => vp?.status === 'MANUAL_ACTION_REQUIRED' && !vp?.manualActionType;
+
 const ON_UPDATE_VP = /* GraphQL */ `
   subscription OnUpdateVirtualParticipant {
     onUpdateVirtualParticipant {
@@ -316,6 +326,18 @@ const ManualActionAlerts = () => {
         status: vp.status,
         owner: vp.Owner,
       });
+      // A subscription delivers the fields the mutation behind it selected, so
+      // an update from a writer that did not select the prompt fields arrives
+      // with the prompt status and nothing to describe it. That payload is not
+      // evidence about the prompt in either direction: rebuilding the alert
+      // from it would replace the real message with generic text and re-fire
+      // the notification, and clearing it would drop an alert the VP still
+      // needs. The writers all share one selection set so this should not
+      // arise; ignoring it here means a future one that does not cannot make
+      // the alert worse.
+      if (isUndescribedPrompt(vp)) {
+        return;
+      }
       // The sticky MANUAL alert belongs to a prompt that is still open, so it
       // goes as soon as the VP reports any other status — not only the three
       // that mean it is in the meeting. A prompt raised before admission

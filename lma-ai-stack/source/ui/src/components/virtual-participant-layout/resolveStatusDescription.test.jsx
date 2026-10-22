@@ -87,9 +87,11 @@ describe('STATUS_CONFIG', () => {
   // UI package, so the comparison lives there rather than in both places.
   it('gives every status a message, description, icon, type and colour', () => {
     // A status present in the map but missing one of these renders as a gap in
-    // the status panel rather than as an obviously wrong value.
+    // the status panel rather than as an obviously wrong value. How many
+    // statuses there are is not asserted here: the container-side test owns
+    // that, so adding one does not mean editing a count in two places.
     const statuses = Object.entries(VP_STATUS_CONFIG);
-    expect(statuses).toHaveLength(18);
+    expect(statuses.length).toBeGreaterThan(0);
     statuses.forEach(([status, config]) => {
       ['message', 'description', 'icon', 'type', 'color'].forEach((key) => {
         expect(config[key], `${status}.${key}`).toBeTruthy();

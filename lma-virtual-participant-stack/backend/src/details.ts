@@ -324,6 +324,8 @@ export type ExitReasonCode =
  * before the value is returned, and `chime.ts` has no catch at all, so an
  * exception there propagates rather than returning. The one `unknown` that can
  * actually reach the orchestrator is `webex.ts`'s catch around its own wait.
+ * `exit-reason.test.ts` holds that count to four and asserts each one is still
+ * a wait initialiser, so this paragraph cannot quietly go out of date.
  */
 export function didJoinMeeting(info: ExitInfo): boolean {
   switch (info.reason) {

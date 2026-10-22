@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
-import { shouldClearManualAlert } from './ManualActionAlerts';
+import { isUndescribedPrompt, shouldClearManualAlert } from './ManualActionAlerts';
 import { VP_STATUS_CONFIG } from './VirtualParticipantDetails';
 
 // Both modules call generateClient() / ConsoleLogger at module load; stub
@@ -36,5 +36,34 @@ describe('shouldClearManualAlert', () => {
     expect(shouldClearManualAlert(undefined)).toBe(false);
     expect(shouldClearManualAlert(null)).toBe(false);
     expect(shouldClearManualAlert('')).toBe(false);
+  });
+});
+
+describe('isUndescribedPrompt', () => {
+  // A subscription payload carries the fields the mutation behind it selected.
+  // An update written by a caller that did not select the prompt fields arrives
+  // with the prompt status and nulls, which is not something to act on: the
+  // real message would be replaced by generic text and the notification would
+  // fire a second time.
+  it('recognises a prompt status with no prompt to show', () => {
+    expect(isUndescribedPrompt({ status: 'MANUAL_ACTION_REQUIRED' })).toBe(true);
+    expect(isUndescribedPrompt({ status: 'MANUAL_ACTION_REQUIRED', manualActionType: null })).toBe(true);
+  });
+
+  it('accepts a prompt that describes itself', () => {
+    expect(
+      isUndescribedPrompt({
+        status: 'MANUAL_ACTION_REQUIRED',
+        manualActionType: 'LOGIN',
+        manualActionMessage: 'Sign in via the live view',
+      }),
+    ).toBe(false);
+  });
+
+  it('says nothing about an update that is not reporting a prompt', () => {
+    expect(isUndescribedPrompt({ status: 'ACTIVE' })).toBe(false);
+    expect(isUndescribedPrompt({ status: 'FAILED', errorMessage: 'Wrong meeting password' })).toBe(false);
+    expect(isUndescribedPrompt({})).toBe(false);
+    expect(isUndescribedPrompt(null)).toBe(false);
   });
 });
