@@ -192,10 +192,71 @@ A secret you provide must:
   document.
 - **Grant `kms:Decrypt` to the reader in its key policy**, if it is encrypted
   with your own KMS key rather than the AWS managed `aws/secretsmanager` key.
-  The reader is the Virtual Participant task execution role for the four
-  container credentials, or the meeting assist function's role for the Tavily
-  key. Under `VPLaunchType=MICROVM` it is the MicroVM launcher function's role
-  instead, for the reason given above.
+  Which role is the reader depends on the credential and, for the four
+  container ones, on the launch type — see below.
+
+#### Which role reads which secret
+
+Getting this wrong is not caught at deploy time: the key policy is yours, the
+stack cannot inspect it, and the first sign of a missing grant is the feature
+failing when it is next used.
+
+| Secret | Reader |
+|---|---|
+| Tavily API key | The meeting assist function's role |
+| The four Virtual Participant credentials, under `VPLaunchType=MICROVM` (the **default**) | The MicroVM launcher function's role |
+| The four Virtual Participant credentials, under `FARGATE` or `EC2` | The Virtual Participant **task execution** role (not the task role) |
+
+Neither Virtual Participant role has a fixed name, so look the ARN up rather
+than constructing it. Under the default launch type:
+
+```bash
+aws lambda get-function-configuration \
+  --function-name <stack-name>-VPMicrovmLauncher \
+  --query Role --output text
+```
+
+Under `FARGATE` or `EC2`, read it off the task definition the stack created:
+
+```bash
+VP_STACK=$(aws cloudformation describe-stack-resources \
+  --stack-name <stack-name> --logical-resource-id VIRTUALPARTICIPANTSTACK \
+  --query 'StackResources[0].PhysicalResourceId' --output text)
+aws ecs describe-task-definition \
+  --task-definition "$(aws cloudformation describe-stacks --stack-name "$VP_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='TaskDefinitionArn'].OutputValue" \
+    --output text)" \
+  --query 'taskDefinition.executionRoleArn' --output text
+```
+
+The meeting assist function's role, for the Tavily key:
+
+```bash
+aws lambda get-function-configuration \
+  --function-name STRANDS-<stack-name>-MeetingAssist \
+  --query Role --output text
+```
+
+Then add a statement of this shape to your key's policy. The `kms:ViaService`
+condition is the same whichever reader applies, because both of the stack's own
+grants carry it — only the principal differs:
+
+```json
+{
+  "Sid": "AllowLMAToDecryptThisSecret",
+  "Effect": "Allow",
+  "Principal": { "AWS": "<the role ARN from above>" },
+  "Action": "kms:Decrypt",
+  "Resource": "*",
+  "Condition": {
+    "StringEquals": { "kms:ViaService": "secretsmanager.<region>.amazonaws.com" }
+  }
+}
+```
+
+`Resource: "*"` in a key policy means "this key", not every key. If you change
+`VPLaunchType` later, the reader changes with it, so revisit the key policy at
+the same time.
 
 ### Rotating a credential
 

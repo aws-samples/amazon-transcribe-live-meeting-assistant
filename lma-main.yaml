@@ -104,8 +104,11 @@ Parameters:
       (Optional) ARN of an existing Secrets Manager secret whose value is the
       ElevenLabs API key. Use this instead of ElevenLabsApiKey when the key is
       already provisioned in Secrets Manager. Supply one form or the other, not
-      both. A secret encrypted with your own KMS key must grant kms:Decrypt to
-      the Virtual Participant task execution role in that key's policy.
+      both. A secret encrypted with your own KMS key must grant kms:Decrypt in
+      that key's policy to whichever role reads it: the MicroVM launcher
+      function's role under VPLaunchType MICROVM (the default), or the Virtual
+      Participant task execution role on FARGATE and EC2. See
+      docs/infrastructure-and-security.md#bringing-your-own-secret.
 
   ElevenLabsAgentId:
     Type: String
@@ -141,8 +144,10 @@ Parameters:
       Simli API key. Use this instead of SimliApiKey when the key is already
       provisioned in Secrets Manager. Supply one form or the other, not both.
       SimliFaceId is still required alongside it. A secret encrypted with your
-      own KMS key must grant kms:Decrypt to the Virtual Participant task
-      execution role in that key's policy.
+      own KMS key must grant kms:Decrypt in that key's policy to whichever role
+      reads it: the MicroVM launcher function's role under VPLaunchType MICROVM
+      (the default), or the Virtual Participant task execution role on FARGATE
+      and EC2. See docs/infrastructure-and-security.md#bringing-your-own-secret.
 
   SimliFaceId:
     Type: String
@@ -668,8 +673,11 @@ Parameters:
       ZoomMeetingSdkClientSecret when the secret is already provisioned in
       Secrets Manager. Supply one form or the other, not both.
       ZoomMeetingSdkClientId is still required alongside it. A secret encrypted
-      with your own KMS key must grant kms:Decrypt to the Virtual Participant
-      task execution role in that key's policy.
+      with your own KMS key must grant kms:Decrypt in that key's policy to
+      whichever role reads it: the MicroVM launcher function's role under
+      VPLaunchType MICROVM (the default), or the Virtual Participant task
+      execution role on FARGATE and EC2. See
+      docs/infrastructure-and-security.md#bringing-your-own-secret.
 
   AcsConnectionString:
     Type: String
@@ -701,8 +709,11 @@ Parameters:
       full Azure Communication Services connection string. Use this instead of
       AcsConnectionString when the connection string is already provisioned in
       Secrets Manager. Supply one form or the other, not both. A secret
-      encrypted with your own KMS key must grant kms:Decrypt to the Virtual
-      Participant task execution role in that key's policy.
+      encrypted with your own KMS key must grant kms:Decrypt in that key's
+      policy to whichever role reads it: the MicroVM launcher function's role
+      under VPLaunchType MICROVM (the default), or the Virtual Participant task
+      execution role on FARGATE and EC2. See
+      docs/infrastructure-and-security.md#bringing-your-own-secret.
 
   EnableVideoRecording:
     Type: String
