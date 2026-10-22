@@ -192,12 +192,12 @@ Reaching `JOINED`, `ACTIVE` or `COMPLETED` without a new detail to show clears `
 | --- | --- |
 | Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave | `chat` |
-| Meeting ended | `post-meeting-screen`, `meeting-ended-text`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `ACS_REMOVED …`, `ACS_DISCONNECTED …`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
+| Meeting ended | `post-meeting-screen`, `meeting-ended-text`, `webex-text:…` (the matched phrase, slugged), `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `ACS_REMOVED …`, `ACS_DISCONNECTED …`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
 | Everyone else left | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui-…`, `attendee-badge-missing` |
 | Ran out of time or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
 | Threw instead of exiting | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
 
-Two triggers interpolate a platform error message (`error:…` from the Webex watcher, `poll-error:…` from the Chime one). Those are shortened to a prefix plus a slug of the first part of the message before being stored, so they can still be grouped; the full text is in `errorMessage`, which is where prose belongs.
+Whatever follows the first colon in a trigger is reduced to a lower-case, hyphenated slug before the value is stored, and the whole thing is capped at 100 characters. That is what makes the three interpolated forms countable — `error:…` and `poll-error:…`, which quote a platform error message, and `webex-text:…`, which quotes the phrase a meeting-end was matched on: two reports of the same failure become the same string and so group together, whatever the wording or punctuation around them. The full message is in `errorMessage`, which is where prose belongs. A trigger with no colon — the fixed upper-case ones such as `ZOOM_END_DIALOG` — is stored exactly as it is.
 
 `COMPLETED` means the VP was in the meeting. A VP that never got in — not admitted, or stuck on the pre-join screen — ends as `FAILED` with *"Could not join the meeting (was not admitted, or stuck on the join screen)."*, on every platform.
 

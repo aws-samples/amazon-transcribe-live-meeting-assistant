@@ -145,6 +145,17 @@ export const resumedStatus = (recordedStatus?: string | null): VpStatus =>
   statusToResume(recordedStatus) ?? VP_STATUS.JOINING;
 
 /**
+ * Whether a GraphQL failure is DynamoDB declining a conditional write.
+ *
+ * AppSync surfaces it as an error naming `ConditionalCheckFailedException`,
+ * which for the write that restores a prompt's interrupted status is an
+ * expected outcome rather than a fault: it says the row stopped prompting
+ * before the write landed.
+ */
+export const isConditionalCheckFailure = (error: unknown): boolean =>
+  /ConditionalCheckFailed/i.test(error instanceof Error ? error.message : String(error));
+
+/**
  * Whether a status write should take the status-detail string off the row.
  *
  * `errorMessage` is deliberately overloaded: it is the detail line for every
@@ -826,6 +837,14 @@ export class VirtualParticipantStatusManager {
    * A VP that is not prompting keeps whatever status it has. That matters for
    * the callers that clear opportunistically, without knowing whether a prompt
    * was ever raised.
+   *
+   * The status to resume can only come from reading the row first, and the
+   * value read could be stale by the time the write lands — the same
+   * read-modify-write shape this file's `setCallId` exists to avoid. The
+   * difference is that the write is conditional: supplying a status together
+   * with `clearManualAction` makes the mutation apply only while the row is
+   * still MANUAL_ACTION_REQUIRED, so a status written in between stands and
+   * this write drops out rather than overwriting it.
    */
   async clearManualAction(): Promise<boolean> {
     try {
@@ -871,13 +890,31 @@ export class VirtualParticipantStatusManager {
       };
 
       // Only a prompting VP gets a status written, and only the one the prompt
-      // displaced.
+      // displaced. Supplying it is also what makes the write conditional on the
+      // row still prompting (see the resolver), which is what keeps this read
+      // from being able to undo a status written since.
       if (current.status === VP_STATUS.MANUAL_ACTION_REQUIRED) {
         variables.input.status = resumedStatus(current.statusBeforeManualAction);
         console.log(`Resuming VP ${this.participantId} at ${variables.input.status}`);
       }
 
-      const result = await this.signAndSendGraphQLRequest(mutation, variables);
+      let result;
+      try {
+        result = await this.signAndSendGraphQLRequest(mutation, variables);
+      } catch (error) {
+        if (isConditionalCheckFailure(error)) {
+          // Not a failure: the VP left MANUAL_ACTION_REQUIRED between the read
+          // and the write, so whatever wrote that status is more current than
+          // the one this call was going to restore. Nothing is on screen for
+          // the prompt either, because the UI stops showing it as soon as the
+          // status moves off MANUAL_ACTION_REQUIRED.
+          console.log(
+            `VP ${this.participantId} is no longer prompting — leaving its status alone`,
+          );
+          return true;
+        }
+        throw error;
+      }
 
       if (result) {
         console.log(`Successfully cleared manual action for VP ${this.participantId}`);

@@ -90,7 +90,8 @@ test('the never-joined message does not read as a successful meeting', () => {
 test('normalizeExitTrigger leaves a trigger from the taxonomy exactly as it is', () => {
     // The whole value of storing this is that rows sharing a cause share a
     // string, so the fixed triggers must survive untouched — including the
-    // upper-case ones and the one that carries platform codes.
+    // upper-case ones and the one that carries platform codes. The ones that
+    // already read as a slug are unchanged by being slugged.
     for (const trigger of [
         'pre-join:not-admitted',
         'pre-join:ai-error-screen',
@@ -102,9 +103,38 @@ test('normalizeExitTrigger leaves a trigger from the taxonomy exactly as it is',
         'ZOOM_END_DIALOG',
         'HANGUP_BUTTON_HIDDEN',
         'error:renderer-crashed',
-        'webex-text:meeting has ended',
         'ACS_DISCONNECTED code=490 subCode=0',
     ]) {
+        assert.equal(normalizeExitTrigger(trigger), trigger);
+    }
+});
+
+test('normalizeExitTrigger slugs what follows the colon however short it is', () => {
+    // Slugging only long triggers would store a short platform message
+    // verbatim, and two reports of one failure differing by a word or a full
+    // stop would land in groups of one — which is the property the field
+    // exists for.
+    assert.equal(normalizeExitTrigger('error:Target closed'), 'error:target-closed');
+    assert.equal(normalizeExitTrigger('error:Target closed.'), 'error:target-closed');
+    assert.equal(normalizeExitTrigger('poll-error:Target closed'), 'poll-error:target-closed');
+    // The phrase a Webex meeting-end was matched on is a closed set, and
+    // hyphenating it keeps it one value per phrase.
+    assert.equal(
+        normalizeExitTrigger('webex-text:meeting has ended'),
+        'webex-text:meeting-has-ended',
+    );
+});
+
+test('normalizeExitTrigger groups two reports of one short failure', () => {
+    const first = normalizeExitTrigger('error:Target closed');
+    const second = normalizeExitTrigger('error:  Target  CLOSED!  ');
+    assert.equal(first, second);
+});
+
+test('normalizeExitTrigger leaves a trigger with no colon alone', () => {
+    // These are the fixed upper-case ones; slugging would only make them
+    // harder to recognise, and they are already one value per cause.
+    for (const trigger of ['ZOOM_END_DIALOG', 'URL_CHANGE_BLANK', 'ACS_REMOVED code=1 subCode=0']) {
         assert.equal(normalizeExitTrigger(trigger), trigger);
     }
 });

@@ -6706,6 +6706,23 @@ Resources:
             "expressionNames": $utils.toJson($expNames),
             "expressionValues": $utils.toJson($expValues)
           }
+        ## Clearing a prompt *and* supplying a status means one thing: put back **
+        ## the status that prompt interrupted. The caller can only know that **
+        ## status by having read the row first, so this write is conditional on **
+        ## the prompt still being the current state -- a status written in **
+        ## between, by the user ending the meeting or by the task reaper, then **
+        ## stands rather than being replaced by a value chosen before it **
+        ## existed. The caller treats the resulting conditional-check failure **
+        ## as the VP having moved on. Clearing a prompt *without* a status **
+        ## carries no condition: that is the path for a VP that is not **
+        ## prompting, which must not be made to depend on it. **
+        #if( $util.defaultIfNull($ctx.args.input.clearManualAction, false) == true && !$util.isNullOrBlank($ctx.args.input.status) )
+          ,"condition": {
+            "expression": "#conditionStatus = :promptingStatus",
+            "expressionNames": { "#conditionStatus": "status" },
+            "expressionValues": { ":promptingStatus": $util.dynamodb.toDynamoDBJson("MANUAL_ACTION_REQUIRED") }
+          }
+        #end
         }
       ResponseMappingTemplate: |
         #if($ctx.error)

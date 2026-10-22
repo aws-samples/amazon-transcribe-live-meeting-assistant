@@ -364,17 +364,24 @@ export const MAX_EXIT_TRIGGER_LENGTH = 100;
  * aggregate and make the attribute a second, worse copy of `errorMessage` —
  * which is where that prose belongs and already goes.
  *
- * So: whitespace is collapsed, anything already short enough is kept exactly,
- * and anything too long keeps the segment before its first colon — the part
- * that classifies — followed by a slug of what remains. Playwright messages
- * begin with their stable part ('Target closed', 'Execution context was
- * destroyed'), so the result still distinguishes causes.
+ * So: the segment before the first colon — the part that classifies — is kept
+ * exactly, and everything after it is reduced to a slug, every time rather than
+ * only when the result is long. Doing it only to long triggers would leave a
+ * short platform message stored verbatim, and two reports of one failure
+ * differing by a word or a full stop would not group, which is the whole
+ * property this field is for. Playwright messages begin with their stable part
+ * ('Target closed', 'Execution context was destroyed'), so the slug still
+ * distinguishes causes.
+ *
+ * A trigger with no colon is left alone apart from the length cap. Those are
+ * the fixed upper-case ones — 'ZOOM_END_DIALOG', 'ACS_DISCONNECTED code=490
+ * subCode=0' — which are already as groupable as they are going to get, and
+ * slugging them would only make them harder to recognise.
  */
 export function normalizeExitTrigger(trigger?: string): string | undefined {
   if (!trigger) return undefined;
   const oneLine = trigger.replace(/\s+/g, ' ').trim();
   if (!oneLine) return undefined;
-  if (oneLine.length <= MAX_EXIT_TRIGGER_LENGTH) return oneLine;
   const colon = oneLine.indexOf(':');
   if (colon < 0) return oneLine.slice(0, MAX_EXIT_TRIGGER_LENGTH);
   const prefix = oneLine.slice(0, colon);
@@ -383,7 +390,10 @@ export function normalizeExitTrigger(trigger?: string): string | undefined {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return `${prefix}:${slug}`.slice(0, MAX_EXIT_TRIGGER_LENGTH);
+  // The trailing hyphen trim matters for more than looks: without it the cap
+  // can cut mid-word and leave one, and normalising the result again would
+  // remove it, so the function would not be idempotent.
+  return `${prefix}:${slug}`.slice(0, MAX_EXIT_TRIGGER_LENGTH).replace(/-+$/, '');
 }
 
 export interface ExitInfo {

@@ -26,6 +26,7 @@ import {
   VP_STATUS,
   VP_STATUSES,
   VirtualParticipantStatusManager,
+  isConditionalCheckFailure,
   isTerminalVpStatus,
   isVpStatus,
   resumedStatus,
@@ -259,6 +260,40 @@ test('clearManualAction resumes the status the prompt interrupted', async () => 
     assert.equal(input.status, interrupted);
     assert.equal(input.clearManualAction, true);
   }
+});
+
+test('a VP that stopped prompting mid-clear keeps the status that overtook it', async () => {
+  // The status to resume comes from a read, so the write is conditional on the
+  // row still prompting (see the resolver). DynamoDB declining it is the
+  // expected outcome, not a fault: something more current than this read has
+  // already written a status.
+  process.env.GRAPHQL_ENDPOINT = 'https://example.invalid/graphql';
+  const manager: any = new VirtualParticipantStatusManager(VP_ID);
+  manager.signAndSendGraphQLRequest = async (query: string) => {
+    if (query.includes('query GetVirtualParticipant')) {
+      return {
+        getVirtualParticipant: {
+          id: VP_ID,
+          status: VP_STATUS.MANUAL_ACTION_REQUIRED,
+          statusBeforeManualAction: VP_STATUS.JOINING,
+        },
+      };
+    }
+    throw new Error(
+      'GraphQL errors: [{"errorType":"DynamoDB:ConditionalCheckFailedException"}]',
+    );
+  };
+  assert.equal(await manager.clearManualAction(), true);
+});
+
+test('isConditionalCheckFailure tells that outcome from a real failure', () => {
+  assert.equal(
+    isConditionalCheckFailure(new Error('DynamoDB:ConditionalCheckFailedException')),
+    true,
+  );
+  assert.equal(isConditionalCheckFailure(new Error('conditionalcheckfailed')), true);
+  assert.equal(isConditionalCheckFailure(new Error('AccessDeniedException')), false);
+  assert.equal(isConditionalCheckFailure(new Error('fetch failed')), false);
 });
 
 test('clearManualAction falls back to JOINING when no interrupted status was recorded', async () => {

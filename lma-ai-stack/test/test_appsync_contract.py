@@ -312,6 +312,30 @@ def test_update_virtual_participant_clear_flags_remove_their_attributes() -> Non
             )
 
 
+def test_resuming_a_prompts_status_is_conditional_on_it_still_prompting() -> None:
+    """The status to resume comes from a read, so the write has to be guarded.
+
+    Clearing a prompt and supplying a status together mean "put back the status
+    this prompt interrupted", and that status can only have come from reading
+    the row first. The condition makes the write apply only while the row is
+    still prompting, so a status written in between stands.
+    """
+    resolver = _resolver("Mutation", "updateVirtualParticipant")
+    guard = re.search(
+        r"#if\(\s*\$util\.defaultIfNull\(\$ctx\.args\.input\.clearManualAction, false\) == true"
+        r"\s*&&\s*!\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\)\s*\)(.*?)#end",
+        resolver.block,
+        re.S,
+    )
+    assert guard, "the condition is not gated on clearing a prompt with a status"
+    body = guard.group(1)
+    assert '"condition"' in body, "the gated branch emits no condition block"
+    assert "MANUAL_ACTION_REQUIRED" in body, "the condition does not name the prompting status"
+    # The condition's own expression names are separate from the update's, so a
+    # name reused across the two blocks would be undeclared in one of them.
+    assert '"#conditionStatus": "status"' in body
+
+
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:
     """An unreferenced resolver file is never uploaded, so it silently does nothing."""
     referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", TEMPLATE.read_text()))
