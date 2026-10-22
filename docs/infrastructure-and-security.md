@@ -130,6 +130,13 @@ Every grant is scoped to the specific secret ARNs a deployment was given — no
 wildcards — together with `kms:Decrypt` restricted to requests made through
 Secrets Manager.
 
+The Virtual Participant redacts these four from its own log output. Its logs go
+to `/aws/lambda-microvms/<stack-name>-vp-logs` under `VPLaunchType=MICROVM` and
+to the Virtual Participant stack's `.../fargate/VirtualParticipant` group on the
+ECS launch types. Both groups are declared by the stack, encrypted with the
+customer-managed key, and kept for `CloudWatchLogsExpirationInDays` — so that
+one parameter is where to set how long Virtual Participant logs live.
+
 ### The 30-day recovery window
 
 Each secret carries a fixed name, which is what makes the rotation procedures
