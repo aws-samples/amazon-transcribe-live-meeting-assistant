@@ -339,6 +339,16 @@ Nothing validates that Nova Sonic is actually available in the region you name â
 | TranscriptLambdaHookFunctionArn | ARN of a Lambda function for custom transcript segment processing | (none) | Valid Lambda ARN |
 | TranscriptLambdaHookFunctionNonPartialOnly | Process only final (non-partial) transcript segments | true | true, false |
 
+## Operational Monitoring
+
+See [Monitoring & Alerting](monitoring.md) for what each alarm watches and how to
+subscribe to the alerts topic.
+
+| Parameter | Description | Default | Allowed Values |
+|-----------|-------------|---------|----------------|
+| EnableOperationalAlarms | Create the CloudWatch alarms that notify the operational alerts SNS topic. The topic and the dashboard are created either way, so `false` removes the notifications rather than the visibility. | true | true, false |
+| TranscribeConcurrentStreamAlarmThreshold | Concurrent Amazon Transcribe streaming sessions at which the near-quota alarm notifies. The default is 80% of the default account quota of 25; raise it if you raise the quota, because the alarm cannot read it. | 20 | Integer â‰¥ 1 |
+
 ## Security and Networking
 
 | Parameter | Description | Default | Allowed Values |

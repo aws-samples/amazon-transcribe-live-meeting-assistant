@@ -4108,3 +4108,40 @@ Outputs:
     Value: !GetAtt VirtualParticipantSchedulerFunction.Arn
     Export:
       Name: !Sub "${AWS::StackName}-VPSchedulerFunctionArn"
+
+  # ── Identifiers the top-level stack's CloudWatch dashboard needs ──
+  # ClusterArn and TaskDefinitionArn are already exported above, but a
+  # CloudWatch metric dimension takes the bare cluster name and the task
+  # definition family rather than an ARN, and the log group names are built from
+  # this nested stack's generated name, which the parent does not know.
+  ClusterName:
+    Description: >-
+      Name of the Virtual Participant ECS cluster, for the ClusterName
+      dimension of ECS/ContainerInsights metrics
+    Value: !Ref Cluster
+    Export:
+      Name: !Sub "${AWS::StackName}-ClusterName"
+
+  TaskDefinitionFamily:
+    Description: >-
+      Family of the Virtual Participant task definition, for the
+      TaskDefinitionFamily dimension of ECS/ContainerInsights metrics
+    Value: !Sub "${AWS::StackName}VirtualParticipantTaskDef"
+    Export:
+      Name: !Sub "${AWS::StackName}-TaskDefinitionFamily"
+
+  SchedulerStateMachineLogGroupName:
+    Description: >-
+      Log group the Virtual Participant launch state machine writes to, for
+      Logs Insights dashboard widgets
+    Value: !Ref SchedulerStateMachineLogGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-SchedulerStateMachineLogGroupName"
+
+  ContainerLogGroupName:
+    Description: >-
+      Log group the Virtual Participant container writes to, for Logs Insights
+      dashboard widgets
+    Value: !Ref VirtualParticipantTaskDefContainerLogGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-ContainerLogGroupName"

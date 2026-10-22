@@ -918,6 +918,40 @@ Outputs:
     Description: Lambda function ARN invoked by S3 notifications on lma-uploads-pending/*
     Value: !GetAtt UploadMeetingProcessorFunction.Arn
 
+  # ── Identifiers the top-level stack's CloudWatch alarms and dashboard need ──
+  # Every resource below is auto-named by CloudFormation or SAM, so the parent
+  # cannot reconstruct the name from its own stack name. Each value is the
+  # literal a CloudWatch metric dimension or a Logs Insights widget takes.
+  CallEventProcessorFunctionName:
+    Description: >-
+      Generated name of the Call Event Processor Lambda function, for the
+      FunctionName dimension of AWS/Lambda metrics
+    Value: !Ref CallEventProcessorFunction
+
+  CallEventProcessorLogGroupName:
+    Description: >-
+      Log group of the Call Event Processor Lambda function, for Logs Insights
+      dashboard widgets
+    Value: !Ref CallEventProcessorFunctionLogGroup
+
+  StaleMeetingReaperFunctionName:
+    Description: >-
+      Generated name of the stale-meeting reaper Lambda function, for the
+      FunctionName dimension of AWS/Lambda metrics
+    Value: !Ref StaleMeetingReaperFunction
+
+  CallEventProcessorDiscardedRecordsQueueName:
+    Description: >-
+      Generated name of the queue holding Kinesis records the Call Event
+      Processor could not process, for the QueueName dimension of AWS/SQS metrics
+    Value: !GetAtt CallEventProcessorDiscardedRecordsQueue.QueueName
+
+  AppSyncApiId:
+    Description: >-
+      API ID of the GraphQL API, for the GraphQLAPIId dimension of AWS/AppSync
+      metrics. Distinct from AppSyncEventApiId, which identifies the Event API.
+    Value: !GetAtt AppSyncApiEncrypted.ApiId
+
 Resources:
   EventSourcingTable:
     Type: AWS::DynamoDB::Table

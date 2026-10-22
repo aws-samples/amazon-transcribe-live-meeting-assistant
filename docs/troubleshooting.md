@@ -53,6 +53,15 @@ Be aware of the following service quota considerations:
 
 ## Runtime Monitoring via CloudWatch
 
+Before working through the console paths below, check the dashboard the stack
+deploys for you — it is named `<stack-name>-<region>` and the
+`OperationalDashboardConsoleUrl` stack output links straight to it. It collects
+the metrics in this section onto one page, including recent `ERROR` lines from
+the four busiest log groups, and it annotates the thresholds the alarms use.
+[Monitoring & Alerting](monitoring.md) explains every widget and every alarm,
+and — importantly — notes that the SNS email subscription created for
+`AdminEmail` delivers nothing until it is confirmed.
+
 Use the following paths to access logs for each LMA component:
 
 - **WebSocket Fargate task**: ECS console > Clusters > LMA-WEBSOCKETTRANSCRIBERSTACK-xxxx-TranscribingCluster > Tasks > Logs > View in CloudWatch

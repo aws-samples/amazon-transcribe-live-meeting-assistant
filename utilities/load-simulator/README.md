@@ -345,16 +345,49 @@ Example:
 
 ## CloudWatch observability
 
-A template dashboard JSON is shipped at
-`lma_load/observability/cloudwatch_dashboard.json`. Deploy it per-run with:
+Every LMA stack deploys its own dashboard, named `<stack-name>-<region>`, which
+needs no substitution and is wider than the one here — see
+[Monitoring & Alerting](../../docs/monitoring.md). Use that one unless you
+specifically want a separate, disposable dashboard per load run.
+
+For the per-run case, a template dashboard JSON is shipped at
+`lma_load/observability/cloudwatch_dashboard.json`. It contains five placeholders,
+and **all five must be substituted**: an unsubstituted one leaves a widget
+querying a metric that does not exist, which renders as an empty graph rather
+than an error, so the dashboard looks fine and shows nothing. Three of the five
+name resources that CloudFormation and SAM generate names for, so they are read
+from the nested stacks' outputs rather than built from the stack name:
 
 ```bash
+# Resolve the generated resource names from the nested stacks.
+AI_STACK=$(aws cloudformation describe-stack-resource \
+    --stack-name "$LMA_STACK_NAME" --logical-resource-id AISTACK \
+    --query 'StackResourceDetail.PhysicalResourceId' --output text)
+CEP_FUNCTION=$(aws cloudformation describe-stacks --stack-name "$AI_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='CallEventProcessorFunctionName'].OutputValue" \
+    --output text)
+APPSYNC_API_ID=$(aws cloudformation describe-stacks --stack-name "$AI_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='AppSyncApiId'].OutputValue" --output text)
+
+VP_STACK=$(aws cloudformation describe-stack-resource \
+    --stack-name "$LMA_STACK_NAME" --logical-resource-id VIRTUALPARTICIPANTSTACK \
+    --query 'StackResourceDetail.PhysicalResourceId' --output text)
+VP_CLUSTER=$(aws cloudformation describe-stacks --stack-name "$VP_STACK" \
+    --query "Stacks[0].Outputs[?OutputKey=='ClusterName'].OutputValue" --output text)
+
+CALL_DATA_STREAM=$(lma load stack-info | awk '/call_data_stream/{print $2}')
+
 # Fill in template vars then put-dashboard
 sed "s/\${region}/$AWS_DEFAULT_REGION/g; \
-     s/\${stack}/$LMA_STACK_NAME/g; \
-     s/\${call_data_stream}/$(lma load stack-info | awk '/call_data_stream/{print $2}')/g" \
+     s/\${call_data_stream}/$CALL_DATA_STREAM/g; \
+     s/\${cep_function}/$CEP_FUNCTION/g; \
+     s/\${appsync_api_id}/$APPSYNC_API_ID/g; \
+     s/\${vp_cluster}/$VP_CLUSTER/g" \
      utilities/load-simulator/lma_load/observability/cloudwatch_dashboard.json \
     > /tmp/dash.json
+
+# Nothing should be left; prints the placeholders that were missed.
+grep -o '\${[a-z_]*}' /tmp/dash.json || echo "all placeholders substituted"
 
 aws cloudwatch put-dashboard \
     --dashboard-name "LMA-LoadSim-$LMA_STACK_NAME" \
@@ -363,11 +396,11 @@ aws cloudwatch put-dashboard \
 
 The dashboard covers:
 
-* Transcribe active streaming sessions (Maximum)
+* Transcribe concurrent streaming sessions (`ConcurrentStreamsCount`, Maximum) — account-wide, so other Transcribe workloads in the account are included
 * Kinesis CallDataStream throughput + throttles
-* `CallEventProcessor` Lambda concurrency / errors / throttles
+* Call Event Processor Lambda concurrency / duration / errors / throttles
 * Bedrock invocations / throttles / client errors
-* ECS VP cluster `RunningTaskCount`
+* ECS VP cluster `RunningTaskCount` — zero under the default `VPLaunchType=MICROVM`, where participants are not ECS tasks
 * AppSync 4xx/5xx + Latency
 
 Each scenario also saves per-run artifacts to `./results/<runId>/`:
