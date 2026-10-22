@@ -134,9 +134,24 @@ class Resolver:
     type_name: str
     field_name: str
     files: tuple[str, ...]
+    block: str
 
     def __repr__(self) -> str:  # shows up in pytest parametrize IDs
         return f"{self.type_name}.{self.field_name}"
+
+    @property
+    def input_references(self) -> set[str]:
+        """Input field names the inline mapping templates read.
+
+        `$ctx.args.input.put("X", ...)` is a method call on the input map, not a
+        reference to a declared field, and a name the template puts there itself
+        is readable afterwards without being part of the input type -- so both
+        are excluded.
+        """
+        references = set(re.findall(r"\$ctx\.args\.input\.(\w+)", self.block)) - {"put"}
+        return references - set(
+            re.findall(r'\$ctx\.args\.input\.put\(\s*"(\w+)"', self.block)
+        )
 
 
 def _load_resolvers() -> list[Resolver]:
@@ -149,11 +164,20 @@ def _load_resolvers() -> list[Resolver]:
         field_name = re.search(r"^      FieldName: (\S+)", block, re.M)
         assert type_name and field_name, f"{logical_id} is missing TypeName/FieldName"
         files = tuple(re.findall(r"^      \w*S3Location: (\S+)", block, re.M))
-        resolvers.append(Resolver(logical_id, type_name.group(1), field_name.group(1), files))
+        resolvers.append(
+            Resolver(logical_id, type_name.group(1), field_name.group(1), files, block)
+        )
     return resolvers
 
 
 RESOLVERS = _load_resolvers()
+RESOLVERS_READING_INPUT = [resolver for resolver in RESOLVERS if resolver.input_references]
+
+
+def _resolver(type_name: str, field_name: str) -> Resolver:
+    matches = [r for r in RESOLVERS if (r.type_name, r.field_name) == (type_name, field_name)]
+    assert len(matches) == 1, f"expected exactly one resolver on {type_name}.{field_name}"
+    return matches[0]
 
 
 def test_template_declares_the_expected_resolver_count() -> None:
@@ -187,6 +211,88 @@ def test_resolver_mapping_template_files_exist(resolver: Resolver) -> None:
     for location in resolver.files:
         path = (TEMPLATE.parent / location).resolve()
         assert path.is_file(), f"{resolver.logical_id} references missing file {location}"
+
+
+def test_resolvers_reading_the_input_argument_were_found() -> None:
+    """Guards the inline-template extractor, as the resolver-count test does."""
+    assert len(RESOLVERS_READING_INPUT) >= 5, (
+        f"only found {len(RESOLVERS_READING_INPUT)} resolvers reading $ctx.args.input"
+    )
+
+
+@pytest.mark.parametrize("resolver", RESOLVERS_READING_INPUT, ids=repr)
+def test_resolver_reads_only_declared_input_fields(resolver: Resolver, schema) -> None:
+    """A mapping template reading an undeclared input field reads null forever.
+
+    The field can never arrive -- AppSync rejects an operation that sends it --
+    so the attribute the template meant to write is silently never written, with
+    no error anywhere. A rename on either side lands here instead.
+    """
+    root = {"Mutation": schema.mutation_type, "Query": schema.query_type}[resolver.type_name]
+    argument = root.fields[resolver.field_name].args["input"]
+    input_type = argument.type
+    while hasattr(input_type, "of_type"):
+        input_type = input_type.of_type
+    declared = set(input_type.fields)
+    undeclared = resolver.input_references - declared
+    assert not undeclared, (
+        f"{resolver.logical_id} reads {sorted(undeclared)} from "
+        f"{input_type.name}, which {SCHEMA.name} does not declare"
+    )
+
+
+def test_update_virtual_participant_writes_status_only_when_one_is_supplied() -> None:
+    """A caller updating one unrelated field must leave the lifecycle status alone.
+
+    `status` is optional on the input for exactly this reason: a caller that owns
+    only the CallId, or only the manual-action prompt, sends that field by itself
+    and the row keeps whatever status the VP's own lifecycle last wrote.
+    """
+    resolver = _resolver("Mutation", "updateVirtualParticipant")
+    status_set = re.search(
+        r'#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*'
+        r'\$util\.qr\( \$expSet\.put\("#status", ":status"\) \)',
+        resolver.block,
+    )
+    assert status_set, "the #status SET is not guarded on status being supplied"
+
+
+def test_update_virtual_participant_clear_flags_remove_their_attributes() -> None:
+    """Clearing has to be expressible, and distinguishable from omission.
+
+    An omitted input field means "leave this attribute as it is", so a detail
+    written during one phase of a VP's life can only be taken off the row again
+    through an explicit flag that maps to a DynamoDB REMOVE.
+    """
+    resolver = _resolver("Mutation", "updateVirtualParticipant")
+    assert "REMOVE" in resolver.block, "the resolver builds no REMOVE clause"
+    for flag, attributes in (
+        ("clearErrorMessage", ["errorMessage"]),
+        (
+            "clearManualAction",
+            [
+                "manualActionType",
+                "manualActionMessage",
+                "manualActionTimeoutSeconds",
+                "manualActionStartTime",
+                # The status the prompt interrupted is bookkeeping for the
+                # prompt, so it goes when the prompt goes.
+                "statusBeforeManualAction",
+            ],
+        ),
+    ):
+        branch = re.search(
+            r"#if\( \$util\.defaultIfNull\(\$ctx\.args\.input\."
+            + flag
+            + r", false\) == true \)(.*?)#(?:else|end)",
+            resolver.block,
+            re.S,
+        )
+        assert branch, f"{flag} does not gate a branch of the mapping template"
+        for attribute in attributes:
+            assert f'$expRemove.add("#{attribute}")' in branch.group(1), (
+                f"{flag} does not remove {attribute}"
+            )
 
 
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:

@@ -6558,12 +6558,19 @@ Resources:
         #set( $expNames = {} )
         #set( $expValues = {} )
         #set( $expSet = {} )
-        
-        ## Always update status and updatedAt **
-        $util.qr( $expSet.put("#status", ":status") )
-        $util.qr( $expNames.put("#status", "status") )
-        $util.qr( $expValues.put(":status", $util.dynamodb.toDynamoDB($ctx.args.input.status)) )
-        
+        ## Attributes to drop from the row. An omitted input field means **
+        ## "leave this attribute alone", so clearing one needs its own **
+        ## signal -- the clearErrorMessage / clearManualAction flags below. **
+        #set( $expRemove = [] )
+
+        ## Write status only when the caller supplied one, so a caller that **
+        ## owns a single unrelated field leaves the lifecycle status alone. **
+        #if( !$util.isNullOrBlank($ctx.args.input.status) )
+            $util.qr( $expSet.put("#status", ":status") )
+            $util.qr( $expNames.put("#status", "status") )
+            $util.qr( $expValues.put(":status", $util.dynamodb.toDynamoDB($ctx.args.input.status)) )
+        #end
+
         $util.qr( $expSet.put("#updatedAt", ":updatedAt") )
         $util.qr( $expNames.put("#updatedAt", "updatedAt") )
         $util.qr( $expValues.put(":updatedAt", $util.dynamodb.toDynamoDB($UpdatedAt)) )
@@ -6594,41 +6601,82 @@ Resources:
             $util.qr( $expValues.put(":vncReady", $util.dynamodb.toDynamoDB($ctx.args.input.vncReady)) )
         #end
         
-        ## Add manual action fields if provided **
-        #if( !$util.isNullOrBlank($ctx.args.input.manualActionType) )
-            $util.qr( $expSet.put("#manualActionType", ":manualActionType") )
+        ## Manual action fields. clearManualAction drops the whole set in one **
+        ## call -- the prompt, its type, its timeout, its start time and the **
+        ## status it interrupted all describe a single prompt, so they are **
+        ## cleared together once the user has dealt with it. The status to **
+        ## resume is supplied by the same call that clears the prompt. **
+        #if( $util.defaultIfNull($ctx.args.input.clearManualAction, false) == true )
             $util.qr( $expNames.put("#manualActionType", "manualActionType") )
-            $util.qr( $expValues.put(":manualActionType", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionType)) )
-        #end
-        
-        #if( !$util.isNullOrBlank($ctx.args.input.manualActionMessage) )
-            $util.qr( $expSet.put("#manualActionMessage", ":manualActionMessage") )
+            $util.qr( $expRemove.add("#manualActionType") )
             $util.qr( $expNames.put("#manualActionMessage", "manualActionMessage") )
-            $util.qr( $expValues.put(":manualActionMessage", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionMessage)) )
-        #end
-        
-        #if( !$util.isNull($ctx.args.input.manualActionTimeoutSeconds) )
-            $util.qr( $expSet.put("#manualActionTimeoutSeconds", ":manualActionTimeoutSeconds") )
+            $util.qr( $expRemove.add("#manualActionMessage") )
             $util.qr( $expNames.put("#manualActionTimeoutSeconds", "manualActionTimeoutSeconds") )
-            $util.qr( $expValues.put(":manualActionTimeoutSeconds", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionTimeoutSeconds)) )
-        #end
-        
-        #if( !$util.isNullOrBlank($ctx.args.input.manualActionStartTime) )
-            $util.qr( $expSet.put("#manualActionStartTime", ":manualActionStartTime") )
+            $util.qr( $expRemove.add("#manualActionTimeoutSeconds") )
             $util.qr( $expNames.put("#manualActionStartTime", "manualActionStartTime") )
-            $util.qr( $expValues.put(":manualActionStartTime", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionStartTime)) )
+            $util.qr( $expRemove.add("#manualActionStartTime") )
+            $util.qr( $expNames.put("#statusBeforeManualAction", "statusBeforeManualAction") )
+            $util.qr( $expRemove.add("#statusBeforeManualAction") )
+        #else
+            #if( !$util.isNullOrBlank($ctx.args.input.statusBeforeManualAction) )
+                $util.qr( $expSet.put("#statusBeforeManualAction", ":statusBeforeManualAction") )
+                $util.qr( $expNames.put("#statusBeforeManualAction", "statusBeforeManualAction") )
+                $util.qr( $expValues.put(":statusBeforeManualAction", $util.dynamodb.toDynamoDB($ctx.args.input.statusBeforeManualAction)) )
+            #end
+
+            #if( !$util.isNullOrBlank($ctx.args.input.manualActionType) )
+                $util.qr( $expSet.put("#manualActionType", ":manualActionType") )
+                $util.qr( $expNames.put("#manualActionType", "manualActionType") )
+                $util.qr( $expValues.put(":manualActionType", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionType)) )
+            #end
+
+            #if( !$util.isNullOrBlank($ctx.args.input.manualActionMessage) )
+                $util.qr( $expSet.put("#manualActionMessage", ":manualActionMessage") )
+                $util.qr( $expNames.put("#manualActionMessage", "manualActionMessage") )
+                $util.qr( $expValues.put(":manualActionMessage", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionMessage)) )
+            #end
+
+            #if( !$util.isNull($ctx.args.input.manualActionTimeoutSeconds) )
+                $util.qr( $expSet.put("#manualActionTimeoutSeconds", ":manualActionTimeoutSeconds") )
+                $util.qr( $expNames.put("#manualActionTimeoutSeconds", "manualActionTimeoutSeconds") )
+                $util.qr( $expValues.put(":manualActionTimeoutSeconds", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionTimeoutSeconds)) )
+            #end
+
+            #if( !$util.isNullOrBlank($ctx.args.input.manualActionStartTime) )
+                $util.qr( $expSet.put("#manualActionStartTime", ":manualActionStartTime") )
+                $util.qr( $expNames.put("#manualActionStartTime", "manualActionStartTime") )
+                $util.qr( $expValues.put(":manualActionStartTime", $util.dynamodb.toDynamoDB($ctx.args.input.manualActionStartTime)) )
+            #end
         #end
 
-        ## Persist the human-readable status detail (e.g. "Asked to leave by Jeremy.") **
-        ## The VP backend writes this on terminal states so the UI can show why **
-        ## the meeting actually ended instead of a generic message. **
-        #if( !$util.isNullOrBlank($ctx.args.input.errorMessage) )
+        ## The human-readable status detail (e.g. "Asked to leave by Jeremy.", **
+        ## or a join sub-step while the VP is still JOINING). The VP backend **
+        ## writes it on terminal states so the UI can show why the meeting **
+        ## actually ended instead of a generic message, and clears it when the **
+        ## VP reaches a healthy state so a detail from an earlier attempt **
+        ## cannot outlive the condition it described. **
+        #if( $util.defaultIfNull($ctx.args.input.clearErrorMessage, false) == true )
+            $util.qr( $expNames.put("#errorMessage", "errorMessage") )
+            $util.qr( $expRemove.add("#errorMessage") )
+        #elseif( !$util.isNullOrBlank($ctx.args.input.errorMessage) )
             $util.qr( $expSet.put("#errorMessage", ":errorMessage") )
             $util.qr( $expNames.put("#errorMessage", "errorMessage") )
             $util.qr( $expValues.put(":errorMessage", $util.dynamodb.toDynamoDB($ctx.args.input.errorMessage)) )
         #end
 
-        ## Build the SET expression **
+        ## Machine-readable counterpart of errorMessage: the structured exit **
+        ## trigger (e.g. "pre-join:not-admitted"), so join outcomes can be **
+        ## aggregated by query instead of by grepping container logs. **
+        #if( !$util.isNullOrBlank($ctx.args.input.endTrigger) )
+            $util.qr( $expSet.put("#endTrigger", ":endTrigger") )
+            $util.qr( $expNames.put("#endTrigger", "endTrigger") )
+            $util.qr( $expValues.put(":endTrigger", $util.dynamodb.toDynamoDB($ctx.args.input.endTrigger)) )
+        #end
+
+        ## Build the update expression. updatedAt is always set, so the SET **
+        ## clause is never empty; REMOVE is appended only when something is **
+        ## actually being cleared. No attribute can appear in both clauses -- **
+        ## each clear flag above skips the SET for the attributes it removes. **
         #set( $expression = "SET" )
         #foreach( $entry in $expSet.entrySet() )
             #set( $expression = "${expression} ${entry.key} = ${entry.value}" )
@@ -6636,7 +6684,17 @@ Resources:
                 #set( $expression = "${expression}," )
             #end
         #end
-        
+
+        #if( !$expRemove.isEmpty() )
+            #set( $expression = "${expression} REMOVE" )
+            #foreach( $name in $expRemove )
+                #set( $expression = "${expression} ${name}" )
+                #if ( $foreach.hasNext )
+                    #set( $expression = "${expression}," )
+                #end
+            #end
+        #end
+
         {
           "version": "2018-05-29",
           "operation": "UpdateItem",

@@ -300,14 +300,45 @@ export type ExitReasonCode =
   | 'unknown';            // fallback when no signal could be classified
 
 /**
- * True when the VP actually made it into the meeting (so ending is a normal
- * COMPLETED). False for reasons that mean it never joined — those must be
- * surfaced as FAILED so the UI doesn't falsely report success. `unknown` is
- * treated as "joined" to preserve prior behaviour for unclassified mid-
- * meeting exits; only the explicit never-joined reason flips to failure.
+ * True when the VP actually made it into the meeting, so ending is a normal
+ * COMPLETED. False for reasons that mean it never got in — those are surfaced
+ * as FAILED instead, so the UI does not report success for a meeting the VP
+ * never joined.
+ *
+ * Written as an exhaustive switch rather than `reason !== 'never-joined'` so
+ * that adding a reason code forces a decision here: a new code that nobody
+ * classified is a compile error, not a silent "joined".
+ *
+ * `unknown` counts as joined, and that is a deliberate choice rather than
+ * inherited behaviour. Every place that produces it sits in the handler's
+ * post-admission wait — the initial value of `exitInfo` while watching for the
+ * meeting to end, and the catch around that watch (see `webex.ts`, `chime.ts`,
+ * `zoom.ts`, `teams.ts`). Each of those is reached only after the handler has
+ * already reported JOINED, so `unknown` means "the VP was in the meeting and
+ * we could not classify why it left", and scoring it as a failure would report
+ * FAILED for meetings that ran and produced a transcript. Not being admitted
+ * is reported by its own code, `never-joined`, from the pre-join path; the
+ * pre-join paths must never return `unknown`.
  */
 export function didJoinMeeting(info: ExitInfo): boolean {
-  return info.reason !== 'never-joined';
+  switch (info.reason) {
+    case 'never-joined':
+      return false;
+    case 'end-command':
+    case 'alone-in-meeting':
+    case 'removed-from-meeting':
+    case 'host-ended':
+    case 'meeting-timeout':
+    case 'page-closed':
+    case 'unknown':
+      return true;
+    default: {
+      // Exhaustiveness: a new ExitReasonCode fails to compile here until it is
+      // classified above.
+      const unclassified: never = info.reason;
+      return unclassified;
+    }
+  }
 }
 
 export interface ExitInfo {

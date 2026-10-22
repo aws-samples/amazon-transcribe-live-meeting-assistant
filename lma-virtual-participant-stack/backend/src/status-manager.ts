@@ -53,6 +53,111 @@ export interface VPTaskRegistryItem {
   expiresAt: number;
 }
 
+/**
+ * Every status a Virtual Participant row can carry.
+ *
+ * The set is a contract between four writers and one reader: this container
+ * (most of them), `backend/entrypoint.sh` (BOOTING, before Node starts), the
+ * Step Functions state machine in `lma-virtual-participant-stack/template.yaml`
+ * (WAITING_FOR_CAPACITY, FAILED), the task reaper Lambda in the same template
+ * (FAILED), and the React UI's `STATUS_CONFIG`, which renders a message, an
+ * icon and a colour per status and shows the bare string for anything it does
+ * not recognise. Declaring them here means a status this file writes is a value
+ * the compiler has seen, rather than a string literal that only a deployed UI
+ * can disprove.
+ */
+export const VP_STATUS = {
+  SCHEDULED: 'SCHEDULED',
+  INITIALIZING: 'INITIALIZING',
+  WAITING_FOR_CAPACITY: 'WAITING_FOR_CAPACITY',
+  BOOTING: 'BOOTING',
+  REGISTERING_NETWORK: 'REGISTERING_NETWORK',
+  VNC_READY: 'VNC_READY',
+  HYDRATING_PROFILE: 'HYDRATING_PROFILE',
+  LAUNCHING_BROWSER: 'LAUNCHING_BROWSER',
+  WARMING_PROFILE: 'WARMING_PROFILE',
+  CONNECTING: 'CONNECTING',
+  JOINING: 'JOINING',
+  JOINED: 'JOINED',
+  ACTIVE: 'ACTIVE',
+  COMPLETED: 'COMPLETED',
+  FAILED: 'FAILED',
+  ENDED: 'ENDED',
+  CANCELLED: 'CANCELLED',
+  MANUAL_ACTION_REQUIRED: 'MANUAL_ACTION_REQUIRED',
+} as const;
+
+export type VpStatus = (typeof VP_STATUS)[keyof typeof VP_STATUS];
+
+/** All of them, for exhaustiveness checks in tests. */
+export const VP_STATUSES: readonly VpStatus[] = Object.values(VP_STATUS);
+
+/**
+ * Statuses that say the VP is healthy: it is in the meeting, or it finished
+ * normally. Reaching one of these means any status detail written earlier --
+ * a join sub-step, or the reason an earlier attempt in this same run did not
+ * work out -- no longer describes the participant, so it is cleared unless the
+ * caller supplies a replacement.
+ */
+export const HEALTHY_VP_STATUSES: readonly VpStatus[] = [
+  VP_STATUS.JOINED,
+  VP_STATUS.ACTIVE,
+  VP_STATUS.COMPLETED,
+];
+
+/** Statuses from which a VP never moves on. */
+export const TERMINAL_VP_STATUSES: readonly VpStatus[] = [
+  VP_STATUS.COMPLETED,
+  VP_STATUS.FAILED,
+  VP_STATUS.ENDED,
+  VP_STATUS.CANCELLED,
+];
+
+export const isTerminalVpStatus = (status: string): boolean =>
+  (TERMINAL_VP_STATUSES as readonly string[]).includes(status);
+
+export const isVpStatus = (value?: string | null): value is VpStatus =>
+  !!value && (VP_STATUSES as readonly string[]).includes(value);
+
+/**
+ * The status a manual-action prompt is about to interrupt, so it can be put
+ * back afterwards. Null when there is nothing worth recording: an unrecognised
+ * status, or MANUAL_ACTION_REQUIRED itself, which happens when a second prompt
+ * arrives before the first has been cleared and must not displace the status
+ * the first one recorded.
+ */
+export const statusToResume = (currentStatus?: string | null): VpStatus | null =>
+  isVpStatus(currentStatus) && currentStatus !== VP_STATUS.MANUAL_ACTION_REQUIRED
+    ? currentStatus
+    : null;
+
+/**
+ * Where a VP goes when its manual-action prompt is cleared.
+ *
+ * A prompt displaces the status the VP was reporting, and the UI's alert stays
+ * up until the status moves off MANUAL_ACTION_REQUIRED, so clearing a prompt
+ * has to put a status back. The one recorded when the prompt was raised is the
+ * right answer; JOINING is the fallback for a row written before this was
+ * recorded, since every caller that raises a prompt pre-admission is in the
+ * middle of joining.
+ */
+export const resumedStatus = (recordedStatus?: string | null): VpStatus =>
+  statusToResume(recordedStatus) ?? VP_STATUS.JOINING;
+
+/**
+ * Whether a status write should take the status-detail string off the row.
+ *
+ * `errorMessage` is deliberately overloaded: it is the detail line for every
+ * status, not only failures -- the exit reason on COMPLETED ("Asked to leave by
+ * Jeremy."), and the join sub-step while the VP is still JOINING. Because the
+ * mutation leaves fields it was not given alone, a detail written during one
+ * phase stays on the row through every later write that does not mention it.
+ * So a transition into a healthy state with nothing new to say clears it; a
+ * transition that carries its own detail just overwrites it.
+ */
+export const shouldClearStatusDetail = (status: string, statusDetail?: string): boolean =>
+  !statusDetail && (HEALTHY_VP_STATUSES as readonly string[]).includes(status);
+
 export class VirtualParticipantStatusManager {
   private participantId: string;
   private graphqlEndpoint: string;
@@ -134,7 +239,19 @@ export class VirtualParticipantStatusManager {
     }
   }
 
-  async updateStatus(status: string, errorMessage?: string): Promise<boolean> {
+  /**
+   * Write a lifecycle status, and with it the detail line the UI shows.
+   *
+   * `endTrigger` is the structured counterpart of `errorMessage`: the exact
+   * branch the VP exited through (`ExitInfo.trigger`, e.g.
+   * 'pre-join:not-admitted'). It is persisted alongside the prose so join
+   * outcomes can be counted with a query rather than a log search.
+   */
+  async updateStatus(
+    status: VpStatus,
+    errorMessage?: string,
+    endTrigger?: string,
+  ): Promise<boolean> {
     try {
       // First, get the current VP to preserve existing CallId and VNC fields
       const getQuery = `
@@ -163,6 +280,19 @@ export class VirtualParticipantStatusManager {
       console.log(`Current VP state from query:`, JSON.stringify(current, null, 2));
       console.log(`Preserving CallId: ${current.CallId}, VNC fields while updating status to ${status}`);
 
+      // Reported, not refused. A VP's own container is the authority on its
+      // progress, and a terminal status can arrive from elsewhere — the
+      // launcher state machine and the task reaper both write FAILED — so a
+      // task that is in fact still running has to be able to carry on saying
+      // so. But the container never moves on from a terminal status under its
+      // own steam, so seeing one here means two writers disagreed about this
+      // participant, and that is worth a line in the log.
+      if (isTerminalVpStatus(current.status) && !isTerminalVpStatus(status)) {
+        console.warn(
+          `VP ${this.participantId} is ${current.status} and is being set to ${status}`,
+        );
+      }
+
       // Update with new status while preserving CallId and VNC fields.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
@@ -174,6 +304,7 @@ export class VirtualParticipantStatusManager {
             vncPort
             vncReady
             errorMessage
+            endTrigger
             updatedAt
             Owner
             SharedWith
@@ -205,14 +336,28 @@ export class VirtualParticipantStatusManager {
       // The schema's `errorMessage` field is the generic status detail —
       // it's persisted on FAILED *and* on normal terminal states like
       // COMPLETED so the UI can show why the meeting actually ended
-      // (e.g. "Asked to leave by Jeremy"). Without this assignment the
-      // mutation would only carry the status code itself and the detail
-      // string would be silently dropped.
+      // (e.g. "Asked to leave by Jeremy"), and it carries the JOINING
+      // sub-step while the VP is still working its way in. Without this
+      // assignment the mutation would only carry the status code itself
+      // and the detail string would be silently dropped.
+      //
+      // The mutation leaves out fields it was not given, so a detail has to
+      // be taken off the row explicitly once it no longer applies: reaching
+      // a healthy state with nothing new to say clears it, which is what
+      // keeps a message from an earlier attempt out of the UI for a VP that
+      // went on to join successfully.
       if (errorMessage) {
         variables.input.errorMessage = errorMessage;
+      } else if (shouldClearStatusDetail(status)) {
+        variables.input.clearErrorMessage = true;
+        console.log(`Clearing stale status detail on transition to ${status}`);
       }
 
-      if (status === 'FAILED' && errorMessage) {
+      if (endTrigger) {
+        variables.input.endTrigger = endTrigger;
+      }
+
+      if (status === VP_STATUS.FAILED && errorMessage) {
         console.error(`VP ${this.participantId} failed: ${errorMessage}`);
       }
 
@@ -395,13 +540,21 @@ export class VirtualParticipantStatusManager {
     }
   }
 
-  // Method to set CallId in VP record
+  /**
+   * Link this VP to the call it is recording.
+   *
+   * Sends the CallId and nothing else. `status` is deliberately absent: this
+   * method owns the CallId, not the lifecycle, and the mutation writes only
+   * the fields it is given — so whatever status the VP's own progress last
+   * wrote stays in place.
+   */
   async setCallId(callId: string): Promise<boolean> {
     try {
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
             id
+            status
             CallId
             updatedAt
             Owner
@@ -413,7 +566,6 @@ export class VirtualParticipantStatusManager {
       const variables = {
         input: {
           id: this.participantId,
-          status: 'SCHEDULED', // Keep current status
           CallId: callId
         }
       };
@@ -437,38 +589,38 @@ export class VirtualParticipantStatusManager {
   // Status update methods matching Python implementation
   async setScheduled(scheduledTime?: Date): Promise<boolean> {
     const message = scheduledTime ? `Scheduled for ${scheduledTime.toISOString()}` : undefined;
-    return this.updateStatus('SCHEDULED', message);
+    return this.updateStatus(VP_STATUS.SCHEDULED, message);
   }
 
   async setInitializing(): Promise<boolean> {
-    return this.updateStatus('INITIALIZING');
+    return this.updateStatus(VP_STATUS.INITIALIZING);
   }
 
   // Granular sub-states inside the INITIALIZING phase. Each maps to a
   // different long-running setup step so the UI can show progress
   // instead of staying on a generic "Setting up..." for ~60s.
   async setRegisteringNetwork(): Promise<boolean> {
-    return this.updateStatus('REGISTERING_NETWORK');
+    return this.updateStatus(VP_STATUS.REGISTERING_NETWORK);
   }
 
   async setLaunchingBrowser(): Promise<boolean> {
-    return this.updateStatus('LAUNCHING_BROWSER');
+    return this.updateStatus(VP_STATUS.LAUNCHING_BROWSER);
   }
 
   async setHydratingProfile(): Promise<boolean> {
-    return this.updateStatus('HYDRATING_PROFILE');
+    return this.updateStatus(VP_STATUS.HYDRATING_PROFILE);
   }
 
   async setWarmingProfile(): Promise<boolean> {
-    return this.updateStatus('WARMING_PROFILE');
+    return this.updateStatus(VP_STATUS.WARMING_PROFILE);
   }
 
   async setConnecting(): Promise<boolean> {
-    return this.updateStatus('CONNECTING');
+    return this.updateStatus(VP_STATUS.CONNECTING);
   }
 
   async setJoining(): Promise<boolean> {
-    return this.updateStatus('JOINING');
+    return this.updateStatus(VP_STATUS.JOINING);
   }
 
   /**
@@ -480,44 +632,59 @@ export class VirtualParticipantStatusManager {
    */
   async setJoiningSubstep(message: string): Promise<void> {
     try {
-      await this.updateStatus('JOINING', message);
+      await this.updateStatus(VP_STATUS.JOINING, message);
     } catch {
       /* progress sub-message is best-effort */
     }
   }
 
+  // Admission. Clears the join sub-step detail with it (no message is
+  // supplied), so the UI stops showing "Waiting to be admitted…" next to a
+  // participant that is by then in the meeting.
   async setJoined(): Promise<boolean> {
-    const result = this.updateStatus('JOINED');
-    if (!result) {
-      throw new Error('Failed to update VP status to JOINED via GraphQL');
+    const updated = await this.updateStatus(VP_STATUS.JOINED);
+    if (!updated) {
+      // Reported, not thrown: the VP is in the meeting and recording either
+      // way, so a status write that did not land must not end the meeting.
+      console.error('Failed to update VP status to JOINED via GraphQL');
     }
-    return result;
+    return updated;
   }
 
   async setActive(): Promise<boolean> {
-    return this.updateStatus('ACTIVE');
+    return this.updateStatus(VP_STATUS.ACTIVE);
   }
 
-  async setCompleted(statusMessage?: string): Promise<boolean> {
-    return this.updateStatus('COMPLETED', statusMessage);
+  async setCompleted(statusMessage?: string, endTrigger?: string): Promise<boolean> {
+    return this.updateStatus(VP_STATUS.COMPLETED, statusMessage, endTrigger);
   }
 
-  async setFailed(errorMessage?: string): Promise<boolean> {
-    return this.updateStatus('FAILED', errorMessage);
+  async setFailed(errorMessage?: string, endTrigger?: string): Promise<boolean> {
+    return this.updateStatus(VP_STATUS.FAILED, errorMessage, endTrigger);
   }
 
+  /**
+   * Ask the user to take over in the live view.
+   *
+   * MANUAL_ACTION_REQUIRED is a status, so the prompt displaces whatever the VP
+   * was doing. A prompt can arrive anywhere from sign-in to mid-meeting, so the
+   * displaced status is recorded on the row for `clearManualAction` to go back
+   * to — there is no one status that is right to resume from.
+   */
   async setManualActionRequired(
     actionType: string,
     message: string,
     timeoutSeconds: number
   ): Promise<boolean> {
     try {
-      // First, get the current VP to preserve existing CallId and VNC fields
+      // First, get the current VP to preserve existing CallId and VNC fields,
+      // and to record the status this prompt is interrupting.
       const getQuery = `
         query GetVirtualParticipant($id: ID!) {
           getVirtualParticipant(id: $id) {
             id
             status
+            statusBeforeManualAction
             CallId
             vncEndpoint
             vncPort
@@ -552,6 +719,7 @@ export class VirtualParticipantStatusManager {
             manualActionMessage
             manualActionTimeoutSeconds
             manualActionStartTime
+            statusBeforeManualAction
             updatedAt
             Owner
             SharedWith
@@ -562,13 +730,21 @@ export class VirtualParticipantStatusManager {
       const variables: any = {
         input: {
           id: this.participantId,
-          status: 'MANUAL_ACTION_REQUIRED',
+          status: VP_STATUS.MANUAL_ACTION_REQUIRED,
           manualActionType: actionType,
           manualActionMessage: message,
           manualActionTimeoutSeconds: timeoutSeconds,
           manualActionStartTime: new Date().toISOString()
         }
       };
+
+      // Record what to resume, unless a prompt is already pending — a second
+      // prompt arriving before the first is cleared must not overwrite the
+      // stash with MANUAL_ACTION_REQUIRED itself.
+      const interrupted = statusToResume(current.status);
+      if (interrupted) {
+        variables.input.statusBeforeManualAction = interrupted;
+      }
 
       // Preserve CallId if it exists
       if (current.CallId) {
@@ -598,18 +774,34 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  /**
+   * Take the manual-action prompt off the row once the user has dealt with it.
+   *
+   * The prompt's attributes are removed through the mutation's
+   * `clearManualAction` flag: an omitted field means "leave this attribute
+   * alone", so the prompt needs an explicit signal to come off rather than a
+   * null value, which the mutation ignores.
+   *
+   * The status goes back to the one the prompt interrupted, recorded on the row
+   * by `setManualActionRequired`. It is not a fixed value: this is called from
+   * the Zoom sign-in flow, the Teams and Webex pre-join flows and the dialog
+   * watchdog, which runs for the whole meeting — so a VP prompted mid-meeting
+   * returns to mid-meeting rather than to a join that already happened.
+   *
+   * A VP that is not prompting keeps whatever status it has. That matters for
+   * the callers that clear opportunistically, without knowing whether a prompt
+   * was ever raised.
+   */
   async clearManualAction(): Promise<boolean> {
     try {
-      // Get current VP to preserve fields
+      console.log(`Clearing manual action for VP ${this.participantId}`);
+
       const getQuery = `
         query GetVirtualParticipant($id: ID!) {
           getVirtualParticipant(id: $id) {
             id
             status
-            CallId
-            vncEndpoint
-            vncPort
-            vncReady
+            statusBeforeManualAction
           }
         }
       `;
@@ -624,9 +816,7 @@ export class VirtualParticipantStatusManager {
       }
 
       const current = currentVP.getVirtualParticipant;
-      console.log(`Clearing manual action for VP ${this.participantId}`);
 
-      // Update to clear manual action fields by setting them to null.
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
           updateVirtualParticipant(input: $input) {
@@ -650,28 +840,19 @@ export class VirtualParticipantStatusManager {
       const variables: any = {
         input: {
           id: this.participantId,
-          status: 'JOINING',
-          manualActionType: null,
-          manualActionMessage: null,
-          manualActionTimeoutSeconds: null,
-          manualActionStartTime: null
+          clearManualAction: true
         }
       };
 
-      // Preserve CallId if it exists
-      if (current.CallId) {
-        variables.input.CallId = current.CallId;
-      }
-
-      // Preserve VNC fields if they exist
-      if (current.vncEndpoint) {
-        variables.input.vncEndpoint = current.vncEndpoint;
-        variables.input.vncPort = current.vncPort;
-        variables.input.vncReady = current.vncReady;
+      // Only a prompting VP gets a status written, and only the one the prompt
+      // displaced.
+      if (current.status === VP_STATUS.MANUAL_ACTION_REQUIRED) {
+        variables.input.status = resumedStatus(current.statusBeforeManualAction);
+        console.log(`Resuming VP ${this.participantId} at ${variables.input.status}`);
       }
 
       const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      
+
       if (result) {
         console.log(`Successfully cleared manual action for VP ${this.participantId}`);
         return true;
@@ -1345,12 +1526,17 @@ export class VirtualParticipantStatusManager {
         }
       `;
 
+      // VNC_READY is a lifecycle step of its own, not a side effect of
+      // publishing the endpoint: the UI shows it as "Live view ready / About
+      // to navigate to the meeting URL". It is written once, from the single
+      // point in the startup sequence that runs between profile warmup and
+      // the first navigation, so it cannot land on a VP that is further along.
       const variables: any = {
         input: {
           id: this.participantId,
           vncEndpoint: vncEndpoint,
           vncReady: true,
-          status: 'VNC_READY'
+          status: VP_STATUS.VNC_READY
         }
       };
 
@@ -1398,10 +1584,11 @@ export function createStatusManager(participantId: string): VirtualParticipantSt
 }
 
 export async function updateParticipantStatus(
-  participantId: string, 
-  status: string, 
-  errorMessage?: string
+  participantId: string,
+  status: VpStatus,
+  errorMessage?: string,
+  endTrigger?: string
 ): Promise<boolean> {
   const manager = new VirtualParticipantStatusManager(participantId);
-  return manager.updateStatus(status, errorMessage);
+  return manager.updateStatus(status, errorMessage, endTrigger);
 }

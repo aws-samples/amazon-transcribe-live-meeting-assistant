@@ -2931,7 +2931,7 @@ Resources:
               },
               "MarkVPFailed": {
                 "Type": "Task",
-                "Comment": "RunTask failed (e.g. ECS capacity, IAM, image pull). Surface a FAILED status + error message on the VP DynamoDB row so the UI / MCP poller stops showing INITIALIZING forever.",
+                "Comment": "RunTask failed (e.g. ECS capacity, IAM, image pull). Surface a FAILED status + error message on the VP DynamoDB row so the UI / MCP poller stops showing INITIALIZING forever. The ConditionExpression keeps the write to rows that have not reached a terminal status yet, which is the same guard VPTaskReaperFunction uses: this state can run while a task that did start is already reporting its own outcome, and the row's own lifecycle is the authority on that. A conditional-check failure is caught below and ends the execution, exactly as any other failure of this update does.",
                 "Resource": "arn:${AWS::Partition}:states:::aws-sdk:dynamodb:updateItem",
                 "Parameters": {
                   "TableName": "${VirtualParticipantTableName}",
@@ -2939,6 +2939,7 @@ Resources:
                     "id": { "S.$": "$.data.virtualParticipantId" }
                   },
                   "UpdateExpression": "SET #s = :failed, #e = :err, #ea = :now",
+                  "ConditionExpression": "attribute_exists(id) AND NOT (#s IN (:failed, :completed, :ended, :cancelled))",
                   "ExpressionAttributeNames": {
                     "#s": "status",
                     "#e": "errorMessage",
@@ -2946,6 +2947,9 @@ Resources:
                   },
                   "ExpressionAttributeValues": {
                     ":failed": { "S": "FAILED" },
+                    ":completed": { "S": "COMPLETED" },
+                    ":ended": { "S": "ENDED" },
+                    ":cancelled": { "S": "CANCELLED" },
                     ":err": { "S.$": "States.Format('VP launch failed: {}', $.runTaskError.Cause)" },
                     ":now": { "S.$": "$$.State.EnteredTime" }
                   }
