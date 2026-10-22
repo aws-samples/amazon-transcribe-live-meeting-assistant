@@ -3165,6 +3165,7 @@ Resources:
         VPMaxInstances: !Ref VPMaxInstances
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         SchedulerStateMachineLogsExpirationInDays: !Ref VPSchedulerStateMachineLogsExpirationInDays
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LogLevel: !Ref LogLevel
 

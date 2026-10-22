@@ -2306,8 +2306,12 @@ Resources:
 
   BedrockSummaryLambdaLogGroup:
     Type: AWS::Logs::LogGroup
-    # Matches BedrockSummaryLambda's condition: an unconditional group would be
-    # created and stay empty in a deployment that has no summariser.
+    # Matches BedrockSummaryLambda's condition, so the group exists exactly when
+    # something writes to it. The trade is deliberate: a deployment that had the
+    # summariser on, then turned it off, loses the group and the logs in it on
+    # the next update. Keeping the group behind while the function is gone would
+    # instead leave it in the way of its own re-creation when the summariser is
+    # turned back on.
     Condition: ShouldEnableBedrockSummarizer
     Properties:
       LogGroupName:

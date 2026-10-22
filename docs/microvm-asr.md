@@ -534,7 +534,7 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   inference threads for 4.
 - The engine logs its CPU use once a minute while a meeting is open, as
   `engine load: 5.57 of 16 cores (35%) over the last 60s, 2 session(s), rss=2340MB`,
-  in `/aws/lambda-microvms/<stack>-asr`. The size is billed whatever the load, so
+  in `/aws/lambda-microvms/<stack>-asr-logs`. The size is billed whatever the load, so
   this line is what tells you whether a bundle would fit a smaller size.
   `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
 - `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
@@ -684,7 +684,7 @@ aws s3api delete-objects --bucket "$B" --delete file:///tmp/objects.json
 aws cloudformation delete-stack --stack-name <the nested ASR stack>
 ```
 
-**The image build fails.** Check `/aws/lambda-microvms/<stack>-asr`. A `SHA256
+**The image build fails.** Check `/aws/lambda-microvms/<stack>-asr-logs`. A `SHA256
 mismatch` means the pinned checksum does not match the download; `model file ... is
 not in the archive` means the file names in the catalog entry are wrong; `HTTP 404`
 means the URL is wrong.

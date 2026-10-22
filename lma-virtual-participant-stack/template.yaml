@@ -520,6 +520,17 @@ Parameters:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
 
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      When true, this stack's MicroVM log group is retained on a stack delete and
+      on a change of VPLaunchType, so a meeting's MicroVM output survives both.
+      When false, it is deleted with the resource that produced it.
+
   PermissionsBoundaryArn:
     Type: String
     Default: ""
@@ -606,6 +617,7 @@ Conditions:
   # model ARN in that region too, or the client is pointed somewhere IAM denies.
   HasCustomNovaSonicRegion: !Not [!Equals [!Ref AmazonNovaSonicRegion, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
   HasAsrLauncher: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
   # Empty under MICROVM, where the AI stack creates no VNC load balancer and so
@@ -2076,6 +2088,17 @@ Resources:
   VPMicrovmLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: UseMicrovmLaunchType
+    # Treated as stateful, like VirtualParticipantTaskDefContainerLogGroup: this
+    # is where a meeting's MicroVM output lands, so neither a stack delete nor a
+    # change of VPLaunchType should take it with them -- and because the group
+    # is conditional, a launch-type change alone would otherwise delete every
+    # MicroVM meeting log as a side effect. Note the consequence of retaining
+    # it, which is the same one every retained resource in LMA has: the name is
+    # derived from the parent stack's name, so moving off MICROVM and back with
+    # retention enabled leaves the retained group in the way of the new one.
+    # Delete it by hand first.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub "/aws/lambda-microvms/${LMAStackName}-vp-logs"
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays

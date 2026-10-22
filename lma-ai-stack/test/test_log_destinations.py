@@ -5,31 +5,33 @@
 
 A Lambda function with no `LoggingConfig` still logs: Lambda creates
 `/aws/lambda/<function-name>` on the first invocation, with no retention and the
-AWS-owned key, and CloudFormation neither owns nor deletes it. The same is true
-of a declared log group that nothing points at — the group sits empty while the
-function logs somewhere else. Both are invisible until somebody goes looking for
-a log, or reads a bill, so this file asserts the wiring instead.
+AWS-owned key, and CloudFormation neither owns nor deletes it. A MicroVM image
+whose `Logging.CloudWatch.LogGroup` names no declared group is the same story
+with a different service. So is a declared log group that nothing points at —
+that one sits empty while the logs it was declared for go elsewhere. All three
+are invisible until somebody goes looking for a log, or reads a bill, so this
+file asserts the wiring instead.
 
-The five rules, each as its own test so a failure names which one broke:
+`EMITTER_LOG_GROUP_PATHS` is the set of resource types that name their own log
+group, and where each names it. The five rules, each as its own test so a
+failure names which one broke:
 
-1. every `AWS::Lambda::Function` and `AWS::Serverless::Function` sets
-   `LoggingConfig.LogGroup` to a `!Ref` of a log group declared in the same
-   template;
+1. every emitter names a log group declared in the same template;
 2. every `AWS::Logs::LogGroup` sets a non-null `RetentionInDays`;
-3. no `LogGroupName` is derived from a function resource, in any intrinsic form.
-   `!Sub "/aws/lambda/${SomeFunction}"` resolves the function's generated
-   physical name, which makes the group depend on the function. CloudFormation
-   then creates the function first, and anything that invokes it in that window
-   lets Lambda create the group — after which the stack's own group fails to
-   create, because the name is taken;
-4. a log group's `Condition` matches the `Condition` of the function that names
-   it, so a conditional function cannot end up pointing at a group that was not
+3. no `LogGroupName` is derived from the resource that logs to it, in any
+   intrinsic form. `!Sub "/aws/lambda/${SomeFunction}"` resolves the function's
+   generated physical name, which makes the group depend on the function.
+   CloudFormation then creates the function first, and anything that invokes it
+   in that window lets Lambda create the group — after which the stack's own
+   group fails to create, because the name is taken;
+4. a log group's `Condition` matches the `Condition` of the resource that names
+   it, so a conditional emitter cannot end up pointing at a group that was not
    created (or vice versa);
 5. every declared log group is referenced by something.
 
 Scoped to the templates `lma-main.yaml` actually instantiates, read from the
 `CFN_TEMPLATES` list in the root `Makefile` so the two cannot drift. There is no
-per-function exemption list: a new function that does not comply fails rule 1.
+per-resource exemption list: a new emitter that does not comply fails rule 1.
 
 Run via `make test-ai-stack` or pytest directly.
 """
@@ -46,8 +48,19 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 MAIN_TEMPLATE = REPO_ROOT / "lma-main.yaml"
 MAKEFILE = REPO_ROOT / "Makefile"
 
-FUNCTION_TYPES = ("AWS::Lambda::Function", "AWS::Serverless::Function")
 LOG_GROUP_TYPE = "AWS::Logs::LogGroup"
+
+# Resource types that emit to a log group they name, and the property path each
+# one names it under. A MicroVM image is in here for the same reason a function
+# is: `Logging.CloudWatch.LogGroup` is a destination name, so without a declared
+# group the service creates one, with no expiry and the AWS-owned key — and the
+# MicroVM groups carry the highest-volume output in the solution.
+EMITTER_LOG_GROUP_PATHS = {
+    "AWS::Lambda::Function": ("LoggingConfig", "LogGroup"),
+    "AWS::Serverless::Function": ("LoggingConfig", "LogGroup"),
+    "AWS::Lambda::MicrovmImage": ("Logging", "CloudWatch", "LogGroup"),
+}
+EMITTER_TYPES = tuple(EMITTER_LOG_GROUP_PATHS)
 
 # `CFN_TEMPLATES` is written with make variables for the longer directories.
 MAKE_VARIABLES = {
@@ -57,12 +70,12 @@ MAKE_VARIABLES = {
     "$(WEBSOCKET_DIR)": "lma-websocket-transcriber-stack",
 }
 
-# Linted, but not instantiated by lma-main.yaml, so nothing in them reaches a
+# Linted, but instantiated by no template, so nothing in them reaches a
 # deployment. They are exempt from the rules below as whole templates rather
 # than per-resource, and `test_the_exempt_templates_are_still_not_deployed`
-# keeps that honest: wiring either one into lma-main.yaml fails that test, which
-# is the point at which its functions have to comply. The value of each entry is
-# the string whose absence from lma-main.yaml is the evidence for the exemption.
+# keeps that honest: wiring either one in anywhere fails that test, which is the
+# point at which its log destinations have to comply. The value of each entry is
+# the string whose absence from every other template is the evidence.
 TEMPLATES_NOT_DEPLOYED = {
     "lma-ai-stack/deployment/virtual-participant-enhancements.yaml": (
         "virtual-participant-enhancements"
@@ -140,8 +153,16 @@ def _references(node, path: str = ""):
             yield from _references(value, f"{path}[{index}]")
 
 
-def _log_group_ref(function: dict) -> object:
-    return (function.get("Properties", {}).get("LoggingConfig") or {}).get("LogGroup")
+def _log_group_ref(emitter: dict) -> object:
+    """Whatever the emitter names as its log group, by its own type's path."""
+    node = emitter.get("Properties", {}) or {}
+    for key in EMITTER_LOG_GROUP_PATHS[emitter["Type"]]:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+        if node is None:
+            return None
+    return node
 
 
 def _as_name(value: object) -> str | None:
@@ -161,15 +182,15 @@ def _as_name(value: object) -> str | None:
     return None
 
 
-def _destination(function: dict, log_groups: dict) -> str | None:
-    """The logical id of the log group a function logs to, or None if it is not one.
+def _destination(emitter: dict, log_groups: dict) -> str | None:
+    """The logical id of the log group an emitter logs to, or None if it is not one.
 
     Two spellings are in use and both are accepted: `!Ref <group>`, and the
     group's name repeated verbatim (the older and still more common form in
     these templates). The second only counts when some declared group really
     carries that name — which is what makes a typo in it a failure here.
     """
-    reference = _log_group_ref(function)
+    reference = _log_group_ref(emitter)
     if isinstance(reference, dict) and set(reference) == {"Ref"}:
         return reference["Ref"] if reference["Ref"] in log_groups else None
     wanted = _as_name(reference)
@@ -189,6 +210,28 @@ def test_the_template_list_parses_at_the_expected_scale():
     assert len(ALL_TEMPLATES) >= 16, f"only found {len(ALL_TEMPLATES)} templates in CFN_TEMPLATES"
     missing = [path for path in ALL_TEMPLATES if not (REPO_ROOT / path).is_file()]
     assert not missing, f"CFN_TEMPLATES names templates that do not exist: {missing}"
+
+
+def test_every_emitter_type_is_actually_collected_somewhere():
+    """Each type in `EMITTER_LOG_GROUP_PATHS` must match a resource that exists.
+
+    A type dropped from that mapping, or a resource type renamed, silently
+    removes a whole class of log destination from all five rules, which is not
+    visible as a failure anywhere else — every remaining test would still pass.
+    The MicroVM images are the live example: the first version of this file
+    covered only the two Lambda function types, so neither of them was gated.
+    """
+    found = {emitter_type: 0 for emitter_type in EMITTER_LOG_GROUP_PATHS}
+    for path in DEPLOYED_TEMPLATES:
+        for resource in _resources(path).values():
+            if resource.get("Type") in found:
+                found[resource["Type"]] += 1
+    uncovered = sorted(name for name, count in found.items() if count == 0)
+    assert not uncovered, (
+        f"these emitter types match no resource in any deployed template, so "
+        f"listing them gates nothing: {uncovered}. Either the resource type was "
+        f"renamed or the resources were removed — do not just delete the entry."
+    )
 
 
 def test_cfn_templates_covers_every_nested_stack_lma_main_deploys():
@@ -211,16 +254,24 @@ def test_cfn_templates_covers_every_nested_stack_lma_main_deploys():
 
 
 def test_the_exempt_templates_are_still_not_deployed():
-    """The exemption in `TEMPLATES_NOT_DEPLOYED` holds only while that stays true."""
-    main = MAIN_TEMPLATE.read_text()
-    now_deployed = sorted(
-        path for path, evidence in TEMPLATES_NOT_DEPLOYED.items() if evidence in main
-    )
+    """The exemption in `TEMPLATES_NOT_DEPLOYED` holds only while that stays true.
+
+    Every other template is searched, not just lma-main.yaml: nesting is two deep
+    here, so an AI-stack sub-template would be instantiated from
+    lma-ai-stack.yaml and scanning only the root would never see it.
+    """
+    now_deployed = []
+    for path, evidence in TEMPLATES_NOT_DEPLOYED.items():
+        for other in ALL_TEMPLATES:
+            if other == path:
+                continue  # a template naming itself proves nothing
+            if evidence in (REPO_ROOT / other).read_text():
+                now_deployed.append(f"{path} (named in {other})")
     assert not now_deployed, (
-        f"these templates are exempt from the log-destination rules because "
-        f"lma-main.yaml does not instantiate them, which is no longer true: "
-        f"{now_deployed}. Remove them from TEMPLATES_NOT_DEPLOYED and wire their "
-        f"functions to declared log groups."
+        f"these templates are exempt from the log-destination rules because no "
+        f"template instantiates them, which is no longer true: {sorted(now_deployed)}. "
+        f"Remove them from TEMPLATES_NOT_DEPLOYED and wire their log destinations "
+        f"to declared log groups."
     )
 
 
@@ -228,20 +279,18 @@ def test_the_exempt_templates_are_still_not_deployed():
 
 
 @pytest.mark.parametrize("template", DEPLOYED_TEMPLATES)
-def test_every_function_names_a_log_group_declared_in_the_same_template(template: str):
-    """Rule 1. Without this, Lambda creates the group and sets its own defaults."""
+def test_every_emitter_names_a_log_group_declared_in_the_same_template(template: str):
+    """Rule 1. Without this, the service creates the group and sets its own defaults."""
     resources = _resources(template)
     log_groups = _of_type(resources, LOG_GROUP_TYPE)
     broken = []
-    for name, function in _of_type(resources, *FUNCTION_TYPES).items():
-        reference = _log_group_ref(function)
+    for name, emitter in _of_type(resources, *EMITTER_TYPES).items():
+        path = ".".join(EMITTER_LOG_GROUP_PATHS[emitter["Type"]])
+        reference = _log_group_ref(emitter)
         if reference is None:
-            broken.append(f"{name}: no LoggingConfig.LogGroup")
-        elif _destination(function, log_groups) is None:
-            broken.append(
-                f"{name}: LoggingConfig.LogGroup ({reference!r}) is not a log group "
-                f"declared here"
-            )
+            broken.append(f"{name}: no {path}")
+        elif _destination(emitter, log_groups) is None:
+            broken.append(f"{name}: {path} ({reference!r}) is not a log group declared here")
     assert not broken, f"{template}: {broken}"
 
 
@@ -257,46 +306,56 @@ def test_every_log_group_sets_a_retention(template: str):
 
 
 @pytest.mark.parametrize("template", DEPLOYED_TEMPLATES)
-def test_no_log_group_name_is_derived_from_a_function(template: str):
+def test_no_log_group_name_is_derived_from_its_emitter(template: str):
     """Rule 3. See the module docstring for why this ordering matters."""
     resources = _resources(template)
-    functions = _of_type(resources, *FUNCTION_TYPES)
+    emitters = _of_type(resources, *EMITTER_TYPES)
     derived = []
     for name, group in _of_type(resources, LOG_GROUP_TYPE).items():
         group_name = group.get("Properties", {}).get("LogGroupName")
         for target, _ in _references(group_name):
-            if target in functions:
+            if target in emitters:
                 derived.append(f"{name} -> {target}")
     assert not derived, (
-        f"{template}: LogGroupName derived from a function resource, which makes "
-        f"the group depend on the function: {derived}"
+        f"{template}: LogGroupName derived from the resource that logs to it, which "
+        f"makes the group depend on that resource: {derived}"
     )
 
 
 @pytest.mark.parametrize("template", DEPLOYED_TEMPLATES)
-def test_a_log_groups_condition_matches_its_functions(template: str):
+def test_a_log_groups_condition_matches_its_emitters(template: str):
     """Rule 4. A mismatch creates one of the pair without the other."""
     resources = _resources(template)
     log_groups = _of_type(resources, LOG_GROUP_TYPE)
     mismatched = []
-    for name, function in _of_type(resources, *FUNCTION_TYPES).items():
-        destination = _destination(function, log_groups)
+    for name, emitter in _of_type(resources, *EMITTER_TYPES).items():
+        destination = _destination(emitter, log_groups)
         if destination is None:
             continue  # rule 1 reports this
         group = log_groups[destination]
-        if function.get("Condition") != group.get("Condition"):
+        if emitter.get("Condition") != group.get("Condition"):
             mismatched.append(
-                f"{name} (Condition: {function.get('Condition')}) -> "
+                f"{name} (Condition: {emitter.get('Condition')}) -> "
                 f"{destination} (Condition: {group.get('Condition')})"
             )
     assert not mismatched, (
-        f"{template}: condition mismatch between a function and its log group: {mismatched}"
+        f"{template}: condition mismatch between a resource and its log group: {mismatched}"
     )
 
 
 @pytest.mark.parametrize("template", DEPLOYED_TEMPLATES)
 def test_every_declared_log_group_is_referenced(template: str):
-    """Rule 5. An unreferenced group stays empty while its logs go elsewhere."""
+    """Rule 5. An unreferenced group stays empty while its logs go elsewhere.
+
+    `DependsOn` deliberately does NOT count as a reference. Every emitter here is
+    required to declare `DependsOn: [<its>LogGroup]`, so counting it would make
+    the rule unfalsifiable: a function cross-wired to a *different* group's name
+    leaves its own group genuinely orphaned, and the surviving `DependsOn` alone
+    would satisfy this. Only a real use counts -- a `Ref`/`GetAtt`/`Sub` from
+    somewhere other than the group itself (which is how the ECS container groups
+    and the Step Functions group are reached), an output, or an emitter whose
+    log destination resolves to it.
+    """
     loaded = _load(template)
     resources = loaded.get("Resources", {}) or {}
     log_groups = _of_type(resources, LOG_GROUP_TYPE)
@@ -305,14 +364,12 @@ def test_every_declared_log_group_is_referenced(template: str):
         if name in log_groups:
             continue  # a group referring to itself does not make it used
         referenced |= {target for target, _ in _references(resource)}
-        depends_on = resource.get("DependsOn")
-        referenced |= set([depends_on] if isinstance(depends_on, str) else (depends_on or []))
     referenced |= {target for target, _ in _references(loaded.get("Outputs", {}) or {})}
-    # A function naming its group by repeating the name counts as using it.
+    # An emitter naming its group by repeating the name counts as using it.
     referenced |= {
         destination
-        for function in _of_type(resources, *FUNCTION_TYPES).values()
-        if (destination := _destination(function, log_groups)) is not None
+        for emitter in _of_type(resources, *EMITTER_TYPES).values()
+        if (destination := _destination(emitter, log_groups)) is not None
     }
     orphans = sorted(set(log_groups) - referenced)
     assert not orphans, (

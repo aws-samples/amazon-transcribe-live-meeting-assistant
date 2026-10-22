@@ -33,7 +33,8 @@ This is a complete reference of all LMA CloudFormation stack parameters. These v
 | AdminEmail | Admin user email address. A temporary password is sent to this address. | (required) | Valid email address |
 | AuthorizedAccountEmailDomain | Comma-separated email domains allowed for self-registration | (none) | Comma-separated domain names |
 | MeetingRecordExpirationInDays | Number of days to retain meeting data before automatic deletion | 90 | Positive integer |
-| CloudWatchLogsExpirationInDays | Number of days to retain CloudWatch Logs | (varies) | Standard CloudWatch retention values |
+| CloudWatchLogsExpirationInDays | Number of days to retain CloudWatch Logs. Applies to every log group the deployment declares, including VPC Flow Logs and the MicroVM log groups | 90 | Standard CloudWatch retention values |
+| VPSchedulerStateMachineLogsExpirationInDays | Number of days to retain the scheduled Virtual Participant state machine's execution history. Kept shorter than `CloudWatchLogsExpirationInDays` because it logs every state transition of every scheduled Virtual Participant; raise it while investigating a scheduled Virtual Participant that did not start | 7 | Standard CloudWatch retention values |
 | EnableDataRetentionOnDelete | Retain DynamoDB tables, S3 buckets, the Cognito user pool, and KMS keys when the stack is deleted | true | true, false |
 | MeetingInactivityTimeoutInMinutes | Minutes a meeting may go without a finalized transcript segment before LMA ends it on the meeting's behalf. 0 leaves such meetings open | 240 | 0-10080 |
 | MeetingInactivityLookbackInDays | How far back the reaper looks for meetings to close. A meeting that started earlier than this is never closed automatically | 2 | 1-90 |

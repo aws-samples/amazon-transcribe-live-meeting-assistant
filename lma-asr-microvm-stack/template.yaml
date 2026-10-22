@@ -430,6 +430,15 @@ Resources:
   # AsrMicrovmExecutionRole's existing log-group scoping still covers it.
   AsrMicrovmLogGroup:
     Type: AWS::Logs::LogGroup
+    # Treated as stateful, like the other log groups that hold meeting-time
+    # output: a stack delete would otherwise take with it the post-mortem logs
+    # for the compute path that is hardest to debug. Note the consequence of
+    # retaining it, which is the same one every retained resource in LMA has:
+    # the name is derived from the parent stack's name, so turning
+    # EnableMicrovmAsr off and on again with retention enabled leaves the
+    # retained group in the way of the new one. Delete it by hand first.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub "/aws/lambda-microvms/${LMAStackName}-asr-logs"
       RetentionInDays: !Ref CloudWatchLogsExpirationInDays
@@ -787,4 +796,4 @@ Outputs:
 
   MicrovmLogGroup:
     Description: CloudWatch log group for ASR MicroVM sessions.
-    Value: !Sub "/aws/lambda-microvms/${LMAStackName}-asr"
+    Value: !Ref AsrMicrovmLogGroup
