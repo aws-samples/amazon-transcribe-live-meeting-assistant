@@ -396,11 +396,11 @@ aws cloudwatch put-dashboard \
 
 The dashboard covers:
 
-* Transcribe concurrent streaming sessions (`ConcurrentStreamsCount`, Maximum) — account-wide, so other Transcribe workloads in the account are included
+* Transcribe concurrent streaming sessions (`ConcurrentStreamsCount`, Maximum) — account-wide, so another workload in the account calling `StartStreamTranscription` is included; one calling `StartCallAnalyticsStreamTranscription` or `StartMedicalStreamTranscription` consumes the same quota but is published as a separate series and is not shown
 * Kinesis CallDataStream throughput + throttles
 * Call Event Processor Lambda concurrency / duration / errors / throttles
 * Bedrock invocations / throttles / client errors
-* ECS VP cluster `RunningTaskCount` — zero under the default `VPLaunchType=MICROVM`, where participants are not ECS tasks
+* ECS VP cluster `TaskCount` — the cluster-wide metric, because `RunningTaskCount` is published per service and Virtual Participant tasks are started per meeting by `RunTask` rather than by a service
 * AppSync 4xx/5xx + Latency
 
 Each scenario also saves per-run artifacts to `./results/<runId>/`:

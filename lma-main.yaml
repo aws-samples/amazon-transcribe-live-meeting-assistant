@@ -3356,21 +3356,31 @@ Resources:
         at least that much. Check this function's Duration and Throttles first,
         then its log group for retried batches. The stream keeps 24 hours of
         records, so a lag that keeps growing eventually loses data. Two metrics
-        are combined because the stream's own GetRecords age is only published
-        for polling readers, and this deployment reads through an enhanced
-        fan-out consumer whose lag Lambda reports instead; whichever of the two
-        has data drives the alarm, and a period with neither reads as zero.
+        are combined, both reporting the same lag by different routes: the
+        stream's enhanced fan-out consumer reports how far behind the latest
+        record each delivered event was, and Lambda reports the age of the
+        batch its event source handed over. Whichever has data drives the
+        alarm, a period with neither reads as zero, and two of the last three
+        periods must breach before it notifies.
       Metrics:
-        - Id: streamage
-          Label: Stream GetRecords iterator age
+        # The stream is read through an enhanced fan-out consumer, so the lag
+        # signal is SubscribeToShardEvent.MillisBehindLatest rather than
+        # GetRecords.IteratorAgeMilliseconds. Measured over 14 days on a live
+        # stream, the GetRecords age had data in 29 of 336 hours — whatever
+        # occasionally polls the stream, not this consumer — while this metric
+        # had data in all 336.
+        - Id: efolag
+          Label: Enhanced fan-out consumer lag
           ReturnData: false
           MetricStat:
             Metric:
               Namespace: AWS/Kinesis
-              MetricName: GetRecords.IteratorAgeMilliseconds
+              MetricName: SubscribeToShardEvent.MillisBehindLatest
               Dimensions:
                 - Name: StreamName
                   Value: !Ref CallDataStream
+                - Name: ConsumerName
+                  Value: !GetAtt AISTACK.Outputs.DataStreamConsumerName
             Period: 300
             Stat: Maximum
         - Id: consumerage
@@ -3387,9 +3397,14 @@ Resources:
             Stat: Maximum
         - Id: worstlag
           Label: Worst observed consumer lag (ms)
-          Expression: "MAX([FILL(streamage, 0), FILL(consumerage, 0)])"
+          Expression: "MAX([FILL(efolag, 0), FILL(consumerage, 0)])"
           ReturnData: true
-      EvaluationPeriods: 2
+      # Two of three rather than two of two. FILL makes the expression dense,
+      # so TreatMissingData is never consulted and the newest period always
+      # carries a value — which for a metric published with any delay is the
+      # fill value. AWS documents that this can leave a FILL-based alarm stuck
+      # in one state, and names an M-of-N alarm with M < N as the workaround.
+      EvaluationPeriods: 3
       DatapointsToAlarm: 2
       Threshold: 300000
       ComparisonOperator: GreaterThanThreshold
@@ -3471,10 +3486,11 @@ Resources:
         console for a task that cannot be placed — an exhausted Fargate quota, a
         subnet with no address space left, or an image the task execution role
         cannot pull are the usual reasons — and the Fargate log group for a
-        container exiting during startup. During a deployment the count dips
-        briefly while a replacement registers, which is why two consecutive
-        five-minute windows are required before this notifies. OK notifications
-        are enabled so recovery is visible.
+        container exiting during startup. A deployment does not lower this count
+        — the service registers a replacement before draining the task it
+        replaces — so two consecutive five-minute windows are required only so
+        that a single absent or transiently zero datapoint does not notify. OK
+        notifications are enabled so recovery is visible.
       Namespace: ECS/ContainerInsights
       MetricName: RunningTaskCount
       Dimensions:
@@ -3529,45 +3545,40 @@ Resources:
     Properties:
       AlarmName: !Sub "${AWS::StackName}-transcribe-concurrent-streams-near-quota"
       AlarmDescription: !Sub >-
-        Concurrent Amazon Transcribe streaming sessions in this region reached
-        ${TranscribeConcurrentStreamAlarmThreshold}, the level set by the
-        TranscribeConcurrentStreamAlarmThreshold parameter. Nothing has failed
-        yet: past the account quota, Transcribe refuses a new session with
-        LimitExceededException and the meeting that asked for it gets no
+        Concurrent Amazon Transcribe StartStreamTranscription sessions in this
+        region reached ${TranscribeConcurrentStreamAlarmThreshold}, the level
+        set by the TranscribeConcurrentStreamAlarmThreshold parameter. Nothing
+        has failed yet: past the account quota, Transcribe refuses a new session
+        with LimitExceededException and the meeting that asked for it gets no
         transcript. Request an increase to "Concurrent HTTP/2 streams for
         transcription" in Service Quotas, and raise this parameter with it — the
         alarm cannot read the quota. The count is account-wide and region-wide,
-        so other workloads in this account consume the same quota. This
-        deployment opens one session per audio channel, so a stereo meeting
-        counts as two.
-      Metrics:
-        - Id: streamsall
-          Label: Concurrent streaming sessions (account total)
-          ReturnData: false
-          MetricStat:
-            Metric:
-              Namespace: AWS/Transcribe
-              MetricName: ConcurrentStreamsCount
-            Period: 300
-            Stat: Maximum
-        - Id: streamsbydomain
-          Label: Concurrent streaming sessions (Transcribe streaming)
-          ReturnData: false
-          MetricStat:
-            Metric:
-              Namespace: AWS/Transcribe
-              MetricName: ConcurrentStreamsCount
-              Dimensions:
-                - Name: Domain
-                  Value: Transcribe
-                - Name: ServiceType
-                  Value: streaming
-            Period: 300
-            Stat: Maximum
-        - Id: concurrentstreams
-          Label: Concurrent streaming sessions
-          Expression: "MAX([FILL(streamsall, 0), FILL(streamsbydomain, 0)])"
-          ReturnData: true
+        so another workload in this account calling StartStreamTranscription
+        consumes the same quota and is counted here; one calling
+        StartCallAnalyticsStreamTranscription or
+        StartMedicalStreamTranscription also consumes it but is published as a
+        separate series and is not counted. This deployment opens one session
+        per audio channel, so a stereo meeting counts as two.
+      # Amazon Transcribe publishes ConcurrentStreamsCount under exactly one
+      # dimension set, confirmed against a live account with list-metrics:
+      # Domain, ServiceType and Operation together, with ServiceType
+      # capitalised. Querying any subset returns no datapoints at all, which
+      # would leave this alarm in OK for ever. The published dimensions table
+      # disagrees with this — it lists "batch" as ServiceType's only value and
+      # omits Operation entirely — so trust the measurement, not the table.
+      # A SEARCH expression would cover every streaming operation at once, but
+      # CloudWatch does not accept SEARCH in an alarm.
+      Namespace: AWS/Transcribe
+      MetricName: ConcurrentStreamsCount
+      Dimensions:
+        - Name: Domain
+          Value: Transcribe
+        - Name: ServiceType
+          Value: Streaming
+        - Name: Operation
+          Value: StartStreamTranscription
+      Statistic: Maximum
+      Period: 300
       EvaluationPeriods: 1
       Threshold: !Ref TranscribeConcurrentStreamAlarmThreshold
       ComparisonOperator: GreaterThanOrEqualToThreshold
@@ -3653,7 +3664,8 @@ Resources:
         with a FAILED status, so the web UI shows the failure to the person who
         asked for it; this alarm exists so nobody has to be watching the UI to
         find out. Failures and timeouts are summed, since the state machine
-        reports a launch that never completed as a timeout.
+        reports a launch that never completed as a timeout, and one breaching
+        period out of the last three notifies.
       Metrics:
         - Id: launchfailed
           Label: Launch executions failed
@@ -3679,11 +3691,17 @@ Resources:
                   Value: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.StepFunctions
             Period: 300
             Stat: Sum
+        # No FILL here. CloudWatch treats a missing value as 0 on either side of
+        # an arithmetic operator, so the sum already behaves as intended, and
+        # leaving the terms unfilled keeps the expression sparse — which is what
+        # lets TreatMissingData apply and avoids the stuck-state hazard FILL
+        # carries for a metric published with any delay.
         - Id: launchnotcompleted
           Label: Launches that did not complete
-          Expression: "FILL(launchfailed, 0) + FILL(launchtimedout, 0)"
+          Expression: "launchfailed + launchtimedout"
           ReturnData: true
-      EvaluationPeriods: 1
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
       Threshold: 1
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData: notBreaching
@@ -3717,13 +3735,12 @@ Resources:
               {
                 "type": "metric", "x": 0, "y": 2, "width": 12, "height": 6,
                 "properties": {
-                  "title": "Transcribe concurrent streaming sessions — account-wide, not just this stack",
+                  "title": "Transcribe concurrent StartStreamTranscription sessions — account-wide, not just this stack",
                   "region": "${AWS::Region}",
                   "stat": "Maximum",
                   "period": 300,
                   "metrics": [
-                    ["AWS/Transcribe", "ConcurrentStreamsCount", {"label": "Account total"}],
-                    ["AWS/Transcribe", "ConcurrentStreamsCount", "Domain", "Transcribe", "ServiceType", "streaming", {"label": "Transcribe streaming"}]
+                    ["AWS/Transcribe", "ConcurrentStreamsCount", "Domain", "Transcribe", "ServiceType", "Streaming", "Operation", "StartStreamTranscription", {"label": "StartStreamTranscription"}]
                   ],
                   "annotations": {
                     "horizontal": [
@@ -3756,7 +3773,7 @@ Resources:
                   "stat": "Maximum",
                   "period": 300,
                   "metrics": [
-                    ["AWS/Kinesis", "GetRecords.IteratorAgeMilliseconds", "StreamName", "${CallDataStreamName}", {"label": "Stream GetRecords age (polling readers only)"}],
+                    ["AWS/Kinesis", "SubscribeToShardEvent.MillisBehindLatest", "StreamName", "${CallDataStreamName}", "ConsumerName", "${DataStreamConsumerName}", {"label": "Enhanced fan-out consumer lag"}],
                     ["AWS/Lambda", "IteratorAge", "FunctionName", "${CallEventProcessorFunctionName}", {"label": "Call Event Processor event-source age"}]
                   ],
                   "annotations": {
@@ -3821,13 +3838,13 @@ Resources:
               {
                 "type": "metric", "x": 12, "y": 20, "width": 12, "height": 6,
                 "properties": {
-                  "title": "ECS running tasks — the VP cluster is empty by design under VPLaunchType=MICROVM",
+                  "title": "ECS tasks — RunningTaskCount is per service, TaskCount is per cluster; the VP series counts tasks started per meeting",
                   "region": "${AWS::Region}",
-                  "stat": "Minimum",
+                  "stat": "Maximum",
                   "period": 300,
                   "metrics": [
-                    ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${TranscribingClusterName}", "ServiceName", "${TranscriberServiceName}", {"label": "Transcriber service"}],
-                    ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${VirtualParticipantClusterName}", {"label": "Virtual Participant cluster"}]
+                    ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${TranscribingClusterName}", "ServiceName", "${TranscriberServiceName}", {"stat": "Minimum", "label": "Transcriber service (running)"}],
+                    ["ECS/ContainerInsights", "TaskCount", "ClusterName", "${VirtualParticipantClusterName}", {"label": "Virtual Participant cluster (all tasks)"}]
                   ]
                 }
               },
@@ -3928,6 +3945,7 @@ Resources:
         - AlertsTopicName: !GetAtt AlertsTopic.TopicName
           TranscribeQuotaThreshold: !Ref TranscribeConcurrentStreamAlarmThreshold
           CallDataStreamName: !Ref CallDataStream
+          DataStreamConsumerName: !GetAtt AISTACK.Outputs.DataStreamConsumerName
           CallEventProcessorFunctionName: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
           CallEventProcessorLogGroup: !GetAtt AISTACK.Outputs.CallEventProcessorLogGroupName
           DiscardedRecordsQueueName: !GetAtt AISTACK.Outputs.CallEventProcessorDiscardedRecordsQueueName

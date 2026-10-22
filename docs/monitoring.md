@@ -43,15 +43,15 @@ problem.
 | `discarded-records-queue-depth` | The queue holding Kinesis records the Call Event Processor could not process has one or more messages visible (`Maximum` over 5 min, `> 0`). Also notifies on recovery. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `call-event-processor-errors` | The Call Event Processor failed one or more invocations (`Sum` over 5 min, `>= 1`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `call-event-processor-throttles` | Lambda refused to start an invocation for want of account concurrency (`Sum` over 5 min, `> 0`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
-| `kinesis-consumer-iterator-age` | The consumer is more than 5 minutes behind the stream, in two consecutive 5-minute windows (`Maximum`, `> 300000` ms). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
+| `kinesis-consumer-iterator-age` | The consumer is more than 5 minutes behind the stream in two of the last three 5-minute windows (`Maximum`, `> 300000` ms). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `kinesis-write-throughput-exceeded` | A write to the call data stream was rejected for exceeding shard throughput (`Sum` over 5 min, `> 0`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `transcriber-no-healthy-targets` | The transcriber load balancer has no target passing its health check, for two consecutive 1-minute windows (`Minimum`, `< 1`). Also notifies on recovery. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `transcriber-service-no-tasks` | The transcriber ECS service is running no tasks, for two consecutive 5-minute windows (`Minimum`, `< 1`). Also notifies on recovery. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `appsync-5xx-errors` | The GraphQL API returned five or more server errors (`Sum` over 5 min, `>= 5`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
-| `transcribe-concurrent-streams-near-quota` | Concurrent Amazon Transcribe streaming sessions in this region reach the configured level (`Maximum` over 5 min, `>= threshold`). | `AlertsTopic` | `TranscribeConcurrentStreamAlarmThreshold` (`20`) |
+| `transcribe-concurrent-streams-near-quota` | Concurrent Amazon Transcribe `StartStreamTranscription` sessions in this region reach the configured level (`Maximum` over 5 min, `>= threshold`). | `AlertsTopic` | `TranscribeConcurrentStreamAlarmThreshold` (`20`) |
 | `stale-meeting-reaper-not-invoked` | The stale-meeting reaper recorded no invocations in each of two consecutive hours (`Sum`, `<= 0`). Also notifies on recovery. Not created at all when the reaper is switched off. | `AlertsTopic` | `MeetingInactivityTimeoutInMinutes` (`240`; `0` removes the alarm) |
 | `bedrock-throttling` | Amazon Bedrock throttled five or more invocations (`Sum` over 5 min, `>= 5`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
-| `vp-launch-failures` | The Virtual Participant launch state machine failed or timed out an execution (`Sum` over 5 min, `>= 1`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
+| `vp-launch-failures` | The Virtual Participant launch state machine failed or timed out an execution in any of the last three 5-minute windows (`Sum`, `>= 1`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 
 Each alarm carries an `AlarmDescription` written as the first few steps of a
 runbook, because the description is the only context that travels with the
@@ -75,10 +75,22 @@ default account quota is 25 concurrent streaming sessions, and
 it, which leaves time to request an increase before meetings start being
 refused. If you raise the quota, raise this parameter with it. There is no API
 the alarm can consult, so left at 20 against a quota of 200 it notifies at a
-level that is no longer close to anything. The count is account-wide and
-region-wide, so other Transcribe workloads in the same account consume the same
-quota, and LMA opens one streaming session per audio channel, which means a
-stereo meeting counts as two.
+level that is no longer close to anything. LMA opens one streaming session per
+audio channel, which means a stereo meeting counts as two.
+
+**What that alarm counts, exactly.** Amazon Transcribe publishes
+`ConcurrentStreamsCount` under a single dimension set — `Domain`, `ServiceType`
+and `Operation` together — so the alarm is scoped to one operation,
+`StartStreamTranscription`, which is the one LMA calls. The count is still
+account-wide and region-wide: another workload in the same account calling
+`StartStreamTranscription` is included. A workload calling
+`StartCallAnalyticsStreamTranscription` or `StartMedicalStreamTranscription`
+consumes the same quota but publishes a separate series, so it is *not*
+included — if you share the account with such a workload, the alarm will
+under-report how close you are. Covering every operation at once would need a
+`SEARCH` expression, and CloudWatch does not accept `SEARCH` in an alarm, so
+enumerating one operation is the only option. The dashboard's widget has the
+same scope.
 
 **A fresh install produces one `stale-meeting-reaper-not-invoked` alert.** That
 alarm watches for the *absence* of invocations, so it treats missing data as
@@ -151,7 +163,14 @@ at something the team owns:
 
 Because the topic is encrypted with the customer-managed key, anything you give
 permission to publish to it also needs `kms:GenerateDataKey*` and `kms:Decrypt`
-on that key. Subscribers do not: decryption happens before delivery.
+on that key. Subscribers do not: decryption happens before delivery. The stack's
+key policy already grants CloudWatch those two actions, which is what lets an
+alarm action reach an encrypted topic. The grant is not narrowed by a condition
+key, because AWS does not document CloudWatch populating `aws:SourceAccount` or
+`aws:SourceArn` when it calls KMS on an alarm action's behalf, and a condition
+that did not match would drop every notification silently. If you deploy inside
+an AWS Organization and want that statement narrowed, `aws:SourceOrgID` is the
+condition key AWS documents for it.
 
 ### Turning the alarms off
 
@@ -161,6 +180,32 @@ which is the right choice if your organisation manages alarms centrally and
 would otherwise have two systems notifying for the same event. It removes the
 notifications rather than the visibility — the dashboard still works, because it
 reads the same service-published metrics directly.
+
+One consequence worth expecting: because the topic and its subscription are
+created either way, a deployment with `EnableOperationalAlarms=false` still
+sends the `AdminEmail` address a subscription-confirmation message, for a topic
+that nothing will publish to. Confirming it anyway is the better choice — it
+means switching the alarms back on starts delivering immediately, rather than
+needing a second round trip through somebody's inbox.
+
+### What it costs
+
+In us-east-1, a standard-resolution CloudWatch alarm costs $0.10 per alarm
+metric per month, with the first ten alarm metrics included at no charge. **An
+alarm built on a metric-math expression bills per metric referenced in the
+expression, not per alarm**, so the 12 alarms here are 14 billable alarm metrics
+— ten reading a single metric each, plus two metric-math alarms reading two
+metrics each. That is $0.40 per month for an account with the free allowance
+still available, and $1.40 per month for one that has already used it elsewhere.
+
+The dashboard references 26 metrics, comfortably inside the metric allowance for
+a free dashboard, and CloudWatch includes three dashboards per account at no
+charge. An account that already has three custom dashboards pays $3.00 per month
+for this one, which is the realistic case for anyone running several LMA stacks
+in one account. Logs Insights queries in the four error-log widgets are billed
+per query when the widget runs, not continuously. See
+[Amazon CloudWatch pricing](https://aws.amazon.com/cloudwatch/pricing/) for
+other regions and for current rates.
 
 ## The dashboard
 
@@ -175,13 +220,13 @@ mislead. Reading top to bottom:
 
 | Widget | What it shows | Read it for |
 |---|---|---|
-| Transcribe concurrent streaming sessions | `ConcurrentStreamsCount`, with a horizontal annotation at the alarm threshold | How close the account is to the streaming quota. Account-wide, so a spike you cannot explain may belong to another workload. |
+| Transcribe concurrent streaming sessions | `ConcurrentStreamsCount` for `StartStreamTranscription`, with a horizontal annotation at the alarm threshold | How close the account is to the streaming quota. Account-wide, so a spike you cannot explain may belong to another workload — but only one that calls the same operation; see the note above on what this series excludes. |
 | Kinesis call data stream | `IncomingRecords` and `WriteProvisionedThroughputExceeded` | Whether the pipeline is accepting writes. Record volume alone tells you how busy the deployment is, not whether it is healthy; rejected writes are the signal. |
-| Consumer lag | Stream `GetRecords.IteratorAgeMilliseconds` and the Call Event Processor's event-source `IteratorAge`, annotated at the alarm threshold | How far behind the live meeting the transcript is. Two series because the stream's own age is published only for polling readers, and LMA reads through an enhanced fan-out consumer whose lag Lambda reports instead. |
+| Consumer lag | `SubscribeToShardEvent.MillisBehindLatest` for the stream's enhanced fan-out consumer, and the Call Event Processor's event-source `IteratorAge`, annotated at the alarm threshold | How far behind the live meeting the transcript is. Two series reporting the same lag by different routes, so either alone is enough. Note the *stream-level* `GetRecords.IteratorAgeMilliseconds` is deliberately not shown: LMA reads the stream through an enhanced fan-out consumer, which uses `SubscribeToShard`, so that metric reflects whatever else happens to poll the stream rather than this consumer's lag. |
 | Discarded records queue | `ApproximateNumberOfMessagesVisible`, annotated at zero | Open work. Depth never falls on its own, so any value above zero is a batch that needs investigating, not a backlog that will clear. |
 | Call Event Processor | `Invocations`, `Errors`, `Throttles`, `ConcurrentExecutions` and `Duration` p99 | The health of the one consumer between Kinesis and the web UI. Rising duration with flat invocations usually precedes rising lag. |
 | Amazon Bedrock | `Invocations`, `InvocationThrottles`, `InvocationClientErrors` and `InvocationLatency` p99 | Whether summaries and the Meeting Assistant are getting through. Read without a model dimension on purpose: Bedrock publishes these both ways, and a request throttled before the model is resolved carries no model id, so filtering by model undercounts. |
-| ECS running tasks | `RunningTaskCount` for the transcriber service and the Virtual Participant cluster | Capacity. The Virtual Participant cluster is empty by design under the default `VPLaunchType=MICROVM`, where participants run on Lambda MicroVMs rather than ECS tasks — zero there is not a fault. |
+| ECS tasks | `RunningTaskCount` for the transcriber *service*, and cluster-wide `TaskCount` for the Virtual Participant cluster | Capacity. Two different metrics because `RunningTaskCount` is only published per service: the Virtual Participant cluster starts a task per meeting with `RunTask` rather than through a service, so it has no `RunningTaskCount` series under any `VPLaunchType` — including `FARGATE` and `EC2`, where the service that does exist holds `DesiredCount: 0` and only keeps a load-balancer target-group association. `TaskCount` is the cluster-wide metric and does count those per-meeting tasks. It is legitimately zero whenever no Virtual Participant is in a meeting, and permanently zero under the default `VPLaunchType=MICROVM`, where participants run on Lambda MicroVMs and are not ECS tasks at all. |
 | Virtual Participant memory used | `MemoryUtilized` for the VP task definition family, peak and average | Whether a participant stuck in `INITIALIZING` is on a starved host. [Troubleshooting](troubleshooting.md) describes this check; the widget is the same query without the console navigation. |
 | Transcriber target health | `HealthyHostCount` and `UnHealthyHostCount` | Whether new meetings can connect at all. Zero healthy targets refuses every new connection. |
 | Transcriber load balancer | `TargetResponseTime` p99 and `HTTPCode_Target_5XX_Count` | Errors at the edge. Response time is of limited use here: a meeting is one long-lived WebSocket, so what is being timed is the upgrade handshake, not the meeting. |
@@ -190,9 +235,7 @@ mislead. Reading top to bottom:
 | Four error-log tables | The most recent 50 lines matching `/ERROR/` in the Call Event Processor, the Virtual Participant launch state machine, the Virtual Participant container and the WebSocket transcriber container log groups | A first look without leaving the dashboard. These are CloudWatch Logs Insights queries, so they run on demand and are billed per query, not continuously. |
 
 The dashboard is created whether or not `EnableOperationalAlarms` is `true`.
-CloudWatch includes three dashboards per account at no charge; beyond that
-dashboards are billed monthly, which is worth knowing if you run several LMA
-stacks in one account.
+See [What it costs](#what-it-costs) above for the dashboard and alarm charges.
 
 ## Related documentation
 

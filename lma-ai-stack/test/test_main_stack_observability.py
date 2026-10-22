@@ -80,11 +80,6 @@ def main_template() -> dict:
 
 
 @pytest.fixture(scope="module")
-def ai_template() -> dict:
-    return yaml.load(AI_TEMPLATE.read_text(), Loader=_CfnLoader)
-
-
-@pytest.fixture(scope="module")
 def alarms(main_template: dict) -> dict:
     return {
         name: body
@@ -279,21 +274,31 @@ def test_the_key_policy_grants_cloudwatch_unconditionally(main_template: dict):
     in the statement list rather than inside an `Fn::If`, because
     `EnableOperationalAlarms` can be turned on by a later stack update and a
     grant that was skipped at create time would not then appear.
+
+    Both the `Fn::Sub`-of-`AWS::URLSuffix` form and the literal hostname are
+    accepted. The two are byte-identical in the `aws` and `aws-us-gov`
+    partitions and diverge only in China, and the seven sibling statements in
+    this same key policy all use literal hostnames — so requiring one form here
+    would cement a convention this repository has not verified and would block
+    aligning this statement with the ones around it.
     """
     key = main_template["Resources"]["CustomerManagedEncryptionKey"]
     statements = key["Properties"]["KeyPolicy"]["Statement"]
     assert isinstance(statements, list), "the key policy statement list is conditional as a whole"
 
-    expected_principal = {"Fn::Sub": "cloudwatch.${AWS::URLSuffix}"}
+    accepted_principals = (
+        {"Fn::Sub": "cloudwatch.${AWS::URLSuffix}"},
+        "cloudwatch.amazonaws.com",
+    )
     matching = [
         statement
         for statement in statements
         if isinstance(statement, dict)
-        and statement.get("Principal", {}).get("Service") == expected_principal
+        and statement.get("Principal", {}).get("Service") in accepted_principals
     ]
     assert matching, (
-        "no key policy statement grants the cloudwatch.${AWS::URLSuffix} service principal; "
-        "a literal service hostname would also fail this, and would not resolve in GovCloud"
+        "no key policy statement grants the CloudWatch service principal, so an alarm "
+        "would change state without its notification reaching the encrypted topic"
     )
     for statement in matching:
         assert "Fn::If" not in str(statement.get("Effect")), "the grant's Effect is conditional"
@@ -308,60 +313,175 @@ def test_the_key_policy_grants_cloudwatch_unconditionally(main_template: dict):
 # ── cross-template wiring ───────────────────────────────────────────────────
 
 
-def test_every_nested_stack_output_the_alarms_read_is_declared(ai_template: dict):
-    """A renamed AI stack output fails the parent's deploy, not this stack's.
+# Every nested stack whose Outputs an alarm or a dashboard widget resolves, with
+# the outputs that are load-bearing for observability. Each of these supplies a
+# metric dimension value or a log group name for a Logs Insights widget, and all
+# of them name resources CloudFormation or SAM generates names for — so a rename
+# in the child is invisible until the parent updates, 35-40 minutes into a
+# deploy, after the child itself has already succeeded.
+OBSERVABILITY_OUTPUTS = {
+    "AISTACK": (
+        AI_TEMPLATE,
+        {
+            "CallEventProcessorFunctionName",
+            "CallEventProcessorLogGroupName",
+            "CallEventProcessorDiscardedRecordsQueueName",
+            "StaleMeetingReaperFunctionName",
+            "AppSyncApiId",
+            "DataStreamConsumerName",
+        },
+    ),
+    "WEBSOCKETTRANSCRIBERSTACK": (
+        REPO_ROOT
+        / "lma-websocket-transcriber-stack"
+        / "deployment"
+        / "lma-websocket-transcriber.yaml",
+        {
+            "TranscribingClusterName",
+            "TranscriberServiceName",
+            "TranscriberLoadBalancerFullName",
+            "TranscriberTargetGroupFullName",
+            "TranscriberFargateLogGroupName",
+        },
+    ),
+    "VIRTUALPARTICIPANTSTACK": (
+        REPO_ROOT / "lma-virtual-participant-stack" / "template.yaml",
+        {
+            "ClusterName",
+            "TaskDefinitionFamily",
+            "SchedulerStateMachineLogGroupName",
+            "ContainerLogGroupName",
+            "StepFunctions",
+        },
+    ),
+}
 
-    The alarms and the dashboard resolve metric dimensions through
-    `!GetAtt AISTACK.Outputs.<Name>`, which CloudFormation only rejects when the
-    parent updates — after the nested stack has already succeeded.
+
+@pytest.mark.parametrize("logical_id", sorted(OBSERVABILITY_OUTPUTS))
+def test_every_nested_stack_output_the_alarms_read_is_declared(logical_id: str):
+    """A renamed child output fails the parent's deploy, not the child's.
+
+    Checked for all three nested stacks the alarms and dashboard read, not just
+    the AI stack: five transcriber outputs and five Virtual Participant outputs
+    are equally load-bearing, and a rename in either is just as invisible.
     """
+    child_template, expected = OBSERVABILITY_OUTPUTS[logical_id]
+    assert child_template.is_file(), f"{child_template} does not exist"
+
     main = MAIN_TEMPLATE.read_text()
-    consumed = set(re.findall(r"AISTACK\s*\.\s*Outputs\s*\.\s*(\w+)", main))
-    declared = set(ai_template.get("Outputs", {}))
-    observability_outputs = {
-        "CallEventProcessorFunctionName",
-        "CallEventProcessorLogGroupName",
-        "CallEventProcessorDiscardedRecordsQueueName",
-        "StaleMeetingReaperFunctionName",
-        "AppSyncApiId",
+    consumed = set(re.findall(rf"{logical_id}\s*\.\s*Outputs\s*\.\s*(\w+)", main))
+    consumed |= set(re.findall(rf'"{logical_id}"\s*,\s*"Outputs\.(\w+)"', main))
+    declared = set(
+        yaml.load(child_template.read_text(), Loader=_CfnLoader).get("Outputs", {})
+    )
+
+    assert expected <= consumed, (
+        f"lma-main.yaml no longer reads {logical_id} outputs the alarms or dashboard need: "
+        f"{sorted(expected - consumed)}"
+    )
+    assert expected <= declared, (
+        f"{child_template.name} no longer declares outputs lma-main.yaml reads: "
+        f"{sorted(expected - declared)}"
+    )
+    # Anything else lma-main.yaml reads from this child must also exist, so a
+    # rename of an output this test does not enumerate still fails here.
+    assert consumed <= declared, (
+        f"lma-main.yaml reads {logical_id} outputs {child_template.name} does not declare: "
+        f"{sorted(consumed - declared)}"
+    )
+
+
+# Functions whose result is null for a period in which any argument is null.
+# FILL is excluded: filling is the thing being looked for, not a hazard.
+NULL_PROPAGATING_FUNCTIONS = ("MAX(", "MIN(", "AVG(", "SUM(", "IF(")
+
+
+def _metric_ids(body: dict) -> set[str]:
+    """Ids of the plain metric stats an expression in this alarm can reference."""
+    return {
+        metric["Id"]
+        for metric in body["Properties"].get("Metrics", []) or []
+        if "MetricStat" in metric
     }
-    assert observability_outputs <= consumed, (
-        "lma-main.yaml no longer reads outputs the alarms need: "
-        f"{sorted(observability_outputs - consumed)}"
-    )
-    assert observability_outputs <= declared, (
-        "the AI stack no longer declares outputs lma-main.yaml reads: "
-        f"{sorted(observability_outputs - declared)}"
-    )
 
 
-def test_metric_math_alarms_fill_missing_datapoints(alarms: dict):
-    """A null in any term nulls the whole expression, and the alarm stops evaluating.
+def test_metric_math_expressions_fill_every_term_or_none(alarms: dict):
+    """A half-filled expression is always a mistake, whichever way round it is.
 
-    Every compound alarm here combines metrics that are each legitimately sparse
-    — a stream with no traffic, a service that publishes nothing while idle — so
-    an unfilled term means an alarm that silently cannot reach a state.
+    `FILL(m, 0)` turns a sparse metric into a dense one, which is what lets a
+    compound alarm evaluate at all when one of its inputs legitimately publishes
+    nothing. But the filling has to cover every term: in `MAX([FILL(a, 0), b])`
+    a period where `b` has no datapoint still nulls the result, so the alarm
+    cannot reach a state — the exact failure the filling was added to prevent,
+    and invisible because the expression *looks* filled.
+
+    Two properties are asserted, per expression:
+
+    * if any referenced metric is wrapped in `FILL(`, all of them must be;
+    * an expression using a function whose result is null when any argument is
+      null must fill every referenced metric, since there the nulling is
+      certain rather than possible.
+
+    Arithmetic-only expressions may leave every term unfilled: CloudWatch
+    documents that a missing value on either side of `+ - * /` is treated as 0,
+    so `a + b` already behaves as intended and staying sparse lets
+    `TreatMissingData` apply.
     """
-    unfilled = {}
+    problems = {}
     for name, body in alarms.items():
+        known_ids = _metric_ids(body)
         for metric in body["Properties"].get("Metrics", []) or []:
             expression = metric.get("Expression")
-            if expression and "FILL(" not in expression:
-                unfilled[f"{name}/{metric['Id']}"] = expression
-    assert not unfilled, f"metric math expressions with an unfilled term: {unfilled}"
+            if not expression:
+                continue
+            referenced = {
+                metric_id
+                for metric_id in known_ids
+                if re.search(rf"\b{re.escape(metric_id)}\b", expression)
+            }
+            filled = set(re.findall(r"FILL\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*,", expression))
+            unfilled = referenced - filled
+            where = f"{name}/{metric['Id']}"
+
+            if not referenced:
+                problems[where] = f"references no metric in this alarm: {expression}"
+            elif filled and unfilled:
+                problems[where] = f"fills some terms but not {sorted(unfilled)}: {expression}"
+            elif unfilled and any(fn in expression for fn in NULL_PROPAGATING_FUNCTIONS):
+                problems[where] = (
+                    f"uses a null-propagating function with {sorted(unfilled)} unfilled: "
+                    f"{expression}"
+                )
+    assert not problems, f"metric math expressions that cannot reliably evaluate: {problems}"
 
 
 # ── the docs, against the template ──────────────────────────────────────────
 
 
-def test_the_docs_do_not_overstate_the_number_of_alarms(alarms: dict):
+def test_the_docs_state_the_number_of_alarms_the_template_declares(alarms: dict):
+    """Both that each doc states the count, and that the count it states is right.
+
+    Asserting only "no doc states a wrong number" passes when a doc states no
+    number at all, so deleting the digits would satisfy it while leaving the
+    prose silent about something readers rely on. Each doc must therefore match
+    the pattern at least once before its captures are compared.
+    """
     expected = len(alarms)
+    silent = []
     drift = {}
     for doc in (MONITORING_DOC, WELL_ARCHITECTED_DOC):
         assert doc.is_file(), f"{doc.name} is referenced by this test but does not exist"
-        for stated in PROSE_ALARM_COUNT.findall(doc.read_text()):
-            if int(stated) != expected:
-                drift.setdefault(doc.name, []).append(stated)
+        stated = PROSE_ALARM_COUNT.findall(doc.read_text())
+        if not stated:
+            silent.append(doc.name)
+            continue
+        wrong = [value for value in stated if int(value) != expected]
+        if wrong:
+            drift[doc.name] = wrong
+    assert not silent, (
+        f"these docs no longer state the alarm count in digits, so the gate that keeps them "
+        f"honest has nothing to check: {silent}"
+    )
     assert not drift, (
         f"lma-main.yaml declares {expected} alarms, but these docs state another number "
         f"in digits: {drift}. Counts other than the total should be written in words."

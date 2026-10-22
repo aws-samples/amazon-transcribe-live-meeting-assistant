@@ -1,14 +1,13 @@
 {
-  "_comment": "Template CloudWatch dashboard for LMA Load Simulator observability. Substitute ${region}, ${call_data_stream}, ${cep_function}, ${appsync_api_id} and ${vp_cluster} before posting with put-dashboard — the README's 'CloudWatch observability' section has the exact commands that resolve each one. Every placeholder here must be filled: an unsubstituted one leaves a widget querying a metric that does not exist, which renders as an empty graph rather than an error. For a dashboard that needs no substitution at all, use the one the stack deploys (<stack-name>-<region>) — see docs/monitoring.md.",
+  "_comment": "Template CloudWatch dashboard for LMA Load Simulator observability. Substitute ${region}, ${call_data_stream}, ${cep_function}, ${appsync_api_id} and ${vp_cluster} before posting with put-dashboard — the README's 'CloudWatch observability' section has the exact commands that resolve each one. Every placeholder here must be filled: an unsubstituted one leaves a widget querying a metric that does not exist, which renders as an empty graph rather than an error. Dimension sets are likewise exact — ConcurrentStreamsCount is published only with all three of Domain, ServiceType and Operation, and the cluster-wide ECS task metric is TaskCount, since RunningTaskCount is published per service. For a dashboard that needs no substitution at all, use the one the stack deploys (<stack-name>-<region>) — see docs/monitoring.md.",
   "widgets": [
     {
       "type": "metric",
       "properties": {
-        "title": "Transcribe concurrent streaming sessions (account-wide)",
+        "title": "Transcribe concurrent StartStreamTranscription sessions (account-wide)",
         "region": "${region}",
         "metrics": [
-          ["AWS/Transcribe", "ConcurrentStreamsCount", {"label": "Account total"}],
-          ["AWS/Transcribe", "ConcurrentStreamsCount", "Domain", "Transcribe", "ServiceType", "streaming", {"label": "Transcribe streaming"}]
+          ["AWS/Transcribe", "ConcurrentStreamsCount", "Domain", "Transcribe", "ServiceType", "Streaming", "Operation", "StartStreamTranscription", {"label": "StartStreamTranscription"}]
         ],
         "stat": "Maximum",
         "period": 60
@@ -62,7 +61,7 @@
         "title": "ECS VP cluster task count",
         "region": "${region}",
         "metrics": [
-          ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${vp_cluster}"]
+          ["ECS/ContainerInsights", "TaskCount", "ClusterName", "${vp_cluster}"]
         ],
         "stat": "Maximum",
         "period": 60

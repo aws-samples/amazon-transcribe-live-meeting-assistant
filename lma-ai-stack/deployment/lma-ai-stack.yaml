@@ -952,6 +952,13 @@ Outputs:
       metrics. Distinct from AppSyncEventApiId, which identifies the Event API.
     Value: !GetAtt AppSyncApiEncrypted.ApiId
 
+  DataStreamConsumerName:
+    Description: >-
+      Name of the enhanced fan-out consumer the Call Event Processor reads the
+      call data stream through, for the ConsumerName dimension of the
+      AWS/Kinesis SubscribeToShardEvent metrics
+    Value: !GetAtt DataStreamConsumer.ConsumerName
+
 Resources:
   EventSourcingTable:
     Type: AWS::DynamoDB::Table
