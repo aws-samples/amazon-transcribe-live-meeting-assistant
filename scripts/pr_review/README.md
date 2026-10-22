@@ -205,6 +205,37 @@ What to do when a review is withheld:
   channel in [CONTRIBUTING.md](../../CONTRIBUTING.md#security-issue-notifications).
   That is the one non-public channel that exists.
 
+## Two baselines, and they are not interchangeable
+
+The harness uses the target branch at **two different revisions**, for two different
+questions, and mixing them up has already caused one defect worth not repeating.
+
+| Question | Revision | Where |
+|---|---|---|
+| Which criteria should the review apply? | target branch **tip** | `instruction_files`, `pin_instructions_to_target_branch` |
+| What did this request change? | **merge base** with the target branch | `request_file_changes`, `instruction_changes`, `build_diff`, `diff_stat`, `export_base_tree` |
+
+The tip is right for the first because the review should apply the *current*
+criteria, not whatever they were when the branch started. The merge base is right
+for the second because that is the request's own baseline — and it is what the
+supplied diff is computed against, so anything derived from it is guaranteed to
+have a hunk the reviewer can read.
+
+Using the tip for the second question is what produced the first live defect in
+this tooling. A changed instruction file was detected by comparing the worktree
+copy against the target branch's *current* copy, so when a `CLAUDE.md` edit landed
+on `develop`, every open request that had branched earlier looked like it had
+modified the file. Five of the first nine reviews spent a `🟡 Should fix` telling
+the maintainer to go and read a hunk that does not exist — noise in exactly the
+place the design most needs to be trustworthy, and a good way to train somebody to
+ignore the warning on the day it is real. Measured before and after on PRs 779,
+777, 800 and 791: all four reported `['CLAUDE.md']`, all four now report nothing,
+and `git diff <merge-base>..<head>` agrees.
+
+`.ai-review/base/` is the **merge base** tree, which is why `pr-review-ci.md` tells
+the review it can say "this does not exist at the branch point" but not "`develop`
+has no such field".
+
 ## Keeping the reviewer out of the reviewer
 
 The job hands a model a checkout of author-controlled code plus a token that can

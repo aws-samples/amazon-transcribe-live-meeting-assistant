@@ -1153,12 +1153,12 @@ def test_pinning_rebuilds_the_claude_directory_and_reports_truthfully(
     * a file on NEITHER tree (`AGENTS.md` is in the required set and is absent from
       `develop` today) must not be reported as "added by this request" — otherwise
       every review is told the request adds AGENTS.md;
-    * a file the request CHANGES must still be reported as modified, which needs the
-      head's content captured before the directory is deleted — after it, there is
-      nothing on disk left to compare against.
+    * the pinned content must actually be written back, or the reviewer has no
+      criteria to read at all.
 
-    And the pinned content must actually be written back, or the reviewer has no
-    criteria to read at all.
+    What the REQUEST changed is no longer this function's business — see
+    ``test_an_instruction_file_changed_on_the_target_branch_is_not_the_requests_change``
+    for that half, which is where the real defect lived.
     """
     worktree = tmp_path / "wt"
     (worktree / ".claude" / "skills").mkdir(parents=True)
@@ -1185,28 +1185,198 @@ def test_pinning_rebuilds_the_claude_directory_and_reports_truthfully(
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr(review, "_run", fake_run)
-    modified, removed = review.pin_instructions_to_target_branch(worktree, "develop")
+    pinned, removed = review.pin_instructions_to_target_branch(worktree, "develop")
 
     assert (worktree / ".claude" / "skills" / "pr-review.md").read_text() == (
         "THE REAL CRITERIA"
     ), "the pinned criteria were not written back, so the reviewer has none"
+    assert ".claude/skills/pr-review.md" in pinned
     assert not (worktree / ".claude" / "skills" / "evil").exists(), (
         "a skill DIRECTORY the request adds survived, which is the auto-discovered "
         "shape an authored glob list missed"
     )
-    assert ".claude/skills/pr-review.md" in modified, (
-        "the request edits the review criteria and the review was not told; the "
-        "head's content has to be captured before the directory is removed"
-    )
-    joined = " ".join(removed)
-    assert "AGENTS.md" not in joined, (
-        "AGENTS.md is on neither tree, so reporting it as added by this request "
+    assert "AGENTS.md" not in removed, (
+        "AGENTS.md is on neither tree, so nothing was removed for it and saying so "
         "would be false on every single review"
     )
-    assert "pr-review-ci.md" not in joined, "likewise for a required file on neither tree"
-    assert any("evil/SKILL.md" in entry for entry in removed), (
+    assert ".claude/skills/pr-review-ci.md" not in removed, (
+        "likewise for a required file on neither tree"
+    )
+    assert ".claude/skills/evil/SKILL.md" in removed, (
         "the added skill directory was removed but the review was not told, so it "
         "cannot assess the proposal it just had taken away"
+    )
+
+
+def test_an_instruction_file_changed_on_the_target_branch_is_not_the_requests_change(
+    monkeypatch,
+) -> None:
+    """THE REGRESSION TEST. A request whose merge base predates a `CLAUDE.md` edit on
+    the target branch must report NO instruction-file change.
+
+    This is the exact shape five of the first nine live reviews got wrong. The
+    orchestrator classified a changed instruction file by comparing the worktree copy
+    against the TARGET BRANCH TIP, so when PR #801 landed a `CLAUDE.md` edit on
+    `develop`, every open request that had branched earlier suddenly looked like it
+    had modified the file — and each review then spent a 🟡 finding telling the
+    maintainer to go and read a hunk that does not exist. Reproduced before the fix
+    against PR #779: `git diff <merge-base>..<head>` does not mention `CLAUDE.md`,
+    while the harness reported `['CLAUDE.md']`.
+
+    The fix is to derive it from the same merge-base range as the supplied diff, so
+    the two agree by construction rather than by two code paths happening to match.
+    The fixture below is that exact topology:
+
+        merge base ── request head          (touches one Lambda file only)
+             │
+             └─────── target branch tip     (CLAUDE.md edited by an unrelated merge)
+    """
+    # `git diff --name-status <merge-base>..<head>` for a request that touches one
+    # ordinary file. Note what is NOT here: CLAUDE.md.
+    name_status = (
+        "M\tlma-ai-stack/source/lambda_functions/thing/index.py\n"
+        "A\tlma-ai-stack/source/lambda_functions/thing/test_index.py\n"
+    )
+
+    def fake_run(command, cwd=None, env=None, timeout=300):
+        import subprocess as sp
+
+        if command[:2] == ["git", "merge-base"]:
+            return sp.CompletedProcess(command, 0, "aaaaaaa\n", "")
+        if command[:3] == ["git", "diff", "--name-status"]:
+            return sp.CompletedProcess(command, 0, name_status, "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(review, "_run", fake_run)
+
+    assert review.instruction_changes(779, "develop") == {}, (
+        "an instruction file edited on the TARGET BRANCH after this request branched "
+        "is not a change this request made. Reporting it sends the reader to a hunk "
+        "the diff does not contain, and trains them to ignore this warning for the "
+        "day it is real."
+    )
+    # The non-instruction files are still classified, so the mechanism works.
+    assert review.request_file_changes(779, "develop") == {
+        "lma-ai-stack/source/lambda_functions/thing/index.py": "modified",
+        "lma-ai-stack/source/lambda_functions/thing/test_index.py": "added",
+    }
+
+
+def test_a_real_instruction_change_is_still_reported_with_its_status(monkeypatch) -> None:
+    """The other half: narrowing must not make the warning useless.
+
+    A request that genuinely edits the criteria has to be reported, because the
+    pinning means the reviewer is NOT reading the version the request proposes and the
+    reader needs to know that. A rename is keyed on its new path — the one a reader
+    can open.
+    """
+    name_status = (
+        "M\tCLAUDE.md\n"
+        "A\t.claude/skills/new-thing.md\n"
+        "D\t.claude/skills/old-thing.md\n"
+        "R095\t.claude/skills/was.md\t.claude/skills/now.md\n"
+        "M\tREADME.md\n"
+    )
+
+    def fake_run(command, cwd=None, env=None, timeout=300):
+        import subprocess as sp
+
+        if command[:2] == ["git", "merge-base"]:
+            return sp.CompletedProcess(command, 0, "bbbbbbb\n", "")
+        if command[:3] == ["git", "diff", "--name-status"]:
+            return sp.CompletedProcess(command, 0, name_status, "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(review, "_run", fake_run)
+    changes = review.instruction_changes(1, "develop")
+    assert changes == {
+        "CLAUDE.md": "modified",
+        ".claude/skills/new-thing.md": "added",
+        ".claude/skills/old-thing.md": "deleted",
+        ".claude/skills/now.md": "renamed",
+    }, f"got {changes}"
+    assert "README.md" not in changes, "README.md is not an instruction file"
+    assert ".claude/skills/was.md" not in changes, (
+        "a rename should be keyed on the NEW path, which is the one a reader opens"
+    )
+
+
+def test_the_ci_status_lookup_never_costs_a_review(monkeypatch) -> None:
+    """A cosmetic field must not be able to abort a run.
+
+    `ci_status` saves the review from opening with "CI status: not supplied" and then
+    disclaiming that nothing it says should be read as green. It is two extra API
+    calls, and two extra API calls are two more things that can fail — so every
+    failure returns "" and the review is told the status was not supplied, which is
+    the same state the GitLab side is always in. In particular it must not raise
+    `Skip`, which `_review_all` treats as a global precondition failure and uses to
+    BREAK out of the sweep: a flaky status endpoint would then cancel the reviews of
+    every remaining pull request.
+    """
+    forge = review.Github("owner/name", "token")
+
+    def raise_skip(*args, **kwargs):
+        raise review.Skip("the checks endpoint is unhappy")
+
+    monkeypatch.setattr(forge, "_request", raise_skip)
+    assert forge.check_status("abc1234") == ""
+
+    def raise_unexpected(*args, **kwargs):
+        raise ValueError("malformed payload")
+
+    monkeypatch.setattr(forge, "_request", raise_unexpected)
+    assert forge.check_status("abc1234") == ""
+
+    # Both surfaces are consulted: check-runs carries Actions, and the older
+    # commit-status API carries external CI. Summarising only the first would call a
+    # red external status green.
+    seen: list[str] = []
+
+    def both(method, url, body=None):
+        seen.append(url)
+        if "check-runs" in url:
+            return {"check_runs": [{"conclusion": "success"}, {"status": "queued"}]}, {}
+        return {"statuses": [{"state": "failure"}]}, {}
+
+    monkeypatch.setattr(forge, "_request", both)
+    summary = forge.check_status("abc1234")
+    assert any("check-runs" in url for url in seen)
+    assert any(url.endswith("/status") for url in seen)
+    assert "1 success" in summary and "1 queued" in summary and "1 failure" in summary, (
+        f"got {summary!r}; a queued run must not read as either colour and an "
+        f"external failure must not be dropped"
+    )
+
+
+def test_the_published_file_count_describes_the_diff_that_was_supplied() -> None:
+    """`changed_files` must never name files the review cannot see.
+
+    The two counts in play come from different commands: `git diff --numstat` over the
+    whole change, and the diff text itself after `build_diff` has truncated it at
+    `--max-diff-bytes`. Measured on this repository: a 30-file request cut to 20 KB
+    supplies 5 sections while numstat still says 30. Publishing the numstat figure as
+    `changed_files` therefore tells the reviewer about 25 files it was never given,
+    and the first thing it does is notice the discrepancy and report it as a finding.
+
+    (The 27-against-28 observation in one live review was the model's own miscount —
+    on every open request at the time the two figures agreed exactly. The mechanism
+    that would make it real is truncation, which is what this closes.)
+    """
+    diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+        "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1 +1 @@\n-x\n+y\n"
+        "diff --git a/c.py b/c.py\n--- a/c.py\n+++ b/c.py\n@@ -1 +1 @@\n-x\n+y\n"
+    )
+    assert review.diff_file_count(diff) == 3
+    assert review.diff_file_count("") == 0
+    # A body line that merely mentions the marker must not be counted: only a real
+    # section header at the start of a line is a file.
+    assert review.diff_file_count("+# see diff --git a/x b/x for context\n") == 0
+
+    source = HARNESS.read_text()
+    assert '"changed_files": supplied_files' in source, (
+        "metadata's changed_files no longer comes from the supplied diff, so it can "
+        "once again name files the review was not given"
     )
 
 
