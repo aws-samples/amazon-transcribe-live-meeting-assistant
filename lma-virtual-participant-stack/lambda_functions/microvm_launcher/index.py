@@ -69,6 +69,13 @@ SECRET_KEYS = {
     "USER_ID_TOKEN",
     "USER_REFRESH_TOKEN",
     "MEETING_PASSWORD",
+    # Resolved from the task definition's Secrets entries (see
+    # _integration_secrets): named here so a change to the launcher's logging
+    # cannot start printing them.
+    "ZOOM_MEETING_SDK_CLIENT_SECRET",
+    "ACS_CONNECTION_STRING",
+    "ELEVENLABS_API_KEY",
+    "SIMLI_API_KEY",
 }
 
 # The AWS developer guide says runHookPayload allows 16 KB, but the SERVICE
@@ -106,6 +113,41 @@ RUN_HOOK_PAYLOAD_MAX_BYTES = 4096
 _STATIC_CONFIG_CACHE: dict | None = None
 
 
+def _integration_secrets(container: dict) -> dict:
+    """Resolve the container definition's Secrets entries to their values.
+
+    On the ECS launch types the ECS agent does this with the task execution
+    role, which is why third-party credentials are named by secret ARN on the
+    task definition rather than carried in its environment. A MicroVM has no
+    ECS agent, so the launcher performs the same resolution and the container
+    goes on reading the same environment variable names on both paths.
+
+    One failed secret is skipped rather than failing the meeting: the container
+    reports the feature that needed it as unavailable, which is a far more
+    legible outcome than a VP that never joins.
+    """
+    entries = container.get("secrets") or []
+    if not entries:
+        return {}
+
+    resolved = {}
+    secretsmanager = boto3.client("secretsmanager")
+    for entry in entries:
+        name = entry.get("name")
+        arn = entry.get("valueFrom")
+        if not name or not arn:
+            continue
+        try:
+            value = secretsmanager.get_secret_value(SecretId=arn).get("SecretString")
+        except Exception:  # noqa: BLE001 - one unavailable integration, not a dead meeting
+            logger.exception("Could not read the secret supplying %s", name)
+            continue
+        if value:
+            resolved[name] = value
+    logger.info("Resolved %d of %d integration secrets", len(resolved), len(entries))
+    return resolved
+
+
 def _static_config() -> dict:
     """Static per-stack config, from the VP ECS task definition.
 
@@ -134,6 +176,7 @@ def _static_config() -> dict:
             for item in env
             if item["name"] not in FIELD_MAP and item.get("value")
         }
+        config.update(_integration_secrets(containers[0]))
         logger.info("Loaded %d static config values from the task definition", len(config))
         _STATIC_CONFIG_CACHE = config
     except Exception:  # noqa: BLE001 - degrade rather than fail the meeting

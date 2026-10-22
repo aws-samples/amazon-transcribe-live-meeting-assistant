@@ -213,6 +213,24 @@ test('redactPerMeetingConfig hides tokens and passwords but keeps shape', () => 
     assert.ok(!JSON.stringify(red).includes('aaa.bbb.ccc'));
 });
 
+test('redactPerMeetingConfig hides the third-party integration credentials', () => {
+    // Under MICROVM these arrive in the staged configuration, resolved from
+    // Secrets Manager by the launcher Lambda, and this config is logged on
+    // every /run. Each name is also in the launcher's own SECRET_KEYS.
+    const red = redactPerMeetingConfig({
+        ZOOM_MEETING_SDK_CLIENT_SECRET: 'zoom-secret',
+        ACS_CONNECTION_STRING: 'endpoint=https://x/;accesskey=acs-secret',
+        ELEVENLABS_API_KEY: 'sk-elevenlabs',
+        SIMLI_API_KEY: 'simli-secret',
+        GRAPHQL_ENDPOINT: 'https://example.invalid/graphql',
+    } as never);
+    assert.equal(red.GRAPHQL_ENDPOINT, 'https://example.invalid/graphql');
+    const serialized = JSON.stringify(red);
+    for (const value of ['zoom-secret', 'acs-secret', 'sk-elevenlabs', 'simli-secret']) {
+        assert.ok(!serialized.includes(value), `${value} was not redacted`);
+    }
+});
+
 test('PER_MEETING_KEYS covers every value the ECS launchers override', () => {
     // Keeps this module in sync with the three existing dispatch paths
     // (Step Functions RunTask, EventBridge Scheduler, scheduler Lambda).

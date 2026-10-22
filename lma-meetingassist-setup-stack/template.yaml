@@ -41,16 +41,15 @@ Parameters:
     # rather than naming a model no longer offered there.
     Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 
-  TavilyApiKey:
+  TavilyApiKeySecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional - STRANDS_BEDROCK only) API key for Tavily web search service to enable web search tool.
-      Get your API key from https://tavily.com. When provided, the Strands agent can search the web 
-      for current information during meetings. Leave blank to disable web search capability.
-    AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
-    ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
+      (Optional - STRANDS_BEDROCK only) ARN of the Secrets Manager secret holding the Tavily
+      API key, which enables the web search tool. When provided, the Strands agent can search
+      the web for current information during meetings. Leave blank to disable web search
+      capability. The function reads the ARN from its environment and fetches the key on the
+      first web search of each execution environment.
 
   TranscriptBedrockKnowledgeBaseId:
     Type: String
@@ -175,6 +174,10 @@ Conditions:
     !Not [!Equals [!Ref BedrockGuardrailId, ""]],
     !Not [!Equals [!Ref BedrockGuardrailVersion, ""]]
   ]
+  # Empty unless the deployment configured a Tavily API key, in which case the
+  # web search tool is available and the function is granted the one secret
+  # that supplies it.
+  HasTavilyApiKeySecret: !Not [!Equals [!Ref TavilyApiKeySecretArn, ""]]
 
 Resources:
   Boto3Layer:
@@ -294,6 +297,28 @@ Resources:
                 Resource:
                   - !Ref CustomerManagedEncryptionKeyArn
           PolicyName: KMSDecryptPolicy
+        # Reads the one secret that supplies the Tavily API key for the web
+        # search tool, by ARN. Absent when no key is configured, so a
+        # deployment without web search grants no Secrets Manager access at
+        # all. The kms:Decrypt statement is scoped to reads made through
+        # Secrets Manager and keeps this grant self-contained; KMSDecryptPolicy
+        # above already permits the key for the function's other uses.
+        - !If
+          - HasTavilyApiKeySecret
+          - PolicyName: TavilyApiKeySecretPolicy
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action: "secretsmanager:GetSecretValue"
+                  Resource: !Ref TavilyApiKeySecretArn
+                - Effect: Allow
+                  Action: "kms:Decrypt"
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
+          - !Ref AWS::NoValue
         - PolicyDocument:
             Version: 2012-10-17
             Statement:
@@ -354,7 +379,12 @@ Resources:
           KB_REGION: !Ref AWS::Region
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           TRANSCRIPT_KB_ID: !Ref TranscriptBedrockKnowledgeBaseId
-          TAVILY_API_KEY: !Ref TavilyApiKey
+          # The ARN of the secret holding the key, not the key. Non-empty is
+          # what tells the function the web search tool is configured, so the
+          # tool can be registered without reading Secrets Manager; the value
+          # itself is fetched on the first search and cached for the life of
+          # the execution environment.
+          TAVILY_API_KEY_SECRET_ARN: !Ref TavilyApiKeySecretArn
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
           EVENT_API_HTTP_URL: !Ref EventApiHttpUrl
           ENABLE_STREAMING: "true"

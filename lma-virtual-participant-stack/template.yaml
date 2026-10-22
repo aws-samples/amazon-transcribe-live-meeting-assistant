@@ -192,26 +192,34 @@ Parameters:
     Default: ""
     Description: >-
       (Optional) Zoom Meeting SDK app Client ID. When both ZoomMeetingSdkClientId
-      and ZoomMeetingSdkClientSecret are provided, the Virtual Participant joins
+      and ZoomMeetingSdkClientSecretArn are provided, the Virtual Participant joins
       Zoom meetings via the Zoom Meeting Web SDK instead of automating the public
       web client. Requires Zoom approval/allowlist of the SDK app for meetings
       outside the app owner's own account. Leave both blank to use the default
       web-client join.
 
-  ZoomMeetingSdkClientSecret:
+  # Third-party credentials reach this stack as the ARN of the Secrets Manager
+  # secret that holds them, never as the value. The container reads each one
+  # from the environment variable of the same name it always has:
+  # ZOOM_MEETING_SDK_CLIENT_SECRET, ACS_CONNECTION_STRING, ELEVENLABS_API_KEY
+  # and SIMLI_API_KEY. Under the ECS launch types the ECS agent resolves the ARN
+  # and sets the variable at task start; under MICROVM the launcher Lambda does
+  # the same before the container's /run hook fires. Each parameter is empty
+  # when its feature is unconfigured.
+  ZoomMeetingSdkClientSecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional) Zoom Meeting SDK app Client Secret. Paired with
-      ZoomMeetingSdkClientId. Used to sign the SDK join signature.
+      (Optional) ARN of the Secrets Manager secret holding the Zoom Meeting SDK
+      app client secret. Paired with ZoomMeetingSdkClientId. Used to sign the
+      SDK join signature.
 
-  AcsConnectionString:
+  AcsConnectionStringSecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional) Azure Communication Services connection string
+      (Optional) ARN of the Secrets Manager secret holding the Azure
+      Communication Services connection string
       (endpoint=https://...;accesskey=...). When provided, the Virtual
       Participant joins Microsoft Teams meetings via the ACS calling SDK
       (Teams interoperability) instead of automating the Teams web client.
@@ -266,13 +274,13 @@ Parameters:
       30 minutes at the chosen cadence is adjusted into that range, so at the
       default cadence anything below 12 is raised.
 
-  ElevenLabsApiKey:
+  ElevenLabsApiKeySecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional) API key for ElevenLabs text-to-speech and conversational AI.
-      When provided, enables voice interaction capabilities in Virtual Participant.
+      (Optional) ARN of the Secrets Manager secret holding the ElevenLabs API
+      key for text-to-speech and conversational AI. When provided, enables
+      voice interaction capabilities in Virtual Participant.
 
   ElevenLabsAgentId:
     Type: String
@@ -281,23 +289,24 @@ Parameters:
       (Optional) ElevenLabs Conversational AI Agent ID for custom personality.
       Leave blank to use default conversational agent.
 
-  SimliApiKey:
+  SimliApiKeySecretArn:
     Type: String
-    NoEcho: true
     Default: ""
     Description: >-
-      (Optional) API key for Simli avatar. The avatar feature requires BOTH
-      SimliApiKey and SimliFaceId — leave both blank to disable, or set both
-      to enable animated avatar video for the Virtual Participant's camera
-      feed. The avatar lip-syncs with the voice assistant's audio output.
+      (Optional) ARN of the Secrets Manager secret holding the Simli API key.
+      The avatar feature requires BOTH this and SimliFaceId — leave both blank
+      to disable, or set both to enable animated avatar video for the Virtual
+      Participant's camera feed. The avatar lip-syncs with the voice
+      assistant's audio output.
 
   SimliFaceId:
     Type: String
     Default: ""
     Description: >-
       (Optional) Simli Face ID for the avatar appearance. Required when
-      SimliApiKey is set — the avatar is enabled only when BOTH parameters
-      are non-empty. Get this from your Simli dashboard at simli.com.
+      SimliApiKeySecretArn is set — the avatar is enabled only when BOTH
+      parameters are non-empty. Get this from your Simli dashboard at
+      simli.com.
 
   SimliTransportMode:
     Type: String
@@ -623,6 +632,20 @@ Conditions:
   # Empty under MICROVM, where the AI stack creates no VNC load balancer and so
   # no origin-verify secret for one.
   HasVncOriginVerifySecret: !Not [!Equals [!Ref VncOriginVerifyHeaderValueSecretArn, ""]]
+  # One per third-party credential, each true only when that feature is
+  # configured, so an unconfigured feature contributes neither a Secrets entry
+  # on the task definition nor an IAM grant.
+  HasZoomMeetingSdkClientSecretArn:
+    !Not [!Equals [!Ref ZoomMeetingSdkClientSecretArn, ""]]
+  HasAcsConnectionStringSecretArn:
+    !Not [!Equals [!Ref AcsConnectionStringSecretArn, ""]]
+  HasElevenLabsApiKeySecretArn: !Not [!Equals [!Ref ElevenLabsApiKeySecretArn, ""]]
+  HasSimliApiKeySecretArn: !Not [!Equals [!Ref SimliApiKeySecretArn, ""]]
+  HasAnyIntegrationSecret: !Or
+    - !Condition HasZoomMeetingSdkClientSecretArn
+    - !Condition HasAcsConnectionStringSecretArn
+    - !Condition HasElevenLabsApiKeySecretArn
+    - !Condition HasSimliApiKeySecretArn
   ShouldEnableContentRedaction: !And
     - !Equals [!Ref IsContentRedactionEnabled, "true"]
     - !Equals [!Ref TranscribeLanguageCode, "en-US"]
@@ -1484,6 +1507,50 @@ Resources:
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      # The ECS agent resolves a container definition's Secrets with the task
+      # EXECUTION role, so the read lives here and not on TaskRole: the
+      # container's own credentials never grant access to these secrets.
+      # Scoped to the specific secret ARNs this deployment was given, and the
+      # whole policy is absent when no integration is configured.
+      #
+      # AmazonECSTaskExecutionRolePolicy above does not cover this: it grants
+      # ECR pull and CloudWatch Logs only.
+      Policies: !If
+        - HasAnyIntegrationSecret
+        - - PolicyName: ReadIntegrationCredentialSecrets
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource:
+                    - !If
+                      - HasZoomMeetingSdkClientSecretArn
+                      - !Ref ZoomMeetingSdkClientSecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasAcsConnectionStringSecretArn
+                      - !Ref AcsConnectionStringSecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasElevenLabsApiKeySecretArn
+                      - !Ref ElevenLabsApiKeySecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasSimliApiKeySecretArn
+                      - !Ref SimliApiKeySecretArn
+                      - !Ref AWS::NoValue
+                # The secrets this stack creates are encrypted with the
+                # customer-managed key, so GetSecretValue alone is not enough
+                # to read them. A secret supplied by the operator under its own
+                # key needs a matching grant in that key's policy instead.
+                - Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
         - !Ref AWS::NoValue
 
   Cluster:
@@ -2407,6 +2474,42 @@ Resources:
               - Effect: Allow
                 Action: ecs:DescribeTaskDefinition
                 Resource: "*"
+              # A MicroVM has no ECS agent, so the launcher does what the agent
+              # does on the ECS launch types: resolve the task definition's
+              # Secrets entries and hand the container the same environment
+              # variables. Scoped to the same specific ARNs the task execution
+              # role is granted.
+              - !If
+                - HasAnyIntegrationSecret
+                - Effect: Allow
+                  Action: secretsmanager:GetSecretValue
+                  Resource:
+                    - !If
+                      - HasZoomMeetingSdkClientSecretArn
+                      - !Ref ZoomMeetingSdkClientSecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasAcsConnectionStringSecretArn
+                      - !Ref AcsConnectionStringSecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasElevenLabsApiKeySecretArn
+                      - !Ref ElevenLabsApiKeySecretArn
+                      - !Ref AWS::NoValue
+                    - !If
+                      - HasSimliApiKeySecretArn
+                      - !Ref SimliApiKeySecretArn
+                      - !Ref AWS::NoValue
+                - !Ref AWS::NoValue
+              - !If
+                - HasAnyIntegrationSecret
+                - Effect: Allow
+                  Action: kms:Decrypt
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.${AWS::URLSuffix}"
+                - !Ref AWS::NoValue
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -2600,10 +2703,6 @@ Resources:
               Value: ""
             - Name: ZOOM_MEETING_SDK_CLIENT_ID
               Value: !Ref ZoomMeetingSdkClientId
-            - Name: ZOOM_MEETING_SDK_CLIENT_SECRET
-              Value: !Ref ZoomMeetingSdkClientSecret
-            - Name: ACS_CONNECTION_STRING
-              Value: !Ref AcsConnectionString
             - Name: LMA_USER_SUB
               Value: ""
             - Name: DYNAMODB_TABLE_NAME
@@ -2630,12 +2729,8 @@ Resources:
               Value: !Ref VncOriginVerifyHeaderValueSecretArn
             - Name: VNC_ORIGIN_VERIFY_HEADER_NAME
               Value: !Ref VncOriginVerifyHeaderName
-            - Name: ELEVENLABS_API_KEY
-              Value: !Ref ElevenLabsApiKey
             - Name: ELEVENLABS_AGENT_ID
               Value: !Ref ElevenLabsAgentId
-            - Name: SIMLI_API_KEY
-              Value: !Ref SimliApiKey
             - Name: SIMLI_FACE_ID
               Value: !Ref SimliFaceId
             - Name: SIMLI_TRANSPORT_MODE
@@ -2661,6 +2756,38 @@ Resources:
               Value: !Ref NovaSonicConfigTableName
             - Name: STRANDS_LAMBDA_ARN
               Value: !Ref StrandsLambdaArn
+          # Third-party credentials, named by secret ARN. The ECS agent reads
+          # each secret with the TASK EXECUTION role (not the task role) and
+          # sets the variable in the container at task start, so the value is
+          # absent from this task definition, from DescribeTaskDefinition and
+          # from the console's task view, while the container keeps reading the
+          # same process.env name it always did.
+          #
+          # The whole list is omitted when no integration is configured, rather
+          # than rendered as an empty list.
+          Secrets: !If
+            - HasAnyIntegrationSecret
+            - - !If
+                - HasZoomMeetingSdkClientSecretArn
+                - Name: ZOOM_MEETING_SDK_CLIENT_SECRET
+                  ValueFrom: !Ref ZoomMeetingSdkClientSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasAcsConnectionStringSecretArn
+                - Name: ACS_CONNECTION_STRING
+                  ValueFrom: !Ref AcsConnectionStringSecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasElevenLabsApiKeySecretArn
+                - Name: ELEVENLABS_API_KEY
+                  ValueFrom: !Ref ElevenLabsApiKeySecretArn
+                - !Ref AWS::NoValue
+              - !If
+                - HasSimliApiKeySecretArn
+                - Name: SIMLI_API_KEY
+                  ValueFrom: !Ref SimliApiKeySecretArn
+                - !Ref AWS::NoValue
+            - !Ref AWS::NoValue
           Essential: true
           Image: !Sub "${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ImageRepo}:latest"
           PortMappings:

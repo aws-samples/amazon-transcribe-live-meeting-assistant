@@ -12,6 +12,7 @@ title: "Infrastructure & Security"
 - [Nested Stack Structure](#nested-stack-structure)
 - [Authentication](#authentication)
 - [Encryption](#encryption)
+- [Integration Credentials](#integration-credentials)
 - [Networking](#networking)
 - [WAF (Web Application Firewall)](#waf-web-application-firewall)
 - [CloudFront CDN](#cloudfront-cdn)
@@ -74,6 +75,100 @@ LMA uses **Amazon Cognito User Pool** for authentication with the following feat
 
 - **HTTPS/TLS** for all connections including WebSocket, AppSync, and CloudFront
 - All API communications are encrypted end-to-end
+
+## Integration Credentials
+
+LMA talks to five optional third-party services, and the credential for each is
+supplied by you as a CloudFormation parameter. Every one of those values is
+held in **AWS Secrets Manager**, in a secret created by the stack and encrypted
+with the deployment's customer-managed KMS key. The parameter is still where
+you type the key; the stack decides where it is kept.
+
+Each secret is named under the prefix `<stack-name>/integrations/`, alongside
+the per-user Zoom sign-in credentials the deployment already keeps at
+`<stack-name>/zoom-credentials/<cognito-sub>`:
+
+| Credential | CloudFormation parameter | Secret name | Read by |
+|---|---|---|---|
+| Tavily API key (web search tool) | `TavilyApiKey` | `<stack-name>/integrations/tavily-api-key` | The meeting assist Lambda, on the first web search of each execution environment |
+| ElevenLabs API key (voice assistant) | `ElevenLabsApiKey` | `<stack-name>/integrations/elevenlabs-api-key` | The Virtual Participant container, at task start |
+| Simli API key (avatar) | `SimliApiKey` | `<stack-name>/integrations/simli-api-key` | The Virtual Participant container, at task start |
+| Zoom Meeting SDK client secret | `ZoomMeetingSdkClientSecret` | `<stack-name>/integrations/zoom-meeting-sdk-client-secret` | The Virtual Participant container, at task start |
+| Azure Communication Services connection string | `AcsConnectionString` | `<stack-name>/integrations/acs-connection-string` | The Virtual Participant container, at task start |
+
+A secret is created only when its parameter has a value, so a deployment that
+uses none of these features creates none of them.
+
+These secrets are deleted with the stack, regardless of
+`EnableDataRetentionOnDelete` — that parameter protects the meeting data a
+deployment produced, and these values also exist at the provider and in the
+stack parameter. Deleting a secret schedules it for deletion rather than
+removing it at once, and the name is held for the recovery window, so
+**deleting an LMA stack and recreating it with the same name within 30 days
+fails on the first integration secret.** Either recreate under a different
+stack name, or clear the old names first:
+
+```bash
+aws secretsmanager delete-secret \
+  --secret-id <stack-name>/integrations/tavily-api-key \
+  --force-delete-without-recovery
+```
+
+**How each consumer reads its credential.** The Virtual Participant's ECS task
+definition lists the secret's ARN under `Secrets` rather than a value under
+`Environment`. The ECS agent resolves it with the **task execution role** and
+sets the environment variable in the container when the task starts, so the
+value is not part of the task definition and does not appear in
+`DescribeTaskDefinition` or the ECS console. Under `VPLaunchType=MICROVM`
+there is no ECS agent, so the MicroVM launcher Lambda performs the same
+resolution before the container starts. The meeting assist Lambda is given the
+secret's ARN in `TAVILY_API_KEY_SECRET_ARN` and fetches the value itself,
+caching it for the life of the execution environment.
+
+Every grant is scoped to the specific secret ARNs a deployment was given — no
+wildcards — together with `kms:Decrypt` restricted to requests made through
+Secrets Manager.
+
+### Bringing your own secret
+
+Each of the five also accepts the ARN of a secret you have already provisioned,
+via a companion parameter (`TavilyApiKeySecretArn`,
+`ElevenLabsApiKeySecretArn`, `SimliApiKeySecretArn`,
+`ZoomMeetingSdkClientSecretArn`, `AcsConnectionStringSecretArn`). Supply the
+value or the ARN, not both — the stack refuses a deployment that sets both
+forms of the same credential.
+
+A secret you provide must hold the credential as its entire `SecretString`
+(not a JSON document). If it is encrypted with your own KMS key rather than the
+AWS managed `aws/secretsmanager` key, that key's policy must grant `kms:Decrypt`
+to the reader: the Virtual Participant task execution role for the four
+container credentials, or the meeting assist function's role for the Tavily key.
+
+### Rotating a credential
+
+There are two ways to roll a key, and they differ in when it takes effect.
+
+**Through the stack (recommended).** Update the CloudFormation parameter with
+the new value and apply the stack update. CloudFormation stores a new version
+of the secret. No new task definition revision and no forced ECS deployment are
+needed: Virtual Participant tasks are started one per meeting, so the next
+meeting to start reads the new value. For the Tavily key, the stack update
+replaces the Lambda's configuration, which retires the existing execution
+environments, so the new key is in use on the next invocation.
+
+**Directly in Secrets Manager.** Store a new version of the secret in the
+Secrets Manager console or with
+`aws secretsmanager put-secret-value --secret-id <stack-name>/integrations/<name>`.
+Virtual Participant meetings started after that point use the new value; a
+meeting already in progress keeps the value it started with. The meeting
+assistant picks the new key up on its next cold start, so a warm function can
+keep using the previous key for a few minutes — invoke-and-wait, or apply a
+stack update, if you need it to switch immediately.
+
+> If you rotate directly in Secrets Manager, also set the CloudFormation
+> parameter to the new value (or move to the matching `...SecretArn` parameter
+> and manage the secret entirely yourself). Otherwise the next stack update
+> writes the parameter's older value back over the rotated one.
 
 ## Networking
 

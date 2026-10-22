@@ -157,6 +157,23 @@ When deploying or updating your LMA stack, set these parameters:
 | `ElevenLabsApiKey` | `sk_...` | Your ElevenLabs API key from Step 1.5 |
 | `ElevenLabsAgentId` | `agent_...` | Your agent ID from Step 1.4 |
 
+The stack keeps the API key in AWS Secrets Manager, in a secret named
+`<stack-name>/integrations/elevenlabs-api-key` encrypted with the deployment's
+customer-managed KMS key. The Virtual Participant's task definition names the
+secret's ARN and the ECS agent sets `ELEVENLABS_API_KEY` in the container when
+each meeting's task starts. If you already keep the key in Secrets Manager, set
+`ElevenLabsApiKeySecretArn` to that secret's ARN instead of
+`ElevenLabsApiKey` — supply one form or the other, not both.
+
+**To rotate the key:** generate a new one in the ElevenLabs dashboard, put the
+new value in the `ElevenLabsApiKey` parameter, and apply the stack update.
+Virtual Participant tasks start one per meeting, so the next meeting to begin
+uses the new key — no forced ECS deployment is needed, and a meeting already in
+progress finishes on the key it started with. You can also store the new
+version directly in Secrets Manager for an immediate change; if you do, set the
+parameter to match, or the next stack update writes the old value back. See
+[Integration Credentials](infrastructure-and-security.md#integration-credentials).
+
 ### 3.2 Activation Modes
 
 **Wake Phrase Mode** (Recommended)

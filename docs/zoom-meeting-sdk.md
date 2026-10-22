@@ -45,8 +45,13 @@ Set these on the main stack (group **Meeting Assist Voice Assistant**):
 |-----------|-------------|
 | `ZoomMeetingSdkClientId` | Zoom Meeting SDK app **Client ID**. |
 | `ZoomMeetingSdkClientSecret` | Zoom Meeting SDK app **Client Secret** (`NoEcho`). Used to sign the SDK join signature. |
+| `ZoomMeetingSdkClientSecretArn` | ARN of a Secrets Manager secret you have already provisioned holding the client secret. Use instead of `ZoomMeetingSdkClientSecret`; supply one form or the other, not both. |
 
-Both are optional and default to empty. They are passed to the VP task definition as the env vars `ZOOM_MEETING_SDK_CLIENT_ID` and `ZOOM_MEETING_SDK_CLIENT_SECRET`. The secret is never logged and is only used inside the container to sign a short-lived (2-hour) JWT.
+All are optional and default to empty. The client ID is passed to the VP task definition as the env var `ZOOM_MEETING_SDK_CLIENT_ID`.
+
+The client secret is held in AWS Secrets Manager, in a secret named `<stack-name>/integrations/zoom-meeting-sdk-client-secret` encrypted with the deployment's customer-managed KMS key. The task definition names the secret's ARN, and the ECS agent sets `ZOOM_MEETING_SDK_CLIENT_SECRET` in the container when each meeting's task starts, so the value is not part of the task definition. The secret is never logged and is only used inside the container to sign a short-lived (2-hour) JWT.
+
+**To rotate the client secret:** regenerate it in the Zoom App Marketplace under **App Credentials**, put the new value in the `ZoomMeetingSdkClientSecret` parameter, and apply the stack update. Virtual Participant tasks start one per meeting, so the next meeting to begin uses the new secret — no forced ECS deployment is needed, and a meeting already in progress finishes on the secret it started with. You can also store the new version directly in Secrets Manager for an immediate change; if you do, set the parameter to match, or the next stack update writes the old value back. See [Integration Credentials](infrastructure-and-security.md#integration-credentials).
 
 ## Getting Meeting SDK credentials
 

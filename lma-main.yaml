@@ -63,6 +63,24 @@ Parameters:
     AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
     ConstraintDescription: "Must be empty or a valid Tavily API key (20+ characters)"
 
+  # Second form of the same setting, for a deployment that already keeps the key
+  # in Secrets Manager (provisioned by its own tooling, rotated on its own
+  # schedule). Either form supplies the stack with one thing: a secret ARN. The
+  # TavilyApiKeyCredentialForm rule below rejects both at once.
+  TavilyApiKeySecretArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
+    Description: >-
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      Tavily API key. Use this instead of TavilyApiKey when the key is already
+      provisioned in Secrets Manager. Supply one form or the other, not both.
+      A secret encrypted with your own KMS key must grant kms:Decrypt to the
+      meeting-assist function's role in that key's policy.
+
   ElevenLabsApiKey:
     Type: String
     NoEcho: true
@@ -73,6 +91,21 @@ Parameters:
       agent responses in meetings using natural-sounding voices. Leave blank to disable TTS capability.
     AllowedPattern: "^(|[a-zA-Z0-9_-]{20,})$"
     ConstraintDescription: "Must be empty or a valid ElevenLabs API key (20+ characters)"
+
+  # See TavilyApiKeySecretArn for how the two forms relate.
+  ElevenLabsApiKeySecretArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
+    Description: >-
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      ElevenLabs API key. Use this instead of ElevenLabsApiKey when the key is
+      already provisioned in Secrets Manager. Supply one form or the other, not
+      both. A secret encrypted with your own KMS key must grant kms:Decrypt to
+      the Virtual Participant task execution role in that key's policy.
 
   ElevenLabsAgentId:
     Type: String
@@ -94,6 +127,22 @@ Parameters:
       or set both to enable an animated lip-synced avatar as the Virtual
       Participant's camera feed.
       Get your API key from https://simli.com. Leave blank to disable avatar.
+
+  # See TavilyApiKeySecretArn for how the two forms relate.
+  SimliApiKeySecretArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
+    Description: >-
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      Simli API key. Use this instead of SimliApiKey when the key is already
+      provisioned in Secrets Manager. Supply one form or the other, not both.
+      SimliFaceId is still required alongside it. A secret encrypted with your
+      own KMS key must grant kms:Decrypt to the Virtual Participant task
+      execution role in that key's policy.
 
   SimliFaceId:
     Type: String
@@ -605,6 +654,23 @@ Parameters:
       (Optional) Zoom Meeting SDK app Client Secret. Paired with
       ZoomMeetingSdkClientId. Used to sign the SDK join signature.
 
+  # See TavilyApiKeySecretArn for how the two forms relate.
+  ZoomMeetingSdkClientSecretArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
+    Description: >-
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      Zoom Meeting SDK app client secret. Use this instead of
+      ZoomMeetingSdkClientSecret when the secret is already provisioned in
+      Secrets Manager. Supply one form or the other, not both.
+      ZoomMeetingSdkClientId is still required alongside it. A secret encrypted
+      with your own KMS key must grant kms:Decrypt to the Virtual Participant
+      task execution role in that key's policy.
+
   AcsConnectionString:
     Type: String
     NoEcho: true
@@ -621,6 +687,22 @@ Parameters:
       Participant joins Microsoft Teams meetings via the ACS calling SDK
       (Teams interoperability) instead of automating the Teams web client.
       Leave blank to use the default web-client join.
+
+  # See TavilyApiKeySecretArn for how the two forms relate.
+  AcsConnectionStringSecretArn:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(|arn:aws[a-zA-Z-]*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:.+)$"
+    ConstraintDescription: >-
+      Must be empty, or the ARN of a Secrets Manager secret
+      (arn:aws:secretsmanager:<region>:<account>:secret:<name>).
+    Description: >-
+      (Optional) ARN of an existing Secrets Manager secret whose value is the
+      full Azure Communication Services connection string. Use this instead of
+      AcsConnectionString when the connection string is already provisioned in
+      Secrets Manager. Supply one form or the other, not both. A secret
+      encrypted with your own KMS key must grant kms:Decrypt to the Virtual
+      Participant task execution role in that key's policy.
 
   EnableVideoRecording:
     Type: String
@@ -1060,13 +1142,16 @@ Metadata:
           - MeetingAssistService
           - MeetingAssistServiceBedrockModelID
           - TavilyApiKey
+          - TavilyApiKeySecretArn
           - AssistantWakePhraseRegEx
       - Label:
           default: Meeting Assist Voice Assistant
         Parameters:
           - ElevenLabsApiKey
+          - ElevenLabsApiKeySecretArn
           - ElevenLabsAgentId
           - SimliApiKey
+          - SimliApiKeySecretArn
           - SimliFaceId
           - VoiceAssistantProvider
           - AmazonNovaSonicRegion
@@ -1075,7 +1160,9 @@ Metadata:
           - VoiceAssistantActivationDuration
           - ZoomMeetingSdkClientId
           - ZoomMeetingSdkClientSecret
+          - ZoomMeetingSdkClientSecretArn
           - AcsConnectionString
+          - AcsConnectionStringSecretArn
       - Label:
           default: Meeting Assist Bedrock Guardrails
         Parameters:
@@ -1199,20 +1286,30 @@ Metadata:
         default: Meeting Assist Service Bedrock Model ID
       TavilyApiKey:
         default: Tavily API Key for Web Search (STRANDS_BEDROCK only)
+      TavilyApiKeySecretArn:
+        default: Existing Secret ARN Holding the Tavily API Key (Optional)
       ElevenLabsApiKey:
         default: ElevenLabs API Key for Virtual Participant Voice (Optional)
+      ElevenLabsApiKeySecretArn:
+        default: Existing Secret ARN Holding the ElevenLabs API Key (Optional)
       ElevenLabsAgentId:
         default: ElevenLabs Agent ID for Custom Personality (Optional)
       SimliApiKey:
         default: Simli API Key for Avatar (Optional)
+      SimliApiKeySecretArn:
+        default: Existing Secret ARN Holding the Simli API Key (Optional)
       SimliFaceId:
         default: Simli Face ID for Avatar Appearance (Optional)
       ZoomMeetingSdkClientId:
         default: Zoom Meeting SDK Client ID (Optional)
       ZoomMeetingSdkClientSecret:
         default: Zoom Meeting SDK Client Secret (Optional)
+      ZoomMeetingSdkClientSecretArn:
+        default: Existing Secret ARN Holding the Zoom Meeting SDK Client Secret (Optional)
       AcsConnectionString:
         default: Azure Communication Services Connection String for Teams SDK Join (Optional)
+      AcsConnectionStringSecretArn:
+        default: Existing Secret ARN Holding the ACS Connection String (Optional)
       VoiceAssistantProvider:
         default: Voice Assistant Provider (none, elevenlabs, amazon_nova_sonic)
       AmazonNovaSonicRegion:
@@ -1390,6 +1487,50 @@ Rules:
           EnableVideoRecording is 'true' — scaling out would place meeting video
           connections on tasks that do not hold the matching audio session.
 
+  # Each third-party credential is supplied in exactly one of two forms: the
+  # value itself (this stack stores it in a secret of its own) or the ARN of a
+  # secret that already holds it. Supplying both leaves no single answer to
+  # which one the consumers should read, so it is rejected on the parameters
+  # page rather than resolved by precedence.
+  TavilyApiKeyCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref TavilyApiKey, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref TavilyApiKeySecretArn, ""]
+        AssertDescription:
+          Supply either TavilyApiKey or TavilyApiKeySecretArn, not both. Clear
+          TavilyApiKey to point the stack at your own secret, or clear
+          TavilyApiKeySecretArn to have the stack store the key for you.
+
+  ElevenLabsApiKeyCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref ElevenLabsApiKey, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref ElevenLabsApiKeySecretArn, ""]
+        AssertDescription:
+          Supply either ElevenLabsApiKey or ElevenLabsApiKeySecretArn, not both.
+
+  SimliApiKeyCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref SimliApiKey, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref SimliApiKeySecretArn, ""]
+        AssertDescription:
+          Supply either SimliApiKey or SimliApiKeySecretArn, not both.
+
+  ZoomMeetingSdkClientSecretCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref ZoomMeetingSdkClientSecretArn, ""]
+        AssertDescription:
+          Supply either ZoomMeetingSdkClientSecret or
+          ZoomMeetingSdkClientSecretArn, not both.
+
+  AcsConnectionStringCredentialForm:
+    RuleCondition: !Not [!Equals [!Ref AcsConnectionString, ""]]
+    Assertions:
+      - Assert: !Equals [!Ref AcsConnectionStringSecretArn, ""]
+        AssertDescription:
+          Supply either AcsConnectionString or AcsConnectionStringSecretArn,
+          not both.
+
 Mappings:
   # Deploy-time values for the on-demand ASR engine that are deliberately not
   # CloudFormation parameters: EnableMicrovmAsr is the only deploy-time question,
@@ -1444,9 +1585,33 @@ Conditions:
   ShouldUseTranscriptKnowledgeBase: !Condition ShouldCreateTranscriptKnowledgeBase
   ShouldEnableMCP: !Equals [!Ref EnableMCP, "true"]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+
+  # Operator-supplied third-party credentials. "...Value" means the credential
+  # itself was typed into the parameter, so this stack creates the secret that
+  # holds it; "...SecretArn" means an existing secret was named instead. The
+  # Rules above allow at most one of the two per credential, and the consuming
+  # stacks only ever receive the resulting ARN.
+  HasTavilyApiKeyValue: !Not [!Equals [!Ref TavilyApiKey, ""]]
+  HasTavilyApiKeySecretArn: !Not [!Equals [!Ref TavilyApiKeySecretArn, ""]]
+  HasElevenLabsApiKeyValue: !Not [!Equals [!Ref ElevenLabsApiKey, ""]]
+  HasElevenLabsApiKeySecretArn: !Not [!Equals [!Ref ElevenLabsApiKeySecretArn, ""]]
+  HasSimliApiKeyValue: !Not [!Equals [!Ref SimliApiKey, ""]]
+  HasSimliApiKeySecretArn: !Not [!Equals [!Ref SimliApiKeySecretArn, ""]]
+  HasZoomMeetingSdkClientSecretValue:
+    !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
+  HasZoomMeetingSdkClientSecretArn:
+    !Not [!Equals [!Ref ZoomMeetingSdkClientSecretArn, ""]]
+  HasAcsConnectionStringValue: !Not [!Equals [!Ref AcsConnectionString, ""]]
+  HasAcsConnectionStringSecretArn:
+    !Not [!Equals [!Ref AcsConnectionStringSecretArn, ""]]
+
+  # Either form of the Zoom SDK client secret enables the SDK join path, which
+  # is what the UI's ZoomSdkEnabled setting reports.
   ZoomSdkEnabled: !And
     - !Not [!Equals [!Ref ZoomMeetingSdkClientId, ""]]
-    - !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
+    - !Or
+      - !Condition HasZoomMeetingSdkClientSecretValue
+      - !Condition HasZoomMeetingSdkClientSecretArn
   ShouldDeployMicrovmAsr: !Equals [!Ref EnableMicrovmAsr, "true"]
   ShouldCreateOperationalAlarms: !Equals [!Ref EnableOperationalAlarms, "true"]
   # AdminEmail is a required parameter with an AllowedPattern that an empty
@@ -1624,6 +1789,94 @@ Resources:
     Properties:
       AliasName: !Sub "alias/${AWS::StackName}-encryption-key"
       TargetKeyId: !Ref CustomerManagedEncryptionKey
+
+  ##########################################################################
+  # Third-party integration credentials
+  #
+  # One secret per operator-supplied credential, created only when that
+  # credential was typed into its parameter. The parameters themselves are
+  # unchanged: an operator still enters the key in the same box, and this stack
+  # is what decides where it is kept. What travels on to the consuming stacks is
+  # the secret's ARN — the ECS task definition names the ARN and the ECS agent
+  # injects the value at task start, and the meeting-assist function reads the
+  # ARN and fetches the value on first use.
+  #
+  # Each is named under ${AWS::StackName}/integrations/ so an operator rotating
+  # one can find it in the Secrets Manager console next to the per-user
+  # credentials this deployment already keeps there
+  # (${AWS::StackName}/zoom-credentials/<cognito sub>).
+  #
+  # DeletionPolicy is Delete rather than the EnableDataRetentionOnDelete
+  # conditional used for DynamoDB tables and S3 buckets, and matches the four
+  # secrets the AI stack and the WebSocket transcriber stack already create.
+  # Two reasons: the value here is an operator input that also exists at the
+  # provider and in the stack parameter, so a retained copy preserves nothing
+  # that is not already recoverable; and these secrets carry explicit names, so
+  # a retained copy would hold its name indefinitely against a redeployment of
+  # the same stack name, where a deleted one releases it once Secrets Manager's
+  # recovery window elapses (documented in docs/infrastructure-and-security.md,
+  # because recreating a stack of the same name inside that window still needs
+  # the old names cleared).
+  ##########################################################################
+  TavilyApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasTavilyApiKeyValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/tavily-api-key"
+      Description: !Sub "Tavily API key for the ${AWS::StackName} web search tool"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref TavilyApiKey
+
+  ElevenLabsApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasElevenLabsApiKeyValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/elevenlabs-api-key"
+      Description: !Sub "ElevenLabs API key for the ${AWS::StackName} voice assistant"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref ElevenLabsApiKey
+
+  SimliApiKeySecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasSimliApiKeyValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/simli-api-key"
+      Description: !Sub "Simli API key used by the ${AWS::StackName} Virtual Participant avatar"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref SimliApiKey
+
+  ZoomMeetingSdkClientSecretSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasZoomMeetingSdkClientSecretValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/zoom-meeting-sdk-client-secret"
+      Description: !Sub "Zoom Meeting SDK client secret for ${AWS::StackName} join signatures"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref ZoomMeetingSdkClientSecret
+
+  AcsConnectionStringSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: HasAcsConnectionStringValue
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    # checkov:skip=CKV_AWS_149: "Encrypted with this stack's customer-managed key"
+    Properties:
+      Name: !Sub "${AWS::StackName}/integrations/acs-connection-string"
+      Description: !Sub "ACS connection string for ${AWS::StackName} Teams interop tokens"
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+      SecretString: !Ref AcsConnectionString
 
   # EventBridge rule for KMS key monitoring
   KMSKeyMonitoringEventRule:
@@ -2980,7 +3233,13 @@ Resources:
             - ""
         BedrockKnowledgeBaseS3BucketName: !Ref BedrockKnowledgeBaseS3BucketName
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
-        TavilyApiKey: !Ref TavilyApiKey
+        # The ARN of the secret holding the key, never the key: whichever form
+        # the operator used, the meeting-assist function fetches the value for
+        # itself. Empty when web search is not configured.
+        TavilyApiKeySecretArn: !If
+          - HasTavilyApiKeySecretArn
+          - !Ref TavilyApiKeySecretArn
+          - !If [HasTavilyApiKeyValue, !Ref TavilyApiKeySecret, ""]
         WebAppBucket: !GetAtt AISTACK.Outputs.WebAppBucket
         CloudFrontDistributionId: !GetAtt AISTACK.Outputs.CloudFrontDistributionId
         TranscriptBedrockKnowledgeBaseId: !If
@@ -3158,15 +3417,37 @@ Resources:
           - ""
         EnableAudioRecording: !Ref EnableAudioRecording
         ZoomMeetingSdkClientId: !Ref ZoomMeetingSdkClientId
-        ZoomMeetingSdkClientSecret: !Ref ZoomMeetingSdkClientSecret
-        AcsConnectionString: !Ref AcsConnectionString
+        # ARNs of the secrets holding these credentials, never the credentials:
+        # the Virtual Participant task definition names the ARN and the ECS
+        # agent injects the value into the container at task start. Empty when
+        # the corresponding feature is not configured.
+        ZoomMeetingSdkClientSecretArn: !If
+          - HasZoomMeetingSdkClientSecretArn
+          - !Ref ZoomMeetingSdkClientSecretArn
+          - !If
+            - HasZoomMeetingSdkClientSecretValue
+            - !Ref ZoomMeetingSdkClientSecretSecret
+            - ""
+        AcsConnectionStringSecretArn: !If
+          - HasAcsConnectionStringSecretArn
+          - !Ref AcsConnectionStringSecretArn
+          - !If
+            - HasAcsConnectionStringValue
+            - !Ref AcsConnectionStringSecret
+            - ""
         EnableVideoRecording: !Ref EnableVideoRecording
         VPAttendeePollMs: !Ref VPAttendeePollMs
         VPPollsBeforeEnd: !Ref VPPollsBeforeEnd
         VPPollsBeforeEndMissing: !Ref VPPollsBeforeEndMissing
-        ElevenLabsApiKey: !Ref ElevenLabsApiKey
+        ElevenLabsApiKeySecretArn: !If
+          - HasElevenLabsApiKeySecretArn
+          - !Ref ElevenLabsApiKeySecretArn
+          - !If [HasElevenLabsApiKeyValue, !Ref ElevenLabsApiKeySecret, ""]
         ElevenLabsAgentId: !Ref ElevenLabsAgentId
-        SimliApiKey: !Ref SimliApiKey
+        SimliApiKeySecretArn: !If
+          - HasSimliApiKeySecretArn
+          - !Ref SimliApiKeySecretArn
+          - !If [HasSimliApiKeyValue, !Ref SimliApiKeySecret, ""]
         SimliFaceId: !Ref SimliFaceId
         VoiceAssistantProvider: !Ref VoiceAssistantProvider
         AmazonNovaSonicRegion: !Ref AmazonNovaSonicRegion

@@ -22,6 +22,7 @@ from bedrock_compat import (
     build_inference_config,
     extract_text,
 )
+import tavily_secret
 
 # Import MCP server loader
 try:
@@ -1476,7 +1477,11 @@ def handler(event, context):
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID', '')
         model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
-        tavily_api_key = os.environ.get('TAVILY_API_KEY', '')
+        # Whether the web search tool is available is decided from the secret's
+        # ARN alone, so a deployment without a Tavily API key makes no Secrets
+        # Manager call. The key itself is read inside the tool, on the first
+        # search this execution environment performs.
+        web_search_configured = tavily_secret.is_configured()
         
         # Fetch meeting transcript from DynamoDB
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
@@ -1526,15 +1531,12 @@ def handler(event, context):
                         'timestamp': datetime.utcnow().isoformat()
                     }, 0)
         
-        # Add web search tool if API key provided (auto-enable)
-        if tavily_api_key:
+        # Add web search tool if an API key is configured (auto-enable)
+        if web_search_configured:
             try:
                 from tavily import TavilyClient
                 from strands import tool
-                
-                # Create Tavily client in closure
-                tavily_client = TavilyClient(api_key=tavily_api_key)
-                
+
                 # Capture call_id and message_id in closure for thinking steps
                 _call_id = call_id
                 _message_id = message_id
@@ -1569,6 +1571,16 @@ def handler(event, context):
                             send_thinking_step_to_appsync(_call_id, _message_id, thinking_step, sequence)
                         
                         logger.info(f"Web search tool executing: {query}")
+
+                        # Fetched from Secrets Manager on the first search and
+                        # cached for the life of this execution environment.
+                        api_key = tavily_secret.get_api_key()
+                        if not api_key:
+                            return (
+                                "Web search is unavailable: the configured Tavily API key "
+                                "could not be read. Answer from the other available tools."
+                            )
+                        tavily_client = TavilyClient(api_key=api_key)
                         response = tavily_client.search(query, max_results=3)
                         
                         # Format results

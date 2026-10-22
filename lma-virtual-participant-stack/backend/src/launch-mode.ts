@@ -277,11 +277,20 @@ export function microvmVncEndpoint(endpoint: string | undefined): string {
  * three Cognito JWTs and a meeting password; none should ever reach CloudWatch.
  */
 export function redactPerMeetingConfig(config: PerMeetingConfig): Record<string, string> {
+    // Kept in step with SECRET_KEYS in the launcher Lambda
+    // (lambda_functions/microvm_launcher/index.py), which redacts the same
+    // names on its side of the same payload. The last four are the third-party
+    // integration credentials the launcher resolves from Secrets Manager and
+    // stages alongside the per-meeting values.
     const SECRET_KEYS = new Set<string>([
         'USER_ACCESS_TOKEN',
         'USER_ID_TOKEN',
         'USER_REFRESH_TOKEN',
         'MEETING_PASSWORD',
+        'ZOOM_MEETING_SDK_CLIENT_SECRET',
+        'ACS_CONNECTION_STRING',
+        'ELEVENLABS_API_KEY',
+        'SIMLI_API_KEY',
     ]);
     const out: Record<string, string> = {};
     for (const [key, value] of Object.entries(config)) {

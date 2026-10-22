@@ -151,6 +151,35 @@ The `web_search` tool enables the Meeting Assistant to search the web for curren
 
 To enable web search, set the **TavilyApiKey** CloudFormation parameter to your Tavily API key. Without a valid API key, the `web_search` tool will not be available to the assistant.
 
+### Where the key is stored
+
+The stack keeps the key in AWS Secrets Manager, in a secret named
+`<stack-name>/integrations/tavily-api-key` encrypted with the deployment's
+customer-managed KMS key. The meeting assist Lambda is given the secret's ARN
+in `TAVILY_API_KEY_SECRET_ARN` and reads the key itself on the first web search
+each execution environment performs, caching it from then on. Whether the
+`web_search` tool is offered to the assistant at all is decided from the ARN
+alone, so a deployment that has not configured a key makes no Secrets Manager
+call.
+
+If you already keep the key in Secrets Manager, set **TavilyApiKeySecretArn**
+to that secret's ARN instead of **TavilyApiKey** — supply one form or the
+other, not both.
+
+### Rotating the key
+
+Generate a new key at [tavily.com](https://tavily.com), put it in the
+**TavilyApiKey** parameter, and apply the stack update. The update replaces the
+Lambda's configuration, which retires the existing execution environments, so
+the new key is in use from the next invocation.
+
+You can also store the new version directly in Secrets Manager. A warm function
+keeps the previously cached key until its execution environment is recycled, so
+expect a few minutes before the change is universal — and set the
+CloudFormation parameter to match, or the next stack update writes the old
+value back. See
+[Integration Credentials](infrastructure-and-security.md#integration-credentials).
+
 ## Related Documentation
 
 - [MCP Servers](mcp-servers.md)

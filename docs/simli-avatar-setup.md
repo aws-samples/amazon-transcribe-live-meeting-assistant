@@ -78,6 +78,24 @@ When deploying or updating your LMA stack, set these parameters:
 
 > **Important:** Although each Simli parameter shows as "(Optional)" in the CloudFormation template (the stack deploys fine without them), the avatar feature itself requires **both** `SimliApiKey` *and* `SimliFaceId` to be non-empty. Set both, or leave both blank.
 
+The stack keeps the API key in AWS Secrets Manager, in a secret named
+`<stack-name>/integrations/simli-api-key` encrypted with the deployment's
+customer-managed KMS key. The Virtual Participant's task definition names the
+secret's ARN and the ECS agent sets `SIMLI_API_KEY` in the container when each
+meeting's task starts. If you already keep the key in Secrets Manager, set
+`SimliApiKeySecretArn` to that secret's ARN instead of `SimliApiKey` — supply
+one form or the other, not both. `SimliFaceId` is not a credential and is
+passed as an ordinary parameter either way.
+
+**To rotate the key:** generate a new one in the Simli dashboard, put the new
+value in the `SimliApiKey` parameter, and apply the stack update. Virtual
+Participant tasks start one per meeting, so the next meeting to begin uses the
+new key — no forced ECS deployment is needed, and a meeting already in progress
+finishes on the key it started with. You can also store the new version
+directly in Secrets Manager for an immediate change; if you do, set the
+parameter to match, or the next stack update writes the old value back. See
+[Integration Credentials](infrastructure-and-security.md#integration-credentials).
+
 > **Important:** Simli avatar is meant to be used with a voice assistant. The avatar is driven by the voice assistant's audio output — without a voice assistant, there is no audio to animate the avatar.
 
 ### 2.2 Optional Parameters
