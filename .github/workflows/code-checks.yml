@@ -145,6 +145,13 @@ jobs:
       - name: ASR MicroVM runtime tests
         run: make test-asr
 
+      # The advisory AI review's own machinery: the disclosure guard that decides
+      # whether a model-written comment reaches this public repository, and the
+      # four properties of ai-pr-review.yml most likely to be deleted by accident.
+      # No AWS and no model call.
+      - name: Advisory AI review tests
+        run: make test-pr-review
+
       - name: WebSocket transcriber dependencies
         working-directory: lma-websocket-transcriber-stack/source/app
         run: npm ci

@@ -107,6 +107,10 @@ code_checks:
     - make test-integ-plumbing
     # ASR MicroVM runtime unit tests + ruff (no AWS, no model weights).
     - make test-asr
+    # The advisory AI review's own machinery: the disclosure guard that decides
+    # whether a model-written comment reaches the public repository, and the four
+    # properties of the review job most likely to be deleted by accident.
+    - make test-pr-review
     # WebSocket transcriber: unit tests (tsc + eslint via `npm run build`, then
     # node --test on dist) followed by the Fastify 5 websocket smoke test, which
     # boots the server and round-trips a frame — runtime coverage the unit tests
@@ -174,6 +178,215 @@ srt_security_review:
       - srt-semgrep-summary.json
       - srt-syft-summary.json
       - srt-project-summary.md
+    expire_in: 1 week
+
+# ── fast_checks: advisory AI review ────────────────────────────────────────
+# The GitLab counterpart of the `ai_pr_review` job in
+# .github/workflows/ai-pr-review.yml. Runs Claude Code (via Amazon Bedrock) over
+# the MR diff with .claude/skills/pr-review.md plus .claude/skills/pr-review-ci.md
+# and posts the result as an MR note. Both jobs run the same harness,
+# scripts/pr_review/ai_pr_review.py.
+#
+# ⚠️ NOT A GATE — `allow_failure: true`. A model's opinion must not decide whether
+# code merges; `code_checks` and `srt_security_review` do that. Exit 1 here means
+# the tooling failed, never that a review found something.
+#
+# ⚠️ INERT UNTIL TWO CI VARIABLES EXIST, and it says so loudly rather than failing:
+#   GITLAB_REVIEW_TOKEN  project access token, `api` scope, MASKED. The note is
+#                        posted as this token's identity. CI_JOB_TOKEN cannot
+#                        create notes, so there is no fallback — without this the
+#                        job prints SKIPPED and exits 0.
+#   AWS credentials      bedrock:InvokeModel on the model below, and NOTHING else.
+#                        Give this job its own Bedrock-only role; do not reuse the
+#                        nightly deploy credentials, which carry S3, CloudFormation
+#                        and CodeBuild grants this job has no use for.
+#
+# ⚠️ THIS REPOSITORY IS PUBLIC (the GitLab remote is a mirror of the public GitHub
+# repository, and an MR note here can be quoted into a PR there). The published
+# text is constrained by .claude/skills/pr-review-ci.md §2 and enforced by
+# `scan_for_disclosure` in the harness, which withholds a whole review rather than
+# publish a description of a weakness. See the header of
+# .github/workflows/ai-pr-review.yml for the full reasoning, including why the
+# withheld text is written to no artifact and no log.
+#
+# ⚠️ COST, and the three things that bound it. A review is a real Bedrock spend.
+# Measured on this repository: $0.83 for a 24-file, +1704/-131 pull request on
+# us.anthropic.claude-opus-5-5, so roughly $0.30-1.50 per review for LMA's usual
+# sizes. Reviews are idempotent per HEAD SHA, so a NEW push means a NEW paid
+# review:
+#   - `interruptible: true` — a push while a review is running cancels it, so a
+#     burst of pushes costs roughly one review rather than one per push. This is
+#     the main protection and it is easy to delete by accident.
+#   - idempotent per HEAD SHA — a re-run of the same pipeline posts nothing.
+#   - Draft MRs are excluded, so the WIP phase (where pushes are frequent) is free.
+# What is NOT bounded: pushes spaced further apart than a review takes. An MR
+# revised over a week pays per revision. If that becomes the dominant cost, the
+# cheapest fix is a cooldown in ai_pr_review.py (skip if the last review note is
+# younger than N hours) rather than going back to a manual button.
+#
+# NO SCHEDULED SWEEP HERE, deliberately. The harness supports one (`--all-open`)
+# and the script block below still dispatches to it, but no
+# `$CI_PIPELINE_SOURCE == "schedule"` rule exists, so in this pipeline it is
+# unreachable. The sweep exists on GitHub for fork pull requests, which have no
+# GitLab equivalent — this mirror takes no outside contributions. To turn it on
+# later, add `- if: $CI_PIPELINE_SOURCE == "schedule"` above the terminal `never`
+# and create the schedule; read the cost note above first.
+ai_mr_review:
+  stage: fast_checks
+  interruptible: true
+  # Sized so the SWEEP's own bound is the limit that fires, not this one: --max-mrs
+  # 2 at --timeout 1200 is a 40-minute worst case plus ~3 minutes of install. See
+  # the arithmetic at the script block. Matches the GitHub job's timeout-minutes.
+  timeout: 70m
+  allow_failure: true
+
+  # Reviewing is read-only, but it reads the whole checkout at the MR head and a
+  # large diff wants memory for the model client plus a git worktree.
+  tags:
+    - size:large
+
+  rules:
+    # Non-Draft MRs targeting develop, automatically. Ordered before the catch-all
+    # so a Draft falls through to `never` — a review posted on somebody's WIP is
+    # noise they did not ask for, and the Draft phase is where pushes are frequent,
+    # so excluding it is a cost control as well as a courtesy.
+    - if: $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop" && $CI_MERGE_REQUEST_TITLE !~ /^Draft:/
+      when: on_success
+    - when: never
+
+  # Nothing to wait for: it reads the MR, not another job's artifacts. In
+  # particular it does NOT wait for code_checks — a lint failure is exactly when a
+  # review is most useful, and gating the review on the gates would mean the MRs
+  # most in need of one never get it.
+  needs: []
+
+  variables:
+    # Pinned for the same reason the GitHub job pins its action SHAs: an unpinned
+    # tool on an automatic job changes behaviour with no commit here. The test
+    # suite compares this against CLAUDE_CODE_VERSION in the GitHub workflow.
+    CLAUDE_CODE_VERSION: "2.1.308"
+    # Bedrock inference-profile id. Must be one this account has model access to;
+    # keep in step with the GitHub workflow and with DEFAULT_MODEL in the harness.
+    ANTHROPIC_MODEL: "us.anthropic.claude-opus-5-5"
+    AWS_REGION: "us-east-1"
+    # Full history: the review diffs the MR head against its merge base with
+    # develop, which a shallow clone does not have.
+    GIT_DEPTH: 0
+
+  before_script:
+    - apt-get update -y
+    - apt-get install -y curl git
+    # Node from .nvmrc, the same source of truth code_checks and the GitHub
+    # workflow use. @anthropic-ai/claude-code needs >=22, and an older major fails
+    # in the quietest way available: npm's EBADENGINE is only a warning, both
+    # `npm install` and `claude --version` succeed on 20, and the CLI then exits 1
+    # with an empty stderr on the first real session. So the RUNTIME is asserted
+    # below rather than the intent — a check on the download URL stays green when
+    # the download is what failed.
+    #
+    # ⚠️ `$NODE_PIN` comes from the MR's OWN `.nvmrc` and is interpolated into a URL
+    # in a job that holds credentials, so it is QUOTED here. The `code_checks` job
+    # above (line ~76) and `nightly_publish` spell the same two lines unquoted;
+    # `nightly_deploy` already uses the quoted form. Quoting does not validate the
+    # value — a hostile `.nvmrc` still produces a wrong URL — but it stops the
+    # expansion being word-split and re-globbed before `curl` ever sees it, and
+    # `curl -f` fails closed on anything that is not a real release tarball.
+    - NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
+    - NODE_PIN=$(tr -d '[:space:]' < .nvmrc)
+    - >-
+      curl -fsSL "https://nodejs.org/dist/v$NODE_PIN/node-v$NODE_PIN-linux-$NODE_ARCH.tar.xz"
+      | tar -xJ -C /usr/local --strip-components=1
+    - node --version
+    - >-
+      node -e 'const m=+process.versions.node.split(".")[0];
+      if (m < 22) { console.error("FATAL: node "+process.versions.node+
+      " but @anthropic-ai/claude-code needs >=22. The .nvmrc install did not take.");
+      process.exit(1); }'
+    - npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+    - claude --version
+
+  script:
+    # ⚠️ PIN THE HARNESS TO THE TARGET BRANCH BEFORE RUNNING IT.
+    #
+    # This checkout is the MR head, so without this the reviewer is the MR's own
+    # copy of itself: the permission mode, both tool lists, the secret-stripping
+    # list, THE DISCLOSURE GUARD and the prompt are all author-controlled, and the
+    # script's internal pinning of instruction files runs too late to matter because
+    # the code doing the pinning is also the MR's. The blast radius is this job's
+    # environment, which holds an AWS credential and GITLAB_REVIEW_TOKEN.
+    #
+    # So the harness comes from the target branch and only the DIFF comes from the
+    # MR. The tradeoff is explicit: an MR that improves the reviewer is not
+    # exercised by its own pipeline — it takes effect once merged. That is the same
+    # trade the instruction-file pinning makes, for the same reason.
+    #
+    # ⚠️ ON FAILURE THIS SKIPS THE REVIEW AND EXITS 0, in step with the GitHub
+    # workflow. It used to warn and then RUN THE MR'S OWN COPY, which is the one
+    # thing this step exists to prevent — the warning made it visible in a log but
+    # did not stop it. The two platforms now behave identically: no pinned harness
+    # means no review.
+    #
+    # `exit 1` stays for the two paths that always exist on the target branch. A
+    # failure to resolve those means a rename nobody updated here, which is a real
+    # defect; the other two legitimately do not exist until this change merges.
+    - |
+      TARGET="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-develop}"
+      git fetch -q origin "$TARGET"
+      ALWAYS=".claude/skills/pr-review.md CLAUDE.md"
+      HARNESS="scripts/pr_review/ai_pr_review.py .claude/skills/pr-review-ci.md"
+      HARNESS="$HARNESS $ALWAYS"
+
+      MISSING=""
+      for path in $HARNESS; do
+        if ! git cat-file -e "FETCH_HEAD:$path" 2>/dev/null; then
+          MISSING="$MISSING $path"
+        fi
+      done
+
+      if [ -n "$MISSING" ]; then
+        echo "⚠️  origin/$TARGET does not carry:$MISSING"
+        echo "    NOT running the MR's own copy of the reviewer."
+        for path in $MISSING; do
+          case " $ALWAYS " in
+            *" $path "*)
+              echo "❌ $path always exists on $TARGET, so it has been renamed or"
+              echo "   removed without this step's path list being updated."
+              exit 1
+              ;;
+          esac
+        done
+        echo "    Everything missing is a file this MR itself adds, so there is"
+        echo "    nothing to fix: no review will run and this job stays green."
+        exit 0
+      fi
+
+      # Unquoted on purpose: $HARNESS is a LIST and must word-split into four
+      # pathspecs. Quoting it passes one argument containing spaces, matching nothing.
+      git checkout FETCH_HEAD -- $HARNESS
+      echo "Harness pinned to origin/$TARGET:$HARNESS"
+    - |
+      if [ -n "$CI_MERGE_REQUEST_IID" ]; then
+        python3 scripts/pr_review/ai_pr_review.py \
+          --forge gitlab --remote origin --mr "$CI_MERGE_REQUEST_IID"
+      else
+        # --max-mrs 2, and the arithmetic has to close: at --timeout 1200 (20
+        # minutes) a batch of two is a 40-minute worst case, plus ~3 minutes of Node
+        # and CLI install, against this job's 70m timeout. So the SWEEP's bound is
+        # the one that fires and the job timeout is never reached mid-review, which
+        # is the whole point of having a bound. It was 3 against a 45m timeout, which
+        # is 63 > 45 — the job limit would have fired first and cut a review off
+        # halfway. (Unreachable today: no schedule rule exists, so CI always takes
+        # the --mr branch above.)
+        python3 scripts/pr_review/ai_pr_review.py \
+          --forge gitlab --remote origin --all-open --max-mrs 2
+      fi
+
+  # Carries exactly the text that was published, and nothing more — see the
+  # disclosure note above and in the GitHub workflow header.
+  artifacts:
+    when: always
+    paths:
+      - ai-reviews/
     expire_in: 1 week
 
 # ── scheduled_integration: build the branch, deploy it, then test it ───────
