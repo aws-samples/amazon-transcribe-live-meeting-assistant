@@ -819,18 +819,75 @@ def test_the_checkout_does_not_persist_the_job_token(gh_job: dict) -> None:
 
 
 def test_the_job_requests_only_the_permissions_it_needs(gh_job: dict) -> None:
-    """Three scopes, each with a specific job, and `contents` stays read.
+    """Five scopes, each with a specific job, only two of them write.
 
     `pull-requests: write` posts the comment and `id-token: write` mints the OIDC
     token for the Bedrock role. `contents: write` would let a review that went wrong
     push to the repository, and nothing here needs it.
+
+    The two read scopes are the ones easy to leave off, and leaving them off fails
+    SILENTLY — see the next test.
     """
     permissions = gh_job.get("permissions") or {}
     assert permissions.get("contents") == "read"
     assert permissions.get("pull-requests") == "write"
     assert permissions.get("id-token") == "write"
-    assert set(permissions) == {"contents", "pull-requests", "id-token"}, (
-        f"the job's permissions grew beyond the three it needs: {permissions}"
+    assert permissions.get("checks") == "read"
+    assert permissions.get("statuses") == "read"
+    assert set(permissions) == {
+        "contents",
+        "pull-requests",
+        "id-token",
+        "checks",
+        "statuses",
+    }, f"the job's permissions grew beyond the five it needs: {permissions}"
+    writes = {scope for scope, access in permissions.items() if access == "write"}
+    assert writes == {"pull-requests", "id-token"}, (
+        f"the job now requests write on {writes - {'pull-requests', 'id-token'}}, "
+        f"which nothing in a read-only review needs"
+    )
+
+
+def test_the_ci_status_scopes_are_granted_and_their_absence_would_be_silent(
+    gh_job: dict,
+) -> None:
+    """`checks: read` and `statuses: read`, because every unlisted scope is `none`.
+
+    `Github.check_status` calls `/commits/{sha}/check-runs` and `/commits/{sha}/status`.
+    Without these two scopes those calls can 403, which `_request` turns into `Skip`,
+    which `check_status` turns into `""`, which makes the review disclaim having any
+    CI status — **which is exactly what the GitLab side looks like when working
+    correctly.** So the feature would be dead and indistinguishable from fine.
+
+    ⚠️ Whether omitting them really does 403 on a PUBLIC repository is not
+    established, and this test does not claim it: both endpoints return 200 with no
+    credential at all here, the Checks API reference scopes its access requirement to
+    private repositories, and a scoped-down `GITHUB_TOKEN` cannot be minted outside
+    Actions to settle it. They are asserted because they are the documented scopes for
+    these two endpoints, they cost nothing on world-readable data, and the
+    alternative is a feature whose liveness depends on an undocumented interaction.
+
+    The second half of the defence is in the harness and is what makes a wrong guess
+    survivable: a failed lookup prints a warning naming this block as the first thing
+    to check, instead of returning an empty field in silence.
+    """
+    permissions = gh_job.get("permissions") or {}
+    for scope in ("checks", "statuses"):
+        assert permissions.get(scope) == "read", (
+            f"`{scope}: read` is missing from the job's permissions. Every scope not "
+            f"listed in a permissions block is `none`, so the CI-status lookup can "
+            f"403 — and it fails to an empty field that reads exactly like the "
+            f"GitLab side working as designed."
+        )
+
+    source = HARNESS.read_text()
+    assert "could not read the checks for" in source, (
+        "check_status no longer warns when the lookup fails, so a missing scope "
+        "would once again be indistinguishable from there being no checks"
+    )
+    assert "checks: read" in source, (
+        "the warning should name the likely cause so a reader does not have to "
+        "rediscover the permissions model"
     )
 
 

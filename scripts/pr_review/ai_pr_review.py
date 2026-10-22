@@ -1209,7 +1209,19 @@ class Github:
         Best-effort by design. A failure here must not cost a review, so anything
         other than a clean answer returns "" and the review is told the status was not
         supplied — the same state as the GitLab side. It is NOT allowed to raise
-        :class:`Skip`, which would abort the whole run for a cosmetic field.
+        :class:`Skip`, which :func:`_review_all` treats as a global precondition
+        failure and uses to BREAK out of a sweep: a flaky checks endpoint would
+        otherwise cancel the reviews of every remaining request.
+
+        ⚠️ **But it is loud about failing, and that is not decoration.** Swallowing
+        the error quietly is how this feature would die without anyone noticing: the
+        job's ``permissions`` block sets every unlisted scope to ``none``, so a
+        missing ``checks: read`` / ``statuses: read`` would turn into a 403, into a
+        :class:`Skip`, into ``""``, into a review that disclaims having any CI status
+        — looking exactly like the GitLab side, which is *supposed* to look like
+        that. An empty field would therefore be indistinguishable from working as
+        designed. That is the failure mode the rest of this harness exists to avoid,
+        so the warning names the cause a reader should check first.
         """
         counts: dict[str, int] = {}
         try:
@@ -1224,7 +1236,13 @@ class Github:
                 for context in combined.get("statuses") or []:
                     outcome = str(context.get("state") or "unknown")
                     counts[outcome] = counts.get(outcome, 0) + 1
-        except (Skip, Failure, AssertionError, KeyError, TypeError, ValueError):
+        except (Skip, Failure, AssertionError, KeyError, TypeError, ValueError) as error:
+            print(
+                f"  ⚠️  could not read the checks for {sha[:8]}; the review will be told "
+                f"it has no CI status. In a workflow the usual cause is a `permissions:` "
+                f"block without `checks: read` and `statuses: read` — every scope not "
+                f"listed there is `none`. Cause: {str(error)[:200]}"
+            )
             return ""
         if not counts:
             return "no checks reported for this commit"
@@ -2114,9 +2132,12 @@ def compose_note(
     review = defuse_quick_actions(review)
     files, additions, deletions = stat
     marker = f"<!-- ai-review: sha={merge_request.head_sha} rev={PROMPT_REVISION} -->"
-    # On a truncated diff the file count describes the whole change, not what the
-    # review saw, so it is deliberately not quoted next to "TRUNCATED" — the footer
-    # would otherwise claim coverage of files the review was never given.
+    # ``stat`` describes the WHOLE change, which on a truncated diff is more than the
+    # review saw — so when truncated the footer labels it as such ("the full change
+    # is …") rather than presenting it as the scope that was reviewed. An unlabelled
+    # count there would claim coverage of files the review was never given.
+    # metadata.json's `changed_files` is the other number, counted from the diff that
+    # was actually supplied; see diff_file_count for why the two exist.
     scope = (
         f"a TRUNCATED diff (the full change is +{additions}/-{deletions} across "
         f"{files} files, too large for one context window)"
@@ -2180,6 +2201,18 @@ def review_one(
     # Asked for AFTER the head is settled, so the status describes the commit that is
     # actually being reviewed rather than the one the list call saw. Best-effort: a
     # failure returns "" and the review is told the status was not supplied.
+    #
+    # ⚠️ GITHUB ONLY, and the reason is not a permissions gap on the other side.
+    # GitLab's `GITLAB_REVIEW_TOKEN` is a project access token with `api` scope, which
+    # already covers reading an MR's pipelines — there is no per-job scope narrowing
+    # there to forget, the way GitHub's `permissions:` block can be forgotten. So the
+    # GitLab side has no equivalent hole; it simply does not implement this, and
+    # `pr-review-ci.md` tells the review the field is empty there.
+    #
+    # Not implemented for GitLab deliberately: that job has no credentials provisioned
+    # and so never runs today, which means anything added to it could not be exercised
+    # even once. Shipping untested code down an inert path is precisely the mistake
+    # this change exists to correct, so it waits for someone who can run it.
     if isinstance(forge, Github):
         merge_request.ci_status = forge.check_status(merge_request.head_sha)
 
