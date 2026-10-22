@@ -64,18 +64,27 @@ FIELD_MAP = {
     "ENABLE_VIDEO_RECORDING": ("enableVideoRecording",),
 }
 
+# The container environment variables supplied by the task definition's Secrets
+# entries (see _integration_secrets). Enumerated here, rather than taken from
+# whatever the task definition happens to list, so that a failed read can be
+# labelled in the log using a name this module already knows -- nothing read
+# from the task definition entry itself reaches a log record.
+#
+# Kept in step with the Secrets list on TaskDefinition in template.yaml and with
+# SECRET_KEYS in the container's src/launch-mode.ts.
+INTEGRATION_SECRET_NAMES = (
+    "ZOOM_MEETING_SDK_CLIENT_SECRET",
+    "ACS_CONNECTION_STRING",
+    "ELEVENLABS_API_KEY",
+    "SIMLI_API_KEY",
+)
+
 SECRET_KEYS = {
     "USER_ACCESS_TOKEN",
     "USER_ID_TOKEN",
     "USER_REFRESH_TOKEN",
     "MEETING_PASSWORD",
-    # Resolved from the task definition's Secrets entries (see
-    # _integration_secrets): named here so a change to the launcher's logging
-    # cannot start printing them.
-    "ZOOM_MEETING_SDK_CLIENT_SECRET",
-    "ACS_CONNECTION_STRING",
-    "ELEVENLABS_API_KEY",
-    "SIMLI_API_KEY",
+    *INTEGRATION_SECRET_NAMES,
 }
 
 # The AWS developer guide says runHookPayload allows 16 KB, but the SERVICE
@@ -140,12 +149,26 @@ def _integration_secrets(container: dict) -> dict:
         try:
             value = secretsmanager.get_secret_value(SecretId=arn).get("SecretString")
         except Exception:  # noqa: BLE001 - one unavailable integration, not a dead meeting
-            logger.exception("Could not read the secret supplying %s", name)
+            logger.exception("Could not read the secret supplying %s", _label_for(name))
             continue
         if value:
             resolved[name] = value
     logger.info("Resolved %d of %d integration secrets", len(resolved), len(entries))
     return resolved
+
+
+def _label_for(name) -> str:
+    """A log-safe label for one of the task definition's Secrets entries.
+
+    Returns the matching member of INTEGRATION_SECRET_NAMES, so the string that
+    reaches the log is this module's own constant and not a value read out of
+    the task definition. An entry whose name is not one this launcher knows
+    about is reported generically rather than echoed.
+    """
+    for known in INTEGRATION_SECRET_NAMES:
+        if known == name:
+            return known
+    return "an unrecognised integration"
 
 
 def _static_config() -> dict:
