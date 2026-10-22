@@ -218,8 +218,10 @@ def test_every_emitter_type_is_actually_collected_somewhere():
     A type dropped from that mapping, or a resource type renamed, silently
     removes a whole class of log destination from all five rules, which is not
     visible as a failure anywhere else — every remaining test would still pass.
-    The MicroVM images are the live example: the first version of this file
-    covered only the two Lambda function types, so neither of them was gated.
+    The MicroVM images are the case this guards: drop `AWS::Lambda::MicrovmImage`
+    from the mapping and both of them go ungated, taking the two
+    highest-volume log groups in the solution with them, and nothing else here
+    would notice.
     """
     found = {emitter_type: 0 for emitter_type in EMITTER_LOG_GROUP_PATHS}
     for path in DEPLOYED_TEMPLATES:

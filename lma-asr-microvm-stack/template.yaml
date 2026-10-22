@@ -432,12 +432,21 @@ Resources:
     Type: AWS::Logs::LogGroup
     # Treated as stateful, like the other log groups that hold meeting-time
     # output: a stack delete would otherwise take with it the post-mortem logs
-    # for the compute path that is hardest to debug. Note the consequence of
-    # retaining it, which is the same one every retained resource in LMA has:
-    # the name is derived from the parent stack's name, so turning
+    # for the compute path that is hardest to debug.
+    #
+    # RetainExceptOnCreate rather than Retain, because the update that first
+    # creates this group is the same one that rebuilds the image, and that build
+    # downloads the model bundle from an external host. If the build fails, the
+    # update rolls back -- and a plain Retain is honoured even when rolling back
+    # the operation that created the resource, which would leave the group behind
+    # and make the retry fail with "already exists". The retry has to be able to
+    # create this group again.
+    #
+    # Retaining it on a real delete has the consequence every retained resource
+    # in LMA has: the name is derived from the parent stack's name, so turning
     # EnableMicrovmAsr off and on again with retention enabled leaves the
     # retained group in the way of the new one. Delete it by hand first.
-    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, RetainExceptOnCreate, Delete]
     UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub "/aws/lambda-microvms/${LMAStackName}-asr-logs"

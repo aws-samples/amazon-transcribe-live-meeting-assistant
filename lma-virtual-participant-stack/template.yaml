@@ -2092,12 +2092,20 @@ Resources:
     # is where a meeting's MicroVM output lands, so neither a stack delete nor a
     # change of VPLaunchType should take it with them -- and because the group
     # is conditional, a launch-type change alone would otherwise delete every
-    # MicroVM meeting log as a side effect. Note the consequence of retaining
-    # it, which is the same one every retained resource in LMA has: the name is
-    # derived from the parent stack's name, so moving off MICROVM and back with
-    # retention enabled leaves the retained group in the way of the new one.
-    # Delete it by hand first.
-    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    # MicroVM meeting log as a side effect.
+    #
+    # RetainExceptOnCreate rather than Retain, because the update that first
+    # creates this group is the same one that rebuilds the image. If that build
+    # fails the update rolls back -- and a plain Retain is honoured even when
+    # rolling back the operation that created the resource, which would leave the
+    # group behind and make the retry fail with "already exists". The retry has
+    # to be able to create this group again.
+    #
+    # Retaining it on a real delete has the consequence every retained resource
+    # in LMA has: the name is derived from the parent stack's name, so moving off
+    # MICROVM and back with retention enabled leaves the retained group in the
+    # way of the new one. Delete it by hand first.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, RetainExceptOnCreate, Delete]
     UpdateReplacePolicy: Retain
     Properties:
       LogGroupName: !Sub "/aws/lambda-microvms/${LMAStackName}-vp-logs"

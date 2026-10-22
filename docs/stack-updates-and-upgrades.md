@@ -157,8 +157,10 @@ update that carries it has completed.
 
 Every Lambda function and MicroVM in the deployment now logs to a log group the
 stack declares, with the retention set by `CloudWatchLogsExpirationInDays` and
-the deployment's customer-managed key. Nothing breaks on upgrade, but four
-things are worth knowing before you click **Update**.
+the deployment's customer-managed key. That includes the two Bedrock Knowledge
+Base stacks, whose functions had no declared group at all and so logged to
+implicit ones. Nothing breaks on upgrade, but five things are worth knowing
+before you click **Update**.
 
 **The MicroVM log groups are renamed, and a deployment using MicroVM compute
 rebuilds its image.** CloudFormation cannot take ownership of a log group that
@@ -188,11 +190,22 @@ upgrade does not delete them, and they still have no expiry — so they are
 permanent leftovers until you delete them. See [Cleanup](cleanup.md) for the
 prefixes to sweep.
 
-**VPC Flow Log retention now follows your setting.** The VPC stack previously
-applied its own 14-day default whatever `CloudWatchLogsExpirationInDays` was set
-to at the top level. The same was true of the two Bedrock Knowledge Base stacks.
-If your top-level value is higher than 14 (the default is 90), those logs will
-start retaining for longer, and costing more, after this upgrade.
+**VPC Flow Log retention now follows your setting.** The VPC stack applied its
+own 14-day default whatever `CloudWatchLogsExpirationInDays` was set to at the
+top level, because the parameter was never passed down to it. If your top-level
+value is higher than 14 — the default is 90 — your VPC Flow Logs will start
+retaining for longer, and costing more, after this upgrade. Lower it on the VPC
+stack's behalf by lowering the top-level parameter if that is not what you want.
+
+**Three log groups are removed if the feature they belong to is currently off.**
+`BedrockSummaryLambdaLogGroup`, `CognitoUserPoolEmailDomainVerifyFunctionLogGroup`
+and `PCAIntegrationFunctionLogGroup` now exist only when the function that writes
+to them exists. If your deployment has the Bedrock summariser, the sign-up email
+domain restriction or the PCA integration switched **off**, the corresponding
+group is deleted by this upgrade — along with anything it still holds from a
+period when the feature was on. Export what you need from those three before
+upgrading. The alternative was leaving an unowned group behind to block its own
+re-creation when the feature is switched back on.
 
 **One new parameter.** `VPSchedulerStateMachineLogsExpirationInDays` (default 7)
 sets retention for the scheduled Virtual Participant state machine's execution
