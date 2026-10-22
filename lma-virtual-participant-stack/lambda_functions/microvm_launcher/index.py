@@ -77,6 +77,11 @@ INTEGRATION_SECRET_NAMES = (
     "SIMLI_API_KEY",
 )
 
+# What _redact replaces with a length. _redact is currently applied only to the
+# per-meeting config, which can hold only FIELD_MAP keys, so the integration
+# names below are not reached today; they are here so that redaction already
+# covers them if _redact is ever applied to the merged payload_config, which is
+# where they live.
 SECRET_KEYS = {
     "USER_ACCESS_TOKEN",
     "USER_ID_TOKEN",
@@ -117,7 +122,41 @@ RUN_HOOK_PAYLOAD_MAX_BYTES = 4096
 # is exactly one source of truth and no drift when a stack parameter changes.
 # (The task definition is created under MICROVM too — it is unused for running
 # tasks, but it carries the resolved configuration.)
-_STATIC_CONFIG_CACHE: dict | None = None
+#
+# The DEFINITION is what is cached, not the configuration derived from it. A
+# registered task definition revision is immutable and a stack update that
+# changes it replaces this Lambda too, so one DescribeTaskDefinition per
+# execution environment is enough. What its Secrets entries POINT AT is a
+# different matter and is resolved per launch -- see _integration_secrets.
+_CONTAINER_DEFINITION_CACHE: dict | None = None
+
+
+def _container_definition() -> dict:
+    """The VP container definition from the ECS task definition, or {}.
+
+    A failed read is not cached, so the next launch tries again rather than
+    inheriting an empty configuration for the life of this instance.
+    """
+    global _CONTAINER_DEFINITION_CACHE
+    if _CONTAINER_DEFINITION_CACHE is not None:
+        return _CONTAINER_DEFINITION_CACHE
+
+    task_definition = os.environ.get("TASK_DEFINITION_ARN", "")
+    if not task_definition:
+        logger.warning("TASK_DEFINITION_ARN not set - no static config available")
+        return {}
+
+    try:
+        described = boto3.client("ecs").describe_task_definition(
+            taskDefinition=task_definition
+        )
+        containers = described["taskDefinition"]["containerDefinitions"]
+    except Exception:  # noqa: BLE001 - degrade rather than fail the meeting
+        logger.exception("Could not read the task definition")
+        return {}
+
+    _CONTAINER_DEFINITION_CACHE = containers[0] if containers else {}
+    return _CONTAINER_DEFINITION_CACHE
 
 
 def _integration_secrets(container: dict) -> dict:
@@ -128,6 +167,13 @@ def _integration_secrets(container: dict) -> dict:
     task definition rather than carried in its environment. A MicroVM has no
     ECS agent, so the launcher performs the same resolution and the container
     goes on reading the same environment variable names on both paths.
+
+    Called on every launch, and deliberately not cached alongside the static
+    config: a secret holds its current version, which changes whenever an
+    operator rotates the credential and without any stack update. Reading it
+    per launch is what lets the next meeting to start use a rotated value. The
+    cost is up to four GetSecretValue calls against a RunMicrovm plus the wait
+    for RUNNING.
 
     One failed secret is skipped rather than failing the meeting: the container
     reports the feature that needed it as unavailable, which is a far more
@@ -160,41 +206,24 @@ def _integration_secrets(container: dict) -> dict:
     return resolved
 
 
-def _static_config() -> dict:
-    """Static per-stack config, from the VP ECS task definition.
+def _static_config(container: dict) -> dict:
+    """Static per-stack config, from the container definition's environment.
 
-    Cached for the life of the execution environment: the values only change on a
-    stack update, which replaces this Lambda anyway.
+    These are task-definition values: the GraphQL endpoint, the bucket and
+    table names, the Transcribe and voice-assistant settings. They change only
+    on a stack update, which replaces this Lambda anyway, so the definition
+    they come from is read once per execution environment (see
+    _container_definition) and this derivation is a dict comprehension over it.
     """
-    global _STATIC_CONFIG_CACHE
-    if _STATIC_CONFIG_CACHE is not None:
-        return _STATIC_CONFIG_CACHE
-
-    task_definition = os.environ.get("TASK_DEFINITION_ARN", "")
-    if not task_definition:
-        logger.warning("TASK_DEFINITION_ARN not set - no static config available")
-        _STATIC_CONFIG_CACHE = {}
-        return _STATIC_CONFIG_CACHE
-
-    try:
-        described = boto3.client("ecs").describe_task_definition(
-            taskDefinition=task_definition
-        )
-        containers = described["taskDefinition"]["containerDefinitions"]
-        env = containers[0].get("environment", [])
-        # Per-meeting values are supplied per launch and must not be frozen here.
-        config = {
-            item["name"]: item["value"]
-            for item in env
-            if item["name"] not in FIELD_MAP and item.get("value")
-        }
-        config.update(_integration_secrets(containers[0]))
-        logger.info("Loaded %d static config values from the task definition", len(config))
-        _STATIC_CONFIG_CACHE = config
-    except Exception:  # noqa: BLE001 - degrade rather than fail the meeting
-        logger.exception("Could not read static config from the task definition")
-        _STATIC_CONFIG_CACHE = {}
-    return _STATIC_CONFIG_CACHE
+    env = container.get("environment") or []
+    # Per-meeting values are supplied per launch and must not be frozen here.
+    config = {
+        item["name"]: item["value"]
+        for item in env
+        if item["name"] not in FIELD_MAP and item.get("value")
+    }
+    logger.info("Loaded %d static config values from the task definition", len(config))
+    return config
 
 # Meetings can run long, but a MicroVM's hard ceiling is 8 hours.
 MAX_DURATION_SECONDS = 28800
@@ -275,7 +304,17 @@ def lambda_handler(event, context):
         return {"ok": False, "reason": "no virtualParticipantId in payload"}
 
     # Static stack config first so per-meeting values win on any collision.
-    payload_config = {**_static_config(), **config}
+    #
+    # The integration credentials sit between the two. They come from the same
+    # task definition as the static config, but their values are read on every
+    # launch rather than once per execution environment, so the next meeting to
+    # start uses the current version of each secret.
+    container = _container_definition()
+    payload_config = {
+        **_static_config(container),
+        **_integration_secrets(container),
+        **config,
+    }
 
     # Stash the full configuration in the registry BEFORE starting the MicroVM,
     # so it is already there when the container's /run hook fires and reads it.

@@ -82,7 +82,10 @@ The stack keeps the API key in AWS Secrets Manager, in a secret named
 `<stack-name>/integrations/simli-api-key` encrypted with the deployment's
 customer-managed KMS key. The Virtual Participant's task definition names the
 secret's ARN and the ECS agent sets `SIMLI_API_KEY` in the container when each
-meeting's task starts. If you already keep the key in Secrets Manager, set
+meeting's task starts; under the default `VPLaunchType=MICROVM` the MicroVM
+launcher does the equivalent, by a different route —
+see [Integration Credentials](infrastructure-and-security.md#integration-credentials).
+If you already keep the key in Secrets Manager, set
 `SimliApiKeySecretArn` to that secret's ARN instead of `SimliApiKey` — supply
 one form or the other, not both. `SimliFaceId` is not a credential and is
 passed as an ordinary parameter either way.
@@ -112,7 +115,7 @@ The following environment variables are set automatically by CloudFormation but 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SIMLI_API_KEY` | (from CFN) | Simli API key |
+| `SIMLI_API_KEY` | (from Secrets Manager) | Simli API key. Set in the container at task start from the secret named by `SimliApiKeySecretArn`, not carried in the task definition |
 | `SIMLI_FACE_ID` | (from CFN) | Simli Face ID |
 | `SIMLI_TRANSPORT_MODE` | `livekit` | Transport mode (`livekit` or `p2p`) |
 | `SIMLI_MAX_SESSION_LENGTH` | `3600` | Maximum avatar session length in seconds |
@@ -185,9 +188,12 @@ When Simli avatar is active, the Virtual Participant's behavior changes slightly
 
 **Solution:**
 - Check CloudWatch logs for `Failed to initialize Simli Avatar` errors
-- Verify `SIMLI_API_KEY` and `SIMLI_FACE_ID` are set correctly
-- Ensure the Simli API key is valid and has not expired
-- Check that the Face ID exists in your Simli account
+- Verify `SimliFaceId` is set on the stack, and that the Face ID exists in your
+  Simli account
+- Verify the secret holding the API key has a value:
+  `aws secretsmanager get-secret-value --secret-id <stack-name>/integrations/simli-api-key --query SecretString --output text`
+- Ensure the Simli API key is valid and has not expired. An expired or revoked
+  key is reported by Simli at session start, not at deploy time
 
 ### Issue: Avatar Shows But Lips Don't Move
 

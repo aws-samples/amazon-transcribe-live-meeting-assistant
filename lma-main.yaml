@@ -1802,21 +1802,23 @@ Resources:
   # ARN and fetches the value on first use.
   #
   # Each is named under ${AWS::StackName}/integrations/ so an operator rotating
-  # one can find it in the Secrets Manager console next to the per-user
+  # one can address it by a name they can predict, next to the per-user
   # credentials this deployment already keeps there
-  # (${AWS::StackName}/zoom-credentials/<cognito sub>).
+  # (${AWS::StackName}/zoom-credentials/<cognito sub>). That is a deliberate
+  # difference from the four secrets the AI stack and the WebSocket transcriber
+  # stack create, which set no Name and so get a generated one: nothing
+  # addresses those by name, and the rotation procedures for these do.
   #
-  # DeletionPolicy is Delete rather than the EnableDataRetentionOnDelete
-  # conditional used for DynamoDB tables and S3 buckets, and matches the four
-  # secrets the AI stack and the WebSocket transcriber stack already create.
-  # Two reasons: the value here is an operator input that also exists at the
-  # provider and in the stack parameter, so a retained copy preserves nothing
-  # that is not already recoverable; and these secrets carry explicit names, so
-  # a retained copy would hold its name indefinitely against a redeployment of
-  # the same stack name, where a deleted one releases it once Secrets Manager's
-  # recovery window elapses (documented in docs/infrastructure-and-security.md,
-  # because recreating a stack of the same name inside that window still needs
-  # the old names cleared).
+  # DeletionPolicy is Delete, not the EnableDataRetentionOnDelete conditional
+  # used for DynamoDB tables and S3 buckets. The value here is an operator
+  # input that also exists at the provider and in the stack parameter, so a
+  # retained copy preserves nothing that is not already recoverable, and with a
+  # fixed name a retained copy would hold that name indefinitely. Delete
+  # releases it once Secrets Manager's recovery window elapses; the window
+  # itself cannot be shortened from CloudFormation (the resource exposes no
+  # RecoveryWindowInDays), so the two cases where a held name fails a stack
+  # update are documented in
+  # docs/infrastructure-and-security.md#the-30-day-recovery-window.
   ##########################################################################
   TavilyApiKeySecret:
     Type: AWS::SecretsManager::Secret

@@ -161,7 +161,10 @@ The stack keeps the API key in AWS Secrets Manager, in a secret named
 `<stack-name>/integrations/elevenlabs-api-key` encrypted with the deployment's
 customer-managed KMS key. The Virtual Participant's task definition names the
 secret's ARN and the ECS agent sets `ELEVENLABS_API_KEY` in the container when
-each meeting's task starts. If you already keep the key in Secrets Manager, set
+each meeting's task starts; under the default `VPLaunchType=MICROVM` the MicroVM
+launcher does the equivalent, by a different route —
+see [Integration Credentials](infrastructure-and-security.md#integration-credentials).
+If you already keep the key in Secrets Manager, set
 `ElevenLabsApiKeySecretArn` to that secret's ARN instead of
 `ElevenLabsApiKey` — supply one form or the other, not both.
 

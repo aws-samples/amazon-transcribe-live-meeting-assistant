@@ -102,32 +102,62 @@ uses none of these features creates none of them.
 These secrets are deleted with the stack, regardless of
 `EnableDataRetentionOnDelete` — that parameter protects the meeting data a
 deployment produced, and these values also exist at the provider and in the
-stack parameter. Deleting a secret schedules it for deletion rather than
-removing it at once, and the name is held for the recovery window, so
-**deleting an LMA stack and recreating it with the same name within 30 days
-fails on the first integration secret.** Either recreate under a different
-stack name, or clear the old names first:
-
-```bash
-aws secretsmanager delete-secret \
-  --secret-id <stack-name>/integrations/tavily-api-key \
-  --force-delete-without-recovery
-```
+stack parameter.
 
 **How each consumer reads its credential.** The Virtual Participant's ECS task
 definition lists the secret's ARN under `Secrets` rather than a value under
 `Environment`. The ECS agent resolves it with the **task execution role** and
 sets the environment variable in the container when the task starts, so the
 value is not part of the task definition and does not appear in
-`DescribeTaskDefinition` or the ECS console. Under `VPLaunchType=MICROVM`
-there is no ECS agent, so the MicroVM launcher Lambda performs the same
-resolution before the container starts. The meeting assist Lambda is given the
-secret's ARN in `TAVILY_API_KEY_SECRET_ARN` and fetches the value itself,
+`DescribeTaskDefinition` or the ECS console. The meeting assist Lambda is given
+the secret's ARN in `TAVILY_API_KEY_SECRET_ARN` and fetches the value itself,
 caching it for the life of the execution environment.
+
+Under `VPLaunchType=MICROVM`, the default, there is no ECS agent, so the MicroVM
+launcher Lambda performs the same resolution — on every launch, so that a
+rotated credential reaches the next meeting. The delivery route differs from the
+ECS one and is worth knowing: a MicroVM takes its configuration from the
+Virtual Participant task registry (the `…-VPTaskRegistry` DynamoDB table the AI
+stack creates) rather than from an injected environment, so the launcher writes
+the resolved values into the `vpConfig` attribute of that participant's item and
+the container reads them from there and applies them to its environment before
+starting. That table is encrypted with the deployment's customer-managed key and
+has point-in-time recovery enabled, each item expires by TTL on `expiresAt`
+roughly nine hours after the launch, and the Virtual Participant's own task role
+can read items in it.
 
 Every grant is scoped to the specific secret ARNs a deployment was given — no
 wildcards — together with `kms:Decrypt` restricted to requests made through
 Secrets Manager.
+
+### The 30-day recovery window
+
+Each secret carries a fixed name, which is what makes the rotation procedures
+below usable: you address the secret by a name you can predict. The cost is
+that Secrets Manager does not remove a deleted secret immediately. It schedules
+it for deletion and holds the name for a 30-day recovery window, and creating a
+secret of a held name fails. `AWS::SecretsManager::Secret` exposes no way to
+shorten that window, so there are two cases to know about.
+
+**Clearing a credential and setting it again inside 30 days.** Blanking
+`SimliApiKey` (say) deletes `<stack-name>/integrations/simli-api-key`; putting a
+value back within the window fails the stack update on `CreateSecret`, because
+the name is still held. This is the likelier of the two cases — no stack
+deletion is involved, only two ordinary parameter changes — so if you are
+turning a feature off and expect to turn it back on soon, clear the name as
+below rather than waiting.
+
+**Deleting a stack and recreating it under the same name inside 30 days.** The
+same thing, for every configured credential at once, on the first one
+CloudFormation reaches.
+
+Either way, recover by removing the held name outright and retrying:
+
+```bash
+aws secretsmanager delete-secret \
+  --secret-id <stack-name>/integrations/simli-api-key \
+  --force-delete-without-recovery
+```
 
 ### Bringing your own secret
 
@@ -138,11 +168,27 @@ via a companion parameter (`TavilyApiKeySecretArn`,
 value or the ARN, not both — the stack refuses a deployment that sets both
 forms of the same credential.
 
-A secret you provide must hold the credential as its entire `SecretString`
-(not a JSON document). If it is encrypted with your own KMS key rather than the
-AWS managed `aws/secretsmanager` key, that key's policy must grant `kms:Decrypt`
-to the reader: the Virtual Participant task execution role for the four
-container credentials, or the meeting assist function's role for the Tavily key.
+A secret you provide must:
+
+- **Live in the same account and the same region as the stack.** The parameters
+  accept any well-formed Secrets Manager ARN, because a CloudFormation
+  `AllowedPattern` cannot interpolate the stack's own region or account to check
+  it, but only a same-account, same-region secret works. The `kms:Decrypt`
+  grants are conditioned on `kms:ViaService = secretsmanager.<stack
+  region>.<url suffix>`, so a secret in another region is not decryptable;
+  and a secret in another account additionally needs a resource policy on the
+  secret itself granting the reader, which this stack neither creates nor
+  checks for. Either mistake shows up when the credential is first used — a VP
+  task that cannot start, or a web search that reports itself unavailable — not
+  at deploy time.
+- **Hold the credential as its entire `SecretString`**, not as a field of a JSON
+  document.
+- **Grant `kms:Decrypt` to the reader in its key policy**, if it is encrypted
+  with your own KMS key rather than the AWS managed `aws/secretsmanager` key.
+  The reader is the Virtual Participant task execution role for the four
+  container credentials, or the meeting assist function's role for the Tavily
+  key. Under `VPLaunchType=MICROVM` it is the MicroVM launcher function's role
+  instead, for the reason given above.
 
 ### Rotating a credential
 
@@ -151,10 +197,13 @@ There are two ways to roll a key, and they differ in when it takes effect.
 **Through the stack (recommended).** Update the CloudFormation parameter with
 the new value and apply the stack update. CloudFormation stores a new version
 of the secret. No new task definition revision and no forced ECS deployment are
-needed: Virtual Participant tasks are started one per meeting, so the next
-meeting to start reads the new value. For the Tavily key, the stack update
-replaces the Lambda's configuration, which retires the existing execution
-environments, so the new key is in use on the next invocation.
+needed: Virtual Participant tasks are started one per meeting, and the current
+version of the secret is read at the start of each one, so the next meeting to
+start uses the new value. That holds on every launch type — under
+`VPLaunchType=MICROVM` the launcher resolves the secrets per launch for exactly
+this reason. For the Tavily key, the stack update replaces the Lambda's
+configuration, which retires the existing execution environments, so the new
+key is in use on the next invocation.
 
 **Directly in Secrets Manager.** Store a new version of the secret in the
 Secrets Manager console or with

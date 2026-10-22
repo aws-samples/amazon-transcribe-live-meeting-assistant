@@ -1509,8 +1509,13 @@ Resources:
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       # The ECS agent resolves a container definition's Secrets with the task
-      # EXECUTION role, so the read lives here and not on TaskRole: the
-      # container's own credentials never grant access to these secrets.
+      # EXECUTION role, so the read lives here and not on TaskRole: on the ECS
+      # launch types the container's own credentials grant no access to these
+      # secrets. Under MICROVM the launcher Lambda resolves them instead and
+      # stages the values in the VP task registry, which the container does
+      # read with TaskRole -- see VPMicrovmLauncherRole below and
+      # docs/infrastructure-and-security.md#integration-credentials.
+      #
       # Scoped to the specific secret ARNs this deployment was given, and the
       # whole policy is absent when no integration is configured.
       #

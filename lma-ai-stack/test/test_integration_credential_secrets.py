@@ -356,7 +356,9 @@ def test_the_microvm_launcher_resolves_the_task_definitions_secrets(vp: dict):
 
     Under MICROVM the container is handed its static configuration by the
     launcher rather than by the ECS agent, so the launcher is what turns a
-    `Secrets` entry into an environment variable.
+    `Secrets` entry into an environment variable. Its behaviour is tested in
+    lma-virtual-participant-stack/test/test_microvm_launcher_secrets.py; this
+    is the template-side check that the two have not drifted apart.
     """
     source = (
         VP_TEMPLATE.parent / "lambda_functions" / "microvm_launcher" / "index.py"
@@ -364,7 +366,10 @@ def test_the_microvm_launcher_resolves_the_task_definitions_secrets(vp: dict):
     assert "_integration_secrets" in source
     assert "get_secret_value" in source
     for name in VP_CONTAINER_SECRETS:
-        assert name in source, f"{name} is not redacted by the launcher's logging"
+        assert name in source, (
+            f"the task definition injects {name}, but the MicroVM launcher does "
+            f"not name it, so that launch type would not supply it"
+        )
 
 
 # ---------------------------------------------------------------------------

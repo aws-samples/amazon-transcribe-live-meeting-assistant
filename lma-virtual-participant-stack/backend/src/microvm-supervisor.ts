@@ -275,18 +275,27 @@ async function defaultFetchConfig(vpId: string): Promise<PerMeetingConfig> {
     const region = process.env.AWS_REGION || process.env.VP_AWS_REGION || 'us-east-1';
     const client = new DynamoDBClient({ region });
     for (let attempt = 1; attempt <= 10; attempt += 1) {
+        let raw: string | undefined;
         try {
             const result = await client.send(
                 new GetItemCommand({ TableName: tableName, Key: { vpId: { S: vpId } } }),
             );
-            const raw = result.Item?.vpConfig?.S;
-            if (raw) {
+            raw = result.Item?.vpConfig?.S;
+        } catch (err) {
+            console.error('[supervisor] error reading staged config:', err);
+        }
+        // Parsed outside the try, and reported by error name only. The staged
+        // config holds the meeting's credentials, and a V8 SyntaxError quotes
+        // the fragment of its input that it stopped on.
+        if (raw) {
+            try {
                 const parsed = JSON.parse(raw) as Record<string, string>;
                 console.log(`[supervisor] loaded ${Object.keys(parsed).length} staged config values`);
                 return parsed as PerMeetingConfig;
+            } catch (err) {
+                const name = err instanceof Error ? err.name : 'error';
+                console.error(`[supervisor] staged config is not valid JSON (${name})`);
             }
-        } catch (err) {
-            console.error('[supervisor] error reading staged config:', err);
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
     }
