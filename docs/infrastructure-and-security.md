@@ -192,6 +192,11 @@ A secret you provide must:
 
 ### Rotating a credential
 
+Rotating a third-party credential from time to time is ordinary practice, and
+each of these providers issues replacements from its own console. Doing it once
+for each credential you have configured also means every value the deployment
+uses is one held as described above — the mechanics are the same either way.
+
 **Storing the new value.** Either update the CloudFormation parameter and apply
 the stack update, which stores a new version of the secret for you, or store
 the new version yourself in the Secrets Manager console or with
