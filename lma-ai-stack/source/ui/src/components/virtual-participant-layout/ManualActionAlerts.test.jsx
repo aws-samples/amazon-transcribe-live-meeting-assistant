@@ -175,13 +175,12 @@ describe('alerts across the updates one prompt produces', () => {
   });
 
   it('notifies once for a prompt, through every update that follows it', () => {
-    // The chain that keeps biting. Every write to the VP record returns the
-    // open prompt along with whatever it changed, and this PR deliberately
-    // allows writes while a prompt is open: a join sub-step from the join loop
-    // that runs alongside the dialog watchdog, and a CallId link mid-meeting.
-    // Each of those arrives as a fully described prompt, so only comparing it
-    // with what is already on screen keeps the user from being chimed at
-    // repeatedly for a prompt they are already looking at.
+    // Writes while a prompt is open are normal: a join sub-step from the join
+    // loop that runs alongside the dialog watchdog, and the CallId link
+    // mid-meeting. Each returns the open prompt along with whatever it changed,
+    // so each arrives as a fully described prompt — and only comparing it with
+    // what is already on screen keeps the user from being chimed at repeatedly
+    // for a prompt they are already looking at.
     //
     // The debounce window is allowed to elapse between each update, which is
     // both the realistic timing — a prompt waits on a human for minutes while

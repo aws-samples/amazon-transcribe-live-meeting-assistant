@@ -182,22 +182,31 @@ Alongside `status`, the VP record carries two fields describing the current stat
 | Field | Contents |
 | --- | --- |
 | `errorMessage` | The prose the UI shows under the status. It is the detail line for every status, not only failures: the reason a meeting ended on `COMPLETED` (*"Asked to leave by Jeremy."*), the current sub-step while the VP is still `JOINING` (*"Waiting to be admitted…"*), and the error on `FAILED`. |
-| `endTrigger` | The machine-readable counterpart: which branch the VP exited through, from the closed set below. Written on `COMPLETED` and `FAILED`, so join outcomes across many meetings can be counted with a query over the VP table instead of a search through container logs. |
+| `endTrigger` | The machine-readable counterpart: which branch the VP exited through, from the vocabulary below. Written on `COMPLETED` and `FAILED`, so join outcomes across many meetings can be counted with a query over the VP table instead of a search through container logs. |
 
 Reaching `JOINED`, `ACTIVE` or `COMPLETED` without a new detail to show clears `errorMessage`, so a message from earlier in the same run — a join sub-step, or an attempt that did not work out before a later one did — is not still displayed next to a VP that is in the meeting.
 
-`endTrigger` takes one of a fixed set of values, which is what makes it worth grouping by:
+Most of the values are fixed strings, and those are the ones to group by:
 
 | Group | Values |
 | --- | --- |
 | Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
 | Asked to leave | `chat` |
-| Meeting ended | `post-meeting-screen`, `meeting-ended-text`, `webex-text:…` (the matched phrase, slugged), `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `ACS_REMOVED …`, `ACS_DISCONNECTED …`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
-| Everyone else left | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui-…`, `attendee-badge-missing` |
+| Meeting ended | `post-meeting-screen`, `meeting-ended-text`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
+| Everyone else left | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui-counter_gone`, `participants-ui-page_dead`, `attendee-badge-missing` |
 | Ran out of time or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
-| Threw instead of exiting | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
+| Threw during the join | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
 
-Whatever follows the first colon in a trigger is reduced to a lower-case, hyphenated slug before the value is stored, and the whole thing is capped at 100 characters. That is what makes the three interpolated forms countable — `error:…` and `poll-error:…`, which quote a platform error message, and `webex-text:…`, which quotes the phrase a meeting-end was matched on: two reports of the same failure become the same string and so group together, whatever the wording or punctuation around them. The full message is in `errorMessage`, which is where prose belongs. A trigger with no colon — the fixed upper-case ones such as `ZOOM_END_DIALOG` — is stored exactly as it is.
+Four forms are a fixed prefix followed by a detail the platform supplied, so the prefix is what groups and the part after the colon varies:
+
+| Form | Prefix meaning | Detail |
+| --- | --- | --- |
+| `ACS_REMOVED:…`, `ACS_DISCONNECTED:…` | The Teams SDK reported the call ended | The platform's own `code` and `subCode` |
+| `webex-text:…` | A Webex meeting-end phrase appeared on the page | Which of the five phrases matched |
+| `error:…` | The join threw and the message was not one the six fixed `error:` values cover | The start of the underlying message |
+| `poll-error:…` | The Chime meeting-end poll threw | The start of the underlying message |
+
+Whatever follows the first colon is reduced to a lower-case, hyphenated slug before the value is stored, and the whole value is capped at 100 characters. That is what keeps the four forms above countable: two reports of the same failure become the same string whatever the wording or punctuation around them. It also means an `error:` or `poll-error:` value can be one this page does not list, because the message it slugs comes from the browser rather than from LMA — group those by prefix, and read `errorMessage` for the detail, which is where prose belongs. A trigger with no colon is stored exactly as it is.
 
 `COMPLETED` means the VP was in the meeting. A VP that never got in — not admitted, or stuck on the pre-join screen — ends as `FAILED` with *"Could not join the meeting (was not admitted, or stuck on the join screen)."*, on every platform.
 

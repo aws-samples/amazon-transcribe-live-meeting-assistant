@@ -182,10 +182,10 @@ export const shouldClearStatusDetail = (status: string, statusDetail?: string): 
  * without the prompt fields would describe an open prompt in generic terms.
  *
  * Carrying the full set is this side's half of that. The other half is in the
- * component: because every write returns the open prompt along with whatever it
- * changed, and a write while a prompt is open is something this PR deliberately
- * allows, the component compares an incoming prompt with the one on screen and
- * acts only on a new one.
+ * component: a write while a prompt is open is normal — a join sub-step, the
+ * CallId link — and each one returns the open prompt along with whatever it
+ * changed, so the component compares an incoming prompt with the one on screen
+ * and acts only on a new one.
  *
  * One list rather than per-mutation lists is the point: the next write added
  * here cannot forget. `vp-status-updates.test.ts` checks this list against the
@@ -838,13 +838,14 @@ export class VirtualParticipantStatusManager {
    * the callers that clear opportunistically, without knowing whether a prompt
    * was ever raised.
    *
-   * The status to resume can only come from reading the row first, and the
-   * value read could be stale by the time the write lands — the same
-   * read-modify-write shape this file's `setCallId` exists to avoid. The
-   * difference is that the write is conditional: supplying a status together
-   * with `clearManualAction` makes the mutation apply only while the row is
-   * still MANUAL_ACTION_REQUIRED, so a status written in between stands and
-   * this write drops out rather than overwriting it.
+   * Both decisions here are taken from a read of the row, and the row can move
+   * between that read and the write — the same read-modify-write shape
+   * `setCallId` exists to avoid. The difference is that the resolver makes both
+   * forms of this write conditional on the row still being what the read saw:
+   * restoring a status applies only while the row is still
+   * MANUAL_ACTION_REQUIRED, and clearing without a status applies only while it
+   * is not. Either way the writer with current information wins and this call
+   * drops out, which it reports rather than retries.
    */
   async clearManualAction(): Promise<boolean> {
     try {
@@ -903,13 +904,21 @@ export class VirtualParticipantStatusManager {
         result = await this.signAndSendGraphQLRequest(mutation, variables);
       } catch (error) {
         if (isConditionalCheckFailure(error)) {
-          // Not a failure: the VP left MANUAL_ACTION_REQUIRED between the read
-          // and the write, so whatever wrote that status is more current than
-          // the one this call was going to restore. Nothing is on screen for
-          // the prompt either, because the UI stops showing it as soon as the
-          // status moves off MANUAL_ACTION_REQUIRED.
+          // Not a failure. The row stopped matching what the read above saw,
+          // so another writer acted on more current information than this call
+          // has, and the condition in the resolver let that writer win.
           console.log(
-            `VP ${this.participantId} is no longer prompting — leaving its status alone`,
+            variables.input.status
+              ? // Was restoring a prompt's interrupted status; the VP has since
+                // left MANUAL_ACTION_REQUIRED, and the status that took it
+                // there is newer than the one being restored. The prompt is off
+                // the screen either way, because the UI stops showing one as
+                // soon as the status moves off MANUAL_ACTION_REQUIRED.
+                `VP ${this.participantId} is no longer prompting — leaving its status alone`
+              : // Was clearing opportunistically, having read a row that was
+                // not prompting; one has been raised since, and removing its
+                // description now would leave a prompt nothing can describe.
+                `VP ${this.participantId} is now prompting — leaving the prompt in place`,
           );
           return true;
         }

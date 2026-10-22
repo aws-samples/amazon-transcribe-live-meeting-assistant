@@ -312,28 +312,51 @@ def test_update_virtual_participant_clear_flags_remove_their_attributes() -> Non
             )
 
 
-def test_resuming_a_prompts_status_is_conditional_on_it_still_prompting() -> None:
-    """The status to resume comes from a read, so the write has to be guarded.
+def test_clearing_a_prompt_is_conditional_on_the_row_the_caller_read() -> None:
+    """Both forms of the clear decide what to do from a read, so both are guarded.
 
-    Clearing a prompt and supplying a status together mean "put back the status
-    this prompt interrupted", and that status can only have come from reading
-    the row first. The condition makes the write apply only while the row is
-    still prompting, so a status written in between stands.
+    With a status the caller is restoring the status a prompt interrupted, which
+    holds only while that prompt is still current. Without one it is clearing
+    opportunistically, having seen a row that was not prompting — so the
+    condition is the converse, and a prompt raised since does not have its
+    description removed from under it. Either way the writer with current
+    information wins.
     """
     resolver = _resolver("Mutation", "updateVirtualParticipant")
-    guard = re.search(
-        r"#if\(\s*\$util\.defaultIfNull\(\$ctx\.args\.input\.clearManualAction, false\) == true"
-        r"\s*&&\s*!\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\)\s*\)(.*?)#end",
+    # `clearManualAction` gates two blocks: the REMOVE clause earlier in the
+    # template, and the condition. Both are wanted elsewhere, so select by
+    # content rather than by position.
+    gates = re.findall(
+        r"#if\(\s*\$util\.defaultIfNull\(\$ctx\.args\.input\.clearManualAction, false\)"
+        r" == true\s*\)(.*?)\n        #end",
         resolver.block,
         re.S,
     )
-    assert guard, "the condition is not gated on clearing a prompt with a status"
-    body = guard.group(1)
+    bodies = [gate for gate in gates if '"condition"' in gate]
+    assert len(bodies) == 1, "expected exactly one clearManualAction-gated condition block"
+    body = bodies[0]
     assert '"condition"' in body, "the gated branch emits no condition block"
     assert "MANUAL_ACTION_REQUIRED" in body, "the condition does not name the prompting status"
-    # The condition's own expression names are separate from the update's, so a
-    # name reused across the two blocks would be undeclared in one of them.
+    # The condition's expression names are a separate block from the update's, so
+    # a name shared between them would be undeclared in one of the two.
     assert '"#conditionStatus": "status"' in body
+
+    resume, opportunistic = (
+        re.search(
+            r"#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*"
+            r"#set\( \$conditionExpression = \"([^\"]+)\" \)",
+            body,
+        ),
+        re.search(
+            r"#else\s*\n\s*#set\( \$conditionExpression = \"([^\"]+)\" \)",
+            body,
+        ),
+    )
+    assert resume and opportunistic, "the two condition expressions are not both set"
+    assert resume.group(1) == "#conditionStatus = :promptingStatus"
+    assert opportunistic.group(1) == (
+        "attribute_not_exists(#conditionStatus) OR #conditionStatus <> :promptingStatus"
+    )
 
 
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:

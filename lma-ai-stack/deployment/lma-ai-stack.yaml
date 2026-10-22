@@ -6706,19 +6706,31 @@ Resources:
             "expressionNames": $utils.toJson($expNames),
             "expressionValues": $utils.toJson($expValues)
           }
-        ## Clearing a prompt *and* supplying a status means one thing: put back **
-        ## the status that prompt interrupted. The caller can only know that **
-        ## status by having read the row first, so this write is conditional on **
-        ## the prompt still being the current state -- a status written in **
-        ## between, by the user ending the meeting or by the task reaper, then **
-        ## stands rather than being replaced by a value chosen before it **
-        ## existed. The caller treats the resulting conditional-check failure **
-        ## as the VP having moved on. Clearing a prompt *without* a status **
-        ## carries no condition: that is the path for a VP that is not **
-        ## prompting, which must not be made to depend on it. **
-        #if( $util.defaultIfNull($ctx.args.input.clearManualAction, false) == true && !$util.isNullOrBlank($ctx.args.input.status) )
+        ## A caller clearing a prompt decided what to do from a read of the row, **
+        ## so both of its forms are conditional on the row still being what that **
+        ## read saw. Whichever way the race goes, the writer that acted on **
+        ## current information wins and this one drops out; the caller treats the **
+        ## conditional-check failure as exactly that. **
+        ##                                                                        **
+        ## With a status, the caller is restoring the status a prompt interrupted, **
+        ## which is only correct while that prompt is still the current state -- **
+        ## otherwise a status written in between, by the user ending the meeting **
+        ## or by the task reaper, would be replaced by a value chosen before it **
+        ## existed. **
+        ##                                                                        **
+        ## Without one, the caller is clearing opportunistically, having seen a **
+        ## row that was not prompting -- so the condition is the converse. A **
+        ## prompt raised between that read and this write would otherwise have **
+        ## its description removed from under it, leaving a row that reports a **
+        ## prompt it cannot describe. **
+        #if( $util.defaultIfNull($ctx.args.input.clearManualAction, false) == true )
+          #if( !$util.isNullOrBlank($ctx.args.input.status) )
+            #set( $conditionExpression = "#conditionStatus = :promptingStatus" )
+          #else
+            #set( $conditionExpression = "attribute_not_exists(#conditionStatus) OR #conditionStatus <> :promptingStatus" )
+          #end
           ,"condition": {
-            "expression": "#conditionStatus = :promptingStatus",
+            "expression": "$conditionExpression",
             "expressionNames": { "#conditionStatus": "status" },
             "expressionValues": { ":promptingStatus": $util.dynamodb.toDynamoDBJson("MANUAL_ACTION_REQUIRED") }
           }

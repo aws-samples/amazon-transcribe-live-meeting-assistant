@@ -286,6 +286,28 @@ test('a VP that stopped prompting mid-clear keeps the status that overtook it', 
   assert.equal(await manager.clearManualAction(), true);
 });
 
+test('a VP that started prompting mid-clear keeps its prompt', async () => {
+  // The opportunistic callers clear without knowing whether a prompt was ever
+  // raised, so they read a row that is not prompting. If one is raised between
+  // that read and the write, removing its description would leave a row
+  // reporting a prompt that nothing can describe — so the resolver's converse
+  // condition declines the write, and that is the expected outcome here too.
+  process.env.GRAPHQL_ENDPOINT = 'https://example.invalid/graphql';
+  const manager: any = new VirtualParticipantStatusManager(VP_ID);
+  let sentInput: any;
+  manager.signAndSendGraphQLRequest = async (query: string, variables: any) => {
+    if (query.includes('query GetVirtualParticipant')) {
+      return { getVirtualParticipant: { id: VP_ID, status: VP_STATUS.ACTIVE } };
+    }
+    sentInput = variables.input;
+    throw new Error('GraphQL errors: [{"errorType":"DynamoDB:ConditionalCheckFailedException"}]');
+  };
+  assert.equal(await manager.clearManualAction(), true);
+  // No status was sent, which is what selects the converse condition.
+  assert.equal(sentInput.status, undefined);
+  assert.equal(sentInput.clearManualAction, true);
+});
+
 test('isConditionalCheckFailure tells that outcome from a real failure', () => {
   assert.equal(
     isConditionalCheckFailure(new Error('DynamoDB:ConditionalCheckFailedException')),
