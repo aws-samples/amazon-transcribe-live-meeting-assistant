@@ -230,10 +230,14 @@ lint-cfn: ## Validate CloudFormation templates with cfn-lint
 		exit 1; \
 	fi
 
+# scripts/pr_review is linted alongside the Lambda tree so that the fix command
+# this target provides covers everything lint-cicd checks. Nothing else under
+# scripts/ is included: those files predate this and reformatting them here would
+# make an unrelated diff.
 lint-python: ## Lint Python Lambda functions with ruff
 	@echo "Running ruff on Lambda functions..."
-	cd $(AI_STACK_DIR) && ruff check --fix $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
-	cd $(AI_STACK_DIR) && ruff format $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
+	cd $(AI_STACK_DIR) && ruff check --fix $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) $(CURDIR)/scripts/pr_review
+	cd $(AI_STACK_DIR) && ruff format $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) $(CURDIR)/scripts/pr_review
 	@echo -e "$(GREEN)✅ All Python linting passed!$(NC)"
 
 lint-bandit: ## Run bandit security scan on Python Lambda functions
@@ -282,12 +286,12 @@ lint-cicd: ## CI/CD lint — checks only, no modifications
 		echo -e "$(RED)ERROR: cfn-lint failed!$(NC)"; \
 		exit 1; \
 	fi
-	@if ! (cd $(AI_STACK_DIR) && ruff check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)); then \
+	@if ! (cd $(AI_STACK_DIR) && ruff check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) $(CURDIR)/scripts/pr_review); then \
 		echo -e "$(RED)ERROR: Ruff linting failed!$(NC)"; \
 		echo -e "$(YELLOW)Run 'make lint-python' locally to fix these issues.$(NC)"; \
 		exit 1; \
 	fi
-	@if ! (cd $(AI_STACK_DIR) && ruff format --check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)); then \
+	@if ! (cd $(AI_STACK_DIR) && ruff format --check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) $(CURDIR)/scripts/pr_review); then \
 		echo -e "$(RED)ERROR: Code formatting check failed!$(NC)"; \
 		echo -e "$(YELLOW)Run 'make format' locally to fix these issues.$(NC)"; \
 		exit 1; \

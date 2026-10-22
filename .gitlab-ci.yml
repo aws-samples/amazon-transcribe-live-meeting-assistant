@@ -234,10 +234,10 @@ srt_security_review:
 ai_mr_review:
   stage: fast_checks
   interruptible: true
-  # One review is a few minutes; --max-mrs 3 bounds the (currently unreachable)
-  # sweep. 45m leaves room for a slow run without letting a wedged one hold a
-  # runner for hours. Matches the GitHub job's timeout-minutes.
-  timeout: 45m
+  # Sized so the SWEEP's own bound is the limit that fires, not this one: --max-mrs
+  # 2 at --timeout 1200 is a 40-minute worst case plus ~3 minutes of install. See
+  # the arithmetic at the script block. Matches the GitHub job's timeout-minutes.
+  timeout: 70m
   allow_failure: true
 
   # Reviewing is read-only, but it reads the whole checkout at the MR head and a
@@ -283,9 +283,19 @@ ai_mr_review:
     # with an empty stderr on the first real session. So the RUNTIME is asserted
     # below rather than the intent — a check on the download URL stays green when
     # the download is what failed.
+    #
+    # ⚠️ `$NODE_PIN` comes from the MR's OWN `.nvmrc` and is interpolated into a URL
+    # in a job that holds credentials, so it is QUOTED here. The `code_checks` job
+    # above (line ~76) and `nightly_publish` spell the same two lines unquoted;
+    # `nightly_deploy` already uses the quoted form. Quoting does not validate the
+    # value — a hostile `.nvmrc` still produces a wrong URL — but it stops the
+    # expansion being word-split and re-globbed before `curl` ever sees it, and
+    # `curl -f` fails closed on anything that is not a real release tarball.
     - NODE_ARCH=$(case "$(uname -m)" in x86_64) echo x64;; aarch64|arm64) echo arm64;; *) echo x64;; esac)
     - NODE_PIN=$(tr -d '[:space:]' < .nvmrc)
-    - curl -fsSL https://nodejs.org/dist/v$NODE_PIN/node-v$NODE_PIN-linux-$NODE_ARCH.tar.xz | tar -xJ -C /usr/local --strip-components=1
+    - >-
+      curl -fsSL "https://nodejs.org/dist/v$NODE_PIN/node-v$NODE_PIN-linux-$NODE_ARCH.tar.xz"
+      | tar -xJ -C /usr/local --strip-components=1
     - node --version
     - >-
       node -e 'const m=+process.versions.node.split(".")[0];
@@ -310,35 +320,65 @@ ai_mr_review:
     # exercised by its own pipeline — it takes effect once merged. That is the same
     # trade the instruction-file pinning makes, for the same reason.
     #
-    # The `else` arm covers the first landing, when the target branch has no copy
-    # yet. It says so loudly rather than proceeding silently, because "no pinned
-    # copy" and "pinned successfully" must not look alike in a log.
+    # ⚠️ ON FAILURE THIS SKIPS THE REVIEW AND EXITS 0, in step with the GitHub
+    # workflow. It used to warn and then RUN THE MR'S OWN COPY, which is the one
+    # thing this step exists to prevent — the warning made it visible in a log but
+    # did not stop it. The two platforms now behave identically: no pinned harness
+    # means no review.
+    #
+    # `exit 1` stays for the two paths that always exist on the target branch. A
+    # failure to resolve those means a rename nobody updated here, which is a real
+    # defect; the other two legitimately do not exist until this change merges.
     - |
       TARGET="${CI_MERGE_REQUEST_TARGET_BRANCH_NAME:-develop}"
       git fetch -q origin "$TARGET"
-      HARNESS="scripts/pr_review/ai_pr_review.py"
-      HARNESS="$HARNESS .claude/skills/pr-review.md"
-      HARNESS="$HARNESS .claude/skills/pr-review-ci.md"
-      HARNESS="$HARNESS CLAUDE.md"
-      if git checkout FETCH_HEAD -- $HARNESS 2>/dev/null; then
-        echo "Harness pinned to origin/$TARGET: $HARNESS"
-      else
-        echo "⚠️  Could not pin the harness to origin/$TARGET — it does not carry"
-        echo "    all of: $HARNESS"
-        echo "    Running the MR's own copy. Expected only on the MR that adds this."
+      ALWAYS=".claude/skills/pr-review.md CLAUDE.md"
+      HARNESS="scripts/pr_review/ai_pr_review.py .claude/skills/pr-review-ci.md"
+      HARNESS="$HARNESS $ALWAYS"
+
+      MISSING=""
+      for path in $HARNESS; do
+        if ! git cat-file -e "FETCH_HEAD:$path" 2>/dev/null; then
+          MISSING="$MISSING $path"
+        fi
+      done
+
+      if [ -n "$MISSING" ]; then
+        echo "⚠️  origin/$TARGET does not carry:$MISSING"
+        echo "    NOT running the MR's own copy of the reviewer."
+        for path in $MISSING; do
+          case " $ALWAYS " in
+            *" $path "*)
+              echo "❌ $path always exists on $TARGET, so it has been renamed or"
+              echo "   removed without this step's path list being updated."
+              exit 1
+              ;;
+          esac
+        done
+        echo "    Everything missing is a file this MR itself adds, so there is"
+        echo "    nothing to fix: no review will run and this job stays green."
+        exit 0
       fi
+
+      # Unquoted on purpose: $HARNESS is a LIST and must word-split into four
+      # pathspecs. Quoting it passes one argument containing spaces, matching nothing.
+      git checkout FETCH_HEAD -- $HARNESS
+      echo "Harness pinned to origin/$TARGET:$HARNESS"
     - |
       if [ -n "$CI_MERGE_REQUEST_IID" ]; then
         python3 scripts/pr_review/ai_pr_review.py \
           --forge gitlab --remote origin --mr "$CI_MERGE_REQUEST_IID"
       else
-        # --max-mrs 3, not the script's default of 10: at --timeout 1200 a batch of
-        # ten has a 200-minute worst case against this job's 45m timeout, so the
-        # sweep's own bound would never be the one that fires and the job would be
-        # truncated mid-review. Three fits. (Unreachable today — no schedule rule
-        # exists, so CI always takes the --mr branch above.)
+        # --max-mrs 2, and the arithmetic has to close: at --timeout 1200 (20
+        # minutes) a batch of two is a 40-minute worst case, plus ~3 minutes of Node
+        # and CLI install, against this job's 70m timeout. So the SWEEP's bound is
+        # the one that fires and the job timeout is never reached mid-review, which
+        # is the whole point of having a bound. It was 3 against a 45m timeout, which
+        # is 63 > 45 — the job limit would have fired first and cut a review off
+        # halfway. (Unreachable today: no schedule rule exists, so CI always takes
+        # the --mr branch above.)
         python3 scripts/pr_review/ai_pr_review.py \
-          --forge gitlab --remote origin --all-open --max-mrs 3
+          --forge gitlab --remote origin --all-open --max-mrs 2
       fi
 
   # Carries exactly the text that was published, and nothing more — see the

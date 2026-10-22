@@ -88,6 +88,17 @@ Parameters:
       template update rather than happening silently.
     AllowedPattern: 'claude-[a-z0-9.-]+'
     Default: claude-opus-5-5
+  PermissionsBoundaryArn:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional IAM permissions boundary to attach to the review role. Leave EMPTY
+      for no boundary. Required by .claude/skills/infrastructure.md for every IAM
+      role in this repository, and named on pr-review.md's own red-flag list, so
+      this template follows the same convention as lma-ai-stack.yaml: accounts that
+      mandate a boundary can deploy without editing the template, and accounts that
+      do not are unaffected.
+    AllowedPattern: '^$|^arn:aws[a-zA-Z-]*:iam::\d{12}:policy/.+$'
   ExistingOidcProviderArn:
     Type: String
     Description: >-
@@ -101,6 +112,7 @@ Parameters:
 
 Conditions:
   CreateOidcProvider: !Equals [!Ref ExistingOidcProviderArn, '']
+  HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, '']]
 
 Resources:
   # ⚠️ ACCOUNT-GLOBAL RESOURCE. Deleting this stack removes the provider, which
@@ -144,8 +156,13 @@ Resources:
         Actions. Grants no deploy, no S3 and no read of any other service.
       # GitHub's OIDC tokens are short-lived and STS caps a web-identity session at
       # 1 hour regardless, so this is the ceiling rather than a target. A review
-      # takes a few minutes; the job's own timeout is 45 minutes.
+      # takes a few minutes; the job's own timeout is 70 minutes, which the sweep's
+      # own --max-mrs bound keeps it well inside.
       MaxSessionDuration: 3600
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -178,6 +195,19 @@ Resources:
                 #   repo:<owner>/<repo>:ref:refs/heads/<default branch>
                 #       the scheduled sweep and any workflow_dispatch, both of
                 #       which GitHub runs from the DEFAULT branch.
+                #
+                # ⚠️ NARROWABLE, and worth doing if this account ever holds anything
+                # beyond this role. `repo:<owner>/<repo>:pull_request` admits ANY
+                # pull_request-triggered workflow in this repository that requests
+                # `id-token: write` - not just ai-pr-review.yml - because GitHub does
+                # not vary the `sub` claim by workflow. Two ways to tighten it, both
+                # needing a second setup step so they are deliberately not the
+                # default here: add a `token.actions.githubusercontent.com:
+                # job_workflow_ref` condition naming this workflow file, or move the
+                # job into a GitHub `environment` and gate on `:environment:`. Today
+                # the grant is bedrock:InvokeModel on one model family, so the blast
+                # radius of the wider trust is a Bedrock bill rather than access to
+                # anything.
                 #
                 # ⚠️ If the organization ever configures a customized OIDC subject
                 # claim, these literals stop matching and every run fails at the

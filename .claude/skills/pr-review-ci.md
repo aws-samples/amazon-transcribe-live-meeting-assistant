@@ -79,9 +79,9 @@ Worked examples of the shape, on invented findings:
   resolver needs the Admin-group check the sibling resolvers apply before a
   write; see `updateOtherThing.js:11` for the form.
 
-- 🟡 **Should fix** — `lma-ai-stack/source/ui/src/components/Panel.jsx:88` —
+- 🟡 **Should fix** — `lma-ai-stack/source/ui/src/components/InventedPanel.jsx:88` —
   Values rendered through `dangerouslySetInnerHTML` need `DOMPurify.sanitize()`
-  first, as `MeetingSummary.jsx` does.
+  first, as the sibling components do.
 
 - 🟡 **Should fix** — `lma-ai-stack/deployment/lma-ai-stack.yaml:2140` — This new
   policy statement needs a resource ARN rather than `"*"`, or a `cfn-nag`
@@ -125,12 +125,25 @@ discloses nothing. There is no run artifact or job log to defer the detail to:
 so neither is a private channel. The security channel in `CONTRIBUTING.md` is the
 only one that is.
 
-**This is enforced, not trusted.** `scan_for_disclosure` in
-`scripts/pr_review/ai_pr_review.py` scans the composed comment before it is
-posted. If it matches an attack-narrative shape or an uncleared flaw-class term,
-**the whole review is withheld** — not edited, not trimmed — and a short neutral
-notice is posted in its place. The findings are then lost. So write every security
-finding in the shape above the first time; there is no second pass.
+**There is a backstop, and it is not a safety net you can lean on.**
+`scan_for_disclosure` in `scripts/pr_review/ai_pr_review.py` scans the composed
+comment before it is posted. If it matches an attack-narrative shape or an
+uncleared flaw-class term, **the whole review is withheld** — not edited, not
+trimmed — and a short neutral notice is posted in its place. The findings are
+then lost.
+
+Two consequences, and they pull in the same direction:
+
+- **It will not catch everything.** It is regular expressions over English.
+  Fifteen realistically-phrased disclosure sentences were put to an earlier
+  version of it and all fifteen passed. So a clean scan is not evidence that a
+  sentence is publishable. **You** are the control; the scan is a net under you.
+- **When it does fire, it costs the whole review.** There is no second pass and
+  no partial publication.
+
+So write every security finding in the shape above the first time, and when you
+are unsure whether a sentence is sayable, use the escape hatch below rather than
+hoping.
 
 ### 3. Post the review — that is the whole point
 

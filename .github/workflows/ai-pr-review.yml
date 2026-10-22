@@ -15,23 +15,63 @@
 # the context pointless: GitHub reports a conditionally skipped job as SUCCEEDING,
 # so requiring it would let the gate pass without a review having run.
 #
+# ⚠️ A NOTE ON THIS FILE'S OWN COMMENTS, decided deliberately rather than by
+# accident. The header below and the docstring in ai_pr_review.py repeatedly name a
+# control together with what its absence would permit — "persist-credentials is off
+# because otherwise the token is left in .git/config", "without pinning, the reviewer
+# is the pull request's own copy of itself", "/etc/hostname was served without
+# --restricted". A strict reading of CLAUDE.md's Security Disclosure Hygiene section
+# bites there: that is the shape it calls malformed.
+#
+# It is kept, for three reasons that are specific and do not generalise:
+#
+#   * Every gap described is in THIS JOB'S OWN MACHINERY or in the documented
+#     behaviour of GitHub Actions and the Claude Code CLI — not in the LMA product,
+#     not in anything a deployment runs, and not in anything an operator of LMA could
+#     act on.
+#   * Each control is present in the same commit as its explanation, so no version of
+#     this repository has ever had the gap. The rule exists to stop a reader learning
+#     what USED to be possible; here nothing was.
+#   * The explanation is the control's own protection. These are lines a future
+#     maintainer will be tempted to delete as noise, and a comment that says "do not
+#     remove this" without saying why gets removed. Several of them are measurements
+#     that cost a round trip to obtain.
+#
+# The exception stops here. It does NOT extend to the review output, which is what
+# the output contract in .claude/skills/pr-review-ci.md §2 governs and what the guard
+# enforces: a finding about the LMA product is published as the file, the line and
+# the control needed, with no account of what its absence permits.
+#
 # ⚠️ THIS REPOSITORY IS PUBLIC AND THIS JOB PUBLISHES MODEL-WRITTEN TEXT ON IT.
 # CLAUDE.md's "Security Disclosure Hygiene" section applies to every artifact this
 # repository publishes, and a review comment is one of them. Three things follow,
 # and all three are deliberate:
 #
-#   1. The output contract is in .claude/skills/pr-review-ci.md §2: a published
-#      security finding names the file, the line and the control that is needed —
-#      never the attack, the precondition, the flaw class, or what the control's
-#      absence would permit.
-#   2. It is ENFORCED, not trusted. `scan_for_disclosure` in ai_pr_review.py scans
-#      the composed comment before posting. On a match the whole review is
-#      withheld and a short neutral notice is posted instead. The guard is a set of
-#      narrative SHAPES plus flaw-class terms with clearance patterns, not a word
-#      list, because CLAUDE.md explicitly permits the ordinary senses (a cache
-#      bypass, a dependency CVE bump, prompt injection as a product concern,
-#      Teams' own lobby-bypass setting) and a guard that withheld reviews over
-#      those would be deleted within a week.
+#   1. THE CONTROL IS THE OUTPUT CONTRACT in .claude/skills/pr-review-ci.md §2: a
+#      published security finding names the file, the line and the control that is
+#      needed — never the attack, the precondition, the flaw class, or what the
+#      control's absence would permit. That file is pinned to the target branch
+#      before the reviewer runs, so a pull request cannot edit its own contract.
+#   2. `scan_for_disclosure` in ai_pr_review.py is A BACKSTOP, NOT THE CONTROL, and
+#      the difference matters to anyone deciding whether to read a comment before it
+#      posts. It scans the composed comment and withholds the whole review on a
+#      match, and it catches the common phrasings — but it is regular expressions
+#      over English and the tail it misses is not small. Measured: of fifteen
+#      realistically-phrased disclosure sentences put to an earlier version, ALL
+#      FIFTEEN would have published, including "the JWT is accepted without checking
+#      its signature" and "there is no authentication on this route". Five of those
+#      phrasings are now covered and more will always exist. Do not treat a clean
+#      run as proof the comment is safe; treat the contract as the thing being
+#      relied on.
+#      The guard is narrative SHAPES plus flaw-class terms with clearance patterns,
+#      and for the broad shapes a required-context list — not a word list, because
+#      CLAUDE.md explicitly permits the ordinary senses (a cache bypass, a
+#      dependency CVE bump, prompt injection as a product concern, Teams' own
+#      lobby-bypass setting). That calibration is measured too, and in the other
+#      direction: an earlier version withheld 15 of 49 of this repository's own
+#      documentation pages, which is a complete paid review destroyed per trip.
+#      `test_the_guard_does_not_fire_on_this_repositorys_own_prose` re-measures it
+#      on every CI run.
 #   3. ⚠️ THE WITHHELD TEXT IS WRITTEN NOWHERE — not to the artifact below, not to
 #      the job log. The obvious design, which the harness this was ported from
 #      uses, is "full review to the run artifact, safe version to the comment". It
@@ -80,6 +120,13 @@
 # looks installed and does nothing) and `DefaultBranch` in
 # scripts/pr_review/cfn/github-oidc-review-role.yaml must be changed to match, or
 # the scheduled run also loses its credentials.
+#
+# ⚠️ The other way the cron stops silently: GitHub DISABLES scheduled workflows
+# after 60 days with no repository activity, and re-enabling is a manual click in
+# the Actions tab. This repository is active enough that it should not trigger, and
+# the `pull_request` trigger is unaffected either way — but a sweep that has been
+# disabled looks exactly like a sweep with nothing to do, so check there first if
+# fork pull requests stop getting reviewed.
 
 name: AI PR Review
 
@@ -145,10 +192,12 @@ jobs:
   ai_pr_review:
     name: AI PR Review (advisory)
     runs-on: ubuntu-latest
-    # A review is a few minutes plus ~2 for Node and the CLI. The sweep is bounded
-    # to 3 pull requests below, so 45m covers a slow sweep without letting a wedged
-    # run hold a runner for hours.
-    timeout-minutes: 45
+    # Sized so the SWEEP's own bound is the limit that fires, not this one: --max-mrs
+    # 2 at --timeout 1200 is a 40-minute worst case, plus ~3 minutes of Node and CLI
+    # install. 70 leaves real headroom over that 43 without letting a wedged run hold
+    # a runner for hours. See the arithmetic at the Review step — the three numbers
+    # are a set and changing one means redoing the sum.
+    timeout-minutes: 70
 
     # Reviewing somebody's work in progress is noise they did not ask for, and the
     # draft phase is where pushes are frequent, so this is a cost control as well as
@@ -233,30 +282,69 @@ jobs:
       #
       # The anonymous fetch works because this repository is public and
       # persist-credentials is off above.
+      #
+      # ⚠️ ON FAILURE THIS SKIPS THE REVIEW AND STAYS GREEN. It must not run the
+      # pull request's own copy, and it must not go red either: this job is
+      # deliberately unable to gate a merge, and a red ❌ on a job that gates nothing
+      # is the same noise the fork condition above exists to avoid. So the outcome is
+      # a step output the Review step reads, not a non-zero exit.
+      #
+      # The case that makes this concrete is the pull request that ADDS this file:
+      # `ai_pr_review.py` and `pr-review-ci.md` do not exist on the target branch
+      # yet, so the checkout genuinely fails and there is nothing wrong. `exit 1`
+      # stays for the two paths that always exist on the target branch — a failure
+      # to resolve those means a rename nobody updated here, which is a real defect
+      # and should be loud.
       - name: Pin the review harness to the target branch
+        id: pin
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git fetch -q origin "$TARGET_BRANCH"
-          HARNESS="scripts/pr_review/ai_pr_review.py"
-          HARNESS="$HARNESS .claude/skills/pr-review.md"
-          HARNESS="$HARNESS .claude/skills/pr-review-ci.md"
-          HARNESS="$HARNESS CLAUDE.md"
-          # The unquoted expansion is required, not an oversight: $HARNESS is a
-          # LIST of paths and must word-split into four arguments. Quoting it
-          # passes one argument containing spaces, which `git checkout --` treats
-          # as a single pathspec that matches nothing — so the step would take the
-          # else branch and refuse to run, on every pull request.
-          # shellcheck disable=SC2086
-          if git checkout FETCH_HEAD -- $HARNESS 2>/dev/null; then
-            echo "Harness pinned to origin/$TARGET_BRANCH: $HARNESS"
-          else
-            echo "❌ Could not pin the harness to origin/$TARGET_BRANCH — it does not"
-            echo "   carry all of: $HARNESS"
-            echo "   REFUSING to run this checkout's own copy. On a pull request that"
-            echo "   would make the reviewer the PR's own copy of the reviewer, which"
-            echo "   is the one thing this step exists to prevent. Fix the path list."
-            exit 1
+          # Always present on the target branch; absence means a rename.
+          ALWAYS=".claude/skills/pr-review.md CLAUDE.md"
+          HARNESS="scripts/pr_review/ai_pr_review.py .claude/skills/pr-review-ci.md"
+          HARNESS="$HARNESS $ALWAYS"
+
+          MISSING=""
+          for path in $HARNESS; do
+            if ! git cat-file -e "FETCH_HEAD:$path" 2>/dev/null; then
+              MISSING="$MISSING $path"
+            fi
+          done
+
+          if [ -z "$MISSING" ]; then
+            # The unquoted expansion is required, not an oversight: $HARNESS is a
+            # LIST of paths and must word-split into four arguments. Quoting it
+            # passes one argument containing spaces, which `git checkout --` treats
+            # as a single pathspec matching nothing.
+            # shellcheck disable=SC2086
+            git checkout FETCH_HEAD -- $HARNESS
+            echo "pinned=true" >> "$GITHUB_OUTPUT"
+            echo "Harness pinned to origin/$TARGET_BRANCH:$HARNESS"
+            exit 0
           fi
+
+          echo "pinned=false" >> "$GITHUB_OUTPUT"
+          echo "⚠️  origin/$TARGET_BRANCH does not carry:$MISSING"
+          echo "    NOT running this checkout's own copy. On a pull request that"
+          echo "    would make the reviewer the PR's own copy of the reviewer, which"
+          echo "    is the one thing this step exists to prevent."
+
+          for path in $MISSING; do
+            case " $ALWAYS " in
+              *" $path "*)
+                echo "❌ $path always exists on $TARGET_BRANCH, so it has been renamed"
+                echo "   or removed without this step's path list being updated."
+                echo "   That is a real defect, not the first-landing case. Fix the list."
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "    Everything missing is a file this change itself adds, so there is"
+          echo "    nothing to fix: no review will run and this job stays green. It"
+          echo "    starts working on the next pull request after this one merges."
+          exit 0
 
       # The role ARN is NOT a secret — it is safe in a workflow file — but it embeds
       # an AWS account id, and this repository keeps private account ids out of the
@@ -303,8 +391,26 @@ jobs:
       # execution beside that credential — the model's sandbox is irrelevant, because
       # such a step runs before the model does. The reviewer needs nothing installed:
       # it is stdlib Python driving the `claude` CLI and `git`.
+      #
+      # ⚠️ `continue-on-error` IS NOT TIDINESS — it is the only thing that keeps this
+      # job from putting a red ❌ on every open pull request during a Bedrock
+      # incident. The harness exits 1 when a review FAILS TO RUN (a throttle, an
+      # unreachable endpoint, a `claude` crash), which is correct — that is tooling
+      # breakage and the log should say so — but GitHub has no `allow_failure`, so
+      # without this the failure becomes a failed check on a job that gates nothing.
+      # It is this platform's equivalent of `allow_failure: true` on the GitLab job,
+      # and the test suite asserts both.
+      #
+      # ⚠️ NOT YET PASSED, and deliberately: `--fail-on-skip`. Once the role variable
+      # is set, every remaining `Skip` cause on this platform is real breakage — the
+      # token always exists in a non-fork run and the role check already gates this
+      # step, so a skip can only mean a missing `claude`, an unreachable Bedrock or a
+      # 401/403/404 from the API, each of which currently produces a GREEN job with no
+      # review. Add it as the third activation step once reviews are landing; see
+      # scripts/pr_review/README.md.
       - name: Review
-        if: steps.role.outputs.configured == 'true'
+        if: steps.role.outputs.configured == 'true' && steps.pin.outputs.pinned == 'true'
+        continue-on-error: true
         env:
           # Read by the parent process to post the comment, and stripped from the
           # model's environment by SECRET_ENV_KEYS in ai_pr_review.py.
@@ -316,12 +422,20 @@ jobs:
               --forge github --remote origin --mr "$PR_NUMBER" \
               --target-branch "$TARGET_BRANCH"
           else
-            # --max-mrs 3, not the script's default of 10: at --timeout 1200 a batch
-            # of ten has a 200-minute worst case against this job's 45m limit, so the
-            # sweep's own bound would never be the one that fires and the job would be
-            # cut off mid-review. Three fits.
+            # --max-mrs 2, not the script's default of 10, and the arithmetic has to
+            # close: at --timeout 1200 (20 minutes) a batch of two has a 40-minute
+            # worst case, plus ~3 minutes of Node and CLI install, against
+            # timeout-minutes: 70. So the SWEEP's bound is the one that fires and the
+            # job limit is never reached mid-review, which is the whole point of
+            # having a bound.
+            #
+            # It was --max-mrs 3 against timeout-minutes: 45, which is 60 + 3 > 45 —
+            # the job limit would have fired first and cut a review off halfway,
+            # exactly the failure the bound exists to prevent. Changing either number
+            # means redoing this sum; test_the_cost_controls_are_still_in_place
+            # checks it rather than the literal value.
             python3 scripts/pr_review/ai_pr_review.py \
-              --forge github --remote origin --all-open --max-mrs 3 \
+              --forge github --remote origin --all-open --max-mrs 2 \
               --target-branch "$TARGET_BRANCH"
           fi
 
