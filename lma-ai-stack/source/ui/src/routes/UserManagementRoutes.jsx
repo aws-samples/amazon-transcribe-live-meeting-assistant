@@ -4,7 +4,7 @@
  * See the LICENSE file in the project root for full license information.
  */
 import React, { useState } from 'react';
-import { AppLayout, Alert, Box, Flashbar, SpaceBetween } from '@cloudscape-design/components';
+import { AppLayout, Flashbar, SpaceBetween } from '@cloudscape-design/components';
 
 import CallAnalyticsTopNavigation from '../components/call-analytics-top-navigation';
 import Navigation from '../components/call-analytics-layout/navigation';
@@ -12,22 +12,13 @@ import UserManagementPage from '../components/user-management-page/UserManagemen
 import Breadcrumbs from '../components/user-management-page/breadcrumbs';
 import ToolsPanel from '../components/user-management-page/tools-panel';
 import { appLayoutLabels } from '../components/common/labels';
+import AdminOnly from '../components/common/AdminOnly';
 import useNotifications from '../hooks/use-notifications';
 import useAppContext from '../contexts/app';
-import useUserGroups from '../hooks/use-user-groups';
-
-const AccessDenied = () => (
-  <Box padding="xl">
-    <Alert type="error" header="Access denied">
-      Only <strong>Admin</strong> users can view this page.
-    </Alert>
-  </Box>
-);
 
 const UserManagementRoutes = () => {
   const { navigationOpen, setNavigationOpen } = useAppContext();
   const notifications = useNotifications();
-  const { isAdmin } = useUserGroups();
   const [toolsOpen, setToolsOpen] = useState(false);
 
   return (
@@ -44,13 +35,11 @@ const UserManagementRoutes = () => {
         toolsOpen={toolsOpen}
         onToolsChange={({ detail }) => setToolsOpen(detail.open)}
         content={
-          isAdmin ? (
+          <AdminOnly feature="users and their roles">
             <SpaceBetween size="l">
               <UserManagementPage />
             </SpaceBetween>
-          ) : (
-            <AccessDenied />
-          )
+          </AdminOnly>
         }
         ariaLabels={appLayoutLabels}
       />

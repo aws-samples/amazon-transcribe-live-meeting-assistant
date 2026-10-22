@@ -213,10 +213,14 @@ type Mutation @aws_iam {
 	unshareVirtualParticipant(input: UnshareVirtualParticipantInput!): UnshareVirtualParticipantOutput @aws_cognito_user_pools @aws_iam
 	sendChatMessage(input: SendChatMessageInput!): SendChatMessageOutput @aws_cognito_user_pools
 	addChatToken(input: AddChatTokenInput!): ChatToken @aws_iam
-	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools
-	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools
+	# The four configuration records below are account-wide: one stored item drives
+	# every meeting in the deployment. Writing them is an administrator operation,
+	# pinned to the "Admin" Cognito group here and re-checked in each resolver
+	# Lambda so the directive is not the only place the constraint exists.
+	updateChatButtonConfig(input: UpdateChatButtonConfigInput!): UpdateChatButtonConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateAsrConfig(input: UpdateAsrConfigInput!): UpdateAsrConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
-	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools
+	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -264,10 +268,16 @@ type Query @aws_cognito_user_pools
 	listVirtualParticipants: [VirtualParticipant] @aws_cognito_user_pools @aws_iam
 	getVirtualParticipant(id: ID!): VirtualParticipant @aws_cognito_user_pools @aws_iam
 	parseMeetingInvitation(invitationText: String!): String @aws_cognito_user_pools @aws_iam
+	# Read by the Meeting Assist chat panel for whoever is viewing the meeting, to
+	# render the quick-action buttons, so every signed-in user reads it.
 	getChatButtonConfig(ChatButtonConfigId: ID!): ChatButtonConfig @aws_cognito_user_pools @aws_iam
-	getNovaSonicConfig(NovaSonicConfigId: ID!): NovaSonicConfig @aws_cognito_user_pools @aws_iam
+	getNovaSonicConfig(NovaSonicConfigId: ID!): NovaSonicConfig @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	# Read by the Stream Audio and Upload Audio forms for whoever is starting a
+	# meeting -- the capture sample rate and the speaker-count field depend on which
+	# engine is selected -- so every signed-in user reads it. The Virtual Participant
+	# task role reads it with SigV4, which is what @aws_iam is here for.
 	getAsrConfig(AsrConfigId: ID!): AsrConfig @aws_cognito_user_pools @aws_iam
-	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools @aws_iam
+	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools

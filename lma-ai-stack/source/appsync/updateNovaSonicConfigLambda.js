@@ -6,7 +6,11 @@
 
 /**
  * AppSync Lambda resolver for updateNovaSonicConfig mutation
- * Delegates to Lambda function for input validation and security filtering
+ *
+ * Delegates to a Lambda function, which validates the input against the allowed
+ * field list and re-checks the caller's group membership. `ctx.identity` is
+ * forwarded so the function reads the caller's groups from the validated token
+ * rather than from the mutation arguments.
  */
 
 import { util } from '@aws-appsync/utils';

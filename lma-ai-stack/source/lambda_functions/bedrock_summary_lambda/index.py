@@ -32,6 +32,21 @@ LLM_PROMPT_TEMPLATE_TABLE_NAME = os.environ["LLM_PROMPT_TEMPLATE_TABLE_NAME"]
 DEFAULT_PROMPT_TEMPLATES_PK = "DefaultSummaryPromptTemplates"
 CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
 
+# A prompt template is stored under a key of the form "N#Title", where N orders
+# the sections of the summary. Kept identical to the pattern that the
+# update_llm_prompt_template_resolver applies on write, so the reader and the
+# writer agree on which attributes of the item are prompts.
+PROMPT_KEY_PATTERN = re.compile(r"^\d+#")
+
+# The item's other attributes, which are bookkeeping rather than prompts: the
+# partition key, the seeded guidance text, and the record of who last saved it.
+# Used only to keep the log quiet about them -- selection is the pattern above,
+# not this set -- so that a key which is neither a prompt nor one of these gets
+# a line of its own. The only way to store such a key is to add it to the table
+# by hand, and the operator who did that is the one who needs to know it is not
+# being used as a prompt.
+NON_PROMPT_KEYS = frozenset({"LLMPromptTemplateId", "*Information*", "UpdatedBy", "UpdatedAt"})
+
 # Optional environment variables allow region / endpoint override for bedrock Boto3
 BEDROCK_REGION = (
     os.environ["BEDROCK_REGION_OVERRIDE"]
@@ -88,8 +103,14 @@ def get_templates_from_dynamodb(prompt_override):
             mergedPromptTemplates = {**defaultPromptTemplates, **customPromptTemplates}
             print("Merged Prompt Template:", mergedPromptTemplates)
 
+            # A prompt key is "N#Title" -- the form the seeded *Information* text
+            # states, and the one the sequence-number stripping below already
+            # assumes. Reading by that form rather than by excluding the attribute
+            # names known today keeps the item's other attributes out of the prompt
+            # list: the partition key, the *Information* text, the record of who
+            # last saved it, and whatever is added to the item later.
             for k in sorted(mergedPromptTemplates):
-                if k != "LLMPromptTemplateId" and k != "*Information*":
+                if PROMPT_KEY_PATTERN.match(k):
                     prompt = mergedPromptTemplates[k]["S"]
                     # skip if prompt value is empty, or set to 'NONE'
                     if prompt and prompt != "NONE":
@@ -97,6 +118,12 @@ def get_templates_from_dynamodb(prompt_override):
                         index = k.find("#")
                         k_stripped = k[index + 1 :]
                         templates.append({k_stripped: prompt})
+                elif k not in NON_PROMPT_KEYS:
+                    print(
+                        f"Not using '{k}' as a summary prompt: a prompt is stored "
+                        "under a key of the form 'N#Title', where N is a sequence "
+                        "number that orders the sections of the summary."
+                    )
         except Exception as e:
             print("Exception:", e)
             raise (e)
