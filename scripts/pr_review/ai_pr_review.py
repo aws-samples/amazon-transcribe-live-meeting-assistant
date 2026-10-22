@@ -146,6 +146,7 @@ Environment
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import os
 import re
@@ -1206,12 +1207,17 @@ class Github:
         older commit-status API that external CI still posts to. A summary built from
         only the first would call a red external status green.
 
-        Best-effort by design. A failure here must not cost a review, so anything
-        other than a clean answer returns "" and the review is told the status was not
-        supplied — the same state as the GitLab side. It is NOT allowed to raise
+        Best-effort by design. Every transport and protocol failure returns "" and the
+        review is told the status was not supplied — the same state as the GitLab side
+        — so a flaky endpoint cannot cost a review. In particular it must not raise
         :class:`Skip`, which :func:`_review_all` treats as a global precondition
-        failure and uses to BREAK out of a sweep: a flaky checks endpoint would
-        otherwise cancel the reviews of every remaining request.
+        failure and uses to BREAK out of a sweep: that would cancel the reviews of
+        every remaining request over a cosmetic field.
+
+        What it does NOT swallow, stated so the tuple below and this paragraph agree:
+        a programming error in this method (``AttributeError``, ``NameError``) and
+        anything deriving from ``BaseException`` (``KeyboardInterrupt``,
+        ``SystemExit``). The reasoning is at the ``except`` clause.
 
         ⚠️ **But it is loud about failing, and that is not decoration.** Swallowing
         the error quietly is how this feature would die without anyone noticing: the
@@ -1224,23 +1230,65 @@ class Github:
         so the warning names the cause a reader should check first.
         """
         counts: dict[str, int] = {}
+        unread = 0
         try:
             runs, _ = self._request("GET", self._url(f"/commits/{sha}/check-runs?per_page=100"))
             if isinstance(runs, dict):
-                for run in runs.get("check_runs") or []:
+                listed = runs.get("check_runs") or []
+                for run in listed:
                     # A queued or in-progress run has conclusion None.
                     outcome = run.get("conclusion") or run.get("status") or "unknown"
                     counts[str(outcome)] = counts.get(str(outcome), 0) + 1
+                # ⚠️ One page of 100, and `Link` is deliberately not followed — but the
+                # shortfall is REPORTED rather than hidden. Above 100 check runs the
+                # counts below would otherwise undercount silently, which is the one
+                # thing a status line must not do: a reader would see "100 success"
+                # and have no way to know that twenty more were never looked at.
+                # Reporting the gap is cheaper than pagination and fits the rest of
+                # this harness, which says when it does not know. LMA's pull requests
+                # run about eight check runs, so this is a guard against a future
+                # shape rather than a present condition.
+                total = runs.get("total_count")
+                if isinstance(total, int) and total > len(listed):
+                    unread = total - len(listed)
             combined, _ = self._request("GET", self._url(f"/commits/{sha}/status"))
             if isinstance(combined, dict):
                 for context in combined.get("statuses") or []:
                     outcome = str(context.get("state") or "unknown")
                     counts[outcome] = counts.get(outcome, 0) + 1
-        except (Skip, Failure, AssertionError, KeyError, TypeError, ValueError) as error:
+        # ⚠️ THE TUPLE HAS TO MATCH WHAT CAN ACTUALLY ARRIVE, and an earlier version of
+        # it did not. :meth:`_request` converts failures at CONNECT time into
+        # ``Skip``/``Failure`` because urllib raises ``URLError`` there — but an error
+        # while reading the response BODY comes straight out of the ``with`` block
+        # unwrapped. A socket timeout is ``TimeoutError`` and a dropped connection is
+        # ``ConnectionResetError`` (both ``OSError``), and a short read is
+        # ``http.client.IncompleteRead``, which is an ``HTTPException`` and not an
+        # ``OSError`` at all. :func:`_review_all` handles only ``Skip``, ``Failure``
+        # and ``TimeoutExpired``, so any of those would have stopped the entire run —
+        # and after the second lookup, which runs once the model has been paid for,
+        # that means discarding a finished review. Verified by raising each one.
+        #
+        # ⚠️ NOT bare ``Exception``, deliberately. An ``AttributeError`` or
+        # ``NameError`` here means this method is broken, and silently degrading to
+        # "no CI status" is precisely the indistinguishable-from-working failure the
+        # warning below exists to prevent — a bug should surface in the test suite
+        # instead. The last-resort guard for the post-model call lives at that call
+        # site, where a finished review is at stake and the trade is different.
+        except (
+            Skip,
+            Failure,
+            OSError,
+            http.client.HTTPException,
+            AssertionError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as error:
             print(
-                f"  ⚠️  could not read the checks for {sha[:8]}; the review will be told "
-                f"it has no CI status. In a workflow the usual cause is a `permissions:` "
-                f"block without `checks: read` and `statuses: read` — every scope not "
+                f"  ⚠️  could not read the checks for {sha[:8]} "
+                f"({type(error).__name__}); the review will be told it has no CI "
+                f"status. In a workflow the usual cause is a `permissions:` block "
+                f"without `checks: read` and `statuses: read` — every scope not "
                 f"listed there is `none`. Cause: {str(error)[:200]}"
             )
             return ""
@@ -1259,6 +1307,11 @@ class Github:
         )
         if unfinished:
             summary += f" — {unfinished} still running, so this is NOT a final verdict"
+        if unread:
+            summary += (
+                f" (plus {unread} further check run(s) this summary did not read: only "
+                f"the first page of 100 is fetched, so treat these counts as a floor)"
+            )
         return summary
 
     def reviewed_shas(self, iid: int) -> set[tuple[str, int]]:
@@ -2202,6 +2255,30 @@ def compose_note(
     )
 
 
+def _write_artifact(path: Path, text: str) -> None:
+    """Write the review to the artifact directory, and never let that lose the review.
+
+    Found by asking the same question as the ``check_status`` wrapper above, of every
+    step that runs after the paid model call: ``Path.write_text`` raises ``OSError``
+    on a full or read-only filesystem, and :func:`_review_all` catches only
+    ``Failure`` and ``TimeoutExpired`` — so a failed artifact write would propagate
+    out of ``main`` as an uncaught traceback and kill the whole run, having already
+    paid for a review it then did not post.
+
+    The posted comment is the deliverable; the artifact is a convenience copy of it.
+    So a write failure is reported and stepped over, rather than being allowed to
+    prevent the posting it precedes.
+    """
+    try:
+        path.write_text(text)
+    except OSError as error:
+        print(
+            f"  ⚠️  could not write {path} ({type(error).__name__}: "
+            f"{str(error)[:120]}). The review itself is unaffected; only the "
+            f"artifact copy is missing."
+        )
+
+
 def review_one(
     forge: Forge | None,
     merge_request: MergeRequest,
@@ -2393,9 +2470,28 @@ def review_one(
     # see the note at the first sample. Still best-effort: a failure leaves whatever
     # the first sample found, which the footer then labels as the earlier reading
     # rather than silently presenting as fresh.
+    #
+    # ⚠️ AND WRAPPED, which is the one place in this module where a bare ``Exception``
+    # is the right answer. Everything from here to the ``post_note`` below exists to
+    # deliver work that has ALREADY BEEN PAID FOR, and this call is the only step in
+    # it that talks to the network. ``check_status`` enumerates the transport and
+    # protocol errors it expects and deliberately lets a programming error through so
+    # a bug surfaces in tests — that trade is right where nothing is at stake yet, and
+    # wrong here, where an unanticipated error would discard a finished review over a
+    # status line. So the enumeration stays for the diagnostics it gives, and this is
+    # the backstop under it. ``KeyboardInterrupt`` and ``SystemExit`` still propagate.
     fresh_status = ""
     if isinstance(forge, Github):
-        fresh_status = forge.check_status(merge_request.head_sha)
+        try:
+            fresh_status = forge.check_status(merge_request.head_sha)
+        except Exception as error:  # noqa: BLE001 - see the note above
+            print(
+                f"  ⚠️  the post-review checks lookup raised "
+                f"{type(error).__name__}, which check_status did not expect. The "
+                f"review is unaffected and will be posted with the earlier reading; "
+                f"this is worth fixing in check_status's except clause. Cause: "
+                f"{str(error)[:200]}"
+            )
 
     note = compose_note(
         merge_request,
@@ -2417,7 +2513,7 @@ def review_one(
         # Rule NAMES only, never the matched text: this log is public too.
         print(f"  ⚠️  withholding the review; output shapes not matched: {', '.join(tripped)}")
         published = withheld_notice(merge_request, tripped, args.model)
-        artifact.write_text(note if not args.redact_artifact else published)
+        _write_artifact(artifact, note if not args.redact_artifact else published)
         if args.dry_run or forge is None:
             return Outcome(
                 merge_request.iid,
@@ -2436,7 +2532,7 @@ def review_one(
             artifact,
         )
 
-    artifact.write_text(note)
+    _write_artifact(artifact, note)
     if args.dry_run or forge is None:
         return Outcome(
             merge_request.iid,

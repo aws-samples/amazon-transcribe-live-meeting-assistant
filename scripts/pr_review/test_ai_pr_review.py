@@ -34,6 +34,7 @@ that assert nothing.
 
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import re
 import sys
@@ -1405,6 +1406,35 @@ def test_the_ci_status_lookup_never_costs_a_review(monkeypatch) -> None:
     monkeypatch.setattr(forge, "_request", raise_skip)
     assert forge.check_status("abc1234") == ""
 
+    # ⚠️ THE ERRORS THAT ACTUALLY REACH IT, which the first version of the `except`
+    # tuple did not cover. `Github._request` converts failures at CONNECT time into
+    # Skip/Failure (urllib raises URLError there), but an error while reading the
+    # response BODY is raised as-is from inside the `with` block — a socket timeout
+    # or a reset peer — and `IncompleteRead` is an `http.client.HTTPException`, which
+    # is not an `OSError` at all. `_review_all` handles only Skip, Failure and
+    # TimeoutExpired, so any of these would have stopped the whole run.
+    #
+    # The worst case is the SECOND lookup, after the paid model call: a blip there
+    # would discard a finished review. That is the hazard this function's design is
+    # supposed to remove, and the tuple has to implement it, not just the docstring.
+    for error in (
+        TimeoutError("timed out reading the response"),
+        ConnectionResetError("peer reset the connection"),
+        http.client.IncompleteRead(b"half a payload"),
+        http.client.HTTPException("protocol confusion"),
+        OSError("something at the socket layer"),
+    ):
+
+        def raise_it(*args, _error=error, **kwargs):
+            raise _error
+
+        monkeypatch.setattr(forge, "_request", raise_it)
+        assert forge.check_status("abc1234") == "", (
+            f"{type(error).__name__} escaped check_status. _review_all does not "
+            f"handle it, so it would abort the run — and after the second lookup "
+            f"that means discarding a review that has already been paid for."
+        )
+
     def raise_unexpected(*args, **kwargs):
         raise ValueError("malformed payload")
 
@@ -1558,6 +1588,66 @@ def test_an_unfinished_check_is_stated_not_left_to_inference() -> None:
     assert "still running" not in forge.check_status("abc1234"), (
         "a finished run must not carry the caveat, or the caveat stops meaning anything"
     )
+
+
+def test_check_runs_beyond_the_first_page_are_declared_not_dropped() -> None:
+    """Only one page of 100 is fetched, so the shortfall has to be stated.
+
+    `Link` is deliberately not followed — LMA's pull requests run about eight check
+    runs, so pagination is a guard against a future shape rather than a present need.
+    But a summary that silently counted 100 of 120 would be the one thing a status
+    line must never be: a reader would see "100 success" with no way to know twenty
+    were never looked at. `total_count` makes the gap free to detect, so it is
+    reported and the counts are labelled a floor.
+    """
+    forge = review.Github("owner/name", "token")
+
+    def one_page_of_many(method, url, body=None):
+        if "check-runs" in url:
+            return {
+                "total_count": 120,
+                "check_runs": [{"conclusion": "success"}] * 100,
+            }, {}
+        return {"statuses": []}, {}
+
+    forge._request = one_page_of_many
+    summary = forge.check_status("abc1234")
+    assert "100 success" in summary
+    assert "20 further check run" in summary and "floor" in summary, (
+        f"got {summary!r}; the 20 unread runs must be declared, not dropped"
+    )
+
+    def one_complete_page(method, url, body=None):
+        if "check-runs" in url:
+            return {"total_count": 3, "check_runs": [{"conclusion": "success"}] * 3}, {}
+        return {"statuses": []}, {}
+
+    forge._request = one_complete_page
+    assert "further check run" not in forge.check_status("abc1234"), (
+        "a complete page must not carry the caveat, or it stops meaning anything"
+    )
+
+
+def test_nothing_after_the_paid_model_call_can_discard_the_review(tmp_path) -> None:
+    """The artifact write runs after the model has been paid for, so it cannot throw.
+
+    `Path.write_text` raises `OSError` on a full or read-only filesystem, and
+    `_review_all` catches only `Failure` and `TimeoutExpired` — so an unhandled one
+    would propagate out of `main` as a traceback and kill the whole run, having
+    already paid for a review it then did not post. The posted comment is the
+    deliverable and the artifact is a convenience copy, so a write failure is
+    reported and stepped over.
+
+    Found by asking the same question of every post-model step as the `check_status`
+    wrapper, which is where this round's review pointed.
+    """
+    missing = tmp_path / "no" / "such" / "dir" / "review-1.md"
+    review._write_artifact(missing, "a review body")  # must not raise
+    assert not missing.exists()
+
+    written = tmp_path / "review-1.md"
+    review._write_artifact(written, "a review body")
+    assert written.read_text() == "a review body"
 
 
 def test_the_published_file_count_describes_the_diff_that_was_supplied() -> None:
