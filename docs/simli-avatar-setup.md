@@ -76,7 +76,7 @@ When deploying or updating your LMA stack, set these parameters:
 | `VoiceAssistantProvider` | `amazon_nova_sonic` or `elevenlabs` | A voice assistant must be enabled |
 | `VoiceAssistantActivationMode` | `wake_phrase` or `always_active` | Choose activation mode |
 
-> **Important:** Although each Simli parameter shows as "(Optional)" in the CloudFormation template (the stack deploys fine without them), the avatar feature itself requires **both** `SimliApiKey` *and* `SimliFaceId` to be non-empty. Set both, or leave both blank.
+> **Important:** Although each Simli parameter shows as "(Optional)" in the CloudFormation template (the stack deploys fine without them), the avatar feature itself requires **both** an API key — as either `SimliApiKey` or `SimliApiKeySecretArn` — *and* `SimliFaceId` to be non-empty. Set both, or leave both blank.
 
 The stack keeps the API key in AWS Secrets Manager, in a secret named
 `<stack-name>/integrations/simli-api-key` encrypted with the deployment's

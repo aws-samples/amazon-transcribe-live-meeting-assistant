@@ -338,7 +338,11 @@ def test_the_task_role_is_not_the_one_granted_the_integration_secrets(vp: dict):
 
 
 def test_the_microvm_launcher_reads_the_same_secrets_scoped_to_their_arns(vp: dict):
-    """A MicroVM has no ECS agent, so the launcher resolves the same entries."""
+    """A MicroVM has no ECS agent, so the launcher resolves the same entries.
+
+    Asserted the same way as the task execution role above, decrypt grant
+    included, so the two roles that read these secrets cannot drift apart.
+    """
     role = vp["Resources"]["VPMicrovmLauncherRole"]
     statements = _statements(_policy_documents(role))
     reads = [s for s in statements if "secretsmanager:GetSecretValue" in _actions(s)]
@@ -349,6 +353,23 @@ def test_the_microvm_launcher_reads_the_same_secrets_scoped_to_their_arns(vp: di
             assert resource != "*", "the secret read is not scoped to an ARN"
             granted |= _refs(resource)
     assert granted == set(VP_CONTAINER_SECRETS.values())
+
+    # The secrets are encrypted with the customer-managed key, so a read needs
+    # a decrypt grant through Secrets Manager as well.
+    decrypts = [
+        s
+        for s in statements
+        if "kms:Decrypt" in _actions(s)
+        and "secretsmanager"
+        in str(s.get("Condition", {}).get("StringEquals", {}).get("kms:ViaService", ""))
+    ]
+    assert decrypts, (
+        "the MicroVM launcher can read the secrets but cannot decrypt them: no "
+        "kms:Decrypt statement conditioned on kms:ViaService for Secrets Manager"
+    )
+    assert all(
+        "CustomerManagedEncryptionKeyArn" in _refs(_resources(s)) for s in decrypts
+    )
 
 
 def test_the_microvm_launcher_resolves_the_task_definitions_secrets(vp: dict):
