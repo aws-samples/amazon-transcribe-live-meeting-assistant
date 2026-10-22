@@ -427,6 +427,97 @@ def test_microvm_soft_failures_route_to_the_existing_failure_state(
     assert "MarkVPFailed" in states
 
 
+# The condition every writer of a VP's status outside the container carries, so
+# none of them can overwrite a row whose outcome is already settled. Declared by
+# VPTaskReaperFunction (in Python, inline in this template) and used verbatim by
+# the state-machine states below; the container's entrypoint.sh carries the same
+# expression on its BOOTING write.
+TERMINAL_STATUS_GUARD = (
+    "attribute_exists(id) AND NOT (#s IN (:failed, :completed, :ended, :cancelled))"
+)
+
+# Every state-machine state that writes a status to the VP record, with the
+# attribute values its update is expected to need beyond the guard's four.
+STATUS_WRITING_STATES = {
+    "MarkVPFailed": {":err", ":now"},
+    "MarkWaitingForCapacity": {":status", ":now"},
+}
+
+
+@pytest.mark.parametrize("state_name", sorted(STATUS_WRITING_STATES))
+def test_status_writing_states_carry_the_terminal_status_guard(
+    template: dict, state_name: str
+) -> None:
+    """A settled VP must keep its outcome.
+
+    Nothing offline can evaluate a DynamoDB condition expression — the Step
+    Functions SDK integration passes it through as an opaque string and
+    ValidateStateMachineDefinition does not look inside it — so the guard is
+    asserted literally, and against the reaper's wording rather than a copy, so
+    the three writers cannot drift apart.
+    """
+    states = _rendered_states(template, is_microvm=False)
+    parameters = states[state_name]["Parameters"]
+    assert parameters.get("ConditionExpression") == TERMINAL_STATUS_GUARD
+    assert parameters["ExpressionAttributeNames"]["#s"] == "status"
+
+
+def test_the_reaper_uses_the_same_terminal_status_guard(raw: str) -> None:
+    """The guard above is the reaper's, not a second opinion about it."""
+    # The reaper builds it as an adjacent pair of Python string literals, so the
+    # comparison is against the concatenation with the quoting removed.
+    reaper_source = raw[raw.index("def _mark_failed("):]
+    reaper_source = reaper_source[: reaper_source.index("ExpressionAttributeNames")]
+    collapsed = re.sub(r"'\s*\n\s*'", "", reaper_source)
+    assert TERMINAL_STATUS_GUARD in collapsed
+
+
+@pytest.mark.parametrize("state_name", sorted(STATUS_WRITING_STATES))
+def test_status_writing_states_declare_no_unused_expression_values(
+    template: dict, state_name: str
+) -> None:
+    """DynamoDB rejects an update that declares a value it never references.
+
+    It rejects it at run time, which for these states is in the middle of a
+    launch, so the VP is left showing whatever status it had instead of the one
+    the state exists to write.
+    """
+    states = _rendered_states(template, is_microvm=False)
+    parameters = states[state_name]["Parameters"]
+    referenced = " ".join(
+        (parameters["UpdateExpression"], parameters.get("ConditionExpression", ""))
+    )
+    declared = set(parameters["ExpressionAttributeValues"])
+    unused = {value for value in declared if value not in referenced}
+    assert not unused, f"{state_name} declares unreferenced values: {sorted(unused)}"
+    # And the other direction: every placeholder used has to be declared.
+    used = set(re.findall(r":[A-Za-z][A-Za-z0-9_]*", referenced))
+    assert used - declared == set(), f"{state_name} uses undeclared values"
+    expected = STATUS_WRITING_STATES[state_name] | {
+        ":failed",
+        ":completed",
+        ":ended",
+        ":cancelled",
+    }
+    assert declared == expected
+
+
+def test_booting_status_write_carries_the_terminal_status_guard() -> None:
+    """The container's own first status write is guarded the same way.
+
+    entrypoint.sh writes BOOTING before Node starts, with the AWS CLI rather
+    than the SDK, and swallows every failure — so a conditional-check failure
+    there is simply a no-op, which is the intent for a VP that was cancelled
+    while its task was still being placed.
+    """
+    entrypoint = (TEMPLATE.parent / "backend" / "entrypoint.sh").read_text()
+    booting = entrypoint[entrypoint.index("push_booting_status() {"):]
+    booting = booting[: booting.index("\n}")]
+    assert f'--condition-expression "{TERMINAL_STATUS_GUARD}"' in booting
+    for value in (":failed", ":completed", ":ended", ":cancelled"):
+        assert f'\\"{value}\\"' in booting, f"{value} is used but never declared"
+
+
 def test_scheduled_ecs_target_is_unchanged(template: dict) -> None:
     """The ECS scheduled-meeting target must be preserved exactly.
 

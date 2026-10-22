@@ -20,6 +20,16 @@ import { VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
 
 const client = generateClient();
 
+/**
+ * Whether an incoming VP update takes the sticky manual-action alert down.
+ *
+ * True for every status except MANUAL_ACTION_REQUIRED itself: a prompt that
+ * has been dealt with returns the VP to whatever it was doing when the prompt
+ * arrived, which is as often a pre-admission status as a mid-meeting one. An
+ * update with no status at all is not evidence either way.
+ */
+export const shouldClearManualAlert = (status) => !!status && status !== 'MANUAL_ACTION_REQUIRED';
+
 const ON_UPDATE_VP = /* GraphQL */ `
   subscription OnUpdateVirtualParticipant {
     onUpdateVirtualParticipant {
@@ -306,6 +316,22 @@ const ManualActionAlerts = () => {
         status: vp.status,
         owner: vp.Owner,
       });
+      // The sticky MANUAL alert belongs to a prompt that is still open, so it
+      // goes as soon as the VP reports any other status — not only the three
+      // that mean it is in the meeting. A prompt raised before admission
+      // resumes JOINING or CONNECTING when it is cleared, and the alert has to
+      // go then too; the viewer's own banner, which keys off the status
+      // directly, already does. A payload carrying no status says nothing
+      // about the prompt and clears nothing.
+      //
+      // This also cancels a desktop notification still inside the 15s debounce
+      // window: most prompts clear quickly (a transient consent dialog the VP
+      // dismisses itself), and an OS notification for one of those is noise.
+      if (shouldClearManualAlert(vp.status)) {
+        setAlerts((prev) => prev.filter((a) => a.id !== `${vp.id}#manual`));
+        cancelPendingNotification(vp.id, ALERT_KIND.MANUAL);
+      }
+
       if (vp.status === 'MANUAL_ACTION_REQUIRED') {
         const alertId = `${vp.id}#manual`;
         if (dismissedRef.current.has(alertId)) return;
@@ -342,16 +368,6 @@ const ManualActionAlerts = () => {
           },
         ]);
         fireBrowserNotification(vp, ALERT_KIND.FAILED);
-      } else if (
-        // Auto-clear MANUAL alert when VP transitions out of MANUAL_ACTION_REQUIRED.
-        // Also cancel any pending desktop-notification scheduled within the
-        // 15s debounce window — most MANUAL_ACTION transitions auto-clear
-        // quickly (e.g. transient consent dialogs the VP itself dismisses)
-        // and we don't want to fire an OS notification for them.
-        ['JOINED', 'ACTIVE', 'COMPLETED'].includes(vp.status)
-      ) {
-        setAlerts((prev) => prev.filter((a) => a.id !== `${vp.id}#manual`));
-        cancelPendingNotification(vp.id, ALERT_KIND.MANUAL);
       }
     },
     [cancelPendingNotification, dismiss, fireBrowserNotification, openVPViewer],

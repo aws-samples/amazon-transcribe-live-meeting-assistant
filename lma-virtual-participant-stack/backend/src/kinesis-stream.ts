@@ -176,106 +176,30 @@ class KinesisStreamManager {
     }
   }
 
+  /**
+   * Link the CallId onto the VP record.
+   *
+   * Delegates to the status manager so there is one implementation of this
+   * write. It used to have its own: read the row's status, then send it back
+   * with the CallId. That is a read-modify-write of a field this call does not
+   * own, and unlike the equivalent at startup it runs here in the middle of the
+   * VP's life — `startTranscription` calls it moments before `markActive`
+   * reports ACTIVE, on the same code path — so losing that race put a
+   * recording VP back to whatever the read had returned.
+   *
+   * The CallId is already linked before the meeting starts (see `index.ts`,
+   * which calls `setCallId` with this same value). This remains as a
+   * belt-and-braces write for a VP whose startup link did not happen.
+   */
   private async linkCallToVP(vpId: string, callId: string): Promise<void> {
-    /**Link CallId to Virtual Participant record via GraphQL (matching Python implementation with SigV4)*/
-    try {
-        const graphqlEndpoint = details.graphqlEndpoint;
-        if (!graphqlEndpoint) {
-            console.log('Warning: GRAPHQL_ENDPOINT not set, cannot link CallId');
-            return;
-        }
-
-        // Use AWS SigV4 signing (matching Python SigV4Auth)
-        const { createSignedFetcher } = await import('aws-sigv4-fetch');
-        const signedFetch = createSignedFetcher({
-            service: 'appsync',
-            region: process.env.AWS_REGION || 'us-east-1',
-        });
-
-        // First, get the current VP to preserve existing status
-        const getQuery = `
-            query GetVirtualParticipant($id: ID!) {
-                getVirtualParticipant(id: $id) {
-                    id
-                    status
-                }
-            }
-        `;
-
-        const getResponse = await signedFetch(graphqlEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                query: getQuery,
-                variables: { id: vpId }
-            }),
-        });
-
-        if (!getResponse.ok) {
-            throw new Error(`Failed to get VP data: HTTP ${getResponse.status} - ${await getResponse.text()}`);
-        }
-
-        const getData = await getResponse.json();
-        if (getData.errors) {
-            throw new Error(`GraphQL errors getting VP: ${JSON.stringify(getData.errors)}`);
-        }
-
-        const currentVP = getData.data?.getVirtualParticipant;
-        if (!currentVP) {
-            throw new Error(`VP ${vpId} not found`);
-        }
-
-        const currentStatus = currentVP.status || 'INITIALIZING';
-        console.log(`Current VP status: ${currentStatus}`);
-
-        // Now update with CallId while preserving status.
-        const mutation = `
-            mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
-                updateVirtualParticipant(input: $input) {
-                    id
-                    status
-                    CallId
-                    updatedAt
-                    Owner
-                    SharedWith
-                }
-            }
-        `;
-
-        const variables = {
-            input: {
-                id: vpId,
-                status: currentStatus,
-                CallId: callId
-            }
-        };
-
-        const response = await signedFetch(graphqlEndpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                query: mutation,
-                variables: variables
-            }),
-        });
-
-        if (!response.ok) {
-            throw new Error(`Failed to link CallId: HTTP ${response.status} - ${await response.text()}`);
-        }
-
-        const responseData = await response.json();
-        if (responseData.errors) {
-            throw new Error(`GraphQL errors linking CallId: ${JSON.stringify(responseData.errors)}`);
-        }
-
-        console.log(`Successfully linked CallId ${callId} to VP ${vpId} with status ${currentStatus}`);
-    } catch (error) {
-        console.error(`Error linking CallId to VP: ${error}`);
-        throw error;
+    if (!details.graphqlEndpoint) {
+        console.log('Warning: GRAPHQL_ENDPOINT not set, cannot link CallId');
+        return;
+    }
+    const { createStatusManager } = await import('./status-manager.js');
+    const linked = await createStatusManager(vpId).setCallId(callId);
+    if (!linked) {
+        throw new Error(`Failed to link CallId ${callId} to VP ${vpId}`);
     }
   }
 

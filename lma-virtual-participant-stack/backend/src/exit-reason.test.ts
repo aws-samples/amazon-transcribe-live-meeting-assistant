@@ -22,7 +22,13 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { ExitReasonCode, didJoinMeeting, formatExitMessage } from './details.js';
+import {
+    ExitReasonCode,
+    MAX_EXIT_TRIGGER_LENGTH,
+    didJoinMeeting,
+    formatExitMessage,
+    normalizeExitTrigger,
+} from './details.js';
 
 /**
  * Every reason code, with whether it means the VP was in the meeting.
@@ -75,6 +81,79 @@ test('every reason code has prose of its own', () => {
 test('the never-joined message does not read as a successful meeting', () => {
     const message = formatExitMessage({ reason: 'never-joined' });
     assert.match(message, /could not join/i);
+});
+
+// ---------------------------------------------------------------------------
+// Bounding the trigger before it is stored
+// ---------------------------------------------------------------------------
+
+test('normalizeExitTrigger leaves a trigger from the taxonomy exactly as it is', () => {
+    // The whole value of storing this is that rows sharing a cause share a
+    // string, so the fixed triggers must survive untouched — including the
+    // upper-case ones and the one that carries platform codes.
+    for (const trigger of [
+        'pre-join:not-admitted',
+        'pre-join:ai-error-screen',
+        'acs-not-admitted',
+        'enterprise-login-timeout',
+        'attendees-left',
+        'meetingTimeout',
+        'chat',
+        'ZOOM_END_DIALOG',
+        'HANGUP_BUTTON_HIDDEN',
+        'error:renderer-crashed',
+        'webex-text:meeting has ended',
+        'ACS_DISCONNECTED code=490 subCode=0',
+    ]) {
+        assert.equal(normalizeExitTrigger(trigger), trigger);
+    }
+});
+
+test('normalizeExitTrigger reduces an interpolated error message to something groupable', () => {
+    // A Playwright message is long, multi-line and near enough unique. Stored
+    // whole it would put every such row in a group of one and duplicate
+    // errorMessage; the part that classifies is the prefix plus the start of
+    // the message, which is stable.
+    const playwright =
+        'error:page.waitForSelector: Target closed\n' +
+        '=========================== logs ===========================\n' +
+        "waiting for selector 'button[data-test=\"join\"]' to be visible\n" +
+        '============================================================';
+    const normalized = normalizeExitTrigger(playwright);
+    assert.ok(normalized);
+    assert.ok(normalized.length <= MAX_EXIT_TRIGGER_LENGTH);
+    assert.ok(normalized.startsWith('error:page-waitforselector-target-closed'));
+    assert.ok(!normalized.includes('\n'), 'must be a single line');
+
+    // Two occurrences of the same failure normalise to the same value — the
+    // property the whole field depends on.
+    assert.equal(normalized, normalizeExitTrigger(`${playwright}\nretry 2`));
+});
+
+test('normalizeExitTrigger keeps the classifying prefix of a long trigger', () => {
+    const poll = `poll-error:${'Execution context was destroyed. '.repeat(10)}`;
+    const normalized = normalizeExitTrigger(poll);
+    assert.ok(normalized?.startsWith('poll-error:execution-context-was-destroyed'));
+});
+
+test('normalizeExitTrigger returns nothing for a trigger that says nothing', () => {
+    assert.equal(normalizeExitTrigger(undefined), undefined);
+    assert.equal(normalizeExitTrigger(''), undefined);
+    assert.equal(normalizeExitTrigger('   \n  '), undefined);
+});
+
+test('normalizeExitTrigger is idempotent', () => {
+    // It runs at the persistence boundary; applying it twice must not erode the
+    // value further.
+    for (const trigger of ['pre-join:not-admitted', `error:${'x y '.repeat(60)}`]) {
+        const once = normalizeExitTrigger(trigger);
+        assert.equal(normalizeExitTrigger(once), once);
+    }
+});
+
+test('a trigger with no colon is still bounded', () => {
+    const normalized = normalizeExitTrigger('A'.repeat(500));
+    assert.equal(normalized?.length, MAX_EXIT_TRIGGER_LENGTH);
 });
 
 // ---------------------------------------------------------------------------
@@ -161,6 +240,35 @@ test('a Chime meeting the VP is not admitted to reports never-joined', () => {
     );
     for (const pair of preJoin) {
         assert.equal(pair.reason, 'never-joined', pair.trigger);
+    }
+});
+
+test('every bare unknown is a post-admission wait initialiser', () => {
+    // The pair scanner above only sees `reason: '…', trigger: '…'` in that
+    // order, so a bare `reason: 'unknown'` with no trigger is invisible to it —
+    // and that is the shape of the four initialisers. Each one has to be the
+    // declaration of the exit value in the handler's wait for the meeting to
+    // end, which is reached only past the admission gate. A bare unknown
+    // anywhere else, a pre-join branch most of all, would be scored as a
+    // meeting that completed.
+    //
+    // If this fails because a handler was added or renamed, check where the new
+    // occurrence sits before changing the expectation.
+    const bare: Array<{ file: string; line: string }> = [];
+    for (const name of HANDLERS) {
+        for (const line of handlerSource(name).split('\n')) {
+            if (/reason:\s*'unknown'\s*}/.test(line)) {
+                bare.push({ file: `${name}.ts`, line: line.trim() });
+            }
+        }
+    }
+    assert.equal(bare.length, 4, `expected four bare unknowns, found ${bare.length}`);
+    for (const { file, line } of bare) {
+        assert.match(
+            line,
+            /^let exitInfo: ExitInfo = \{ reason: 'unknown' \};$/,
+            `${file}: a bare unknown outside a wait initialiser`,
+        );
     }
 });
 

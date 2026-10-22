@@ -624,15 +624,39 @@ export class VirtualParticipantStatusManager {
   }
 
   /**
-   * Refresh the JOINING status with a human-readable sub-step so the long
-   * join span (sign-in → navigate → prejoin → admission → chat) doesn't
-   * look frozen in the UI. Keeps status=JOINING (UI-safe; the detail line
-   * renders this via the errorMessage channel) but bumps updatedAt and the
-   * shown message. Best-effort — never throws or blocks the join.
+   * Publish a human-readable sub-step so the long join span (sign-in →
+   * navigate → prejoin → admission → chat) doesn't look frozen in the UI. The
+   * detail line renders through the errorMessage channel; this also bumps
+   * updatedAt. Best-effort — never throws or blocks the join.
+   *
+   * It writes no status. The row is already JOINING before the platform
+   * handler starts (`index.ts` sets it ahead of `initialize()`), so there is
+   * nothing for a sub-step to add, and writing one would not be harmless: the
+   * dialog watchdog starts at the top of the same handler and runs
+   * concurrently with the join, so a sub-step landing just after the watchdog
+   * raised MANUAL_ACTION_REQUIRED would take the prompt off the screen while
+   * the user is still needed to clear it.
    */
   async setJoiningSubstep(message: string): Promise<void> {
     try {
-      await this.updateStatus(VP_STATUS.JOINING, message);
+      const mutation = `
+        mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
+          updateVirtualParticipant(input: $input) {
+            id
+            status
+            errorMessage
+            updatedAt
+            Owner
+            SharedWith
+          }
+        }
+      `;
+      await this.signAndSendGraphQLRequest(mutation, {
+        input: {
+          id: this.participantId,
+          errorMessage: message,
+        },
+      });
     } catch {
       /* progress sub-message is best-effort */
     }

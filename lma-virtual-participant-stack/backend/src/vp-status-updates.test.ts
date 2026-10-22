@@ -19,6 +19,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
+import { readFileSync, readdirSync } from 'node:fs';
 import {
   HEALTHY_VP_STATUSES,
   TERMINAL_VP_STATUSES,
@@ -71,33 +72,35 @@ const onlyMutationInput = (sent: SentRequest[]) => {
 // The status vocabulary
 // ---------------------------------------------------------------------------
 
-test('every status the UI renders is declared in the status union', () => {
-  // The UI's STATUS_CONFIG is the only other place the full set appears; these
-  // are its keys. A status written by the container that is missing from the
-  // UI's map renders as a bare string, and one missing here is a string
-  // literal the compiler cannot check.
-  const renderedByTheUi = [
-    'SCHEDULED',
-    'INITIALIZING',
-    'WAITING_FOR_CAPACITY',
-    'BOOTING',
-    'REGISTERING_NETWORK',
-    'VNC_READY',
-    'HYDRATING_PROFILE',
-    'LAUNCHING_BROWSER',
-    'WARMING_PROFILE',
-    'CONNECTING',
-    'JOINING',
-    'JOINED',
-    'ACTIVE',
-    'COMPLETED',
-    'FAILED',
-    'ENDED',
-    'CANCELLED',
-    'MANUAL_ACTION_REQUIRED',
-  ];
-  assert.deepEqual([...VP_STATUSES].sort(), [...renderedByTheUi].sort());
-  assert.equal(VP_STATUSES.length, 18);
+/**
+ * The statuses the React UI has rendering for, read from its source.
+ *
+ * Read rather than copied on purpose. A hardcoded list here would be a second
+ * piece of bookkeeping: adding a status to this union and to that list would
+ * keep this test green while the UI still had no rendering for it. Comparing
+ * against the other file means one side cannot move without the other.
+ */
+const statusesRenderedByTheUi = (): string[] => {
+  // src/ and dist/ are siblings, so one relative path serves both the ts-node
+  // and the compiled `node --test dist/*.test.js` runs.
+  const url = new URL(
+    '../../../lma-ai-stack/source/ui/src/components/virtual-participant-layout/VirtualParticipantDetails.jsx',
+    new URL('.', import.meta.url),
+  );
+  const source = readFileSync(url, 'utf8');
+  const start = source.indexOf('const STATUS_CONFIG = {');
+  assert.ok(start >= 0, 'STATUS_CONFIG was not found — the path in this test needs updating');
+  const block = source.slice(start, source.indexOf('\n};', start));
+  return [...block.matchAll(/^ {2}([A-Z_]+): \{$/gm)].map((match) => match[1]);
+};
+
+test('the status union and the UI status map describe the same statuses', () => {
+  // A status the container writes that the UI does not know renders as a bare
+  // string with no icon or colour; one the UI knows that the container cannot
+  // name is a status nothing can reach.
+  const rendered = statusesRenderedByTheUi();
+  assert.equal(rendered.length, 18, 'the UI status map was not parsed as expected');
+  assert.deepEqual([...VP_STATUSES].sort(), [...rendered].sort());
 });
 
 test('healthy and terminal statuses are drawn from the declared set', () => {
@@ -171,9 +174,20 @@ test('a JOINING sub-step still delivers its progress message', async () => {
   const { manager, sent } = harness();
   await manager.setJoiningSubstep('Waiting to be admitted…');
   const input = onlyMutationInput(sent);
-  assert.equal(input.status, VP_STATUS.JOINING);
   assert.equal(input.errorMessage, 'Waiting to be admitted…');
   assert.equal(input.clearErrorMessage, undefined);
+});
+
+test('a JOINING sub-step writes no status', async () => {
+  // The row is already JOINING when the handler starts, so a sub-step has only
+  // its message to add — and the dialog watchdog runs concurrently with the
+  // join, so a status here could take a manual-action prompt off the screen
+  // while the user is still needed to clear it.
+  const { manager, sent } = harness({ id: VP_ID, status: VP_STATUS.MANUAL_ACTION_REQUIRED });
+  await manager.setJoiningSubstep('Waiting to be admitted…');
+  const input = onlyMutationInput(sent);
+  assert.equal(input.status, undefined);
+  assert.deepEqual(Object.keys(input).sort(), ['errorMessage', 'id']);
 });
 
 test('a failure writes its message and does not clear it', async () => {
@@ -293,6 +307,25 @@ test('no status write rewinds a VP that is already further along', async () => {
     await call(manager);
     assert.equal(onlyMutationInput(sent).status, undefined);
   }
+});
+
+test('the status manager is the only writer of the VP record', () => {
+  // There used to be a second one: the Kinesis manager linked the CallId with
+  // its own GraphQL call, which read the row's status and wrote it straight
+  // back. A duplicate implementation is how a field ends up being written by
+  // code that does not own it, and that one ran mid-meeting, moments before
+  // the write that reports recording has started.
+  const here = new URL('.', import.meta.url);
+  const sources = readdirSync(new URL('../src/', here)).filter(
+    (name) => name.endsWith('.ts') && !name.endsWith('.test.ts') && name !== 'status-manager.ts',
+  );
+  assert.ok(sources.length > 10, 'the source listing in this test needs updating');
+  const offenders = sources.filter((name) =>
+    readFileSync(new URL(`../src/${name}`, here), 'utf8').includes(
+      'mutation UpdateVirtualParticipant',
+    ),
+  );
+  assert.deepEqual(offenders, [], 'these files write the VP record directly');
 });
 
 // ---------------------------------------------------------------------------

@@ -310,15 +310,20 @@ export type ExitReasonCode =
  * classified is a compile error, not a silent "joined".
  *
  * `unknown` counts as joined, and that is a deliberate choice rather than
- * inherited behaviour. Every place that produces it sits in the handler's
- * post-admission wait — the initial value of `exitInfo` while watching for the
+ * inherited behaviour. Every place that produces it sits past the handler's
+ * admission gate — the initial value of `exitInfo` while watching for the
  * meeting to end, and the catch around that watch (see `webex.ts`, `chime.ts`,
- * `zoom.ts`, `teams.ts`). Each of those is reached only after the handler has
- * already reported JOINED, so `unknown` means "the VP was in the meeting and
- * we could not classify why it left", and scoring it as a failure would report
+ * `zoom.ts`, `teams.ts`). So `unknown` means "the VP was in the meeting and we
+ * could not classify why it left", and scoring it as a failure would report
  * FAILED for meetings that ran and produced a transcript. Not being admitted
  * is reported by its own code, `never-joined`, from the pre-join path; the
  * pre-join paths must never return `unknown`.
+ *
+ * Four of the five are initialisers that cannot survive: every racer and every
+ * catch in `chime.ts`, `zoom.ts` and `teams.ts` assigns a concrete reason
+ * before the value is returned, and `chime.ts` has no catch at all, so an
+ * exception there propagates rather than returning. The one `unknown` that can
+ * actually reach the orchestrator is `webex.ts`'s catch around its own wait.
  */
 export function didJoinMeeting(info: ExitInfo): boolean {
   switch (info.reason) {
@@ -339,6 +344,44 @@ export function didJoinMeeting(info: ExitInfo): boolean {
       return unclassified;
     }
   }
+}
+
+/** Longest trigger persisted. Every trigger in the taxonomy is far shorter. */
+export const MAX_EXIT_TRIGGER_LENGTH = 100;
+
+/**
+ * Reduce an exit trigger to something that can be counted, before it is
+ * persisted on the VP record.
+ *
+ * Nearly every trigger is a fixed literal — 'pre-join:not-admitted',
+ * 'attendees-left', 'ZOOM_END_DIALOG' — and passes through untouched, which is
+ * the point: the value is only worth persisting if rows sharing a cause share a
+ * string. A few interpolate a platform error message instead ('error:…',
+ * 'poll-error:…'), and a Playwright message is long, multi-line and close to
+ * unique, so persisting it verbatim would leave those rows outside every
+ * aggregate and make the attribute a second, worse copy of `errorMessage` —
+ * which is where that prose belongs and already goes.
+ *
+ * So: whitespace is collapsed, anything already short enough is kept exactly,
+ * and anything too long keeps the segment before its first colon — the part
+ * that classifies — followed by a slug of what remains. Playwright messages
+ * begin with their stable part ('Target closed', 'Execution context was
+ * destroyed'), so the result still distinguishes causes.
+ */
+export function normalizeExitTrigger(trigger?: string): string | undefined {
+  if (!trigger) return undefined;
+  const oneLine = trigger.replace(/\s+/g, ' ').trim();
+  if (!oneLine) return undefined;
+  if (oneLine.length <= MAX_EXIT_TRIGGER_LENGTH) return oneLine;
+  const colon = oneLine.indexOf(':');
+  if (colon < 0) return oneLine.slice(0, MAX_EXIT_TRIGGER_LENGTH);
+  const prefix = oneLine.slice(0, colon);
+  const slug = oneLine
+    .slice(colon + 1)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${prefix}:${slug}`.slice(0, MAX_EXIT_TRIGGER_LENGTH);
 }
 
 export interface ExitInfo {

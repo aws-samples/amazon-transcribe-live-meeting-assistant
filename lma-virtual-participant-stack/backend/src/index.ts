@@ -6,7 +6,7 @@ import ZoomSdk from './zoom-sdk.js';
 import Teams from './teams.js';
 import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
-import { details, ExitInfo, formatExitMessage, didJoinMeeting } from './details.js';
+import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
@@ -863,12 +863,16 @@ const main = async (): Promise<void> => {
         // exit detail (e.g. "Asked to leave by Jeremy") alongside COMPLETED.
         // The structured trigger is persisted next to the prose, so "why did
         // joins fail today" is a query over the VP table rather than a search
-        // through container logs.
+        // through container logs. Normalised on the way in so it stays a value
+        // rows can be grouped by: a handful of triggers interpolate a platform
+        // error message, and the full prose has its home in errorMessage. The
+        // log line above keeps the trigger exactly as the handler reported it.
+        const endTrigger = normalizeExitTrigger(exitInfo?.trigger);
         const joined = exitInfo ? didJoinMeeting(exitInfo) : true;
         if (success && joined) {
             const completionMessage = exitInfo ? formatExitMessage(exitInfo) : undefined;
             if (statusManager) {
-                await statusManager.setCompleted(completionMessage, exitInfo?.trigger);
+                await statusManager.setCompleted(completionMessage, endTrigger);
             }
             console.log(
                 completionMessage
@@ -880,7 +884,7 @@ const main = async (): Promise<void> => {
             // Ran cleanly but never joined → FAILED with the reason.
             const failMessage = exitInfo ? formatExitMessage(exitInfo) : 'Could not join the meeting.';
             if (statusManager) {
-                await statusManager.setFailed(failMessage, exitInfo?.trigger);
+                await statusManager.setFailed(failMessage, endTrigger);
             }
             console.log(`LMA Virtual Participant did not join: ${failMessage}`);
             process.exit(1);

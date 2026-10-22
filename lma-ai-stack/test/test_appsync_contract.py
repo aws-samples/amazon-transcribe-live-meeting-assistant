@@ -140,18 +140,35 @@ class Resolver:
         return f"{self.type_name}.{self.field_name}"
 
     @property
-    def input_references(self) -> set[str]:
-        """Input field names the inline mapping templates read.
+    def mapping_source(self) -> str:
+        """Everything this resolver's mapping templates contain.
 
-        `$ctx.args.input.put("X", ...)` is a method call on the input map, not a
-        reference to a declared field, and a name the template puts there itself
-        is readable afterwards without being part of the input type -- so both
-        are excluded.
+        Inline templates live in the template block; the rest are separate files
+        under `source/appsync/`, named by `*S3Location` and uploaded at package
+        time. Both are read, because a field name is as easy to get wrong in one
+        as in the other.
         """
-        references = set(re.findall(r"\$ctx\.args\.input\.(\w+)", self.block)) - {"put"}
-        return references - set(
-            re.findall(r'\$ctx\.args\.input\.put\(\s*"(\w+)"', self.block)
-        )
+        parts = [self.block]
+        for location in self.files:
+            path = (TEMPLATE.parent / location).resolve()
+            if path.is_file():
+                parts.append(path.read_text())
+        return "\n".join(parts)
+
+    @property
+    def input_references(self) -> set[str]:
+        """Input field names this resolver's mapping templates read.
+
+        Two things that look like field reads are not. A name followed by `(` is
+        a method call on the input map itself -- `put(...)`, `entrySet()`,
+        `keySet()`, `get(...)` -- excluded by the lookahead; `\\b` before it
+        stops the name matching short of the parenthesis. And a name the
+        template puts into the map itself is readable from it afterwards without
+        being part of the input type.
+        """
+        source = self.mapping_source
+        references = set(re.findall(r"\$ctx\.args\.input\.(\w+)\b(?!\s*\()", source))
+        return references - set(re.findall(r'\$ctx\.args\.input\.put\(\s*"(\w+)"', source))
 
 
 def _load_resolvers() -> list[Resolver]:

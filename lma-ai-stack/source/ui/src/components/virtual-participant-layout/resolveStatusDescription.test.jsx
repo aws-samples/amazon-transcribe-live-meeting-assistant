@@ -77,39 +77,20 @@ describe('resolveStatusDescription', () => {
 });
 
 describe('STATUS_CONFIG', () => {
-  // The same set is declared as a TypeScript union in the Virtual Participant
-  // container (`VP_STATUS` in `lma-virtual-participant-stack/backend/src/
-  // status-manager.ts`), which is what lets the compiler check the statuses the
-  // container writes. A status written there but missing here renders as a bare
-  // string with no icon or colour, so the two lists have to stay in step; this
-  // is the copy of the set that the UI side can assert.
-  const EXPECTED_STATUSES = [
-    'SCHEDULED',
-    'INITIALIZING',
-    'WAITING_FOR_CAPACITY',
-    'BOOTING',
-    'REGISTERING_NETWORK',
-    'VNC_READY',
-    'HYDRATING_PROFILE',
-    'LAUNCHING_BROWSER',
-    'WARMING_PROFILE',
-    'CONNECTING',
-    'JOINING',
-    'JOINED',
-    'ACTIVE',
-    'COMPLETED',
-    'FAILED',
-    'ENDED',
-    'CANCELLED',
-    'MANUAL_ACTION_REQUIRED',
-  ];
-
-  it('renders every status the Virtual Participant can report', () => {
-    expect(Object.keys(VP_STATUS_CONFIG).sort()).toEqual([...EXPECTED_STATUSES].sort());
-  });
-
+  // Whether this map covers every status a Virtual Participant can report is
+  // asserted on the container side, in
+  // `lma-virtual-participant-stack/backend/src/vp-status-updates.test.ts`,
+  // which reads this file's keys and compares them with the `VP_STATUS` union
+  // the container writes from. That test is set equality between the two, so it
+  // fails whichever side adds a status without the other — which a second
+  // hardcoded list over here would not. Vite will not read a file outside the
+  // UI package, so the comparison lives there rather than in both places.
   it('gives every status a message, description, icon, type and colour', () => {
-    Object.entries(VP_STATUS_CONFIG).forEach(([status, config]) => {
+    // A status present in the map but missing one of these renders as a gap in
+    // the status panel rather than as an obviously wrong value.
+    const statuses = Object.entries(VP_STATUS_CONFIG);
+    expect(statuses).toHaveLength(18);
+    statuses.forEach(([status, config]) => {
       ['message', 'description', 'icon', 'type', 'color'].forEach((key) => {
         expect(config[key], `${status}.${key}`).toBeTruthy();
       });

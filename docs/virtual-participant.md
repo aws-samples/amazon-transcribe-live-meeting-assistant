@@ -12,6 +12,7 @@ title: "Virtual Participant"
 - [Supported Platforms](#supported-platforms)
 - [Joining a Meeting](#joining-a-meeting)
 - [Status Lifecycle](#status-lifecycle)
+  - [The status detail line](#the-status-detail-line)
   - [How the VP decides a meeting has ended](#how-the-vp-decides-a-meeting-has-ended)
 - [Manual Action Required (CAPTCHA, 2FA, SSO)](#manual-action-required-captcha-2fa-sso)
 - [AI-driven self-healing](#ai-driven-self-healing)
@@ -181,9 +182,22 @@ Alongside `status`, the VP record carries two fields describing the current stat
 | Field | Contents |
 | --- | --- |
 | `errorMessage` | The prose the UI shows under the status. It is the detail line for every status, not only failures: the reason a meeting ended on `COMPLETED` (*"Asked to leave by Jeremy."*), the current sub-step while the VP is still `JOINING` (*"Waiting to be admitted…"*), and the error on `FAILED`. |
-| `endTrigger` | The machine-readable counterpart: the exact branch the VP exited through (`pre-join:not-admitted`, `acs-not-admitted`, `attendees-left`, `meetingTimeout`, `error:renderer-crashed`, …). Written on `COMPLETED` and `FAILED`, so join outcomes across many meetings can be counted with a query over the VP table instead of a search through container logs. |
+| `endTrigger` | The machine-readable counterpart: which branch the VP exited through, from the closed set below. Written on `COMPLETED` and `FAILED`, so join outcomes across many meetings can be counted with a query over the VP table instead of a search through container logs. |
 
 Reaching `JOINED`, `ACTIVE` or `COMPLETED` without a new detail to show clears `errorMessage`, so a message from earlier in the same run — a join sub-step, or an attempt that did not work out before a later one did — is not still displayed next to a VP that is in the meeting.
+
+`endTrigger` takes one of a fixed set of values, which is what makes it worth grouping by:
+
+| Group | Values |
+| --- | --- |
+| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
+| Asked to leave | `chat` |
+| Meeting ended | `post-meeting-screen`, `meeting-ended-text`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `ACS_REMOVED …`, `ACS_DISCONNECTED …`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
+| Everyone else left | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui-…`, `attendee-badge-missing` |
+| Ran out of time or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
+| Threw instead of exiting | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
+
+Two triggers interpolate a platform error message (`error:…` from the Webex watcher, `poll-error:…` from the Chime one). Those are shortened to a prefix plus a slug of the first part of the message before being stored, so they can still be grouped; the full text is in `errorMessage`, which is where prose belongs.
 
 `COMPLETED` means the VP was in the meeting. A VP that never got in — not admitted, or stuck on the pre-join screen — ends as `FAILED` with *"Could not join the meeting (was not admitted, or stuck on the join screen)."*, on every platform.
 

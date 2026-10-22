@@ -344,6 +344,12 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# code, so join outcomes can be aggregated by query rather than by
 	# grepping container logs.
 	endTrigger: String
+	# Why the VP was ended from outside: written by endVirtualParticipant,
+	# which has carried it on the row all along without it being declared
+	# here, so it could not be read back through the API. Prose, supplied by
+	# the caller ("User requested termination"); endTrigger above is the
+	# machine-readable field.
+	endReason: String
 	# Set to true by acknowledgeVPFailure when the user clicks "Got it" on
 	# the failure banner. The VP container polls this on the FAILED path
 	# and proceeds with ALB/VNC tear-down as soon as it flips (or after a
