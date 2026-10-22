@@ -4108,3 +4108,50 @@ Outputs:
     Value: !GetAtt VirtualParticipantSchedulerFunction.Arn
     Export:
       Name: !Sub "${AWS::StackName}-VPSchedulerFunctionArn"
+
+  # ── Identifiers the top-level stack's CloudWatch dashboard needs ──
+  # ClusterArn and TaskDefinitionArn are already exported above, but a
+  # CloudWatch metric dimension takes the bare cluster name and the task
+  # definition family rather than an ARN, and the log group names are built from
+  # this nested stack's generated name, which the parent does not know.
+  #
+  # Unlike the outputs above, these four carry no Export. lma-main.yaml reads
+  # them with Fn::GetAtt on the nested stack, never Fn::ImportValue, so an
+  # export would buy nothing and would create a constraint that is hard to undo:
+  # CloudFormation refuses to remove or rename an exported output once anything
+  # imports it, and these are observability plumbing that should stay free to
+  # change. The equivalent outputs added to the AI and transcriber stacks for
+  # the same purpose likewise have none.
+  ClusterName:
+    Description: >-
+      Name of the Virtual Participant ECS cluster, for the ClusterName
+      dimension of ECS/ContainerInsights metrics
+    Value: !Ref Cluster
+
+  TaskDefinitionFamily:
+    Description: >-
+      Family of the Virtual Participant task definition, for the
+      TaskDefinitionFamily dimension of ECS/ContainerInsights metrics
+    # Derived from the task definition ARN rather than repeating the Family
+    # expression used on the resource, which the two could otherwise drift
+    # apart on silently. Ref on a task definition returns
+    # arn:<partition>:ecs:<region>:<account>:task-definition/<family>:<revision>,
+    # so taking the part after the slash and then the part before the colon
+    # yields the family.
+    Value: !Select
+      - 0
+      - !Split
+        - ":"
+        - !Select [1, !Split ["/", !Ref TaskDefinition]]
+
+  SchedulerStateMachineLogGroupName:
+    Description: >-
+      Log group the Virtual Participant launch state machine writes to, for
+      Logs Insights dashboard widgets
+    Value: !Ref SchedulerStateMachineLogGroup
+
+  ContainerLogGroupName:
+    Description: >-
+      Log group the Virtual Participant container writes to, for Logs Insights
+      dashboard widgets
+    Value: !Ref VirtualParticipantTaskDefContainerLogGroup

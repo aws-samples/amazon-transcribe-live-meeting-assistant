@@ -53,6 +53,15 @@ Be aware of the following service quota considerations:
 
 ## Runtime Monitoring via CloudWatch
 
+Before working through the console paths below, check the dashboard the stack
+deploys for you — it is named `<stack-name>-<region>` and the
+`OperationalDashboardConsoleUrl` stack output links straight to it. It collects
+the metrics in this section onto one page, including recent `ERROR` lines from
+the four busiest log groups, and it annotates the thresholds the alarms use.
+[Monitoring & Alerting](monitoring.md) explains every widget and every alarm,
+and — importantly — notes that the SNS email subscription created for
+`AdminEmail` delivers nothing until it is confirmed.
+
 Use the following paths to access logs for each LMA component:
 
 - **WebSocket Fargate task**: ECS console > Clusters > LMA-WEBSOCKETTRANSCRIBERSTACK-xxxx-TranscribingCluster > Tasks > Logs > View in CloudWatch
@@ -248,6 +257,14 @@ Key AWS service pricing pages for detailed cost estimation:
 - [AWS Lambda Pricing](https://aws.amazon.com/lambda/pricing/)
 - [Amazon S3 Pricing](https://aws.amazon.com/s3/pricing/)
 - [Amazon Cognito Pricing](https://aws.amazon.com/cognito/pricing/)
+- [Amazon CloudWatch Pricing](https://aws.amazon.com/cloudwatch/pricing/) — log storage, plus the alarms and the dashboard each deployment creates
+
+The alarms and dashboard add a small fixed monthly cost that does not vary with
+meeting volume: about $0.40 per stack in us-east-1 if the account still has its
+free allowance of ten alarm metrics, rising to $1.40 if it does not, and $3.00
+more for the dashboard in an account that already has three custom dashboards.
+[Monitoring & Alerting](monitoring.md#what-it-costs) breaks that down, including
+why a metric-math alarm bills per metric rather than per alarm.
 
 Use **AWS Cost Explorer** or **Bill Details** in the AWS Billing console for actual spend tracking.
 

@@ -153,6 +153,10 @@ export default defineConfig({
               label: "Well-Architected Assessment",
               slug: "well-architected",
             },
+            {
+              label: "Monitoring & Alerting",
+              slug: "monitoring",
+            },
             { label: "Troubleshooting", slug: "troubleshooting" },
             { label: "Cleanup", slug: "cleanup" },
           ],

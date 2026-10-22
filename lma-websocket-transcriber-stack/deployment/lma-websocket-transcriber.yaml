@@ -548,6 +548,40 @@ Outputs:
     Description: Egress security group for ECS
     Value: !Ref TranscriberWebsocketFargateServiceSecurityGroup
 
+  # ── Identifiers the top-level stack's CloudWatch alarms and dashboard need ──
+  # The cluster, the service and both load-balancer resources are auto-named by
+  # CloudFormation, so the parent cannot reconstruct these from its own stack
+  # name. Each value is the literal a CloudWatch metric dimension takes.
+  TranscribingClusterName:
+    Description: >-
+      Name of the ECS cluster running the transcriber service, for the
+      ClusterName dimension of ECS/ContainerInsights metrics
+    Value: !Ref TranscribingCluster
+
+  TranscriberServiceName:
+    Description: >-
+      Name of the transcriber ECS service, for the ServiceName dimension of
+      ECS/ContainerInsights metrics
+    Value: !GetAtt TranscriberWebsocketFargateService.Name
+
+  TranscriberLoadBalancerFullName:
+    Description: >-
+      Full name of the transcriber application load balancer, for the
+      LoadBalancer dimension of AWS/ApplicationELB metrics
+    Value: !GetAtt TranscribingWebsocketLoadBalancer.LoadBalancerFullName
+
+  TranscriberTargetGroupFullName:
+    Description: >-
+      Full name of the transcriber target group, for the TargetGroup dimension
+      of AWS/ApplicationELB metrics
+    Value: !GetAtt TranscribingWebsocketLoadBalancerListenerTargetGroup.TargetGroupFullName
+
+  TranscriberFargateLogGroupName:
+    Description: >-
+      Log group the transcriber container writes to, for Logs Insights
+      dashboard widgets
+    Value: !Ref TranscriberWebsocketTaskDefWebsocketContainerLogGroup
+
 Resources:
   ##########################################################################
   # CodeBuild

@@ -1,13 +1,13 @@
 {
-  "_comment": "Template CloudWatch dashboard for LMA Load Simulator observability. Substitute ${region}, ${stack} and ${call_data_stream} before posting with put-dashboard.",
+  "_comment": "Template CloudWatch dashboard for LMA Load Simulator observability. Substitute ${region}, ${call_data_stream}, ${cep_function}, ${appsync_api_id} and ${vp_cluster} before posting with put-dashboard — the README's 'CloudWatch observability' section has the exact commands that resolve each one. Every placeholder here must be filled: an unsubstituted one leaves a widget querying a metric that does not exist, which renders as an empty graph rather than an error. Dimension sets are likewise exact — ConcurrentStreamsCount is published only with all three of Domain, ServiceType and Operation, and the cluster-wide ECS task metric is TaskCount, since RunningTaskCount is published per service. For a dashboard that needs no substitution at all, use the one the stack deploys (<stack-name>-<region>) — see docs/monitoring.md.",
   "widgets": [
     {
       "type": "metric",
       "properties": {
-        "title": "Transcribe concurrent streaming sessions",
+        "title": "Transcribe concurrent StartStreamTranscription sessions (account-wide)",
         "region": "${region}",
         "metrics": [
-          ["AWS/Transcribe", "ActiveStreamingSessions"]
+          ["AWS/Transcribe", "ConcurrentStreamsCount", "Domain", "Transcribe", "ServiceType", "Streaming", "Operation", "StartStreamTranscription", {"label": "StartStreamTranscription"}]
         ],
         "stat": "Maximum",
         "period": 60
@@ -32,7 +32,7 @@
         "title": "call_event_processor Lambda",
         "region": "${region}",
         "metrics": [
-          ["AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${stack}-CallEventProcessor"],
+          ["AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${cep_function}"],
           [".",          "Duration",              ".", "."],
           [".",          "Errors",                ".", "."],
           [".",          "Throttles",             ".", "."]
@@ -61,7 +61,7 @@
         "title": "ECS VP cluster task count",
         "region": "${region}",
         "metrics": [
-          ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${stack}-VirtualParticipantCluster"]
+          ["ECS/ContainerInsights", "TaskCount", "ClusterName", "${vp_cluster}"]
         ],
         "stat": "Maximum",
         "period": 60

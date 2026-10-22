@@ -971,6 +971,33 @@ Parameters:
       Default logging level for all Lambda functions. Set to DEBUG for
       troubleshooting, INFO for normal operation.
 
+  EnableOperationalAlarms:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      Create the CloudWatch alarms that watch the transcription pipeline and
+      notify the operational alerts SNS topic. Set to 'false' if you forward
+      these signals from somewhere else, or if your organisation manages alarms
+      outside the application stack. The operational dashboard and the alerts
+      topic are created either way, so turning this off removes the
+      notifications rather than the visibility. See docs/monitoring.md.
+
+  TranscribeConcurrentStreamAlarmThreshold:
+    Type: Number
+    Default: 20
+    MinValue: 1
+    Description: >-
+      Number of concurrent Amazon Transcribe streaming sessions at which the
+      'transcribe-concurrent-streams-near-quota' alarm notifies. The default of
+      20 is 80% of the default account quota of 25 concurrent streams, which
+      leaves headroom to request an increase before meetings start being
+      refused. If you raise the quota, raise this with it — the alarm has no way
+      to read your account's current quota, so left at 20 it keeps notifying at
+      a level that is no longer close to the limit.
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
@@ -1106,6 +1133,11 @@ Metadata:
           - PublicSubnet2
           - PrivateSubnet1
           - PrivateSubnet2
+      - Label:
+          default: Operational Monitoring
+        Parameters:
+          - EnableOperationalAlarms
+          - TranscribeConcurrentStreamAlarmThreshold
       - Label:
           default: Security Configuration
         Parameters:
@@ -1279,6 +1311,10 @@ Metadata:
         default: Permissions Boundary ARN
       EnableDataRetentionOnDelete:
         default: Enable Data Retention On Stack Deletion
+      EnableOperationalAlarms:
+        default: Create Operational CloudWatch Alarms
+      TranscribeConcurrentStreamAlarmThreshold:
+        default: Transcribe Concurrent Stream Alarm Threshold
 
 Rules:
   # check required parameters
@@ -1330,6 +1366,19 @@ Mappings:
       ModelBundle: parakeet-tdt-v3-titanet-small
       MaxMeetingSeconds: "14400"
 
+  # Console hostname per partition, for the console links in Outputs.
+  # AWS::URLSuffix does not help here: the console is not reached at
+  # <service>.<urlsuffix>, and its hostname differs per partition in a way that
+  # no pseudo parameter exposes. Keyed on AWS::Partition so a GovCloud or China
+  # deployment emits links that resolve there.
+  ConsoleDomain:
+    aws:
+      Domain: console.aws.amazon.com
+    aws-us-gov:
+      Domain: console.amazonaws-us-gov.com
+    aws-cn:
+      Domain: console.amazonaws.cn
+
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   ShouldDeleteDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "false"]
@@ -1361,6 +1410,19 @@ Conditions:
     - !Not [!Equals [!Ref ZoomMeetingSdkClientId, ""]]
     - !Not [!Equals [!Ref ZoomMeetingSdkClientSecret, ""]]
   ShouldDeployMicrovmAsr: !Equals [!Ref EnableMicrovmAsr, "true"]
+  ShouldCreateOperationalAlarms: !Equals [!Ref EnableOperationalAlarms, "true"]
+  # AdminEmail is a required parameter with an AllowedPattern that an empty
+  # string does not match, so in practice this is always true. It is asserted
+  # anyway so that the subscription resource states the contract it depends on:
+  # SNS rejects a subscription with an empty endpoint, which would fail the
+  # whole stack rather than just the subscription.
+  ShouldSubscribeAdminEmailToAlerts: !Not [!Equals [!Ref AdminEmail, ""]]
+  # The stale-meeting reaper's schedule rule is created with State DISABLED when
+  # the timeout is 0, so the function exists but is never invoked. An alarm on
+  # "no invocations" would then be permanently in ALARM, so it is not created.
+  ShouldAlarmOnStaleMeetingReaper: !And
+    - !Condition ShouldCreateOperationalAlarms
+    - !Not [!Equals [!Ref MeetingInactivityTimeoutInMinutes, 0]]
   ShouldEnableAsrDiarization: !And
     - !Condition ShouldDeployMicrovmAsr
     - !Not
@@ -1488,6 +1550,23 @@ Resources:
             Condition:
               StringEquals:
                 "aws:SourceAccount": !Ref "AWS::AccountId"
+          # CloudWatch is the publisher when an alarm notifies the operational
+          # alerts topic, and SNS requires the publisher itself to hold
+          # kms:GenerateDataKey* and kms:Decrypt on the topic's key. Granted
+          # unconditionally and with no condition keys: EnableOperationalAlarms
+          # can be switched on by a stack update at any time, and without this
+          # grant an alarm shows ALARM in the console while the notification is
+          # silently dropped, which is the one failure an alerting stack cannot
+          # afford. kms:Decrypt is needed because SNS re-reads the data key it
+          # was given, and the grant covers no other action.
+          - Sid: Allow CloudWatch Alarms To Publish To Encrypted Topics
+            Effect: Allow
+            Principal:
+              Service: !Sub "cloudwatch.${AWS::URLSuffix}"
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey*
+            Resource: "*"
           - Sid: Allow S3 Vectors indexing service
             Effect: Allow
             Principal:
@@ -3145,6 +3224,743 @@ Resources:
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
+  ##########################################################################
+  # Operational alerting
+  #
+  # One SNS topic that every alarm below notifies, and an email subscription
+  # for AdminEmail. An email subscription is created in PendingConfirmation
+  # state and delivers nothing until the recipient clicks the link in the
+  # confirmation message, so a deployment is not alerting until somebody has
+  # done that. See docs/monitoring.md.
+  ##########################################################################
+  AlertsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: LMA Operational Alerts
+      KmsMasterKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+
+  AlertsTopicAdminEmailSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: ShouldSubscribeAdminEmailToAlerts
+    Properties:
+      TopicArn: !Ref AlertsTopic
+      Protocol: email
+      Endpoint: !Ref AdminEmail
+
+  ##########################################################################
+  # Operational alarms
+  #
+  # Every alarm here reads a metric an AWS service publishes on its own, so
+  # none of them depend on application code emitting anything. Each one
+  # notifies AlertsTopic, sets TreatMissingData explicitly, and carries an
+  # AlarmDescription written as the first few steps of a runbook, because the
+  # description is the only context that travels with the notification email.
+  ##########################################################################
+  DiscardedRecordsQueueDepthAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-discarded-records-queue-depth"
+      AlarmDescription: >-
+        A batch of Kinesis records reached the Call Event Processor's on-failure
+        destination, so transcript segments or meeting events were dropped
+        rather than delayed. Check the Call Event Processor log group for the
+        error that ended the batch, then read a message from this queue — it
+        carries the shard and sequence-number range of the failed batch, not the
+        records themselves — to see what was lost. Messages stay for 14 days and
+        nothing drains the queue automatically, so the depth holds until someone
+        purges it. OK notifications are enabled for that reason: the queue
+        returning to empty means a person acted, and that is worth knowing.
+      Namespace: AWS/SQS
+      MetricName: ApproximateNumberOfMessagesVisible
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt AISTACK.Outputs.CallEventProcessorDiscardedRecordsQueueName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  CallEventProcessorErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-call-event-processor-errors"
+      AlarmDescription: >-
+        The Call Event Processor failed at least one invocation in a five-minute
+        window. It is the single consumer between Kinesis and both DynamoDB and
+        AppSync, so while it is failing the web UI stops receiving transcript
+        updates even though audio is still being transcribed. Check its log
+        group for the exception first. A Bedrock throttle, a DynamoDB capacity
+        error or a malformed event from a Lambda hook function are the usual
+        causes. The event source retries a failed batch, so a short burst can
+        clear itself; errors that persist across several windows will eventually
+        surface on the discarded-records queue instead.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  CallEventProcessorThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-call-event-processor-throttles"
+      AlarmDescription: >-
+        Lambda refused to start an invocation of the Call Event Processor because
+        the account's concurrent execution limit was already in use. Transcript
+        updates fall behind for as long as this continues, and the backlog shows
+        up on the consumer-lag alarm shortly afterwards. Check the account's
+        Lambda concurrency usage in Service Quotas and what else in the account
+        is consuming it; a reserved concurrency allocation on this function, or a
+        quota increase, is the fix. The event source retries throttled batches,
+        so no data is lost unless the records age out of the stream's 24-hour
+        retention first.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  KinesisConsumerIteratorAgeAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-kinesis-consumer-iterator-age"
+      AlarmDescription: >-
+        The Call Event Processor is more than five minutes behind the call data
+        stream, so the web UI is showing a transcript that lags the meeting by
+        at least that much. Check this function's Duration and Throttles first,
+        then its log group for retried batches. The stream keeps 24 hours of
+        records, so a lag that keeps growing eventually loses data. Two metrics
+        are combined, both reporting the same lag by different routes: the
+        stream's enhanced fan-out consumer reports how far behind the latest
+        record each delivered event was, and Lambda reports the age of the
+        batch its event source handed over. Whichever has data drives the
+        alarm, a period with neither reads as zero, and two of the last three
+        periods must breach before it notifies.
+      Metrics:
+        # The stream is read through an enhanced fan-out consumer, so the lag
+        # signal is SubscribeToShardEvent.MillisBehindLatest rather than
+        # GetRecords.IteratorAgeMilliseconds. Measured over 14 days on a live
+        # stream, the GetRecords age had data in 29 of 336 hours — whatever
+        # occasionally polls the stream, not this consumer — while this metric
+        # had data in all 336.
+        - Id: efolag
+          Label: Enhanced fan-out consumer lag
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Kinesis
+              MetricName: SubscribeToShardEvent.MillisBehindLatest
+              Dimensions:
+                - Name: StreamName
+                  Value: !Ref CallDataStream
+                - Name: ConsumerName
+                  Value: !GetAtt AISTACK.Outputs.DataStreamConsumerName
+            Period: 300
+            Stat: Maximum
+        - Id: consumerage
+          Label: Call Event Processor event-source iterator age
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: IteratorAge
+              Dimensions:
+                - Name: FunctionName
+                  Value: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
+            Period: 300
+            Stat: Maximum
+        - Id: worstlag
+          Label: Worst observed consumer lag (ms)
+          Expression: "MAX([FILL(efolag, 0), FILL(consumerage, 0)])"
+          ReturnData: true
+      # Two of three rather than two of two. FILL makes the expression dense,
+      # so TreatMissingData is never consulted and the newest period always
+      # carries a value — which for a metric published with any delay is the
+      # fill value. AWS documents that this can leave a FILL-based alarm stuck
+      # in one state, and names an M-of-N alarm with M < N as the workaround.
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 2
+      Threshold: 300000
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  KinesisWriteThroughputExceededAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-kinesis-write-throughput-exceeded"
+      AlarmDescription: >-
+        A write to the call data stream was rejected for exceeding the shard's
+        throughput. The stream is in on-demand mode, which grows its capacity
+        automatically but only after a sustained rise, so this is what a sharp
+        increase in concurrent meetings looks like before the stream has caught
+        up. The producer retries, so brief rejections cost latency rather than
+        data. If it persists, check how many meetings are live and whether the
+        number is rising faster than roughly double every fifteen minutes, which
+        is the rate on-demand scaling keeps up with.
+      Namespace: AWS/Kinesis
+      MetricName: WriteProvisionedThroughputExceeded
+      Dimensions:
+        - Name: StreamName
+          Value: !Ref CallDataStream
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 0
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  TranscriberNoHealthyTargetsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcriber-no-healthy-targets"
+      AlarmDescription: >-
+        The transcriber load balancer has no target passing its health check, so
+        every new Stream Audio, browser-extension, desktop-app and Virtual
+        Participant connection is being refused. Meetings already streaming
+        drop as well. Check the transcriber service's running task count and
+        its Fargate log group for a task that is failing to start, then the
+        target group's health-check reason in the EC2 console. Missing data
+        reads as healthy here, because the target group publishes nothing at all
+        when it has no registered targets; the transcriber-service-no-tasks
+        alarm is what covers that case. OK notifications are enabled so that
+        recovery is visible without checking the console.
+      Namespace: AWS/ApplicationELB
+      MetricName: HealthyHostCount
+      Dimensions:
+        - Name: TargetGroup
+          Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberTargetGroupFullName
+        - Name: LoadBalancer
+          Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberLoadBalancerFullName
+      Statistic: Minimum
+      Period: 60
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  TranscriberServiceNoTasksAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcriber-service-no-tasks"
+      AlarmDescription: >-
+        The transcriber ECS service is running no tasks, so no meeting can
+        stream audio in by any route. Check the service's Events tab in the ECS
+        console for a task that cannot be placed — an exhausted Fargate quota, a
+        subnet with no address space left, or an image the task execution role
+        cannot pull are the usual reasons — and the Fargate log group for a
+        container exiting during startup. A deployment does not lower this count
+        — the service registers a replacement before draining the task it
+        replaces — so two consecutive five-minute windows are required only so
+        that a single absent or transiently zero datapoint does not notify. OK
+        notifications are enabled so recovery is visible.
+      Namespace: ECS/ContainerInsights
+      MetricName: RunningTaskCount
+      Dimensions:
+        - Name: ClusterName
+          Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscribingClusterName
+        - Name: ServiceName
+          Value: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberServiceName
+      Statistic: Minimum
+      Period: 300
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 1
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  AppSync5xxErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-appsync-5xx-errors"
+      AlarmDescription: >-
+        The GraphQL API returned five or more server errors in a five-minute
+        window. The web UI reads every meeting, transcript and summary through
+        this API and subscribes to live updates over it, so users see empty
+        pages or a transcript that stops advancing. Check the AppSync console's
+        Monitoring tab to see which resolver is failing, then that resolver's
+        data source: a DynamoDB table being throttled and a Lambda data source
+        timing out both surface here as 5XX. Client-side errors appear as 4XX
+        instead and are not covered by this alarm — look at the dashboard's
+        AppSync widget if users report problems and this is quiet.
+      Namespace: AWS/AppSync
+      MetricName: 5XXError
+      Dimensions:
+        - Name: GraphQLAPIId
+          Value: !GetAtt AISTACK.Outputs.AppSyncApiId
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  TranscribeConcurrentStreamsNearQuotaAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcribe-concurrent-streams-near-quota"
+      AlarmDescription: !Sub >-
+        Concurrent Amazon Transcribe StartStreamTranscription sessions in this
+        region reached ${TranscribeConcurrentStreamAlarmThreshold}, the level
+        set by the TranscribeConcurrentStreamAlarmThreshold parameter. Nothing
+        has failed yet: past the account quota, Transcribe refuses a new session
+        with LimitExceededException and the meeting that asked for it gets no
+        transcript. Request an increase to "Concurrent HTTP/2 streams for
+        transcription" in Service Quotas, and raise this parameter with it — the
+        alarm cannot read the quota. The count is account-wide and region-wide,
+        so another workload in this account calling StartStreamTranscription
+        consumes the same quota and is counted here; one calling
+        StartCallAnalyticsStreamTranscription or
+        StartMedicalStreamTranscription also consumes it but is published as a
+        separate series and is not counted. This deployment opens one session
+        per audio channel, so a stereo meeting counts as two.
+      # Amazon Transcribe publishes ConcurrentStreamsCount under exactly one
+      # dimension set, confirmed against a live account with list-metrics:
+      # Domain, ServiceType and Operation together, with ServiceType
+      # capitalised. Querying any subset returns no datapoints at all, which
+      # would leave this alarm in OK for ever. The published dimensions table
+      # disagrees with this — it lists "batch" as ServiceType's only value and
+      # omits Operation entirely — so trust the measurement, not the table.
+      # A SEARCH expression would cover every streaming operation at once, but
+      # CloudWatch does not accept SEARCH in an alarm.
+      Namespace: AWS/Transcribe
+      MetricName: ConcurrentStreamsCount
+      Dimensions:
+        - Name: Domain
+          Value: Transcribe
+        - Name: ServiceType
+          Value: Streaming
+        - Name: Operation
+          Value: StartStreamTranscription
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: !Ref TranscribeConcurrentStreamAlarmThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  StaleMeetingReaperNotInvokedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldAlarmOnStaleMeetingReaper
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-stale-meeting-reaper-not-invoked"
+      AlarmDescription: >-
+        The stale-meeting reaper has not run for two hours. It is scheduled
+        every fifteen minutes and is what ends a meeting whose client
+        disconnected without sending an end-of-meeting event, so while it is
+        quiet those meetings stay "In Progress" and never get a summary. Check
+        that the EventBridge rule whose name ends in -StaleMeetingReaper (it is
+        prefixed with the nested AI stack's name, not this stack's) is enabled
+        and its target still resolves. Missing data is treated as breaching,
+        since the
+        signal being watched for is the absence of invocations; CloudWatch
+        treats an evaluation range with no data at all as breaching regardless
+        of EvaluationPeriods, so a fresh install notifies once and then clears,
+        which is expected. This alarm is not created when
+        MeetingInactivityTimeoutInMinutes is 0, because the schedule is then
+        left in place but disabled on purpose.
+      Namespace: AWS/Lambda
+      MetricName: Invocations
+      Dimensions:
+        - Name: FunctionName
+          Value: !GetAtt AISTACK.Outputs.StaleMeetingReaperFunctionName
+      Statistic: Sum
+      Period: 3600
+      EvaluationPeriods: 2
+      DatapointsToAlarm: 2
+      Threshold: 0
+      ComparisonOperator: LessThanOrEqualToThreshold
+      TreatMissingData: breaching
+      AlarmActions:
+        - !Ref AlertsTopic
+      OKActions:
+        - !Ref AlertsTopic
+
+  BedrockThrottlingAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-bedrock-throttling"
+      AlarmDescription: >-
+        Amazon Bedrock throttled five or more invocations in a five-minute
+        window. Meeting summaries, the Meeting Assistant's replies, speaker
+        naming and meeting-invitation parsing all go through Bedrock, so users
+        see an assistant that does not answer or a summary that does not appear.
+        Check which model is being throttled on the dashboard's Bedrock widget,
+        then that model's requests-per-minute and tokens-per-minute quotas in
+        Service Quotas. The metric is read without a model dimension on purpose,
+        because Bedrock publishes it both ways and a request throttled before
+        the model is resolved carries no model id.
+      Namespace: AWS/Bedrock
+      MetricName: InvocationThrottles
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  VirtualParticipantLaunchFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-vp-launch-failures"
+      AlarmDescription: >-
+        The state machine that launches Virtual Participants failed or timed out
+        an execution, so somebody asked for a bot to join a meeting and it did
+        not. Open the execution in the Step Functions console and read the
+        failing state, then the launch state machine's log group. A compute
+        quota that is exhausted, an image that cannot be pulled and a meeting
+        URL the platform rejected all land here. The meeting record is written
+        with a FAILED status, so the web UI shows the failure to the person who
+        asked for it; this alarm exists so nobody has to be watching the UI to
+        find out. Failures and timeouts are summed, since the state machine
+        reports a launch that never completed as a timeout, and one breaching
+        period out of the last three notifies.
+      Metrics:
+        - Id: launchfailed
+          Label: Launch executions failed
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/States
+              MetricName: ExecutionsFailed
+              Dimensions:
+                - Name: StateMachineArn
+                  Value: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.StepFunctions
+            Period: 300
+            Stat: Sum
+        - Id: launchtimedout
+          Label: Launch executions timed out
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: AWS/States
+              MetricName: ExecutionsTimedOut
+              Dimensions:
+                - Name: StateMachineArn
+                  Value: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.StepFunctions
+            Period: 300
+            Stat: Sum
+        # No FILL here. CloudWatch treats a missing value as 0 on either side of
+        # an arithmetic operator, so the sum already behaves as intended, and
+        # leaving the terms unfilled keeps the expression sparse — which is what
+        # lets TreatMissingData apply and avoids the stuck-state hazard FILL
+        # carries for a metric published with any delay.
+        - Id: launchnotcompleted
+          Label: Launches that did not complete
+          Expression: "launchfailed + launchtimedout"
+          ReturnData: true
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  ##########################################################################
+  # Operational dashboard
+  #
+  # One template-level dashboard rather than a Lambda that merges fragments
+  # from each nested stack: every identifier the widgets need is already a
+  # nested stack Output, so the variable map of the list form of Fn::Sub is
+  # enough. Widgets read only metrics AWS services publish; the band reserved
+  # near the bottom is where application metrics will go.
+  ##########################################################################
+  OperationalDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: !Sub "${AWS::StackName}-${AWS::Region}"
+      # yamllint disable rule:line-length
+      DashboardBody: !Sub
+        - |
+          {
+            "widgets": [
+              {
+                "type": "text", "x": 0, "y": 0, "width": 24, "height": 2,
+                "properties": {
+                  "markdown": "# ${AWS::StackName} — operational dashboard\n\nEvery widget here reads a metric an AWS service publishes on its own. Alarms on the same metrics notify the SNS topic **${AlertsTopicName}**; see `docs/monitoring.md` for what each one means and how to subscribe to it."
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 2, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Transcribe concurrent StartStreamTranscription sessions — account-wide, not just this stack",
+                  "region": "${AWS::Region}",
+                  "stat": "Maximum",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Transcribe", "ConcurrentStreamsCount", "Domain", "Transcribe", "ServiceType", "Streaming", "Operation", "StartStreamTranscription", {"label": "StartStreamTranscription"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-transcribe-concurrent-streams-near-quota notifies at or above this",
+                        "value": ${TranscribeQuotaThreshold}
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 2, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Kinesis call data stream — rejected writes matter more than record volume",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Kinesis", "IncomingRecords", "StreamName", "${CallDataStreamName}", {"label": "Records in"}],
+                    ["AWS/Kinesis", "WriteProvisionedThroughputExceeded", "StreamName", "${CallDataStreamName}", {"label": "Writes rejected", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 8, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Consumer lag — how far behind the live meeting the transcript is (ms)",
+                  "region": "${AWS::Region}",
+                  "stat": "Maximum",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Kinesis", "SubscribeToShardEvent.MillisBehindLatest", "StreamName", "${CallDataStreamName}", "ConsumerName", "${DataStreamConsumerName}", {"label": "Enhanced fan-out consumer lag"}],
+                    ["AWS/Lambda", "IteratorAge", "FunctionName", "${CallEventProcessorFunctionName}", {"label": "Call Event Processor event-source age"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-kinesis-consumer-iterator-age notifies above this",
+                        "value": 300000
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 8, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Discarded records queue — depth never falls on its own, so any value above zero is open work",
+                  "region": "${AWS::Region}",
+                  "stat": "Maximum",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/SQS", "ApproximateNumberOfMessagesVisible", "QueueName", "${DiscardedRecordsQueueName}", {"label": "Messages waiting"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-discarded-records-queue-depth notifies above this",
+                        "value": 0
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 14, "width": 24, "height": 6,
+                "properties": {
+                  "title": "Call Event Processor — the one consumer between Kinesis and the web UI",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Lambda", "Invocations", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "Sum", "label": "Invocations"}],
+                    ["AWS/Lambda", "Errors", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "Sum", "label": "Errors"}],
+                    ["AWS/Lambda", "Throttles", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "Sum", "label": "Throttles"}],
+                    ["AWS/Lambda", "ConcurrentExecutions", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "Maximum", "label": "Concurrent executions"}],
+                    ["AWS/Lambda", "Duration", "FunctionName", "${CallEventProcessorFunctionName}", {"stat": "p99", "label": "Duration p99 (ms)", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 20, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Amazon Bedrock — read without a model dimension, so pre-resolution failures are counted",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/Bedrock", "Invocations", {"stat": "Sum", "label": "Invocations"}],
+                    ["AWS/Bedrock", "InvocationThrottles", {"stat": "Sum", "label": "Throttles"}],
+                    ["AWS/Bedrock", "InvocationClientErrors", {"stat": "Sum", "label": "Client errors"}],
+                    ["AWS/Bedrock", "InvocationLatency", {"stat": "p99", "label": "Latency p99 (ms)", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 20, "width": 12, "height": 6,
+                "properties": {
+                  "title": "ECS tasks — RunningTaskCount is per service, TaskCount is per cluster; the VP series counts tasks started per meeting",
+                  "region": "${AWS::Region}",
+                  "stat": "Maximum",
+                  "period": 300,
+                  "metrics": [
+                    ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "${TranscribingClusterName}", "ServiceName", "${TranscriberServiceName}", {"stat": "Minimum", "label": "Transcriber service (running)"}],
+                    ["ECS/ContainerInsights", "TaskCount", "ClusterName", "${VirtualParticipantClusterName}", {"label": "Virtual Participant cluster (all tasks)"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 26, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Virtual Participant memory used (MiB) — a VP stuck in INITIALIZING is usually a starved host",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["ECS/ContainerInsights", "MemoryUtilized", "ClusterName", "${VirtualParticipantClusterName}", "TaskDefinitionFamily", "${VirtualParticipantTaskFamily}", {"stat": "Maximum", "label": "Peak per task"}],
+                    ["ECS/ContainerInsights", "MemoryUtilized", "ClusterName", "${VirtualParticipantClusterName}", "TaskDefinitionFamily", "${VirtualParticipantTaskFamily}", {"stat": "Average", "label": "Average per task"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 26, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Transcriber target health — zero healthy targets refuses every new meeting",
+                  "region": "${AWS::Region}",
+                  "stat": "Minimum",
+                  "period": 60,
+                  "metrics": [
+                    ["AWS/ApplicationELB", "HealthyHostCount", "TargetGroup", "${TranscriberTargetGroupFullName}", "LoadBalancer", "${TranscriberLoadBalancerFullName}", {"label": "Healthy"}],
+                    ["AWS/ApplicationELB", "UnHealthyHostCount", "TargetGroup", "${TranscriberTargetGroupFullName}", "LoadBalancer", "${TranscriberLoadBalancerFullName}", {"stat": "Maximum", "label": "Unhealthy"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 32, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Transcriber load balancer — a WebSocket is long-lived, so response time reads the upgrade, not the meeting",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/ApplicationELB", "TargetResponseTime", "LoadBalancer", "${TranscriberLoadBalancerFullName}", {"stat": "p99", "label": "Target response time p99 (s)"}],
+                    ["AWS/ApplicationELB", "HTTPCode_Target_5XX_Count", "LoadBalancer", "${TranscriberLoadBalancerFullName}", {"stat": "Sum", "label": "Target 5XX", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 32, "width": 12, "height": 6,
+                "properties": {
+                  "title": "GraphQL API — 4XX is usually an expired client token, 5XX is a failing resolver",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["AWS/AppSync", "4XXError", "GraphQLAPIId", "${AppSyncApiId}", {"stat": "Sum", "label": "4XX"}],
+                    ["AWS/AppSync", "5XXError", "GraphQLAPIId", "${AppSyncApiId}", {"stat": "Sum", "label": "5XX"}],
+                    ["AWS/AppSync", "Latency", "GraphQLAPIId", "${AppSyncApiId}", {"stat": "p99", "label": "Latency p99 (ms)", "yAxis": "right"}]
+                  ]
+                }
+              },
+              {
+                "type": "text", "x": 0, "y": 38, "width": 24, "height": 2,
+                "properties": {
+                  "markdown": "## Application metrics\n\nReserved. Nothing is published here yet: every widget above reads a metric an AWS service emits on its own, and LMA does not yet emit metrics of its own. Per-meeting counts, transcript-segment latency and assistant turn latency will appear in this band once the application publishes them."
+                }
+              },
+              {
+                "type": "log", "x": 0, "y": 40, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Errors — Call Event Processor",
+                  "region": "${AWS::Region}",
+                  "view": "table",
+                  "query": "SOURCE '${CallEventProcessorLogGroup}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 50"
+                }
+              },
+              {
+                "type": "log", "x": 12, "y": 40, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Errors — Virtual Participant launch state machine",
+                  "region": "${AWS::Region}",
+                  "view": "table",
+                  "query": "SOURCE '${VirtualParticipantStateMachineLogGroup}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 50"
+                }
+              },
+              {
+                "type": "log", "x": 0, "y": 46, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Errors — Virtual Participant container",
+                  "region": "${AWS::Region}",
+                  "view": "table",
+                  "query": "SOURCE '${VirtualParticipantContainerLogGroup}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 50"
+                }
+              },
+              {
+                "type": "log", "x": 12, "y": 46, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Errors — WebSocket transcriber container",
+                  "region": "${AWS::Region}",
+                  "view": "table",
+                  "query": "SOURCE '${TranscriberFargateLogGroup}' | fields @timestamp, @message | filter @message like /ERROR/ | sort @timestamp desc | limit 50"
+                }
+              }
+            ]
+          }
+        - AlertsTopicName: !GetAtt AlertsTopic.TopicName
+          TranscribeQuotaThreshold: !Ref TranscribeConcurrentStreamAlarmThreshold
+          CallDataStreamName: !Ref CallDataStream
+          DataStreamConsumerName: !GetAtt AISTACK.Outputs.DataStreamConsumerName
+          CallEventProcessorFunctionName: !GetAtt AISTACK.Outputs.CallEventProcessorFunctionName
+          CallEventProcessorLogGroup: !GetAtt AISTACK.Outputs.CallEventProcessorLogGroupName
+          DiscardedRecordsQueueName: !GetAtt AISTACK.Outputs.CallEventProcessorDiscardedRecordsQueueName
+          AppSyncApiId: !GetAtt AISTACK.Outputs.AppSyncApiId
+          TranscribingClusterName: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscribingClusterName
+          TranscriberServiceName: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberServiceName
+          TranscriberTargetGroupFullName: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberTargetGroupFullName
+          TranscriberLoadBalancerFullName: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberLoadBalancerFullName
+          TranscriberFargateLogGroup: !GetAtt WEBSOCKETTRANSCRIBERSTACK.Outputs.TranscriberFargateLogGroupName
+          VirtualParticipantClusterName: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.ClusterName
+          VirtualParticipantTaskFamily: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.TaskDefinitionFamily
+          VirtualParticipantStateMachineLogGroup: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.SchedulerStateMachineLogGroupName
+          VirtualParticipantContainerLogGroup: !GetAtt VIRTUALPARTICIPANTSTACK.Outputs.ContainerLogGroupName
+
+# yamllint enable rule:line-length
 Outputs:
   QuickSightManifestUrl:
     Description: S3 URL for QuickSight manifest file to import recordings bucket data
@@ -3287,4 +4103,32 @@ Outputs:
       REST API Gateway endpoint for API key-authenticated MCP access.
       Users generate personal API keys in the LMA UI settings and pass them via x-api-key header.
     Value: !GetAtt AISTACK.Outputs.MCPServerApiKeyEndpoint
+
+  SNSAlertsTopicARN:
+    Description: >-
+      SNS topic every operational alarm notifies. The AdminEmail address is
+      subscribed at deploy time but receives nothing until that subscription is
+      confirmed from the email SNS sends. Subscribe a team alias or a chat
+      webhook here instead of relying on one person — see docs/monitoring.md.
+    Value: !Ref AlertsTopic
+
+  SNSAlertsTopicConsoleUrl:
+    Description: >-
+      Console link to the operational alerts topic, where subscriptions can be
+      added and their confirmation status checked.
+    Value: !Sub
+      - "https://${Domain}/sns/v3/home?region=${AWS::Region}#/topic/${TopicArn}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TopicArn: !Ref AlertsTopic
+
+  OperationalDashboardName:
+    Description: Name of the CloudWatch dashboard for this deployment
+    Value: !Ref OperationalDashboard
+
+  OperationalDashboardConsoleUrl:
+    Description: Console link to the operational dashboard
+    Value: !Sub
+      - "https://${Domain}/cloudwatch/home?region=${AWS::Region}#dashboards/dashboard/${DashboardName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        DashboardName: !Ref OperationalDashboard
 
