@@ -5471,7 +5471,31 @@ Resources:
         RuntimeVersion: 1.0.0
       Code: |
         import { util } from '@aws-appsync/utils';
-        
+
+        const DIGITS = '0123456789';
+
+        // Whether `key` names a chat button, which is stored under a key of the
+        // form "N#LABEL" where N orders the buttons -- "1#Action Items".
+        //
+        // Spelled out character by character because the APPSYNC_JS runtime has
+        // no regular expressions: String.replace takes a Java-style pattern, but
+        // there is no regex literal, no test and no match. Equivalent to the
+        // /^\d+#/ that the updateChatButtonConfig resolver applies on write and
+        // that both readers apply to what they receive.
+        function isButtonField(key) {
+          const separator = key.indexOf('#');
+          if (separator < 1) {
+            // No '#', or nothing ahead of it, so there is no sequence number.
+            return false;
+          }
+          for (const character of key.slice(0, separator).split('')) {
+            if (DIGITS.indexOf(character) < 0) {
+              return false;
+            }
+          }
+          return true;
+        }
+
         export function request(ctx) {
           return {
             operation: 'GetItem',
@@ -5480,16 +5504,33 @@ Resources:
             })
           };
         }
-        
+
         export function response(ctx) {
           if (ctx.error) {
             util.error(ctx.error.message, ctx.error.type);
           }
-          
-          // Return the full DynamoDB item as a JSON string in the ChatButtonConfigId field
-          // This allows us to bypass GraphQL's field filtering
+
+          // The buttons, as a JSON string in the ChatButtonConfigId field. A
+          // string because the stored keys carry a sequence number and a label
+          // chosen by an administrator, so they cannot be declared as fields of
+          // the ChatButtonConfig type.
+          //
+          // The buttons and nothing else. Every signed-in user reads this record,
+          // because the Meeting Assist chat panel renders its quick-action buttons
+          // from it for whoever is viewing a meeting, so the response carries what
+          // a reader of the chat buttons asked for and not the remainder of the
+          // item: the partition key, the attributes recording who saved it last,
+          // and whatever is added to the record later. Both readers already keep
+          // exactly these keys, so what the UI sees does not change.
+          const item = ctx.result ?? {};
+          const buttons = {};
+          for (const key of Object.keys(item)) {
+            if (isButtonField(key)) {
+              buttons[key] = item[key];
+            }
+          }
           return {
-            ChatButtonConfigId: JSON.stringify(ctx.result)
+            ChatButtonConfigId: JSON.stringify(buttons)
           };
         }
 

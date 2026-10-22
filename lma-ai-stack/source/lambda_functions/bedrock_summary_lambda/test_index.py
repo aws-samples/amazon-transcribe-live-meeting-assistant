@@ -316,14 +316,28 @@ def test_templates_left_empty_or_set_to_none_are_not_sent(
     assert result == "a summary"
 
 
-def test_the_item_key_and_the_information_row_are_not_treated_as_prompts(
+def test_only_keys_in_the_sequence_form_are_treated_as_prompts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both are bookkeeping fields on the same item as the templates."""
+    """A prompt key is 'N#Title'; every other attribute is bookkeeping.
+
+    The templates share their item with the partition key, the *Information*
+    text and the attributes recording who last saved the record, and more may be
+    added later. Reading by the 'N#Title' form rather than by excluding the names
+    known today keeps an added attribute from being sent to Bedrock as a prompt
+    and appearing as a section of the summary. The form is the contract the
+    seeded *Information* text states.
+    """
     bedrock, _ = install(
         monkeypatch,
         templates=ddb_item(**{"*Information*": "edit these in the UI", "1#Summary": "real prompt"}),
-        custom=ddb_item(),
+        custom=ddb_item(
+            **{
+                "UpdatedBy": "admin@example.com",
+                "UpdatedAt": "2026-10-22T18:30:00.000000Z",
+                "Owner": "someone",
+            }
+        ),
     )
     index.generate_summary("T", None)
     assert prompts_sent(bedrock) == ["real prompt"]

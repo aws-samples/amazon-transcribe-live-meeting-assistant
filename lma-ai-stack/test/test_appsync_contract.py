@@ -168,9 +168,91 @@ ADMIN_ONLY_FIELDS = [
 #   selected, because the capture sample rate and the speaker-count field depend
 #   on it. The Virtual Participant task role reads it with SigV4 as well, which
 #   is a separate authorization mode and would be unaffected either way.
+# * listInstalledMCPServers / getMCPServer -- which servers are installed is
+#   account-wide information the meeting assistant's users are meant to see;
+#   managing them is what belongs to the Admin group. `redact_server` in
+#   mcp_server_manager projects AuthConfig away on this path, and
+#   test_mcp_server_manager.py pins both that and the open read.
 UNRESTRICTED_READS = [
     ("Query", "getChatButtonConfig"),
     ("Query", "getAsrConfig"),
+    ("Query", "listInstalledMCPServers"),
+    ("Query", "getMCPServer"),
+]
+
+# Everything else the schema declares. Listed so that the three lists together
+# have to account for every field: without this, a new administrative mutation
+# added later with no group argument would pass the suite by simply not being
+# mentioned anywhere, which is the drift these tests exist to catch. Membership
+# here is a claim that the operation acts on one meeting, on the caller's own
+# data, or is reached only by a service role with SigV4 -- not that it is
+# unimportant. Moving a field onto one of the lists above is the deliberate act
+# that adding it here avoids.
+OTHER_FIELDS = [
+    # Writes on the event-sourcing path, reached by the Kinesis consumer and the
+    # Virtual Participant with SigV4 (`type Mutation @aws_iam`).
+    ("Mutation", "createCall"),
+    ("Mutation", "updateCallStatus"),
+    ("Mutation", "updateCallAggregation"),
+    ("Mutation", "updateRecordingUrl"),
+    ("Mutation", "updateVideoRecordingUrl"),
+    ("Mutation", "updatePcaUrl"),
+    ("Mutation", "updateAgent"),
+    ("Mutation", "addCallCategory"),
+    ("Mutation", "addIssuesDetected"),
+    ("Mutation", "addCallSummaryText"),
+    ("Mutation", "addTranscriptSegment"),
+    ("Mutation", "addChatToken"),
+    # One meeting at a time, authorized per meeting by the resolver against its
+    # owner and share list rather than by group.
+    ("Mutation", "updateSpeakerIdentities"),
+    ("Mutation", "resolveSpeakerNames"),
+    ("Mutation", "deleteCall"),
+    ("Mutation", "shareCall"),
+    ("Mutation", "unshareCall"),
+    ("Mutation", "deleteTranscriptSegment"),
+    ("Mutation", "shareTranscriptSegment"),
+    ("Mutation", "shareMeetings"),
+    ("Mutation", "deleteMeetings"),
+    ("Mutation", "createUploadMeeting"),
+    ("Mutation", "sendChatMessage"),
+    ("Mutation", "acknowledgeVPFailure"),
+    # A user's own Virtual Participants.
+    ("Mutation", "createVirtualParticipant"),
+    ("Mutation", "updateVirtualParticipant"),
+    ("Mutation", "endVirtualParticipant"),
+    ("Mutation", "deleteVirtualParticipants"),
+    ("Mutation", "shareVirtualParticipant"),
+    ("Mutation", "unshareVirtualParticipant"),
+    ("Mutation", "toggleVNCPreview"),
+    ("Mutation", "createMicrovmVncToken"),
+    ("Mutation", "createVncEdgeToken"),
+    # A user acting on their own account: their voice, their credentials, their
+    # browser profile, their API keys. First-party by design -- nobody may
+    # consent, enrol or store credentials on another person's behalf -- so a
+    # group argument would be the wrong control here.
+    ("Mutation", "grantVoiceConsent"),
+    ("Mutation", "enrolMyVoice"),
+    ("Mutation", "revokeVoiceConsent"),
+    ("Mutation", "generateMCPApiKey"),
+    ("Mutation", "revokeMCPApiKey"),
+    ("Mutation", "setMyZoomCredentials"),
+    ("Mutation", "deleteMyZoomCredentials"),
+    ("Mutation", "deleteMyChromeProfile"),
+    # Reads scoped to the caller, to one meeting, or to the caller's own record.
+    ("Query", "getCall"),
+    ("Query", "voiceEnrollmentTerms"),
+    ("Query", "getTranscriptSegments"),
+    ("Query", "getTranscriptSegmentsWithSentiment"),
+    ("Query", "listCallsDateRange"),
+    ("Query", "getCallCount"),
+    ("Query", "queryKnowledgeBase"),
+    ("Query", "listVirtualParticipants"),
+    ("Query", "getVirtualParticipant"),
+    ("Query", "parseMeetingInvitation"),
+    ("Query", "listMCPApiKeys"),
+    ("Query", "getMyZoomCredentialsStatus"),
+    ("Query", "getMyChromeProfileStatus"),
 ]
 
 
@@ -185,7 +267,14 @@ def _cognito_groups(field) -> tuple[str, ...] | None:
             continue
         for argument in directive.arguments:
             if argument.name.value == "cognito_groups":
-                return tuple(value.value for value in argument.value.values)
+                # A list in every current use, but the directive also accepts a
+                # bare string. `values` is absent on a StringValueNode, and
+                # reading it blindly would raise AttributeError from inside the
+                # helper instead of failing the assertion with a message.
+                values = getattr(argument.value, "values", None)
+                if values is None:
+                    return (argument.value.value,)
+                return tuple(value.value for value in values)
         return ()
     return None
 
@@ -218,6 +307,51 @@ def test_read_used_by_every_signed_in_user_is_available_to_every_group(
         f"{type_name}.{field_name} is read by every signed-in user, so its "
         f"@aws_cognito_user_pools directive must not name a group"
     )
+
+
+def test_every_mutation_and_query_field_is_classified(
+    schema_fields: dict[str, set[str]],
+) -> None:
+    """The three lists above must account for every field the schema declares.
+
+    Each of the other tests here is parametrized over one of those lists, so an
+    operation nobody listed is an operation nothing checks. Adding a field to the
+    schema therefore fails this test until somebody says which kind it is -- which
+    is the point: for an administrative operation, the answer is a group argument
+    and a resolver-side check, and the alternative to being asked is shipping
+    without either.
+    """
+    classified = {(type_name, field) for type_name, field in ADMIN_ONLY_FIELDS}
+    classified |= {(type_name, field) for type_name, field in UNRESTRICTED_READS}
+    classified |= {(type_name, field) for type_name, field in OTHER_FIELDS}
+
+    declared = {
+        (type_name, field)
+        for type_name in ("Mutation", "Query")
+        for field in schema_fields.get(type_name, set())
+    }
+
+    assert declared, "no Mutation or Query fields found -- the SDL parser is not seeing the schema"
+
+    unclassified = declared - classified
+    assert not unclassified, (
+        "these fields are in the schema but on none of the lists in this file; add "
+        "each to ADMIN_ONLY_FIELDS, UNRESTRICTED_READS or OTHER_FIELDS according to "
+        f"who should be able to call it: {sorted(unclassified)}"
+    )
+
+    stale = classified - declared
+    assert not stale, (
+        f"these fields are listed in this file but the schema no longer declares them: "
+        f"{sorted(stale)}"
+    )
+
+
+def test_no_field_is_classified_twice() -> None:
+    """Two lists asserting opposite things about one field would contradict."""
+    everything = ADMIN_ONLY_FIELDS + UNRESTRICTED_READS + OTHER_FIELDS
+    duplicates = {field for field in everything if everything.count(field) > 1}
+    assert not duplicates, f"listed more than once: {sorted(duplicates)}"
 
 
 # ── resolvers declared in the template ──────────────────────────────────────

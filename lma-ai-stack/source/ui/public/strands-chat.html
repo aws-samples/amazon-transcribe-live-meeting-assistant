@@ -858,6 +858,12 @@
             
             // Sort buttons by sequence number
             const sortedButtons = Object.entries(buttonConfig)
+                // A button is stored under an "N#LABEL" key, which is what the sort
+                // and the label below both already assume. Testing for it here too
+                // keeps this renderer from depending on what the parent sent: any
+                // other attribute of the stored record would otherwise draw a button
+                // labelled with its own key.
+                .filter(([key]) => /^\d+#/.test(key))
                 .sort((a, b) => {
                     const getSequence = (key) => {
                         const match = key.match(/^(\d+)#/);
@@ -972,6 +978,9 @@
             
             // Sort buttons by sequence number (N# prefix)
             const sortedButtons = Object.entries(config)
+                // As above: a button is an "N#LABEL" key, so this renderer states
+                // that for itself rather than trusting what it was handed.
+                .filter(([key]) => /^\d+#/.test(key))
                 .sort((a, b) => {
                     const getSequence = (key) => {
                         const match = key.match(/^(\d+)#/);
