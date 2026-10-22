@@ -66,7 +66,8 @@ always covered, and at any plausible meeting volume the cap is never reached. Se
 | MeetingAssistService | Meeting assistant service type | STRANDS_BEDROCK | STRANDS_BEDROCK, STRANDS_BEDROCK_WITH_KB (Create), STRANDS_BEDROCK_WITH_KB (Use Existing) |
 | MeetingAssistServiceBedrockModelID | LLM model used by the meeting assistant | Claude Haiku 4.5 | See [Bedrock model choices](#bedrock-model-choices) |
 | MeetingAssistWakePhrase | Regular expression pattern that activates the meeting assistant | OK Assistant | Valid regex pattern |
-| TavilyApiKey | API key for the Tavily web search tool | (none) | Valid API key string |
+| TavilyApiKey | API key for the Tavily web search tool. Stored in a Secrets Manager secret named `<stack-name>/integrations/tavily-api-key`; the meeting assist function is given the secret's ARN and fetches the key itself. Leave blank to leave web search unavailable | (none) | Empty, or 20+ characters of `[a-zA-Z0-9_-]` |
+| TavilyApiKeySecretArn | ARN of a Secrets Manager secret you have already provisioned holding the Tavily API key, used instead of `TavilyApiKey`. Supply one form or the other, not both | (none) | Empty, or a Secrets Manager secret ARN |
 | BedrockGuardrailId | Optional Bedrock guardrail identifier | (none) | Valid guardrail ID |
 | BedrockGuardrailVersion | Version of the Bedrock guardrail to use | (none) | Valid guardrail version |
 
@@ -289,6 +290,13 @@ parameter is changed to a supported value — see
 | VPAttendeePollMs | How often a Teams Virtual Participant samples the meeting UI to decide whether the meeting is still running, in milliseconds. | 20000 | 1000-120000 |
 | VPPollsBeforeEnd | Consecutive polls on which a Teams meeting must show one or fewer attendees before the VP leaves — about 60 seconds at the default cadence. | 3 | 1-90 |
 | VPPollsBeforeEndMissing | Consecutive polls on which a Teams meeting must show neither a readable attendee count nor any in-meeting controls before the VP leaves — about 5 minutes at the default cadence. Raise it if participants report the VP leaving meetings that are still in progress. | 15 | 1-90 |
+| ZoomMeetingSdkClientId | Zoom Meeting SDK app client ID. With `ZoomMeetingSdkClientSecret` (or `ZoomMeetingSdkClientSecretArn`) set, Zoom meetings join via the Web SDK instead of the public web client — see [Zoom Meeting SDK Join](zoom-meeting-sdk.md). | (none) | Valid client ID |
+| ZoomMeetingSdkClientSecret | Zoom Meeting SDK app client secret, used to sign the join signature. Stored in a Secrets Manager secret named `<stack-name>/integrations/zoom-meeting-sdk-client-secret` and injected into the Virtual Participant container at task start by the ECS agent, or, under the default MICROVM launch type, by the MicroVM launcher. | (none) | Valid client secret |
+| ZoomMeetingSdkClientSecretArn | ARN of a Secrets Manager secret you have already provisioned holding the Zoom Meeting SDK client secret, used instead of `ZoomMeetingSdkClientSecret`. Supply one form or the other, not both. | (none) | Empty, or a Secrets Manager secret ARN |
+| AcsConnectionString | Azure Communication Services connection string (`endpoint=https://...;accesskey=...`). When set, Teams meetings join via the ACS calling SDK — see [Teams ACS SDK Join](teams-acs-sdk.md). Stored in a Secrets Manager secret named `<stack-name>/integrations/acs-connection-string` and injected into the Virtual Participant container at task start by the ECS agent, or, under the default MICROVM launch type, by the MicroVM launcher. | (none) | Empty, or `endpoint=https://...;accesskey=...` |
+| AcsConnectionStringSecretArn | ARN of a Secrets Manager secret you have already provisioned holding the ACS connection string, used instead of `AcsConnectionString`. Supply one form or the other, not both. | (none) | Empty, or a Secrets Manager secret ARN |
+
+The four third-party credentials above (and the Simli and ElevenLabs keys below) are held in AWS Secrets Manager — see [Integration Credentials](infrastructure-and-security.md#integration-credentials) for the full list, the bring-your-own-secret form, and the rotation procedure.
 
 `VPInstanceType`, `VPMinInstances` and `VPMaxInstances` apply only to `VPLaunchType=EC2`. Under `MICROVM` there are no hosts to size or scale — each meeting gets its own MicroVM, billed for its lifetime.
 
@@ -311,7 +319,8 @@ None of these requires user configuration. The AI fallback resolver model is con
 | VoiceAssistantWakePhrase | Comma-separated wake phrases for the voice assistant | (none) | e.g., "hey alex,ok alex" |
 | VoiceAssistantActivationDuration | Duration (in seconds) the voice assistant stays active after wake phrase | 30 | 5-300 |
 | AmazonNovaSonicRegion | Region to reach Amazon Nova Sonic in, when it differs from the region the stack is deployed to. Leave empty to use the stack's own region. Nova Sonic is available in fewer regions than LMA itself, so a deployment constrained to one region for compliance can keep everything else local and reach the voice assistant elsewhere. Only used when `VoiceAssistantProvider` is `amazon_nova_sonic`. | (empty — use the stack's region) | Empty, or an AWS Region name such as `eu-north-1` |
-| ElevenLabsApiKey | API key for ElevenLabs voice assistant | (none) | Valid API key string |
+| ElevenLabsApiKey | API key for ElevenLabs voice assistant. Stored in a Secrets Manager secret named `<stack-name>/integrations/elevenlabs-api-key` and injected into the Virtual Participant container at task start by the ECS agent, or, under the default MICROVM launch type, by the MicroVM launcher | (none) | Empty, or 20+ characters of `[a-zA-Z0-9_-]` |
+| ElevenLabsApiKeySecretArn | ARN of a Secrets Manager secret you have already provisioned holding the ElevenLabs API key, used instead of `ElevenLabsApiKey`. Supply one form or the other, not both | (none) | Empty, or a Secrets Manager secret ARN |
 | ElevenLabsAgentId | ElevenLabs conversational agent ID | (none) | Valid agent ID |
 
 Setting `AmazonNovaSonicRegion` also grants the Virtual Participant's task role permission to invoke the Nova model in that region — without it the client would be pointed at a region IAM denies, and the voice assistant would fail to start with an access-denied error rather than anything that reads like a misconfiguration. Only the Nova Sonic model itself moves. The Bedrock calls behind the Virtual Participant's self-healing DOM resolver, the DynamoDB table holding the Nova Sonic configuration you set on the Nova Sonic page, and the meeting-assistant Lambda the voice assistant calls as a tool are all deployed in the stack's region and continue to be reached there.
@@ -322,7 +331,8 @@ Nothing validates that Nova Sonic is actually available in the region you name �
 
 | Parameter | Description | Default | Allowed Values |
 |-----------|-------------|---------|----------------|
-| SimliApiKey | API key for Simli avatar service | (none) | Valid API key string |
+| SimliApiKey | API key for Simli avatar service. Stored in a Secrets Manager secret named `<stack-name>/integrations/simli-api-key` and injected into the Virtual Participant container at task start by the ECS agent, or, under the default MICROVM launch type, by the MicroVM launcher | (none) | Valid API key string |
+| SimliApiKeySecretArn | ARN of a Secrets Manager secret you have already provisioned holding the Simli API key, used instead of `SimliApiKey`. Supply one form or the other, not both | (none) | Empty, or a Secrets Manager secret ARN |
 | SimliFaceId | Simli face ID for avatar appearance | (none) | Valid face ID |
 | SimliTransportMode | Transport mode for Simli avatar video | livekit | livekit, p2p |
 

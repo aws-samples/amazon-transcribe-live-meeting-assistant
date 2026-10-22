@@ -17,7 +17,7 @@ This guide walks you through setting up the Simli avatar integration for the LMA
 - LMA deployed (version 0.2.31 and above)
 - A voice assistant configured and working (`amazon_nova_sonic` or `elevenlabs`)
 - Simli account with API access
-- **Both** `SimliApiKey` and `SimliFaceId` set on the stack — the avatar is only enabled when both parameters are non-empty. Setting just one (e.g. only the API key) will silently leave the avatar disabled and the Virtual Participant will join with no camera.
+- **Both** an API key (as either `SimliApiKey` or `SimliApiKeySecretArn`) and `SimliFaceId` set on the stack — the avatar is only enabled when both are non-empty. Setting just one (e.g. only the API key) will silently leave the avatar disabled and the Virtual Participant will join with no camera.
 
 ## How It Works
 
@@ -76,7 +76,28 @@ When deploying or updating your LMA stack, set these parameters:
 | `VoiceAssistantProvider` | `amazon_nova_sonic` or `elevenlabs` | A voice assistant must be enabled |
 | `VoiceAssistantActivationMode` | `wake_phrase` or `always_active` | Choose activation mode |
 
-> **Important:** Although each Simli parameter shows as "(Optional)" in the CloudFormation template (the stack deploys fine without them), the avatar feature itself requires **both** `SimliApiKey` *and* `SimliFaceId` to be non-empty. Set both, or leave both blank.
+> **Important:** Although each Simli parameter shows as "(Optional)" in the CloudFormation template (the stack deploys fine without them), the avatar feature itself requires **both** an API key — as either `SimliApiKey` or `SimliApiKeySecretArn` — *and* `SimliFaceId` to be non-empty. Set both, or leave both blank.
+
+The stack keeps the API key in AWS Secrets Manager, in a secret named
+`<stack-name>/integrations/simli-api-key` encrypted with the deployment's
+customer-managed KMS key. The Virtual Participant's task definition names the
+secret's ARN and the ECS agent sets `SIMLI_API_KEY` in the container when each
+meeting's task starts; under the default `VPLaunchType=MICROVM` the MicroVM
+launcher does the equivalent, by a different route —
+see [Integration Credentials](infrastructure-and-security.md#integration-credentials).
+If you already keep the key in Secrets Manager, set
+`SimliApiKeySecretArn` to that secret's ARN instead of `SimliApiKey` — supply
+one form or the other, not both. `SimliFaceId` is not a credential and is
+passed as an ordinary parameter either way.
+
+**To rotate the key:** generate a new one in the Simli dashboard, put the new
+value in the `SimliApiKey` parameter, and apply the stack update. Virtual
+Participant tasks start one per meeting, so the next meeting to begin uses the
+new key — no forced ECS deployment is needed, and a meeting already in progress
+finishes on the key it started with. You can also store the new version
+directly in Secrets Manager for an immediate change; if you do, set the
+parameter to match, or the next stack update writes the old value back. See
+[Integration Credentials](infrastructure-and-security.md#integration-credentials).
 
 > **Important:** Simli avatar is meant to be used with a voice assistant. The avatar is driven by the voice assistant's audio output — without a voice assistant, there is no audio to animate the avatar.
 
@@ -94,7 +115,7 @@ The following environment variables are set automatically by CloudFormation but 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SIMLI_API_KEY` | (from CFN) | Simli API key |
+| `SIMLI_API_KEY` | (from Secrets Manager) | Simli API key. Set in the container at task start from the secret named by `SimliApiKeySecretArn`, not carried in the task definition |
 | `SIMLI_FACE_ID` | (from CFN) | Simli Face ID |
 | `SIMLI_TRANSPORT_MODE` | `livekit` | Transport mode (`livekit` or `p2p`) |
 | `SIMLI_MAX_SESSION_LENGTH` | `3600` | Maximum avatar session length in seconds |
@@ -107,7 +128,7 @@ The following environment variables are set automatically by CloudFormation but 
 1. Go to AWS CloudFormation console
 2. Find your LMA stack
 3. Verify the nested Virtual Participant stack deployed successfully
-4. Check that `SimliApiKey` and `SimliFaceId` parameters are set
+4. Check that `SimliFaceId` is set, and that the API key is set as either `SimliApiKey` or `SimliApiKeySecretArn`
 
 ### 3.2 Test the Avatar
 
@@ -167,9 +188,12 @@ When Simli avatar is active, the Virtual Participant's behavior changes slightly
 
 **Solution:**
 - Check CloudWatch logs for `Failed to initialize Simli Avatar` errors
-- Verify `SIMLI_API_KEY` and `SIMLI_FACE_ID` are set correctly
-- Ensure the Simli API key is valid and has not expired
-- Check that the Face ID exists in your Simli account
+- Verify `SimliFaceId` is set on the stack, and that the Face ID exists in your
+  Simli account
+- Verify the secret holding the API key has a value:
+  `aws secretsmanager get-secret-value --secret-id <stack-name>/integrations/simli-api-key --query SecretString --output text`
+- Ensure the Simli API key is valid and has not expired. An expired or revoked
+  key is reported by Simli at session start, not at deploy time
 
 ### Issue: Avatar Shows But Lips Don't Move
 

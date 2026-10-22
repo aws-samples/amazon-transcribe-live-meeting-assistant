@@ -151,6 +151,48 @@ The `web_search` tool enables the Meeting Assistant to search the web for curren
 
 To enable web search, set the **TavilyApiKey** CloudFormation parameter to your Tavily API key. Without a valid API key, the `web_search` tool will not be available to the assistant.
 
+### Where the key is stored
+
+The stack keeps the key in AWS Secrets Manager, in a secret named
+`<stack-name>/integrations/tavily-api-key` encrypted with the deployment's
+customer-managed KMS key. The meeting assist Lambda is given the secret's ARN
+in `TAVILY_API_KEY_SECRET_ARN` and reads the key itself on the first web search
+each execution environment performs, caching it from then on. Whether the
+`web_search` tool is offered to the assistant at all is decided from the ARN
+alone, so a deployment that has not configured a key makes no Secrets Manager
+call.
+
+If you already keep the key in Secrets Manager, set **TavilyApiKeySecretArn**
+to that secret's ARN instead of **TavilyApiKey** — supply one form or the
+other, not both.
+
+### Rotating the key
+
+Generate a new key at [tavily.com](https://tavily.com), put it in the
+**TavilyApiKey** parameter, and apply the stack update, which stores a new
+version of the secret. You can also store the new version directly in Secrets
+Manager instead — if you do, set the CloudFormation parameter to match, or the
+next stack update writes the old value back.
+
+The new key then takes effect **as the function's execution environments
+recycle**, because each one caches the key on its first web search. How long
+that takes is up to Lambda and depends on your traffic; under steady use an
+environment can stay warm for hours. A stack update does not hasten it: the
+function is configured with the secret's ARN, and that does not change when the
+value does, so there is nothing for Lambda to replace. To put the new key in
+use immediately, change the function's configuration directly, which is what
+makes Lambda start new execution environments:
+
+```bash
+aws lambda update-function-configuration \
+  --function-name STRANDS-<stack-name>-MeetingAssist \
+  --description "Tavily key rotated $(date -u +%FT%TZ)"
+```
+
+This differs from the four Virtual Participant credentials, which are read at
+the start of each meeting and so are picked up by the next meeting to start.
+See [Integration Credentials](infrastructure-and-security.md#rotating-a-credential).
+
 ## Related Documentation
 
 - [MCP Servers](mcp-servers.md)

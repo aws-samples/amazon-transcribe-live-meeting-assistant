@@ -22,7 +22,7 @@ The SDK method renders a full meeting UI (video gallery, active-speaker highligh
 
 Enablement follows the same "set the key and it turns on" pattern as the Zoom Meeting SDK:
 
-- When `AcsConnectionString` is set, Teams meetings join via the ACS SDK.
+- When the connection string is set — as either `AcsConnectionString` or `AcsConnectionStringSecretArn` — Teams meetings join via the ACS SDK.
 - When it is blank, Teams meetings use the default web-client automation.
 
 An optional task-definition env var `MEETING_TEAMS_METHOD` can force a method regardless of credentials:
@@ -42,8 +42,13 @@ Set this on the main stack (group **Meeting Assist Voice Assistant**):
 | Parameter | Description |
 |-----------|-------------|
 | `AcsConnectionString` | Azure Communication Services **connection string** (`endpoint=https://...;accesskey=...`, `NoEcho`). |
+| `AcsConnectionStringSecretArn` | ARN of a Secrets Manager secret you have already provisioned holding the full connection string. Use instead of `AcsConnectionString`; supply one form or the other, not both. |
 
-Optional; defaults to empty. It is passed to the VP task definition as the env var `ACS_CONNECTION_STRING`. The access key is never logged and is only used inside the container to mint a short-lived (24-hour) ACS user token for each meeting.
+Both are optional and default to empty.
+
+The connection string is held in AWS Secrets Manager, in a secret named `<stack-name>/integrations/acs-connection-string` encrypted with the deployment's customer-managed KMS key. The VP task definition names the secret's ARN, and the ECS agent sets `ACS_CONNECTION_STRING` in the container when each meeting's task starts, so the value is not part of the task definition. Under the default `VPLaunchType=MICROVM` the MicroVM launcher does the equivalent, by a different route — see [Integration Credentials](infrastructure-and-security.md#integration-credentials). The access key is never logged and is only used inside the container to mint a short-lived (24-hour) ACS user token for each meeting.
+
+**To rotate the connection string:** regenerate the key in the Azure portal under **Settings → Keys** (the resource has a primary and a secondary key, so you can swap to the secondary, update LMA, then regenerate the primary without an outage), put the new full connection string in the `AcsConnectionString` parameter, and apply the stack update. Virtual Participant tasks start one per meeting, so the next meeting to begin uses the new value — no forced ECS deployment is needed, and a meeting already in progress finishes on the value it started with. You can also store the new version directly in Secrets Manager for an immediate change; if you do, set the parameter to match, or the next stack update writes the old value back. See [Integration Credentials](infrastructure-and-security.md#integration-credentials).
 
 ## Getting an ACS connection string
 
