@@ -317,7 +317,7 @@ build-vp: ## Build Virtual Participant (TypeScript)
 	@echo -e "$(GREEN)✅ Virtual Participant build complete!$(NC)"
 
 ##@ Testing
-test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr ## Run all tests (no AWS required)
+test: test-ui test-sdk test-cli test-lambdas test-ai-stack test-integ-plumbing test-asr test-pr-review ## Run all tests (no AWS required)
 
 test-sdk: ## Run LMA SDK unit tests
 	@echo "Running LMA SDK tests..."
@@ -404,6 +404,32 @@ test-integ-plumbing: ## Unit tests for the scheduled integ-test machinery (no AW
 	$(PYTHON) -m pytest integ-tests/test_ci_plumbing.py -q
 	@echo -e "$(GREEN)✅ Integration-test plumbing tests passed!$(NC)"
 
+# The advisory AI review's own machinery. The disclosure guard is the part that
+# matters: it decides whether a model-written comment describing a security
+# weakness reaches a public pull request, so both of its failure directions are
+# covered — a miss (publishes a weakness, nobody finds out) and a false positive
+# (withholds a legitimate review, which is how a guard gets deleted). The rest
+# pins the four workflow properties an edit removes without noticing.
+test-pr-review: ## Unit tests for the advisory AI review harness (no AWS, no model call)
+	@echo "Running advisory AI review tests..."
+	$(PYTHON) -m pytest scripts/pr_review/test_ai_pr_review.py -q
+	@echo -e "$(GREEN)✅ Advisory AI review tests passed!$(NC)"
+
+# Run one review locally and PRINT it rather than posting. Usage:
+#   make ai-pr-review PR=800
+#   make ai-pr-review PR=800 ARGS=--no-redact-artifact   # keep withheld text locally
+# Needs a `claude` CLI on PATH and AWS credentials with bedrock:InvokeModel. This
+# is a real Bedrock spend (~$1-4); see scripts/pr_review/README.md.
+#
+# `--remote github` because a developer checkout of this repository has two
+# remotes and `origin` is the GitLab mirror, which carries no refs/pull/* refs.
+ai-pr-review: ## Dry-run the advisory AI review on one PR, printed not posted (Usage: make ai-pr-review PR=<n>)
+	@if [ -z "$(PR)" ]; then \
+		echo -e "$(RED)Usage: make ai-pr-review PR=<number>$(NC)"; exit 1; \
+	fi
+	$(PYTHON) scripts/pr_review/ai_pr_review.py \
+		--forge github --remote github --mr $(PR) --dry-run $(ARGS)
+
 test-asr: ## Run ASR MicroVM runtime unit tests (no AWS, no model weights)
 	@echo "Running ASR MicroVM runtime tests..."
 	@test -d $(ASR_SOURCE_DIR)/.venv || $(PYTHON) -m venv $(ASR_SOURCE_DIR)/.venv
@@ -448,7 +474,8 @@ test-coverage-python: ## Coverage for the Python suites only (faster; no npm)
         docker-build-check-all integ-tests integ-tests-live integ-tests-nightly \
         integ-deploy-and-test test-lambdas \
         test-vp test-vp-template test-vp-microvm-e2e test-ai-stack \
-        test-integ-plumbing test-coverage test-coverage-python test-asr
+        test-integ-plumbing test-coverage test-coverage-python test-asr \
+        test-pr-review ai-pr-review
 # Build the container images the SAME way the in-stack CodeBuild projects do,
 # locally, to catch Dockerfile / build-context regressions (e.g. a COPY of a
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then

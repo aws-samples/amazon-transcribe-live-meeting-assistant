@@ -1,0 +1,232 @@
+---
+# Copyright (c) 2025 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >-
+  GitHub Actions OIDC provider and a Bedrock-only role for the advisory AI pull
+  request review (.github/workflows/ai-pr-review.yml).
+
+# WHY THIS IS ITS OWN STACK, SEPARATE FROM EVERYTHING ELSE LMA DEPLOYS.
+#
+# There is no shared AWS role that GitHub's hosted runners can assume, so the
+# review job needs real web-identity federation: an OIDC provider plus a role that
+# trusts it on the `sub` claim of the workflow's token.
+#
+# Keeping it separate also keeps the blast radius honest. Every other credential
+# this repository's CI uses drives a deploy and therefore carries S3,
+# CloudFormation, CodeBuild and CloudWatch Logs grants. The reviewer needs
+# bedrock:InvokeModel and nothing else, and it is that from the start — which
+# matters more here than it would elsewhere, because this is the one job that
+# hands a model a checkout of author-controlled code beside a live credential.
+#
+# DEPLOY (one command, once, in the account that will pay for the reviews):
+#
+#   AWS_PROFILE=default aws cloudformation deploy \
+#     --template-file scripts/pr_review/cfn/github-oidc-review-role.yaml \
+#     --stack-name lma-sdlc-github-review-role \
+#     --capabilities CAPABILITY_NAMED_IAM \
+#     --region us-east-1
+#
+# Then wire it to the workflow with the role ARN from the stack outputs:
+#
+#   gh variable set AI_REVIEW_ROLE_ARN \
+#     --repo aws-samples/amazon-transcribe-live-meeting-assistant \
+#     --body "$(AWS_PROFILE=default aws cloudformation describe-stacks \
+#       --stack-name lma-sdlc-github-review-role --region us-east-1 \
+#       --query 'Stacks[0].Outputs[?OutputKey==`GitHubReviewRoleArn`].OutputValue' \
+#       --output text)"
+#
+# A repository VARIABLE, not a secret: the ARN is not a credential and is safe in
+# plain sight. It is kept out of the tree only because it embeds an AWS account id,
+# and this repository is public (the account-id placeholder convention in the docs
+# is 123456789012).
+#
+# Until that variable is set, the workflow is inert — it reports a skip and
+# exits 0. See scripts/pr_review/README.md.
+
+Parameters:
+  AppId:
+    Type: String
+    Description: Application identifier, used in the role name
+    AllowedPattern: '[a-z0-9-]+'
+    Default: lma
+  EnvId:
+    Type: String
+    Description: Environment identifier, used in the role name
+    AllowedPattern: '[a-z0-9-]+'
+    Default: sdlc
+  GitHubOwner:
+    Type: String
+    Description: GitHub organization or user that owns the repository
+    AllowedPattern: '[A-Za-z0-9][A-Za-z0-9-]*'
+    Default: aws-samples
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name
+    AllowedPattern: '[A-Za-z0-9._-]+'
+    Default: amazon-transcribe-live-meeting-assistant
+  DefaultBranch:
+    Type: String
+    Description: >-
+      The repository's DEFAULT branch, which is the ref a scheduled or manually
+      dispatched workflow run reports in its OIDC token. For this repository that
+      is `develop` - the same branch pull requests target, confirmed with
+      `gh repo view --json defaultBranchRef`. If the default branch is ever
+      changed, this parameter must change with it or the scheduled sweep loses its
+      credentials.
+    AllowedPattern: .+
+    Default: develop
+  ModelIdPrefix:
+    Type: String
+    Description: >-
+      Bedrock model-id prefix the role may invoke, without the `anthropic.` vendor
+      prefix or the cross-region `us.`/`global.` routing prefix. Must stay in step
+      with ANTHROPIC_MODEL in .github/workflows/ai-pr-review.yml and DEFAULT_MODEL
+      in scripts/pr_review/ai_pr_review.py. Failing closed on an unlisted model is
+      intended: a model change is a cost and behaviour change and should need a
+      template update rather than happening silently.
+    AllowedPattern: 'claude-[a-z0-9.-]+'
+    Default: claude-opus-5-5
+  ExistingOidcProviderArn:
+    Type: String
+    Description: >-
+      ARN of an existing GitHub Actions OIDC provider in this account, if one is
+      already present. Leave EMPTY to have this stack create it. An IAM OIDC
+      provider is account-global and only ONE can exist per URL, so in a shared
+      account a second stack attempting to create it fails with
+      EntityAlreadyExists - pass the existing ARN instead. Check first with
+      `aws iam list-open-id-connect-providers`.
+    Default: ''
+
+Conditions:
+  CreateOidcProvider: !Equals [!Ref ExistingOidcProviderArn, '']
+
+Resources:
+  # ⚠️ ACCOUNT-GLOBAL RESOURCE. Deleting this stack removes the provider, which
+  # breaks every other role in the account that trusts it. Pass
+  # ExistingOidcProviderArn instead of creating a second one.
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      # The thumbprint is recorded for completeness and is NOT what secures this.
+      # Since mid-2023 STS validates GitHub's OIDC endpoint against its own trusted
+      # root CA library and ignores this list for this provider, which is why a
+      # rotation of GitHub's intermediate certificate no longer breaks federation.
+      # It stays because the field is the documented shape of the resource and an
+      # empty list reads as an oversight.
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+      Tags:
+        - Key: Application
+          Value: !Ref AppId
+        - Key: Environment
+          Value: !Ref EnvId
+
+  GitHubReviewRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: >-
+              The role name is referenced by the workflow's role-to-assume value,
+              which is held in a repository variable; a generated name would change
+              on stack replacement and silently break the job.
+    Properties:
+      RoleName: !Sub "${AppId}-${EnvId}-GitHubReview"
+      Description: >-
+        Bedrock-only role for the advisory AI pull request review run by GitHub
+        Actions. Grants no deploy, no S3 and no read of any other service.
+      # GitHub's OIDC tokens are short-lived and STS caps a web-identity session at
+      # 1 hour regardless, so this is the ceiling rather than a target. A review
+      # takes a few minutes; the job's own timeout is 45 minutes.
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOidcProvider
+                - !Ref GitHubOidcProvider
+                - !Ref ExistingOidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                # `aud` must be pinned. Without it the trust accepts a token minted
+                # for any audience, and the audience is the only thing
+                # distinguishing a token meant for STS from one meant for some
+                # other service a workflow talks to.
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                # `sub` is pinned to exact values rather than a wildcard, so these
+                # two entries ARE the complete list of what can assume this role:
+                #
+                #   repo:<owner>/<repo>:pull_request
+                #       every pull_request-triggered run in this repository. Note
+                #       GitHub does NOT vary this claim by base branch or by PR
+                #       number, so it cannot be narrowed to PRs targeting
+                #       `develop` - that filtering is the workflow's `on:` and
+                #       `if:`, not IAM's. A fork PR gets no token at all and so is
+                #       not covered here or anywhere; that is why the workflow has
+                #       a scheduled sweep.
+                #
+                #   repo:<owner>/<repo>:ref:refs/heads/<default branch>
+                #       the scheduled sweep and any workflow_dispatch, both of
+                #       which GitHub runs from the DEFAULT branch.
+                #
+                # ⚠️ If the organization ever configures a customized OIDC subject
+                # claim, these literals stop matching and every run fails at the
+                # credential step. The failure is loud (the credentials action
+                # errors) rather than silent, but it is not self-explaining - check
+                # the `sub` in the token against these two values.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub "repo:${GitHubOwner}/${GitHubRepo}:pull_request"
+                  - !Sub "repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/${DefaultBranch}"
+      Policies:
+        - PolicyName: BedrockInvokeForAdvisoryReview
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Three ARNs rather than one, because invoking a cross-region
+              # inference profile is authorized against BOTH the profile ARN and
+              # the underlying foundation-model ARNs in whichever region the
+              # request is routed to. Granting only the profile fails at invoke
+              # time with an AccessDenied naming a foundation model, which reads
+              # like a model-access problem rather than a policy one.
+              #
+              # ${AWS::Partition} and the account-scoped profile ARNs keep this
+              # GovCloud-friendly, which is the convention for every other IAM
+              # policy in this repository (see .claude/skills/infrastructure.md).
+              # The foundation-model ARN has no account segment by design - that is
+              # how Bedrock names them.
+              - Sid: InvokeTheReviewModel
+                Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                  - bedrock:InvokeModelWithResponseStream
+                Resource:
+                  - !Sub >-
+                    arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/us.anthropic.${ModelIdPrefix}*
+                  - !Sub >-
+                    arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/global.anthropic.${ModelIdPrefix}*
+                  - !Sub >-
+                    arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.${ModelIdPrefix}*
+
+Outputs:
+  GitHubReviewRoleArn:
+    Description: >-
+      Role ARN for the workflow's aws-actions/configure-aws-credentials step
+      (role-to-assume). Not a secret - it is safe in the workflow file, and lives
+      in a repository variable only to keep the account id out of this public tree.
+    Value: !GetAtt GitHubReviewRole.Arn
+  OidcProviderArn:
+    Description: ARN of the GitHub Actions OIDC provider this role trusts
+    Value: !If
+      - CreateOidcProvider
+      - !Ref GitHubOidcProvider
+      - !Ref ExistingOidcProviderArn

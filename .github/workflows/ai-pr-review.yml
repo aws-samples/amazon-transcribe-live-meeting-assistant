@@ -1,0 +1,339 @@
+---
+# Copyright (c) 2025 Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: MIT-0
+#
+# Advisory AI code review, the GitHub counterpart of `ai_mr_review` in
+# .gitlab-ci.yml. Runs Claude Code (via Amazon Bedrock) over the pull request diff
+# with .claude/skills/pr-review.md plus .claude/skills/pr-review-ci.md, and posts
+# the result as a pull request comment.
+#
+# ⚠️ NOT A GATE. A model's opinion must not decide whether code merges — the
+# `code_checks` job in code-checks.yml and .gitlab-ci.yml does that. Keep this
+# job's context out of every required-check set; the test
+# `scripts/pr_review/test_ai_pr_review.py` asserts that no workflow or branch
+# ruleset claims it. The job-level `if:` below is itself enough to make requiring
+# the context pointless: GitHub reports a conditionally skipped job as SUCCEEDING,
+# so requiring it would let the gate pass without a review having run.
+#
+# ⚠️ THIS REPOSITORY IS PUBLIC AND THIS JOB PUBLISHES MODEL-WRITTEN TEXT ON IT.
+# CLAUDE.md's "Security Disclosure Hygiene" section applies to every artifact this
+# repository publishes, and a review comment is one of them. Three things follow,
+# and all three are deliberate:
+#
+#   1. The output contract is in .claude/skills/pr-review-ci.md §2: a published
+#      security finding names the file, the line and the control that is needed —
+#      never the attack, the precondition, the flaw class, or what the control's
+#      absence would permit.
+#   2. It is ENFORCED, not trusted. `scan_for_disclosure` in ai_pr_review.py scans
+#      the composed comment before posting. On a match the whole review is
+#      withheld and a short neutral notice is posted instead. The guard is a set of
+#      narrative SHAPES plus flaw-class terms with clearance patterns, not a word
+#      list, because CLAUDE.md explicitly permits the ordinary senses (a cache
+#      bypass, a dependency CVE bump, prompt injection as a product concern,
+#      Teams' own lobby-bypass setting) and a guard that withheld reviews over
+#      those would be deleted within a week.
+#   3. ⚠️ THE WITHHELD TEXT IS WRITTEN NOWHERE — not to the artifact below, not to
+#      the job log. The obvious design, which the harness this was ported from
+#      uses, is "full review to the run artifact, safe version to the comment". It
+#      does not work here, and that was MEASURED rather than assumed. On
+#      2026-10-22, from an account holding only public read on a public repository
+#      (`pull: true`, `push: false`, `triage: false`), both
+#      `GET /repos/{o}/{r}/actions/artifacts/{id}/zip` and
+#      `GET /repos/{o}/{r}/actions/runs/{id}/logs` returned 200 OK with real
+#      content; artifact metadata reads with no credential at all. A run artifact
+#      on a public repository is therefore a publication channel, and so is the
+#      log. There is no private channel inside a GitHub Actions run here. The one
+#      that exists is the AWS/Amazon Security route in CONTRIBUTING.md, and both
+#      the review instructions and the withheld notice point there. The artifact
+#      below is still uploaded — it carries exactly the text that was published,
+#      which is useful for audit and debugging and discloses nothing new.
+#
+# ⚠️ COST. A review is a real Bedrock spend. MEASURED on this repository, not
+# estimated: $0.83 for pull request #800 — 24 files, +1704/-131, a 100 KB diff
+# reviewed untruncated — on us.anthropic.claude-opus-5-5, from a local dry run of
+# this harness. LMA's open pull requests run 600-2,900 changed lines, so roughly
+# $0.30-1.50 per review is the expectation. (A CI run should land near the same
+# figure; for reference, the harness this was ported from measured $3.42 for a
+# 5,400-line review on a larger diff.) ai_pr_review.py prints `total model cost`
+# in its summary, so a real CI number is one job log away.
+#
+# Reviews are idempotent per HEAD SHA, so a new push means a new PAID review.
+# Three things bound it and all three have to stay:
+#   - `concurrency: cancel-in-progress` below, this platform's equivalent of
+#     GitLab's `interruptible: true`: a push while a review is running cancels it,
+#     so a burst of pushes costs roughly one review rather than one per push. It is
+#     the main protection and the easiest to delete by accident.
+#   - idempotency per head SHA, enforced in ai_pr_review.py by the
+#     `<!-- ai-review: sha=... rev=... -->` marker it reads back off the pull
+#     request's comments. A re-run over an unchanged head posts nothing and pays
+#     nothing, which is also what makes the scheduled sweep below affordable.
+#   - drafts are excluded, so the WIP phase (where pushes are frequent) is free.
+#
+# ✅ THE SCHEDULE RUNS FROM THE DEFAULT BRANCH, AND HERE THAT IS `develop`.
+# GitHub reads `on: schedule` from the workflow file on the repository's DEFAULT
+# branch. Checked rather than assumed: `gh repo view --json defaultBranchRef`
+# reports `develop`, which is also the branch pull requests target. So unlike the
+# repository this was ported from — where the default is a release branch and the
+# cron fires never until the file is merged there — the sweep here starts working
+# as soon as this file lands on `develop`, with no second merge needed. If the
+# default branch is ever changed to `main`, this stops firing SILENTLY (the sweep
+# looks installed and does nothing) and `DefaultBranch` in
+# scripts/pr_review/cfn/github-oidc-review-role.yaml must be changed to match, or
+# the scheduled run also loses its credentials.
+
+name: AI PR Review
+
+on:
+  # Same-repository pull requests: reviewed immediately.
+  pull_request:
+    branches:
+      - develop
+    # `ready_for_review` is what makes un-drafting a pull request trigger a review;
+    # without it a PR opened as a draft and later marked ready would wait for its
+    # next push. `synchronize` is any push to the PR branch.
+    types: [opened, synchronize, reopened, ready_for_review]
+
+  # The fork path. A `pull_request` run from a fork gets NO OIDC token and so cannot
+  # reach Bedrock at all, which is not a configuration problem to fix — it is what
+  # stops a fork pull request from minting this account's credentials. A scheduled
+  # run is triggered by the repository rather than by the contribution, so it has
+  # the token regardless of where the PR came from, and the head of a fork PR is
+  # fetchable from this repository as refs/pull/<n>/head.
+  #
+  # Hourly, which is affordable only because of the idempotency marker: a tick with
+  # no new head reads the open PR list and exits having paid nothing.
+  schedule:
+    - cron: '23 * * * *'
+
+  # One pull request on demand, for a fork PR that should not wait for the next
+  # tick.
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: 'PR number to review (blank = sweep every open non-draft fork PR)'
+        required: false
+        type: string
+
+# Least-privilege floor, as in code-checks.yml. The job widens it.
+permissions:
+  contents: read
+
+# GitLab's `interruptible: true`. Keyed on the PR number for a pull_request run and
+# on the ref otherwise, so a scheduled sweep does not cancel a PR's own review.
+concurrency:
+  group: ai-pr-review-${{ github.event.pull_request.number || inputs.pr || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pinned for the same reason the action SHAs are: an unpinned tool on an automatic
+  # job changes behaviour with no commit here. Keep in step with
+  # CLAUDE_CODE_VERSION in .gitlab-ci.yml — the test suite compares the two, because
+  # two platforms running the same reviewer at different CLI versions is a
+  # difference that would only ever show up as one of them producing an oddly
+  # different review.
+  CLAUDE_CODE_VERSION: '2.1.308'
+  # Bedrock inference-profile id, confirmed present in us-east-1. The IAM policy in
+  # scripts/pr_review/cfn/github-oidc-review-role.yaml is scoped to this family, so
+  # changing this needs that template's ModelIdPrefix changed too; failing closed on
+  # an unlisted model is intended. Keep in step with DEFAULT_MODEL in
+  # ai_pr_review.py.
+  ANTHROPIC_MODEL: 'us.anthropic.claude-opus-5-5'
+  AWS_REGION: 'us-east-1'
+  TARGET_BRANCH: 'develop'
+
+jobs:
+  ai_pr_review:
+    name: AI PR Review (advisory)
+    runs-on: ubuntu-latest
+    # A review is a few minutes plus ~2 for Node and the CLI. The sweep is bounded
+    # to 3 pull requests below, so 45m covers a slow sweep without letting a wedged
+    # run hold a runner for hours.
+    timeout-minutes: 45
+
+    # Reviewing somebody's work in progress is noise they did not ask for, and the
+    # draft phase is where pushes are frequent, so this is a cost control as well as
+    # a courtesy. `github.event.pull_request.draft` is absent on a schedule or
+    # dispatch run, hence the event-name guard first; the sweep does its own draft
+    # filtering from the API.
+    #
+    # Two conditions, and the second is NOT redundant with the fork design above.
+    # Repository `vars` — unlike `secrets` — ARE readable by a fork's run, so the
+    # role check would pass and `configure-aws-credentials` would then fail for want
+    # of an OIDC token, putting a red mark on every fork pull request. The
+    # head-repository test makes "forks go through the schedule" explicit rather than
+    # emergent, and turns that red mark into a skipped job.
+    if: >-
+      github.event_name != 'pull_request' || (
+        github.event.pull_request.draft == false &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
+
+    permissions:
+      contents: read
+      # Posting the review. Unlike GitLab's CI_JOB_TOKEN, the built-in Actions token
+      # can create a comment, so there is no personal access token to provision and
+      # nothing stored as a secret for this.
+      pull-requests: write
+      # Minting the OIDC token that assumes the Bedrock role.
+      id-token: write
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # The review diffs the head against its merge base with the target branch,
+          # which a shallow clone does not have.
+          fetch-depth: 0
+          # ⚠️ DO NOT REMOVE. By default actions/checkout leaves the job's token in
+          # .git/config as an http.extraheader, and this job hands a model a checkout
+          # plus a credential that can post publicly. The model gets no Bash and no
+          # network tool, so it could not USE the token — but it can read files, and
+          # a review body is published, so a persisted credential is an exfiltration
+          # channel that costs one line to close.
+          persist-credentials: false
+
+      - name: Set up Node.js
+        # Node 22: @anthropic-ai/claude-code declares `engines: {node: ">=22"}`, and
+        # an older major fails in the quietest way available — npm's EBADENGINE is
+        # only a warning and `claude --version` succeeds on 20, after which the CLI
+        # exits 1 with an empty stderr on the first real session. A first-party
+        # action is used rather than a `curl | bash` NodeSource install, because that
+        # pattern exits with BASH's status rather than curl's and so fails silently.
+        # .nvmrc is this repository's single source of truth, shared with
+        # `make setup-node`, code-checks.yml and .gitlab-ci.yml.
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Install Claude Code
+        run: |
+          npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
+          claude --version
+
+      # ⚠️ PIN THE HARNESS TO THE TARGET BRANCH BEFORE RUNNING IT.
+      #
+      # On a pull_request run this checkout contains the PR's changes, so without
+      # this the reviewer is the PR's own copy of itself: the permission mode, both
+      # tool lists, the secret-stripping list, THE DISCLOSURE GUARD and the prompt
+      # are all author-controlled, and the script's internal pinning of instruction
+      # files runs too late to matter because the code doing the pinning is also the
+      # PR's. The blast radius is this job's environment, which holds a Bedrock
+      # credential and a token that can post publicly on a public repository.
+      #
+      # So the harness comes from the target branch and only the DIFF comes from the
+      # pull request. The trade is explicit and is the same one .gitlab-ci.yml makes:
+      # a pull request that improves the reviewer is not exercised by its own run —
+      # it takes effect once merged.
+      #
+      # This also covers the schedule and dispatch paths, where the checkout is the
+      # default branch. Here the default branch IS the target branch, so those paths
+      # pin to the copy they already have; the step is kept uniform rather than
+      # conditional so that a future change of default branch does not silently make
+      # the sweep run a stale harness.
+      #
+      # The anonymous fetch works because this repository is public and
+      # persist-credentials is off above.
+      - name: Pin the review harness to the target branch
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git fetch -q origin "$TARGET_BRANCH"
+          HARNESS="scripts/pr_review/ai_pr_review.py"
+          HARNESS="$HARNESS .claude/skills/pr-review.md"
+          HARNESS="$HARNESS .claude/skills/pr-review-ci.md"
+          HARNESS="$HARNESS CLAUDE.md"
+          # The unquoted expansion is required, not an oversight: $HARNESS is a
+          # LIST of paths and must word-split into four arguments. Quoting it
+          # passes one argument containing spaces, which `git checkout --` treats
+          # as a single pathspec that matches nothing — so the step would take the
+          # else branch and refuse to run, on every pull request.
+          # shellcheck disable=SC2086
+          if git checkout FETCH_HEAD -- $HARNESS 2>/dev/null; then
+            echo "Harness pinned to origin/$TARGET_BRANCH: $HARNESS"
+          else
+            echo "❌ Could not pin the harness to origin/$TARGET_BRANCH — it does not"
+            echo "   carry all of: $HARNESS"
+            echo "   REFUSING to run this checkout's own copy. On a pull request that"
+            echo "   would make the reviewer the PR's own copy of the reviewer, which"
+            echo "   is the one thing this step exists to prevent. Fix the path list."
+            exit 1
+          fi
+
+      # The role ARN is NOT a secret — it is safe in a workflow file — but it embeds
+      # an AWS account id, and this repository keeps private account ids out of the
+      # tree (the placeholder convention in docs is 123456789012). A repository
+      # variable is the mechanism built for exactly this, so the id never lands in a
+      # commit. Set it once, after deploying the role:
+      #
+      #   gh variable set AI_REVIEW_ROLE_ARN \
+      #     --repo aws-samples/amazon-transcribe-live-meeting-assistant \
+      #     --body 'arn:aws:iam::123456789012:role/lma-sdlc-GitHubReview'
+      #
+      # The role is created by scripts/pr_review/cfn/github-oidc-review-role.yaml,
+      # which also carries the OIDC trust this step relies on. Until the variable is
+      # set this job is INERT: it checks out, installs the CLI, reports a skip and
+      # exits 0.
+      - name: Check the review role is configured
+        id: role
+        env:
+          ROLE_ARN: ${{ vars.AI_REVIEW_ROLE_ARN }}
+        run: |
+          if [ -z "$ROLE_ARN" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "SKIPPED: the AI_REVIEW_ROLE_ARN repository variable is not set, so"
+            echo "         there is no role to assume and no review can run. See the"
+            echo "         comment above this step for the one command that sets it,"
+            echo "         and scripts/pr_review/README.md for the whole setup."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assume the Bedrock review role
+        if: steps.role.outputs.configured == 'true'
+        # v6.3.0
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd
+        with:
+          role-to-assume: ${{ vars.AI_REVIEW_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: ai-pr-review-${{ github.run_id }}
+
+      # ⚠️ NOTHING IN THIS JOB MAY BUILD OR INSTALL FROM THE CHECKOUT. On the
+      # scheduled path the checkout is this repository but the DIFF under review can
+      # come from a fork, and the job holds a Bedrock credential. A `pip install -r`,
+      # an `npm ci`, or a `make` target over the tree would hand a fork code
+      # execution beside that credential — the model's sandbox is irrelevant, because
+      # such a step runs before the model does. The reviewer needs nothing installed:
+      # it is stdlib Python driving the `claude` CLI and `git`.
+      - name: Review
+        if: steps.role.outputs.configured == 'true'
+        env:
+          # Read by the parent process to post the comment, and stripped from the
+          # model's environment by SECRET_ENV_KEYS in ai_pr_review.py.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          if [ -n "$PR_NUMBER" ]; then
+            python3 scripts/pr_review/ai_pr_review.py \
+              --forge github --remote origin --mr "$PR_NUMBER" \
+              --target-branch "$TARGET_BRANCH"
+          else
+            # --max-mrs 3, not the script's default of 10: at --timeout 1200 a batch
+            # of ten has a 200-minute worst case against this job's 45m limit, so the
+            # sweep's own bound would never be the one that fires and the job would be
+            # cut off mid-review. Three fits.
+            python3 scripts/pr_review/ai_pr_review.py \
+              --forge github --remote origin --all-open --max-mrs 3 \
+              --target-branch "$TARGET_BRANCH"
+          fi
+
+      # Carries exactly the text that was published — see the disclosure note at the
+      # top of this file for why it carries nothing more. Useful for audit (what did
+      # the reviewer actually say on that commit) and for debugging a run that
+      # withheld its review.
+      - name: Upload the reviews
+        if: always() && steps.role.outputs.configured == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: ai-reviews
+          path: ai-reviews/
+          retention-days: 7
+          if-no-files-found: ignore
