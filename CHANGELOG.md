@@ -579,7 +579,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changed Virtual Participant default launch type from FARGATE to EC2
 
 ### Fixed
-- Critical security vulnerability: JWT tokens now always verified with signature validation (prevents token forgery and user impersonation)
+- Cognito JWT access tokens are verified against the user pool's signing keys before any claim is used
 - Virtual Participant transcription failure due to function signature mismatch in get_owner_from_jwt() call - all transcript segments were failing to write to DynamoDB
 - Enabled X-Ray tracing on GetEventApiDnsFunction, GetCloudFrontPrefixListFunction, and VirtualParticipantSchedulerFunction for improved observability
 - Triaged and suppressed 54 security scan false positives and acceptable design decisions
@@ -778,7 +778,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.6] - 2024-11-01
 ### Fixed
-- Fixed a bug that allowed non-Admin users to see other user call details if they had (or could guess) the callId.
+- Call detail retrieval is restricted to the meeting's owner, users it has been shared with, and members of the Admin group.
 - Fixed a bug that prevented calls from being shared for live calls.
 - Added share meeting button to call split panel and call details pages.
 
