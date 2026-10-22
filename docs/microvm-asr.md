@@ -102,7 +102,13 @@ fails with `Unrecognized resource types: [AWS::Lambda::MicrovmImage]`.
 
 **First deployment builds the image**, which downloads the models (~150 MB for the
 default bundle) and warms them. Expect several extra minutes on the first create and
-on any later change of bundle. Build logs land in `/aws/lambda-microvms/<stack-name>-asr`.
+on any later change of bundle. Build logs land in
+`/aws/lambda-microvms/<stack-name>-asr-logs`, which the stack declares with the
+retention you set in `CloudWatchLogsExpirationInDays` and the deployment's
+customer-managed key. Stacks created before v0.3.11 logged to
+`/aws/lambda-microvms/<stack-name>-asr`; that group keeps the logs it already
+holds and is not removed on upgrade, so delete it yourself once you no longer
+need them.
 
 That is the whole deploy-time surface. Two more values are fixed in the `AsrDefaults`
 mapping in `lma-main.yaml` rather than asked, because neither is a question a
@@ -528,7 +534,7 @@ validate the pairing on a live multi-speaker meeting before marking it `vetted`.
   inference threads for 4.
 - The engine logs its CPU use once a minute while a meeting is open, as
   `engine load: 5.57 of 16 cores (35%) over the last 60s, 2 session(s), rss=2340MB`,
-  in `/aws/lambda-microvms/<stack>-asr`. The size is billed whatever the load, so
+  in `/aws/lambda-microvms/<stack>-asr-logs`. The size is billed whatever the load, so
   this line is what tells you whether a bundle would fit a smaller size.
   `ASR_LOAD_LOG_INTERVAL_S` changes the interval; `0` turns it off.
 - `MaxMeetingSeconds` in the `AsrDefaults` mapping (default 4 h, service maximum 8 h)
@@ -678,7 +684,7 @@ aws s3api delete-objects --bucket "$B" --delete file:///tmp/objects.json
 aws cloudformation delete-stack --stack-name <the nested ASR stack>
 ```
 
-**The image build fails.** Check `/aws/lambda-microvms/<stack>-asr`. A `SHA256
+**The image build fails.** Check `/aws/lambda-microvms/<stack>-asr-logs`. A `SHA256
 mismatch` means the pinned checksum does not match the download; `model file ... is
 not in the archive` means the file names in the catalog entry are wrong; `HTTP 404`
 means the URL is wrong.

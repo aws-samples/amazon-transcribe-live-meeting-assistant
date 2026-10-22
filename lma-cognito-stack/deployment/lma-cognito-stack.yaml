@@ -513,6 +513,13 @@ Resources:
 
   CognitoUserPoolEmailDomainVerifyFunctionLogGroup:
     Type: AWS::Logs::LogGroup
+    # Matches CognitoUserPoolEmailDomainVerifyFunction's condition, so the group
+    # exists exactly when something writes to it. The trade is deliberate: a
+    # deployment that had an email-domain restriction, then removed it, loses the
+    # group and the logs in it on the next update. Keeping the group behind while
+    # the function is gone would instead leave it in the way of its own
+    # re-creation when a restriction is set again.
+    Condition: ShouldAllowSignUpEmailDomain
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/CognitoUserPoolEmailDomainVerifyFunction

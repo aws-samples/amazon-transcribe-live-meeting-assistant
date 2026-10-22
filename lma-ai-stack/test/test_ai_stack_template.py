@@ -384,15 +384,12 @@ def test_every_lambda_runtime_is_the_same_pinned_python(resources: dict):
 # does not comply fails the corresponding test; fixing an existing one means
 # removing its name from the list below.
 
-# These two are custom-resource helpers that predate the convention.
-FUNCTIONS_WITHOUT_A_DEDICATED_LOG_GROUP = {
-    "GetCloudFrontPrefixListFunction",
-    "GetEventApiDnsFunction",
-}
+# Empty, and kept here as the shape of the assertion: a newly added function
+# without a dedicated log group fails the test that reads this, naming itself.
+# Cross-template coverage of the same rule lives in test_log_destinations.py.
+FUNCTIONS_WITHOUT_A_DEDICATED_LOG_GROUP: set[str] = set()
 
-FUNCTIONS_NOT_DEPENDING_ON_THEIR_LOG_GROUP = {
-    "MicrovmVncTokenFunction",
-}
+FUNCTIONS_NOT_DEPENDING_ON_THEIR_LOG_GROUP: set[str] = set()
 
 STATEFUL_RESOURCES_WITHOUT_A_DELETION_POLICY = {
     "VncEdgeTokenSigningSecret",

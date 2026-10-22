@@ -414,8 +414,52 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
 
+  # Destination for the image build and for every ASR MicroVM's stdout -- the
+  # highest-volume stream in this stack, so it is declared here to carry the
+  # stack's retention setting and the customer-managed key rather than being
+  # created by the service with no expiry and the AWS-owned key.
+  #
+  # The name deliberately differs from the group earlier releases logged to
+  # (`/aws/lambda-microvms/${LMAStackName}-asr`). That group is already present
+  # in any stack that has built the image, and CloudFormation cannot adopt an
+  # existing log group: declaring it under the same name fails the update with
+  # "already exists". The previous group is left in place with the logs it
+  # already holds.
+  #
+  # Kept under the /aws/lambda-microvms/ prefix so AsrMicrovmBuildRole's and
+  # AsrMicrovmExecutionRole's existing log-group scoping still covers it.
+  AsrMicrovmLogGroup:
+    Type: AWS::Logs::LogGroup
+    # Treated as stateful, like the other log groups that hold meeting-time
+    # output: a stack delete would otherwise take with it the post-mortem logs
+    # for the compute path that is hardest to debug.
+    #
+    # RetainExceptOnCreate rather than Retain, because the update that first
+    # creates this group is the same one that rebuilds the image, and that build
+    # downloads the model bundle from an external host. If the build fails, the
+    # update rolls back -- and a plain Retain is honoured even when rolling back
+    # the operation that created the resource, which would leave the group behind
+    # and make the retry fail with "already exists". The retry has to be able to
+    # create this group again.
+    #
+    # Retaining it on a real delete has the consequence every retained resource
+    # in LMA has: the name is derived from the parent stack's name, so turning
+    # EnableMicrovmAsr off and on again with retention enabled leaves the
+    # retained group in the way of the new one. Delete it by hand first.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, RetainExceptOnCreate, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/aws/lambda-microvms/${LMAStackName}-asr-logs"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
   AsrMicrovmImage:
     Type: AWS::Lambda::MicrovmImage
+    # Logging.CloudWatch.LogGroup is a destination name, not a group the
+    # resource owns, so the group has to exist before the first build writes to
+    # it -- and has to outlive the image on a stack delete.
+    DependsOn:
+      - AsrMicrovmLogGroup
     # cfn-lint ships no schema for this resource type yet (service launched
     # 2026-06), so E3006 would otherwise fail the lint.
     Metadata:
@@ -434,7 +478,7 @@ Resources:
         - Architecture: ARM_64
       Logging:
         CloudWatch:
-          LogGroup: !Sub "/aws/lambda-microvms/${LMAStackName}-asr"
+          LogGroup: !Ref AsrMicrovmLogGroup
       # The Lambda-managed pool is enough: egress is only used at build time to
       # download the model, and the running ASR server makes no outbound calls.
       EgressNetworkConnectors:
@@ -761,4 +805,4 @@ Outputs:
 
   MicrovmLogGroup:
     Description: CloudWatch log group for ASR MicroVM sessions.
-    Value: !Sub "/aws/lambda-microvms/${LMAStackName}-asr"
+    Value: !Ref AsrMicrovmLogGroup

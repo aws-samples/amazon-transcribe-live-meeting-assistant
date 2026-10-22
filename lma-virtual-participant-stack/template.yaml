@@ -506,9 +506,30 @@ Parameters:
     Default: 14
     Description: The number of days log events are kept in CloudWatch Logs.
 
+  SchedulerStateMachineLogsExpirationInDays:
+    Type: Number
+    Default: 7
+    Description: >-
+      Retention for the scheduled-launch state machine's execution-history log
+      group. Kept shorter than CloudWatchLogsExpirationInDays by default because
+      the state machine logs every state transition of every scheduled Virtual
+      Participant. Raise it while investigating a scheduled launch that did not
+      start.
+
   CustomerManagedEncryptionKeyArn:
     Type: String
     Description: ARN of the customer managed KMS key for encryption
+
+  EnableDataRetentionOnDelete:
+    Type: String
+    Default: "true"
+    AllowedValues:
+      - "true"
+      - "false"
+    Description: >-
+      When true, this stack's MicroVM log group is retained on a stack delete and
+      on a change of VPLaunchType, so a meeting's MicroVM output survives both.
+      When false, it is deleted with the resource that produced it.
 
   PermissionsBoundaryArn:
     Type: String
@@ -596,6 +617,7 @@ Conditions:
   # model ARN in that region too, or the client is pointed somewhere IAM denies.
   HasCustomNovaSonicRegion: !Not [!Equals [!Ref AmazonNovaSonicRegion, ""]]
   HasPermissionsBoundary: !Not [!Equals [!Ref PermissionsBoundaryArn, ""]]
+  ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
   HasAsrLauncher: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
   # Empty under MICROVM, where the AI stack creates no VNC load balancer and so
@@ -952,8 +974,21 @@ Resources:
                 Resource:
                   - "*"
 
+  # Named independently of the function on purpose: !Sub-ing the function's
+  # generated physical name would make this group depend on the function, so
+  # CloudFormation would create the function first and the first invocation
+  # would let Lambda create the group itself.
+  BuildCustomResourceFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/BuildCustomResourceFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   BuildCustomResourceFunction:
     Type: "AWS::Lambda::Function"
+    DependsOn:
+      - BuildCustomResourceFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -973,6 +1008,8 @@ Resources:
       Role: !GetAtt BuildCustomResourceRole.Arn
       Timeout: 900
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref BuildCustomResourceFunctionLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -1059,8 +1096,17 @@ Resources:
                 Resource:
                   - "*"
 
+  ECSRoleCustomResourceFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ECSRoleCustomResourceFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   ECSRoleCustomResourceFunction:
     Type: "AWS::Lambda::Function"
+    DependsOn:
+      - ECSRoleCustomResourceFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -1080,6 +1126,8 @@ Resources:
       Role: !GetAtt ECSRoleCustomResourceRole.Arn
       Timeout: 300
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref ECSRoleCustomResourceFunctionLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -1580,9 +1628,19 @@ Resources:
                   - ec2:DescribeInstances
                 Resource: "*"
 
+  ASGDeletionHandlerFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseEC2LaunchType
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/ASGDeletionHandlerFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   ASGDeletionHandlerFunction:
     Type: AWS::Lambda::Function
     Condition: UseEC2LaunchType
+    DependsOn:
+      - ASGDeletionHandlerFunctionLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -1605,6 +1663,8 @@ Resources:
       Role: !GetAtt ASGDeletionHandlerRole.Arn
       Timeout: 300
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref ASGDeletionHandlerFunctionLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -2011,6 +2071,47 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
 
+  # Destination for the image build and for every MicroVM's stdout -- the
+  # highest-volume stream in the VP stack, so it is declared here to carry the
+  # stack's retention setting and the customer-managed key rather than being
+  # created by the service with no expiry and the AWS-owned key.
+  #
+  # The name deliberately differs from the group earlier releases logged to
+  # (`/aws/lambda-microvms/${LMAStackName}-vp`). That group is already present
+  # in any stack that has built the image, and CloudFormation cannot adopt an
+  # existing log group: declaring it under the same name fails the update with
+  # "already exists". The previous group is left in place with the logs it
+  # already holds.
+  #
+  # Kept under the /aws/lambda-microvms/ prefix so VPMicrovmBuildRole's and the
+  # task role's existing log-group scoping still covers it.
+  VPMicrovmLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseMicrovmLaunchType
+    # Treated as stateful, like VirtualParticipantTaskDefContainerLogGroup: this
+    # is where a meeting's MicroVM output lands, so neither a stack delete nor a
+    # change of VPLaunchType should take it with them -- and because the group
+    # is conditional, a launch-type change alone would otherwise delete every
+    # MicroVM meeting log as a side effect.
+    #
+    # RetainExceptOnCreate rather than Retain, because the update that first
+    # creates this group is the same one that rebuilds the image. If that build
+    # fails the update rolls back -- and a plain Retain is honoured even when
+    # rolling back the operation that created the resource, which would leave the
+    # group behind and make the retry fail with "already exists". The retry has
+    # to be able to create this group again.
+    #
+    # Retaining it on a real delete has the consequence every retained resource
+    # in LMA has: the name is derived from the parent stack's name, so moving off
+    # MICROVM and back with retention enabled leaves the retained group in the
+    # way of the new one. Delete it by hand first.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, RetainExceptOnCreate, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      LogGroupName: !Sub "/aws/lambda-microvms/${LMAStackName}-vp-logs"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   # The MicroVM image: a versioned Firecracker snapshot built from the same
   # Dockerfile the ECS launch types use.
   #
@@ -2021,6 +2122,11 @@ Resources:
   VPMicrovmImage:
     Type: AWS::Lambda::MicrovmImage
     Condition: UseMicrovmLaunchType
+    # Logging.CloudWatch.LogGroup is a destination name, not a group the
+    # resource owns, so the group has to exist before the first build writes to
+    # it -- and has to outlive the image on a stack delete.
+    DependsOn:
+      - VPMicrovmLogGroup
     # cfn-lint 1.51 ships no schema for this resource type yet (service launched
     # 2026-06), so E3006 would otherwise fail `make lint-cfn` in CI. Scoped to
     # this resource rather than disabling the rule globally.
@@ -2048,7 +2154,7 @@ Resources:
         - Architecture: ARM_64
       Logging:
         CloudWatch:
-          LogGroup: !Sub "/aws/lambda-microvms/${LMAStackName}-vp"
+          LogGroup: !Ref VPMicrovmLogGroup
       # Egress via the VPC connector (see VPMicrovmEgressConnector) rather than
       # the Lambda-managed INTERNET_EGRESS pool, so the VP reaches
       # Zoom/Teams/Webex/Chime and the AWS public APIs from the VPC's NAT
@@ -2323,11 +2429,21 @@ Resources:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
+  VPMicrovmLauncherFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: UseMicrovmLaunchType
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/VPMicrovmLauncherFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   # Launches one MicroVM per meeting. Called by the scheduler state machine
   # (MICROVM dispatch path) and by EventBridge Scheduler for scheduled meetings,
   # since neither has a native lambda-microvms integration.
   VPMicrovmLauncherFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - VPMicrovmLauncherFunctionLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -2346,6 +2462,8 @@ Resources:
       # throttling backoff and a cold image.
       Timeout: 300
       MemorySize: 256
+      LoggingConfig:
+        LogGroup: !Ref VPMicrovmLauncherFunctionLogGroup
       TracingConfig:
         Mode: Active
       Role: !GetAtt VPMicrovmLauncherRole.Arn
@@ -2702,7 +2820,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      RetentionInDays: 7
+      RetentionInDays: !Ref SchedulerStateMachineLogsExpirationInDays
       LogGroupName: !Sub "/aws/vendedlogs/states/${AWS::StackName}"
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
@@ -3442,6 +3560,8 @@ Resources:
   # Virtual Participant Scheduler Lambda Function
   VirtualParticipantSchedulerFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - VirtualParticipantSchedulerLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -3455,6 +3575,8 @@ Resources:
       FunctionName: !Sub "${LMAStackName}-VPScheduler"
       Handler: index.lambda_handler
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref VirtualParticipantSchedulerLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -3772,6 +3894,8 @@ Resources:
 
   VPTaskReaperFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - VPTaskReaperLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -3787,6 +3911,8 @@ Resources:
       Runtime: python3.12
       MemorySize: 256
       Timeout: 60
+      LoggingConfig:
+        LogGroup: !Ref VPTaskReaperLogGroup
       Role: !GetAtt VPTaskReaperRole.Arn
       Environment:
         Variables:

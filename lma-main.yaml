@@ -724,6 +724,41 @@ Parameters:
       Number of days to retain CloudWatch log records. Logs will be automatically
       deleted after this time.
 
+  VPSchedulerStateMachineLogsExpirationInDays:
+    Type: Number
+    Default: 7
+    AllowedValues:
+      [
+        1,
+        3,
+        5,
+        7,
+        14,
+        30,
+        60,
+        90,
+        120,
+        150,
+        180,
+        365,
+        400,
+        545,
+        731,
+        1096,
+        1827,
+        2192,
+        2557,
+        2922,
+        3288,
+        3653,
+      ]
+    Description: >-
+      Number of days to retain the scheduled Virtual Participant state machine's
+      execution history logs. Shorter than CloudWatchLogsExpirationInDays by
+      default because the state machine logs every state transition of every
+      scheduled Virtual Participant. Raise it while investigating a scheduled
+      Virtual Participant that did not start.
+
   EnableAppSyncApiCache:
     Type: String
     Default: "false"
@@ -1116,6 +1151,7 @@ Metadata:
           - TranscriptionExpirationInDays
           - AudioRecordingExpirationInDays
           - CloudWatchLogsExpirationInDays
+          - VPSchedulerStateMachineLogsExpirationInDays
           - MeetingInactivityTimeoutInMinutes
           - MeetingInactivityLookbackInDays
           - EnableDataRetentionOnDelete
@@ -1263,6 +1299,8 @@ Metadata:
         default: Audio Recording Expiration In Days
       CloudWatchLogsExpirationInDays:
         default: CloudWatch Logs Expiration In Days
+      VPSchedulerStateMachineLogsExpirationInDays:
+        default: Virtual Participant Scheduler State Machine Logs Expiration In Days
       MeetingInactivityTimeoutInMinutes:
         default: Meeting Inactivity Timeout In Minutes
       MeetingInactivityLookbackInDays:
@@ -2141,9 +2179,23 @@ Resources:
                     - !Sub "${RecordingsBucket.Arn}/*"
                     - !Ref AWS::NoValue
 
+  # Named independently of the function on purpose: !Sub-ing the function's
+  # generated physical name would make this group depend on the function, so
+  # CloudFormation would create the function first and the first invocation
+  # would let Lambda create the group itself.
+  S3BucketCleanupFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldDeleteDataOnDelete
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/S3BucketCleanupFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !GetAtt CustomerManagedEncryptionKey.Arn
+
   S3BucketCleanupFunction:
     Type: AWS::Lambda::Function
     Condition: ShouldDeleteDataOnDelete
+    DependsOn:
+      - S3BucketCleanupFunctionLogGroup
     Metadata:
       cdk_nag:
         rules_to_suppress:
@@ -2166,6 +2218,8 @@ Resources:
       Role: !GetAtt S3BucketCleanupRole.Arn
       Timeout: 900
       Runtime: python3.12
+      LoggingConfig:
+        LogGroup: !Ref S3BucketCleanupFunctionLogGroup
       TracingConfig:
         Mode: Active
       Environment:
@@ -2886,6 +2940,8 @@ Resources:
         pS3SyncScheduleExpression: "cron(0 0 * * ? *)"  # default once a day at midnight
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
   TRANSCRIPTBEDROCKKB:
     Type: AWS::CloudFormation::Stack
@@ -2900,6 +2956,8 @@ Resources:
         pInputDocumentUploadFolderPrefix: "lma-transcripts/"
         pS3SyncScheduleExpression: "cron(0/15 * ? * * *)"  # default is to sync transcripts every 15 minutes
         EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
 
 
   MEETINGASSISTSETUP:
@@ -2961,6 +3019,7 @@ Resources:
       Parameters:
         LMAStackName: !Ref "AWS::StackName"
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
+        CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
 
   # On-demand streaming ASR + speaker diarization on AWS Lambda MicroVMs, used by
   # the WebSocket transcriber as an alternative to Amazon Transcribe streaming.
@@ -3184,6 +3243,8 @@ Resources:
         VPMinInstances: !Ref VPMinInstances
         VPMaxInstances: !Ref VPMaxInstances
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
+        SchedulerStateMachineLogsExpirationInDays: !Ref VPSchedulerStateMachineLogsExpirationInDays
+        EnableDataRetentionOnDelete: !Ref EnableDataRetentionOnDelete
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         LogLevel: !Ref LogLevel
 
