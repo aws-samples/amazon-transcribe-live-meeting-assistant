@@ -165,11 +165,16 @@ export const shouldClearStatusDetail = (status: string, statusDetail?: string): 
  * An AppSync subscription delivers the fields the *mutation* selected: one the
  * subscriber asked for that the mutation did not return arrives as null. Most
  * of the UI merges an update into what it already has and treats a null as "no
- * news", but `ManualActionAlerts` rebuilds its alert from the payload — so a
- * write that did not select the prompt fields would have it rebuild a live
- * prompt from nulls, replacing the specific message with generic text and
- * re-firing the desktop notification. Since this PR deliberately lets a join
- * sub-step be written while a prompt is open, that is reachable.
+ * news", but `ManualActionAlerts` builds an alert out of the payload, so what a
+ * write leaves out it renders as missing — which is why its alerts named the
+ * meeting as "null" until this list included `meetingName`, and why a write
+ * without the prompt fields would describe an open prompt in generic terms.
+ *
+ * Carrying the full set is this side's half of that. The other half is in the
+ * component: because every write returns the open prompt along with whatever it
+ * changed, and a write while a prompt is open is something this PR deliberately
+ * allows, the component compares an incoming prompt with the one on screen and
+ * acts only on a new one.
  *
  * One list rather than per-mutation lists is the point: the next write added
  * here cannot forget. `vp-status-updates.test.ts` checks this list against the

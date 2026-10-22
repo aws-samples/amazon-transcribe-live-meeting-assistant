@@ -36,9 +36,31 @@ export const shouldClearManualAlert = (status) => !!status && status !== 'MANUAL
  * A subscription payload carries the fields the mutation selected; one that did
  * not select the prompt fields reports the status and nulls. Such an update
  * cannot be acted on — there is nothing to show, and nothing to conclude from
- * its absence either.
+ * its absence either. Every writer selects the prompt fields today, so this is
+ * a backstop against one added later that does not.
+ *
+ * Separate from the deduplication below, which covers the opposite case: a
+ * fully described payload for a prompt that is already on screen. The two guard
+ * different failures and removing either reopens one of them.
  */
 export const isUndescribedPrompt = (vp) => vp?.status === 'MANUAL_ACTION_REQUIRED' && !vp?.manualActionType;
+
+/**
+ * Identity of the prompt an update is reporting, for telling a new prompt from
+ * another report of the one already on screen.
+ *
+ * Any write to the VP record while a prompt is open returns the prompt fields
+ * along with everything else, so the alert sees a stream of identical prompts —
+ * a join sub-step, a CallId link. Rebuilding on each would re-render an alert
+ * the user is already reading and sound the chime again.
+ *
+ * `manualActionStartTime` is the identity because it is stamped once, when the
+ * prompt is raised: a second, different prompt and a prompt whose timeout has
+ * been restarted each carry a new one and so count as new, while a repeat of
+ * the same prompt does not. `manualActionType` is folded in so that an update
+ * somehow lacking the timestamp still tells one kind of prompt from another.
+ */
+export const promptIdentity = (vp) => `${vp?.manualActionStartTime || ''}#${vp?.manualActionType || ''}`;
 
 const ON_UPDATE_VP = /* GraphQL */ `
   subscription OnUpdateVirtualParticipant {
@@ -193,6 +215,11 @@ const ManualActionAlerts = () => {
   // cancel (suppress) a notification if the VP transitions out of
   // MANUAL_ACTION_REQUIRED within the debounce window.
   const pendingNotificationsRef = useRef(new Map());
+  // The prompt currently on screen for each VP, by `promptIdentity`. Held in a
+  // ref rather than derived from `alerts` because the handler is a useCallback
+  // that would otherwise close over a stale copy of that state. Dropped when
+  // the prompt clears, so a later prompt for the same VP is shown afresh.
+  const shownPromptRef = useRef(new Map());
 
   // Triggered by the click on the "Enable desktop notifications" banner
   // button. Browsers require a real user gesture for requestPermission()
@@ -330,11 +357,9 @@ const ManualActionAlerts = () => {
       // an update from a writer that did not select the prompt fields arrives
       // with the prompt status and nothing to describe it. That payload is not
       // evidence about the prompt in either direction: rebuilding the alert
-      // from it would replace the real message with generic text and re-fire
-      // the notification, and clearing it would drop an alert the VP still
-      // needs. The writers all share one selection set so this should not
-      // arise; ignoring it here means a future one that does not cannot make
-      // the alert worse.
+      // from it would replace the real message with generic text, and clearing
+      // it would drop an alert the VP still needs. Every writer selects those
+      // fields, so this is the backstop for one added later that does not.
       if (isUndescribedPrompt(vp)) {
         return;
       }
@@ -352,11 +377,26 @@ const ManualActionAlerts = () => {
       if (shouldClearManualAlert(vp.status)) {
         setAlerts((prev) => prev.filter((a) => a.id !== `${vp.id}#manual`));
         cancelPendingNotification(vp.id, ALERT_KIND.MANUAL);
+        // Forget which prompt was on screen, so the deduplication below cannot
+        // outlive the alert whose duplicates it was suppressing.
+        shownPromptRef.current.delete(vp.id);
       }
 
       if (vp.status === 'MANUAL_ACTION_REQUIRED') {
         const alertId = `${vp.id}#manual`;
         if (dismissedRef.current.has(alertId)) return;
+        // Only a prompt that is not already on screen is worth showing again.
+        // Every write to the VP record returns the open prompt along with
+        // whatever it changed, and the writes that land during a prompt are
+        // ones this component should not react to — a join sub-step from the
+        // join loop that runs alongside the dialog watchdog, a CallId link
+        // mid-meeting. Rebuilding on those re-renders an alert the user is
+        // reading and sounds the chime again. A genuinely new prompt, or the
+        // same kind raised afresh with its timeout restarted, carries a new
+        // start time and so passes.
+        const identity = promptIdentity(vp);
+        if (shownPromptRef.current.get(vp.id) === identity) return;
+        shownPromptRef.current.set(vp.id, identity);
         setAlerts((prev) => [
           ...prev.filter((a) => a.id !== alertId),
           {
