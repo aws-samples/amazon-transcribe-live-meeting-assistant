@@ -51,8 +51,10 @@ CFN_TEMPLATES := \
 	$(ASR_DIR)/template.yaml \
 	lma-bedrockagent-stack/template.yaml \
 	lma-bedrockkb-stack/template.yaml \
+	lma-browser-extension-stack/template.yaml \
 	lma-chat-button-config-stack/deployment/chat-button-config.yaml \
 	lma-cognito-stack/deployment/lma-cognito-stack.yaml \
+	lma-desktop-capture-app-stack/template.yaml \
 	lma-llm-template-setup-stack/deployment/llm-template-setup.yaml \
 	lma-meetingassist-setup-stack/template.yaml \
 	lma-nova-sonic-config-stack/deployment/nova-sonic-config.yaml \

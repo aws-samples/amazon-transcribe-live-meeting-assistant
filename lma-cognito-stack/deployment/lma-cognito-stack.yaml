@@ -513,6 +513,10 @@ Resources:
 
   CognitoUserPoolEmailDomainVerifyFunctionLogGroup:
     Type: AWS::Logs::LogGroup
+    # Matches CognitoUserPoolEmailDomainVerifyFunction's condition: an
+    # unconditional group would be created and stay empty in a deployment that
+    # does not restrict sign-up by email domain.
+    Condition: ShouldAllowSignUpEmailDomain
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/CognitoUserPoolEmailDomainVerifyFunction

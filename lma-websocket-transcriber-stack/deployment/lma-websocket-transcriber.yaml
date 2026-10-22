@@ -1823,6 +1823,9 @@ Resources:
 
   PCAIntegrationFunctionLogGroup:
     Type: AWS::Logs::LogGroup
+    # Matches PCAIntegrationFunction's condition: an unconditional group would
+    # be created and stay empty in a deployment without the PCA integration.
+    Condition: ShouldInstallPcaIntegration
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/PCAIntegrationFunction

@@ -414,8 +414,34 @@ Resources:
                   - logs:PutLogEvents
                 Resource: !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/*"
 
+  # Destination for the image build and for every ASR MicroVM's stdout -- the
+  # highest-volume stream in this stack, so it is declared here to carry the
+  # stack's retention setting and the customer-managed key rather than being
+  # created by the service with no expiry and the AWS-owned key.
+  #
+  # The name deliberately differs from the group earlier releases logged to
+  # (`/aws/lambda-microvms/${LMAStackName}-asr`). That group is already present
+  # in any stack that has built the image, and CloudFormation cannot adopt an
+  # existing log group: declaring it under the same name fails the update with
+  # "already exists". The previous group is left in place with the logs it
+  # already holds.
+  #
+  # Kept under the /aws/lambda-microvms/ prefix so AsrMicrovmBuildRole's and
+  # AsrMicrovmExecutionRole's existing log-group scoping still covers it.
+  AsrMicrovmLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda-microvms/${LMAStackName}-asr-logs"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !If [HasEncryptionKey, !Ref CustomerManagedEncryptionKeyArn, !Ref "AWS::NoValue"]
+
   AsrMicrovmImage:
     Type: AWS::Lambda::MicrovmImage
+    # Logging.CloudWatch.LogGroup is a destination name, not a group the
+    # resource owns, so the group has to exist before the first build writes to
+    # it -- and has to outlive the image on a stack delete.
+    DependsOn:
+      - AsrMicrovmLogGroup
     # cfn-lint ships no schema for this resource type yet (service launched
     # 2026-06), so E3006 would otherwise fail the lint.
     Metadata:
@@ -434,7 +460,7 @@ Resources:
         - Architecture: ARM_64
       Logging:
         CloudWatch:
-          LogGroup: !Sub "/aws/lambda-microvms/${LMAStackName}-asr"
+          LogGroup: !Ref AsrMicrovmLogGroup
       # The Lambda-managed pool is enough: egress is only used at build time to
       # download the model, and the running ASR server makes no outbound calls.
       EgressNetworkConnectors:

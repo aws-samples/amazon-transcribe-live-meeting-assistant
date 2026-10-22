@@ -2306,6 +2306,9 @@ Resources:
 
   BedrockSummaryLambdaLogGroup:
     Type: AWS::Logs::LogGroup
+    # Matches BedrockSummaryLambda's condition: an unconditional group would be
+    # created and stay empty in a deployment that has no summariser.
+    Condition: ShouldEnableBedrockSummarizer
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/BedrockSummaryLambda
@@ -4592,8 +4595,17 @@ Resources:
                   - appsync:GetApi
                 Resource: !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*"
 
+  GetEventApiDnsFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/GetEventApiDnsFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   GetEventApiDnsFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - GetEventApiDnsFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -4609,6 +4621,8 @@ Resources:
       Runtime: python3.12
       Timeout: 60
       Role: !GetAtt GetEventApiDnsRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref GetEventApiDnsFunctionLogGroup
       TracingConfig:
         Mode: Active
       Code:
@@ -5713,6 +5727,8 @@ Resources:
 
   MicrovmVncTokenFunction:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - MicrovmVncTokenFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -6816,7 +6832,9 @@ Resources:
                 - lambda:GetMicrovm
               Resource: "*"
       LoggingConfig:
-        LogGroup: !Sub "/${AWS::StackName}/lambda/VirtualParticipantManager"
+        LogGroup: !Ref VirtualParticipantManagerLogGroup
+    DependsOn:
+      - VirtualParticipantManagerLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -8452,8 +8470,18 @@ Resources:
                   - ec2:DescribeManagedPrefixLists
                 Resource: '*'
 
+  GetCloudFrontPrefixListFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldCreateVNCALB
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/lambda/GetCloudFrontPrefixListFunction"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   GetCloudFrontPrefixListFunction:
     Type: AWS::Lambda::Function
+    DependsOn:
+      - GetCloudFrontPrefixListFunctionLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -8470,6 +8498,8 @@ Resources:
       Runtime: python3.12
       Timeout: 60
       Role: !GetAtt GetCloudFrontPrefixListRole.Arn
+      LoggingConfig:
+        LogGroup: !Ref GetCloudFrontPrefixListFunctionLogGroup
       TracingConfig:
         Mode: Active
       Code:

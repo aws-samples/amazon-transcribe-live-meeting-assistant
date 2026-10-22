@@ -68,7 +68,9 @@ Resources:
           LOG_LEVEL: INFO
       Role: !GetAtt VirtualParticipantManagerRole.Arn
       LoggingConfig:
-        LogGroup: !Sub "/${LMAStackName}/lambda/VirtualParticipantManager"
+        LogGroup: !Ref VirtualParticipantManagerLogGroup
+    DependsOn:
+      - VirtualParticipantManagerLogGroup
     Metadata:
       cfn_nag:
         rules_to_suppress:
