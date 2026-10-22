@@ -21,7 +21,7 @@ into the working directory:
 
 | Path | Contents |
 |---|---|
-| `.ai-review/metadata.json` | number, title, author, source/target branch, head SHA, CI status, line counts, `changed_files` (the number of sections in the diff you were **given**), and which instruction files this request changes |
+| `.ai-review/metadata.json` | number, title, author, source/target branch, head SHA, `ci_status_when_review_started`, line counts, `changed_files` (the number of sections in the diff you were **given**), and which instruction files this request changes |
 | `.ai-review/diff.patch` | unified diff against the **merge base** with the target branch |
 | `.ai-review/base/` | the **whole repository at the merge base** — the "before" tree |
 | `.ai-review/commits.log` | this request's own commits |
@@ -294,12 +294,21 @@ explicit about what it could not do:
 
 - It read the diff and the checkout. It did **not** deploy, run the test suite,
   run SRT, build an image, open the UI, join a meeting, or call any AWS service.
-- **CI status** is in `metadata.json` as `ci_status`, as a count per outcome
-  ("12 success, 1 failure, 2 queued") for the head commit. On GitHub it is
-  populated from the Checks and commit-status APIs; on the GitLab mirror, and
-  under `--no-api`, it is empty. Report what it says, and when it is empty say the
-  status was not supplied rather than inferring one — "no failure in the diff" has
-  never been evidence that a pipeline passed. A queued or in-progress count means
-  the answer is not in yet, which is worth saying plainly in the verdict table
-  rather than reading as either colour.
+- **CI status** is in `metadata.json` as `ci_status_when_review_started`, as a
+  count per outcome ("12 success, 1 failure, 2 queued") for the head commit. On
+  GitHub it is populated from the Checks and commit-status APIs; on the GitLab
+  mirror, and under `--no-api`, it is empty.
+
+  ⚠️ **It is named for when it was taken, and you must report it that way.** It was
+  sampled before you started, and you take minutes — so on the common case, where
+  the same push triggered both CI and this review, more checks will have finished
+  by the time your comment is posted. Write "CI when this review started: …", not
+  "CI status: ✅ passing". The orchestrator samples again just before posting and
+  the footer carries that fresher reading, so the comment makes exactly one
+  present-tense claim about CI and it is not yours to make.
+
+  If the field says some checks were still running, say so plainly in the verdict
+  table rather than reading it as either colour; the string itself will tell you.
+  If it is empty, say the status was not supplied rather than inferring one — "no
+  failure in the diff" has never been evidence that a pipeline passed.
 - A ✅ on "Safe to merge?" is one machine reading a diff, not an approval.

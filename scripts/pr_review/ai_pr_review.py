@@ -165,9 +165,9 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 #: existing review stale. It is part of the idempotency marker, so bumping it
 #: re-reviews every open request on the next run — which is the point.
 #:
-#: 2: the metadata contract changed (``changed_files`` now counts the sections in
-#:    the supplied diff, ``ci_status`` is populated on GitHub, and the
-#:    instruction-file fields were renamed and re-derived from the merge base). The
+#: 2: the metadata contract changed (``changed_files`` counts the sections in the
+#:    supplied diff, ``ci_status_when_review_started`` is populated on GitHub, and
+#:    the instruction-file fields were renamed and derived from the merge base). The
 #:    reviews already posted at revision 1 are stale in a way that matters rather
 #:    than cosmetically: five of the first nine carry a finding about a `CLAUDE.md`
 #:    change the request never made. Note this does NOT trigger a mass re-review —
@@ -734,8 +734,8 @@ DISCLOSURE_RULES: tuple[DisclosureRule, ...] = (
             _c(r"\binject\w*\s+(?:dependenc\w+|backend\w*|fixture\w*|stub\w*)\b"),
         ),
     ),
-    # `flaw-class/bypass` used to sit here, matching the bare word with an allowlist
-    # of innocent neighbours. It is gone; `attack-narrative/control-bypass` above
+    # There is deliberately NO rule here matching the bare word `bypass` against an
+    # allowlist of innocent neighbours. `attack-narrative/control-bypass` above
     # requires the control to be named instead, and says why.
     DisclosureRule(
         "flaw-class/unauthenticated",
@@ -1246,7 +1246,20 @@ class Github:
             return ""
         if not counts:
             return "no checks reported for this commit"
-        return ", ".join(f"{count} {name}" for name, count in sorted(counts.items()))
+        summary = ", ".join(f"{count} {name}" for name, count in sorted(counts.items()))
+        # ⚠️ Say the unfinished part OUT LOUD rather than leaving it to be inferred
+        # from a state name in a list. "7 success" with three more still running is a
+        # half-truth that reads as a pass, and a count of `queued` next to it is easy
+        # to skim past — so a reader who sees a success count and nothing else can
+        # trust it to be the whole story, and otherwise is told in words.
+        unfinished = sum(
+            count
+            for name, count in counts.items()
+            if name in ("queued", "in_progress", "pending", "waiting", "requested")
+        )
+        if unfinished:
+            summary += f" — {unfinished} still running, so this is NOT a final verdict"
+        return summary
 
     def reviewed_shas(self, iid: int) -> set[tuple[str, int]]:
         """(sha, prompt revision) pairs this tool has already reviewed."""
@@ -2003,7 +2016,8 @@ def run_claude(prompt: str, cwd: Path, model: str, timeout: int) -> tuple[str, f
         # what both CI jobs pin. On an older CLI the flag is rejected and the job
         # fails loudly rather than running unconfined.
         #
-        # It does three things this module previously only argued about:
+        # It does three things that the rest of this module could otherwise only
+        # argue for rather than enforce:
         #
         #   * IGNORES user, project and local settings files. Without it,
         #     `--allowedTools` is ADDITIVE to whatever the machine carries, so a
@@ -2018,7 +2032,7 @@ def run_claude(prompt: str, cwd: Path, model: str, timeout: int) -> tuple[str, f
         #     under this exact argv: a probe asked for `/etc/hostname` and an in-tree
         #     file. Without `--restricted` the out-of-tree read was SERVED; with it,
         #     it was REFUSED with an explicit permission denial while the in-tree read
-        #     still worked. So "the review reads only the tree under review" is now a
+        #     still worked. So "the review reads only the tree under review" is a
         #     true statement rather than an aspiration — which matters because the
         #     process environment holds a Bedrock credential and the review's output
         #     is published.
@@ -2112,6 +2126,8 @@ def compose_note(
     stat: tuple[int, int, int],
     truncated: bool,
     model: str,
+    ci_status_now: str = "",
+    ci_status_at_start: str = "",
 ) -> str:
     """The comment body: the marker, the review, and a footer saying what ran.
 
@@ -2120,6 +2136,13 @@ def compose_note(
     than no comment. It also states where the text does and does not exist, because on
     a public repository "a fuller version is in the artifact" would be both untrue and
     unsafe: the artifact carries exactly this text.
+
+    ``ci_status_now`` is sampled immediately before this call, so it is as fresh as the
+    comment. ``ci_status_at_start`` is what the model was given and is minutes older;
+    it is used only as a fallback, and then it is LABELLED as the earlier reading
+    rather than presented as current. The two exist because the model cannot see
+    anything written after it starts, but a reader should not be handed a stale
+    present-tense claim — see the note at the first sample in :func:`review_one`.
 
     The review goes through :func:`defuse_quick_actions` first, because this is where
     model output becomes a request made with a credential. The result is then handed to
@@ -2144,10 +2167,22 @@ def compose_note(
         if truncated
         else f"the full diff (+{additions}/-{deletions} across {files} files)"
     )
+    # The one present-tense claim about CI in the whole comment, and it is the fresh
+    # reading. The fallback is labelled rather than relabelled.
+    if ci_status_now:
+        checks = f"Checks on this commit when this was posted: {ci_status_now}.\n\n"
+    elif ci_status_at_start:
+        checks = (
+            f"Checks on this commit when the review STARTED, minutes before this was "
+            f"posted (the later read failed): {ci_status_at_start}.\n\n"
+        )
+    else:
+        checks = ""
     return (
         f"{marker}\n"
         f"{review}\n\n"
         "---\n"
+        f"{checks}"
         f"🤖 Automated review of `{merge_request.head_sha[:8]}` by `{model}` over "
         f"{scope}, following "
         # Deliberately NOT a Markdown link. A relative path in a request comment is
@@ -2198,6 +2233,23 @@ def review_one(
         # GitHub pull_request path, which is where nearly every review comes from.
         merge_request.head_sha = head_sha
 
+    # ⚠️ SAMPLED TWICE, and the second one is the one a reader should believe.
+    #
+    # This first sample is an INPUT to the model: it genuinely shapes the "Safe to
+    # merge?" verdict, and the model cannot see anything written after it runs because
+    # metadata.json is composed before the process starts. But a review takes minutes,
+    # and on the common case — a push that triggers the review and CI together — the
+    # checks are still running throughout, so this value is stale by the time the
+    # comment is posted. Publishing it as though it were current is worse than
+    # publishing nothing, because the line reads as a present-tense fact.
+    #
+    # So it is sampled again immediately before compose_note, and the FOOTER carries
+    # that fresher value with the moment it was taken. Two cheap read-only GETs
+    # against world-readable data, next to a model run that costs about a dollar.
+    # pr-review-ci.md tells the review to time-qualify what it says about this one and
+    # to leave the authoritative statement to the footer, so the comment makes exactly
+    # one present-tense claim about CI and it is the fresh one.
+    #
     # Asked for AFTER the head is settled, so the status describes the commit that is
     # actually being reviewed rather than the one the list call saw. Best-effort: a
     # failure returns "" and the review is told the status was not supplied.
@@ -2299,7 +2351,9 @@ def review_one(
             "target_branch": merge_request.target_branch,
             "head_sha": merge_request.head_sha,
             "web_url": merge_request.web_url,
-            "ci_status": merge_request.ci_status,
+            # Named for WHEN it was taken, so nothing downstream can read it as
+            # current. The footer carries the status as at posting time.
+            "ci_status_when_review_started": merge_request.ci_status,
             "changed_files": supplied_files,
             "additions": stat[1],
             "deletions": stat[2],
@@ -2334,7 +2388,24 @@ def review_one(
         )
         shutil.rmtree(worktree, ignore_errors=True)
 
-    note = compose_note(merge_request, review, stat, truncated, args.model)
+    # ⚠️ RE-SAMPLED HERE, after the model run, so the status the comment publishes is
+    # as fresh as the comment itself. The value the model saw is minutes old by now —
+    # see the note at the first sample. Still best-effort: a failure leaves whatever
+    # the first sample found, which the footer then labels as the earlier reading
+    # rather than silently presenting as fresh.
+    fresh_status = ""
+    if isinstance(forge, Github):
+        fresh_status = forge.check_status(merge_request.head_sha)
+
+    note = compose_note(
+        merge_request,
+        review,
+        stat,
+        truncated,
+        args.model,
+        ci_status_now=fresh_status,
+        ci_status_at_start=merge_request.ci_status,
+    )
     artifact = artifact_dir / f"review-{merge_request.iid}.md"
 
     # ⚠️ The guard sits between composing and publishing, and it decides what gets

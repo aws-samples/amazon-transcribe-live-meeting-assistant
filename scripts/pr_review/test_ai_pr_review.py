@@ -523,6 +523,32 @@ def test_the_footer_and_notice_are_themselves_publishable() -> None:
         "compose_note's own footer trips the guard, so no review could ever be posted"
     )
 
+    # The CI line is part of the footer and so part of the guard's input, and it
+    # carries words the harness does not choose — a check outcome is whatever GitHub
+    # calls it. `failure` is the one most likely to look alarming to a word-based
+    # rule, so both the fresh and the fallback wordings are scanned with it present.
+    for kwargs in (
+        {"ci_status_now": "9 success, 2 failure, 1 queued — 1 still running"},
+        {"ci_status_at_start": "9 success, 2 failure, 1 cancelled"},
+        {"ci_status_now": "no checks reported for this commit"},
+    ):
+        with_ci = review.compose_note(
+            merge_request,
+            "## PR/MR Review: a title (#800)\n\nLooks fine.",
+            (3, 40, 2),
+            True,
+            review.DEFAULT_MODEL,
+            **kwargs,
+        )
+        assert not review.scan_for_disclosure(with_ci), (
+            f"the footer's CI line trips the guard for {kwargs}, which would withhold "
+            f"every review of a pull request whose checks are in that state"
+        )
+        # And the fallback must be labelled as the earlier reading, never presented as
+        # current — that distinction is the whole point of sampling twice.
+        if "ci_status_at_start" in kwargs:
+            assert "when the review STARTED" in with_ci
+
     notice = review.withheld_notice(
         merge_request, ["attack-narrative/attacker"], review.DEFAULT_MODEL
     )
@@ -724,9 +750,10 @@ PINNED_PATHS = (
 def _pinning_step_bodies() -> dict[str, str]:
     """The pinning shell on each platform, keyed by file name.
 
-    BOTH are checked, because they drifted: the GitLab version used to warn and then
-    run the MR's own copy, where the GitHub one refused. A warning makes the failure
-    visible in a log; it does not stop it.
+    BOTH are checked, because the two are written separately and can drift. The shape
+    to guard against is a platform that only WARNS on a resolution failure and then
+    runs the request's own copy: a warning makes the failure visible in a log without
+    stopping it, which is the one thing the step exists to prevent.
     """
     bodies: dict[str, str] = {}
     workflow = yaml.safe_load(GITHUB_WORKFLOW.read_text())
@@ -971,8 +998,8 @@ def test_a_failed_review_cannot_redden_the_job_on_either_platform(gh_job: dict) 
 
     GitLab says this with `allow_failure: true`. GitHub has no such key, so the Review
     step carries `continue-on-error: true`; without it a Bedrock incident marks the
-    check failed. Asserting only the GitLab half, which is what this test used to do,
-    left the platform that actually runs on every pull request uncovered.
+    check failed. Both halves are asserted deliberately — checking only the GitLab one
+    would leave the platform that actually runs on every pull request uncovered.
     """
     config = yaml.safe_load(GITLAB_CI.read_text())
     job = config["ai_mr_review"]
@@ -1402,6 +1429,134 @@ def test_the_ci_status_lookup_never_costs_a_review(monkeypatch) -> None:
     assert "1 success" in summary and "1 queued" in summary and "1 failure" in summary, (
         f"got {summary!r}; a queued run must not read as either colour and an "
         f"external failure must not be dropped"
+    )
+
+
+def test_the_published_ci_status_is_sampled_after_the_model_run(tmp_path, monkeypatch) -> None:
+    """The status in the comment must be as fresh as the comment, not as the prompt.
+
+    A review takes minutes. The first sample has to happen BEFORE the model starts,
+    because `metadata.json` is composed before the process launches and the model
+    cannot see anything written later — and the CI state genuinely shapes a "Safe to
+    merge?" verdict. But publishing that early reading as a present-tense fact is
+    worse than publishing nothing: on the common case, where one push triggers both CI
+    and this review, checks are still running throughout, so the line would be stale
+    the moment it was written and would read as current.
+
+    So the status is sampled twice and the FOOTER carries the later reading. This
+    asserts the ordering behaviourally rather than by reading the source, because the
+    ordering is the whole property: a future edit that moved the second sample back
+    above `run_claude` would still pass any textual check for "two calls".
+    """
+    order: list[str] = []
+    statuses = iter(
+        ["3 success, 2 queued — 2 still running, so this is NOT a final verdict", "5 success"]
+    )
+
+    class FakeForge(review.Github):
+        def __init__(self):
+            super().__init__("owner/name", "token")
+
+        def reviewed_shas(self, iid):
+            return set()
+
+        def check_status(self, sha):
+            order.append("check_status")
+            return next(statuses)
+
+        def post_note(self, iid, body):
+            raise AssertionError("a dry run must not post")
+
+    def fake_run_claude(prompt, cwd, model, timeout):
+        order.append("run_claude")
+        return "## PR/MR Review: a title (#1)\n\nLooks fine.", 0.5
+
+    monkeypatch.setattr(review, "fetch_head", lambda *a, **k: "f" * 40)
+    monkeypatch.setattr(review, "diff_stat", lambda *a, **k: (2, 10, 1))
+    monkeypatch.setattr(
+        review, "build_diff", lambda *a, **k: ("diff --git a/a.py b/a.py\n+x\n", False)
+    )
+    monkeypatch.setattr(review, "instruction_changes", lambda *a, **k: {})
+    monkeypatch.setattr(review, "pin_instructions_to_target_branch", lambda *a, **k: ([], []))
+    monkeypatch.setattr(review, "neutralise_agent_config", lambda *a, **k: [])
+    monkeypatch.setattr(review, "export_base_tree", lambda *a, **k: "b" * 40)
+    monkeypatch.setattr(review, "write_commit_log", lambda *a, **k: None)
+    monkeypatch.setattr(review, "run_claude", fake_run_claude)
+    # The worktree add/remove and the ancestry probe are the only _run calls left.
+    monkeypatch.setattr(
+        review,
+        "_run",
+        lambda *a, **k: __import__("subprocess").CompletedProcess(a[0], 0, "", ""),
+    )
+
+    merge_request = review.MergeRequest(
+        iid=1,
+        title="a title",
+        author="someone",
+        source_branch="feature/x",
+        target_branch="develop",
+        web_url="https://example.invalid/pull/1",
+        head_sha="f" * 40,
+        draft=False,
+    )
+    args = review.parse_args(["--mr", "1", "--dry-run", "--artifact-dir", str(tmp_path)])
+    outcome = review.review_one(FakeForge(), merge_request, args, tmp_path)
+
+    assert outcome.status == "reviewed", outcome.detail
+    assert order == ["check_status", "run_claude", "check_status"], (
+        f"call order was {order}. The status must be sampled once before the model "
+        f"(so the prompt can carry it) and AGAIN after it (so the comment publishes a "
+        f"reading as fresh as itself)."
+    )
+
+    published = (tmp_path / "review-1.md").read_text()
+    assert "when this was posted: 5 success" in published, (
+        "the footer published something other than the post-model reading, so the "
+        "comment carries a CI verdict that was already stale when it was written"
+    )
+    assert "3 success, 2 queued" not in published, (
+        "the footer published the PRE-model reading as though it were current"
+    )
+
+
+def test_an_unfinished_check_is_stated_not_left_to_inference() -> None:
+    """ "7 success" with three still running is a half-truth that reads as a pass.
+
+    The counts alone put `queued` in a list next to `success` and leave the reader to
+    notice. Since the whole point of the field is that the review stops disclaiming CI
+    status, a reader who sees a success count and nothing else should be able to trust
+    it as the whole story — so the unfinished case says so in words.
+    """
+    forge = review.Github("owner/name", "token")
+
+    def runs_and_statuses(method, url, body=None):
+        if "check-runs" in url:
+            return {
+                "check_runs": [
+                    {"conclusion": "success"},
+                    {"conclusion": "success"},
+                    {"conclusion": None, "status": "in_progress"},
+                ]
+            }, {}
+        return {"statuses": []}, {}
+
+    forge._request = runs_and_statuses
+    summary = forge.check_status("abc1234")
+    assert "2 success" in summary
+    assert "1 in_progress" in summary
+    assert "still running" in summary and "NOT a final verdict" in summary, (
+        f"got {summary!r}; an unfinished run must be stated rather than left to be "
+        f"inferred from a state name in a list"
+    )
+
+    def all_done(method, url, body=None):
+        if "check-runs" in url:
+            return {"check_runs": [{"conclusion": "success"}]}, {}
+        return {"statuses": []}, {}
+
+    forge._request = all_done
+    assert "still running" not in forge.check_status("abc1234"), (
+        "a finished run must not carry the caveat, or the caveat stops meaning anything"
     )
 
 

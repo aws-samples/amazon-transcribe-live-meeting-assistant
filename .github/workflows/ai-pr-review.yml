@@ -232,8 +232,8 @@ jobs:
     # The two documents do not settle it and a scoped-down GITHUB_TOKEN cannot be
     # minted outside Actions to test it. So they are listed because they are the
     # documented scopes for these two endpoints and cost nothing — and because
-    # check_status now logs a warning when the lookup fails, so if this guess is wrong
-    # the first run says so instead of the field being quietly empty forever.
+    # check_status logs a warning when the lookup fails, so if this guess is wrong the
+    # first run says so instead of the field being quietly empty forever.
     permissions:
       contents: read
       # Posting the review. Unlike GitLab's CI_JOB_TOKEN, the built-in Actions token
