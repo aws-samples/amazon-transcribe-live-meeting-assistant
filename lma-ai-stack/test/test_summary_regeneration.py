@@ -238,6 +238,26 @@ def test_the_summary_write_states_the_rule_exactly_as_the_identity_write_does(
         assert detection in source
 
 
+def test_the_two_lambdas_apply_one_access_rule_line_for_line() -> None:
+    """`caller_may_edit` is duplicated, so it has to be duplicated exactly.
+
+    The two functions answer the same question about the same meeting rows, from
+    two mutations the same button set reaches, and a reader of either docstring
+    is told they agree. Only the docstrings differ, naming each one's own
+    backend caller, so the comparison is of everything after them.
+    """
+    bodies = []
+    for name in ("summary_regenerator", "speaker_name_resolver"):
+        source = (AI_STACK / "source" / "lambda_functions" / name / "index.py").read_text(
+            encoding="utf-8"
+        )
+        rule = source[source.index("def caller_may_edit(") :]
+        rule = rule[: rule.index("\ndef ")]
+        # Everything after the docstring's closing quotes.
+        bodies.append(rule[rule.index('"""', rule.index('"""') + 3) + 3 :].strip())
+    assert bodies[0] == bodies[1], "the two copies of caller_may_edit have drifted apart"
+
+
 def test_the_share_list_rule_is_stated_where_each_path_applies_it(summary_vtl: str) -> None:
     """Both paths say what `SharedWith` shape their test is exact for.
 
