@@ -13,8 +13,9 @@ That way is the namespace. Every emitter is told its CloudWatch namespace by a
 on the stack's name. An emitter whose variable is unset keeps running perfectly
 and silently publishes nothing; an emitter whose variable is set to the wrong
 thing publishes to a namespace nothing reads. Neither failure is visible from
-the component -- the only symptom is an empty widget and an alarm in
-INSUFFICIENT_DATA, which is what a quiet deployment looks like too. Nothing in a
+the component -- the only symptom is an empty widget and an alarm reading OK,
+since both alarms on these metrics treat missing data as not breaching. That is
+exactly what a quiet deployment looks like. Nothing in a
 build or a deploy checks that an emitter and the things reading it agree on a
 namespace, so the first group of tests below does.
 
@@ -573,11 +574,12 @@ def test_every_metric_recording_a_swallowed_failure_has_an_alarm(alarms: dict):
 
 
 def test_no_alarm_reads_a_metric_nothing_emits(alarms: dict):
-    """An alarm on a metric nobody publishes sits in INSUFFICIENT_DATA for ever.
+    """An alarm on a metric nobody publishes never leaves its no-data state.
 
-    It is indistinguishable from an alarm that is simply quiet, so it reports
-    healthy through exactly the failure it was added for. A misspelled metric
-    name is all it takes, and neither cfn-lint nor the deploy checks one.
+    With `TreatMissingData: notBreaching` that state is OK, so the alarm is
+    indistinguishable from one that is simply quiet and reports healthy through
+    exactly the failure it was added for. A misspelled metric name is all it
+    takes, and neither cfn-lint nor the deploy checks one.
     """
     unknown = sorted(_alarmed_metric_names(alarms) - set(catalogue.BY_NAME))
     assert not unknown, (

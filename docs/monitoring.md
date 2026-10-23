@@ -37,8 +37,9 @@ code otherwise swallows: a failure that is caught, recorded and not raised, so
 no AWS-published metric moves and nothing else would ever mention it. That is
 exactly why each is an alarm rather than only a graph. The cost of reading an
 application metric is that it depends on application code: if a component stops
-publishing, its alarm sits in `INSUFFICIENT_DATA`, which looks the same as a
-quiet deployment. A build-time gate checks the wiring that would cause that, and
+publishing, its alarm reads `OK` -- both are set to treat missing data as not
+breaching, so an alarm with no data at all is indistinguishable from one that is
+simply quiet, and it will not be the thing that tells you. A build-time gate checks the wiring that would cause that, and
 the dashboard band note explains how to tell the two apart by eye.
 
 ### The alarm table
@@ -137,8 +138,12 @@ Kinesis batch — but it means the invocation succeeds, the record is not
 redelivered, `AWS/Lambda Errors` stays flat and the discarded-records queue
 stays empty. The transcript simply has a line missing, on a meeting page with no
 error on it. If this alarm fires, read the Call Event Processor's log group for
-`event processor error` over the same window; each line carries the exception
-type and the GraphQL `errorType`. Segments already lost cannot be replayed once
+`max retries on query` over the same window; each of those lines carries the
+exception type and the GraphQL `errorType`. Search for that string rather than
+the handler's `event processor error`, which reports only failures that were
+raised — and the point of this metric is that these were not, so an operator
+grepping for it finds nothing in the window that fired. Segments already lost
+cannot be replayed once
 their Kinesis records pass the stream's 24-hour retention, so a sustained rate
 is urgent in a way a single occurrence is not.
 

@@ -761,7 +761,20 @@ def emitted(monkeypatch) -> RecordingEmitter:
 
 
 def process_event(session: Any, message: Dict[str, Any], monkeypatch) -> None:
-    """Runs one event through the real dispatch with the hooks switched off."""
+    """Runs one event through the real dispatch with the hooks switched off.
+
+    The retry backoff is made instant. The cases below that assert on a *failed*
+    write go through `execute_gql_query_with_retries`, whose default backoff
+    sleeps for real -- three attempts at a 0.75-second base cost about six
+    seconds per test, and these tests are about which metric is counted rather
+    than about how long a retry waits. The retries themselves still happen, so
+    the path under test is unchanged.
+    """
+
+    async def instant(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", instant)
     monkeypatch.setattr(cep, "START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "", raising=False)
     monkeypatch.setattr(cep, "TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN", "", raising=False)
     monkeypatch.setattr(cep, "SPEAKER_NAME_RESOLVER_ARN", "", raising=False)

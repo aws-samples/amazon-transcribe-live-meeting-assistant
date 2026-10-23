@@ -4141,10 +4141,13 @@ Resources:
         invocation's result rather than raised: the invocation succeeds, the
         Kinesis record is not redelivered, AWS/Lambda Errors stays flat and the
         discarded-records queue stays empty. The transcript simply has a gap.
-        Read the Call Event Processor's log group for 'event processor error'
-        over the same period; the line carries the exception type and the
-        GraphQL errorType. An expired caller token, an AppSync resolver
-        rejecting the write and a DynamoDB capacity error all land here. Lines
+        Read the Call Event Processor's log group for 'max retries on query'
+        over the same period; that line carries the exception type and the
+        GraphQL errorType, and it is the one these failures produce -- the
+        handler's 'event processor error' lines report only failures that were
+        raised, which these are not. An expired caller token, an AppSync
+        resolver rejecting the write and a DynamoDB capacity error all land
+        here. Lines
         already lost cannot be replayed from Kinesis once the records age out of
         its 24-hour retention, so treat a sustained rate as urgent.
       Namespace: !Ref AWS::StackName

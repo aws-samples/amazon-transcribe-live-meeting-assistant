@@ -138,8 +138,9 @@ class MetricEmitter:
                 self._warned_disabled = True
                 LOGGER.error(
                     "%s is unset, so no application metrics are being published by this "
-                    "function. Nothing downstream reports this: the alarms and dashboard "
-                    "widgets that read these metrics stay in INSUFFICIENT_DATA and empty.",
+                    "function. Nothing downstream reports this: the widgets that read these "
+                    "metrics stay empty and their alarms read OK, because both treat "
+                    "missing data as not breaching.",
                     catalogue.NAMESPACE_ENV_VAR,
                 )
             return

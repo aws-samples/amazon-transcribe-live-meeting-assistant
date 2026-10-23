@@ -111,7 +111,8 @@ export class MetricEmitter {
                 this.log.error(
                     `${catalogue.METRIC_NAMESPACE_ENV_VAR} is unset, so this task publishes no ` +
                         'application metrics. Nothing downstream reports that: the widgets that ' +
-                        'read them stay empty and the alarms stay in INSUFFICIENT_DATA.'
+                        'read them stay empty and their alarms read OK, because both treat ' +
+                        'missing data as not breaching.'
                 );
             }
             return;
