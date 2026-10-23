@@ -1468,13 +1468,18 @@ async def execute_process_event_api_mutation(
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
-
-        # Counted on the same condition as the start-of-call hook below, and for
-        # the same reason: a redelivered START must not read as a second meeting.
-        # Kept out of the hook's own branch because the count is wanted whether
-        # or not a deployment configures a hook.
-        if not was_already_created(response):
-            METRICS.count(metric_names.MEETINGS_STARTED)
+            # Counted on the same condition as the start-of-call hook below, and
+            # for the same reason: a redelivered START must not read as a second
+            # meeting. Kept out of the hook's own branch because the count is
+            # wanted whether or not a deployment configures a hook.
+            #
+            # Inside the success branch, matching the END branch below. A
+            # non-duplicate failure raises rather than being returned here, so
+            # in practice this line is unreachable with an exception in hand --
+            # but the branch above shows the contract allows one, and a meeting
+            # that could not be created has not started.
+            if not was_already_created(response):
+                METRICS.count(metric_names.MEETINGS_STARTED)
 
         # At most once per meeting. Redelivery is routine on this stream -- the
         # END branch below explains why -- and a deployment's own start-of-call
