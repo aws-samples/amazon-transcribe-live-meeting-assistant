@@ -59,7 +59,7 @@ A hand-edited summary is marked **Edited** on the panel, and regenerating one as
 
 ### Who Can Do It
 
-Both controls are available to a meeting's **owner**, a user the meeting has been **shared with**, and an **administrator** -- the same rule that decides who can see a meeting at all and who can name its speakers. For anyone else the controls are not offered, and the write is refused by the API even if it is attempted directly.
+Both controls are available to a meeting's **owner**, a user the meeting has been **shared with**, and an **administrator** -- the same rule that decides who can see a meeting at all and who can name its speakers. For anyone else both controls appear disabled, and the write is refused by the API even if it is attempted directly.
 
 ## BEDROCK Option (Default)
 

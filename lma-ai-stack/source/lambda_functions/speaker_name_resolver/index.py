@@ -140,13 +140,21 @@ def caller_may_edit(meeting, identity):
     groups = identity.get("groups") or []
     if "Admin" in groups:
         return True
+    # Only a named caller can match one of the fields below. A meeting row
+    # carries no Owner attribute until someone owns it, and absent reads as
+    # None, so every comparison needs a name on both sides to mean anything.
+    if not username:
+        return False
     if meeting.get("Owner") == username:
         return True
     shared_with = meeting.get("SharedWith")
     if isinstance(shared_with, (list, set)):
         return username in shared_with
     if isinstance(shared_with, str):
-        return bool(username) and username in shared_with
+        # Whole entries, not a substring of the joined string: the older
+        # comma-separated form holds one username per element, and membership is
+        # a property of the elements.
+        return username in {entry.strip() for entry in shared_with.split(",")}
     return False
 
 
@@ -287,14 +295,16 @@ def resolve(call_id, identity=None, force=False, final=False):
 
 def handler(event, context):  # pylint: disable=unused-argument
     """Entry point for both the AppSync resolver and the backend invoke."""
-    LOGGER.debug("Speaker name resolver event: %s", json.dumps(event, default=str)[:2000])
-
     # An AppSync Lambda resolver receives the whole context; a backend invoke
     # sends the Kinesis message, which carries CallId at the top level.
     arguments = (event.get("arguments") or {}).get("input") or {}
     call_id = arguments.get("CallId") or event.get("CallId")
     if not call_id:
         raise ValueError("no CallId in event")
+
+    # Which meeting and which leg: the two fields of the event this function acts
+    # on, named rather than serialised, so the log line says what ran.
+    LOGGER.debug("Speaker name resolver event for %s, trigger %s", call_id, event.get("Trigger"))
 
     identity = event.get("identity")
     # The backend's end-of-meeting invoke says so, and only the backend can: a

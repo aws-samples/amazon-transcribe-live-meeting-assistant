@@ -326,7 +326,10 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
     if (option.detail.id === 'download') {
       await exportToTextFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
     } else if (option.detail.id === 'email') {
-      window.open(`mailto:?subject=${item.callId}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
+      // Both halves are encoded: a meeting name is free text, and
+      // getEmailFormattedSummary returns an encoded body.
+      const subject = encodeURIComponent(item.callId ?? '');
+      window.open(`mailto:?subject=${subject}&body=${getEmailFormattedSummary(item.callSummaryText)}`);
     } else if (option.detail.id === 'docx') {
       await exportToDocxFile(getTextFileFormattedMeetingDetails(item), `Summary-${item.callId}`);
     } else if (option.detail.id === 'copy') {

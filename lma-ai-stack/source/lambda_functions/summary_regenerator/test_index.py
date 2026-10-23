@@ -227,6 +227,56 @@ def test_an_identity_with_no_username_is_refused(monkeypatch: pytest.MonkeyPatch
     assert written == []
 
 
+def test_an_identity_with_no_username_is_refused_on_a_meeting_with_no_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A meeting row carries no Owner attribute until somebody owns it, and an
+    absent attribute reads as None. Access is a match between two names, so a
+    caller with no name matches nothing -- including a row with no owner."""
+    ownerless = {key: value for key, value in MEETING_ROW.items() if key != "Owner"}
+    _, _, starter, written = install(monkeypatch, meeting=ownerless)
+    result = index.handler(start_event({"accountId": "123456789012"}), FakeContext())
+    assert result["Success"] is False
+    assert result["Message"] == "not permitted"
+    assert starter.calls == []
+    assert written == []
+
+
+def test_a_username_that_is_only_a_substring_of_a_shared_entry_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The comma-separated SharedWith form holds one username per element, so
+    membership is tested element by element: a name that merely occurs inside an
+    element is not one of them."""
+    _, _, starter, written = install(
+        monkeypatch,
+        meeting={**MEETING_ROW, "SharedWith": {"S": "friend@example.com,other@example.com"}},
+    )
+    result = index.handler(
+        start_event({"username": "friend@example.co", "groups": []}), FakeContext()
+    )
+    assert result["Success"] is False
+    assert result["Message"] == "not permitted"
+    assert starter.calls == []
+    assert written == []
+
+
+def test_a_shared_entry_with_surrounding_space_still_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The comma-separated form is hand-maintained in places, so an element is
+    stripped before it is compared."""
+    _, _, starter, _ = install(
+        monkeypatch,
+        meeting={**MEETING_ROW, "SharedWith": {"S": "a@b.com, friend@example.com"}},
+    )
+    result = index.handler(
+        start_event({"username": "friend@example.com", "groups": []}), FakeContext()
+    )
+    assert result["Success"] is True
+    assert starter.calls
+
+
 def test_the_second_leg_has_no_identity_and_is_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

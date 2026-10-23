@@ -239,9 +239,35 @@ def test_the_regeneration_applies_the_same_rule_in_the_lambda(regenerator: str) 
     assert '"Admin" in groups' in rule
     assert 'meeting.get("Owner") == username' in rule
     assert "shared_with" in rule
+    # Access is a match between two names, and both of the fields matched against
+    # are absent on some rows, so a caller with no resolvable name is settled
+    # before either field is read.
+    assert rule.index("if not username:") < rule.index('meeting.get("Owner")')
     # Checked before anything is queued or written.
     start = regenerator[regenerator.index("def start(") :]
     assert start.index("caller_may_edit(") < start.index("starter_client.invoke(")
+
+
+def test_the_two_lambda_resolvers_carry_only_the_arguments_and_the_identity() -> None:
+    """Both resolvers name their payload rather than forwarding the context.
+
+    Those two fields are the whole of what either Lambda reads, so the
+    invocation carries the data they work from and nothing else.
+    """
+    for name in ("regenerateCallSummary.js", "resolveSpeakerNames.js"):
+        source = (APPSYNC / name).read_text(encoding="utf-8")
+        assert "payload: { arguments: ctx.arguments, identity: ctx.identity }" in source, name
+        assert "payload: ctx," not in source, name
+
+
+def test_each_resolver_lambda_logs_the_fields_that_identify_the_work() -> None:
+    """Which meeting and which leg, named rather than serialised."""
+    functions = AI_STACK / "source" / "lambda_functions"
+    for name in ("summary_regenerator", "speaker_name_resolver"):
+        source = (functions / name / "index.py").read_text(encoding="utf-8")
+        handler = source[source.index("def handler(") :]
+        assert "json.dumps(event" not in handler, name
+        assert 'event.get("Trigger")' in handler, name
 
 
 # ── reaching the browser ────────────────────────────────────────────────────

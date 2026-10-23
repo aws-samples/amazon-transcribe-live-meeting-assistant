@@ -24,12 +24,14 @@ Reachable two ways, which are the two halves of one run:
 
 Summarisation itself is NOT reimplemented here. The configured summary function
 (`TRANSCRIPT_SUMMARY_FUNCTION_ARN`, which is the Bedrock summariser or a
-customer's own end-of-call hook) is invoked exactly as the end-of-meeting
-orchestrator invokes it, with only a `CallId`. Passing a `Prompt` override would
-both bypass the stored prompt templates and -- in the Bedrock summariser -- skip
-the snapshot of the transcript and summary written to S3 for the Bedrock
-Knowledge Base. Refreshing that snapshot is one of the reasons to regenerate, so
-no override is ever passed.
+customer's own end-of-call hook) is invoked with only the `CallId` the hook
+contract requires (see docs/transcript-summarization.md). The end-of-meeting
+orchestrator forwards its whole END event, of which the `CallId` is the only
+field the summariser reads; the other field it would accept is a `Prompt`
+override, and passing one would both bypass the stored prompt templates and --
+in the Bedrock summariser -- skip the snapshot of the transcript and summary
+written to S3 for the Bedrock Knowledge Base. Refreshing that snapshot is one of
+the reasons to regenerate, so no override is ever passed.
 
 A failed run must leave the previous summary standing: a summary that was there
 and is now "An error occurred." is worse than a stale one. So the text is
@@ -129,10 +131,10 @@ starter_client = boto3.client(
 )
 
 # The session used to sign the writes back to AppSync. At module scope so that
-# a test can replace it with one carrying static credentials: creating it in
-# write_summary left the signing step resolving credentials from whatever
-# ambient chain the process happened to have, which a test cannot control and a
-# build runner does not have.
+# a test can replace it with one carrying static credentials (see
+# `static_signing_credentials` in test_index.py): signing must resolve its
+# credentials from this one object, not from whatever ambient chain the process
+# happens to have, which a test cannot control and a build runner does not have.
 signing_session = boto3.Session()
 
 
@@ -164,13 +166,21 @@ def caller_may_edit(meeting, identity):
     groups = identity.get("groups") or []
     if "Admin" in groups:
         return True
+    # Only a named caller can match one of the fields below. A meeting row
+    # carries no Owner attribute until someone owns it, and absent reads as
+    # None, so every comparison needs a name on both sides to mean anything.
+    if not username:
+        return False
     if meeting.get("Owner") == username:
         return True
     shared_with = meeting.get("SharedWith")
     if isinstance(shared_with, (list, set)):
         return username in shared_with
     if isinstance(shared_with, str):
-        return bool(username) and username in shared_with
+        # Whole entries, not a substring of the joined string: the older
+        # comma-separated form holds one username per element, and membership is
+        # a property of the elements.
+        return username in {entry.strip() for entry in shared_with.split(",")}
     return False
 
 
@@ -428,14 +438,16 @@ def run(call_id):
 
 def handler(event, context):
     """Entry point for both the AppSync resolver and this function's own invoke."""
-    LOGGER.debug("Summary regenerator event: %s", json.dumps(event, default=str)[:2000])
-
     # An AppSync Lambda resolver receives the whole context; the second leg
     # sends a small message with CallId at the top level.
     arguments = (event.get("arguments") or {}).get("input") or {}
     call_id = arguments.get("CallId") or event.get("CallId")
     if not call_id:
         raise ValueError("no CallId in event")
+
+    # Which meeting and which leg: the two fields of the event this function acts
+    # on, named rather than serialised, so the log line says what ran.
+    LOGGER.debug("Summary regenerator event for %s, trigger %s", call_id, event.get("Trigger"))
 
     # Only this function invokes itself, and only without an identity -- an
     # AppSync caller always arrives with one.

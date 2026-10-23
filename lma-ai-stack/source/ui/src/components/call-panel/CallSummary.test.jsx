@@ -112,7 +112,7 @@ describe('CallSummary — regenerating', () => {
     expect(screen.getByText(/migration plan/)).toBeInTheDocument();
   });
 
-  it('offers no controls to a user who may not edit the meeting', () => {
+  it('disables both controls for a user who may not edit the meeting', () => {
     renderPanel({ readOnly: true });
     expect(screen.getByRole('button', { name: /regenerate/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /^edit$/i })).toBeDisabled();

@@ -6,12 +6,16 @@
 import { util } from '@aws-appsync/utils';
 
 /**
- * Hand the whole resolver context to the speaker-name resolver Lambda.
+ * Invoke the speaker-name resolver Lambda with the arguments and the identity.
  *
- * The context, not just the arguments: the Lambda has to know who is asking.
+ * The identity as well as the arguments: the Lambda has to know who is asking.
  * This is a Lambda resolver, so there is no DynamoDB condition to carry the
  * "Admin, owner, or shared-with" rule the way the direct identity write does,
  * and the Lambda applies it from `identity` instead.
+ *
+ * Those two fields and no more: the payload names what the Lambda reads rather
+ * than forwarding the context whole, so the invocation carries the data the
+ * Lambda works from and nothing else the resolver happens to hold.
  *
  * @param {import('@aws-appsync/utils').Context} ctx the context
  * @returns {import('@aws-appsync/utils').LambdaRequest} the request
@@ -19,7 +23,7 @@ import { util } from '@aws-appsync/utils';
 export function request(ctx) {
     return {
         operation: 'Invoke',
-        payload: ctx,
+        payload: { arguments: ctx.arguments, identity: ctx.identity },
     };
 }
 

@@ -42,23 +42,34 @@ export const getMarkdownSummary = (callSummaryText) => {
   return summary;
 };
 
+/**
+ * The summary as a percent-encoded `mailto:` body.
+ *
+ * The text is assembled as plain text and encoded in one pass at the end,
+ * rather than written with `%0D%0A` escapes inline. A hand-edited summary is
+ * plain Markdown and arrives here through the non-JSON branch, so the body
+ * routinely contains characters that carry meaning in a URL -- a `#` opening a
+ * heading, an `&` in a sentence -- and each has to reach the mail client as
+ * itself rather than as a fragment or a parameter boundary.
+ */
 export const getEmailFormattedSummary = (callSummaryText) => {
   if (!callSummaryText) {
-    return 'Not available';
+    return encodeURIComponent('Not available');
   }
   let summary = callSummaryText;
   try {
     const jsonSummary = JSON.parse(summary);
     summary = '';
     Object.entries(jsonSummary).forEach(([key, value]) => {
-      summary += `${key}%0D%0A%0D%0A${value}%0D%0A%0D%0A`;
-      summary = summary.replace(/\n/g, '%0D%0A');
-      summary = summary.replace(/\*\*/g, '');
+      summary += `${key}\n\n${value}\n\n`;
     });
   } catch (e) {
-    return callSummaryText;
+    summary = callSummaryText;
   }
-  return summary;
+  // CRLF is the line ending a mail body takes; normalise to LF first so a text
+  // that already uses CRLF does not end up with doubled carriage returns.
+  const body = summary.replace(/\*\*/g, '').replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+  return encodeURIComponent(body);
 };
 
 export const getTextFileFormattedSummary = (callSummaryText) => {
