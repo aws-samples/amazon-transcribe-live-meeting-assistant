@@ -491,11 +491,15 @@ def run(call_id):
     # A run started while the meeting was still going summarised the transcript
     # as it stood then. If the meeting has since ended, the pipeline is writing
     # its own summary from the whole transcript, and this one -- built from part
-    # of it -- must not land on top of that, nor on the Knowledge Base snapshot
-    # the summariser refreshed. The two writes are unordered, so which arrived
-    # first says nothing; this is dropped either way. Nothing is lost: the
-    # fuller summary is the one the user wanted, and Regenerate is there to run
-    # again afterwards.
+    # of it -- must not land on top of that. The two writes are unordered, so
+    # which arrived first says nothing; this is dropped either way.
+    #
+    # What this does NOT undo is the Knowledge Base snapshot. Under the BEDROCK
+    # option the summariser writes that copy to S3 itself, inside the
+    # invoke_summary_function call above, so by the time this decision is made
+    # the snapshot already holds what this run saw. Pressing Regenerate once the
+    # meeting has ended writes it again from the whole transcript, which is what
+    # the docs tell the user to do.
     if was_live and (read_meeting(call_id) or {}).get("Status") == STATUS_MEETING_ENDED:
         LOGGER.info(
             "Discarding the regenerated summary for %s: the meeting ended while it ran, "
