@@ -809,6 +809,31 @@ def test_a_redelivered_start_event_counts_no_meeting_started(schema, emitted, mo
     assert metric_names.MEETINGS_STARTED not in emitted.counts
 
 
+def test_a_failed_create_counts_no_meeting_started(schema, emitted, monkeypatch):
+    """A meeting that could not be created has not started.
+
+    `was_already_created` is false for an ordinary failure as well as for a
+    first delivery, so on its own it would not tell these two apart. What does
+    is that a failure the resolver did not reject as a duplicate propagates out
+    of the dispatch instead of being returned, so the count is never reached and
+    the record is redelivered. This asserts that, rather than leaving it to be
+    reasoned about: if `execute_create_call_mutation` ever starts returning its
+    exceptions, the meeting count silently begins including meetings that do not
+    exist.
+    """
+    rejected = TransportQueryError(
+        "service unavailable",
+        errors=[{"message": "service unavailable", "errorType": "ServiceUnavailable"}],
+    )
+    with pytest.raises(Exception):  # noqa: B017 - the transport's own type
+        process_event(
+            FakeSession(schema, rejected),
+            {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"},
+            monkeypatch,
+        )
+    assert metric_names.MEETINGS_STARTED not in emitted.counts
+
+
 def test_an_end_event_counts_one_meeting_ended(schema, emitted, monkeypatch):
     # getCall first -- a meeting still open -- then the status write.
     session = QueuedSession(
