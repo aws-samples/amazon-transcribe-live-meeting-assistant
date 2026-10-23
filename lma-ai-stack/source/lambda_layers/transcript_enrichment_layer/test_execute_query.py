@@ -45,6 +45,7 @@ import pytest
 
 try:
     from gql.dsl import DSLQuery, DSLSchema, dsl_gql
+    from gql.transport.exceptions import TransportQueryError
     from graphql import build_ast_schema, parse
 except ModuleNotFoundError as exc:  # pragma: no cover - depends on the environment
     pytest.skip(
@@ -72,12 +73,16 @@ type Query { getCall(CallId: ID!): Call }
 """
 
 
-class TransportQueryError(Exception):
-    """The shape gql raises for a response carrying GraphQL errors."""
+def transport_query_error(errors: List[Dict[str, Any]]) -> TransportQueryError:
+    """gql's own exception, built the way gql builds it.
 
-    def __init__(self, errors: List[Dict[str, Any]]) -> None:
-        super().__init__(str(errors[0]))
-        self.errors = errors
+    ``AsyncClientSession.execute`` raises
+    ``TransportQueryError(str_first_element(result.errors), errors=result.errors,
+    ...)``, so its ``str()`` is the first error entry. The real class rather than
+    a stand-in, so the assertions about keeping the exception's own text out of a
+    log line hold against how gql actually stringifies it.
+    """
+    return TransportQueryError(str(errors[0]), errors=errors)
 
 
 class FailingSession:
@@ -120,7 +125,7 @@ def above_debug(records: List[logging.LogRecord]) -> List[logging.LogRecord]:
 
 def graphql_error() -> TransportQueryError:
     """A transport exception whose own text quotes a mutation argument."""
-    error = TransportQueryError(
+    error = transport_query_error(
         [
             {
                 "errorType": "ValidationError",
@@ -191,7 +196,7 @@ def test_an_exception_carrying_no_graphql_errors_still_reads_as_itself(query, ca
 
 def test_an_ignorable_error_stops_the_retries_and_answers_with_the_given_response(query):
     """The duplicate-write path: the item being stored is the state wanted."""
-    session = FailingSession(TransportQueryError([{"message": "item put condition failure"}]))
+    session = FailingSession(transport_query_error([{"message": "item put condition failure"}]))
     result = run(
         execute_gql_query_with_retries(
             query,
@@ -224,8 +229,8 @@ def test_an_ignorable_error_is_recognised_on_the_last_attempt_too(query):
         async def execute(self, _query: Any) -> Any:
             attempts["count"] += 1
             if attempts["count"] <= 3:
-                raise TransportQueryError([{"errorType": "ServiceUnavailable"}])
-            raise TransportQueryError([{"message": "item put condition failure"}])
+                raise transport_query_error([{"errorType": "ServiceUnavailable"}])
+            raise transport_query_error([{"message": "item put condition failure"}])
 
     result = run(
         execute_gql_query_with_retries(

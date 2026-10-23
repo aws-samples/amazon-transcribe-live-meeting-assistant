@@ -71,6 +71,7 @@ class RecordingLogger:
 # import of graphql-core would hand out a second GraphQLSchema class.
 try:
     import gql.client  # noqa: F401
+    from gql.transport.exceptions import TransportQueryError
 except ModuleNotFoundError as exc:  # pragma: no cover - depends on the environment
     pytest.skip(f"needs gql; {exc.name} is not installed.", allow_module_level=True)
 
@@ -101,12 +102,16 @@ class FakeAppsyncClient:
         return False
 
 
-class TransportQueryError(Exception):
-    """The shape gql raises for a response carrying GraphQL errors."""
+def transport_query_error(errors: List[Dict[str, Any]]) -> TransportQueryError:
+    """gql's own exception, built the way gql builds it.
 
-    def __init__(self, errors: List[Dict[str, Any]]) -> None:
-        super().__init__(str(errors[0]))
-        self.errors = errors
+    ``AsyncClientSession.execute`` raises
+    ``TransportQueryError(str_first_element(result.errors), errors=result.errors,
+    ...)``, so its ``str()`` is the first error entry. The real class rather than
+    a stand-in, so the assertions about keeping the exception's own text out of a
+    log record hold against how gql actually stringifies it.
+    """
+    return TransportQueryError(str(errors[0]), errors=errors)
 
 
 MESSAGE_QUOTING_CONTENT = "rejected Transcript 'the figures we discussed'"
@@ -196,7 +201,7 @@ def test_the_failure_record_names_the_exception_type_and_the_frame_chain():
 
 def test_the_failure_line_carries_error_types_not_the_graphql_message():
     """The exception's own text quotes the argument the server rejected."""
-    error = TransportQueryError(
+    error = transport_query_error(
         [
             {
                 "errorType": "ValidationError",
@@ -222,7 +227,7 @@ def test_the_failure_line_carries_error_types_not_the_graphql_message():
 
 def test_the_failure_is_still_recorded_as_an_error():
     """The log line is a diagnostic; the record must still fail."""
-    error = TransportQueryError([{"errorType": "ServiceUnavailable", "message": "later"}])
+    error = transport_query_error([{"errorType": "ServiceUnavailable", "message": "later"}])
     processor = processor_for(error)
     exit_processor(processor)
     assert processor.results["errors"] == [error]

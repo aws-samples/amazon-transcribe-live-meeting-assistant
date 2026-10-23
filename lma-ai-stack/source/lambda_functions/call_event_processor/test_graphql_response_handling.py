@@ -132,6 +132,10 @@ with mock.patch.dict(sys.modules, _STUBS):
     with mock.patch("boto3.Session", return_value=mock.MagicMock()):
         import event_processor.call_event_processor as cep  # noqa: E402
 
+        # In here because its package imports gql's HTTP transports, the ones the
+        # stubs stand in for.
+        from appsync_utils import execute_gql_query_with_retries  # noqa: E402
+
 # AppSync provides these implicitly, so the committed SDL does not declare them
 # and graphql-core cannot build it unaided. Same prelude as the layer's
 # graphql_helpers tests, for the same reason.
@@ -443,3 +447,61 @@ def test_a_duplicate_write_is_recognised_from_the_exception_gql_raises():
 def test_any_other_failure_is_not_taken_for_a_duplicate_write(error):
     """Anything unrecognised must stay a failure, so it is retried and reported."""
     assert cep.is_put_condition_failure(error) is False
+
+
+@pytest.mark.parametrize("attempt_of_the_duplicate", [1, 4])
+def test_the_real_predicate_in_the_real_retry_loop_accepts_a_duplicate(
+    attempt_of_the_duplicate, schema
+):
+    """The whole path: ``is_put_condition_failure`` inside the retry wrapper.
+
+    The two cases are the duplicate arriving first and the duplicate arriving on
+    the final attempt, after the retry budget is spent -- that second one is
+    reachable when a write times out after it had in fact stored its item.
+    """
+    attempts = {"count": 0}
+    duplicate = TransportQueryError(
+        "item put condition failure",
+        errors=[{"message": "item put condition failure", "errorType": "DynamoDB"}],
+    )
+    transient = TransportQueryError(
+        "service unavailable", errors=[{"errorType": "ServiceUnavailable"}]
+    )
+
+    class DuplicateOnAttemptSession:
+        """Fails transiently until the attempt that answers with the duplicate."""
+
+        def __init__(self, schema: Any) -> None:
+            self.client = types.SimpleNamespace(schema=schema)
+
+        async def execute(self, _query: Any) -> Any:
+            attempts["count"] += 1
+            raise duplicate if attempts["count"] >= attempt_of_the_duplicate else transient
+
+    result = run(
+        execute_gql_query_with_retries(
+            cep.dsl_gql(
+                cep.DSLMutation(
+                    cep.DSLSchema(schema)
+                    .Mutation.addTranscriptSegment.args(
+                        input={
+                            "CallId": "call-1",
+                            "SegmentId": "segment-1",
+                            "StartTime": 0.0,
+                            "EndTime": 1.0,
+                            "Transcript": "hello there",
+                            "IsPartial": False,
+                            "Status": "TRANSCRIBING",
+                        }
+                    )
+                    .select(cep.DSLSchema(schema).TranscriptSegment.CallId)
+                )
+            ),
+            client_session=DuplicateOnAttemptSession(schema),
+            logger=cep.LOGGER,
+            min_sleep_time=0,
+            should_ignore_exception_fn=cep.is_put_condition_failure,
+        )
+    )
+    assert attempts["count"] == attempt_of_the_duplicate
+    assert result == {"ok": True}, "a stored item is the state the write wanted"
