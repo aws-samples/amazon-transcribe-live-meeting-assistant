@@ -422,6 +422,39 @@ def test_a_user_the_meeting_is_shared_with_may_run_a_pass(
         assert written
 
 
+def test_a_username_that_is_only_a_substring_of_a_shared_entry_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The comma-separated SharedWith form holds one username per element, so
+    membership is a property of the elements: a name that merely occurs inside
+    one is not one of them."""
+    shared = {**MEETING_ROW, "SharedWith": {"S": "friend@example.com,other@example.com"}}
+    _, _, written = install(monkeypatch, meeting=shared)
+    event = {
+        "arguments": {"input": {"CallId": CALL_ID}},
+        "identity": {"username": "friend@example.co", "groups": []},
+    }
+    assert index.handler(event, None)["Success"] is False
+    assert written == []
+
+
+def test_an_identity_with_no_username_is_refused_on_a_meeting_with_no_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An identity dict is present for every AppSync caller, and one without a
+    username is not the backend -- the backend's own pass sends no identity at
+    all. Access is a match between two names, so a caller with no name matches
+    nothing, including a row carrying no Owner attribute."""
+    ownerless = {key: value for key, value in MEETING_ROW.items() if key != "Owner"}
+    _, _, written = install(monkeypatch, meeting=ownerless)
+    event = {
+        "arguments": {"input": {"CallId": CALL_ID}},
+        "identity": {"accountId": "123456789012"},
+    }
+    assert index.handler(event, None)["Success"] is False
+    assert written == []
+
+
 def test_a_backend_invoke_has_no_identity_and_is_allowed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
