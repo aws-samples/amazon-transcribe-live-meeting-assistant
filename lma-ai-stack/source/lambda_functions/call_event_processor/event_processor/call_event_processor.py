@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime
 from os import getenv
 from statistics import fmean
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Mapping, Optional, TypedDict
 
 # third-party imports from Lambda layer
@@ -151,8 +152,9 @@ PUT_CONDITION_FAILURE_MESSAGES = frozenset(
 
 # Stands in for a createCall result when the meeting was already created, so the
 # START branch can tell a first delivery from a redelivered one and invoke the
-# start-of-call hook once per meeting. Read, never mutated.
-CALL_ALREADY_CREATED: Dict[str, Any] = {"ok": True, "AlreadyExists": True}
+# start-of-call hook once per meeting. Read-only rather than documented as such:
+# it is module state that ends up in the batch's results.
+CALL_ALREADY_CREATED: Mapping[str, Any] = MappingProxyType({"ok": True, "AlreadyExists": True})
 
 
 def is_put_condition_failure(error: Any) -> bool:
@@ -521,9 +523,25 @@ async def get_aggregated_sentiment(
         raise ValueError("invalid AppSync schema")
     DSLSchema(appsync_session.client.schema)
 
-    result = await execute_get_transcript_segments_query(
-        message=message, appsync_session=appsync_session
-    )
+    try:
+        result = await execute_get_transcript_segments_query(
+            message=message, appsync_session=appsync_session
+        )
+    except Exception as error:  # pylint: disable=broad-except
+        # The segments could not be read at all -- a response carrying errors
+        # arrives from gql as a raised exception rather than as a null field.
+        # Letting it out would fail the record, and the transcript segment goes
+        # with it: its own write is gathered after this read. The aggregation is
+        # recomputed on the next final segment, so it is the cheaper thing to
+        # lose. `get_call_details` reads the same meeting earlier in this record
+        # and would already have failed it if AppSync were unreachable.
+        LOGGER.error(
+            "could not read the scored segments for call %s; aggregating nothing - error: [%s]",
+            call_id,
+            describe_exception(error),
+            extra=dict(frames=traceback_frames(error)),
+        )
+        return None
 
     sentiment_entry_list_by_channel: Dict[ChannelType, SentimentPerChannel] = {}
 

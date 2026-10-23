@@ -216,7 +216,7 @@ GET_CALL_RESPONSES = {
             "Status": "ENDED",
             "CustomerPhoneNumber": "+18005550000",
             "CallSummaryText": "a summary",
-            "SharedWith": ["someone@example.com"],
+            "SharedWith": "someone@example.com",
         }
     },
     "null field": {"getCall": None},
@@ -331,7 +331,7 @@ def test_get_call_details_returns_the_fields_when_the_response_carries_them(sche
     session = FakeSession(schema, GET_CALL_RESPONSES["populated"])
     details = run(cep.get_call_details(message={"CallId": "call-1"}, appsync_session=session))
     assert details["CallId"] == "call-1"
-    assert details["SharedWith"] == ["someone@example.com"]
+    assert details["SharedWith"] == "someone@example.com"
     assert details["CallSummaryText"] == "a summary"
 
 
@@ -459,6 +459,58 @@ def test_no_aggregation_is_sent_when_no_segment_list_came_back(shape, schema):
         )
         == []
     )
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        # What gql actually does with a response carrying errors: it raises,
+        # rather than handing back a dict with no data. The "errors and no data"
+        # cases above cover the shape; this covers the delivery.
+        TransportQueryError(
+            "Unauthorized", errors=[{"errorType": "Unauthorized", "message": "nope"}]
+        ),
+        ConnectionResetError("connection reset by peer"),
+        TimeoutError(),
+    ],
+    ids=["transport query error", "connection reset", "timeout"],
+)
+def test_a_sentiment_read_that_raises_aggregates_nothing_and_keeps_the_record(
+    error, schema, monkeypatch
+):
+    """The transcript segment's own write is gathered after this read.
+
+    Letting the exception out would fail the record and take the segment with it.
+    The aggregation is recomputed on the next final segment, so it is the cheaper
+    thing to lose; ``get_call_details`` reads the same meeting earlier in the
+    record and would already have failed it if AppSync were unreachable.
+
+    The retry wrapper is replaced rather than driven, so the exception reaches
+    the branch under test without four attempts of real backoff.
+    ``test_execute_query.py`` covers what the wrapper does on the way.
+    """
+
+    async def raising_execute(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(cep, "execute_gql_query_with_retries", raising_execute)
+    session = FakeSession(schema, None)
+    assert (
+        run(cep.get_aggregated_sentiment(message={"CallId": "call-1"}, appsync_session=session))
+        is None
+    )
+    assert (
+        run(
+            cep.get_call_aggregation_tasks(
+                message={"CallId": "call-1", "EndTime": 1.0}, appsync_session=session
+            )
+        )
+        == []
+    )
+    errors = [record for record in cep.LOGGER.records if record["level"] == "ERROR"]
+    assert errors, "the read that failed has to leave a line behind"
+    assert any("aggregating nothing" in record["message"] for record in errors), errors
+    assert all("nope" not in record["message"] for record in errors), errors
 
 
 @pytest.mark.parametrize("shape", ["populated", *SCORES_NOTHING])
