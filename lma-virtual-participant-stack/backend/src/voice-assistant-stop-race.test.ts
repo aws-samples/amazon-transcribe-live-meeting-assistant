@@ -280,6 +280,34 @@ test('a tool call after the assistant has been asked back is not timed against t
     }
 });
 
+test('a tool call long after the request is not timed against it either', async () => {
+    // A silenced assistant goes on hearing the meeting, and in always_active
+    // mode it can stay silent for many minutes, so a `mute` call well after the
+    // fact is about something else. Reporting a latency for it would put a
+    // number worth nothing into the set the window is to be tuned from.
+    capture();
+    try {
+        const agent = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+        agent.requestStopTalking('test');
+        await delay(PAST_GRACE_MS);
+        assert.equal(agent.isMuted(), true);
+
+        // Still silent — nothing has asked the assistant back — but far enough
+        // past the request that no tool call could be answering it.
+        await delay(STOP_REQUEST_TOOL_BACKSTOP_MS * 2);
+        (agent as any).noteMuteToolRequested();
+
+        const claimed = stopLines().filter((line) => line.includes('action=claimed')).pop();
+        assert.match(claimed!, /late=false/);
+        assert.match(claimed!, /tool_latency_ms=n\/a/);
+        assert.match(claimed!, /transcript_deferred=false/);
+
+        await delay(PAST_BACKSTOP_MS);
+    } finally {
+        release();
+    }
+});
+
 test('a tool call whose handler never runs still ends in silence', async () => {
     // The tool-use event and the handler that acts on it are two steps, and the
     // bidirectional stream can close in between. Handing the request over must
@@ -607,20 +635,27 @@ test('one hand-off\'s cap cannot cut short a later one', async () => {
         stdin: { end: () => {}, destroyed: false },
     });
 
+    // The two hand-offs are separated by most of a cap, so the window between
+    // the first cap firing and the second's is wide: the assertion below sits
+    // 300 ms after the first deadline and 600 ms before the second, which a
+    // loaded runner's timer overshoot is not going to cross. Tightening this
+    // gap is what would make the suite flaky, not the real timers themselves.
+    const gapMs = Math.round(capMs * 0.6);
+
     (agent as any).pacatProcess = fakePacat('first');
     (agent as any).stopPacatStream('drain');
-    await delay(300);
+    await delay(gapMs);
     (agent as any).pacatProcess = fakePacat('second');
     (agent as any).stopPacatStream('drain');
     assert.deepEqual(killed, ['first:SIGTERM']);
 
-    // Past the first hand-off's cap, inside the second's.
-    await delay(capMs - 300 + 150);
+    // Past the first hand-off's cap, well inside the second's.
+    await delay(capMs - gapMs + 300);
     assert.deepEqual(killed, ['first:SIGTERM'], 'the later stream must still be playing');
     assert.equal((agent as any).drainingPacatProcess?.tag, 'second');
 
     // And its own cap does end it.
-    await delay(450);
+    await delay(gapMs + 300);
     assert.deepEqual(killed, ['first:SIGTERM', 'second:SIGTERM']);
     assert.equal((agent as any).drainingPacatProcess, null);
 });

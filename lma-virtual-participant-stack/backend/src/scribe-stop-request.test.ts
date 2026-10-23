@@ -18,9 +18,11 @@
  *
  * The scribe and the provider are both selected from the environment at import
  * time, so those two imports are deliberately dynamic and come after the
- * assignments below. The constant is a plain static import: nova-agent.ts reads
- * nothing from the environment at module load, only inside the agent, so
- * hoisting it above the assignments changes nothing.
+ * assignments below. The constant is a plain static import: nothing this test
+ * sets is read at module load, so hoisting it above the assignments changes
+ * nothing. (Loading it is not inert — nova-agent.ts pulls in simli-avatar.ts,
+ * which builds its singleton from the `SIMLI_*` variables — but this test sets
+ * none of those.)
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';

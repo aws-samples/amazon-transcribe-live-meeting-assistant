@@ -229,8 +229,8 @@ export class NovaAgent implements VoiceAssistantProvider {
    *
    * Scoped to the stretch of silence that request caused: set when the
    * transcript route accepts a request and cleared when the assistant is made
-   * audible again, so a tool call is never timed against a request the meeting
-   * has already moved on from.
+   * audible again, and additionally bounded where it is read, so a tool call is
+   * never timed against a request the meeting has already moved on from.
    */
   private lastTranscriptStopAt: number | null = null;
   
@@ -2632,14 +2632,26 @@ export class NovaAgent implements VoiceAssistantProvider {
     // A tool call that misses the window is the measurement that matters most:
     // it says by how much 500 ms was too short. The record it would have
     // claimed is gone by then — resolveStopRequest clears it — so the time the
-    // transcript route recognised the request outlives it for exactly as long
-    // as the silence it caused, and the latency is reported from there with
-    // `late=true` to say which side of the deadline it landed on.
-    const against = existing?.fromTranscript
-      ? existing.seenAt
-      : (existing ? null : this.lastTranscriptStopAt);
-    const late = existing === null && this.lastTranscriptStopAt !== null;
-    const latency = against === null ? 'n/a' : `${Date.now() - against}`;
+    // transcript route recognised the request outlives it, and the latency is
+    // reported from there with `late=true` to say which side of the deadline it
+    // landed on.
+    //
+    // Only for as long as a tool call could still plausibly be answering that
+    // request, though. A silenced assistant goes on hearing the meeting, and in
+    // always_active mode it can stay silent for many minutes, so a `mute` call
+    // long afterwards is about something else: timing it against the original
+    // request would put a reading worth nothing into the one set of numbers the
+    // window is to be tuned from.
+    const now = Date.now();
+    const lateFrom =
+      existing === null
+      && this.lastTranscriptStopAt !== null
+      && now - this.lastTranscriptStopAt <= STOP_REQUEST_TOOL_BACKSTOP_MS * 2
+        ? this.lastTranscriptStopAt
+        : null;
+    const against = existing?.fromTranscript ? existing.seenAt : lateFrom;
+    const late = lateFrom !== null;
+    const latency = against === null ? 'n/a' : `${now - against}`;
 
     console.log(
       `[stop-request] route=tool action=claimed transcript_deferred=${against !== null}`
