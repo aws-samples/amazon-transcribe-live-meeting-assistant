@@ -391,6 +391,22 @@ def test_a_run_whose_mark_went_stale_does_not_block_a_new_one(
     assert starter.calls
 
 
+@pytest.mark.parametrize("stamp", [None, "", "yesterday"])
+def test_a_mark_with_no_readable_stamp_does_not_block_a_new_run(
+    monkeypatch: pytest.MonkeyPatch, stamp: str | None
+) -> None:
+    """The stale cut-off is measured from the stamp, so a running mark without a
+    readable one would block this meeting with nothing able to clear it.
+    `updateCallSummaryText` stores whatever state string it is given, so a
+    reader cannot take the shape of this field for granted."""
+    state = {"status": index.STATUS_RUNNING}
+    if stamp is not None:
+        state["startedAt"] = stamp
+    _, _, starter, _ = install(monkeypatch, meeting=row_with_state(state))
+    assert index.handler(start_event({"username": OWNER}), FakeContext())["Success"] is True
+    assert starter.calls
+
+
 def test_a_failed_previous_run_does_not_block_a_new_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

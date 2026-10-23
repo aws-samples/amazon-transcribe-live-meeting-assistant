@@ -25,6 +25,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 
 import { CallSummary } from './CallPanel';
 import { SOURCE_MANUAL, STATUS_FAILED, STATUS_RUNNING } from '../common/summary-state';
+import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
 
 /* eslint-disable react/prop-types */
 
@@ -199,5 +200,37 @@ describe('CallSummary — editing by hand', () => {
   it('cannot be opened on a meeting with no summary yet', () => {
     renderPanel({ item: { ...ITEM, callSummaryText: undefined } });
     expect(screen.getByRole('button', { name: /^edit$/i })).toBeDisabled();
+  });
+
+  it('cannot be opened while the meeting is still running', () => {
+    // The end-of-meeting summary replaces the stored text when the meeting
+    // ends, with none of the confirmation an edit is promised, so editing waits
+    // for the meeting to finish. Regenerating does not: what it produces is a
+    // generated summary either way.
+    renderPanel({ item: { ...ITEM, recordingStatusLabel: IN_PROGRESS_STATUS } });
+    // `aria-disabled` rather than the `disabled` attribute the other cases use:
+    // this one carries a disabledReason, and Cloudscape keeps a button with one
+    // focusable so its explanation can be read.
+    const edit = screen.getByRole('button', { name: /^edit$/i });
+    expect(edit).toHaveAttribute('aria-disabled', 'true');
+    fireEvent.click(edit);
+    expect(screen.queryByLabelText('Meeting summary text')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /regenerate/i })).toBeEnabled();
+  });
+
+  it('can be opened once the meeting has ended', () => {
+    renderPanel({ item: { ...ITEM, recordingStatusLabel: DONE_STATUS } });
+    expect(screen.getByRole('button', { name: /^edit$/i })).toBeEnabled();
+  });
+
+  it('will not store a blank summary', () => {
+    // An empty string stores as present and reads as no summary, which disables
+    // Edit -- leaving Regenerate as the only way back.
+    renderPanel();
+    fireEvent.click(screen.getByRole('button', { name: /^edit$/i }));
+    fireEvent.change(screen.getByLabelText('Meeting summary text'), { target: { value: '   \n ' } });
+    expect(screen.getByRole('button', { name: /save summary/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /save summary/i }));
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

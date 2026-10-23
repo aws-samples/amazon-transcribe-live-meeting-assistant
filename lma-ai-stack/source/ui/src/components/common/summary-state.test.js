@@ -64,8 +64,10 @@ describe('isRegenerating', () => {
     expect(isRegenerating({ status: STATUS_RUNNING, startedAt: iso(-STALE_RUN_MS - 1000) }, NOW)).toBe(false);
   });
 
-  it('trusts a mark with no timestamp', () => {
-    expect(isRegenerating({ status: STATUS_RUNNING }, NOW)).toBe(true);
+  it('ignores a mark with no timestamp', () => {
+    // Nothing can measure the cut-off from a mark with no stamp, so it would
+    // otherwise disable the button on this meeting with no way to clear it.
+    expect(isRegenerating({ status: STATUS_RUNNING }, NOW)).toBe(false);
   });
 
   it('is false for an unreadable timestamp', () => {

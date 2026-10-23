@@ -65,12 +65,12 @@ export const isRegenerating = (state, now = Date.now()) => {
   if (state?.status !== STATUS_RUNNING) {
     return false;
   }
-  if (!state.startedAt) {
-    // Marked as running with no stamp: trust the mark, since the only writer of
-    // this field always stamps it.
-    return true;
-  }
-  const started = new Date(state.startedAt).getTime();
+  // A mark with no usable stamp reads as finished. The stamp is what the cut-off
+  // is measured from, so a mark without one would otherwise disable the button
+  // on this meeting with nothing able to clear it. `updateCallSummaryText`
+  // stores whatever state string it is given, so the shape of this field is not
+  // something a reader can take for granted.
+  const started = new Date(state.startedAt ?? '').getTime();
   if (Number.isNaN(started)) {
     return false;
   }

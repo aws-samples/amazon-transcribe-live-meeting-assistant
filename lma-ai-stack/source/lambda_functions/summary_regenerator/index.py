@@ -214,6 +214,7 @@ def is_running(state, now):
 
     A stamp older than STALE_RUN_SECONDS is treated as finished however it was
     left, so a run whose Lambda was killed cannot block the meeting for ever.
+    A mark with no readable stamp is treated the same way, for the same reason.
 
     This is a guard against a second click, not a lock: the stamp is read and
     then written, so two callers within the same instant can both pass. The cost
@@ -223,13 +224,13 @@ def is_running(state, now):
     """
     if state.get("status") != STATUS_RUNNING:
         return False
-    started_at = state.get("startedAt")
-    if not started_at:
-        # Marked as running with no stamp: trust the mark rather than override
-        # it, since the only writer of this field always stamps it.
-        return True
+    # A mark with no usable stamp reads as finished. The stamp is what the
+    # cut-off below is measured from, so a mark without one would block this
+    # meeting with nothing able to clear it. `updateCallSummaryText` stores
+    # whatever state string it is given, so the shape of this field is not
+    # something a reader can take for granted.
     try:
-        started = datetime.fromisoformat(started_at)
+        started = datetime.fromisoformat(state.get("startedAt"))
     except (TypeError, ValueError):
         return False
     if started.tzinfo is None:

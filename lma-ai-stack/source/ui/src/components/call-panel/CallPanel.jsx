@@ -211,6 +211,9 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
  */
 const REGENERATE_HANDOVER_MS = 30000;
 
+const EDIT_AFTER_MEETING_REASON =
+  'Available once the meeting has ended, so the end-of-meeting summary cannot replace your text.';
+
 // Exported for its own tests: regenerating is an asynchronous run whose
 // progress and failure are read back from the meeting rather than from the
 // mutation's answer, and that handover is worth driving directly.
@@ -231,6 +234,14 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
   const regenerating = starting || isRegenerating(summaryState);
   const failure = startError || regenerationFailure(summaryState);
   const handEdited = isHandEdited(summaryState);
+  // Editing waits until the meeting has ended. A meeting still running gets an
+  // end-of-meeting summary from the Kinesis pipeline when it does end, and that
+  // write replaces the text without asking -- so an edit made beforehand would
+  // be discarded with none of the confirmation an edit is promised, and the
+  // panel would go on showing the Edited badge over generated text. Regenerate
+  // stays available during a meeting, because what it produces is a generated
+  // summary either way and the pipeline's is simply a later one.
+  const meetingInProgress = item.recordingStatusLabel === IN_PROGRESS_STATUS;
 
   // Hand over from the local flag to the stored state as soon as anything about
   // the summary changes -- which the backend's "running" mark is. Keyed on the
@@ -369,7 +380,10 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
                   <Button onClick={() => setEditing(false)} disabled={saving}>
                     Cancel
                   </Button>
-                  <Button variant="primary" onClick={saveEdit} loading={saving}>
+                  {/* A blank summary would store as an empty string, which
+                      leaves nothing to read and disables Edit, so the only way
+                      back would be Regenerate. */}
+                  <Button variant="primary" onClick={saveEdit} loading={saving} disabled={!draft.trim()}>
                     Save summary
                   </Button>
                 </SpaceBetween>
@@ -388,7 +402,8 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
                   {onSave && (
                     <Button
                       iconName="edit"
-                      disabled={readOnly || regenerating || !item.callSummaryText}
+                      disabled={readOnly || regenerating || meetingInProgress || !item.callSummaryText}
+                      disabledReason={meetingInProgress && !readOnly ? EDIT_AFTER_MEETING_REASON : undefined}
                       onClick={beginEditing}
                     >
                       Edit

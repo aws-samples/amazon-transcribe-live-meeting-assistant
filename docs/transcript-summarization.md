@@ -51,7 +51,9 @@ Three things are worth knowing about how it behaves:
 
 ### Edit
 
-**Edit** opens the summary as text you can change, and **Save summary** stores it. What you save is what every reader of the summary then shows: the meeting page, the summary download, the Word and email exports, and the embeddable meeting panel.
+**Edit** opens the summary as text you can change, and **Save summary** stores it. What you save is what every reader of the stored summary then shows: the meeting page, the summary download, the Word and email exports, and the embeddable meeting panel.
+
+It does **not** reach the copy of the summary written to S3 for the Bedrock Knowledge Base, which is the copy the Meeting Assistant's meeting-history search reads. That copy is written by the summarizer, so only a summary run refreshes it: a search across past meetings keeps returning the generated summary until you press **Regenerate**, which replaces your edit. **Edit** is available once a meeting has ended. While a meeting is still running the button is disabled, because the end-of-meeting summary would replace what you wrote when the meeting ends.
 
 The editor is seeded with the summary as you are reading it, in Markdown. A summary produced from several prompt templates is stored as a structured object with one entry per section; saving an edit replaces that with the plain Markdown document, which is what a hand-written summary is. The section headings are ordinary Markdown bold text in the editor and you can add, remove or reword them.
 
