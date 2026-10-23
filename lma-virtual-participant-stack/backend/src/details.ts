@@ -374,9 +374,13 @@ export const MAX_EXIT_TRIGGER_LENGTH = 100;
  * distinguishes causes.
  *
  * A trigger with no colon is left alone apart from the length cap. Those are
- * the fixed upper-case ones — 'ZOOM_END_DIALOG', 'ACS_DISCONNECTED code=490
- * subCode=0' — which are already as groupable as they are going to get, and
- * slugging them would only make them harder to recognise.
+ * the fixed ones — 'ZOOM_END_DIALOG', 'HANGUP_BUTTON_HIDDEN', 'attendees-left'
+ * — which are already one value per cause, and slugging them would only make
+ * them harder to recognise.
+ *
+ * Which is why a trigger that carries a detail puts it after a colon: that is
+ * the convention this function relies on, and `exit-reason.test.ts` holds the
+ * handlers to it rather than trusting them.
  */
 export function normalizeExitTrigger(trigger?: string): string | undefined {
   if (!trigger) return undefined;

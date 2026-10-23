@@ -186,27 +186,29 @@ Alongside `status`, the VP record carries two fields describing the current stat
 
 Reaching `JOINED`, `ACTIVE` or `COMPLETED` without a new detail to show clears `errorMessage`, so a message from earlier in the same run — a join sub-step, or an attempt that did not work out before a later one did — is not still displayed next to a VP that is in the meeting.
 
-Most of the values are fixed strings, and those are the ones to group by:
+Most values are one of these fixed strings:
 
 | Group | Values |
 | --- | --- |
 | Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
-| Asked to leave | `chat` |
-| Meeting ended | `post-meeting-screen`, `meeting-ended-text`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
-| Everyone else left | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui-counter_gone`, `participants-ui-page_dead`, `attendee-badge-missing` |
-| Ran out of time or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
-| Threw during the join | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
+| Asked to leave in chat | `chat` |
+| The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
+| Everyone else left, or the VP was removed | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui:counter-gone`, `participants-ui:page-dead`, `attendee-badge-missing` |
+| Ran out of time, or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
+| The join threw, and the message matched one of the container's six classes | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
 
-Four forms are a fixed prefix followed by a detail the platform supplied, so the prefix is what groups and the part after the colon varies:
+The rest are a fixed prefix plus a detail that came from the platform, so the prefix is what groups and what follows the colon varies:
 
-| Form | Prefix meaning | Detail |
+| Form | Written when | Detail after the colon |
 | --- | --- | --- |
-| `ACS_REMOVED:…`, `ACS_DISCONNECTED:…` | The Teams SDK reported the call ended | The platform's own `code` and `subCode` |
-| `webex-text:…` | A Webex meeting-end phrase appeared on the page | Which of the five phrases matched |
-| `error:…` | The join threw and the message was not one the six fixed `error:` values cover | The start of the underlying message |
-| `poll-error:…` | The Chime meeting-end poll threw | The start of the underlying message |
+| `ACS_REMOVED:…`, `ACS_DISCONNECTED:…` | The Teams SDK reported the call disconnected, or the VP removed from it | The SDK's own `code` and `subCode`, or `no-endreason` |
+| `webex-text:…` | A Webex meeting-end phrase appeared on the page | Which of five phrases matched |
+| `error:…` | The Webex watcher threw while waiting for the meeting to end — so, after the VP was admitted | The start of the underlying browser message |
+| `poll-error:…` | The Chime meeting-end poll threw | The start of the underlying browser message |
 
-Whatever follows the first colon is reduced to a lower-case, hyphenated slug before the value is stored, and the whole value is capped at 100 characters. That is what keeps the four forms above countable: two reports of the same failure become the same string whatever the wording or punctuation around them. It also means an `error:` or `poll-error:` value can be one this page does not list, because the message it slugs comes from the browser rather than from LMA — group those by prefix, and read `errorMessage` for the detail, which is where prose belongs. A trigger with no colon is stored exactly as it is.
+Note that `error:` appears in both tables and means different things in each. The six values in the first are written by the container's own classifier when a *join* throws, and are fixed. An `error:` value that is not one of those six came from the Webex watcher *after* admission, and its detail is whatever the browser said — so **the value space is open**, and this page cannot list it. Group those by prefix and read `errorMessage` for the detail, which is where prose belongs.
+
+Whatever follows the first colon is reduced to a lower-case, hyphenated slug before the value is stored, and the whole value is capped at 100 characters. That is what keeps the second table countable: two reports of the same failure become the same string whatever the wording or punctuation around them. A trigger with no colon is stored exactly as it is.
 
 `COMPLETED` means the VP was in the meeting. A VP that never got in — not admitted, or stuck on the pre-join screen — ends as `FAILED` with *"Could not join the meeting (was not admitted, or stuck on the join screen)."*, on every platform.
 

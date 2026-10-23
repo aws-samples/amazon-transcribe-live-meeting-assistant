@@ -89,8 +89,7 @@ test('the never-joined message does not read as a successful meeting', () => {
 
 test('normalizeExitTrigger leaves a trigger from the taxonomy exactly as it is', () => {
     // The whole value of storing this is that rows sharing a cause share a
-    // string, so the fixed triggers must survive untouched — including the
-    // upper-case ones and the one that carries platform codes. The ones that
+    // string, so the fixed triggers must survive untouched. The ones that
     // already read as a slug are unchanged by being slugged.
     for (const trigger of [
         'pre-join:not-admitted',
@@ -103,9 +102,132 @@ test('normalizeExitTrigger leaves a trigger from the taxonomy exactly as it is',
         'ZOOM_END_DIALOG',
         'HANGUP_BUTTON_HIDDEN',
         'error:renderer-crashed',
-        'ACS_DISCONNECTED code=490 subCode=0',
     ]) {
         assert.equal(normalizeExitTrigger(trigger), trigger);
+    }
+});
+
+/**
+ * A trigger template literal, split at the colon that separates its prefix
+ * from its detail.
+ *
+ * The interpolations are blanked out first, because an interpolation can
+ * contain a colon of its own — the Teams SDK picks its prefix with a ternary —
+ * and that colon is not the one that matters. `prefix` is returned with its
+ * interpolations expanded into the fixed words they can produce, so a prefix
+ * built that way yields one name per word.
+ */
+const splitTrigger = (template: string) => {
+    const interpolations = [...template.matchAll(/\$\{[^}]*\}/g)].map((match) => match[0]);
+    const blanked = template.replace(/\$\{[^}]*\}/g, '\u0000');
+    const colon = blanked.indexOf(':');
+    if (colon < 0) {
+        return { prefixes: [], detailInterpolated: false, hasColon: false };
+    }
+    const beforeColon = blanked.slice(0, colon);
+    const afterColon = blanked.slice(colon + 1);
+    // Expand each interpolation in the prefix into the quoted words it can
+    // yield; anything else leaves the prefix unenumerable.
+    let prefixes = [beforeColon];
+    for (let index = 0; index < [...beforeColon].filter((c) => c === '\u0000').length; index += 1) {
+        const words = [...interpolations[index].matchAll(/'([A-Za-z0-9_-]+)'/g)].map((m) => m[1]);
+        prefixes = prefixes.flatMap((candidate) =>
+            (words.length ? words : ['\u0000']).map((word) => candidate.replace('\u0000', word)),
+        );
+    }
+    return {
+        prefixes,
+        detailInterpolated: afterColon.includes('\u0000'),
+        hasColon: true,
+    };
+};
+
+test('every trigger that carries a detail puts it after a colon', () => {
+    // Read from the handlers rather than restated, because a fixture that
+    // encoded the shape a handler used to emit would keep passing while the
+    // handler drifted away from it — which is how the Teams SDK's end-of-call
+    // trigger came to carry the platform's codes with no colon, and so never
+    // be slugged. normalizeExitTrigger leaves everything before the first colon
+    // alone, so an interpolated value placed before it is stored verbatim and
+    // its rows cannot be counted.
+    //
+    // A trigger may interpolate before the colon as well, as long as it also
+    // interpolates after one: the Teams SDK picks its prefix from two fixed
+    // words that way, which is bounded and so still groupable.
+    const offenders: string[] = [];
+    let checked = 0;
+    for (const name of HANDLERS) {
+        for (const literal of handlerSource(name).matchAll(/trigger:\s*`([^`]*)`/g)) {
+            const template = literal[1];
+            if (!template.includes('${')) continue;
+            checked += 1;
+            const { hasColon, detailInterpolated } = splitTrigger(template);
+            if (!hasColon || !detailInterpolated) {
+                offenders.push(`${name}.ts: \`${template}\``);
+            }
+        }
+    }
+    assert.equal(checked, 5, `expected five interpolated triggers, found ${checked}`);
+    assert.deepEqual(offenders, [], 'these triggers interpolate a detail outside a colon');
+});
+
+test('every trigger the code can write is documented', () => {
+    // The published vocabulary and the code have drifted apart more than once,
+    // always in the same direction: a trigger added or reshaped in a handler
+    // while the page kept describing the old one. Reading both and comparing is
+    // the only version of this that stays true.
+    //
+    // Fixed literals must appear verbatim. A trigger built from a template
+    // contributes its prefix instead, since the detail after the colon comes
+    // from the platform and cannot be enumerated.
+    const docs = readFileSync(
+        new URL('../../../docs/virtual-participant.md', new URL('.', import.meta.url)),
+        'utf8',
+    );
+    const documented = (value: string) => docs.includes(`\`${value}`);
+
+    const sources = [...HANDLERS, 'index'];
+    const missing: string[] = [];
+    let found = 0;
+    for (const name of sources) {
+        const source = handlerSource(name);
+        for (const match of source.matchAll(/trigger:\s*'([^']+)'/g)) {
+            found += 1;
+            if (!documented(match[1])) missing.push(`${name}.ts: ${match[1]}`);
+        }
+        for (const match of source.matchAll(/trigger:\s*`([^`]*)`/g)) {
+            const { hasColon, prefixes } = splitTrigger(match[1]);
+            if (!hasColon) continue; // asserted separately
+            for (const prefix of prefixes) {
+                found += 1;
+                if (!documented(prefix)) missing.push(`${name}.ts: ${prefix}:…`);
+            }
+        }
+        // setFailed's second argument carries the container's own classes.
+        for (const match of source.matchAll(/setFailed\([^)]*'(error:[a-z-]+)'/g)) {
+            found += 1;
+            if (!documented(match[1])) missing.push(`${name}.ts: ${match[1]}`);
+        }
+    }
+    assert.ok(found > 40, `only found ${found} triggers — the scanner needs updating`);
+    assert.deepEqual(missing, [], 'these triggers are not on the Virtual Participant page');
+});
+
+test('the triggers the handlers build normalise to groupable values', () => {
+    // The shapes the handlers actually emit, with a representative detail
+    // substituted. These are the only triggers whose stored value is not the
+    // literal in the source, so they are the ones worth pinning.
+    const emitted: Array<[string, string]> = [
+        ['ACS_DISCONNECTED:code=490 subCode=0', 'ACS_DISCONNECTED:code-490-subcode-0'],
+        ['ACS_REMOVED:no endReason', 'ACS_REMOVED:no-endreason'],
+        ['participants-ui:counter_gone', 'participants-ui:counter-gone'],
+        ['participants-ui:page_dead', 'participants-ui:page-dead'],
+        ['webex-text:meeting has ended', 'webex-text:meeting-has-ended'],
+        ['error:Target closed', 'error:target-closed'],
+        ['poll-error:Target closed', 'poll-error:target-closed'],
+    ];
+    for (const [raw, stored] of emitted) {
+        assert.equal(normalizeExitTrigger(raw), stored, raw);
     }
 });
 
@@ -132,9 +254,9 @@ test('normalizeExitTrigger groups two reports of one short failure', () => {
 });
 
 test('normalizeExitTrigger leaves a trigger with no colon alone', () => {
-    // These are the fixed upper-case ones; slugging would only make them
-    // harder to recognise, and they are already one value per cause.
-    for (const trigger of ['ZOOM_END_DIALOG', 'URL_CHANGE_BLANK', 'ACS_REMOVED code=1 subCode=0']) {
+    // These are the fixed ones; slugging would only make them harder to
+    // recognise, and they are already one value per cause.
+    for (const trigger of ['ZOOM_END_DIALOG', 'URL_CHANGE_BLANK', 'attendee-badge-missing']) {
         assert.equal(normalizeExitTrigger(trigger), trigger);
     }
 });
