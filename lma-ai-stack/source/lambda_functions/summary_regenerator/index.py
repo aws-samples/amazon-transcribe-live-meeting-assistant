@@ -159,6 +159,13 @@ def caller_may_edit(meeting, identity):
     checked here instead: Admin, the meeting's owner, or a user it has been
     shared with. An invocation with no Cognito identity is the backend calling
     itself (this function's own second leg) and is allowed.
+
+    `SharedWith` is read here in Python, so the share list is compared entry by
+    entry in both shapes it is stored in -- the DynamoDB List `shareCall` writes
+    and the comma-separated String on older rows. The templates that express the
+    same rule as a DynamoDB condition use `contains`, which is a whole-element
+    test on the List and a substring test on the String, because a condition
+    expression cannot split a string; this path is the exact one.
     """
     if not identity:
         return True
@@ -372,6 +379,15 @@ def start(call_id, identity, self_arn):
     # Queue the work BEFORE marking the meeting as regenerating. Marking first
     # and failing to queue would leave the meeting looking busy, and the button
     # disabled everywhere, until the mark went stale.
+    #
+    # The ordering costs one narrow window in exchange: a second leg that fails
+    # at once -- the summariser invoke rejected outright -- can write its
+    # `failed` state before the mark below lands, and the mark then overwrites
+    # it, so the meeting reads as regenerating until the stale cut-off rather
+    # than showing the failure. Closing it needs a conditional write per caller,
+    # the same machinery `is_running` deliberately goes without; the two
+    # outcomes are a hidden failure for twenty minutes against a button disabled
+    # for twenty minutes, and neither loses the stored summary.
     starter_client.invoke(
         FunctionName=self_arn,
         InvocationType="Event",
@@ -438,8 +454,9 @@ def run(call_id):
 
 def handler(event, context):
     """Entry point for both the AppSync resolver and this function's own invoke."""
-    # An AppSync Lambda resolver receives the whole context; the second leg
-    # sends a small message with CallId at the top level.
+    # The AppSync resolver sends the mutation's arguments and the caller's
+    # identity; the second leg sends a small message with CallId at the top
+    # level.
     arguments = (event.get("arguments") or {}).get("input") or {}
     call_id = arguments.get("CallId") or event.get("CallId")
     if not call_id:

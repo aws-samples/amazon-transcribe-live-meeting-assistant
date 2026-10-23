@@ -242,39 +242,52 @@ def test_an_identity_with_no_username_is_refused_on_a_meeting_with_no_owner(
     assert written == []
 
 
-def test_a_username_that_is_only_a_substring_of_a_shared_entry_is_refused(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The comma-separated SharedWith form holds one username per element, so
-    membership is tested element by element: a name that merely occurs inside an
-    element is not one of them."""
-    _, _, starter, written = install(
-        monkeypatch,
-        meeting={**MEETING_ROW, "SharedWith": {"S": "friend@example.com,other@example.com"}},
-    )
-    result = index.handler(
-        start_event({"username": "friend@example.co", "groups": []}), FakeContext()
-    )
-    assert result["Success"] is False
-    assert result["Message"] == "not permitted"
-    assert starter.calls == []
-    assert written == []
+# Every shape `SharedWith` is stored in, against one caller, with the answer
+# each of the two write paths gives for it.
+#
+# `by_condition` is what `contains(#SharedWith, :caller)` evaluates to in the
+# DynamoDB condition on `updateCallSummaryText`; `by_lambda` is what
+# `caller_may_edit` returns. They agree on the List form, which is what
+# `shareCall` writes and so the shape any meeting shared through this product
+# has. They differ on one case -- a caller whose name is a substring of an entry
+# in the legacy comma-separated String -- because a condition expression cannot
+# split a string and this path can. Written down because the templates, the
+# docstrings and the docs all describe the two paths as applying one rule, and
+# this table is the extent to which that is true.
+SHARED_WITH_CASES = [
+    # (stored SharedWith, caller, by_condition, by_lambda)
+    ({"L": [{"S": "friend@example.com"}]}, "friend@example.com", True, True),
+    ({"L": [{"S": "friend@example.com"}]}, "friend@example.co", False, False),
+    ({"L": [{"S": "a@b.com"}, {"S": "friend@example.com"}]}, "friend@example.com", True, True),
+    ({"S": "friend@example.com"}, "friend@example.com", True, True),
+    ({"S": "a@b.com,friend@example.com"}, "friend@example.com", True, True),
+    ({"S": "a@b.com, friend@example.com"}, "friend@example.com", True, True),
+    ({"S": "friend@example.com,other@example.com"}, "friend@example.co", True, False),
+]
 
 
-def test_a_shared_entry_with_surrounding_space_still_matches(
+@pytest.mark.parametrize("stored,caller,by_condition,by_lambda", SHARED_WITH_CASES)
+def test_the_share_list_is_read_entry_by_entry(
     monkeypatch: pytest.MonkeyPatch,
+    stored: dict,
+    caller: str,
+    by_condition: bool,
+    by_lambda: bool,
 ) -> None:
-    """The comma-separated form is hand-maintained in places, so an element is
-    stripped before it is compared."""
-    _, _, starter, _ = install(
-        monkeypatch,
-        meeting={**MEETING_ROW, "SharedWith": {"S": "a@b.com, friend@example.com"}},
-    )
-    result = index.handler(
-        start_event({"username": "friend@example.com", "groups": []}), FakeContext()
-    )
-    assert result["Success"] is True
-    assert starter.calls
+    """The Python half of the table above, through the handler.
+
+    The `by_condition` column is not executed: a DynamoDB condition expression
+    cannot be evaluated locally, so it records what the template's `contains`
+    means for each stored shape. The assertion is on this path, which is the one
+    with no condition behind it.
+    """
+    _, _, starter, _ = install(monkeypatch, meeting={**MEETING_ROW, "SharedWith": stored})
+    result = index.handler(start_event({"username": caller, "groups": []}), FakeContext())
+    assert result["Success"] is by_lambda, (stored, caller)
+    assert bool(starter.calls) is by_lambda
+    # The one disagreement is the documented one, and only there.
+    if by_condition != by_lambda:
+        assert "S" in stored and "," in stored["S"], (stored, caller)
 
 
 def test_the_second_leg_has_no_identity_and_is_allowed(

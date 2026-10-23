@@ -221,6 +221,27 @@ def test_the_summary_write_states_the_rule_exactly_as_the_identity_write_does(
         assert detection in source
 
 
+def test_the_share_list_rule_is_stated_where_each_path_applies_it(summary_vtl: str) -> None:
+    """Both paths say what `SharedWith` shape their test is exact for.
+
+    `contains` in a DynamoDB condition is a whole-element test on the List form
+    `shareCall` writes and a substring test on the legacy comma-separated String,
+    which a condition expression cannot split; the Lambda reads the attribute in
+    Python and compares entry by entry in both. The fixture table covering the
+    Python side is `SHARED_WITH_CASES` in the regenerator's own test file. What
+    is pinned here is that neither place claims an exactness it does not have.
+    """
+    assert "cannot split a string" in summary_vtl
+    for name in ("summary_regenerator", "speaker_name_resolver"):
+        source = (AI_STACK / "source" / "lambda_functions" / name / "index.py").read_text(
+            encoding="utf-8"
+        )
+        rule = source[source.index("def caller_may_edit(") :]
+        rule = rule[: rule.index("\ndef ")]
+        # Whitespace-normalised: the phrase is in a docstring and so wraps.
+        assert "entry by entry" in " ".join(rule.split()), name
+
+
 def test_the_summary_write_only_touches_the_two_summary_attributes(summary_vtl: str) -> None:
     """The write is scoped to the summary: these are the only two attributes it
     assigns, and the rest of the meeting row keeps whatever the pipeline put

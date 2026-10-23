@@ -51,8 +51,13 @@
 #set( $condition = "attribute_exists(#PK)" )
 
 ## `contains` over #SharedWith covers both shapes this attribute is stored in:
-## shareCall writes it from a [String] input (a DynamoDB List) while older rows
-## hold a comma-separated String.
+## shareCall writes it from a [String] input (a DynamoDB List), where `contains`
+## matches a whole element, while older rows hold a comma-separated String, where
+## it matches a substring. A DynamoDB condition expression cannot split a string,
+## so the List form is where this test is exact -- the same semantics
+## getCall.response.vtl and updateSpeakerIdentities.request.vtl have. The two
+## Lambda resolvers read the attribute in Python and so compare entry by entry in
+## both shapes; see `caller_may_edit` in summary_regenerator/index.py.
 #if( $isCognitoUser && !$context.identity.groups.contains("Admin") )
   $util.qr( $conditionNames.put("#Owner", "Owner") )
   $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )

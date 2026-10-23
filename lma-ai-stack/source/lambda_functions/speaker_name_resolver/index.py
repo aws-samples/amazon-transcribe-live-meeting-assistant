@@ -133,6 +133,13 @@ def caller_may_edit(meeting, identity):
     checked here instead: Admin, the meeting's owner, or a user it has been
     shared with. An invocation with no Cognito identity is the backend calling
     itself (the end-of-meeting pass) and is allowed.
+
+    `SharedWith` is read here in Python, so the share list is compared entry by
+    entry in both shapes it is stored in -- the DynamoDB List `shareCall` writes
+    and the comma-separated String on older rows. The templates that express the
+    same rule as a DynamoDB condition use `contains`, which is a whole-element
+    test on the List and a substring test on the String, because a condition
+    expression cannot split a string; this path is the exact one.
     """
     if not identity:
         return True
@@ -295,8 +302,9 @@ def resolve(call_id, identity=None, force=False, final=False):
 
 def handler(event, context):  # pylint: disable=unused-argument
     """Entry point for both the AppSync resolver and the backend invoke."""
-    # An AppSync Lambda resolver receives the whole context; a backend invoke
-    # sends the Kinesis message, which carries CallId at the top level.
+    # The AppSync resolver sends the mutation's arguments and the caller's
+    # identity; a backend invoke sends the Kinesis message, which carries CallId
+    # at the top level.
     arguments = (event.get("arguments") or {}).get("input") or {}
     call_id = arguments.get("CallId") or event.get("CallId")
     if not call_id:
