@@ -77,18 +77,11 @@ async def execute_gql_query_with_retries(
             )
             break
         except Exception as error:  # pylint: disable=broad-except
-            # The exception's type, with its errorType/path where it carries
-            # GraphQL errors and its str() otherwise. A transport exception
-            # stringifies as its first GraphQL error message, and the mutations
-            # on this path inline their arguments into the query document; the
-            # type is what keeps the line readable for an exception whose str()
-            # is empty, which a timeout's is.
-            #
-            # The query document itself stays on the debug line above, which is
-            # the attempt these lines are about. Repeating it here would put the
-            # arguments of every retried write into a log stream that is on at
-            # the default level, and the retry counts and the described error are
-            # what these lines are read for.
+            # See graphql_helpers.response's "Log hygiene" note for what
+            # describe_exception leaves out and why. Local to these lines: the
+            # query document stays on the debug line above, which is the attempt
+            # they are about, because repeating it here would put the arguments
+            # of every retried write into a log stream that is on by default.
             described_error = describe_exception(error)
             # Asked before the retry budget is checked, so an error the caller
             # recognises is recognised on the last attempt as well as the first.
