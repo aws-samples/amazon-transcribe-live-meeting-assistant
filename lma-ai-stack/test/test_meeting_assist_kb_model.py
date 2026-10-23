@@ -323,7 +323,13 @@ def strands_stub():
 
     The object registered in sys.modules is the one returned, so that a second
     test file standing `strands` in does not end up patching a different object
-    from the one `from strands import Agent` resolves to.
+    from the one `from strands import Agent` resolves to. That shared object is
+    why the registration reuses an existing `strands` entry rather than replacing
+    it, and it means these fixtures would take over a real `strands` if the SDK
+    were installed here. That is intended: these tests call tool bodies directly,
+    which needs `tool` to be the identity function rather than the SDK's wrapper,
+    so the stub is wanted whether or not the package is present. The suites are
+    the no-AWS static job, which installs no Lambda-layer packages.
     """
     stub = sys.modules.setdefault("strands", types.ModuleType("strands"))
     stub.tool = lambda func: func

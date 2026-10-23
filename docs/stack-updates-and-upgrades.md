@@ -232,15 +232,21 @@ knowledge bases tried to generate with. The new
 only the seven ids verified against a live knowledge base, defaulting to
 `global.anthropic.claude-haiku-4-5-20251001-v1:0`.
 
-What to set depends on what your agent is running on now:
+What to set depends on what your agent is running on now. Every row below is a
+value v0.3.10 offered, so one of them is the deployment you are upgrading:
 
 | Your current `MeetingAssistServiceBedrockModelID` | What the knowledge-base tools were doing | What to set |
 |---|---|---|
 | `global.anthropic.claude-haiku-4-5-20251001-v1:0` (the default) | Generating on Claude Haiku 4.5 | Nothing — the new parameter's default is the same model |
 | Claude Sonnet 4.5, Sonnet 4.6 or Opus 4.6, in either profile form | Generating on that model | The same id, which the new parameter offers |
-| Claude Haiku 5.5 or Sonnet 5.5 in either profile form, `global.anthropic.claude-opus-5-5`, or Claude Opus 4.1 | Being refused on every call | Any offered id; the default is the safe pick |
-| `us.anthropic.claude-opus-5-5` | Not established; the other five Claude 5.5 ids were refused | Any offered id; the default is the safe pick |
+| Claude Opus 4.1 | Being refused on every call | Any offered id; the default is the safe pick |
 | Any Nova model, or Claude Opus 4 | Never established | Any offered id; the default is the safe pick |
+
+The Claude 5.5 models are not in that table because v0.3.10 did not offer them
+for the agent either — they and this parameter arrive in the same release. They
+are selectable for the agent only; retrieval always uses
+`MeetingAssistKnowledgeBaseModelID`, so choosing one for the agent leaves the
+knowledge-base tools alone.
 
 **Enable access to the value you choose before updating.** Deploy-time parameter
 validation now converses with the knowledge-base model as well as the agent's, so
