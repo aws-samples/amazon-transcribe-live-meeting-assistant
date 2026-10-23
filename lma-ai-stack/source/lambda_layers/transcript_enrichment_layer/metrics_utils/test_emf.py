@@ -315,6 +315,28 @@ def test_a_non_numeric_value_is_not_emitted(value, caplog):
     assert sink.lines == []
 
 
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_a_non_finite_value_is_not_emitted(value, caplog):
+    """These are numbers, and they are worse than a non-number.
+
+    `json.dumps` writes them as bare `NaN` and `Infinity`, which is not JSON, so
+    CloudWatch cannot parse the record at all — one such value loses every
+    metric accumulated alongside it rather than just itself. A duration computed
+    from two clock readings is the realistic way to produce one.
+    """
+    sink = Sink()
+    metrics = emitter(sink)
+    metrics.count(A_COUNT)
+    with caplog.at_level(logging.ERROR):
+        metrics.measure(A_MEASUREMENT, value)
+    metrics.flush()
+
+    assert A_MEASUREMENT not in sink.only, f"{value} reached the record"
+    # The count that shared the record survives, which is the point.
+    assert sink.only[A_COUNT] == 1
+    assert json.loads(sink.lines[0])  # i.e. the record is still parseable JSON
+
+
 # ── the misconfiguration this whole increment is about ──────────────────────
 
 

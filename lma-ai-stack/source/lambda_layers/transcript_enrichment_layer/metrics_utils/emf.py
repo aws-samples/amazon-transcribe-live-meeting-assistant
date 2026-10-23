@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 from typing import Callable, Dict, List, Union
@@ -155,6 +156,15 @@ class MetricEmitter:
             # bool is an int subclass, and True would silently become 1 under a
             # name whose unit is Milliseconds.
             LOGGER.error("refusing to emit %r with non-numeric value %r", name, value)
+            return
+
+        if not math.isfinite(value):
+            # `json.dumps` writes NaN and Infinity as bare `NaN`/`Infinity`,
+            # which is not JSON. CloudWatch cannot parse the record at all, so
+            # one such value loses every metric accumulated alongside it rather
+            # than just itself. A duration computed from two clock readings is
+            # the realistic way to get one.
+            LOGGER.error("refusing to emit %r with non-finite value %r", name, value)
             return
 
         if measurement:
