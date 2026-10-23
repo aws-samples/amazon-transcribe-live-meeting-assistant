@@ -673,8 +673,39 @@ class TroubleshootingTools:
         ),
     }
 
+    #: Parameter names matching any of these are reported by name only.
+    #:
+    #: Defence in depth, not the control. CloudFormation already masks a
+    #: ``NoEcho`` parameter in DescribeStacks output, and all five of this
+    #: solution's third-party credentials are declared that way, so a secret
+    #: arrives here as asterisks rather than as itself. This catches two
+    #: remaining cases: a parameter that carries an address or a name, which is
+    #: personal data a diagnosis has no use for; and a future credential
+    #: parameter that someone forgets to mark NoEcho.
+    REDACTED_PARAMETER_PATTERNS = (
+        "password",
+        "secret",
+        "apikey",
+        "api_key",
+        "token",
+        "credential",
+        "connectionstring",
+        "privatekey",
+        "email",
+        "address",
+    )
+
+    @classmethod
+    def _is_redacted_parameter(cls, name: str) -> bool:
+        lowered = (name or "").lower()
+        return any(pattern in lowered for pattern in cls.REDACTED_PARAMETER_PATTERNS)
+
     def get_stack_parameters(self) -> str:
         """Read the deployment's CloudFormation parameters.
+
+        Parameter *values* are configuration the agent needs, so they are
+        returned — with the exception of anything whose name suggests a
+        credential or personal data, which is reported by name only.
 
         Returns:
             A JSON object with the parameters that determine which components
@@ -690,10 +721,14 @@ class TroubleshootingTools:
             raise ToolError(f"stack {self._stack_name} was not found")
         stack = stacks[0]
 
-        parameters = {
+        declared = {
             p.get("ParameterKey"): p.get("ParameterValue")
             for p in stack.get("Parameters") or []
+            if p.get("ParameterKey")
         }
+        redacted = sorted(k for k in declared if self._is_redacted_parameter(k))
+        parameters = {k: v for k, v in declared.items() if k not in redacted}
+
         architecture = {
             key: parameters[key]
             for key in self.ARCHITECTURE_PARAMETERS
@@ -716,6 +751,16 @@ class TroubleshootingTools:
                     if key in architecture
                 },
                 "otherParameters": remainder,
+                "redactedParameters": redacted,
+                "guidance": (
+                    "The parameters named in redactedParameters have values on "
+                    "this stack that are not returned, because the name "
+                    "indicates a credential or personal data. Whether one is "
+                    "set is usually all a diagnosis needs; if the value itself "
+                    "matters, ask the operator to check it."
+                )
+                if redacted
+                else None,
             }
         )
 

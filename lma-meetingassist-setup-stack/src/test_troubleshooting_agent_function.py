@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
@@ -437,6 +438,99 @@ def test_diagnosis_is_deterministic_where_the_model_allows_it() -> None:
     assert agent_function.AGENT_TEMPERATURE == 0.0
 
 
+def test_bedrock_gets_the_projects_aggressive_retry_profile() -> None:
+    """BedrockModel builds its own client, so a config left on the module is
+    simply not used and the model runs on the SDK's defaults. Cross-region
+    inference profiles make a first attempt fail often enough that this is the
+    difference between a working deployment and an intermittent one."""
+    config = agent_function.BEDROCK_CONFIG
+
+    assert config.retries["max_attempts"] == 50
+    assert config.retries["mode"] == "adaptive"
+
+
+def test_the_retry_profile_actually_reaches_the_model() -> None:
+    """The assertion the previous test cannot make on its own: the config has
+    to be passed, not merely defined."""
+    source = Path("troubleshooting_agent_function.py").read_text(encoding="utf-8")
+
+    assert '"boto_client_config": BEDROCK_CONFIG' in source
+
+
+# ── what the thinking-step stream publishes ─────────────────────────────────
+#
+# This channel reaches the UI without the model in the loop, so everything the
+# prompt says about what to quote is bypassed here. search_logs returns raw log
+# lines, and a log line contains whatever the component that wrote it put
+# there, so a prefix of the raw result is the one thing this must not publish.
+
+
+def test_a_log_search_result_is_published_as_its_shape_not_its_content() -> None:
+    result = json.dumps(
+        {
+            "rowCount": 42,
+            "bytesScanned": 90000,
+            "rows": [{"@message": "Authorization: Bearer super-secret-token"}],
+        }
+    )
+
+    summary = agent_function.ThinkingStepHookProvider.summarise_result(result)
+
+    assert "42 rows" in summary
+    assert "super-secret-token" not in summary
+    assert "Bearer" not in summary
+
+
+def test_a_discovery_result_is_published_as_a_count() -> None:
+    summary = agent_function.ThinkingStepHookProvider.summarise_result(
+        json.dumps({"logGroupCount": 19, "logGroups": [{"logGroupName": "/x"}]})
+    )
+
+    assert "19 log groups" in summary
+    assert "/x" not in summary
+
+
+def test_a_record_result_says_only_whether_it_was_found() -> None:
+    found = agent_function.ThinkingStepHookProvider.summarise_result(
+        json.dumps({"found": True, "record": {"meetingName": "Board review"}})
+    )
+    missing = agent_function.ThinkingStepHookProvider.summarise_result(
+        json.dumps({"found": False})
+    )
+
+    assert found == "record found"
+    assert "Board review" not in found
+    assert missing == "no record"
+
+
+def test_a_tool_error_is_published_because_it_names_no_log_content() -> None:
+    """These messages are written for the agent to read and name a log group or
+    an argument, so they are safe and they are what a reader wants to see."""
+    summary = agent_function.ThinkingStepHookProvider.summarise_result(
+        json.dumps({"error": "none of the named log groups exist", "tool": "search_logs"})
+    )
+
+    assert "none of the named log groups exist" in summary
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json at all",
+        "[1, 2, 3]",
+        "",
+        None,
+        '{"unexpected": "shape"}',
+    ],
+)
+def test_an_unrecognised_result_publishes_nothing_about_itself(content: Any) -> None:
+    """The failure direction that matters: an unparsed result must not fall
+    back to printing itself."""
+    summary = agent_function.ThinkingStepHookProvider.summarise_result(content)
+
+    assert summary == "completed"
+
+
 # ── narrating the investigation to the UI ───────────────────────────────────
 
 
@@ -677,6 +771,55 @@ def test_the_loop_ending_signal_passes_through_an_sdk_s_error_handling() -> None
     what makes this signal pass through untouched."""
     assert issubclass(agent_function.RunBudgetExhausted, BaseException)
     assert not issubclass(agent_function.RunBudgetExhausted, Exception)
+
+
+def test_a_tool_executor_that_catches_exception_does_not_absorb_the_stop() -> None:
+    """The behaviour the class hierarchy is chosen for, asserted directly.
+
+    This drives the wrappers through a stand-in for an SDK's tool executor —
+    a loop that calls tools and converts any `Exception` into a tool result,
+    which is what the real one does. The signal has to survive that and reach
+    the caller.
+
+    What this does NOT establish: that strands-agents 1.61.1 propagates it the
+    same way through its own async and threading plumbing. That needs the
+    layer, which is not installed for these tests, so it is unverified here.
+    The wall-clock budget is the backstop that does not depend on it: it is
+    checked inside every tool, so a run whose stop signal were swallowed still
+    ends at the deadline rather than at the Lambda timeout.
+    """
+    budget = budget_with(max_iterations="1")
+    impl = FakeTools()
+    tools = build_tools(impl, budget)
+    results: List[str] = []
+
+    def executor_loop() -> None:
+        # A model that ignores every instruction and keeps calling tools.
+        for _ in range(10):
+            try:
+                results.append(tools["search_logs"]("whatever"))
+            except Exception as exc:  # noqa: BLE001 - what an SDK executor does
+                results.append(f"tool error: {exc}")
+
+    with pytest.raises(agent_function.RunBudgetExhausted):
+        executor_loop()
+
+    # One refusal reached the model, then the loop was cut off.
+    assert len(results) == 2
+    assert "STOP GATHERING EVIDENCE" in results[1]
+    assert impl.calls == ["search_logs"]
+
+
+def test_the_wall_clock_is_checked_inside_the_tools_not_only_the_loop() -> None:
+    """The guarantee that holds whatever the SDK does with an exception.
+
+    Asserted against the tools module rather than restated: every tool calls
+    _check_deadline before doing work, so a run ends at its deadline even if
+    nothing else stops it.
+    """
+    source = Path("troubleshooting_tools.py").read_text(encoding="utf-8")
+
+    assert source.count("self._check_deadline(") == 4
 
 
 def test_the_loop_ending_signal_carries_the_reason() -> None:

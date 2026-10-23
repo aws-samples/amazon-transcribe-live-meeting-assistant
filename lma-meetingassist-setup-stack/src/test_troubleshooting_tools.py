@@ -1056,3 +1056,86 @@ def test_an_unconfigured_stack_name_is_reported_rather_than_queried() -> None:
         make_tools(cloudformation_client=client, stack_name="").get_stack_parameters()
 
     assert client.calls == []
+
+
+# ── parameter redaction ─────────────────────────────────────────────────────
+#
+# Defence in depth rather than the control: all five of this solution's
+# third-party credentials are NoEcho parameters, which CloudFormation already
+# masks in DescribeStacks output. This covers the two remaining cases -- a
+# parameter carrying personal data, and a future credential parameter somebody
+# forgets to mark NoEcho.
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "AdminEmail",
+        "TavilyApiKey",
+        "ElevenLabsApiKey",
+        "ZoomMeetingSdkClientSecret",
+        "AcsConnectionString",
+        "SomeFuturePassword",
+        "AuthToken",
+        "ServiceCredential",
+        "OperationalAlertsEmailAddress",
+    ],
+)
+def test_a_parameter_naming_a_credential_or_a_person_is_not_returned(
+    name: str,
+) -> None:
+    client = FakeCloudFormationClient(
+        stack_with(VPLaunchType="MICROVM", **{name: "sensitive-value"})
+    )
+
+    rendered = make_tools(cloudformation_client=client).get_stack_parameters()
+    result = parsed(rendered)
+
+    assert "sensitive-value" not in rendered
+    assert name not in result["otherParameters"]
+    assert name in result["redactedParameters"]
+
+
+def test_a_redacted_parameter_is_named_so_its_absence_is_not_a_finding() -> None:
+    client = FakeCloudFormationClient(stack_with(AdminEmail="a@example.com"))
+
+    result = parsed(make_tools(cloudformation_client=client).get_stack_parameters())
+
+    assert result["redactedParameters"] == ["AdminEmail"]
+    assert "not returned" in result["guidance"]
+
+
+def test_configuration_parameters_are_still_returned_in_full() -> None:
+    """The redaction is narrow on purpose: deployment configuration is what
+    the agent is reading these for."""
+    client = FakeCloudFormationClient(
+        stack_with(
+            VPLaunchType="MICROVM",
+            EnableMicrovmAsr="true",
+            TranscribeLanguageCode="en-US",
+            CloudWatchLogsExpirationInDays="90",
+        )
+    )
+
+    result = parsed(make_tools(cloudformation_client=client).get_stack_parameters())
+
+    assert result["architectureParameters"]["VPLaunchType"] == "MICROVM"
+    assert result["architectureParameters"]["EnableMicrovmAsr"] == "true"
+    assert result["otherParameters"]["CloudWatchLogsExpirationInDays"] == "90"
+    assert result["redactedParameters"] == []
+    assert result["guidance"] is None
+
+
+def test_redaction_is_case_insensitive() -> None:
+    client = FakeCloudFormationClient(stack_with(myapikey="x", MY_SECRET="y"))
+
+    result = parsed(make_tools(cloudformation_client=client).get_stack_parameters())
+
+    assert sorted(result["redactedParameters"]) == ["MY_SECRET", "myapikey"]
+
+
+def test_an_architecture_parameter_is_never_itself_redactable() -> None:
+    """A guard on the two lists: a name on both would be annotated as needed
+    for diagnosis and then withheld."""
+    for name in TroubleshootingTools.ARCHITECTURE_PARAMETERS:
+        assert not TroubleshootingTools._is_redacted_parameter(name), name

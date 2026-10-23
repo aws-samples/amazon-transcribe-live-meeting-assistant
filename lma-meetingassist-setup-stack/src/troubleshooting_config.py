@@ -181,14 +181,18 @@ class AgentLimits:
         non-positive value falls back to the default, and anything above the
         ceiling is clamped rather than refused.
         """
+        # The default is itself capped: an operator who lowers the maximum
+        # below it means the smaller number, and returning the default anyway
+        # would quietly ignore the setting they just changed.
+        fallback = min(self.default_lookback_hours, self.max_lookback_hours)
         if requested is None:
-            return self.default_lookback_hours
+            return fallback
         try:
             hours = int(float(requested))
         except (TypeError, ValueError):
-            return self.default_lookback_hours
+            return fallback
         if hours < 1:
-            return self.default_lookback_hours
+            return fallback
         return min(hours, self.max_lookback_hours)
 
     def as_dict(self) -> Dict[str, int]:

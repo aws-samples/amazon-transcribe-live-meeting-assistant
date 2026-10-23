@@ -142,6 +142,16 @@ def test_a_lookback_beyond_the_window_is_clamped() -> None:
     assert limits.resolve_lookback_hours(500) == 48
 
 
+def test_a_maximum_below_the_default_wins() -> None:
+    """Returning the default anyway would quietly ignore the setting the
+    operator just lowered."""
+    limits = limits_with(default_lookback_hours="24", max_lookback_hours="6")
+
+    assert limits.resolve_lookback_hours(None) == 6
+    assert limits.resolve_lookback_hours(12) == 6
+    assert limits.resolve_lookback_hours("nonsense") == 6
+
+
 @pytest.mark.parametrize("requested", ["", "lots", None, 0, -3, [], {}])
 def test_an_unusable_lookback_falls_back_rather_than_raising(requested: object) -> None:
     limits = limits_with()

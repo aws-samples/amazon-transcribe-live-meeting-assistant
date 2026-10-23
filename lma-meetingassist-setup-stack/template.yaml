@@ -541,10 +541,19 @@ Resources:
               - Effect: Allow
                 Action: "logs:DescribeLogGroups"
                 Resource: "*"
+              # DescribeLogStreams is deliberately not granted: no tool calls
+              # it, and an unused grant is one nobody re-reads before relying
+              # on it.
               - Effect: Allow
-                Action:
-                  - "logs:DescribeLogStreams"
-                  - "logs:StartQuery"
+                Action: "logs:StartQuery"
+                # One entry per nested stack lma-main.yaml deploys. Discovery
+                # pages log groups for every nested stack the parent reports,
+                # so a stack missing here is one whose groups are listed and
+                # then cannot be queried -- and a single query naming it fails
+                # as a whole, reported to the agent as a tool fault rather than
+                # as a permission gap. test_troubleshooting_agent_iam.py
+                # compares this list against lma-main.yaml so a new nested
+                # stack cannot drift out of it.
                 Resource:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}/*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-AISTACK-*"
@@ -558,6 +567,9 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-NOVASONICONFIGSTACK-*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-BROWSEREXTENSIONSTACK-*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-DESKTOPCAPTUREAPPSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-BEDROCKKB-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-TRANSCRIPTBEDROCKKB-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-VPCSTACK-*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-vp-logs*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-asr-logs*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${LMAStackName}-VIRTUALPARTICIPANTSTACK-*"

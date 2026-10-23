@@ -247,6 +247,17 @@ class RunBudgetExhausted(BaseException):
     behaviour here — so this inherits from BaseException to pass through that
     handling untouched. ``run_diagnosis`` catches it and writes the answer
     itself.
+
+    **What is and is not verified.** That a catch-``Exception`` tool executor
+    does not absorb this is asserted directly, against a stand-in for one. That
+    strands-agents propagates it unchanged through its own async and threading
+    plumbing is *not*: the Strands layer is not installed for the unit tests,
+    so nothing here exercises the real event loop. The bound that does not
+    depend on it is the wall clock, which every tool checks before doing any
+    work — so a run whose stop signal were somehow swallowed still ends at its
+    deadline rather than at the Lambda timeout. Treat this class as the thing
+    that makes a reached limit end *promptly*, and the deadline as the thing
+    that makes it end *at all*.
     """
 
     def __init__(self, reason: str):
@@ -420,6 +431,48 @@ class ThinkingStepHookProvider:
         except Exception as exc:  # noqa: BLE001
             logger.warning("before-tool hook failed: %s", exc)
 
+    @staticmethod
+    def summarise_result(content: Any) -> str:
+        """Describe a tool result's shape without reproducing its content.
+
+        The thinking-step stream is published to the UI without the model in
+        the loop, so anything put here bypasses every instruction the prompt
+        gives the agent about what to quote. ``search_logs`` returns raw log
+        lines, and a log line can contain whatever the component that wrote it
+        put there — so a prefix of the raw result is the one thing this must
+        not publish.
+
+        A shape summary is also the more useful thing to render: "read 42 rows
+        from 2 log groups" is what a reader wants from a progress panel, and
+        the evidence itself belongs in the diagnosis, where the agent has been
+        told how to quote it.
+        """
+        try:
+            payload = json.loads(str(content))
+        except (TypeError, ValueError):
+            return "completed"
+        if not isinstance(payload, dict):
+            return "completed"
+        if "error" in payload:
+            # The tool's own message, which is written for the agent to read
+            # and names a log group or an argument, never log content.
+            return f"could not gather evidence: {str(payload['error'])[:200]}"
+        parts: List[str] = []
+        for label, key in (
+            ("log groups", "logGroupCount"),
+            ("rows", "rowCount"),
+            ("bytes scanned", "bytesScanned"),
+        ):
+            if isinstance(payload.get(key), int):
+                parts.append(f"{payload[key]} {label}")
+        if "found" in payload:
+            parts.append("record found" if payload["found"] else "no record")
+        if "architectureParameters" in payload:
+            parts.append(
+                f"{len(payload['architectureParameters'])} architecture parameters"
+            )
+        return ", ".join(parts) if parts else "completed"
+
     def on_after_tool_call(self, event: Any) -> None:
         try:
             self._record_usage(event)
@@ -435,7 +488,7 @@ class ThinkingStepHookProvider:
                 {
                     "type": "tool_result",
                     "tool_name": self._tool_name(event),
-                    "result": str(content)[:500],
+                    "result": self.summarise_result(content),
                     "success": not getattr(result, "is_error", False),
                 },
                 self._sequence,
@@ -682,6 +735,13 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     model_kwargs: Dict[str, Any] = {
         "model_id": MODEL_ID,
         "max_tokens": limits.max_output_tokens,
+        # The project's aggressive Bedrock retry profile, passed explicitly:
+        # BedrockModel builds its own client, so a config left on the module
+        # would simply not be used and the model would run on the SDK's
+        # defaults. Cross-region inference profiles make a first attempt fail
+        # often enough that the difference is a working deployment versus an
+        # intermittent one.
+        "boto_client_config": BEDROCK_CONFIG,
         **get_guardrail_config(),
     }
     if accepts_temperature(MODEL_ID):

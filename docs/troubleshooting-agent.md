@@ -144,7 +144,7 @@ templates, as a Default/Custom pair:
 
 | Item | Behaviour |
 |---|---|
-| `DefaultTroubleshootingAgentPrompt` | Shipped with the stack and **rewritten on every stack update**. Edits to it are lost. |
+| `DefaultTroubleshootingAgentPrompt` | Shipped with the stack and **rewritten whenever a stack update ships a changed prompt**. Edits to it are lost. |
 | `CustomTroubleshootingAgentPrompt` | Created empty if it is absent, on create *and* on update, so it is there on an upgraded deployment as well as a new one. Once it exists it is never written again, so your prompt survives every later upgrade. |
 
 To override it, set a `systemPrompt` attribute on
@@ -233,6 +233,14 @@ it quotes; and to quote meeting content only where the content itself is the
 evidence. This matters because a diagnosis is the kind of text people paste into
 a public issue tracker. If what the agent finds needs reporting through a
 security channel, it is told to say so and stop rather than write it up.
+
+Those are instructions to a model, so the controls that do not depend on it
+sit in the tools: `get_vp_record`'s field allowlist, the parameter redaction
+described above, and the fact that the thinking-step stream publishes only a
+tool result's **shape** — "42 rows from 2 log groups" — never its content. That
+last one matters most, because that stream reaches the UI without the model in
+the loop, and a log line can contain whatever the component that wrote it put
+there.
 
 ## Related
 

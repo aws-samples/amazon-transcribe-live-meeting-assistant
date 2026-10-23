@@ -50,7 +50,13 @@ RESOURCELESS_LOG_ACTIONS = {
 }
 
 #: Actions that do take a log group, and so must stay scoped.
-SCOPED_LOG_ACTIONS = {"logs:StartQuery", "logs:DescribeLogStreams"}
+SCOPED_LOG_ACTIONS = {"logs:StartQuery"}
+
+#: Nested stacks whose log groups the agent is not expected to read. Empty on
+#: purpose: discovery pages every nested stack the parent reports, so anything
+#: left out here has to be left out of discovery too, or its groups are listed
+#: and then cannot be queried.
+NESTED_STACKS_NOT_READABLE: set[str] = set()
 
 
 class _Loader(yaml.SafeLoader):
@@ -195,6 +201,80 @@ def test_the_log_read_grant_names_nested_stacks_rather_than_the_bare_prefix(
     assert not any(r.endswith("log-group:/${LMAStackName}-*") for r in rendered)
     assert any("log-group:/${LMAStackName}-AISTACK-*" in r for r in rendered)
     assert any("log-group:/${LMAStackName}/*" in r for r in rendered)
+
+
+def test_every_nested_stack_the_deployment_creates_can_be_read(
+    role: Dict[str, Any],
+) -> None:
+    """Discovery pages log groups for every nested stack the parent reports.
+
+    A nested stack missing from this grant is one whose groups are discovered,
+    offered to the agent, and then refused — and because a Logs Insights query
+    names several groups at once, one unreadable group fails the whole query.
+    The agent is told that is "a fault in the tool", so the symptom would be an
+    investigation that mysteriously cannot read some components.
+    """
+    main = yaml.load(
+        (REPO / "lma-main.yaml").read_text(encoding="utf-8"), Loader=_Loader
+    )
+    nested = {
+        name
+        for name, resource in main["Resources"].items()
+        if resource.get("Type") == "AWS::CloudFormation::Stack"
+    }
+    assert len(nested) >= 12, "the nested stack scan is not seeing lma-main.yaml"
+
+    rendered = rendered_resources(statements_granting(role, "logs:StartQuery")[0])
+    granted = {
+        r.split("log-group:/${LMAStackName}-", 1)[1].rstrip("-*")
+        for r in rendered
+        if "log-group:/${LMAStackName}-" in r
+    }
+
+    missing = nested - granted - NESTED_STACKS_NOT_READABLE
+    assert not missing, (
+        "these nested stacks create log groups that discovery will list but "
+        f"this role cannot query: {sorted(missing)}. Add a "
+        "'log-group:/${LMAStackName}-<LOGICALID>-*' entry for each, or add it "
+        "to NESTED_STACKS_NOT_READABLE and exclude it from discovery too."
+    )
+
+
+def test_the_grant_names_no_stack_the_deployment_does_not_create(
+    role: Dict[str, Any],
+) -> None:
+    """The other direction: a stale entry is a grant for nothing."""
+    main = yaml.load(
+        (REPO / "lma-main.yaml").read_text(encoding="utf-8"), Loader=_Loader
+    )
+    nested = {
+        name
+        for name, resource in main["Resources"].items()
+        if resource.get("Type") == "AWS::CloudFormation::Stack"
+    }
+
+    rendered = rendered_resources(statements_granting(role, "logs:StartQuery")[0])
+    granted = {
+        r.split("log-group:/${LMAStackName}-", 1)[1].rstrip("-*")
+        for r in rendered
+        if "log-group:/${LMAStackName}-" in r
+        # The MicroVM and vended-states entries are not nested stack prefixes.
+        and "lambda-microvms" not in r
+        and "vendedlogs" not in r
+    }
+
+    assert not granted - nested, f"stale entries: {sorted(granted - nested)}"
+
+
+def test_no_tool_calls_describe_log_streams(role: Dict[str, Any]) -> None:
+    """Dropped rather than carried: the role's own comment says an unused grant
+    is one nobody re-reads before relying on it."""
+    source = (
+        REPO / "lma-meetingassist-setup-stack" / "src" / "troubleshooting_tools.py"
+    ).read_text(encoding="utf-8")
+
+    assert "describe_log_streams" not in source
+    assert not statements_granting(role, "logs:DescribeLogStreams")
 
 
 def test_the_microvm_log_groups_are_named_in_full(role: Dict[str, Any]) -> None:

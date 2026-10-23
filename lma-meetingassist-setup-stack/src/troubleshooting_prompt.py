@@ -18,8 +18,10 @@ and an untuned prompt is the failure mode this feature has.
 So it lives in ``LLMPromptTemplateTable``, in the Default/Custom pair LMA
 already uses for its summarization prompts:
 
-* ``DefaultTroubleshootingAgentPrompt`` is written by the deployment and
-  rewritten on every stack update. Operator edits to it are lost, by design.
+* ``DefaultTroubleshootingAgentPrompt`` is written by the deployment, and
+  rewritten whenever a stack update ships a changed prompt — the seeding
+  custom resource re-runs when the content hash over its source changes.
+  Operator edits to it are lost, by design.
 * ``CustomTroubleshootingAgentPrompt`` is seeded empty under a condition that
   can only create it, so it appears on an upgraded stack as well as a new one
   and is never rewritten once it exists. An operator who puts a
