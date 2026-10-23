@@ -405,9 +405,13 @@ test('a periodic refresh already queued is superseded by the rebuild', async () 
     assert.equal((agent as any).refreshQueued, false);
 });
 
-test('a refresh that will not settle is left to finish rather than raced', async () => {
+test('a refresh that will not settle is left to finish, with a rebuild queued behind it', async () => {
     // refreshSession declines to start a second teardown, so claiming a rebuild
-    // here would be reporting one that never happened.
+    // here would be reporting one that never happened. If that refresh had
+    // already sent its promptStart, the live session is running the old mode's
+    // prompt and tools — so a rebuild is queued, and the existing idle-refresh
+    // machinery converges the session at the next idle moment rather than
+    // leaving it to the four-minute timer.
     const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
     withLiveSession(agent);
     (agent as any).isRefreshing = true;
@@ -418,6 +422,7 @@ test('a refresh that will not settle is left to finish rather than raced', async
     assert.equal(outcome.result, 'applied', 'the new values are on the agent either way');
     assert.equal(outcome.sessionRebuilt, false);
     assert.deepEqual(calls, []);
+    assert.equal((agent as any).refreshQueued, true, 'the session must still converge on the new mode');
 });
 
 // ---------------------------------------------------------------------------

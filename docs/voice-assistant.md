@@ -118,7 +118,7 @@ On **ElevenLabs**, only the transcript mechanism and audio barge-in apply. The E
 
 ## Meeting Mode
 
-The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic Configuration page (admin-only). The `group` and `translator` modes need the assistant to be always listening: if the stack is deployed with `VoiceAssistantActivationMode = wake_phrase` they have no effect and the UI surfaces a warning. On Nova Sonic, participants can switch activation to always-listening for the current meeting from the chat — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting).
+The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic Configuration page (admin-only). The `group` and `translator` modes need the assistant to be always listening: if the stack is deployed with `VoiceAssistantActivationMode = wake_phrase` they have no effect and the UI surfaces a warning. On Nova Sonic, the chat commands for those two modes switch activation for the current meeting as well, so they work on a `wake_phrase` deployment — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting).
 
 | Mode | Starts muted? | Speaks when… | Stops when asked to? | Typical use |
 |---|---|---|---|---|
@@ -193,9 +193,11 @@ Every command must address LMA by name, and the whole message must be the name p
 
 | Type in chat | Effect |
 |---|---|
-| `LMA translate` | Switch to translator mode. Also switches activation to always-listening, because a translator with a wake phrase translates nothing until it is addressed. Aliases: `LMA translator`, `LMA translate mode`, `LMA translator mode`, `LMA interpret` |
-| `LMA assist` | Switch to `normal` assistant mode. Aliases: `LMA assistant`, `LMA assist mode`, `LMA assistant mode`, `LMA normal`, `LMA normal mode` |
-| `LMA group` | Switch to group mode: the assistant goes quiet and waits to be addressed by wake phrase. Alias: `LMA group mode` |
+| `LMA translate` | Switch to translator mode, and to always-listening. Aliases: `LMA translator`, `LMA translate mode`, `LMA translator mode`, `LMA interpret` |
+| `LMA assist` | Switch to `normal` assistant mode. Leaves activation alone. Aliases: `LMA assistant`, `LMA assist mode`, `LMA assistant mode`, `LMA normal`, `LMA normal mode` |
+| `LMA group` | Switch to group mode — the assistant goes quiet and waits to be addressed by wake phrase — and to always-listening. Alias: `LMA group mode` |
+
+`LMA translate` and `LMA group` both switch activation to always-listening as well, because neither mode works without it. A translator speaks on every completed utterance, so with a wake phrase it would receive no audio until addressed and translate nothing in between. Group mode starts muted and the state machine that unmutes it runs on transcripts that only arrive while a session is open, so with a wake phrase it would never become audible at all.
 
 **Activation mode:**
 
@@ -204,7 +206,7 @@ Every command must address LMA by name, and the whole message must be the name p
 | `LMA always` | Always listening. Aliases: `LMA always on`, `LMA always active`, `LMA always listen`, `LMA open mic` |
 | `LMA wake` | Listen only after a wake phrase. Aliases: `LMA wake word`, `LMA wake phrase`, `LMA on request` |
 
-Going back from translator mode with `LMA assist` leaves activation where `LMA translate` put it, because the command carries no record of what it was before. Use `LMA wake` to get the wake phrase back.
+`LMA assist` leaves activation where `LMA translate` or `LMA group` put it, because `normal` mode works under either activation mode and the command carries no record of what it was before. Use `LMA wake` to get the wake phrase back.
 
 The assistant replies in chat either way — naming the mode it is now in, or saying that nothing changed and why. A command for the mode the meeting is already in is answered and does nothing else, so it costs the meeting no interruption.
 

@@ -4,7 +4,11 @@ import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptio
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
-import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
+import {
+    applyAssistantChatCommand,
+    createDuplicateToggleFilter,
+    parseAssistantChatCommand,
+} from './assistant-toggles.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
@@ -158,6 +162,10 @@ export default class Webex {
     // Set once the chat end-command has been handled, so the message observer
     // firing twice for the same message doesn't trigger a double exit/goodbye.
     private endHandled = false;
+    // Same observer duplication, applied to the assistant-mode toggles. A short
+    // window rather than a latch, since the same command typed again later is a
+    // real request.
+    private readonly freshToggle = createDuplicateToggleFilter();
 
     constructor() {
         this.endRequested = new Promise<ExitInfo>((resolve) => {
@@ -849,10 +857,10 @@ export default class Webex {
             }
             // Checked ahead of pause/resume so an assistant-mode toggle lands
             // whether or not transcription is paused; the two vocabularies are
-            // disjoint. No `endHandled`-style latch: the observer's duplicate add
-            // events are harmless here, because the second one finds the
-            // assistant already in the requested mode and is answered as such
-            // rather than rebuilding the session a second time.
+            // disjoint. `freshToggle` drops the observer's duplicate add event:
+            // the session is not rebuilt twice either way (the no-op guard in
+            // reconfigure sees the requested mode already in place), but the
+            // duplicate would post a second chat reply right after the first.
             const assistantToggle = parseAssistantChatCommand(message);
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
@@ -879,6 +887,7 @@ export default class Webex {
                     matchedMessage: message,
                 });
             } else if (assistantToggle) {
+                if (!this.freshToggle(message)) return;
                 await this.sendMessages(frame, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
             } else if (
                 details.start &&

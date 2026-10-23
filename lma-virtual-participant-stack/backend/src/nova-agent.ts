@@ -3061,9 +3061,15 @@ export class NovaAgent implements VoiceAssistantProvider {
       // A refresh that has not settled within the bound is itself building a
       // session, and `refreshSession` declines to start a second one. The new
       // values are already on the agent, so whether that session carries them
-      // depends on how far through its prompt it is — report no rebuild rather
-      // than claim one.
-      console.warn('⚠️  Session refresh still in flight — leaving the rebuild to it');
+      // depends on how far through its prompt it already was — report no rebuild
+      // rather than claim one.
+      //
+      // Queue one so the session converges on the new mode at the next idle
+      // moment instead of waiting for the four-minute timer: if that in-flight
+      // refresh had already sent its promptStart, the live session is running the
+      // old mode's prompt and tools while everything else says otherwise.
+      console.warn('⚠️  Session refresh still in flight — queueing a rebuild behind it');
+      this.refreshQueued = true;
       return false;
     }
 

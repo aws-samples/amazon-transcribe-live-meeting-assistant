@@ -32,7 +32,8 @@ import {
     type AssistantReconfigureOutcome,
     type AssistantReconfigureRequest,
 } from './assistant-toggles.js';
-import { matchesEndCommand } from './details.js';
+import { createDuplicateToggleFilter } from './assistant-toggles.js';
+import { details, matchesEndCommand } from './details.js';
 
 // ---------------------------------------------------------------------------
 // The vocabulary
@@ -83,18 +84,37 @@ test('an activation command addressed to LMA is recognised', () => {
     }
 });
 
-test('asking for a translator also asks for an assistant that is listening', () => {
-    // A translator speaks on every completed utterance. On wake_phrase
-    // activation it receives no audio until somebody says the wake phrase, so
-    // "LMA translate" alone would produce a translator that translates nothing.
+test('the two modes that need an always-listening assistant ask for one', () => {
+    // Neither works without it, and a deployment on wake_phrase activation is
+    // where both would otherwise be asked for.
+    //
+    // A translator speaks on every completed utterance, so on wake_phrase it
+    // receives no audio until somebody says the wake phrase and translates
+    // nothing in between. Group mode is worse: it starts muted, activate()
+    // deliberately does not unmute it, and the state machine that would is
+    // driven by Nova USER transcripts, which only arrive while a session is
+    // open — on wake_phrase there is none between activations, so a group-mode
+    // assistant would never become audible at all.
     assert.deepEqual(parseAssistantChatCommand('LMA translate'), {
         meetingMode: 'translator',
         activationMode: 'always_active',
     });
+    assert.deepEqual(parseAssistantChatCommand('LMA group'), {
+        meetingMode: 'group',
+        activationMode: 'always_active',
+    });
+    for (const message of ['LMA translator mode', 'LMA interpret', 'LMA group mode']) {
+        assert.equal(
+            parseAssistantChatCommand(message)?.activationMode,
+            'always_active',
+            `"${message}" must also ask for an always-listening assistant`,
+        );
+    }
 
-    // Going back the other way carries no opinion about activation: the command
-    // does not know what it was before translator mode changed it.
+    // `normal` works under either activation mode, and the command has no record
+    // of what activation was before translator or group changed it.
     assert.equal(parseAssistantChatCommand('LMA assist')?.activationMode, undefined);
+    assert.equal(parseAssistantChatCommand('LMA normal')?.activationMode, undefined);
 });
 
 test('ordinary meeting chat is left alone', () => {
@@ -168,10 +188,20 @@ test('the dismissal vocabulary and the toggle vocabulary do not overlap', () => 
 test('the toggle vocabulary does not collide with the pause and resume commands', () => {
     // Most platforms match pause/resume with a case-sensitive substring test on
     // the raw message, so a toggle phrase containing either word would both
-    // toggle and pause depending on branch order.
+    // toggle and pause depending on branch order. Asserted against the
+    // configured commands rather than the literals, so the two stay aligned if
+    // the commands change.
     for (const message of ['LMA translate', 'LMA assist', 'LMA group', 'LMA always', 'LMA wake', 'LMA open mic']) {
-        assert.equal(message.includes('PAUSE'), false, `"${message}" would also match the pause command`);
-        assert.equal(message.includes('START'), false, `"${message}" would also match the resume command`);
+        assert.equal(
+            message.includes(details.pauseCommand),
+            false,
+            `"${message}" would also match the pause command "${details.pauseCommand}"`,
+        );
+        assert.equal(
+            message.includes(details.startCommand),
+            false,
+            `"${message}" would also match the resume command "${details.startCommand}"`,
+        );
     }
 });
 
@@ -299,6 +329,23 @@ test('a chat command reaches the provider tagged with the chat route and the sen
         ]);
         assert.deepEqual(reply, ['Live Meeting Assistant: switched to translator mode.']);
     });
+});
+
+test('a chat message delivered twice in quick succession is answered once', () => {
+    // The Webex chat observer emits duplicate add events. The session is not
+    // rebuilt twice either way, but the duplicate would post a second reply
+    // right after the first — "switched to translator mode." followed by
+    // "already in the requested configuration.".
+    const fresh = createDuplicateToggleFilter(5000);
+    assert.equal(fresh('LMA translate', 1_000), true);
+    assert.equal(fresh('LMA translate', 1_040), false, 'the duplicate event must be dropped');
+    assert.equal(fresh('@LMA, Translate!', 1_080), false, 'the same command differently typed is still the same');
+
+    // A different command in the window is not a duplicate of the first.
+    assert.equal(fresh('LMA wake', 1_120), true);
+
+    // And the same command typed again later is a real request.
+    assert.equal(fresh('LMA wake', 20_000), true);
 });
 
 test('a meeting with no voice assistant is told so and the provider is not called', async () => {

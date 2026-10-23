@@ -75,8 +75,10 @@ export interface VoiceAssistantProvider {
    * flag flip. A brief gap in what the assistant can hear is expected; the
    * transcript is produced by a separate audio path and is not affected.
    *
-   * Providers that cannot honour a request return it undone, with `applied`
-   * false and a `detail` explaining why, rather than half-applying it.
+   * Providers that cannot honour a request return it undone — `result:
+   * 'declined'` (or `'unchanged'` when the assistant is already doing what was
+   * asked), an empty `changed` list and a `detail` explaining why — rather than
+   * half-applying it.
    *
    * Every call logs one line (see `formatAssistantToggleLog`), including the
    * calls that change nothing, so the record of what a meeting was asked to do

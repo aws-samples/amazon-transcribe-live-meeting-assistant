@@ -142,13 +142,21 @@ export interface AssistantChatCommand {
  * `assist` rather than with `normal` because the pair has to read as two jobs
  * the assistant can do, not as one mode and the absence of it.
  *
- * `translate` also sets `always_active`. Translator mode speaks on every
- * completed utterance, so on `wake_phrase` activation it receives no audio until
- * somebody says the wake phrase and translates nothing in between; asking for a
- * translator and getting silence would be the more surprising reading of the
- * command. Switching back with `assist` leaves activation where translator put
- * it, because the command carries no information about what it was before —
- * `LMA wake` is how you get the wake phrase back.
+ * `translate` and `group` both also set `always_active`, because neither mode
+ * works without it. A translator speaks on every completed utterance, so on
+ * `wake_phrase` activation it receives no audio until somebody says the wake
+ * phrase and translates nothing in between. Group mode is worse: it starts muted
+ * and `activate()` deliberately does not unmute it, because group mode owns its
+ * own muted-until-addressed state machine — and that machine runs on Nova's USER
+ * transcripts, which only arrive while a session is open. On `wake_phrase` there
+ * is no session between activations, so a group-mode assistant would never
+ * become audible at all. Asking for a mode and getting permanent silence is not
+ * a reading of these commands worth supporting.
+ *
+ * `assist` carries no activation change: `normal` mode works under either
+ * activation mode, and the command has no record of what activation was before
+ * `translate` or `group` changed it — `LMA wake` is how you get the wake phrase
+ * back.
  */
 const CHAT_COMMANDS: ReadonlyArray<readonly [string, AssistantChatCommand]> = [
     // Meeting mode — what job the assistant is doing.
@@ -163,8 +171,8 @@ const CHAT_COMMANDS: ReadonlyArray<readonly [string, AssistantChatCommand]> = [
     ['assistant mode', { meetingMode: 'normal' }],
     ['normal', { meetingMode: 'normal' }],
     ['normal mode', { meetingMode: 'normal' }],
-    ['group', { meetingMode: 'group' }],
-    ['group mode', { meetingMode: 'group' }],
+    ['group', { meetingMode: 'group', activationMode: 'always_active' }],
+    ['group mode', { meetingMode: 'group', activationMode: 'always_active' }],
     // Activation mode — when the assistant is listening.
     ['always', { activationMode: 'always_active' }],
     ['always on', { activationMode: 'always_active' }],
@@ -223,6 +231,41 @@ export function parseAssistantChatCommand(message: string): AssistantChatCommand
     if (!command) return null;
 
     return { ...command };
+}
+
+/**
+ * How long the same chat message is treated as a repeat of itself rather than a
+ * fresh command. Long enough to cover a DOM observer emitting one message twice,
+ * short enough that a participant retyping a command because they expected
+ * something to happen still gets an answer.
+ */
+const DUPLICATE_WINDOW_MS = 5000;
+
+/**
+ * Answer the same toggle message once, for a platform that can deliver it twice.
+ *
+ * The Webex chat observer emits duplicate add events, which the end command
+ * handles with a latch of its own. A duplicate toggle does not rebuild the
+ * session twice — the no-op guard in `reconfigure` sees the assistant already in
+ * the requested mode — but it does produce a second chat reply, so one command
+ * reads as "switched to translator mode." immediately followed by "already in
+ * the requested configuration.". This drops the repeat instead.
+ *
+ * Deliberately a short window rather than a permanent latch: typing the same
+ * command again a minute later is a real request, not a duplicate event.
+ */
+export function createDuplicateToggleFilter(windowMs: number = DUPLICATE_WINDOW_MS) {
+    let lastMessage: string | null = null;
+    let lastAt = 0;
+    return function shouldHandle(message: string, now: number = Date.now()): boolean {
+        const key = normalize(message);
+        if (key === lastMessage && now - lastAt < windowMs) {
+            return false;
+        }
+        lastMessage = key;
+        lastAt = now;
+        return true;
+    };
 }
 
 // ---------------------------------------------------------------------------
