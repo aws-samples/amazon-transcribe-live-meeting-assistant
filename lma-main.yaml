@@ -3319,6 +3319,15 @@ Resources:
         TranscriptSummaryFunctionArn: !GetAtt AISTACK.Outputs.TranscriptSummaryFunctionArn
         BedrockGuardrailId: !Ref BedrockGuardrailId
         BedrockGuardrailVersion: !Ref BedrockGuardrailVersion
+        # Inputs for the troubleshooting agent: the records it reads, the table
+        # holding its system prompt, and the API id that scopes its read of
+        # AppSync's service-managed log group.
+        VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
+        LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
+        AppSyncApiId: !GetAtt AISTACK.Outputs.AppSyncApiId
+        # Threaded through so this nested stack's IAM roles carry the
+        # deployment's permissions boundary, as the other nested stacks' do.
+        PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
         Version: v0.8.8
 
   VPCSTACK:
@@ -4574,6 +4583,19 @@ Outputs:
       Edit the *custom* summary prompts. Attribute values here override
       the default summary prompts, and are preserved during stack updates.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+
+  TroubleshootingAgentCustomPrompt:
+    Description:
+      Edit the *custom* troubleshooting agent system prompt. A systemPrompt
+      attribute here replaces the default on the next diagnosis, with no
+      redeployment, and is preserved during stack updates.
+    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomTroubleshootingAgentPrompt&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+
+  TroubleshootingAgentFunctionArn:
+    Description:
+      ARN of the troubleshooting agent Lambda function. No user-facing entry
+      point in this release; invoke it with the AWS CLI or SDK.
+    Value: !GetAtt MEETINGASSISTSETUP.Outputs.TroubleshootingAgentFunctionArn
 
   DefaultChatButtonConfig:
     Description: View the *default* STRANDS agent chat button configuration. Do not edit. To override default buttons, add or edit attributes in the custom button config item.

@@ -155,6 +155,32 @@ Parameters:
       If provided, this policy will limit the maximum permissions that can be granted to IAM roles
       in this stack, providing an additional layer of security.
 
+  # Inputs for the troubleshooting agent. Each defaults to empty so a
+  # standalone deployment of this template still creates a stack; the agent is
+  # only created when all three are supplied, because without them it has
+  # nothing to read.
+  VirtualParticipantTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Name of the VirtualParticipant DynamoDB table, read by the
+      troubleshooting agent.
+
+  LLMPromptTemplateTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Name of the LLM prompt template DynamoDB table, which holds the
+      troubleshooting agent's system prompt.
+
+  AppSyncApiId:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) AppSync GraphQL API id. Used to scope the troubleshooting
+      agent's read of the API's service-managed log group to this deployment's
+      API.
+
 Conditions:
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
   ShouldUseStrandsBedrockWithKBCreate: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
@@ -187,6 +213,25 @@ Conditions:
   # web search tool is available and the function is granted the one secret
   # that supplies it.
   HasTavilyApiKeySecret: !Not [!Equals [!Ref TavilyApiKeySecretArn, ""]]
+  # The troubleshooting agent needs a prompt to run on and records to read, so
+  # it is created only when both tables are named. lma-main.yaml always names
+  # them; a standalone deployment of this template does not have to.
+  ShouldDeployTroubleshootingAgent: !And [
+    !Not [!Equals [!Ref LLMPromptTemplateTableName, ""]],
+    !Not [!Equals [!Ref VirtualParticipantTableName, ""]]
+  ]
+  # Scoping the AppSync log-group grant needs the API id. Without it the grant
+  # is omitted rather than widened, so the agent simply does not see AppSync's
+  # own log group.
+  HasAppSyncApiId: !Not [!Equals [!Ref AppSyncApiId, ""]]
+  # The Strands layer is shared by the two agents in this stack, and either one
+  # alone is reason enough to build it. Without this the layer would exist only
+  # when the meeting assistant is Strands-backed, and the troubleshooting agent
+  # would reference a resource that is not there.
+  ShouldDeployStrandsLayer: !Or [
+    !Condition ShouldDeployStrandsFunction,
+    !Condition ShouldDeployTroubleshootingAgent
+  ]
 
 Resources:
   Boto3Layer:
@@ -196,10 +241,11 @@ Resources:
       CompatibleRuntimes:
         - python3.12
 
-  # Strands Lambda Layer for Strands SDK
+  # Strands Lambda Layer for Strands SDK, shared by the meeting assistant and
+  # the troubleshooting agent.
   StrandsLayer:
     Type: "AWS::Lambda::LayerVersion"
-    Condition: ShouldDeployStrandsFunction
+    Condition: ShouldDeployStrandsLayer
     Properties:
       LayerName: !Sub "${LMAStackName}-strands-layer"
       Description: "Strands Agents SDK for meeting assistance"
@@ -420,6 +466,212 @@ Resources:
         Ref: CloudWatchLogsExpirationInDays
       KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
+  # ── Troubleshooting agent ────────────────────────────────────────────────
+  #
+  # This agent has a role of its own, held separately from the meeting
+  # assistant's. The two serve different audiences -- the meeting assistant
+  # answers questions for whoever is in a meeting, while this one reads the
+  # deployment's operational logs for an operator -- so their permissions are
+  # kept apart and should stay apart. Merging them for convenience would be a
+  # change of posture, not a refactor.
+  #
+  # Every grant below is scoped to this deployment's own resources, and the
+  # whole role is read-only. Two deliberate omissions:
+  #
+  # * lambda:InvokeFunction is not granted. None of this agent's tools needs
+  #   it, and it is the broadest mutating capability an otherwise read-only
+  #   role could carry.
+  # * No ecs:*, no states:*. The tools that would use them are not in this
+  #   increment, and an unused grant is one nobody re-reads before relying on.
+  TroubleshootingAgentFunctionRole:
+    Condition: ShouldDeployTroubleshootingAgent
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: >-
+              logs:GetQueryResults and logs:StopQuery take a query id rather
+              than a log group and support no resource-level permissions, so the
+              statement that carries them cannot be narrowed. The queries they
+              read are only the ones logs:StartQuery could start, and that is
+              scoped to this deployment's log groups.
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        # Reading this deployment's logs. The four log-group prefixes are the
+        # four namespaces LMA writes to: nested-stack groups, groups named
+        # after the parent stack, the MicroVM groups outside the stack-name
+        # namespace, and the EXPRESS state machine's vended group.
+        - PolicyName: DiagnosticLogReadPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:DescribeLogGroups"
+                  - "logs:DescribeLogStreams"
+                  - "logs:StartQuery"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}/*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${LMAStackName}-*"
+                  - !If
+                    - HasAppSyncApiId
+                    - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/appsync/apis/${AppSyncApiId}*"
+                    - !Ref AWS::NoValue
+              # Collecting and cancelling a query. Both take a query id, not a
+              # log group, and support no resource-level permissions.
+              - Effect: Allow
+                Action:
+                  - "logs:GetQueryResults"
+                  - "logs:StopQuery"
+                Resource: "*"
+        # The two records the agent reads, by table, rather than table/*.
+        - PolicyName: DiagnosticRecordReadPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "dynamodb:GetItem"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
+        # Which components this deployment runs. Scoped to the LMA stack tree:
+        # the parent by name, and its nested stacks by the generated prefix.
+        - PolicyName: DiagnosticStackReadPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "cloudformation:DescribeStacks"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LMAStackName}/*"
+                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LMAStackName}-*/*"
+        - PolicyName: BedrockPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "bedrock:InvokeModel"
+                  - "bedrock:InvokeModelWithResponseStream"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action: "bedrock:GetInferenceProfile"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              # Omitted entirely when no guardrail is configured, which is the
+              # default.
+              - !If
+                - HasBedrockGuardrail
+                - Effect: Allow
+                  Action: "bedrock:ApplyGuardrail"
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
+                - !Ref AWS::NoValue
+        # Narrating the investigation to the UI. One mutation field, the same
+        # one the meeting assistant streams through.
+        - PolicyName: AppSyncGraphQLPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: "appsync:GraphQL"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
+        # Reading the CMK-encrypted tables and log groups. Scoped to reads made
+        # through those two services, so the key is not usable for anything
+        # else this role can reach.
+        - PolicyName: KMSPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "kms:Decrypt"
+                  - "kms:DescribeKey"
+                Resource:
+                  - !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService":
+                      - !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+                      - !Sub "logs.${AWS::Region}.${AWS::URLSuffix}"
+
+  TroubleshootingAgentFunction:
+    Condition: ShouldDeployTroubleshootingAgent
+    Type: "AWS::Lambda::Function"
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_116: "DLQ not applicable - invoked synchronously for one diagnosis at a time; a failed run is reported, never retried"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only reads AWS service APIs"
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it has no user-facing entry point in this release"
+    # checkov:skip=CKV_AWS_173: "Environment variables hold resource names and model configuration, no sensitive data"
+    Properties:
+      FunctionName: !Sub "STRANDS-${LMAStackName}-Troubleshooting"
+      Role: !GetAtt TroubleshootingAgentFunctionRole.Arn
+      Handler: troubleshooting_agent_function.handler
+      Runtime: python3.12
+      Layers:
+        - !Ref Boto3Layer
+        - !Ref StrandsLayer
+      # Comfortably longer than the agent's own wall-clock budget (240s by
+      # default) so the agent reports running out of time rather than being
+      # killed mid-answer.
+      Timeout: 300
+      MemorySize: 512
+      TracingConfig:
+        Mode: Active
+      Environment:
+        Variables:
+          LMA_STACK_NAME: !Ref LMAStackName
+          VIRTUAL_PARTICIPANT_TABLE_NAME: !Ref VirtualParticipantTableName
+          LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
+          APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
+          # Tracks the meeting assistant's model so a deployment that selected a
+          # stronger model gets a stronger diagnosis, without adding a
+          # parameter of its own.
+          TROUBLESHOOTING_MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
+          BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
+          BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
+      Code: ./src
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/TroubleshootingAgentFunction
+    DependsOn:
+      - TroubleshootingAgentFunctionLogGroup
+
+  TroubleshootingAgentFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Condition: ShouldDeployTroubleshootingAgent
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/TroubleshootingAgentFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   SetupFunctionRole:
     Type: "AWS::IAM::Role"
     Properties:
@@ -549,3 +801,13 @@ Outputs:
   StrandsMeetingAssistFunctionArn:
     Description: ARN of the Strands Meeting Assist Lambda function
     Value: !If [ShouldDeployStrandsFunction, !GetAtt StrandsMeetingAssistFunction.Arn, "NA"]
+
+  TroubleshootingAgentFunctionArn:
+    Description: >-
+      ARN of the troubleshooting agent Lambda function. It has no user-facing
+      entry point in this release; invoke it with the AWS CLI or SDK to
+      diagnose a deployment.
+    Value: !If
+      - ShouldDeployTroubleshootingAgent
+      - !GetAtt TroubleshootingAgentFunction.Arn
+      - "NA"

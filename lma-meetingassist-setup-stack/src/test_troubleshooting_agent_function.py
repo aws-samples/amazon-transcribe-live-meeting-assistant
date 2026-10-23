@@ -1,0 +1,497 @@
+#!/usr/bin/env python3.12
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
+"""Unit tests for the troubleshooting agent's handler and guardrails (no AWS).
+
+The guardrails are the point of this suite. They are the difference between a
+diagnosis that costs cents and one that spends the whole Lambda timeout, and
+an agentic loop has no natural stopping point, so each of the four bounds is
+asserted here — the iteration cap, the token budget, the wall clock, and the
+deliberate absence of a whole-run retry.
+
+Asserting an absence is unusual and intentional. A retry is the obvious thing
+for a later change to add, and it is the one control here whose cost is
+invisible at the call site: it multiplies the spend of the run it repeats.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from typing import Any, Dict, List, Optional
+from unittest import mock
+
+import pytest
+
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
+os.environ.setdefault("LMA_STACK_NAME", "LMA-Test")
+
+# Clients are built at module scope, as the project's handlers all are.
+with mock.patch("boto3.Session", mock.MagicMock()):
+    import troubleshooting_agent_function as agent_function
+
+from troubleshooting_config import AgentLimits
+
+
+class Clock:
+    """A monotonic clock a test can advance."""
+
+    def __init__(self, now: float = 0.0):
+        self.now = now
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def budget_with(clock: Optional[Clock] = None, **env: str) -> agent_function.RunBudget:
+    environ = {f"TROUBLESHOOTING_{k.upper()}": v for k, v in env.items()}
+    with mock.patch.dict("os.environ", environ, clear=False):
+        limits = AgentLimits()
+    return agent_function.RunBudget(limits, monotonic=clock or Clock())
+
+
+# ── the iteration cap ───────────────────────────────────────────────────────
+
+
+def test_a_run_within_the_iteration_cap_is_not_stopped() -> None:
+    budget = budget_with(max_iterations="3")
+
+    for _ in range(3):
+        budget.note_tool_call()
+        assert budget.exhausted_reason() is None
+
+
+def test_the_call_after_the_cap_is_stopped() -> None:
+    """Without this cap the only bound on a loop that keeps calling tools is
+    the Lambda timeout, which is a budget of seconds rather than of calls."""
+    budget = budget_with(max_iterations="3")
+
+    for _ in range(4):
+        budget.note_tool_call()
+
+    assert "3-tool-call limit" in (budget.exhausted_reason() or "")
+
+
+def test_the_iteration_cap_is_configurable() -> None:
+    budget = budget_with(max_iterations="1")
+    budget.note_tool_call()
+    budget.note_tool_call()
+
+    assert budget.exhausted_reason() is not None
+
+
+# ── the token budget ────────────────────────────────────────────────────────
+
+
+def test_a_run_inside_the_token_budget_continues() -> None:
+    budget = budget_with(token_budget="1000")
+    budget.note_usage(400, 300)
+
+    assert budget.exhausted_reason() is None
+
+
+def test_a_run_over_the_token_budget_is_stopped() -> None:
+    """The system prompt is large and resent on every turn, which is what makes
+    a per-turn output cap insufficient on its own."""
+    budget = budget_with(token_budget="1000")
+    budget.note_usage(900, 200)
+
+    assert "1000-token budget" in (budget.exhausted_reason() or "")
+
+
+def test_usage_is_treated_as_a_cumulative_total_not_a_delta() -> None:
+    """The SDK reports accumulated usage, so taking these as deltas would
+    double-count and stop a run that was well inside its budget."""
+    budget = budget_with(token_budget="100000")
+    budget.note_usage(1000, 100)
+    budget.note_usage(1800, 250)
+
+    assert (budget.input_tokens, budget.output_tokens) == (1800, 250)
+    assert budget.total_tokens == 2050
+
+
+def test_a_usage_report_that_goes_backwards_does_not_lower_the_count() -> None:
+    """A counter reset mid-run must not hand the agent back its budget."""
+    budget = budget_with()
+    budget.note_usage(5000, 500)
+    budget.note_usage(10, 1)
+
+    assert budget.total_tokens == 5500
+
+
+@pytest.mark.parametrize("value", [None, 0, "", False])
+def test_an_absent_usage_figure_is_counted_as_zero_not_an_error(value: Any) -> None:
+    budget = budget_with()
+    budget.note_usage(value, value)
+
+    assert budget.total_tokens == 0
+
+
+# ── the wall clock ──────────────────────────────────────────────────────────
+
+
+def test_the_deadline_is_the_start_plus_the_configured_budget() -> None:
+    clock = Clock(1000.0)
+    budget = budget_with(clock, wall_clock_seconds="90")
+
+    assert budget.deadline == 1090.0
+
+
+def test_a_run_past_its_deadline_is_stopped_even_with_budget_left() -> None:
+    """Neither the iteration cap nor the token budget can bound a run on its
+    own: a single Logs Insights query can legitimately take 45 seconds, and a
+    stalled HTTP call burns time without burning tokens."""
+    clock = Clock()
+    budget = budget_with(clock, wall_clock_seconds="60", max_iterations="100")
+    budget.note_tool_call()
+    assert budget.exhausted_reason() is None
+
+    clock.advance(61)
+
+    assert "60-second time budget" in (budget.exhausted_reason() or "")
+
+
+def test_the_deadline_is_handed_to_the_tools_as_well_as_the_loop() -> None:
+    """The tools check it too, because a query already in flight when the
+    budget expires has to be cancelled rather than waited on."""
+    clock = Clock(500.0)
+    budget = budget_with(clock, wall_clock_seconds="120")
+
+    assert budget.deadline == 620.0
+
+
+def test_elapsed_time_is_reported() -> None:
+    clock = Clock()
+    budget = budget_with(clock)
+    clock.advance(12.34)
+
+    assert budget.as_dict()["elapsedSeconds"] == 12.3
+
+
+# ── there is no whole-run retry ─────────────────────────────────────────────
+
+
+def test_the_handler_does_not_retry_a_failed_run() -> None:
+    """Re-running a diagnosis from the original question re-pays for every tool
+    call it already made, for a question whose answer has not changed. A failed
+    run is reported once, and asking again is the operator's decision.
+    """
+    attempts = []
+
+    def failing(event: Dict[str, Any]) -> Dict[str, Any]:
+        attempts.append(event)
+        raise RuntimeError("bedrock said no")
+
+    with mock.patch.object(agent_function, "run_diagnosis", failing):
+        response = agent_function.handler({"query": "why?"}, None)
+
+    assert len(attempts) == 1
+    assert response["statusCode"] == 500
+    assert "bedrock said no" in json.loads(response["body"])["error"]
+
+
+def test_no_retry_knob_is_offered_anywhere() -> None:
+    """Making the retry configurable would be the first step to reintroducing
+    it, so the limits table deliberately has no entry for one."""
+    assert not [name for name in AgentLimits().as_dict() if "retr" in name.lower()]
+
+
+# ── the handler's contract ──────────────────────────────────────────────────
+
+
+def test_a_successful_run_returns_the_answer_and_the_run_metadata() -> None:
+    with mock.patch.object(
+        agent_function,
+        "run_diagnosis",
+        lambda event: {"answer": "## Root Cause\nX", "usage": {"toolCalls": 3}},
+    ):
+        response = agent_function.handler({"query": "why?"}, None)
+
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 200
+    assert body["answer"].startswith("## Root Cause")
+    assert body["usage"]["toolCalls"] == 3
+
+
+def test_an_unavailable_prompt_is_a_configuration_error_not_a_crash() -> None:
+    """A diagnosis produced from an unknown prompt is worse than none, so this
+    path refuses rather than substituting a prompt."""
+
+    def unavailable(event: Dict[str, Any]) -> Dict[str, Any]:
+        raise agent_function.troubleshooting_prompt.PromptUnavailableError("no item")
+
+    with mock.patch.object(agent_function, "run_diagnosis", unavailable):
+        response = agent_function.handler({}, None)
+
+    assert response["statusCode"] == 400
+    assert "system prompt is not available" in json.loads(response["body"])["error"]
+
+
+def test_an_empty_event_is_accepted() -> None:
+    with mock.patch.object(agent_function, "run_diagnosis", lambda event: {"answer": "x"}):
+        assert agent_function.handler(None, None)["statusCode"] == 200
+
+
+# ── the question handed to the model ────────────────────────────────────────
+
+
+def test_the_question_restates_the_identifiers_as_facts() -> None:
+    """The agent has to pass these to a tool verbatim, and a model extracting
+    an id out of a sentence sometimes extracts it wrongly."""
+    question = agent_function.build_question(
+        {"query": "why did it fail?", "vpId": "vp-9", "callId": "call-7"}
+    )
+
+    assert "QUESTION: why did it fail?" in question
+    assert "Virtual participant id in scope: vp-9" in question
+    assert "Meeting id in scope: call-7" in question
+
+
+def test_the_question_names_the_stack_under_diagnosis() -> None:
+    assert "LMA stack:" in agent_function.build_question({"query": "x"})
+
+
+def test_the_question_states_the_current_time() -> None:
+    """Almost every pattern in the prompt is "did this start recently", which
+    the model cannot judge without knowing when now is."""
+    assert "Current time (UTC):" in agent_function.build_question({})
+
+
+def test_an_absent_query_still_asks_something_answerable() -> None:
+    assert "most recent failure" in agent_function.build_question({})
+
+
+@pytest.mark.parametrize("query", ["", "   ", None])
+def test_a_blank_query_falls_back_rather_than_asking_nothing(query: Any) -> None:
+    assert "most recent failure" in agent_function.build_question({"query": query})
+
+
+def test_an_identifier_that_was_not_supplied_is_not_mentioned() -> None:
+    question = agent_function.build_question({"query": "x"})
+
+    assert "in scope" not in question
+
+
+# ── the guardrail configuration ─────────────────────────────────────────────
+
+
+def test_no_guardrail_is_applied_when_none_is_configured() -> None:
+    """An empty dict spread into the model configuration leaves the request
+    exactly as it would have been, which is the default deployment."""
+    with mock.patch.multiple(
+        agent_function, BEDROCK_GUARDRAIL_ID="", BEDROCK_GUARDRAIL_VERSION=""
+    ):
+        assert agent_function.get_guardrail_config() == {}
+
+
+def test_a_fully_configured_guardrail_is_applied() -> None:
+    with mock.patch.multiple(
+        agent_function, BEDROCK_GUARDRAIL_ID="abc123", BEDROCK_GUARDRAIL_VERSION="DRAFT"
+    ):
+        assert agent_function.get_guardrail_config() == {
+            "guardrail_id": "abc123",
+            "guardrail_version": "DRAFT",
+        }
+
+
+@pytest.mark.parametrize(
+    ("guardrail_id", "version"), [("abc123", ""), ("", "DRAFT")]
+)
+def test_a_half_configured_guardrail_applies_none(guardrail_id: str, version: str) -> None:
+    """A guardrail is only usable with both halves. Applying one half would
+    build a malformed request that fails every turn; the IAM grant for it is
+    omitted on the same condition."""
+    with mock.patch.multiple(
+        agent_function,
+        BEDROCK_GUARDRAIL_ID=guardrail_id,
+        BEDROCK_GUARDRAIL_VERSION=version,
+    ):
+        assert agent_function.get_guardrail_config() == {}
+
+
+def test_diagnosis_is_deterministic_where_the_model_allows_it() -> None:
+    """Diagnosis is extractive: the same evidence should yield the same cause."""
+    assert agent_function.AGENT_TEMPERATURE == 0.0
+
+
+# ── the tool wrapper ────────────────────────────────────────────────────────
+#
+# build_tools needs the Strands layer, which is absent here. The wrapper's
+# behaviour is what matters, so it is exercised through a stubbed decorator.
+
+
+class FakeTools:
+    """Stands in for TroubleshootingTools, recording what was asked of it."""
+
+    def __init__(self, raises: Optional[Exception] = None):
+        self.calls: List[str] = []
+        self.raises = raises
+
+    def _record(self, name: str, **kwargs: Any) -> str:
+        self.calls.append(name)
+        if self.raises:
+            raise self.raises
+        return json.dumps({"ok": name, "args": sorted(kwargs)})
+
+    def discover_log_groups(self, **kwargs: Any) -> str:
+        return self._record("discover_log_groups", **kwargs)
+
+    def search_logs(self, **kwargs: Any) -> str:
+        return self._record("search_logs", **kwargs)
+
+    def get_vp_record(self, **kwargs: Any) -> str:
+        return self._record("get_vp_record", **kwargs)
+
+    def get_stack_parameters(self, **kwargs: Any) -> str:
+        return self._record("get_stack_parameters", **kwargs)
+
+
+def build_tools(tools: Any, budget: agent_function.RunBudget) -> Dict[str, Any]:
+    """Call build_tools with `strands.tool` stubbed out, keyed by tool name."""
+    strands = mock.MagicMock()
+    strands.tool = lambda fn: fn
+    with mock.patch.dict("sys.modules", {"strands": strands}):
+        return {fn.__name__: fn for fn in agent_function.build_tools(tools, budget)}
+
+
+def test_all_four_tools_are_registered() -> None:
+    assert set(build_tools(FakeTools(), budget_with())) == {
+        "discover_log_groups",
+        "search_logs",
+        "get_vp_record",
+        "get_stack_parameters",
+    }
+
+
+def test_the_stack_parameters_tool_is_offered_first() -> None:
+    """Ordering is a nudge, not a control -- the prompt is what instructs the
+    agent to read the parameters before concluding evidence is absent -- but
+    the tool a model reaches for first is correlated with the order it sees."""
+    names = list(build_tools(FakeTools(), budget_with()))
+
+    assert names[0] == "get_stack_parameters"
+
+
+def test_every_tool_has_a_docstring_for_the_model_to_route_on() -> None:
+    """With Strands the docstring IS the tool description the model sees."""
+    for name, fn in build_tools(FakeTools(), budget_with()).items():
+        assert fn.__doc__ and len(fn.__doc__) > 100, name
+
+
+def test_a_tool_call_reaches_the_implementation() -> None:
+    tools = FakeTools()
+
+    build_tools(tools, budget_with())["get_vp_record"]("vp-1")
+
+    assert tools.calls == ["get_vp_record"]
+
+
+def test_each_tool_call_is_counted_by_the_wrapper_not_by_a_hook() -> None:
+    """Counting in the wrapper is what makes the cap hold whether or not the
+    SDK's hook events fire with the shape this version expects."""
+    budget = budget_with(max_iterations="10")
+    tools = build_tools(FakeTools(), budget)
+
+    tools["get_stack_parameters"]()
+    tools["discover_log_groups"]()
+
+    assert budget.tool_calls == 2
+
+
+def test_a_tool_past_the_cap_returns_a_stop_instruction_and_does_no_work() -> None:
+    """Refusing with an instruction rather than an exception ends the run with
+    an answer: the model is told to write up what it already has."""
+    budget = budget_with(max_iterations="1")
+    impl = FakeTools()
+    tools = build_tools(impl, budget)
+
+    tools["get_stack_parameters"]()
+    refused = tools["discover_log_groups"]()
+
+    assert impl.calls == ["get_stack_parameters"]
+    assert "STOP GATHERING EVIDENCE" in refused
+    assert "Not determined" in refused
+    assert budget.stopped_because is not None
+
+
+def test_a_stopped_run_is_reported_as_truncated() -> None:
+    """The caller needs to know the answer was written under a cut-short
+    investigation, so the reason is carried out with the result."""
+    budget = budget_with(max_iterations="1")
+    tools = build_tools(FakeTools(), budget)
+
+    tools["get_stack_parameters"]()
+    assert budget.as_dict()["stoppedBecause"] is None
+
+    tools["discover_log_groups"]()
+
+    assert "1-tool-call limit" in budget.as_dict()["stoppedBecause"]
+
+
+def test_a_tool_error_becomes_readable_text_rather_than_an_exception() -> None:
+    """A raise into the agent loop gives the model an opaque failure; a
+    sentence naming the log group that was not found gives it a next action."""
+    budget = budget_with()
+    tools = build_tools(
+        FakeTools(raises=agent_function.ToolError("call discover_log_groups first")), budget
+    )
+
+    result = json.loads(tools["search_logs"]("whatever"))
+
+    assert result["error"] == "call discover_log_groups first"
+    assert result["tool"] == "search_logs"
+
+
+def test_an_unexpected_tool_fault_is_labelled_as_not_being_evidence() -> None:
+    """Otherwise a bug in this code becomes a finding about the deployment."""
+    budget = budget_with()
+    tools = build_tools(FakeTools(raises=ZeroDivisionError("oops")), budget)
+
+    result = json.loads(tools["get_vp_record"]("vp-1"))
+
+    assert "ZeroDivisionError" in result["error"]
+    assert "not evidence about LMA" in result["note"]
+
+
+def test_a_tool_fault_does_not_end_the_run() -> None:
+    """One failed search should not cost the diagnosis; the agent can try
+    another source."""
+    budget = budget_with()
+    tools = build_tools(FakeTools(raises=agent_function.ToolError("nope")), budget)
+
+    tools["search_logs"]("whatever")
+
+    assert budget.exhausted_reason() is None
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "args", "expected"),
+    [
+        ("search_logs", {"log_group_names": "g", "lookback_hours": 0}, "lookback_hours"),
+        ("search_logs", {"log_group_names": "g", "limit": 0}, "limit"),
+        ("search_logs", {"log_group_names": "g", "search_terms": ""}, "search_terms"),
+        ("discover_log_groups", {"components": ""}, "components"),
+    ],
+)
+def test_an_unset_numeric_or_text_argument_is_passed_as_absent(
+    tool_name: str, args: Dict[str, Any], expected: str
+) -> None:
+    """Strands has no optional-argument concept, so a model that omits one
+    sends the signature default. Zero and the empty string must mean "use the
+    configured default", not "search zero hours" or "match the empty string".
+    """
+    captured: Dict[str, Any] = {}
+
+    class Capturing(FakeTools):
+        def _record(self, name: str, **kwargs: Any) -> str:
+            captured.update(kwargs)
+            return "{}"
+
+    build_tools(Capturing(), budget_with())[tool_name](**args)
+
+    assert captured[expected] is None

@@ -40,6 +40,7 @@ VP_DIR := lma-virtual-participant-stack
 VP_BACKEND_DIR := $(VP_DIR)/backend
 ASR_DIR := lma-asr-microvm-stack
 ASR_SOURCE_DIR := $(ASR_DIR)/source
+MEETINGASSIST_SRC_DIR := lma-meetingassist-setup-stack/src
 VERSION_FILE := VERSION
 PYTHON_LINE_LENGTH := 100
 
@@ -346,6 +347,11 @@ test-cli: ## Run LMA CLI unit tests
 # covers every function at once; it was previously outside this glob, which meant
 # a test placed beside the layer would have been collected by nothing.
 #
+# MEETINGASSIST_SRC_DIR is searched for the same reason. That directory holds
+# this solution's two Strands agents, and its functions are packaged as a bare
+# `Code: ./src` directory rather than through SAM, so nothing else would have
+# collected a test placed beside them.
+#
 # -rs lists the skips. Several suites skip themselves when a runtime dependency
 # is absent, which is right for a developer who has run only `make setup-python`
 # and wrong to pass silently in CI, where `make setup-cli-dev` installs them: a
@@ -353,7 +359,7 @@ test-cli: ## Run LMA CLI unit tests
 test-lambdas: ## Run all Lambda function + layer unit tests (no AWS; each dir isolated)
 	@echo "Running Lambda function unit tests..."
 	@FAILED=0; RAN=0; \
-	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(LAMBDA_LAYERS_DIR) $(ASR_DIR)/lambda_functions -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
+	for d in $$(find $(LAMBDA_FUNCTIONS_DIR) $(LAMBDA_LAYERS_DIR) $(ASR_DIR)/lambda_functions $(MEETINGASSIST_SRC_DIR) -name 'test_*.py' -not -path '*/node_modules/*' -exec dirname {} \; | sort -u); do \
 		files=$$(cd "$$d" && ls test_*.py 2>/dev/null); \
 		[ -z "$$files" ] && continue; \
 		RAN=$$((RAN+1)); \
