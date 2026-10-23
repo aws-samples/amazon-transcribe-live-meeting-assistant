@@ -501,18 +501,26 @@ def _is_this_stacks_namespace(value) -> bool:
     return value in STACK_NAME_NAMESPACES
 
 
-def _alarmed_metric_names(alarms: dict) -> set[str]:
-    """Every metric name an alarm reads out of this stack's namespace."""
+def _alarm_metric_names(properties: dict) -> set[str]:
+    """Metric names one alarm reads out of this stack's namespace.
+
+    Both shapes an alarm can take: a single metric named directly on the alarm,
+    and the `Metrics` list a metric-math alarm uses. Anything reading only the
+    first silently stops covering an alarm the moment it grows a second term.
+    """
     names = set()
-    for body in alarms.values():
-        properties = body["Properties"]
-        if _is_this_stacks_namespace(properties.get("Namespace")):
-            names.add(properties["MetricName"])
-        for metric in properties.get("Metrics", []) or []:
-            stat = metric.get("MetricStat", {}).get("Metric", {})
-            if _is_this_stacks_namespace(stat.get("Namespace")):
-                names.add(stat["MetricName"])
+    if _is_this_stacks_namespace(properties.get("Namespace")):
+        names.add(properties["MetricName"])
+    for metric in properties.get("Metrics", []) or []:
+        stat = metric.get("MetricStat", {}).get("Metric", {})
+        if _is_this_stacks_namespace(stat.get("Namespace")):
+            names.add(stat["MetricName"])
     return names
+
+
+def _alarmed_metric_names(alarms: dict) -> set[str]:
+    """Every metric name any alarm reads out of this stack's namespace."""
+    return set().union(*(_alarm_metric_names(b["Properties"]) for b in alarms.values()))
 
 
 def test_no_alarm_names_this_stacks_namespace_in_a_form_the_gates_miss(alarms: dict):
@@ -593,12 +601,17 @@ def test_every_alarm_on_an_emitted_metric_tolerates_a_late_datapoint(alarms: dic
     the application's control, which on Lambda and on the ECS `awslogs` driver
     it is not: a datapoint can land in the period after the one it belongs to.
     An alarm requiring every period to breach can miss the event entirely.
+
+    Both alarm shapes are examined. Reading only the top-level `MetricName`
+    would let a metric-math alarm on one of these metrics escape the check
+    without failing it -- the same hole, in the same gate, that
+    `STACK_NAME_NAMESPACES` exists to close for the namespace.
     """
     emitted = set(catalogue.BY_NAME)
     too_strict = {}
     for name, body in alarms.items():
         properties = body["Properties"]
-        if properties.get("MetricName") not in emitted:
+        if not (_alarm_metric_names(properties) & emitted):
             continue
         periods = properties.get("EvaluationPeriods")
         to_alarm = properties.get("DatapointsToAlarm")

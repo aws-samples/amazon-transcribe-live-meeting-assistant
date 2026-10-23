@@ -4442,7 +4442,7 @@ Resources:
               {
                 "type": "metric", "x": 12, "y": 46, "width": 12, "height": 6,
                 "properties": {
-                  "title": "Meetings that produced no transcript — sessions under thirty seconds are not counted, so any value here is a meeting that failed",
+                  "title": "Audio sessions that produced no transcript — sessions under thirty seconds are not counted, so any value here is a session that failed",
                   "region": "${AWS::Region}",
                   "stat": "Sum",
                   "period": 300,
