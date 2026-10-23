@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 
 import pytest
+from graphql import GraphQLError, Source
 
 from graphql_helpers.response import (
     GraphQLResponseError,
@@ -340,6 +341,22 @@ def test_an_exception_is_described_by_type_even_with_no_text(error, expected):
     described = describe_exception(error)
     assert described.startswith(expected)
     assert described == expected or str(error) in described
+
+
+def test_a_graphql_error_object_is_summarised_like_its_wire_form():
+    """graphql-core hands back objects, not mappings, for a locally-caught error."""
+    error = GraphQLError(
+        ERRORS_NO_DATA["errors"][0]["message"],
+        path=["getCall", "Status"],
+        source=Source("{ getCall { Status } }"),
+        positions=[2],
+    )
+    [summary] = graphql_errors({"errors": [error]})
+    assert summary["errorType"] == "GraphQLError"
+    assert summary["path"] == ["getCall", "Status"]
+    assert summary["locations"], "a located error must report where"
+    assert summary["messageLength"] == len(ERRORS_NO_DATA["errors"][0]["message"])
+    assert "the figures we discussed" not in repr(summary)
 
 
 def test_a_described_exception_carrying_graphql_errors_omits_their_messages():
