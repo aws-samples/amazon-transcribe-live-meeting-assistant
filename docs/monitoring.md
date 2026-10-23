@@ -154,6 +154,15 @@ language code or custom vocabulary the account does not have; and, where the
 MicroVM ASR engine is selected on the Transcription Engine page, an engine that
 could not start with fallback to Amazon Transcribe switched off.
 
+One case it does not cover: a transcriber task replaced mid-meeting — by a
+deployment, or by scale-in — shuts down without running the per-meeting
+teardown that emits this metric, so meetings it was carrying are not counted
+however little they transcribed. That is the right split of responsibility
+rather than a gap to work around: a meeting cut short by the infrastructure is
+what `transcriber-service-no-tasks` and the ECS task-count widget are for, and
+counting it here would report a transcription fault for something that was not
+one.
+
 **Why there is no alarm on how long a transcript takes to appear.**
 `TimeToFirstTranscriptSegmentMs` is the obvious thing to alarm on and the wrong
 thing. It measures from a meeting's audio session opening to its first
