@@ -39,10 +39,13 @@ anything, and the message's length is reported in its place.
 :func:`graphql_error_messages` exists for matching an error, and its result is
 deliberately not part of any description.
 
-The scope of that is the descriptions, not the log stream. A rendered Python
-traceback ends in the exception's own text, so a handler logging one for a
-transport exception logs the GraphQL message with it; the lines that go through
-:func:`describe_graphql_response` are the ones this covers.
+A rendered Python traceback ends in the exception's own text, so the places that
+log a failure at the pipeline's default level use :func:`raising_frame` instead:
+it gives the frame a traceback would be read for without the text a traceback
+ends in. One traceback is kept on purpose, in the Kinesis handler that collects
+the batch's errors -- the chain of frames is what makes an unexpected response
+shape diagnosable at all, and one record of it per failing batch is the trade
+being made. Everything at default level below that handler is content-free.
 """
 
 from __future__ import annotations
@@ -103,6 +106,25 @@ class GraphQLResponseError(RuntimeError):
             f"AppSync response does not carry {'.'.join(self.path)} "
             f"(retryable: {retryable}, response shape: {description})"
         )
+
+
+def raising_frame(error: BaseException) -> str:
+    """Where an exception was raised, as ``file:line in function``.
+
+    The innermost frame of the exception's traceback, which is the one that
+    identifies the failure. A string rather than a rendered traceback, because a
+    rendered traceback ends in the exception's own text -- which for a GraphQL
+    transport exception is its first error message, the thing the rest of this
+    module keeps out of a log line. An exception with no traceback, one built but
+    never raised, gives ``"unknown"``.
+    """
+    traceback_obj = error.__traceback__
+    if traceback_obj is None:
+        return "unknown"
+    while traceback_obj.tb_next is not None:
+        traceback_obj = traceback_obj.tb_next
+    frame = traceback_obj.tb_frame
+    return f"{frame.f_code.co_filename}:{traceback_obj.tb_lineno} in {frame.f_code.co_name}"
 
 
 def response_data(response: Any) -> Any:

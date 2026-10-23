@@ -15,7 +15,7 @@ from gql.client import AsyncClientSession, ExecutionResult
 
 # module imports from Lambda layer
 # pylint: disable=import-error
-from graphql_helpers import graphql_errors
+from graphql_helpers import graphql_errors, raising_frame
 
 # pylint: enable=import-error
 
@@ -87,12 +87,15 @@ async def execute_gql_query_with_retries(
             # what these lines are read for.
             reduced_error: object = graphql_errors(error) or error
             if retries >= max_retries:
+                # The frame, not a traceback, for the reason above; and one line
+                # rather than two, because the exception is re-raised and the
+                # caller logs it again.
                 logger.error(
-                    "max retries on query - retries: [%d] - error: [%s]",
+                    "max retries on query - retries: [%d] - raised at [%s] - error: [%s]",
                     retries,
+                    raising_frame(error),
                     reduced_error,
                 )
-                logger.exception("gql query exception")
                 raise
 
             if should_ignore_exception_fn(error):

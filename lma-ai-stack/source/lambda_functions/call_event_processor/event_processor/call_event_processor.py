@@ -469,15 +469,12 @@ async def get_aggregated_sentiment(
     # An empty aggregation is a valid answer -- the meeting has no scored
     # segments yet -- so a response that carries no list is logged and treated as
     # one. Failing here would fail the record that carried the segment.
-    segments = (
-        optional_graphql_field(
-            result,
-            "getTranscriptSegmentsWithSentiment",
-            "TranscriptSegmentsWithSentiment",
-            logger=LOGGER,
-            default=[],
-        )
-        or []
+    segments = optional_graphql_field(
+        result,
+        "getTranscriptSegmentsWithSentiment",
+        "TranscriptSegmentsWithSentiment",
+        logger=LOGGER,
+        default=[],
     )
 
     for segment in segments:

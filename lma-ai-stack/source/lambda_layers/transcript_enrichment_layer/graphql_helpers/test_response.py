@@ -33,6 +33,7 @@ from graphql_helpers.response import (
     graphql_errors,
     is_retryable_graphql_response,
     optional_graphql_field,
+    raising_frame,
     require_graphql_field,
     response_data,
 )
@@ -275,6 +276,30 @@ def test_error_summaries_are_read_off_an_exception_without_its_message():
     assert "the figures we discussed" not in repr(summaries)
     # The guard this stands in for: the exception's own text does carry it.
     assert "the figures we discussed" in str(error)
+
+
+def test_the_raising_frame_names_the_innermost_frame_and_not_the_exception():
+    """What the log lines carry in place of a traceback."""
+
+    def inner():
+        raise ValueError("rejected Transcript 'the figures we discussed'")
+
+    def outer():
+        inner()
+
+    try:
+        outer()
+    except ValueError as error:
+        frame = raising_frame(error)
+
+    assert __file__ in frame
+    assert " in inner" in frame, frame
+    assert "the figures we discussed" not in frame
+
+
+def test_the_raising_frame_of_an_unraised_exception_is_unknown():
+    """An exception built but never raised has no traceback to read."""
+    assert raising_frame(ValueError("never raised")) == "unknown"
 
 
 def test_error_messages_are_read_off_an_exception_that_carries_them():

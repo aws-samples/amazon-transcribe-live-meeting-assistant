@@ -19,32 +19,13 @@ from gql.client import AsyncClientSession
 # module imports from Lambda layer
 # pylint: disable=import-error
 from appsync_utils import AppsyncAioGqlClient
-from graphql_helpers import graphql_errors
+from graphql_helpers import graphql_errors, raising_frame
 
 # pylint: enable=import-error
 
 
 LOGGER = Logger(child=True, location="%(filename)s:%(lineno)d - %(funcName)s()")
 KDS_BATCH_PROCESSOR = BatchProcessor(event_type=EventType.KinesisDataStreams)
-
-
-def raising_frame(error: BaseException) -> str:
-    """Where an exception was raised, as ``file:line in function``.
-
-    The innermost frame of the exception's traceback, which is the one that
-    identifies the failure. Returned as a string rather than a rendered
-    traceback because a rendered traceback ends in the exception's own text,
-    which for a GraphQL transport exception is its first error message. An
-    exception with no traceback -- one built but never raised -- gives
-    ``"unknown"``.
-    """
-    traceback_obj = error.__traceback__
-    if traceback_obj is None:
-        return "unknown"
-    while traceback_obj.tb_next is not None:
-        traceback_obj = traceback_obj.tb_next
-    frame = traceback_obj.tb_frame
-    return f"{frame.f_code.co_filename}:{traceback_obj.tb_lineno} in {frame.f_code.co_name}"
 
 
 class TranscriptBatchProcessor:
