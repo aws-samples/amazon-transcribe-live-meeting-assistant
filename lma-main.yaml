@@ -4122,11 +4122,12 @@ Resources:
   # driver it is not. One of three absorbs a datapoint that lands in the next
   # period without missing the event.
   #
-  # Neither uses metric math. The proposal that motivated these suggested
-  # alarming on the *absence* of a first transcript segment while meetings were
-  # starting, which needs two metrics and FILL; StreamingSessionsWithoutTranscript
-  # counts that condition directly in the one component that can observe it, so
-  # a plain threshold says the same thing without the FILL stuck-state hazard.
+  # Neither uses metric math. Alarming on the *absence* of a first transcript
+  # segment while meetings were starting would need two metrics and FILL;
+  # StreamingSessionsWithoutTranscript counts that condition directly in the one
+  # component that can observe it, so a plain threshold says the same thing and
+  # avoids FILL, which makes an expression dense and so stops TreatMissingData
+  # from ever being consulted.
   ##########################################################################
   TranscriptSegmentWriteFailuresAlarm:
     Type: AWS::CloudWatch::Alarm

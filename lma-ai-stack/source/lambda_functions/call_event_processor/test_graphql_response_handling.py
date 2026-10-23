@@ -918,8 +918,9 @@ def gathered(monkeypatch) -> Dict[str, int]:
     The segment counts are taken from a *slice* of the gathered results, because
     the gather also carries sentiment, category and meeting-aggregation tasks
     whose failures are not lost transcript lines. A fixture whose gather holds
-    only segment tasks cannot tell that slice from the whole list, which is how
-    these tests first passed with the slice removed.
+    only segment tasks cannot tell that slice from the whole list, so the tests
+    below assert the gather holds more than the slice does before believing
+    their own counts.
     """
     seen: Dict[str, int] = {}
     real_gather = asyncio.gather

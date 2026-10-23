@@ -176,10 +176,10 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
         component=Component.WEBSOCKET_TRANSCRIBER,
         records_swallowed_failure=False,
         meaning=(
-            "A live audio session opened for a meeting. One per audio channel "
-            "pair handled by one transcriber task, so it counts meetings being "
-            "streamed rather than WebSocket connections. The denominator for "
-            "StreamingSessionsWithoutTranscript."
+            "A live audio session opened for a meeting, and the denominator for "
+            "StreamingSessionsWithoutTranscript. One per audio session, not per "
+            "meeting: a client that reconnects for the same meeting opens a "
+            "second session and is counted again, where MeetingsStarted is not."
         ),
     ),
     MetricDefinition(

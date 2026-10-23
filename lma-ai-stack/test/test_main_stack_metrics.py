@@ -14,11 +14,9 @@ on the stack's name. An emitter whose variable is unset keeps running perfectly
 and silently publishes nothing; an emitter whose variable is set to the wrong
 thing publishes to a namespace nothing reads. Neither failure is visible from
 the component -- the only symptom is an empty widget and an alarm in
-INSUFFICIENT_DATA, which is what a quiet deployment looks like too. The
-reference implementation this work is modelled on had four functions with the
-IAM condition for a namespace and no environment variable, so every emission
-failed at runtime and nobody found out until somebody went looking for a graph.
-The first group of tests below is that gate.
+INSUFFICIENT_DATA, which is what a quiet deployment looks like too. Nothing in a
+build or a deploy checks that an emitter and the things reading it agree on a
+namespace, so the first group of tests below does.
 
 The second group is parity: a metric nobody can see is not worth emitting, and a
 metric that records a *swallowed* failure -- an exception the code catches,
@@ -302,16 +300,22 @@ def test_the_transcriber_is_given_the_parent_stack_name():
 
 @pytest.mark.parametrize("template_path", [AI_TEMPLATE, TRANSCRIBER_TEMPLATE, MAIN_TEMPLATE])
 def test_a_put_metric_data_grant_is_scoped_and_accompanied_by_the_variable(template_path: Path):
-    """The pairing the reference implementation got wrong, in both directions.
+    """A `PutMetricData` grant must be scoped, and must come with the variable.
 
     Nothing grants `cloudwatch:PutMetricData` today, and nothing should: these
     metrics are Embedded Metric Format records that CloudWatch Logs extracts,
     and AWS documents that as needing only the log-writing permission the
     component already has. This gate is here for the change that adds one
-    anyway. Such a grant must carry the namespace condition -- otherwise it is
-    an account-wide write to any namespace -- and the resource holding it must
-    also have `METRIC_NAMESPACE`, which is exactly the pair that was missing
-    when four functions' emissions all failed at runtime.
+    anyway, and it asserts both halves of the pair:
+
+    * the grant carries the `cloudwatch:namespace` condition, since without it
+      the role may write to any namespace in the account;
+    * the resource holding it also sets `METRIC_NAMESPACE`.
+
+    The second half is the one worth a test. A grant conditioned on a namespace,
+    on a component that was never told which namespace to use, denies every
+    emission at runtime -- and the denial is not an error anybody sees, because
+    the caller is a metric emitter that must not fail the work it measures.
     """
     text = template_path.read_text()
     if "cloudwatch:PutMetricData" not in text:
@@ -482,18 +486,57 @@ def _dashboard_metric_names(body: dict) -> set[str]:
     return names
 
 
+# Both ways of writing this stack's name as a namespace. Accepting only `!Ref`
+# would make an alarm written with `!Sub` invisible to the gates below rather
+# than failing them -- it would read a metric LMA emits while being treated as
+# though it read an AWS-published one, which is the quietest way for the parity
+# and late-datapoint gates to stop covering an alarm.
+STACK_NAME_NAMESPACES = (
+    {"Ref": "AWS::StackName"},
+    {"Fn::Sub": "${AWS::StackName}"},
+)
+
+
+def _is_this_stacks_namespace(value) -> bool:
+    return value in STACK_NAME_NAMESPACES
+
+
 def _alarmed_metric_names(alarms: dict) -> set[str]:
     """Every metric name an alarm reads out of this stack's namespace."""
     names = set()
     for body in alarms.values():
         properties = body["Properties"]
-        if properties.get("Namespace") == {"Ref": "AWS::StackName"}:
+        if _is_this_stacks_namespace(properties.get("Namespace")):
             names.add(properties["MetricName"])
         for metric in properties.get("Metrics", []) or []:
             stat = metric.get("MetricStat", {}).get("Metric", {})
-            if stat.get("Namespace") == {"Ref": "AWS::StackName"}:
+            if _is_this_stacks_namespace(stat.get("Namespace")):
                 names.add(stat["MetricName"])
     return names
+
+
+def test_no_alarm_names_this_stacks_namespace_in_a_form_the_gates_miss(alarms: dict):
+    """Both accepted forms resolve identically; anything else is not recognised.
+
+    The gates above find an alarm on an LMA-published metric by matching its
+    `Namespace` against the two forms of the stack's name. A third form -- a
+    `Fn::Join`, or an `Fn::Sub` with surrounding text -- resolves to the right
+    namespace at deploy time and is silently skipped here, so the alarm would
+    exist, work, and be covered by nothing.
+    """
+    unrecognised = {}
+    for name, body in alarms.items():
+        namespace = body["Properties"].get("Namespace")
+        if not isinstance(namespace, dict):
+            continue
+        rendered = str(namespace)
+        if "AWS::StackName" in rendered and not _is_this_stacks_namespace(namespace):
+            unrecognised[name] = namespace
+    assert not unrecognised, (
+        f"these alarms build this stack's namespace in a form the parity gates do not "
+        f"recognise, so they are covered by none of them: {unrecognised}. Use "
+        f"`!Ref AWS::StackName`, or add the form to STACK_NAME_NAMESPACES."
+    )
 
 
 def test_every_emitted_metric_is_on_the_dashboard(dashboard_body: dict):
@@ -525,8 +568,8 @@ def test_no_alarm_reads_a_metric_nothing_emits(alarms: dict):
     """An alarm on a metric nobody publishes sits in INSUFFICIENT_DATA for ever.
 
     It is indistinguishable from an alarm that is simply quiet, so it reports
-    healthy through exactly the failure it was added for. The reference
-    implementation had one on an `AWS/States` metric that does not exist.
+    healthy through exactly the failure it was added for. A misspelled metric
+    name is all it takes, and neither cfn-lint nor the deploy checks one.
     """
     unknown = sorted(_alarmed_metric_names(alarms) - set(catalogue.BY_NAME))
     assert not unknown, (
@@ -581,8 +624,12 @@ def test_the_dashboard_body_renders_to_valid_json(dashboard_body: dict):
 
 
 def test_every_widget_declares_a_position_and_a_type(dashboard_body: dict):
-    """Widgets overlap silently when two share a position, and the band this
-    change inserted pushed four existing widgets down."""
+    """Two widgets sharing a position overlap, and the console says nothing.
+
+    Positions are absolute, so inserting a widget anywhere but the bottom means
+    moving every widget below it by hand -- and getting one wrong hides a widget
+    rather than failing anything.
+    """
     seen: dict[tuple, str] = {}
     for index, widget in enumerate(dashboard_body["widgets"]):
         assert widget.get("type") in {"metric", "log", "text", "alarm"}, (
@@ -690,11 +737,10 @@ DOC_METRIC_ROW = re.compile(r"^\|\s*`(\w+)`\s*\|\s*(\w+)\s*\|", re.MULTILINE)
 def test_the_monitoring_doc_tabulates_every_emitted_metric():
     """The metric table is where an operator finds out what a number means.
 
-    Checked against the table rather than against the whole page. Asserting only
-    that the name appears somewhere in the document passes when the row is
-    deleted and the name survives in a paragraph nearby, which is how this test
-    first passed a negative control: the latency metric is discussed in prose
-    two sections above its row.
+    Checked against the table rather than against the whole page. Several of
+    these metrics are also discussed in the prose on the same page, so asserting
+    only that the name appears somewhere in the document would pass with the
+    table row deleted.
 
     The unit is compared too, because a row stating the wrong unit is worse than
     a missing one -- it is a number the reader will act on in the wrong scale.
