@@ -502,9 +502,11 @@ def handler(event, context):
     identity = event.get("identity")
     if event.get("Trigger") == "regenerate" and identity is None:
         # A summariser that could not produce a summary is reported, not
-        # raised: Lambda would retry the asynchronous invoke twice more and pay
-        # for two more sets of model calls for the same answer. Only a failure
-        # to record the outcome propagates, which is worth retrying.
+        # raised. Only a failure to record the outcome propagates, and it is
+        # retried inside write_summary rather than by the platform: the
+        # function's EventInvokeConfig sets MaximumRetryAttempts to 0, because
+        # re-entering here would pay for another set of model calls for a
+        # summary this frame had already computed.
         return run(call_id)
 
     try:

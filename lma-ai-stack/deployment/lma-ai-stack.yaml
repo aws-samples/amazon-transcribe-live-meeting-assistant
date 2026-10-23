@@ -4370,6 +4370,17 @@ Resources:
           # to record the failure on the meeting. Both functions stop at
           # Lambda's 900s maximum, so waiting one out in full is not possible.
           SUMMARY_READ_TIMEOUT: 780
+      # The platform's own retries are off for this function. Its second leg is
+      # an asynchronous invoke, which Lambda retries twice by default, and a
+      # retry re-runs every model call for a summary already computed in the
+      # frame that failed -- and rewrites the Knowledge Base snapshot again. The
+      # only error that reaches Lambda is a failure to store a finished result,
+      # and write_summary retries that itself, within the one invocation, which
+      # is the retry that costs nothing. Two further attempts would also stretch
+      # a single run past SUMMARY_REGENERATION_STALE_SECONDS, after which a
+      # second run can be accepted beside the first.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/SummaryRegeneratorFunction

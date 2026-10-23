@@ -117,10 +117,27 @@ def test_the_stale_mark_outlasts_the_longest_possible_run(
     resources: dict, regenerator: str
 ) -> None:
     """Otherwise a run still going is treated as abandoned and a second one is
-    accepted beside it."""
+    accepted beside it.
+
+    One invocation's Timeout is the whole of a run, which is what the test below
+    about the retry policy is here to keep true: platform retries would make a
+    single run several invocations long, with the backoff between them on top.
+    """
     regen = resources["SummaryRegeneratorFunction"]["Properties"]["Timeout"]
     stale = int(re.search(r'SUMMARY_REGENERATION_STALE_SECONDS", "(\d+)"', regenerator).group(1))
     assert stale > regen
+
+
+def test_the_second_leg_is_not_retried_by_the_platform(resources: dict) -> None:
+    """A retry would re-run every model call for a summary already computed.
+
+    The only error that reaches Lambda from the second leg is a failure to store
+    a finished result, and write_summary retries that inside the one invocation.
+    This also keeps a run to a single invocation, which the stale window above
+    is sized against.
+    """
+    config = resources["SummaryRegeneratorFunction"]["Properties"]["EventInvokeConfig"]
+    assert config["MaximumRetryAttempts"] == 0
 
 
 def test_the_regenerator_cannot_retry_the_summariser(regenerator: str) -> None:

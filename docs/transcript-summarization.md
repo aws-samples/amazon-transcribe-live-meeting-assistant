@@ -46,7 +46,7 @@ Under the BEDROCK option it also **refreshes the Bedrock Knowledge Base snapshot
 Three things are worth knowing about how it behaves:
 
 - **It is not instant.** Summarization calls the model once per prompt template, which routinely takes longer than a web request allows, so pressing the button starts a run in the background and the panel shows **Regenerating** until the new summary arrives. The new summary appears by itself -- there is nothing to reload.
-- **Only one run at a time.** While a run is going the button is disabled, including in another browser tab and for another user looking at the same meeting. A run that never reports back stops blocking new ones after twenty minutes.
+- **Only one run at a time.** While a run is going the button is disabled, including in another browser tab and for another user looking at the same meeting. A run that never reports back stops blocking new ones after twenty minutes. It is a guard against a second click rather than a lock, so two presses in the same instant can both get through; the cost of that is a duplicated set of model calls, and the later result wins. For the same reason, a summary edited by hand while a run is going is replaced by that run's result.
 - **A failed run keeps the previous summary.** If the model cannot be reached or the summarizer returns nothing usable, the panel shows the error and the stored summary is left exactly as it was. A summary that was there is never replaced by an error message.
 
 ### Edit
