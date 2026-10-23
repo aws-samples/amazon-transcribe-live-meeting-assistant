@@ -294,21 +294,28 @@ def test_get_call_status_records_a_raised_query_without_a_traceback(schema, monk
 
 
 def test_get_call_status_does_not_log_a_transcript_or_an_error_message(schema):
-    """A response's own error text can quote the argument the server rejected."""
+    """A response's own error text can quote the argument the server rejected.
+
+    Every record a default log level would emit, message and kwargs both. The
+    debug records are excluded on purpose and not by oversight: the layer's query
+    wrapper logs the whole response under ``extra`` at debug, which is the
+    affordance that makes a payload inspectable when somebody turns the level up.
+    """
     session = FakeSession(
         schema,
         {
             "errors": [
-                {
-                    "errorType": "MappingTemplate",
-                    "message": "rejected Transcript 'the figures we discussed'",
-                }
+                {"errorType": "MappingTemplate", "message": MESSAGE_QUOTING_CONTENT},
             ]
         },
     )
     run(cep.get_call_status(message={"CallId": "call-1"}, appsync_session=session))
-    logged = " ".join(record["message"] for record in cep.LOGGER.records)
-    assert "the figures we discussed" not in logged
+    logged = " ".join(
+        f"{record['message']} {record['kwargs']!r}"
+        for record in cep.LOGGER.records
+        if record["level"] != "DEBUG"
+    )
+    assert MESSAGE_QUOTING_CONTENT not in logged
     assert "MappingTemplate" in logged
 
 

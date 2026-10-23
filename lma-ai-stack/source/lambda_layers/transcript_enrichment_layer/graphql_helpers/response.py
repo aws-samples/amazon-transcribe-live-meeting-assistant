@@ -344,6 +344,9 @@ def require_graphql_field(
     if missing is None:
         return value
     description = describe_graphql_response(response, missing)
+    # Logged and attached to the exception, and read by neither: no caller
+    # branches on it. It is there to tell an operator whether the failure looks
+    # like one that will clear by itself, not to decide anything.
     retryable = is_retryable_graphql_response(response)
     logger.error(
         "AppSync response does not carry the required field %s (retryable: %s, response shape: %s)",

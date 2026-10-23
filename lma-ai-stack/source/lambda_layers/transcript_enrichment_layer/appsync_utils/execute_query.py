@@ -47,7 +47,7 @@ async def execute_gql_query_with_retries(
         of a GraphQL query error. Uses exponential backoff with base 2
     :param logger: Logger
     :param should_ignore_exception_fn: Function that is called when there is an
-        exception to verify it it should be ignored. Asked on every attempt,
+        exception to verify whether it should be ignored. Asked on every attempt,
         before the retry budget is checked, so an error it recognises is
         recognised on the last attempt as well as the first
     :param ignored_exception_response: Response to send when an exception has
@@ -102,10 +102,10 @@ async def execute_gql_query_with_retries(
                 # line rather than two, because the exception is re-raised and
                 # the caller logs it again.
                 logger.error(
-                    "max retries on query - retries: [%d] - error: [%s] - frames: [%s]",
+                    "max retries on query - retries: [%d] - error: [%s]",
                     retries,
                     reduced_error,
-                    traceback_frames(error),
+                    extra=dict(frames=traceback_frames(error)),
                 )
                 raise
 
