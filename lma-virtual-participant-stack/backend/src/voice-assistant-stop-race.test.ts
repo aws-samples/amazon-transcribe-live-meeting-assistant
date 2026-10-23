@@ -215,7 +215,11 @@ test('both routes firing engages the audio gate exactly once', async () => {
     }
 });
 
-test('a tool call that arrives too late does not silence the assistant twice', async () => {
+test('a tool call that arrives too late is timed and does not silence twice', async () => {
+    // By how much the window was too short is the measurement the 500 ms is to
+    // be tuned from, and it is only available on exactly the requests where
+    // the window failed — so the time the transcript route recognised the
+    // request has to outlive the request itself.
     capture();
     try {
         const agent = novaAgent();
@@ -224,15 +228,53 @@ test('a tool call that arrives too late does not silence the assistant twice', a
         assert.equal(agent.isMuted(), true, 'the fallback has already acted');
 
         (agent as any).noteMuteToolRequested();
-        await (agent as any).handleMuteTool('tool-use-id');
-        await delay(PAST_BACKSTOP_MS);
+        const claimed = stopLines().find((line) => line.includes('action=claimed'));
+        assert.ok(claimed, 'a late tool call must still be reported');
+        assert.match(claimed!, /late=true/, 'it must say which side of the deadline it landed on');
+        assert.match(claimed!, /transcript_deferred=true/, 'it belongs to the transcript request');
+        const latency = Number(/tool_latency_ms=(\d+)/.exec(claimed!)?.[1]);
+        assert.ok(
+            latency >= STOP_REQUEST_TOOL_GRACE_MS,
+            `the latency must be measured, not discarded; got ${claimed}`,
+        );
 
+        await (agent as any).handleMuteTool('tool-use-id');
+        // The gate was already shut, so nothing was drained and the word, if it
+        // was generated at all, was dropped.
+        assert.match(stopLines().join('\n'), /action=acknowledged[^\n]*gate=already-shut/);
+
+        await delay(PAST_BACKSTOP_MS);
         assert.equal(
             gateEngagements().length,
             1,
             `the gate must engage once, saw: ${gateEngagements().join(' | ')}`,
         );
         assert.equal(agent.isMuted(), true);
+    } finally {
+        release();
+    }
+});
+
+test('a tool call after the assistant has been asked back is not timed against the old request', async () => {
+    // The remembered time is scoped to the stretch of silence one request
+    // caused. Once the assistant is audible again, a tool call belongs to
+    // something else and attributing it to the old request would report a
+    // latency that measures nothing.
+    capture();
+    try {
+        const agent = novaAgent();
+        agent.requestStopTalking('test');
+        await delay(PAST_GRACE_MS);
+        agent.unmute('wake phrase activation');
+        assert.equal(agent.isMuted(), false);
+
+        (agent as any).noteMuteToolRequested();
+        const claimed = stopLines().filter((line) => line.includes('action=claimed')).pop();
+        assert.match(claimed!, /late=false/);
+        assert.match(claimed!, /tool_latency_ms=n\/a/);
+        assert.match(claimed!, /transcript_deferred=false/);
+
+        await delay(PAST_BACKSTOP_MS);
     } finally {
         release();
     }
@@ -682,6 +724,33 @@ test('a request the model raised on its own is reported as the tool route', asyn
 
         await delay(PAST_BACKSTOP_MS);
         assert.equal(agent.isMuted(), true);
+        // Its backstop closing out is the tool route's too: `route` names where
+        // the request was recognised, on every line in the family.
+        assert.match(stopLines().join('\n'), /route=tool action=stood-down/);
+        assert.doesNotMatch(stopLines().join('\n'), /route=transcript/);
+    } finally {
+        release();
+    }
+});
+
+test('calling off a request the model raised on its own names the tool route', async () => {
+    // Every line in the family names where the request was recognised, so that
+    // one CloudWatch filter reads coherently; this is the last of them.
+    capture();
+    try {
+        const agent = novaAgent();
+        (agent as any).noteMuteToolRequested();
+        await (agent as any).handleMuteTool('tool-use-id');
+        assert.equal(agent.isMuted(), true);
+
+        agent.unmute('wake phrase activation');
+        const cancelled = stopLines().find((line) => line.includes('action=cancelled'));
+        assert.ok(cancelled, 'being asked back must be reported');
+        assert.match(cancelled!, /route=tool/);
+        assert.doesNotMatch(stopLines().join('\n'), /route=transcript/);
+
+        await delay(PAST_BACKSTOP_MS);
+        assert.equal(agent.isMuted(), false, 'the backstop must not re-silence it');
     } finally {
         release();
     }

@@ -220,6 +220,19 @@ export class NovaAgent implements VoiceAssistantProvider {
     ackDropLogged: boolean;
     timer: NodeJS.Timeout | null;
   } | null = null;
+
+  /**
+   * When the transcript route last recognised a stop request, kept after the
+   * request itself has resolved so that a tool call arriving too late can still
+   * be timed against it — the measurement that says by how much the window was
+   * too short.
+   *
+   * Scoped to the stretch of silence that request caused: set when the
+   * transcript route accepts a request and cleared when the assistant is made
+   * audible again, so a tool call is never timed against a request the meeting
+   * has already moved on from.
+   */
+  private lastTranscriptStopAt: number | null = null;
   
   // Session refresh configuration. Nova closes the stream itself after 295s
   // without interactive content ("Timed out waiting for audio bytes or
@@ -1521,6 +1534,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         // session started just below — so the request in flight has to be
         // called off here by hand.
         this.cancelStopRequest('addressed-again');
+        this.lastTranscriptStopAt = null;
         this._isMuted = false;
         // Start conversation session if not already active
         if (!this.conversationActive) {
@@ -1729,8 +1743,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       // barge-in killed the previous one and the word is still in the buffer
       // rather than in the room. Hence draining rather than discarding.
       const playbackAgeMs = this.pacatSpawnedAt ? Date.now() - this.pacatSpawnedAt : -1;
+      // `gate=` says which of the two outcomes this line records: engaging the
+      // gate behind the acknowledgement, or finding it already shut because the
+      // fallback got there first — in which case nothing was drained and the
+      // word, if it was generated at all, was dropped.
       console.log(
-        `[stop-request] route=tool action=acknowledged flush_ms=${this.MUTE_TOOL_AUDIO_FLUSH_MS}`
+        `[stop-request] route=tool action=acknowledged`
+        + ` gate=${this._isMuted ? 'already-shut' : 'draining'}`
+        + ` flush_ms=${this.MUTE_TOOL_AUDIO_FLUSH_MS}`
         + ` playback_age_ms=${playbackAgeMs} interrupted=${this._isInterrupted}`
         + ` speaking=${this._isSpeaking} mode=${this.meetingMode}`,
       );
@@ -2504,6 +2524,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     // utterance that asked for silence cannot reach here: both wake-phrase
     // routes recognise it and leave the mute state alone.
     this.cancelStopRequest(reason ? `unmuted:${reason.replace(/\s+/g, '-')}` : 'unmuted');
+    // The stretch of silence that request caused is over, so a tool call from
+    // here on belongs to something else and must not be timed against it.
+    this.lastTranscriptStopAt = null;
     if (!this._isMuted) {
       return;
     }
@@ -2564,13 +2587,15 @@ export class NovaAgent implements VoiceAssistantProvider {
       return true;
     }
 
+    const seenAt = Date.now();
     this.stopRequest = {
-      seenAt: Date.now(),
+      seenAt,
       fromTranscript: true,
       toolSeen: false,
       ackDropLogged: false,
       timer: null,
     };
+    this.lastTranscriptStopAt = seenAt;
     this.logStopRequest('transcript', 'deferred');
     this.stopRequest.timer = setTimeout(
       () => this.resolveStopRequest(reason || 'stop requested'),
@@ -2596,10 +2621,23 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     const existing = this.stopRequest;
-    const latency = existing?.fromTranscript ? `${Date.now() - existing.seenAt}` : 'n/a';
+
+    // A tool call that misses the window is the measurement that matters most:
+    // it says by how much 500 ms was too short. The record it would have
+    // claimed is gone by then — resolveStopRequest clears it — so the time the
+    // transcript route recognised the request outlives it for exactly as long
+    // as the silence it caused, and the latency is reported from there with
+    // `late=true` to say which side of the deadline it landed on.
+    const against = existing?.fromTranscript
+      ? existing.seenAt
+      : (existing ? null : this.lastTranscriptStopAt);
+    const late = existing === null && this.lastTranscriptStopAt !== null;
+    const latency = against === null ? 'n/a' : `${Date.now() - against}`;
+
     console.log(
-      `[stop-request] route=tool action=claimed transcript_deferred=${existing?.fromTranscript === true}`
-      + ` tool_latency_ms=${latency} speaking=${this._isSpeaking} interrupted=${this._isInterrupted}`
+      `[stop-request] route=tool action=claimed transcript_deferred=${against !== null}`
+      + ` tool_latency_ms=${latency} late=${late}`
+      + ` speaking=${this._isSpeaking} interrupted=${this._isInterrupted}`
       + ` muted=${this._isMuted} mode=${this.meetingMode}`,
     );
 
@@ -2645,19 +2683,20 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.stopRequest = null;
 
     const elapsedMs = Date.now() - request.seenAt;
+    const route = request.fromTranscript ? 'transcript' : 'tool';
     if (this._isMuted) {
       // The other route already silenced the assistant — on the tool path that
       // means the meeting heard "Okay" and then nothing, which is the whole
       // point of the window.
       console.log(
-        `[stop-request] route=transcript action=stood-down elapsed_ms=${elapsedMs}`
+        `[stop-request] route=${route} action=stood-down elapsed_ms=${elapsedMs}`
         + ` tool_seen=${request.toolSeen} interrupted=${this._isInterrupted}`,
       );
       return;
     }
 
     console.log(
-      `[stop-request] route=transcript action=fired-fallback elapsed_ms=${elapsedMs}`
+      `[stop-request] route=${route} action=fired-fallback elapsed_ms=${elapsedMs}`
       + ` tool_seen=${request.toolSeen} interrupted=${this._isInterrupted}`
       + ` speaking=${this._isSpeaking}`,
     );
@@ -2675,7 +2714,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
     this.stopRequest = null;
     console.log(
-      `[stop-request] route=transcript action=cancelled why=${why}`
+      `[stop-request] route=${request.fromTranscript ? 'transcript' : 'tool'}`
+      + ` action=cancelled why=${why}`
       + ` elapsed_ms=${Date.now() - request.seenAt} tool_seen=${request.toolSeen}`,
     );
   }
