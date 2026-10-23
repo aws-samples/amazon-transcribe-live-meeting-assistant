@@ -427,13 +427,36 @@ def test_aggregated_sentiment_is_empty_for_a_response_without_segments(shape, sc
 # ── recognising a duplicate write ───────────────────────────────────────────
 
 
-def test_a_duplicate_write_is_recognised_from_the_exception_gql_raises():
-    """gql keeps the GraphQL errors on an attribute of the exception, not a key."""
-    error = TransportQueryError(
-        "item put condition failure",
-        errors=[{"message": "item put condition failure", "errorType": "DynamoDB"}],
-    )
-    assert cep.is_put_condition_failure(error) is True
+@pytest.mark.parametrize(
+    ("message", "resolver"),
+    [
+        # dDbPutCondition.response.vtl, shared by the segment and update writes.
+        ("item put condition failure", "dDbPutCondition.response.vtl"),
+        # createCall.response.vtl, which writes transactionally and has its own.
+        ("Item already exists", "createCall.response.vtl"),
+    ],
+)
+def test_a_rejected_write_is_recognised_from_the_exception_gql_raises(message, resolver):
+    """Both messages the resolvers raise, read off the exception's attribute.
+
+    ``createCall`` does not share the response template the others do, so
+    matching only the shared message would leave a redelivered START event
+    retrying and then failing.
+    """
+    error = TransportQueryError(message, errors=[{"message": message, "errorType": "DynamoDB"}])
+    assert cep.is_put_condition_failure(error) is True, resolver
+
+
+def test_both_resolver_messages_are_the_ones_the_templates_raise():
+    """Pins the constant to the resolvers, which is where the strings come from."""
+    appsync = SOURCE / "appsync"
+    for name, expected in (
+        ("dDbPutCondition.response.vtl", "item put condition failure"),
+        ("createCall.response.vtl", "Item already exists"),
+    ):
+        template = (appsync / name).read_text(encoding="utf-8")
+        assert f'$util.error("{expected}")' in template, name
+        assert expected in cep.PUT_CONDITION_FAILURE_MESSAGES
 
 
 @pytest.mark.parametrize(

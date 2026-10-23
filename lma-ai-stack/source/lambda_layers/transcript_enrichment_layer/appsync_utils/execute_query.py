@@ -49,7 +49,9 @@ async def execute_gql_query_with_retries(
     :param should_ignore_exception_fn: Function that is called when there is an
         exception to verify whether it should be ignored. Asked on every attempt,
         before the retry budget is checked, so an error it recognises is
-        recognised on the last attempt as well as the first
+        recognised on the last attempt as well as the first. It is called from
+        inside an ``except`` block and must not raise: an exception from it
+        replaces the one being handled
     :param ignored_exception_response: Response to send when an exception has
         been ignored
     """

@@ -198,9 +198,15 @@ def graphql_errors(response: Any) -> List[Dict[str, Any]]:
             summary["messageLength"] = len(message) if isinstance(message, str) else 0
         else:
             # A GraphQLError object rather than the wire form. It exposes the
-            # same two safe fields as attributes, so the summary is as useful
-            # either way; `message` is read for its length only, as above.
-            summary = {"errorType": type(entry).__name__}
+            # same safe fields as attributes, so the summary is as useful either
+            # way; `message` is read for its length only, as above. The server's
+            # own type is preferred where the error carries one, so the two forms
+            # report the same `errorType` for the same failure.
+            extensions = getattr(entry, "extensions", None) or {}
+            server_type = None
+            if isinstance(extensions, Mapping):
+                server_type = extensions.get("errorType") or extensions.get("code")
+            summary = {"errorType": str(server_type) if server_type else type(entry).__name__}
             for key in ("path", "locations"):
                 value = getattr(entry, key, None)
                 if value is not None:

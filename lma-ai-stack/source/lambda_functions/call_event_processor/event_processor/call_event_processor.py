@@ -138,24 +138,49 @@ CALL_ID = ""
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
-# Every resolver that writes with a condition expression shares
-# ``source/appsync/dDbPutCondition.response.vtl``, which turns DynamoDB's
-# conditional check failure into this GraphQL error message.
-PUT_CONDITION_FAILURE_MESSAGE = "item put condition failure"
+# The two messages a resolver raises when DynamoDB rejects its condition. Most
+# of them share ``source/appsync/dDbPutCondition.response.vtl``, which raises the
+# first; ``createCall`` writes transactionally and has its own
+# ``source/appsync/createCall.response.vtl``, which raises the second.
+PUT_CONDITION_FAILURE_MESSAGES = frozenset(
+    {
+        "item put condition failure",
+        "Item already exists",
+    }
+)
 
 
 def is_put_condition_failure(error: Any) -> bool:
-    """Whether a mutation failed only because the item is already stored.
+    """Whether a write was rejected by its resolver's own condition.
 
     Passed to ``execute_gql_query_with_retries`` as its
-    ``should_ignore_exception_fn``: the item being there already is the state the
-    mutation was aiming for, so retrying buys nothing. The messages are read off
-    whatever the transport raised -- gql keeps them in an ``errors`` attribute on
-    the exception, and a bare error mapping is accepted as well -- and any other
-    shape yields no messages, so an unrecognised failure is retried and reported
-    rather than ignored.
+    ``should_ignore_exception_fn``. What a rejection means is per resolver, and on
+    each of the four call sites it means the row already holds a version of this
+    write that should not be replaced, so retrying buys nothing:
+
+    * ``createCall`` writes with ``attribute_not_exists(#PK)``, so a rejection is
+      a meeting that is already created -- a redelivered START event.
+    * ``addTranscriptSegment`` conditions only a *partial* segment, on
+      ``attribute_not_exists(IsPartial) OR IsPartial = :true``, so a rejection is
+      a partial arriving after the final segment it would have overwritten.
+    * ``updateCallAggregation`` writes through ``updateCall.request.vtl``, whose
+      condition is ``attribute_exists(#PK) AND #UpdatedAt < :UpdatedAt``, so a
+      rejection is an aggregation already superseded by a newer one -- which the
+      concurrent writes for one Kinesis batch produce routinely, because a later
+      segment's aggregation can land first. Dropping the superseded write is
+      intended: the one that won already covers the same segments, and the next
+      non-partial segment aggregates again. A rejection because the meeting row
+      is not there yet is dropped on the same reasoning.
+
+    The messages are read off whatever the transport raised -- gql keeps them in
+    an ``errors`` attribute on the exception, and a bare error mapping is
+    accepted as well. Any other shape yields no messages, so an unrecognised
+    failure is retried and reported rather than ignored, and nothing here raises:
+    the retry wrapper calls this from inside an ``except``.
     """
-    return PUT_CONDITION_FAILURE_MESSAGE in graphql_error_messages(error)
+    return any(
+        message in PUT_CONDITION_FAILURE_MESSAGES for message in graphql_error_messages(error)
+    )
 
 
 ##########################################################################

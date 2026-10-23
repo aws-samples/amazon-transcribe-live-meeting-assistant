@@ -359,6 +359,13 @@ def test_a_graphql_error_object_is_summarised_like_its_wire_form():
     assert "the figures we discussed" not in repr(summary)
 
 
+def test_a_graphql_error_object_reports_the_servers_error_type_when_it_has_one():
+    """So the object and wire forms say the same thing about the same failure."""
+    error = GraphQLError("rejected", extensions={"errorType": "Unauthorized"})
+    [summary] = graphql_errors({"errors": [error]})
+    assert summary["errorType"] == "Unauthorized"
+
+
 def test_a_described_exception_carrying_graphql_errors_omits_their_messages():
     """The reduction still applies; the type is added in front of it."""
 
