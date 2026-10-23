@@ -98,9 +98,10 @@ async def execute_gql_query_with_retries(
                 break
 
             if retries >= max_retries:
-                # Frames, not a rendered traceback, for the reason above; and one
-                # line rather than two, because the exception is re-raised and
-                # the caller logs it again.
+                # Frames rather than a rendered traceback, because a rendered
+                # traceback ends in the exception's own text -- the same reason
+                # the error is reduced above. One line rather than two, because
+                # the exception is re-raised and the caller logs it again.
                 logger.error(
                     "max retries on query - retries: [%d] - error: [%s]",
                     retries,

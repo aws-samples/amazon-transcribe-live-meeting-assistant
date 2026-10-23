@@ -103,14 +103,16 @@ class TranscriptBatchProcessor:
                 )
                 for result in results:
                     if isinstance(result, Exception):
-                        # Three content-free fields: the exception type, its
-                        # traceback as frames -- the chain is what says which of
-                        # a record's mutations this was -- and its GraphQL errors
-                        # reduced to errorType/path. The str() of a transport
-                        # exception is its first GraphQL error message, so it is
-                        # used only for an exception carrying no such errors, and
-                        # the frames go in without the line a rendered traceback
-                        # ends in.
+                        # The exception type, its traceback as frames -- the
+                        # chain is what says which of a record's mutations this
+                        # was -- and its GraphQL errors reduced to
+                        # errorType/path. The first two carry nothing from the
+                        # response; the third falls back to str(result) for an
+                        # exception with no GraphQL errors to reduce, whose text
+                        # is its own and not the server's. A transport
+                        # exception's str() *is* the server's first error
+                        # message, which is why it is reduced, and the frames go
+                        # in without the line a rendered traceback ends in.
                         errors = graphql_errors(result)
                         LOGGER.error(
                             "transcript api mutation exception: %s: %s",
