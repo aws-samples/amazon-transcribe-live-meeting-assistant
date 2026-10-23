@@ -27,6 +27,7 @@ import pytest
 
 from graphql_helpers.response import (
     GraphQLResponseError,
+    describe_exception,
     describe_graphql_response,
     describe_value,
     graphql_error_messages,
@@ -153,7 +154,7 @@ def test_required_read_logs_the_field_the_shape_and_whether_to_retry(label, resp
     assert len(caplog.records) == 1
     message = caplog.records[0].getMessage()
     assert "getCall" in message
-    assert "retryable" in message
+    assert "looksTransient" in message
 
 
 def test_the_reads_log_nothing_when_the_field_is_there(caplog):
@@ -240,7 +241,7 @@ def test_the_retry_classification_reaches_the_exception():
     """It is available on the exception, so a handler need not re-derive it."""
     with pytest.raises(GraphQLResponseError) as raised:
         require_graphql_field(PERMANENT_ERRORS, "getCall", logger=LOGGER)
-    assert raised.value.retryable is False
+    assert raised.value.looks_transient is False
     assert raised.value.description["errors"][0]["errorType"] == "ValidationError"
 
 
@@ -322,6 +323,40 @@ def test_the_frames_of_a_required_read_name_the_caller_not_just_the_helper():
     rendered = " ".join(frames)
     assert "in require_graphql_field" in rendered, rendered
     assert "in a_named_read" in rendered, rendered
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        # The case that makes the type necessary: str() is empty, so a line built
+        # from the exception alone would say nothing about what failed.
+        (TimeoutError(), "TimeoutError"),
+        (ConnectionResetError("connection reset by peer"), "ConnectionResetError: "),
+        (ValueError("invalid AppSync schema"), "ValueError: invalid AppSync schema"),
+    ],
+)
+def test_an_exception_is_described_by_type_even_with_no_text(error, expected):
+    """Every failure line names the exception's class, text or no text."""
+    described = describe_exception(error)
+    assert described.startswith(expected)
+    assert described == expected or str(error) in described
+
+
+def test_a_described_exception_carrying_graphql_errors_omits_their_messages():
+    """The reduction still applies; the type is added in front of it."""
+
+    class _TransportQueryError(Exception):
+        def __init__(self, errors):
+            super().__init__(str(errors[0]))
+            self.errors = errors
+
+    error = _TransportQueryError(
+        [{"errorType": "ValidationError", "message": ERRORS_NO_DATA["errors"][0]["message"]}]
+    )
+    described = describe_exception(error)
+    assert described.startswith("_TransportQueryError: ")
+    assert "ValidationError" in described
+    assert "the figures we discussed" not in described
 
 
 def test_an_unraised_exception_has_no_frames():

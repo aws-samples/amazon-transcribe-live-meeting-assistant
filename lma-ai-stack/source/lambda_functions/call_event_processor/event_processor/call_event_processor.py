@@ -33,8 +33,8 @@ from gql.dsl import DSLMutation, DSLQuery, DSLSchema, dsl_gql
 from graphql.language.printer import print_ast
 from graphql_helpers import (
     call_fields,
+    describe_exception,
     graphql_error_messages,
-    graphql_errors,
     optional_graphql_field,
     require_graphql_field,
     traceback_frames,
@@ -400,7 +400,7 @@ async def get_call_status(
         LOGGER.error(
             "could not read current status for call %s - error: [%s]",
             call_id,
-            graphql_errors(error) or error,
+            describe_exception(error),
             extra=dict(frames=traceback_frames(error)),
         )
         return None

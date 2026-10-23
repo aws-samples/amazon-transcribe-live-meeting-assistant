@@ -15,7 +15,7 @@ from gql.client import AsyncClientSession, ExecutionResult
 
 # module imports from Lambda layer
 # pylint: disable=import-error
-from graphql_helpers import graphql_errors, traceback_frames
+from graphql_helpers import describe_exception, traceback_frames
 
 # pylint: enable=import-error
 
@@ -77,23 +77,25 @@ async def execute_gql_query_with_retries(
             )
             break
         except Exception as error:  # pylint: disable=broad-except
-            # errorType/path where the exception carries GraphQL errors; its
-            # str() otherwise. A transport exception stringifies as its first
-            # GraphQL error message, and the mutations on this path inline their
-            # arguments into the query document.
+            # The exception's type, with its errorType/path where it carries
+            # GraphQL errors and its str() otherwise. A transport exception
+            # stringifies as its first GraphQL error message, and the mutations
+            # on this path inline their arguments into the query document; the
+            # type is what keeps the line readable for an exception whose str()
+            # is empty, which a timeout's is.
             #
             # The query document itself stays on the debug line above, which is
             # the attempt these lines are about. Repeating it here would put the
             # arguments of every retried write into a log stream that is on at
-            # the default level, and the retry counts and the reduced errors are
+            # the default level, and the retry counts and the described error are
             # what these lines are read for.
-            reduced_error: object = graphql_errors(error) or error
+            described_error = describe_exception(error)
             # Asked before the retry budget is checked, so an error the caller
             # recognises is recognised on the last attempt as well as the first.
             # A write that timed out after it had in fact stored its item sees a
             # condition failure on the retry, and that can be the final one.
             if should_ignore_exception_fn(error):
-                logger.info("ignorable exception - not retrying - error: [%s]", reduced_error)
+                logger.info("ignorable exception - not retrying - error: [%s]", described_error)
                 result = _ignored_exception_response
                 break
 
@@ -105,7 +107,7 @@ async def execute_gql_query_with_retries(
                 logger.error(
                     "max retries on query - retries: [%d] - error: [%s]",
                     retries,
-                    reduced_error,
+                    described_error,
                     extra=dict(frames=traceback_frames(error)),
                 )
                 raise
@@ -117,7 +119,7 @@ async def execute_gql_query_with_retries(
                 "error on query - retry: [%d] - sleeping for [%f]s - error: [%s]",
                 retries,
                 sleep_time,
-                reduced_error,
+                described_error,
             )
             await asyncio.sleep(sleep_time)
 

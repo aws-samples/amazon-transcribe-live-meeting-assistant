@@ -93,23 +93,40 @@ class GraphQLResponseError(RuntimeError):
     """A GraphQL response did not carry a field the caller needs.
 
     Carries the shape description that was logged, so a handler further up can
-    report it without re-deriving it, and :attr:`retryable` as classified by
-    :func:`is_retryable_graphql_response`.
+    report it without re-deriving it, and :attr:`looks_transient` as classified
+    by :func:`is_retryable_graphql_response` -- an appearance, not a verdict; read
+    that function's note on how far it can see.
     """
 
     def __init__(
         self,
         path: Sequence[str],
         description: Dict[str, Any],
-        retryable: bool,
+        looks_transient: bool,
     ) -> None:
         self.path: Tuple[str, ...] = tuple(path)
         self.description = description
-        self.retryable = retryable
+        self.looks_transient = looks_transient
         super().__init__(
             f"AppSync response does not carry {'.'.join(self.path)} "
-            f"(retryable: {retryable}, response shape: {description})"
+            f"(looksTransient: {looks_transient}, response shape: {description})"
         )
+
+
+def describe_exception(error: BaseException) -> str:
+    """An exception named by type, with its GraphQL errors reduced.
+
+    ``str()`` on its own is not enough. A transport exception's is the server's
+    first error message, which :func:`graphql_errors` replaces; and some
+    exceptions carry no text at all -- ``str(TimeoutError())`` is empty -- which
+    would leave a log line saying nothing about what failed. The type is always
+    there, so a line built from this names the failure either way.
+    """
+    errors = graphql_errors(error)
+    if errors:
+        return f"{type(error).__name__}: {errors}"
+    text = str(error)
+    return f"{type(error).__name__}: {text}" if text else type(error).__name__
 
 
 def traceback_frames(error: BaseException) -> List[str]:
@@ -336,9 +353,10 @@ def require_graphql_field(
     """The value at ``path``, or :class:`GraphQLResponseError`.
 
     For a field the caller cannot proceed without. The response's shape is
-    logged at error level together with the retryable classification from
-    :func:`is_retryable_graphql_response` -- read that one's note on how far the
-    classification can see -- and the exception carries both.
+    logged at error level together with the classification from
+    :func:`is_retryable_graphql_response`, under the key ``looksTransient``
+    because it is an appearance and not a verdict -- read that one's note on how
+    far it can see -- and the exception carries both.
     """
     value, missing = _resolve(response_data(response), path)
     if missing is None:
@@ -347,11 +365,12 @@ def require_graphql_field(
     # Logged and attached to the exception, and read by neither: no caller
     # branches on it. It is there to tell an operator whether the failure looks
     # like one that will clear by itself, not to decide anything.
-    retryable = is_retryable_graphql_response(response)
+    looks_transient = is_retryable_graphql_response(response)
     logger.error(
-        "AppSync response does not carry the required field %s (retryable: %s, response shape: %s)",
+        "AppSync response does not carry the required field %s "
+        "(looksTransient: %s, response shape: %s)",
         ".".join(missing),
-        retryable,
+        looks_transient,
         description,
     )
-    raise GraphQLResponseError(missing, description, retryable)
+    raise GraphQLResponseError(missing, description, looks_transient)

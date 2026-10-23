@@ -7,6 +7,7 @@
 from .call_fields import call_fields
 from .response import (
     GraphQLResponseError,
+    describe_exception,
     describe_graphql_response,
     graphql_error_messages,
     graphql_errors,
@@ -21,6 +22,7 @@ from .transcript_segment_sentiment_fields import transcript_segment_sentiment_fi
 __all__ = [
     "GraphQLResponseError",
     "call_fields",
+    "describe_exception",
     "describe_graphql_response",
     "graphql_error_messages",
     "graphql_errors",

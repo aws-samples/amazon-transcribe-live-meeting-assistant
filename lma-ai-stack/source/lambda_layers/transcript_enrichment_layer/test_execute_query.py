@@ -191,7 +191,17 @@ def test_an_exception_carrying_no_graphql_errors_still_reads_as_itself(query, ca
     """Reducing the error must not blank out an ordinary transport failure."""
     fail_query(query, ConnectionResetError("connection reset by peer"), caplog)
     whole_log = " ".join(rendered(record) for record in above_debug(caplog.records))
+    assert "ConnectionResetError" in whole_log
     assert "connection reset by peer" in whole_log
+
+
+def test_an_exception_with_no_text_at_all_is_still_named(query, caplog):
+    """``str(TimeoutError())`` is empty, so the type is all the line can say."""
+    fail_query(query, TimeoutError(), caplog)
+    emitted = above_debug(caplog.records)
+    assert emitted, "a failing query must leave something in the log"
+    for record in emitted:
+        assert "TimeoutError" in rendered(record), rendered(record)
 
 
 def test_an_ignorable_error_stops_the_retries_and_answers_with_the_given_response(query):

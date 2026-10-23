@@ -345,7 +345,7 @@ def test_get_call_details_raises_a_named_error_rather_than_an_attribute_error(sh
     assert raised.value.path == ("getCall",)
     errors = cep.LOGGER.at_level("ERROR")
     assert len(errors) == 1, f"expected one error line, got {errors}"
-    assert "getCall" in errors[0] and "retryable" in errors[0]
+    assert "getCall" in errors[0] and "looksTransient" in errors[0]
 
 
 def test_get_call_details_marks_a_request_shape_error_as_permanent(schema):
@@ -362,7 +362,7 @@ def test_get_call_details_marks_a_request_shape_error_as_permanent(schema):
     )
     with pytest.raises(GraphQLResponseError) as raised:
         run(cep.get_call_details(message={"CallId": "call-1"}, appsync_session=session))
-    assert raised.value.retryable is False
+    assert raised.value.looks_transient is False
 
 
 def test_get_call_details_marks_an_unrecognised_failure_as_retryable(schema):
@@ -370,7 +370,7 @@ def test_get_call_details_marks_an_unrecognised_failure_as_retryable(schema):
     session = FakeSession(schema, GET_CALL_RESPONSES["null field"])
     with pytest.raises(GraphQLResponseError) as raised:
         run(cep.get_call_details(message={"CallId": "call-1"}, appsync_session=session))
-    assert raised.value.retryable is True
+    assert raised.value.looks_transient is True
 
 
 # ── get_aggregated_sentiment: an empty aggregation ──────────────────────────
