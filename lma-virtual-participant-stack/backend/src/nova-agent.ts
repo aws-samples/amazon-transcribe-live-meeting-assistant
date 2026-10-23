@@ -183,6 +183,11 @@ export class NovaAgent implements VoiceAssistantProvider {
    *  acknowledgement, because a stream spawned milliseconds earlier may not have
    *  finished connecting to PulseAudio and so has played nothing yet. */
   private pacatSpawnedAt: number = 0;
+  /** A pacat process that has been handed off to finish playing (see
+   *  stopPacatStream's `drain` mode). Held so that a later immediate teardown
+   *  can still reach it: two streams writing to `agent_output` at once would be
+   *  audible as garble, and barge-in has to be able to cut off everything. */
+  private drainingPacatProcess: ChildProcess | null = null;
   /** Upper bound on letting the playback buffer empty instead of discarding it
    *  (see muteDrainingPlayback). Generous for the one word the prompt asks for,
    *  tight enough that a model which ignored the prompt cannot keep talking. */
@@ -1493,16 +1498,17 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     const askedToStop = isStopTalkingRequest(content, configuredWakePhrases());
 
-    if (!askedToStop) {
-      // Being addressed by a wake phrase that is not itself a request for
-      // silence means the assistant is wanted. Supersede any stop request still
-      // resolving: the two utterances can land close enough together that a
-      // fallback armed for the first would otherwise cut off the answer to the
-      // second. The stop utterance cannot reach here, because askedToStop
-      // recognises it.
-      this.cancelStopRequest('addressed-again');
-    }
-
+    // Note what this deliberately does NOT do: call off a stop request that is
+    // still resolving. A wake phrase here means the assistant is wanted, and
+    // activate() acts on exactly that — but `content` is Nova's own transcript
+    // of speech Amazon Transcribe has already read, and two independent
+    // recognisers need not agree on whether an utterance is strictly a stop
+    // command. "Hey Alex, stop talking about that" carries a wake phrase and is
+    // not a stop command, so a single misheard word would otherwise disarm the
+    // fallback for the very request that armed it, leaving a participant who
+    // asked for quiet with an assistant still talking. Below, unmute() calls
+    // the request off once the assistant is actually silent, which is the state
+    // in which a wake phrase unambiguously means "come back".
     if (this.groupMeetingMode) {
       if (this._isMuted && !askedToStop) {
         console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
@@ -1923,6 +1929,13 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private ensurePacatStream(): ChildProcess | null {
+    // An assistant that is about to be heard has nothing left to say from
+    // before. Two streams on `agent_output` at once would be audible as garble,
+    // so a handed-off stream gives way here rather than playing underneath —
+    // before the early return as well as before a spawn, since a stream that is
+    // already live is just as capable of overlapping it.
+    this.killDrainingPacatStream();
+
     if (this.pacatProcess && !this.pacatProcess.killed) {
       return this.pacatProcess;
     }
@@ -1981,11 +1994,17 @@ export class NovaAgent implements VoiceAssistantProvider {
    * Stop the persistent pacat process (called during cleanup/session close).
    *
    * `immediate` discards whatever PulseAudio still has buffered, which is what
-   * barge-in, an ordinary mute and shutdown all want. `drain` closes the input
-   * and lets the buffer play out, bounded by PLAYBACK_DRAIN_CAP_MS; only the
-   * stop-request acknowledgement uses it (see muteDrainingPlayback).
+   * barge-in, an ordinary mute and shutdown all want — including any stream
+   * that an earlier `drain` handed off, so that barge-in can always cut off
+   * everything the meeting can hear. `drain` closes the input and lets the
+   * buffer play out, bounded by PLAYBACK_DRAIN_CAP_MS; only the stop-request
+   * acknowledgement uses it (see muteDrainingPlayback).
    */
   private stopPacatStream(mode: 'immediate' | 'drain' = 'immediate'): void {
+    if (mode === 'immediate') {
+      this.killDrainingPacatStream();
+    }
+
     const process_ = this.pacatProcess;
     if (process_ && !process_.killed) {
       try {
@@ -1996,10 +2015,9 @@ export class NovaAgent implements VoiceAssistantProvider {
           // Hand the process off: it exits on its own once the buffer empties,
           // and the cap stops one that never drains from outliving the request
           // that silenced it.
+          this.drainingPacatProcess = process_;
           const cap = setTimeout(() => {
-            if (!process_.killed) {
-              process_.kill('SIGTERM');
-            }
+            this.killDrainingPacatStream();
           }, this.PLAYBACK_DRAIN_CAP_MS);
           cap.unref?.();
         }
@@ -2015,6 +2033,20 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.speakingTimeout = null;
     }
     this._isSpeaking = false;
+  }
+
+  /** End a handed-off playback stream, whether its own cap or a later teardown
+   *  got there first. Idempotent. */
+  private killDrainingPacatStream(): void {
+    const draining = this.drainingPacatProcess;
+    this.drainingPacatProcess = null;
+    if (draining && !draining.killed) {
+      try {
+        draining.kill('SIGTERM');
+      } catch (e) {
+        // Ignore errors during cleanup
+      }
+    }
   }
 
   private async playAudio(audioBuffer: Buffer): Promise<void> {
@@ -2144,10 +2176,17 @@ export class NovaAgent implements VoiceAssistantProvider {
     // machine (and starts muted by design) and `translator` is driven by its
     // explicit pause/resume trigger phrases. Both of those run always_active,
     // where this method returns above.
-    // Same reasoning as handleUserTurnWakePhrase: a fresh activation means the
-    // assistant has been addressed, which supersedes a stop request still
-    // resolving. The utterance that asked for silence does not activate — the
-    // scribe routes it to the stop path instead of the wake-phrase path.
+    // A fresh activation means the assistant has been addressed, which
+    // supersedes a stop request still resolving: the two utterances can land
+    // close enough together that a fallback armed for the first would otherwise
+    // cut off the answer to the second.
+    //
+    // Safe here, and not on Nova's own transcript turn, because this and the
+    // stop route read the same Amazon Transcribe segments and the scribe sends
+    // a segment down one path or the other, never both — so the utterance that
+    // asked for silence cannot be the one that activates. There is no
+    // equivalent in always_active mode, where this method returns above; a
+    // request there runs its course, which is the safe direction to fail.
     this.cancelStopRequest('activated');
 
     if (this.meetingMode === 'normal' && this._isMuted) {

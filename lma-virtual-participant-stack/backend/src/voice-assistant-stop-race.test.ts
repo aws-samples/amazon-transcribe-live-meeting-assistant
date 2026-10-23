@@ -322,39 +322,32 @@ test('being addressed again inside the window keeps the assistant audible', asyn
     }
 });
 
-test('a new question inside the window is answered, not cut off', async () => {
-    // Two completed segments can land close enough together that the second is
-    // a fresh request while the first is still resolving. Addressing the
-    // assistant means it is wanted, so the pending silence must give way —
-    // otherwise the answer to the new question is cut off mid-sentence.
+test('the model\'s own reading of the request cannot disarm the fallback', async () => {
+    // handleUserTurnWakePhrase reads Nova's transcript of speech that Amazon
+    // Transcribe has already matched, and two independent recognisers need not
+    // agree on whether an utterance is strictly a stop command. Both utterances
+    // below carry a wake phrase; only the first is a strict stop. Neither may
+    // call off the silence the transcript route guaranteed, because at this
+    // point either could be a second reading of the same request — and a single
+    // misheard word would otherwise leave a participant who asked for quiet
+    // with an assistant still talking.
     capture();
     try {
-        const agent = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
-        agent.requestStopTalking('test');
-        (agent as any).handleUserTurnWakePhrase('Hey Alex, actually what is the launch date?');
+        for (const heardByNova of ['Hey Alex, stop talking', 'Hey Alex, stop talking about that']) {
+            for (const mode of ['normal', 'group'] as MeetingMode[]) {
+                const agent = novaAgent({ meetingMode: mode, activationMode: 'always_active' });
+                (agent as any)._isMuted = false; // group starts muted
+                agent.requestStopTalking('test');
+                (agent as any).handleUserTurnWakePhrase(heardByNova);
 
-        await delay(PAST_GRACE_MS);
-        assert.equal(agent.isMuted(), false, 'the new question must not be silenced');
-        assert.match(stopLines().join('\n'), /action=cancelled why=addressed-again/);
-    } finally {
-        release();
-    }
-});
-
-test('a repeated stop request inside the window is not mistaken for being addressed', async () => {
-    // "Hey Alex, stop talking" contains a wake phrase, so the same turn reaches
-    // the code above. It must not call off the silence it just asked for.
-    capture();
-    try {
-        for (const mode of ['normal', 'group'] as MeetingMode[]) {
-            const agent = novaAgent({ meetingMode: mode, activationMode: 'always_active' });
-            (agent as any)._isMuted = false; // group starts muted
-            agent.requestStopTalking('test');
-            (agent as any).handleUserTurnWakePhrase('Hey Alex, stop talking');
-
-            await delay(PAST_GRACE_MS);
-            assert.equal(agent.isMuted(), true, `${mode}: the request must still be honoured`);
-            (agent as any).clearConversationTimeout();
+                await delay(PAST_GRACE_MS);
+                assert.equal(
+                    agent.isMuted(),
+                    true,
+                    `${mode}: the request must survive Nova hearing "${heardByNova}"`,
+                );
+                (agent as any).clearConversationTimeout();
+            }
         }
     } finally {
         release();
@@ -449,6 +442,53 @@ test('the tool route lets playback drain instead of discarding it', async () => 
     } finally {
         release();
     }
+});
+
+test('a handed-off playback stream stays reachable', () => {
+    // Letting the buffer empty means a second process is briefly alive. Two
+    // streams on `agent_output` at once would be audible as garble, so barge-in
+    // has to be able to cut off the one still draining, and an assistant that
+    // speaks again has to replace rather than talk over it.
+    //
+    // Built without the playback stub the other tests use, because the real
+    // stopPacatStream is the thing under test.
+    const agent = new NovaAgent({
+        modelId: 'amazon.nova-2-sonic-v1:0',
+        systemPrompt: 'You are Alex, an AI meeting assistant.',
+        activationMode: 'wake_phrase',
+        meetingMode: 'normal',
+    });
+
+    const killed: string[] = [];
+    const fakePacat = () => ({
+        killed: false,
+        kill: (signal: string) => killed.push(signal),
+        stdin: { end: () => {}, destroyed: false },
+    });
+
+    (agent as any).pacatProcess = fakePacat();
+    (agent as any).stopPacatStream('drain');
+    assert.ok((agent as any).drainingPacatProcess, 'the drained stream must be held, not forgotten');
+    assert.deepEqual(killed, [], 'draining must not cut the buffer off');
+
+    // Barge-in, an ordinary mute and shutdown all reach it.
+    (agent as any).stopPacatStream('immediate');
+    assert.equal((agent as any).drainingPacatProcess, null);
+    assert.deepEqual(killed, ['SIGTERM']);
+
+    // So does being about to be heard again: ensurePacatStream clears the way
+    // rather than leaving the old stream playing under the new one. A live
+    // stream is set up first so that it returns there and spawns no real pacat,
+    // which is not what is being asserted and is not present in a unit test.
+    const live = fakePacat();
+    (agent as any).pacatProcess = live;
+    (agent as any).stopPacatStream('drain');
+    assert.ok((agent as any).drainingPacatProcess);
+
+    (agent as any).pacatProcess = fakePacat();
+    assert.equal((agent as any).ensurePacatStream(), (agent as any).pacatProcess);
+    assert.equal((agent as any).drainingPacatProcess, null);
+    assert.deepEqual(killed, ['SIGTERM', 'SIGTERM']);
 });
 
 test('the translator pause still cuts playback off immediately', async () => {

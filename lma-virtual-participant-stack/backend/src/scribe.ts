@@ -958,8 +958,13 @@ export class TranscriptionService {
                 isStopTalkingRequest(transcript, this.wakePhrases);
 
             if (stopRequested) {
-                // Deliberately not logging the utterance: it is participant
-                // speech, and the provider logs the route, flags and timings.
+                // No log line of its own. The provider reports the route, the
+                // flags and the timings, which is what a stop request has to be
+                // diagnosed from, and a second copy of the utterance here would
+                // add nothing but another copy of participant speech. (It is
+                // not kept out of the log stream altogether — every completed
+                // segment is logged above.)
+                //
                 // A stop request never starts a conversation, so drop any
                 // pre-connect armed by the wake phrase in this utterance. The
                 // reset keys off recognising the request, not off the provider

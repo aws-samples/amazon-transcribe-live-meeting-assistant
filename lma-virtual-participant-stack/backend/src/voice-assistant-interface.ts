@@ -142,8 +142,8 @@ export interface VoiceAssistantProvider {
    * declines — and because only it knows whether it has another way of
    * recognising the request. Where it does, it may hold the request for a short
    * window so that route can answer out loud first; it silences the assistant
-   * itself if that does not happen, so accepting the request always ends in
-   * silence.
+   * itself if that does not happen, so an accepted request ends in silence
+   * unless the assistant is explicitly asked back inside that window.
    *
    * @param reason Optional log tag identifying the source of the call.
    * @returns true when the request has been accepted and the assistant will be
