@@ -24,10 +24,12 @@ import { ActivationMode } from './voice-assistant-interface.js';
 import {
   AssistantReconfigureOutcome,
   AssistantReconfigureRequest,
+  describeMeetingMode,
   formatAssistantToggleLog,
   isActivationMode,
   isMeetingMode,
   publishMeetingMode,
+  requiresAlwaysListening,
 } from './assistant-toggles.js';
 
 /**
@@ -2936,6 +2938,23 @@ export class NovaAgent implements VoiceAssistantProvider {
       return notApplied('declined', `unrecognised activation mode "${request.activationMode}"`);
     }
 
+    // Validate the combination, not just each axis. Group and translator mode
+    // are silent rather than merely limited without an always-listening
+    // assistant, which is why the chat commands for those modes ask for it — and
+    // the same rule has to hold coming the other way, or asking only for the
+    // wake phrase would leave a group-mode assistant inaudible for the rest of
+    // the meeting. Declined with the command that makes it possible, rather than
+    // quietly changing the meeting mode nobody asked about.
+    const resultingMeetingMode = request.meetingMode ?? meetingModeBefore;
+    const resultingActivationMode = request.activationMode ?? activationModeBefore;
+    if (requiresAlwaysListening(resultingMeetingMode) && resultingActivationMode !== 'always_active') {
+      return notApplied(
+        'declined',
+        `the assistant is in ${describeMeetingMode(resultingMeetingMode)}, which has to stay always listening`
+          + ' — switch to assistant mode first with "LMA assist"',
+      );
+    }
+
     const changed: Array<'meetingMode' | 'activationMode'> = [];
     if (request.meetingMode !== undefined && request.meetingMode !== meetingModeBefore) {
       changed.push('meetingMode');
@@ -3107,13 +3126,22 @@ export class NovaAgent implements VoiceAssistantProvider {
     const hasLiveSession = !!(this.session && this.session.isActive);
 
     if (this.activationMode !== 'always_active') {
-      // The wake-phrase contract is that no session is held open between
-      // activations, so the rebuild is a teardown.
-      if (hasLiveSession) {
-        await this.closeSession();
+      if (!hasLiveSession) {
+        return false;
+      }
+      if (this._isActivated) {
+        // A session exists because somebody addressed the assistant and the
+        // activation window they opened is still running. Replace it rather than
+        // close it: closing would leave the window counting down against no
+        // session, so the assistant would be deaf for the rest of it.
+        await this.refreshSession();
         return true;
       }
-      return false;
+      // Otherwise the wake-phrase contract applies — no session is held open
+      // between activations, so the rebuild is a teardown and the next wake
+      // phrase builds one from the new configuration.
+      await this.closeSession();
+      return true;
     }
 
     if (!hasLiveSession) {

@@ -29,10 +29,12 @@ import {
     isActivationMode,
     isMeetingMode,
     parseAssistantChatCommand,
+    requiresAlwaysListening,
     type AssistantReconfigureOutcome,
     type AssistantReconfigureRequest,
 } from './assistant-toggles.js';
 import { createDuplicateToggleFilter } from './assistant-toggles.js';
+import { NoOpAgent } from './noop-agent.js';
 import { details, matchesEndCommand } from './details.js';
 
 // ---------------------------------------------------------------------------
@@ -348,11 +350,41 @@ test('a chat message delivered twice in quick succession is answered once', () =
     assert.equal(fresh('LMA wake', 20_000), true);
 });
 
-test('a meeting with no voice assistant is told so and the provider is not called', async () => {
-    const assistant = fakeAssistant(false);
-    const reply = await applyAssistantChatCommand(assistant, parseAssistantChatCommand('LMA translate')!, 'Alice');
+test('every provider is asked, so one attempt is always one log line', async () => {
+    // Including the one standing in for a meeting with no voice assistant: it
+    // declines with its own reason, and asking it is what keeps the
+    // one-line-per-attempt record true whatever the deployment is running. An
+    // early return here would have skipped the log line the docs promise.
+    const reply = await applyAssistantChatCommand(
+        new NoOpAgent(),
+        parseAssistantChatCommand('LMA translate')!,
+        'Alice',
+    );
     assert.deepEqual(reply, ['Live Meeting Assistant: the voice assistant is not enabled for this meeting.']);
-    assert.deepEqual(assistant.requests, []);
+});
+
+test('the modes that need an always-listening assistant are named in one place', () => {
+    // The chat table asks for always_active alongside these two, and
+    // `reconfigure` refuses a combination that would leave them without it. Both
+    // read the same rule, so the table cannot drift from the guard.
+    for (const mode of ['group', 'translator'] as const) {
+        assert.equal(requiresAlwaysListening(mode), true);
+    }
+    assert.equal(requiresAlwaysListening('normal'), false);
+
+    for (const message of ['LMA translate', 'LMA group', 'LMA translator mode', 'LMA group mode', 'LMA interpret']) {
+        const command = parseAssistantChatCommand(message)!;
+        assert.equal(
+            command.activationMode,
+            'always_active',
+            `"${message}" asks for a mode that requires an always-listening assistant`,
+        );
+    }
+    for (const message of ['LMA assist', 'LMA normal', 'LMA assistant mode']) {
+        const command = parseAssistantChatCommand(message)!;
+        assert.equal(requiresAlwaysListening(command.meetingMode!), false);
+        assert.equal(command.activationMode, undefined, `"${message}" must not force an activation mode`);
+    }
 });
 
 // ---------------------------------------------------------------------------

@@ -104,6 +104,24 @@ export function isActivationMode(value: unknown): value is ActivationMode {
 }
 
 /**
+ * Whether a meeting mode only works while the assistant is always listening.
+ *
+ * `group` starts muted and `activate()` deliberately does not unmute it, because
+ * group mode owns its own muted-until-addressed state machine — and that machine
+ * runs on the model's USER transcripts, which only arrive while a session is
+ * open. `translator` speaks on every completed utterance, and receives none
+ * between activations. On `wake_phrase` activation no session is held between
+ * activations, so either mode would be silent rather than merely limited.
+ *
+ * Stated once, and applied in both directions: the chat commands for these two
+ * modes ask for `always_active` alongside the mode, and `reconfigure` declines a
+ * request whose resulting combination would be one of these modes without it.
+ */
+export function requiresAlwaysListening(mode: MeetingMode): boolean {
+    return mode === 'group' || mode === 'translator';
+}
+
+/**
  * Publish the meeting mode onto the shared meeting details, where the
  * transcription path reads it.
  *
@@ -350,18 +368,23 @@ export function assistantToggleChatReply(outcome: AssistantReconfigureOutcome): 
  * Hand a parsed chat command to the voice assistant and produce the chat reply.
  *
  * Takes the provider rather than reaching for the singleton so the chat path can
- * be exercised without a Nova session, and so the meeting-page and voice routes
- * can reuse it.
+ * be exercised without a Nova session, and so another route can reuse it.
+ *
+ * Every provider is asked, including the one standing in for a meeting with no
+ * voice assistant: each declines with its own reason, and asking them keeps one
+ * attempt to one `[assistant-toggle]` line whatever the deployment is running.
+ *
+ * The caller awaits the whole change, rebuild included. On the platforms whose
+ * chat arrives on a poll loop that is worth knowing: the loop handles messages
+ * one at a time, so a message sent immediately after a mode command waits for
+ * the rebuild — a few hundred milliseconds normally, and at most the provider's
+ * own bound on a session refresh it has to wait behind.
  */
 export async function applyAssistantChatCommand(
-    assistant: Pick<VoiceAssistantProvider, 'isEnabled' | 'reconfigure'>,
+    assistant: Pick<VoiceAssistantProvider, 'reconfigure'>,
     command: AssistantChatCommand,
     requestedBy?: string | null,
 ): Promise<string[]> {
-    if (!assistant.isEnabled()) {
-        return ['Live Meeting Assistant: the voice assistant is not enabled for this meeting.'];
-    }
-
     const outcome = await assistant.reconfigure({
         meetingMode: command.meetingMode,
         activationMode: command.activationMode,

@@ -147,6 +147,89 @@ test('a request with one good half and one bad half applies neither', async () =
     assert.deepEqual(calls, []);
 });
 
+test('asking only for the wake phrase is refused in the modes that need to stay listening', async () => {
+    // The reverse of the rule the chat commands apply going in. Group mode
+    // starts muted and `activate()` does not unmute it; translator mode receives
+    // no audio between activations. Either one on wake-phrase activation is
+    // silent for the rest of the meeting, so the request is refused with the
+    // command that makes it possible rather than quietly changing the meeting
+    // mode nobody asked about.
+    for (const mode of ['group', 'translator'] as MeetingMode[]) {
+        const { agent, calls } = novaAgent({ meetingMode: mode, activationMode: 'always_active' });
+        withLiveSession(agent);
+
+        const outcome = await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
+
+        assert.equal(outcome.result, 'declined', `${mode} must not be left on the wake phrase`);
+        assert.equal(outcome.activationModeAfter, 'always_active');
+        assert.equal((agent as any).activationMode, 'always_active');
+        assert.match(outcome.detail || '', /has to stay always listening/);
+        assert.match(outcome.detail || '', /LMA assist/, 'the reply must say how to get there');
+        assert.deepEqual(calls, [], 'a refused request must not touch the session');
+    }
+});
+
+test('switching into a mode that needs listening without asking for it is refused too', async () => {
+    // Reached by a route that supplies only the meeting mode — the chat commands
+    // for these modes ask for both, but `reconfigure` cannot assume its caller
+    // did.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator' }));
+
+    assert.equal(outcome.result, 'declined');
+    assert.equal((agent as any).meetingMode, 'normal');
+
+    // Asking for both together is what the chat command does, and it works.
+    const both = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+    assert.equal(both.result, 'applied');
+    assert.deepEqual(both.changed, ['meetingMode', 'activationMode']);
+});
+
+test('the wake phrase is still available in assistant mode', async () => {
+    // The rule must not spread beyond the two modes that need it.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    const outcome = await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
+    assert.equal(outcome.result, 'applied');
+});
+
+test('a mode change does not close an activation window somebody opened', async () => {
+    // On wake-phrase activation a session exists only because the assistant was
+    // addressed. Closing it would leave the window counting down against no
+    // session, so the assistant would be deaf for the rest of it.
+    const { agent, calls } = novaAgent({ meetingMode: 'group', activationMode: 'wake_phrase' });
+    withLiveSession(agent);
+    (agent as any)._isActivated = true;
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'normal' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, true);
+    assert.deepEqual(calls, ['refreshSession'], 'the window must be replaced, not closed');
+    assert.equal(agent.isActivated(), true);
+});
+
+test('a mode change with no activation window closes the session it finds', async () => {
+    // The wake-phrase cost contract: nothing is held open between activations.
+    const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    withLiveSession(agent);
+    (agent as any)._isActivated = false;
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'group', activationMode: 'always_active' }));
+
+    assert.equal(outcome.result, 'applied');
+    // Now on always_active, so the session is refreshed rather than closed.
+    assert.deepEqual(calls, ['refreshSession']);
+
+    const stale = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    withLiveSession(stale.agent);
+    (stale.agent as any)._isActivated = false;
+    await stale.agent.reconfigure(chat({ meetingMode: 'normal', activationMode: 'wake_phrase' }));
+    // Nothing changed, so nothing was touched.
+    assert.deepEqual(stale.calls, []);
+});
+
 // ---------------------------------------------------------------------------
 // Asking for what it already is costs the meeting nothing
 // ---------------------------------------------------------------------------
@@ -167,8 +250,9 @@ test('a request for the configuration it is already in rebuilds nothing', async 
 });
 
 test('a request that changes one axis and restates the other changes only the one', async () => {
-    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
-    const outcome = await agent.reconfigure(chat({ meetingMode: 'group', activationMode: 'wake_phrase' }));
+    const { agent } = novaAgent({ meetingMode: 'translator', activationMode: 'always_active' });
+    withLiveSession(agent);
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'normal', activationMode: 'always_active' }));
 
     assert.equal(outcome.result, 'applied');
     assert.deepEqual(outcome.changed, ['meetingMode']);
@@ -340,15 +424,20 @@ test('switching to the wake phrase closes the session it was holding open', asyn
 });
 
 test('a mode change on a wake-phrase agent with no session waits for the next wake phrase', async () => {
-    // Nothing to tear down and nothing to hold open: the new values are on the
-    // agent and the session built by the next activation carries them.
-    const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    // Nothing to tear down and nothing to hold open: the new value is on the
+    // agent and the session built by the next activation carries it.
+    //
+    // Starting from group mode on wake-phrase activation, which is the
+    // combination a deployment can be configured into and the UI warns about —
+    // and `LMA assist` is the way out of it mid-meeting.
+    const { agent, calls } = novaAgent({ meetingMode: 'group', activationMode: 'wake_phrase' });
 
-    const outcome = await agent.reconfigure(chat({ meetingMode: 'group' }));
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'normal' }));
 
     assert.equal(outcome.result, 'applied');
     assert.equal(outcome.sessionRebuilt, false);
-    assert.equal((agent as any).meetingMode, 'group');
+    assert.equal((agent as any).meetingMode, 'normal');
+    assert.equal(agent.isMuted(), false, 'leaving group mode must make it audible');
     assert.deepEqual(calls, []);
 });
 

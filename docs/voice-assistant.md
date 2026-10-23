@@ -199,6 +199,8 @@ Every command must address LMA by name, and the whole message must be the name p
 
 `LMA translate` and `LMA group` both switch activation to always-listening as well, because neither mode works without it. A translator speaks on every completed utterance, so with a wake phrase it would receive no audio until addressed and translate nothing in between. Group mode starts muted and the state machine that unmutes it runs on transcripts that only arrive while a session is open, so with a wake phrase it would never become audible at all.
 
+The same rule applies in the other direction: `LMA wake` is **declined** while the assistant is in translator or group mode, and the reply says to switch to assistant mode first with `LMA assist`. Switching back and then asking for the wake phrase takes two commands, which is deliberate — the alternative is one command silently changing the meeting mode nobody asked about.
+
 **Activation mode:**
 
 | Type in chat | Effect |
@@ -222,7 +224,7 @@ What that means in a live meeting:
 - **The transcript is not affected.** Transcription reads a separate PulseAudio sink that the Virtual Participant feeds itself, and that the assistant's voice reaches through a loopback inside the sound server. Nothing on the mode-change path starts or stops an audio process.
 - **The conversation so far is not carried into a new mode.** The next session is built for the mode it is now in, so replaying earlier turns would prime it with a conversation that mode never had. An activation-mode change on its own keeps the conversation, since the mode and the prompt are unchanged.
 - **Group mode starts quiet.** Switching to `group` leaves the assistant muted until a wake phrase, exactly as deploying in group mode would.
-- **On the wake-phrase path nothing is rebuilt immediately.** No session is held open between activations, so the new mode is picked up by the session the next wake phrase creates.
+- **On the wake-phrase path, usually nothing is rebuilt immediately.** No session is held open between activations, so the new mode is picked up by the session the next wake phrase creates. The exception is a change that arrives while somebody has the assistant activated: the session is replaced rather than closed, so the window they opened keeps working.
 
 One known limitation on the optional [MicroVM ASR engine](microvm-asr.md): whether the assistant's own speech is transcribed on its own channel is decided once, when the engine run starts. A meeting switched into translator mode partway through keeps transcribing the assistant for the rest of that run, so translations appear in the transcript alongside the speech they translate. The meeting's own transcript is unaffected either way.
 
