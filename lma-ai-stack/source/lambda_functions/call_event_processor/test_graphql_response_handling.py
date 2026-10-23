@@ -528,3 +528,62 @@ def test_the_real_predicate_in_the_real_retry_loop_accepts_a_duplicate(
     )
     assert attempts["count"] == attempt_of_the_duplicate
     assert result == {"ok": True}, "a stored item is the state the write wanted"
+
+
+# ── the start-of-call hook runs once per meeting ─────────────────────────────
+
+
+def process_start_event(schema: Any, create_call_response: Any, monkeypatch) -> List[Dict]:
+    """Runs a START event and returns the start-of-call hook's invocations."""
+    invocations: List[Dict] = []
+
+    class RecordingLambdaClient:
+        """Captures invoke calls instead of making them."""
+
+        def invoke(self, **kwargs: Any) -> Dict:
+            invocations.append(kwargs)
+            return {"StatusCode": 202}
+
+    monkeypatch.setattr(cep, "START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "arn:hook", raising=False)
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", RecordingLambdaClient(), raising=False)
+    monkeypatch.setattr(cep, "SETTINGS", {}, raising=False)
+    run(
+        cep.execute_process_event_api_mutation(
+            message={"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"},
+            settings={},
+            appsync_session=FakeSession(schema, create_call_response),
+            sns_client=None,
+            agent_assist_args={},
+            sentiment_analysis_args={},
+        )
+    )
+    return invocations
+
+
+def test_a_first_start_event_invokes_the_start_of_call_hook(schema, monkeypatch):
+    """The ordinary path, so the case below is not passing for the wrong reason."""
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    assert len(process_start_event(schema, created, monkeypatch)) == 1
+
+
+def test_a_redelivered_start_event_does_not_invoke_the_hook_again(schema, monkeypatch):
+    """A deployment's own hook would read a second invocation as a second meeting.
+
+    Redelivery is routine here: the event source mapping reports partial batch
+    failures, so every record from a failing one onwards comes back.
+    """
+    already_created = TransportQueryError(
+        "Item already exists",
+        errors=[{"message": "Item already exists", "errorType": "DynamoDB"}],
+    )
+    assert process_start_event(schema, already_created, monkeypatch) == []
+    info = [record["message"] for record in cep.LOGGER.records if record["level"] == "INFO"]
+    assert any("already created" in message for message in info), info
+
+
+def test_only_the_already_created_marker_counts_as_already_created():
+    """Any other createCall result must leave the hook alone to run."""
+    assert cep.was_already_created(cep.CALL_ALREADY_CREATED) is True
+    assert cep.was_already_created({"ok": True}) is False
+    assert cep.was_already_created({"createCall": {"CallId": "call-1"}}) is False
+    assert cep.was_already_created(None) is False

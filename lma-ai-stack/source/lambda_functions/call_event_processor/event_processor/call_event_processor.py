@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime
 from os import getenv
 from statistics import fmean
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Mapping, Optional, TypedDict
 
 # third-party imports from Lambda layer
 import boto3
@@ -149,14 +149,21 @@ PUT_CONDITION_FAILURE_MESSAGES = frozenset(
     }
 )
 
+# Stands in for a createCall result when the meeting was already created, so the
+# START branch can tell a first delivery from a redelivered one and invoke the
+# start-of-call hook once per meeting. Read, never mutated.
+CALL_ALREADY_CREATED: Dict[str, Any] = {"ok": True, "AlreadyExists": True}
+
 
 def is_put_condition_failure(error: Any) -> bool:
     """Whether a write was rejected by its resolver's own condition.
 
     Passed to ``execute_gql_query_with_retries`` as its
     ``should_ignore_exception_fn``. What a rejection means is per resolver, and on
-    each of the four call sites it means the row already holds a version of this
-    write that should not be replaced, so retrying buys nothing:
+    each of the three live call sites it means the row already holds a version of
+    this write that should not be replaced, so retrying buys nothing
+    (``execute_update_call_aggregation_mutation`` passes it too but has no
+    callers):
 
     * ``createCall`` writes with ``attribute_not_exists(#PK)``, so a rejection is
       a meeting that is already created -- a redelivered START event.
@@ -169,8 +176,11 @@ def is_put_condition_failure(error: Any) -> bool:
       concurrent writes for one Kinesis batch produce routinely, because a later
       segment's aggregation can land first. Dropping the superseded write is
       intended: the one that won already covers the same segments, and the next
-      non-partial segment aggregates again. A rejection because the meeting row
-      is not there yet is dropped on the same reasoning.
+      non-partial segment aggregates again. The same condition is rejected when
+      the meeting row is not there at all, and dropping that is harmless for a
+      different reason -- ``get_call_details`` reads the meeting earlier in the
+      same record and has already failed it on a null ``getCall``, so the
+      aggregation write is not reached.
 
     The messages are read off whatever the transport raised -- gql keeps them in
     an ``errors`` attribute on the exception, and a bare error mapping is
@@ -330,17 +340,31 @@ async def execute_create_call_mutation(
         )
     )
 
+    # A rejected condition here means the meeting is already created, and the
+    # caller has to be able to tell that from having created it: a redelivered
+    # START must not invoke the start-of-call hook a second time.
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
         should_ignore_exception_fn=is_put_condition_failure,
+        ignored_exception_response=CALL_ALREADY_CREATED,
     )
 
     query_string = print_ast(query)
     LOGGER.debug("query result", extra=dict(query=query_string, result=result))
 
     return result
+
+
+def was_already_created(create_call_result: Any) -> bool:
+    """Whether a createCall result came from a meeting that already existed.
+
+    True only for :data:`CALL_ALREADY_CREATED`, which
+    :func:`execute_create_call_mutation` returns in place of a result when the
+    resolver rejected its condition.
+    """
+    return bool(isinstance(create_call_result, Mapping) and create_call_result.get("AlreadyExists"))
 
 
 async def execute_update_call_status_mutation(
@@ -1407,7 +1431,10 @@ async def execute_process_event_api_mutation(
         else:
             return_value["successes"].append(response)
 
-        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN:
+        # Once per meeting. Redelivery is routine on this stream -- the END
+        # branch below explains why -- and a deployment's own start-of-call hook
+        # would read a second invocation as a second meeting starting.
+        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN and not was_already_created(response):
             payload = dict(
                 CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
                 CallId=CALL_ID,
@@ -1417,6 +1444,12 @@ async def execute_process_event_api_mutation(
                 FunctionName=START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN,
                 InvocationType="Event",
                 Payload=json.dumps(payload),
+            )
+        elif START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN:
+            LOGGER.info(
+                "START event for a meeting that is already created; not invoking the "
+                "start-of-call hook again",
+                extra=dict(call_id=message.get("CallId")),
             )
 
     elif event_type in [
