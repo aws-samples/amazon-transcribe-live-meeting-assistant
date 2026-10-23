@@ -12,6 +12,7 @@ title: "Virtual Participant"
 - [Supported Platforms](#supported-platforms)
 - [Joining a Meeting](#joining-a-meeting)
 - [Status Lifecycle](#status-lifecycle)
+  - [The status detail line](#the-status-detail-line)
   - [How the VP decides a meeting has ended](#how-the-vp-decides-a-meeting-has-ended)
 - [Manual Action Required (CAPTCHA, 2FA, SSO)](#manual-action-required-captcha-2fa-sso)
 - [AI-driven self-healing](#ai-driven-self-healing)
@@ -172,7 +173,44 @@ The VP reports a granular status as it boots, joins, and runs. The UI uses these
 | `COMPLETED` / `ENDED` | Meeting ended cleanly (host removed the VP, all attendees left, or the VP got "lonely") |
 | `FAILED` | The VP could not join. The DDB record carries an `errorMessage` describing what went wrong (e.g. *"Meeting join failed: …"*, *"Zoom login failed: invalid credentials"*, *"ECS RunTask soft-failure: agent not connected"*) |
 
-When ECS reports a "soft failure" on RunTask (returns HTTP 200 with a non-empty `failures` array — typically the container instance agent is briefly disconnected), the state machine catches it explicitly and writes `FAILED` plus the original failure reason to the VP record, instead of leaving the VP stuck in `INITIALIZING` indefinitely.
+When ECS reports a "soft failure" on RunTask (returns HTTP 200 with a non-empty `failures` array — typically the container instance agent is briefly disconnected), the state machine catches it explicitly and writes `FAILED` plus the original failure reason to the VP record, instead of leaving the VP stuck in `INITIALIZING` indefinitely. That write is conditional on the row not having reached a terminal status, so a task that did start and is reporting its own outcome keeps it.
+
+### The status detail line
+
+Alongside `status`, the VP record carries two fields describing the current status in more detail:
+
+| Field | Contents |
+| --- | --- |
+| `errorMessage` | The prose the UI shows under the status. It is the detail line for every status, not only failures: the reason a meeting ended on `COMPLETED` (*"Asked to leave by Jeremy."*), the current sub-step while the VP is still `JOINING` (*"Waiting to be admitted…"*), and the error on `FAILED`. |
+| `endTrigger` | The machine-readable counterpart: which branch the VP exited through, from the vocabulary below. Written on `COMPLETED` and `FAILED`, so join outcomes across many meetings can be counted with a query over the VP table instead of a search through container logs. |
+
+Reaching `JOINED`, `ACTIVE` or `COMPLETED` without a new detail to show clears `errorMessage`, so a message from earlier in the same run — a join sub-step, or an attempt that did not work out before a later one did — is not still displayed next to a VP that is in the meeting.
+
+Most values are one of these fixed strings:
+
+| Group | Values |
+| --- | --- |
+| Never got in | `pre-join:not-admitted`, `pre-join:no-join-button`, `pre-join:no-name-input`, `pre-join:goto-failed`, `pre-join:ai-error-screen`, `acs-not-admitted`, `sdk-not-admitted`, `enterprise-login-timeout` |
+| Asked to leave in chat | `chat` |
+| The meeting ended | `post-meeting-screen`, `meeting-ended-text`, `HANGUP_BUTTON_HIDDEN`, `REJOIN_BUTTON_APPEARED`, `ZOOM_END_DIALOG`, `SDK_HOST_ENDED`, `SDK_REMOVED`, `SDK_DISCONNECTED` |
+| Everyone else left, or the VP was removed | `attendees-left`, `acs-participants`, `sdk-participants`, `participants-watchdog`, `participants-ui:counter-gone`, `participants-ui:page-dead`, `attendee-badge-missing` |
+| Ran out of time, or lost the page | `meetingTimeout`, `renderer-crash`, `navigated-away`, `URL_CHANGE_BLANK`, `ZOOM_END_DIALOG_ABORTED` |
+| The join threw, and the message matched one of the container's six classes | `error:renderer-crashed`, `error:password`, `error:meeting-not-found`, `error:meeting-ended`, `error:permission-denied`, `error:unclassified` |
+
+The rest are a fixed prefix plus a detail that came from the platform, so the prefix is what groups and what follows the colon varies:
+
+| Form | Written when | Detail after the colon |
+| --- | --- | --- |
+| `ACS_REMOVED:…`, `ACS_DISCONNECTED:…` | The Teams SDK reported the call disconnected, or the VP removed from it | The SDK's own `code` and `subCode`, or `no-endreason` |
+| `webex-text:…` | A Webex meeting-end phrase appeared on the page | Which of five phrases matched |
+| `error:…` | The Webex watcher threw while waiting for the meeting to end — so, after the VP was admitted | The start of the underlying browser message |
+| `poll-error:…` | The Chime meeting-end poll threw | The start of the underlying browser message |
+
+Note that `error:` appears in both tables and means different things in each. The six values in the first are written by the container's own classifier when a *join* throws, and are fixed. An `error:` value that is not one of those six came from the Webex watcher *after* admission, and its detail is whatever the browser said — so **the value space is open**, and this page cannot list it. Group those by prefix and read `errorMessage` for the detail, which is where prose belongs.
+
+Whatever follows the first colon is reduced to a lower-case, hyphenated slug before the value is stored, and the whole value is capped at 100 characters. That is what keeps the second table countable: two reports of the same failure become the same string whatever the wording or punctuation around them. A trigger with no colon is stored exactly as it is.
+
+`COMPLETED` means the VP was in the meeting. A VP that never got in — not admitted, or stuck on the pre-join screen — ends as `FAILED` with *"Could not join the meeting (was not admitted, or stuck on the join screen)."*, on every platform.
 
 ### How the VP decides a meeting has ended
 

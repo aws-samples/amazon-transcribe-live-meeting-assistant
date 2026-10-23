@@ -390,7 +390,11 @@ export default class TeamsSdk {
                     console.log(`[teams-sdk] call ended (page=${snap.call.page} ${codes})`);
                     this.requestEnd({
                         reason: removed ? 'removed-from-meeting' : 'host-ended',
-                        trigger: `ACS_${removed ? 'REMOVED' : 'DISCONNECTED'} ${codes}`,
+                        // The platform's codes go after a colon so that
+                        // normalizeExitTrigger slugs them: the prefix is one of
+                        // two fixed values and the codes are the detail, which
+                        // is what lets rows be counted by prefix.
+                        trigger: `ACS_${removed ? 'REMOVED' : 'DISCONNECTED'}:${codes}`,
                     });
                     return;
                 }

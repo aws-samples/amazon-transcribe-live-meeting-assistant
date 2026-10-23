@@ -688,7 +688,11 @@ export default class Webex {
         } catch(error: any) {
             console.log("Chat panel button error:", error.message);
             console.log("Your scribe was not admitted into the meeting.");
-            return { reason: 'unknown', trigger: 'pre-join:not-admitted' };
+            // Reaching here means the in-meeting UI never appeared, so the VP
+            // is still outside the meeting: 'never-joined', the same code the
+            // Zoom and Teams handlers return from their equivalent branch.
+            // Anything milder would be scored as a normal completion.
+            return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
         await new Promise(resolve => setTimeout(resolve, 1000));

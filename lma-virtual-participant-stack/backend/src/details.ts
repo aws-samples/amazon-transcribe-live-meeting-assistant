@@ -300,14 +300,104 @@ export type ExitReasonCode =
   | 'unknown';            // fallback when no signal could be classified
 
 /**
- * True when the VP actually made it into the meeting (so ending is a normal
- * COMPLETED). False for reasons that mean it never joined — those must be
- * surfaced as FAILED so the UI doesn't falsely report success. `unknown` is
- * treated as "joined" to preserve prior behaviour for unclassified mid-
- * meeting exits; only the explicit never-joined reason flips to failure.
+ * True when the VP actually made it into the meeting, so ending is a normal
+ * COMPLETED. False for reasons that mean it never got in — those are surfaced
+ * as FAILED instead, so the UI does not report success for a meeting the VP
+ * never joined.
+ *
+ * Written as an exhaustive switch rather than `reason !== 'never-joined'` so
+ * that adding a reason code forces a decision here: a new code that nobody
+ * classified is a compile error, not a silent "joined".
+ *
+ * `unknown` counts as joined, and that is a deliberate choice rather than
+ * inherited behaviour. Every place that produces it sits past the handler's
+ * admission gate — the initial value of `exitInfo` while watching for the
+ * meeting to end, and the catch around that watch (see `webex.ts`, `chime.ts`,
+ * `zoom.ts`, `teams.ts`). So `unknown` means "the VP was in the meeting and we
+ * could not classify why it left", and scoring it as a failure would report
+ * FAILED for meetings that ran and produced a transcript. Not being admitted
+ * is reported by its own code, `never-joined`, from the pre-join path; the
+ * pre-join paths must never return `unknown`.
+ *
+ * Four of the five are initialisers that cannot survive: every racer and every
+ * catch in `chime.ts`, `zoom.ts` and `teams.ts` assigns a concrete reason
+ * before the value is returned, and `chime.ts` has no catch at all, so an
+ * exception there propagates rather than returning. The one `unknown` that can
+ * actually reach the orchestrator is `webex.ts`'s catch around its own wait.
+ * `exit-reason.test.ts` holds that count to four and asserts each one is still
+ * a wait initialiser, so this paragraph cannot quietly go out of date.
  */
 export function didJoinMeeting(info: ExitInfo): boolean {
-  return info.reason !== 'never-joined';
+  switch (info.reason) {
+    case 'never-joined':
+      return false;
+    case 'end-command':
+    case 'alone-in-meeting':
+    case 'removed-from-meeting':
+    case 'host-ended':
+    case 'meeting-timeout':
+    case 'page-closed':
+    case 'unknown':
+      return true;
+    default: {
+      // Exhaustiveness: a new ExitReasonCode fails to compile here until it is
+      // classified above.
+      const unclassified: never = info.reason;
+      return unclassified;
+    }
+  }
+}
+
+/** Longest trigger persisted. Every trigger in the taxonomy is far shorter. */
+export const MAX_EXIT_TRIGGER_LENGTH = 100;
+
+/**
+ * Reduce an exit trigger to something that can be counted, before it is
+ * persisted on the VP record.
+ *
+ * Nearly every trigger is a fixed literal — 'pre-join:not-admitted',
+ * 'attendees-left', 'ZOOM_END_DIALOG' — and passes through untouched, which is
+ * the point: the value is only worth persisting if rows sharing a cause share a
+ * string. A few interpolate a platform error message instead ('error:…',
+ * 'poll-error:…'), and a Playwright message is long, multi-line and close to
+ * unique, so persisting it verbatim would leave those rows outside every
+ * aggregate and make the attribute a second, worse copy of `errorMessage` —
+ * which is where that prose belongs and already goes.
+ *
+ * So: the segment before the first colon — the part that classifies — is kept
+ * exactly, and everything after it is reduced to a slug, every time rather than
+ * only when the result is long. Doing it only to long triggers would leave a
+ * short platform message stored verbatim, and two reports of one failure
+ * differing by a word or a full stop would not group, which is the whole
+ * property this field is for. Playwright messages begin with their stable part
+ * ('Target closed', 'Execution context was destroyed'), so the slug still
+ * distinguishes causes.
+ *
+ * A trigger with no colon is left alone apart from the length cap. Those are
+ * the fixed ones — 'ZOOM_END_DIALOG', 'HANGUP_BUTTON_HIDDEN', 'attendees-left'
+ * — which are already one value per cause, and slugging them would only make
+ * them harder to recognise.
+ *
+ * Which is why a trigger that carries a detail puts it after a colon: that is
+ * the convention this function relies on, and `exit-reason.test.ts` holds the
+ * handlers to it rather than trusting them.
+ */
+export function normalizeExitTrigger(trigger?: string): string | undefined {
+  if (!trigger) return undefined;
+  const oneLine = trigger.replace(/\s+/g, ' ').trim();
+  if (!oneLine) return undefined;
+  const colon = oneLine.indexOf(':');
+  if (colon < 0) return oneLine.slice(0, MAX_EXIT_TRIGGER_LENGTH);
+  const prefix = oneLine.slice(0, colon);
+  const slug = oneLine
+    .slice(colon + 1)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  // The trailing hyphen trim matters for more than looks: without it the cap
+  // can cut mid-word and leave one, and normalising the result again would
+  // remove it, so the function would not be idempotent.
+  return `${prefix}:${slug}`.slice(0, MAX_EXIT_TRIGGER_LENGTH).replace(/-+$/, '');
 }
 
 export interface ExitInfo {

@@ -370,9 +370,41 @@ class Resolver:
     type_name: str
     field_name: str
     files: tuple[str, ...]
+    block: str
 
     def __repr__(self) -> str:  # shows up in pytest parametrize IDs
         return f"{self.type_name}.{self.field_name}"
+
+    @property
+    def mapping_source(self) -> str:
+        """Everything this resolver's mapping templates contain.
+
+        Inline templates live in the template block; the rest are separate files
+        under `source/appsync/`, named by `*S3Location` and uploaded at package
+        time. Both are read, because a field name is as easy to get wrong in one
+        as in the other.
+        """
+        parts = [self.block]
+        for location in self.files:
+            path = (TEMPLATE.parent / location).resolve()
+            if path.is_file():
+                parts.append(path.read_text())
+        return "\n".join(parts)
+
+    @property
+    def input_references(self) -> set[str]:
+        """Input field names this resolver's mapping templates read.
+
+        Two things that look like field reads are not. A name followed by `(` is
+        a method call on the input map itself -- `put(...)`, `entrySet()`,
+        `keySet()`, `get(...)` -- excluded by the lookahead; `\\b` before it
+        stops the name matching short of the parenthesis. And a name the
+        template puts into the map itself is readable from it afterwards without
+        being part of the input type.
+        """
+        source = self.mapping_source
+        references = set(re.findall(r"\$ctx\.args\.input\.(\w+)\b(?!\s*\()", source))
+        return references - set(re.findall(r'\$ctx\.args\.input\.put\(\s*"(\w+)"', source))
 
 
 def _load_resolvers() -> list[Resolver]:
@@ -385,11 +417,20 @@ def _load_resolvers() -> list[Resolver]:
         field_name = re.search(r"^      FieldName: (\S+)", block, re.M)
         assert type_name and field_name, f"{logical_id} is missing TypeName/FieldName"
         files = tuple(re.findall(r"^      \w*S3Location: (\S+)", block, re.M))
-        resolvers.append(Resolver(logical_id, type_name.group(1), field_name.group(1), files))
+        resolvers.append(
+            Resolver(logical_id, type_name.group(1), field_name.group(1), files, block)
+        )
     return resolvers
 
 
 RESOLVERS = _load_resolvers()
+RESOLVERS_READING_INPUT = [resolver for resolver in RESOLVERS if resolver.input_references]
+
+
+def _resolver(type_name: str, field_name: str) -> Resolver:
+    matches = [r for r in RESOLVERS if (r.type_name, r.field_name) == (type_name, field_name)]
+    assert len(matches) == 1, f"expected exactly one resolver on {type_name}.{field_name}"
+    return matches[0]
 
 
 def test_template_declares_the_expected_resolver_count() -> None:
@@ -423,6 +464,135 @@ def test_resolver_mapping_template_files_exist(resolver: Resolver) -> None:
     for location in resolver.files:
         path = (TEMPLATE.parent / location).resolve()
         assert path.is_file(), f"{resolver.logical_id} references missing file {location}"
+
+
+def test_resolvers_reading_the_input_argument_were_found() -> None:
+    """Guards the inline-template extractor, as the resolver-count test does."""
+    assert len(RESOLVERS_READING_INPUT) >= 5, (
+        f"only found {len(RESOLVERS_READING_INPUT)} resolvers reading $ctx.args.input"
+    )
+
+
+@pytest.mark.parametrize("resolver", RESOLVERS_READING_INPUT, ids=repr)
+def test_resolver_reads_only_declared_input_fields(resolver: Resolver, schema) -> None:
+    """A mapping template reading an undeclared input field reads null forever.
+
+    The field can never arrive -- AppSync rejects an operation that sends it --
+    so the attribute the template meant to write is silently never written, with
+    no error anywhere. A rename on either side lands here instead.
+    """
+    root = {"Mutation": schema.mutation_type, "Query": schema.query_type}[resolver.type_name]
+    argument = root.fields[resolver.field_name].args["input"]
+    input_type = argument.type
+    while hasattr(input_type, "of_type"):
+        input_type = input_type.of_type
+    declared = set(input_type.fields)
+    undeclared = resolver.input_references - declared
+    assert not undeclared, (
+        f"{resolver.logical_id} reads {sorted(undeclared)} from "
+        f"{input_type.name}, which {SCHEMA.name} does not declare"
+    )
+
+
+def test_update_virtual_participant_writes_status_only_when_one_is_supplied() -> None:
+    """A caller updating one unrelated field must leave the lifecycle status alone.
+
+    `status` is optional on the input for exactly this reason: a caller that owns
+    only the CallId, or only the manual-action prompt, sends that field by itself
+    and the row keeps whatever status the VP's own lifecycle last wrote.
+    """
+    resolver = _resolver("Mutation", "updateVirtualParticipant")
+    status_set = re.search(
+        r'#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*'
+        r'\$util\.qr\( \$expSet\.put\("#status", ":status"\) \)',
+        resolver.block,
+    )
+    assert status_set, "the #status SET is not guarded on status being supplied"
+
+
+def test_update_virtual_participant_clear_flags_remove_their_attributes() -> None:
+    """Clearing has to be expressible, and distinguishable from omission.
+
+    An omitted input field means "leave this attribute as it is", so a detail
+    written during one phase of a VP's life can only be taken off the row again
+    through an explicit flag that maps to a DynamoDB REMOVE.
+    """
+    resolver = _resolver("Mutation", "updateVirtualParticipant")
+    assert "REMOVE" in resolver.block, "the resolver builds no REMOVE clause"
+    for flag, attributes in (
+        ("clearErrorMessage", ["errorMessage"]),
+        (
+            "clearManualAction",
+            [
+                "manualActionType",
+                "manualActionMessage",
+                "manualActionTimeoutSeconds",
+                "manualActionStartTime",
+                # The status the prompt interrupted is bookkeeping for the
+                # prompt, so it goes when the prompt goes.
+                "statusBeforeManualAction",
+            ],
+        ),
+    ):
+        branch = re.search(
+            r"#if\( \$util\.defaultIfNull\(\$ctx\.args\.input\."
+            + flag
+            + r", false\) == true \)(.*?)#(?:else|end)",
+            resolver.block,
+            re.S,
+        )
+        assert branch, f"{flag} does not gate a branch of the mapping template"
+        for attribute in attributes:
+            assert f'$expRemove.add("#{attribute}")' in branch.group(1), (
+                f"{flag} does not remove {attribute}"
+            )
+
+
+def test_clearing_a_prompt_is_conditional_on_the_row_the_caller_read() -> None:
+    """Both forms of the clear decide what to do from a read, so both are guarded.
+
+    With a status the caller is restoring the status a prompt interrupted, which
+    holds only while that prompt is still current. Without one it is clearing
+    opportunistically, having seen a row that was not prompting — so the
+    condition is the converse, and a prompt raised since does not have its
+    description removed from under it. Either way the writer with current
+    information wins.
+    """
+    resolver = _resolver("Mutation", "updateVirtualParticipant")
+    # `clearManualAction` gates two blocks: the REMOVE clause earlier in the
+    # template, and the condition. Both are wanted elsewhere, so select by
+    # content rather than by position.
+    gates = re.findall(
+        r"#if\(\s*\$util\.defaultIfNull\(\$ctx\.args\.input\.clearManualAction, false\)"
+        r" == true\s*\)(.*?)\n        #end",
+        resolver.block,
+        re.S,
+    )
+    bodies = [gate for gate in gates if '"condition"' in gate]
+    assert len(bodies) == 1, "expected exactly one clearManualAction-gated condition block"
+    body = bodies[0]
+    assert '"condition"' in body, "the gated branch emits no condition block"
+    assert "MANUAL_ACTION_REQUIRED" in body, "the condition does not name the prompting status"
+    # The condition's expression names are a separate block from the update's, so
+    # a name shared between them would be undeclared in one of the two.
+    assert '"#conditionStatus": "status"' in body
+
+    resume, opportunistic = (
+        re.search(
+            r"#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*"
+            r"#set\( \$conditionExpression = \"([^\"]+)\" \)",
+            body,
+        ),
+        re.search(
+            r"#else\s*\n\s*#set\( \$conditionExpression = \"([^\"]+)\" \)",
+            body,
+        ),
+    )
+    assert resume and opportunistic, "the two condition expressions are not both set"
+    assert resume.group(1) == "#conditionStatus = :promptingStatus"
+    assert opportunistic.group(1) == (
+        "attribute_not_exists(#conditionStatus) OR #conditionStatus <> :promptingStatus"
+    )
 
 
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:

@@ -6,7 +6,7 @@ import ZoomSdk from './zoom-sdk.js';
 import Teams from './teams.js';
 import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
-import { details, ExitInfo, formatExitMessage, didJoinMeeting } from './details.js';
+import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager } from './status-manager.js';
 import { recordingService } from './recording.js';
@@ -716,19 +716,23 @@ const main = async (): Promise<void> => {
         console.error('Meeting failed:', error.message);
         
         if (statusManager) {
+            // A thrown error carries no ExitInfo, so the prose shown to the
+            // user is still derived by matching on the message. Each branch
+            // also records which branch it took, so these rows are countable
+            // alongside the ones that arrive with a real trigger.
             const errorMsg = error.message.toLowerCase();
             if (errorMsg.includes('renderer crashed') || errorMsg.includes('target crashed')) {
-                await statusManager.setFailed('The meeting browser ran out of memory and crashed during join. Please try again.');
+                await statusManager.setFailed('The meeting browser ran out of memory and crashed during join. Please try again.', 'error:renderer-crashed');
             } else if (errorMsg.includes('password') || errorMsg.includes('passcode')) {
-                await statusManager.setFailed('Wrong meeting password');
+                await statusManager.setFailed('Wrong meeting password', 'error:password');
             } else if (errorMsg.includes('meeting not found') || errorMsg.includes('invalid meeting')) {
-                await statusManager.setFailed('Invalid meeting ID');
+                await statusManager.setFailed('Invalid meeting ID', 'error:meeting-not-found');
             } else if (errorMsg.includes('meeting ended') || errorMsg.includes('meeting has ended')) {
-                await statusManager.setFailed('Meeting already ended');
+                await statusManager.setFailed('Meeting already ended', 'error:meeting-ended');
             } else if (errorMsg.includes('permission denied') || errorMsg.includes('not authorized')) {
-                await statusManager.setFailed('Permission denied');
+                await statusManager.setFailed('Permission denied', 'error:permission-denied');
             } else {
-                await statusManager.setFailed(`Meeting join failed: ${error.message}`);
+                await statusManager.setFailed(`Meeting join failed: ${error.message}`, 'error:unclassified');
             }
         }
         
@@ -857,11 +861,18 @@ const main = async (): Promise<void> => {
         // COMPLETED — so the UI doesn't falsely report success on a meeting
         // the VP never joined. Genuine completions persist the human-readable
         // exit detail (e.g. "Asked to leave by Jeremy") alongside COMPLETED.
+        // The structured trigger is persisted next to the prose, so "why did
+        // joins fail today" is a query over the VP table rather than a search
+        // through container logs. Normalised on the way in so it stays a value
+        // rows can be grouped by: a handful of triggers interpolate a platform
+        // error message, and the full prose has its home in errorMessage. The
+        // log line above keeps the trigger exactly as the handler reported it.
+        const endTrigger = normalizeExitTrigger(exitInfo?.trigger);
         const joined = exitInfo ? didJoinMeeting(exitInfo) : true;
         if (success && joined) {
             const completionMessage = exitInfo ? formatExitMessage(exitInfo) : undefined;
             if (statusManager) {
-                await statusManager.setCompleted(completionMessage);
+                await statusManager.setCompleted(completionMessage, endTrigger);
             }
             console.log(
                 completionMessage
@@ -873,7 +884,7 @@ const main = async (): Promise<void> => {
             // Ran cleanly but never joined → FAILED with the reason.
             const failMessage = exitInfo ? formatExitMessage(exitInfo) : 'Could not join the meeting.';
             if (statusManager) {
-                await statusManager.setFailed(failMessage);
+                await statusManager.setFailed(failMessage, endTrigger);
             }
             console.log(`LMA Virtual Participant did not join: ${failMessage}`);
             process.exit(1);

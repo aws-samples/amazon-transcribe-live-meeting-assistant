@@ -108,7 +108,11 @@ export default class Chime {
         );
         if (!joinRes) {
             console.log('Could not locate Chime Join button — aborting');
-            return { reason: 'unknown', trigger: 'pre-join:no-join-button' };
+            // Still on the pre-join screen with no way off it, so the VP never
+            // entered the meeting: 'never-joined', matching the Teams handler's
+            // equivalent branch. Anything milder would be scored as a normal
+            // completion.
+            return { reason: 'never-joined', trigger: 'pre-join:no-join-button' };
         }
         await joinRes.element.click();
 
@@ -121,7 +125,12 @@ export default class Chime {
             await chatPanelElement?.click();
         } catch (error) {
             console.log('LMA Virtual Participant was not admitted into the meeting.');
-            throw new Error('Wrong meeting password or permission denied');
+            // Returned rather than thrown, so the reason travels as a code the
+            // orchestrator can act on. Throwing put the outcome through the
+            // message-matching classifier in index.ts, which could only guess
+            // at a cause ("Wrong meeting password or permission denied") from
+            // a branch that knows only that the in-meeting UI never appeared.
+            return { reason: 'never-joined', trigger: 'pre-join:not-admitted' };
         }
 
         await new Promise(resolve => setTimeout(resolve, 1000));

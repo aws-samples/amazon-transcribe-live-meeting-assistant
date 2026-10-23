@@ -20,6 +20,49 @@ import { VIRTUAL_PARTICIPANT_PATH } from '../../routes/constants';
 
 const client = generateClient();
 
+/**
+ * Whether an incoming VP update takes the sticky manual-action alert down.
+ *
+ * True for every status except MANUAL_ACTION_REQUIRED itself: a prompt that
+ * has been dealt with returns the VP to whatever it was doing when the prompt
+ * arrived, which is as often a pre-admission status as a mid-meeting one. An
+ * update with no status at all is not evidence either way.
+ */
+export const shouldClearManualAlert = (status) => !!status && status !== 'MANUAL_ACTION_REQUIRED';
+
+/**
+ * Whether an update says a prompt is open without saying anything about it.
+ *
+ * A subscription payload carries the fields the mutation selected; one that did
+ * not select the prompt fields reports the status and nulls. Such an update
+ * cannot be acted on — there is nothing to show, and nothing to conclude from
+ * its absence either. Only a prompting status reaches this, and the Virtual
+ * Participant container is the only thing that writes one; it selects the
+ * prompt fields, so this is a backstop against a writer that does not.
+ *
+ * Separate from the deduplication below, which covers the opposite case: a
+ * fully described payload for a prompt that is already on screen. The two guard
+ * different failures and removing either reopens one of them.
+ */
+export const isUndescribedPrompt = (vp) => vp?.status === 'MANUAL_ACTION_REQUIRED' && !vp?.manualActionType;
+
+/**
+ * Identity of the prompt an update is reporting, for telling a new prompt from
+ * another report of the one already on screen.
+ *
+ * Any write to the VP record while a prompt is open returns the prompt fields
+ * along with everything else, so the alert sees a stream of identical prompts —
+ * a join sub-step, a CallId link. Rebuilding on each would re-render an alert
+ * the user is already reading and sound the chime again.
+ *
+ * `manualActionStartTime` is the identity because it is stamped once, when the
+ * prompt is raised: a second, different prompt and a prompt whose timeout has
+ * been restarted each carry a new one and so count as new, while a repeat of
+ * the same prompt does not. `manualActionType` is folded in so that an update
+ * somehow lacking the timestamp still tells one kind of prompt from another.
+ */
+export const promptIdentity = (vp) => `${vp?.manualActionStartTime || ''}#${vp?.manualActionType || ''}`;
+
 const ON_UPDATE_VP = /* GraphQL */ `
   subscription OnUpdateVirtualParticipant {
     onUpdateVirtualParticipant {
@@ -173,6 +216,11 @@ const ManualActionAlerts = () => {
   // cancel (suppress) a notification if the VP transitions out of
   // MANUAL_ACTION_REQUIRED within the debounce window.
   const pendingNotificationsRef = useRef(new Map());
+  // The prompt currently on screen for each VP, by `promptIdentity`. Held in a
+  // ref rather than derived from `alerts` because the handler is a useCallback
+  // that would otherwise close over a stale copy of that state. Dropped when
+  // the prompt clears, so a later prompt for the same VP is shown afresh.
+  const shownPromptRef = useRef(new Map());
 
   // Triggered by the click on the "Enable desktop notifications" banner
   // button. Browsers require a real user gesture for requestPermission()
@@ -306,9 +354,51 @@ const ManualActionAlerts = () => {
         status: vp.status,
         owner: vp.Owner,
       });
+      // A subscription delivers the fields the mutation behind it selected, so
+      // an update from a writer that did not select the prompt fields arrives
+      // with the prompt status and nothing to describe it. That payload is not
+      // evidence about the prompt in either direction: rebuilding the alert
+      // from it would replace the real message with generic text, and clearing
+      // it would drop an alert the VP still needs. The container selects those
+      // fields on every write, so this is the backstop for a writer that
+      // does not.
+      if (isUndescribedPrompt(vp)) {
+        return;
+      }
+      // The sticky MANUAL alert belongs to a prompt that is still open, so it
+      // goes as soon as the VP reports any other status — not only the three
+      // that mean it is in the meeting. A prompt raised before admission
+      // resumes JOINING or CONNECTING when it is cleared, and the alert has to
+      // go then too; the viewer's own banner, which keys off the status
+      // directly, already does. A payload carrying no status says nothing
+      // about the prompt and clears nothing.
+      //
+      // This also cancels a desktop notification still inside the 15s debounce
+      // window: most prompts clear quickly (a transient consent dialog the VP
+      // dismisses itself), and an OS notification for one of those is noise.
+      if (shouldClearManualAlert(vp.status)) {
+        setAlerts((prev) => prev.filter((a) => a.id !== `${vp.id}#manual`));
+        cancelPendingNotification(vp.id, ALERT_KIND.MANUAL);
+        // Forget which prompt was on screen, so the deduplication below cannot
+        // outlive the alert whose duplicates it was suppressing.
+        shownPromptRef.current.delete(vp.id);
+      }
+
       if (vp.status === 'MANUAL_ACTION_REQUIRED') {
         const alertId = `${vp.id}#manual`;
         if (dismissedRef.current.has(alertId)) return;
+        // Only a prompt that is not already on screen is worth showing again.
+        // Every write to the VP record returns the open prompt along with
+        // whatever it changed, and the writes that land during a prompt are
+        // ones this component should not react to — a join sub-step from the
+        // join loop that runs alongside the dialog watchdog, a CallId link
+        // mid-meeting. Rebuilding on those re-renders an alert the user is
+        // reading and sounds the chime again. A genuinely new prompt, or the
+        // same kind raised afresh with its timeout restarted, carries a new
+        // start time and so passes.
+        const identity = promptIdentity(vp);
+        if (shownPromptRef.current.get(vp.id) === identity) return;
+        shownPromptRef.current.set(vp.id, identity);
         setAlerts((prev) => [
           ...prev.filter((a) => a.id !== alertId),
           {
@@ -342,16 +432,6 @@ const ManualActionAlerts = () => {
           },
         ]);
         fireBrowserNotification(vp, ALERT_KIND.FAILED);
-      } else if (
-        // Auto-clear MANUAL alert when VP transitions out of MANUAL_ACTION_REQUIRED.
-        // Also cancel any pending desktop-notification scheduled within the
-        // 15s debounce window — most MANUAL_ACTION transitions auto-clear
-        // quickly (e.g. transient consent dialogs the VP itself dismisses)
-        // and we don't want to fire an OS notification for them.
-        ['JOINED', 'ACTIVE', 'COMPLETED'].includes(vp.status)
-      ) {
-        setAlerts((prev) => prev.filter((a) => a.id !== `${vp.id}#manual`));
-        cancelPendingNotification(vp.id, ALERT_KIND.MANUAL);
       }
     },
     [cancelPendingNotification, dismiss, fireBrowserNotification, openVPViewer],

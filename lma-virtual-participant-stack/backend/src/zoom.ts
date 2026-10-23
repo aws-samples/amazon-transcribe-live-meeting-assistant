@@ -1466,7 +1466,10 @@ export default class Zoom {
                         details.start = false;
                         this.requestEnd({
                             reason: 'removed-from-meeting',
-                            trigger: `participants-ui-${result.state.toLowerCase()}`,
+                            // The state goes after a colon so that
+                            // normalizeExitTrigger slugs it, as it does every
+                            // other detail a trigger carries.
+                            trigger: `participants-ui:${result.state.toLowerCase()}`,
                         });
                     }
                 } else if ((result.count ?? 0) <= 1) {

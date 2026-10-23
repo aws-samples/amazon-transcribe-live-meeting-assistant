@@ -75,3 +75,27 @@ describe('resolveStatusDescription', () => {
     expect(resolveStatusDescription('NOPE', 'EC2')).toBe(VP_STATUS_CONFIG.FAILED.description);
   });
 });
+
+describe('STATUS_CONFIG', () => {
+  // Whether this map covers every status a Virtual Participant can report is
+  // asserted on the container side, in
+  // `lma-virtual-participant-stack/backend/src/vp-status-updates.test.ts`,
+  // which reads this file's keys and compares them with the `VP_STATUS` union
+  // the container writes from. That test is set equality between the two, so it
+  // fails whichever side adds a status without the other — which a second
+  // hardcoded list over here would not. Vite will not read a file outside the
+  // UI package, so the comparison lives there rather than in both places.
+  it('gives every status a message, description, icon, type and colour', () => {
+    // A status present in the map but missing one of these renders as a gap in
+    // the status panel rather than as an obviously wrong value. How many
+    // statuses there are is not asserted here: the container-side test owns
+    // that, so adding one does not mean editing a count in two places.
+    const statuses = Object.entries(VP_STATUS_CONFIG);
+    expect(statuses.length).toBeGreaterThan(0);
+    statuses.forEach(([status, config]) => {
+      ['message', 'description', 'icon', 'type', 'color'].forEach((key) => {
+        expect(config[key], `${status}.${key}`).toBeTruthy();
+      });
+    });
+  });
+});
