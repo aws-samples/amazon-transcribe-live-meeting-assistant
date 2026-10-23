@@ -339,11 +339,14 @@ def test_a_caller_without_a_publisher_still_sends_its_token(strands_module, clie
 
 
 def test_the_mutation_document_is_parsed_once_and_names_addchattoken(strands_module):
-    """Parsed per token previously; the document is a constant.
+    """The document is a constant, so it is parsed once per execution environment.
 
-    Asserted on the parsed AST rather than on the text, so a document that no
-    longer sends `addChatToken` fails here even if the string survives in a
-    comment somewhere.
+    gql re-parses the string on every `gql()` call, and the mutation does not
+    vary by token, so publishing an answer need pay for the parse only once.
+
+    Asserted on the parsed AST rather than on the text, so a document that does
+    not send `addChatToken` fails here even if the string survives in a comment
+    somewhere.
     """
     first = strands_module.get_chat_token_mutation()
     assert strands_module.get_chat_token_mutation() is first
@@ -402,7 +405,6 @@ def _invoke(strands_module, strands_stub, monkeypatch, segment_args: dict, chunk
     monkeypatch.setattr(strands_module, "EVENT_API_HTTP_URL", "")
     monkeypatch.setenv("KB_ID", "")
     monkeypatch.setenv("TRANSCRIPT_KB_ID", "")
-    monkeypatch.setenv("TAVILY_API_KEY", "")
     entry_points = _stub_agent(strands_stub, monkeypatch, chunks)
 
     assert strands_module.ENABLE_STREAMING, "streaming must be on for these tests to mean anything"

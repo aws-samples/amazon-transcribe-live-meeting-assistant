@@ -243,6 +243,30 @@ def test_the_knowledge_base_model_defaults_to_a_verified_model(main_template: di
     )
 
 
+def test_the_knowledge_base_model_default_is_the_same_in_all_three_places(
+    main_template: dict, meetingassist_template: dict, strands_module
+):
+    """One default, written down three times, pinned so the copies cannot drift.
+
+    `lma-main.yaml` is the only one an ordinary deployment reads. The nested
+    template's default is reached by deploying it on its own, and the function's
+    `DEFAULT_KB_MODEL_ID` by an environment that sets no `KB_MODEL_ID` at all.
+    Those two are fallbacks, which is exactly why a disagreement between them
+    would go unnoticed: it would surface only in the deployment shape nobody
+    exercises.
+    """
+    main_default = main_template["Parameters"][KB_MODEL_PARAMETER]["Default"]
+    nested_default = meetingassist_template["Parameters"][KB_MODEL_PARAMETER]["Default"]
+    assert nested_default == main_default, (
+        f"{KB_MODEL_PARAMETER} defaults to {nested_default!r} in the meeting-assist "
+        f"template and {main_default!r} in lma-main.yaml"
+    )
+    assert strands_module.DEFAULT_KB_MODEL_ID == main_default, (
+        f"DEFAULT_KB_MODEL_ID is {strands_module.DEFAULT_KB_MODEL_ID!r} but "
+        f"{KB_MODEL_PARAMETER} defaults to {main_default!r}"
+    )
+
+
 def test_the_knowledge_base_model_is_validated_at_deploy_time(main_template: dict):
     """It is a second model to enable in the Bedrock console, so it joins the check.
 
@@ -541,7 +565,6 @@ def test_the_handler_gives_the_knowledge_base_tools_the_knowledge_base_model(
     monkeypatch.setenv("TRANSCRIPT_KB_ID", "ABCDEFGHIJ")
     monkeypatch.setenv("KB_REGION", "us-west-2")
     monkeypatch.setenv("KB_ACCOUNT_ID", "123456789012")
-    monkeypatch.setenv("TAVILY_API_KEY", "")
     # No MCP servers, no AppSync and no DynamoDB table, so this invocation needs
     # nothing but the stubs below.
     monkeypatch.setattr(strands_module, "MCP_LOADER_AVAILABLE", False)
@@ -600,6 +623,11 @@ def test_the_handler_gives_the_knowledge_base_tools_the_knowledge_base_model(
     assert factory_calls["meeting_history"]["kb_model_id"] == KB_MODEL_UNDER_TEST
     assert factory_calls["document_search"]["kb_model_id"] == KB_MODEL_UNDER_TEST
     assert bedrock_model_kwargs["model_id"] == AGENT_MODEL_UNDER_TEST
-    # Both knowledge-base tools were offered, which is what a 5.5 agent model used
-    # to prevent when it was also the retrieval model.
-    assert len(agent_tools) == 2
+    # Both knowledge-base tools are offered, and both generate with the
+    # knowledge-base model, even though the agent runs on a model a knowledge base
+    # refuses. That is the whole point of the two parameters being independent.
+    #
+    # Asserted by name rather than by count so that the absence of web_search is a
+    # stated condition of this test -- this deployment configures no Tavily secret
+    # -- rather than something a reader has to infer from the number 2.
+    assert sorted(t.__name__ for t in agent_tools) == ["document_search", "meeting_history"]

@@ -1424,7 +1424,7 @@ def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_com
     ``publisher`` is the AppsyncPublisher holding the connection this answer's
     tokens go out on; the streaming loop creates one and passes it for every
     token. Without one a connection is opened and closed for this single token,
-    which is what any other caller wants and what the whole stream used to do.
+    which is what a caller publishing a single token on its own wants.
     """
     try:
         if not APPSYNC_GRAPHQL_URL:
