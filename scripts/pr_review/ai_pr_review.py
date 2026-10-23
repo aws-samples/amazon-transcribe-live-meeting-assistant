@@ -1256,17 +1256,18 @@ class Github:
                 for context in combined.get("statuses") or []:
                     outcome = str(context.get("state") or "unknown")
                     counts[outcome] = counts.get(outcome, 0) + 1
-        # ⚠️ THE TUPLE HAS TO MATCH WHAT CAN ACTUALLY ARRIVE, and an earlier version of
-        # it did not. :meth:`_request` converts failures at CONNECT time into
-        # ``Skip``/``Failure`` because urllib raises ``URLError`` there — but an error
-        # while reading the response BODY comes straight out of the ``with`` block
-        # unwrapped. A socket timeout is ``TimeoutError`` and a dropped connection is
-        # ``ConnectionResetError`` (both ``OSError``), and a short read is
-        # ``http.client.IncompleteRead``, which is an ``HTTPException`` and not an
-        # ``OSError`` at all. :func:`_review_all` handles only ``Skip``, ``Failure``
-        # and ``TimeoutExpired``, so any of those would have stopped the entire run —
-        # and after the second lookup, which runs once the model has been paid for,
-        # that means discarding a finished review. Verified by raising each one.
+        # ⚠️ THE TUPLE HAS TO MATCH WHAT CAN ACTUALLY ARRIVE. :meth:`_request` wraps
+        # only connect-time failures; errors while reading the body
+        # (``TimeoutError``, ``ConnectionResetError``, ``http.client.IncompleteRead``)
+        # escape unwrapped, so they are listed here. The first two are ``OSError``
+        # subclasses; ``IncompleteRead`` is an ``HTTPException`` and not an
+        # ``OSError`` at all, which is why both base classes appear below.
+        #
+        # It matters because :func:`_review_all` handles only ``Skip``, ``Failure``
+        # and ``TimeoutExpired``, so anything else stops the entire run — and the
+        # second of this method's two call sites runs once the model has been paid
+        # for, where that means discarding a finished review. Each of the three was
+        # confirmed to escape before being listed.
         #
         # ⚠️ NOT bare ``Exception``, deliberately. An ``AttributeError`` or
         # ``NameError`` here means this method is broken, and silently degrading to

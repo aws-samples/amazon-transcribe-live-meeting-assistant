@@ -1406,17 +1406,18 @@ def test_the_ci_status_lookup_never_costs_a_review(monkeypatch) -> None:
     monkeypatch.setattr(forge, "_request", raise_skip)
     assert forge.check_status("abc1234") == ""
 
-    # ⚠️ THE ERRORS THAT ACTUALLY REACH IT, which the first version of the `except`
-    # tuple did not cover. `Github._request` converts failures at CONNECT time into
-    # Skip/Failure (urllib raises URLError there), but an error while reading the
-    # response BODY is raised as-is from inside the `with` block — a socket timeout
-    # or a reset peer — and `IncompleteRead` is an `http.client.HTTPException`, which
-    # is not an `OSError` at all. `_review_all` handles only Skip, Failure and
-    # TimeoutExpired, so any of these would have stopped the whole run.
+    # ⚠️ THE ERRORS THAT ACTUALLY REACH IT, which is the property this pins and the
+    # one easiest to get wrong by reading `_request` and stopping there.
+    # `Github._request` converts failures at CONNECT time into Skip/Failure (urllib
+    # raises URLError there), but an error while reading the response BODY is raised
+    # as-is from inside the `with` block — a socket timeout or a reset peer — and
+    # `IncompleteRead` is an `http.client.HTTPException`, which is not an `OSError`
+    # at all. `_review_all` handles only Skip, Failure and TimeoutExpired, so any of
+    # these escaping stops the whole run.
     #
     # The worst case is the SECOND lookup, after the paid model call: a blip there
-    # would discard a finished review. That is the hazard this function's design is
-    # supposed to remove, and the tuple has to implement it, not just the docstring.
+    # discards a finished review. That is the hazard `check_status`'s design exists
+    # to remove, and the tuple has to implement it, not just the docstring.
     for error in (
         TimeoutError("timed out reading the response"),
         ConnectionResetError("peer reset the connection"),
@@ -1638,8 +1639,8 @@ def test_nothing_after_the_paid_model_call_can_discard_the_review(tmp_path) -> N
     deliverable and the artifact is a convenience copy, so a write failure is
     reported and stepped over.
 
-    Found by asking the same question of every post-model step as the `check_status`
-    wrapper, which is where this round's review pointed.
+    The same question applies to every step that runs after the model call, and this
+    is the one of them that writes to disk.
     """
     missing = tmp_path / "no" / "such" / "dir" / "review-1.md"
     review._write_artifact(missing, "a review body")  # must not raise
