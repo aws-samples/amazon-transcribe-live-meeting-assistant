@@ -253,7 +253,10 @@ validation now converses with the knowledge-base model as well as the agent's, s
 a stack whose account has never had access to the id in the new parameter is
 rejected at parameter validation instead of part-way through the update. A
 deployment that kept the agent default already has access to Haiku 4.5 and is
-unaffected.
+unaffected. This check depends on `ModelValidation`, which defaults to `true`;
+an automated deployment that sets it to `false` gets no up-front check, and a
+model it cannot reach shows up as a failing knowledge-base tool during a meeting
+instead.
 
 If a knowledge base is ever given a model it cannot generate with — reachable
 only by deploying `lma-meetingassist-setup-stack/template.yaml` on its own, since
