@@ -340,7 +340,14 @@ class TroubleshootingTools:
                 f"{unknown}. Call discover_log_groups and use the names it "
                 "returns verbatim."
             )
-        groups = groups[: min(_INSIGHTS_MAX_GROUPS, self._limits.max_log_groups)]
+        # Logs Insights takes at most 50 groups in one query. The ones past
+        # that are reported rather than dropped quietly: a group the model
+        # asked about and did not get searched would otherwise look like a
+        # group that held nothing, which is the confusion this whole module is
+        # built to avoid.
+        allowed = min(_INSIGHTS_MAX_GROUPS, self._limits.max_log_groups)
+        omitted = groups[allowed:]
+        groups = groups[:allowed]
 
         hours = self._limits.resolve_lookback_hours(lookback_hours)
         row_limit = self._resolve_limit(limit)
@@ -361,24 +368,33 @@ class TroubleshootingTools:
             row_limit=row_limit,
         )
 
+        guidance: List[str] = []
+        if not rows:
+            guidance.append(
+                "An empty rowCount means no line in this window matched. That "
+                "is not a cause; it narrows where the cause can be. Widen "
+                "lookbackHours, drop a term, or query a different component "
+                "before concluding anything from it."
+            )
+        if omitted:
+            guidance.append(
+                f"{len(omitted)} log group(s) you named were NOT searched, "
+                "because one query can cover at most "
+                f"{_INSIGHTS_MAX_GROUPS}: see omittedLogGroupNames. Nothing "
+                "here says anything about those groups. Query them separately."
+            )
         return self._render(
             {
                 "logGroupNames": groups,
                 "unknownLogGroupNames": unknown,
+                "omittedLogGroupNames": [g for g in omitted],
                 "queryString": resolved_query,
                 "lookbackHours": hours,
                 "status": status,
                 "rowCount": len(rows),
                 "bytesScanned": scanned,
                 "rows": rows,
-                "guidance": (
-                    "An empty rowCount means no line in this window matched. "
-                    "That is not a cause; it narrows where the cause can be. "
-                    "Widen lookbackHours, drop a term, or query a different "
-                    "component before concluding anything from it."
-                )
-                if not rows
-                else None,
+                "guidance": " ".join(guidance) if guidance else None,
             }
         )
 

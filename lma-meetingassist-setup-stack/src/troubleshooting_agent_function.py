@@ -830,24 +830,31 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     )
 
     try:
-        answer = str(agent(build_question(event)))
-    except RunBudgetExhausted as exhausted:
-        # Not an error: the run reached a limit and the loop was unwound rather
-        # than paying for another turn. The caller still gets the output
-        # contract's three sections, saying plainly that nothing was concluded.
-        answer = _TRUNCATED_ANSWER.format(
-            reason=exhausted.reason, usage=json.dumps(budget.as_dict(), indent=2)
+        try:
+            answer = str(agent(build_question(event)))
+        except RunBudgetExhausted as exhausted:
+            # Not an error: the run reached a limit and the loop was unwound
+            # rather than paying for another turn. The caller still gets the
+            # output contract's three sections, saying plainly that nothing was
+            # concluded.
+            answer = _TRUNCATED_ANSWER.format(
+                reason=exhausted.reason, usage=json.dumps(budget.as_dict(), indent=2)
+            )
+    finally:
+        # In a `finally` so a run that raised still records what it spent. A
+        # failed diagnosis has usually made several Bedrock calls, and that is
+        # exactly the cost somebody wants to see.
+        #
+        # Formatted into the message rather than passed as `extra`: this
+        # function logs through the stdlib logger to a log group with no JSON
+        # format, where `extra` fields are dropped. These numbers are the only
+        # record of what a diagnosis cost, so they have to be in the line.
+        logger.info(
+            "troubleshooting run finished: model=%s budget=%s",
+            MODEL_ID,
+            json.dumps(budget.as_dict()),
         )
 
-    # Formatted into the message rather than passed as `extra`: this function
-    # logs through the stdlib logger to a log group with no JSON format, where
-    # `extra` fields are dropped. These numbers are the only record of what a
-    # diagnosis cost, so they have to be in the line itself.
-    logger.info(
-        "troubleshooting run finished: model=%s budget=%s",
-        MODEL_ID,
-        json.dumps(budget.as_dict()),
-    )
     return {
         "answer": answer,
         "modelId": MODEL_ID,

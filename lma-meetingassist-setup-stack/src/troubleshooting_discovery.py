@@ -257,8 +257,14 @@ def stack_log_group_prefixes(
     prefixes.append(f"/aws/lambda-microvms/{stack_name}-asr-logs")
 
     if nested_stack_names:
+        # Every vended-states prefix before any nested-stack prefix. Within one
+        # loop they would interleave in whatever order ListStackResources
+        # returned, which can put the VP launch state machine's group after
+        # several broad prefixes — and that group is the only record a launch
+        # was attempted, so it must not be what a cap drops.
         for nested in nested_stack_names:
             prefixes.append(f"/aws/vendedlogs/states/{nested}")
+        for nested in nested_stack_names:
             prefixes.append(f"/{nested}/")
     else:
         prefixes.append(f"/aws/vendedlogs/states/{stack_name}-")

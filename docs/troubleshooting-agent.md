@@ -18,8 +18,11 @@ its CloudFormation parameters, and reporting a cause together with the evidence
 it rests on. It is built on the Strands Agents SDK and Amazon Bedrock, the same
 stack the Meeting Assistant uses.
 
-Everything it can do is read-only. It has no permission to change, restart,
-delete or redeploy anything.
+It reads and does not change anything it diagnoses: no permission to restart,
+delete or redeploy, and no ability to write to any table, log group or bucket.
+Two grants are not reads, and both exist so the investigation can report
+itself: publishing a progress step to the UI through a single GraphQL mutation,
+and cancelling a log query it started.
 
 ## Why it exists
 

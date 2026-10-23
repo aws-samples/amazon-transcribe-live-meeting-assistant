@@ -320,13 +320,78 @@ def test_resolving_nested_stack_names_is_granted_on_the_parent_only(
     assert resources_of(granting[0]) != ["*"]
 
 
-def test_the_role_holds_no_write_action(role: Dict[str, Any]) -> None:
-    """The whole role is read-only. A write action here is a design change."""
+#: Every action the role is allowed to hold. An allowlist rather than a
+#: denylist of write prefixes: a denylist cannot distinguish "this action is a
+#: read" from "nobody thought of this action", and the whole point of the role
+#: is that its surface is enumerable. Adding to this list is the deliberate act
+#: that a reviewer should see.
+#:
+#: Two of these are not reads, and both exist so the investigation can report
+#: itself rather than act on the deployment: `appsync:GraphQL` publishes a
+#: progress step through one mutation field, and `logs:StopQuery` cancels a
+#: query this role started.
+PERMITTED_ACTIONS = {
+    "logs:DescribeLogGroups",
+    "logs:StartQuery",
+    "logs:GetQueryResults",
+    "logs:StopQuery",
+    "dynamodb:GetItem",
+    "cloudformation:DescribeStacks",
+    "cloudformation:ListStackResources",
+    "bedrock:InvokeModel",
+    "bedrock:InvokeModelWithResponseStream",
+    "bedrock:GetInferenceProfile",
+    "bedrock:ApplyGuardrail",
+    "appsync:GraphQL",
+    "kms:Decrypt",
+    "kms:DescribeKey",
+}
+
+#: The permitted actions that are not reads, named so the claim "it reads and
+#: does not change anything it diagnoses" can be checked rather than trusted.
+PERMITTED_NON_READS = {"appsync:GraphQL", "logs:StopQuery"}
+
+
+def test_the_role_holds_only_the_actions_it_is_meant_to(
+    role: Dict[str, Any],
+) -> None:
+    """The role's whole surface, enumerated. A new action fails here."""
+    held = {
+        action for statement in statements(role) for action in actions_of(statement)
+    }
+
+    assert held <= PERMITTED_ACTIONS, (
+        f"actions not on the permitted list: {sorted(held - PERMITTED_ACTIONS)}. "
+        "If one of these belongs on an otherwise read-only diagnostic role, add "
+        "it to PERMITTED_ACTIONS and say why in the template's comment."
+    )
+
+
+def test_every_permitted_action_is_actually_granted(role: Dict[str, Any]) -> None:
+    """The other direction: a stale entry would hide a later removal."""
+    held = {
+        action for statement in statements(role) for action in actions_of(statement)
+    }
+
+    assert PERMITTED_ACTIONS <= held, f"never granted: {sorted(PERMITTED_ACTIONS - held)}"
+
+
+def test_the_only_non_read_actions_are_the_two_that_report_progress(
+    role: Dict[str, Any],
+) -> None:
+    """Pins the claim the template comment, the docs and the CHANGELOG all make.
+
+    A denylist of write prefixes used to stand in for this, and it did not
+    mention `appsync:` at all — so the prose said "no permission to change
+    anything" while the role could call a mutation, and nothing caught it.
+    """
     write_prefixes = (
         "logs:Put",
         "logs:Create",
         "logs:Delete",
         "logs:Tag",
+        "logs:Associate",
+        "logs:StopQuery",
         "dynamodb:Put",
         "dynamodb:Update",
         "dynamodb:Delete",
@@ -335,13 +400,25 @@ def test_the_role_holds_no_write_action(role: Dict[str, Any]) -> None:
         "cloudformation:Update",
         "cloudformation:Delete",
         "cloudformation:Execute",
+        "appsync:",
         "iam:",
+        "lambda:",
         "s3:Put",
         "s3:Delete",
+        "secretsmanager:",
+        "sts:",
     )
-    for statement in statements(role):
-        for action in actions_of(statement):
-            assert not action.startswith(write_prefixes), action
+    held = {
+        action for statement in statements(role) for action in actions_of(statement)
+    }
+    non_reads = {a for a in held if a.startswith(write_prefixes)}
+
+    assert non_reads == PERMITTED_NON_READS, (
+        f"the role's non-read surface changed: {sorted(non_reads)}. The "
+        "template comment, docs/troubleshooting-agent.md and the CHANGELOG all "
+        "describe it as the two that report progress; update all three if this "
+        "is intended."
+    )
 
 
 def test_the_role_cannot_invoke_a_lambda_function(role: Dict[str, Any]) -> None:

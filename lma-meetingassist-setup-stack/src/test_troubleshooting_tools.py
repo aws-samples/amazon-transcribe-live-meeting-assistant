@@ -444,6 +444,43 @@ def test_the_number_of_groups_in_one_query_is_capped() -> None:
     assert len(client.start_query_calls[0]["logGroupNames"]) == 50
 
 
+def test_groups_past_the_query_limit_are_reported_not_dropped() -> None:
+    """A group the model asked about and did not get searched would otherwise
+    look exactly like a group that held nothing."""
+    many = [(f"/{STACK}/lambda/F{i}", 10) for i in range(60)]
+    client = FakeInsightsClient(groups=many, rows=[row(m="x")])
+
+    result = parsed(
+        make_tools(client).search_logs(",".join(name for name, _ in many))
+    )
+
+    assert len(result["logGroupNames"]) == 50
+    assert len(result["omittedLogGroupNames"]) == 10
+    assert set(result["omittedLogGroupNames"]).isdisjoint(result["logGroupNames"])
+    assert "were NOT searched" in result["guidance"]
+    assert "Query them separately" in result["guidance"]
+
+
+def test_a_query_within_the_limit_omits_nothing() -> None:
+    result = parsed(make_tools(FakeInsightsClient(rows=[row(m="x")])).search_logs(VP_GROUP))
+
+    assert result["omittedLogGroupNames"] == []
+    assert result["guidance"] is None
+
+
+def test_an_empty_result_and_an_omission_are_both_reported() -> None:
+    """Two separate things the model must not reason past, and it needs both."""
+    many = [(f"/{STACK}/lambda/F{i}", 10) for i in range(60)]
+    client = FakeInsightsClient(groups=many, rows=[])
+
+    result = parsed(
+        make_tools(client).search_logs(",".join(name for name, _ in many))
+    )
+
+    assert "not a cause" in result["guidance"]
+    assert "were NOT searched" in result["guidance"]
+
+
 # ── search_logs: windows, limits and results ────────────────────────────────
 
 

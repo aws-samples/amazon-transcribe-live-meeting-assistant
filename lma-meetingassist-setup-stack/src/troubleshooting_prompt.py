@@ -112,12 +112,15 @@ def get_system_prompt(dynamodb_client: Any, table_name: str) -> str:
             "the prompt template table is not configured for this function"
         )
 
-    # Two reads rather than one BatchGetItem. The custom item is normally
-    # present but empty, and can be absent entirely if an operator deleted it,
-    # so both "no override" and "no item" are ordinary outcomes here —
-    # BatchGetItem's partial-result handling would make either of those
-    # indistinguishable from a throttle, and a throttle must not be read as
-    # "the operator set no override".
+    # Two reads rather than one BatchGetItem, and the override is read first so
+    # the default is not fetched when it is not needed.
+    #
+    # An unreadable override — including a throttle — falls back to the shipped
+    # default with a warning, rather than failing the run. That is the right
+    # trade for this one field: the default is a complete, current prompt, so a
+    # diagnosis run on it is a good diagnosis, just not the operator's tuned
+    # one. The read that must succeed is the default's, below, and that one
+    # raises.
     try:
         custom = dynamodb_client.get_item(
             TableName=table_name,

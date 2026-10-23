@@ -475,8 +475,13 @@ Resources:
   # kept apart and should stay apart. Merging them for convenience would be a
   # change of posture, not a refactor.
   #
-  # Every grant below is scoped to this deployment's own resources, and the
-  # whole role is read-only. Two deliberate omissions:
+  # Every grant below is scoped to this deployment's own resources. The role
+  # reads and does not change anything it diagnoses; the only two grants that
+  # are not reads are appsync:GraphQL on the single addChatToken mutation, so
+  # the investigation can narrate itself to the UI, and logs:StopQuery, so a
+  # query this role started can be cancelled. Neither touches the deployment.
+  #
+  # Two deliberate omissions:
   #
   # * lambda:InvokeFunction is not granted. None of this agent's tools needs
   #   it, and it is the broadest mutating capability an otherwise read-only
