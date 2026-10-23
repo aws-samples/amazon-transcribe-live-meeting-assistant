@@ -78,11 +78,17 @@ class FakeContext:
 
 
 class FakeDynamo:
-    def __init__(self, meeting=None):
+    def __init__(self, meeting=None, then=None):
         self.meeting = MEETING_ROW if meeting is None else meeting
+        # What a read after the first one returns, for the case where the
+        # meeting changes while a run is going. None means it does not change.
+        self.then = then
+        self.reads = 0
 
     def get_item(self, **kwargs):  # noqa: D102
-        return {"Item": self.meeting} if self.meeting else {}
+        self.reads += 1
+        row = self.then if self.then is not None and self.reads > 1 else self.meeting
+        return {"Item": row} if row else {}
 
 
 class FakeLambda:
@@ -120,8 +126,10 @@ class FakeStarter:
         return {"StatusCode": 202}
 
 
-def install(monkeypatch, meeting=None, summary=NEW_SUMMARY, error=None, body=None, starter=None):
-    ddb = FakeDynamo(meeting=meeting)
+def install(
+    monkeypatch, meeting=None, summary=NEW_SUMMARY, error=None, body=None, starter=None, then=None
+):
+    ddb = FakeDynamo(meeting=meeting, then=then)
     fake_lambda = FakeLambda(summary=summary, error=error, body=body)
     fake_starter = starter or FakeStarter()
     written = []
@@ -499,6 +507,46 @@ def test_a_successful_run_stores_the_text_and_marks_it_generated(
     assert written[-1]["text"] == NEW_SUMMARY
     assert written[-1]["state"]["source"] == index.SOURCE_GENERATED
     assert written[-1]["state"]["status"] == index.STATUS_IDLE
+
+
+def test_a_run_the_meeting_outlived_is_discarded_rather_than_stored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A run started while a meeting was going summarised part of a transcript
+    the end-of-meeting summary covers in full, so its result is dropped: the two
+    writes are unordered, and the fuller summary is the one wanted."""
+    live = {**MEETING_ROW, "Status": {"S": "STARTED"}}
+    ended = {**MEETING_ROW, "Status": {"S": "ENDED"}}
+    _, _, _, written = install(monkeypatch, meeting=live, then=ended)
+    result = index.handler(RUN_EVENT, FakeContext())
+    assert result == {"ok": False, "reason": "superseded"}
+    # The state is written, so the panel stops showing a run in progress, but no
+    # text: the end-of-meeting summary is what the meeting keeps.
+    assert written[-1]["text"] is None
+    assert written[-1]["state"]["status"] == index.STATUS_IDLE
+    assert all(entry["text"] is None for entry in written)
+
+
+def test_a_run_on_a_meeting_that_was_already_over_is_stored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The ordinary case: regenerating a finished meeting. Nothing follows it
+    from the pipeline, so there is nothing for it to lose a race with."""
+    ended = {**MEETING_ROW, "Status": {"S": "ENDED"}}
+    _, _, _, written = install(monkeypatch, meeting=ended)
+    assert index.handler(RUN_EVENT, FakeContext())["ok"] is True
+    assert written[-1]["text"] == NEW_SUMMARY
+
+
+def test_a_run_that_finishes_while_the_meeting_is_still_going_is_stored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regenerating during a meeting is one of the documented reasons to press
+    the button, so a run that outlives nothing is stored as usual."""
+    live = {**MEETING_ROW, "Status": {"S": "STARTED"}}
+    _, _, _, written = install(monkeypatch, meeting=live)
+    assert index.handler(RUN_EVENT, FakeContext())["ok"] is True
+    assert written[-1]["text"] == NEW_SUMMARY
 
 
 def test_a_successful_run_clears_a_manual_mark(monkeypatch: pytest.MonkeyPatch) -> None:

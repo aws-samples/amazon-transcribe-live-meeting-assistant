@@ -36,7 +36,9 @@ the reasons to regenerate, so no override is ever passed.
 A failed run must leave the previous summary standing: a summary that was there
 and is now "An error occurred." is worse than a stale one. So the text is
 written only once a usable result is in hand, and the failure is recorded in the
-small state object beside it instead.
+small state object beside it instead. A run that the meeting outlived is
+discarded for the same reason: it summarised part of a transcript the
+end-of-meeting summary covers in full.
 """
 
 from __future__ import annotations
@@ -103,6 +105,10 @@ UNUSABLE_SUMMARIES = frozenset(
         "no summary available",
     }
 )
+
+# The meeting Status the pipeline writes when a meeting ends, after which it
+# produces the end-of-meeting summary. Same literal the Kinesis consumer uses.
+STATUS_MEETING_ENDED = "ENDED"
 
 SOURCE_GENERATED = "generated"
 SOURCE_MANUAL = "manual"
@@ -180,6 +186,12 @@ def caller_may_edit(meeting, identity):
     same rule as a DynamoDB condition use `contains`, which is a whole-element
     test on the List and a substring test on the String, because a condition
     expression cannot split a string; this path is the exact one.
+
+    One difference from the templates is deliberate: a caller with no
+    `username` falls back to `sub` here, where a VTL condition matches on
+    `username` alone. An AppSync Cognito caller always carries a username, so
+    the fallback is a belt for a shape that does not arrive rather than a
+    second way in.
     """
     if not identity:
         return True
@@ -448,8 +460,10 @@ def run(call_id):
     # a successful run replaces the text whatever the label says, which is what
     # regenerating means, and `is_running` records the one case the panel's
     # confirmation does not cover.
-    state = parse_state((read_meeting(call_id) or {}).get("CallSummaryState"))
+    meeting = read_meeting(call_id) or {}
+    state = parse_state(meeting.get("CallSummaryState"))
     previous_source = state.get("source") or SOURCE_GENERATED
+    was_live = meeting.get("Status") != STATUS_MEETING_ENDED
 
     try:
         summary = invoke_summary_function(call_id)
@@ -473,6 +487,26 @@ def run(call_id):
             },
         )
         return {"ok": False}
+
+    # A run started while the meeting was still going summarised the transcript
+    # as it stood then. If the meeting has since ended, the pipeline is writing
+    # its own summary from the whole transcript, and this one -- built from part
+    # of it -- must not land on top of that, nor on the Knowledge Base snapshot
+    # the summariser refreshed. The two writes are unordered, so which arrived
+    # first says nothing; this is dropped either way. Nothing is lost: the
+    # fuller summary is the one the user wanted, and Regenerate is there to run
+    # again afterwards.
+    if was_live and (read_meeting(call_id) or {}).get("Status") == STATUS_MEETING_ENDED:
+        LOGGER.info(
+            "Discarding the regenerated summary for %s: the meeting ended while it ran, "
+            "so the end-of-meeting summary covers more of the transcript",
+            call_id,
+        )
+        write_summary(
+            call_id,
+            state={"source": previous_source, "status": STATUS_IDLE, "updatedAt": now},
+        )
+        return {"ok": False, "reason": "superseded"}
 
     write_summary(
         call_id,

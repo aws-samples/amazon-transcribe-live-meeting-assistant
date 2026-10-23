@@ -238,9 +238,13 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
   // end-of-meeting summary from the Kinesis pipeline when it does end, and that
   // write replaces the text without asking -- so an edit made beforehand would
   // be discarded with none of the confirmation an edit is promised, and the
-  // panel would go on showing the Edited badge over generated text. Regenerate
-  // stays available during a meeting, because what it produces is a generated
-  // summary either way and the pipeline's is simply a later one.
+  // panel would go on showing the Edited badge over generated text.
+  //
+  // Regenerate stays available during a meeting, which is one of the documented
+  // reasons to press it: a meeting summarised while it was still going has
+  // since continued. A run that is still going when the meeting ends is
+  // discarded by the regenerator rather than written, because the pipeline's
+  // summary covers more of the transcript than that run saw.
   const meetingInProgress = item.recordingStatusLabel === IN_PROGRESS_STATUS;
 
   // Hand over from the local flag to the stored state as soon as anything about

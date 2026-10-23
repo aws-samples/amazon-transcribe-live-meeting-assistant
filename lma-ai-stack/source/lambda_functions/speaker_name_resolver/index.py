@@ -140,6 +140,12 @@ def caller_may_edit(meeting, identity):
     same rule as a DynamoDB condition use `contains`, which is a whole-element
     test on the List and a substring test on the String, because a condition
     expression cannot split a string; this path is the exact one.
+
+    One difference from the templates is deliberate: a caller with no
+    `username` falls back to `sub` here, where a VTL condition matches on
+    `username` alone. An AppSync Cognito caller always carries a username, so
+    the fallback is a belt for a shape that does not arrive rather than a
+    second way in.
     """
     if not identity:
         return True
