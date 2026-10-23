@@ -7,9 +7,11 @@
 mutation, and that line is what an operator searching CloudWatch finds. Two
 things about it are asserted here:
 
-* It names the exception's type and the frame it was raised in. A line carrying
-  only ``str()`` of an exception reads identically for a transport failure and
-  for a response the code could not use, which is not enough to act on.
+* It names the exception's type and the whole chain of frames from its
+  traceback. A line carrying only ``str()`` of an exception reads identically
+  for a transport failure and for a response the code could not use, which is
+  not enough to act on; the innermost frame on its own names only the helper
+  that raised, which on the real paths is gql or ``require_graphql_field``.
 * Where the exception carries GraphQL errors, the whole record carries their
   ``errorType`` and ``path`` and not the exception's own text -- not in the
   message, not in ``extra``, and not as a traceback, since a rendered traceback
@@ -110,10 +112,23 @@ MESSAGE_QUOTING_CONTENT = "rejected Transcript 'the figures we discussed'"
 
 
 def processor_for(error: Exception) -> tbp.TranscriptBatchProcessor:
-    """A processor whose single record's mutation raises ``error``."""
+    """A processor whose single record's mutation raises ``error``.
+
+    The mutation raises through a nested helper and re-raises with a bare
+    ``raise``, which is the shape the real paths have: a transport exception is
+    first raised inside gql and re-raised by the retry wrapper, and a
+    ``GraphQLResponseError`` is raised inside ``require_graphql_field``. A
+    mutation that raised directly would make a one-frame record look sufficient.
+    """
+
+    def raise_it() -> None:
+        raise error
 
     async def failing_mutation(**_kwargs: Any) -> None:
-        raise error
+        try:
+            raise_it()
+        except Exception:
+            raise
 
     instance = tbp.TranscriptBatchProcessor(
         appsync_client=FakeAppsyncClient(),
@@ -156,22 +171,26 @@ def exit_processor(processor: Any) -> Any:
 def rendered(record: Dict[str, Any]) -> str:
     """Everything the record would put in a log stream, message and kwargs.
 
-    `exc_info` lands in the kwargs, so a traceback cannot slip past an assertion
-    that only reads the message.
+    `exc_info` and `extra` both land in the kwargs, so neither a traceback nor a
+    field can slip past an assertion that only reads the message.
     """
     return f"{record['message']} {record['kwargs']!r}"
 
 
-def test_the_failure_line_names_the_exception_type_and_frame():
+def test_the_failure_record_names_the_exception_type_and_the_frame_chain():
     """A line carrying only str() reads the same for every kind of failure."""
     processor = processor_for(ValueError("invalid AppSync schema"))
     assert exit_processor(processor)
     assert len(failure_records()) == 1
-    line = failure_records()[0]["message"]
-    assert "ValueError" in line
-    assert "invalid AppSync schema" in line
-    # The frame, so the line says which of a record's mutations this was.
-    assert f"{__file__}:" in line and "failing_mutation" in line
+    record = failure_records()[0]
+    assert "ValueError" in record["message"]
+    assert "invalid AppSync schema" in record["message"]
+    # The chain, so the record says which of a record's mutations this was --
+    # the innermost frame alone would name only the helper that raised.
+    frames = record["kwargs"]["extra"]["frames"]
+    assert any("in failing_mutation" in frame for frame in frames), frames
+    assert any("in raise_it" in frame for frame in frames), frames
+    assert all(f"{__file__}:" in frame for frame in frames)
 
 
 def test_the_failure_line_carries_error_types_not_the_graphql_message():

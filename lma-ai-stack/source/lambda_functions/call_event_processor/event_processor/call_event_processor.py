@@ -36,8 +36,8 @@ from graphql_helpers import (
     graphql_error_messages,
     graphql_errors,
     optional_graphql_field,
-    raising_frame,
     require_graphql_field,
+    traceback_frames,
     transcript_segment_fields,
     transcript_segment_sentiment_fields,
 )
@@ -393,15 +393,15 @@ async def get_call_status(
             logger=LOGGER,
         )
     except Exception as error:  # pylint: disable=broad-except
-        # The frame and the reduced errors rather than a traceback: nothing above
-        # sees this exception, since the fail-open contract swallows it, so this
-        # line is the whole record of it and a traceback would end in the
-        # exception's own text.
+        # Frames and the reduced errors rather than a rendered traceback: nothing
+        # above sees this exception, since the fail-open contract swallows it, so
+        # this line is the whole record of it, and a rendered traceback would end
+        # in the exception's own text.
         LOGGER.error(
-            "could not read current status for call %s - raised at [%s] - error: [%s]",
+            "could not read current status for call %s - error: [%s]",
             call_id,
-            raising_frame(error),
             graphql_errors(error) or error,
+            extra=dict(frames=traceback_frames(error)),
         )
         return None
 

@@ -15,7 +15,7 @@ from gql.client import AsyncClientSession, ExecutionResult
 
 # module imports from Lambda layer
 # pylint: disable=import-error
-from graphql_helpers import graphql_errors, raising_frame
+from graphql_helpers import graphql_errors, traceback_frames
 
 # pylint: enable=import-error
 
@@ -47,7 +47,9 @@ async def execute_gql_query_with_retries(
         of a GraphQL query error. Uses exponential backoff with base 2
     :param logger: Logger
     :param should_ignore_exception_fn: Function that is called when there is an
-        exception to verify it it should be ignored
+        exception to verify it it should be ignored. Asked on every attempt,
+        before the retry budget is checked, so an error it recognises is
+        recognised on the last attempt as well as the first
     :param ignored_exception_response: Response to send when an exception has
         been ignored
     """
@@ -96,14 +98,14 @@ async def execute_gql_query_with_retries(
                 break
 
             if retries >= max_retries:
-                # The frame, not a traceback, for the reason above; and one line
-                # rather than two, because the exception is re-raised and the
-                # caller logs it again.
+                # Frames, not a rendered traceback, for the reason above; and one
+                # line rather than two, because the exception is re-raised and
+                # the caller logs it again.
                 logger.error(
-                    "max retries on query - retries: [%d] - raised at [%s] - error: [%s]",
+                    "max retries on query - retries: [%d] - error: [%s] - frames: [%s]",
                     retries,
-                    raising_frame(error),
                     reduced_error,
+                    traceback_frames(error),
                 )
                 raise
 

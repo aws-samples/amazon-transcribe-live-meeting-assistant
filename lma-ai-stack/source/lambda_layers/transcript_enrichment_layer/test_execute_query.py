@@ -164,8 +164,8 @@ def test_no_record_above_debug_carries_a_traceback(query, caplog):
     for record in above_debug(caplog.records):
         assert record.exc_info is None, rendered(record)
         assert record.exc_text is None, record.exc_text
-    # The frame a traceback would be read for is logged on its own instead.
-    assert any("raised at" in record.getMessage() for record in above_debug(caplog.records))
+    # The frames a traceback would be read for are logged on their own instead.
+    assert any("frames:" in record.getMessage() for record in above_debug(caplog.records))
 
 
 def test_no_record_above_debug_carries_the_query_document(query, caplog):

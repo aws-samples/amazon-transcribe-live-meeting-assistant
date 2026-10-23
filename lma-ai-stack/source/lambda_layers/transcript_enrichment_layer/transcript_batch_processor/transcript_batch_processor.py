@@ -19,7 +19,7 @@ from gql.client import AsyncClientSession
 # module imports from Lambda layer
 # pylint: disable=import-error
 from appsync_utils import AppsyncAioGqlClient
-from graphql_helpers import graphql_errors, raising_frame
+from graphql_helpers import graphql_errors, traceback_frames
 
 # pylint: enable=import-error
 
@@ -103,24 +103,20 @@ class TranscriptBatchProcessor:
                 )
                 for result in results:
                     if isinstance(result, Exception):
-                        # Three content-free fields: the exception type, the
-                        # frame it raised in -- which is what says which of a
-                        # record's mutations this was -- and its GraphQL errors
+                        # Three content-free fields: the exception type, its
+                        # traceback as frames -- the chain is what says which of
+                        # a record's mutations this was -- and its GraphQL errors
                         # reduced to errorType/path. The str() of a transport
                         # exception is its first GraphQL error message, so it is
-                        # used only for an exception carrying no such errors.
-                        #
-                        # No traceback here, deliberately: a rendered traceback
-                        # ends in the exception's own text. The handler that
-                        # collects these errors logs one with the traceback, so
-                        # this line can stay content-free without the frame
-                        # becoming unobtainable.
+                        # used only for an exception carrying no such errors, and
+                        # the frames go in without the line a rendered traceback
+                        # ends in.
                         errors = graphql_errors(result)
                         LOGGER.error(
-                            "transcript api mutation exception: %s at %s: %s",
+                            "transcript api mutation exception: %s: %s",
                             type(result).__name__,
-                            raising_frame(result),
                             errors if errors else result,
+                            extra=dict(frames=traceback_frames(result)),
                         )
                         self._has_error = True
                         self._errors.append(result)

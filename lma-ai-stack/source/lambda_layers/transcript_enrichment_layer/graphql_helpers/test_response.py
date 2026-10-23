@@ -33,9 +33,9 @@ from graphql_helpers.response import (
     graphql_errors,
     is_retryable_graphql_response,
     optional_graphql_field,
-    raising_frame,
     require_graphql_field,
     response_data,
+    traceback_frames,
 )
 
 LOGGER = logging.getLogger("test_graphql_response")
@@ -278,28 +278,55 @@ def test_error_summaries_are_read_off_an_exception_without_its_message():
     assert "the figures we discussed" in str(error)
 
 
-def test_the_raising_frame_names_the_innermost_frame_and_not_the_exception():
-    """What the log lines carry in place of a traceback."""
+def test_the_traceback_frames_are_the_whole_chain_and_not_the_exception():
+    """What the log lines carry in place of a rendered traceback.
+
+    The whole chain, not the innermost frame: a transport exception re-raised by
+    a bare ``raise`` keeps the frame it was first raised in, and
+    ``GraphQLResponseError`` keeps ``require_graphql_field`` -- the same frame
+    whichever call failed. The call is named by the frames around it.
+    """
 
     def inner():
         raise ValueError("rejected Transcript 'the figures we discussed'")
 
-    def outer():
-        inner()
+    def a_named_mutation():
+        try:
+            inner()
+        except ValueError:
+            raise  # bare re-raise, as the retry wrapper does
 
     try:
-        outer()
+        a_named_mutation()
     except ValueError as error:
-        frame = raising_frame(error)
+        frames = traceback_frames(error)
 
-    assert __file__ in frame
-    assert " in inner" in frame, frame
-    assert "the figures we discussed" not in frame
+    rendered = " ".join(frames)
+    assert "in a_named_mutation" in rendered, rendered
+    assert "in inner" in rendered, rendered
+    assert "the figures we discussed" not in rendered
+    assert all(__file__ in frame and " in " in frame for frame in frames)
 
 
-def test_the_raising_frame_of_an_unraised_exception_is_unknown():
+def test_the_frames_of_a_required_read_name_the_caller_not_just_the_helper():
+    """The helper raises, so its own frame alone would say nothing useful."""
+
+    def a_named_read():
+        return require_graphql_field({"getCall": None}, "getCall", logger=LOGGER)
+
+    try:
+        a_named_read()
+    except GraphQLResponseError as error:
+        frames = traceback_frames(error)
+
+    rendered = " ".join(frames)
+    assert "in require_graphql_field" in rendered, rendered
+    assert "in a_named_read" in rendered, rendered
+
+
+def test_an_unraised_exception_has_no_frames():
     """An exception built but never raised has no traceback to read."""
-    assert raising_frame(ValueError("never raised")) == "unknown"
+    assert traceback_frames(ValueError("never raised")) == []
 
 
 def test_error_messages_are_read_off_an_exception_that_carries_them():

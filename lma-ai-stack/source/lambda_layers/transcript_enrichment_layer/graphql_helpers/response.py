@@ -43,17 +43,16 @@ anything, and the message's length is reported in its place.
 deliberately not part of any description.
 
 A rendered Python traceback ends in the exception's own text, so the places that
-log a failure at the pipeline's default level use :func:`raising_frame` instead:
-it gives the frame a traceback would be read for without the text a traceback
-ends in. One traceback is kept on purpose, in the Kinesis handler that collects
-the batch's errors -- the chain of frames is what makes an unexpected response
-shape diagnosable at all, and one record of it per failing batch is the trade
-being made. Everything at default level below that handler is content-free.
+log a failure at the pipeline's default level use :func:`traceback_frames`
+instead: the chain of frames a traceback is read for, without the line it ends
+in. That chain is what makes an unexpected response shape diagnosable, so it is
+kept everywhere a traceback used to go rather than traded away.
 """
 
 from __future__ import annotations
 
 import logging
+import traceback
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 LOGGER = logging.getLogger(__name__)
@@ -111,23 +110,27 @@ class GraphQLResponseError(RuntimeError):
         )
 
 
-def raising_frame(error: BaseException) -> str:
-    """Where an exception was raised, as ``file:line in function``.
+def traceback_frames(error: BaseException) -> List[str]:
+    """An exception's traceback as ``file:line in function`` entries.
 
-    The innermost frame of the exception's traceback, which is the one that
-    identifies the failure. A string rather than a rendered traceback, because a
-    rendered traceback ends in the exception's own text -- which for a GraphQL
-    transport exception is its first error message, the thing the rest of this
-    module keeps out of a log line. An exception with no traceback, one built but
-    never raised, gives ``"unknown"``.
+    Outermost first, the same order a rendered traceback prints them, so the
+    chain identifies both the call that failed and where inside it. The frames
+    and nothing else: a rendered traceback ends in the exception's own text,
+    which for a GraphQL transport exception is its first error message, the thing
+    the rest of this module keeps out of a log line. Source lines are left out
+    too, so the entries stay one line each.
+
+    The innermost frame on its own would not do. A ``TransportQueryError``
+    re-raised by a bare ``raise`` keeps the frame gql first raised it in, and a
+    :class:`GraphQLResponseError` keeps :func:`require_graphql_field` -- the same
+    frame whichever call failed. It is the rest of the chain that names the call.
+
+    An exception with no traceback, one built but never raised, gives ``[]``.
     """
-    traceback_obj = error.__traceback__
-    if traceback_obj is None:
-        return "unknown"
-    while traceback_obj.tb_next is not None:
-        traceback_obj = traceback_obj.tb_next
-    frame = traceback_obj.tb_frame
-    return f"{frame.f_code.co_filename}:{traceback_obj.tb_lineno} in {frame.f_code.co_name}"
+    return [
+        f"{frame.filename}:{frame.lineno} in {frame.name}"
+        for frame in traceback.extract_tb(error.__traceback__)
+    ]
 
 
 def response_data(response: Any) -> Any:

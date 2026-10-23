@@ -279,18 +279,16 @@ def test_get_call_status_records_a_raised_query_without_a_traceback(schema, monk
     status = run(cep.get_call_status(message={"CallId": "call-1"}, appsync_session=session))
     assert status is None, "fail-open: an unreadable status is unknown"
 
-    errors = cep.LOGGER.at_level("ERROR")
-    assert len(errors) == 1, f"expected one error line, got {errors}"
-    assert "ServiceUnavailable" in errors[0]
-    assert "raised at" in errors[0]
-    assert MESSAGE_QUOTING_CONTENT not in errors[0]
+    records = [record for record in cep.LOGGER.records if record["level"] == "ERROR"]
+    assert len(records) == 1, f"expected one error record, got {records}"
+    assert "ServiceUnavailable" in records[0]["message"]
+    assert MESSAGE_QUOTING_CONTENT not in records[0]["message"]
+    # The frames, so the line says where the read failed.
+    frames = records[0]["kwargs"]["extra"]["frames"]
+    assert any("in raising_execute" in frame for frame in frames), frames
     # No traceback anywhere in the record: a rendered one ends in that text.
     assert cep.LOGGER.at_level("EXCEPTION") == []
-    assert all(
-        "exc_info" not in record["kwargs"]
-        for record in cep.LOGGER.records
-        if record["level"] == "ERROR"
-    )
+    assert all("exc_info" not in record["kwargs"] for record in records)
 
 
 def test_get_call_status_does_not_log_a_transcript_or_an_error_message(schema):
@@ -338,7 +336,14 @@ def test_get_call_details_raises_a_named_error_rather_than_an_attribute_error(sh
 
 
 def test_get_call_details_marks_a_request_shape_error_as_permanent(schema):
-    """A request the schema rejects will be rejected again on redelivery."""
+    """Covers the classification, not a shape this session can deliver.
+
+    gql raises ``TransportQueryError`` for a response carrying ``errors`` before
+    a caller holds it, so this arrives at ``get_call_details`` only through a
+    caller holding an ``ExecutionResult`` or a raw envelope. The classification
+    is informational either way -- see ``is_retryable_graphql_response`` -- and
+    this asserts it reaches the exception rather than that anything acts on it.
+    """
     session = FakeSession(
         schema, {"errors": [{"errorType": "ValidationError", "message": "bad input"}]}
     )
