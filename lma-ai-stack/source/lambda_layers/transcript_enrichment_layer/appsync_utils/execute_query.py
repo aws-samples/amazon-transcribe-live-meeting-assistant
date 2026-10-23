@@ -13,6 +13,12 @@ from graphql import print_ast
 from graphql.language.ast import DocumentNode
 from gql.client import AsyncClientSession, ExecutionResult
 
+# module imports from Lambda layer
+# pylint: disable=import-error
+from graphql_helpers import describe_exception, traceback_frames
+
+# pylint: enable=import-error
+
 LOGGER = logging.getLogger(__name__)
 DEFAULT_IGNORED_EXCEPTION_RESPONSE: Dict[str, object] = {"ok": True}
 
@@ -41,7 +47,11 @@ async def execute_gql_query_with_retries(
         of a GraphQL query error. Uses exponential backoff with base 2
     :param logger: Logger
     :param should_ignore_exception_fn: Function that is called when there is an
-        exception to verify it it should be ignored
+        exception to verify whether it should be ignored. Asked on every attempt,
+        before the retry budget is checked, so an error it recognises is
+        recognised on the last attempt as well as the first. It is called from
+        inside an ``except`` block and must not raise: an exception from it
+        replaces the one being handled
     :param ignored_exception_response: Response to send when an exception has
         been ignored
     """
@@ -69,20 +79,33 @@ async def execute_gql_query_with_retries(
             )
             break
         except Exception as error:  # pylint: disable=broad-except
+            # See graphql_helpers.response's "Log hygiene" note for what
+            # describe_exception leaves out and why. Local to these lines: the
+            # query document stays on the debug line above, which is the attempt
+            # they are about, because repeating it here would put the arguments
+            # of every retried write into a log stream that is on by default.
+            described_error = describe_exception(error)
+            # Asked before the retry budget is checked, so an error the caller
+            # recognises is recognised on the last attempt as well as the first.
+            # A write that timed out after it had in fact stored its item sees a
+            # condition failure on the retry, and that can be the final one.
+            if should_ignore_exception_fn(error):
+                logger.info("ignorable exception - not retrying - error: [%s]", described_error)
+                result = _ignored_exception_response
+                break
+
             if retries >= max_retries:
+                # Frames rather than a rendered traceback, because a rendered
+                # traceback ends in the exception's own text -- the same reason
+                # the error is reduced above. One line rather than two, because
+                # the exception is re-raised and the caller logs it again.
                 logger.error(
                     "max retries on query - retries: [%d] - error: [%s]",
                     retries,
-                    error,
-                    extra=dict(query=query_string),
+                    described_error,
+                    extra=dict(frames=traceback_frames(error)),
                 )
-                logger.exception("gql query exception")
                 raise
-
-            if should_ignore_exception_fn(error):
-                logger.info("ignorable exception - not retrying - error: [%s]", error)
-                result = _ignored_exception_response
-                break
 
             retries = retries + 1
             # exponential backoff with jitter using base 2
@@ -91,8 +114,7 @@ async def execute_gql_query_with_retries(
                 "error on query - retry: [%d] - sleeping for [%f]s - error: [%s]",
                 retries,
                 sleep_time,
-                error,
-                extra=dict(query=query_string),
+                described_error,
             )
             await asyncio.sleep(sleep_time)
 

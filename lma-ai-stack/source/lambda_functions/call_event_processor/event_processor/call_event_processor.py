@@ -11,7 +11,8 @@ import uuid
 from datetime import datetime
 from os import getenv
 from statistics import fmean
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional, TypedDict
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Mapping, Optional, TypedDict
 
 # third-party imports from Lambda layer
 import boto3
@@ -33,6 +34,11 @@ from gql.dsl import DSLMutation, DSLQuery, DSLSchema, dsl_gql
 from graphql.language.printer import print_ast
 from graphql_helpers import (
     call_fields,
+    describe_exception,
+    graphql_error_messages,
+    optional_graphql_field,
+    require_graphql_field,
+    traceback_frames,
     transcript_segment_fields,
     transcript_segment_sentiment_fields,
 )
@@ -133,6 +139,62 @@ CALL_ID = ""
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
+# The two messages a resolver raises when DynamoDB rejects its condition. Most
+# of them share ``source/appsync/dDbPutCondition.response.vtl``, which raises the
+# first; ``createCall`` writes transactionally and has its own
+# ``source/appsync/createCall.response.vtl``, which raises the second.
+PUT_CONDITION_FAILURE_MESSAGES = frozenset(
+    {
+        "item put condition failure",
+        "Item already exists",
+    }
+)
+
+# Stands in for a createCall result when the meeting was already created, so the
+# START branch can tell a first delivery from a redelivered one and invoke the
+# start-of-call hook once per meeting. Read-only rather than documented as such:
+# it is module state that ends up in the batch's results.
+CALL_ALREADY_CREATED: Mapping[str, Any] = MappingProxyType({"ok": True, "AlreadyExists": True})
+
+
+def is_put_condition_failure(error: Any) -> bool:
+    """Whether a write was rejected by its resolver's own condition.
+
+    Passed to ``execute_gql_query_with_retries`` as its
+    ``should_ignore_exception_fn``. What a rejection means is per resolver, and on
+    each of the three live call sites it means the row already holds a version of
+    this write that should not be replaced, so retrying buys nothing
+    (``execute_update_call_aggregation_mutation`` passes it too but has no
+    callers):
+
+    * ``createCall`` writes with ``attribute_not_exists(#PK)``, so a rejection is
+      a meeting that is already created -- a redelivered START event.
+    * ``addTranscriptSegment`` conditions only a *partial* segment, on
+      ``attribute_not_exists(IsPartial) OR IsPartial = :true``, so a rejection is
+      a partial arriving after the final segment it would have overwritten.
+    * ``updateCallAggregation`` writes through ``updateCall.request.vtl``, whose
+      condition is ``attribute_exists(#PK) AND #UpdatedAt < :UpdatedAt``, so a
+      rejection is an aggregation already superseded by a newer one -- which the
+      concurrent writes for one Kinesis batch produce routinely, because a later
+      segment's aggregation can land first. Dropping the superseded write is
+      intended: the one that won already covers the same segments, and the next
+      non-partial segment aggregates again. The same condition is rejected when
+      the meeting row is not there at all, and dropping that is harmless for a
+      different reason -- ``get_call_details`` reads the meeting earlier in the
+      same record and has already failed it on a null ``getCall``, so the
+      aggregation write is not reached.
+
+    The messages are read off whatever the transport raised -- gql keeps them in
+    an ``errors`` attribute on the exception, and a bare error mapping is
+    accepted as well. Any other shape yields no messages, so an unrecognised
+    failure is retried and reported rather than ignored, and nothing here raises:
+    the retry wrapper calls this from inside an ``except``.
+    """
+    return any(
+        message in PUT_CONDITION_FAILURE_MESSAGES for message in graphql_error_messages(error)
+    )
+
+
 ##########################################################################
 # Transcripts
 ##########################################################################
@@ -173,15 +235,12 @@ def add_transcript_segments(
             )
         )
 
-        def ignore_exception_fn(e):
-            return True if (e["message"] == "item put condition failure") else False
-
         tasks.append(
             execute_gql_query_with_retries(
                 query,
                 client_session=appsync_session,
                 logger=LOGGER,
-                should_ignore_exception_fn=ignore_exception_fn,
+                should_ignore_exception_fn=is_put_condition_failure,
             ),
         )
 
@@ -283,20 +342,31 @@ async def execute_create_call_mutation(
         )
     )
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
+    # A rejected condition here means the meeting is already created, and the
+    # caller has to be able to tell that from having created it: a redelivered
+    # START must not invoke the start-of-call hook a second time.
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
-        should_ignore_exception_fn=ignore_exception_fn,
+        should_ignore_exception_fn=is_put_condition_failure,
+        ignored_exception_response=CALL_ALREADY_CREATED,
     )
 
     query_string = print_ast(query)
     LOGGER.debug("query result", extra=dict(query=query_string, result=result))
 
     return result
+
+
+def was_already_created(create_call_result: Any) -> bool:
+    """Whether a createCall result came from a meeting that already existed.
+
+    True only for :data:`CALL_ALREADY_CREATED`, which
+    :func:`execute_create_call_mutation` returns in place of a result when the
+    resolver rejected its condition.
+    """
+    return bool(isinstance(create_call_result, Mapping) and create_call_result.get("AlreadyExists"))
 
 
 async def execute_update_call_status_mutation(
@@ -373,11 +443,23 @@ async def get_call_status(
             client_session=appsync_session,
             logger=LOGGER,
         )
-    except Exception:  # pylint: disable=broad-except
-        LOGGER.exception("could not read current status for call %s", call_id)
+    except Exception as error:  # pylint: disable=broad-except
+        # Frames and the reduced errors rather than a rendered traceback: nothing
+        # above sees this exception, since the fail-open contract swallows it, so
+        # this line is the whole record of it, and a rendered traceback would end
+        # in the exception's own text.
+        LOGGER.error(
+            "could not read current status for call %s - error: [%s]",
+            call_id,
+            describe_exception(error),
+            extra=dict(frames=traceback_frames(error)),
+        )
         return None
 
-    status = (result or {}).get("getCall", {}).get("Status")
+    # Optional, not required: a null getCall or a response without one leaves the
+    # status unknown, and an unknown status is what the fail-open contract above
+    # is for. The shape that came back is logged by the helper.
+    status = optional_graphql_field(result, "getCall", "Status", logger=LOGGER)
     LOGGER.debug("current call status", extra=dict(call_id=call_id, status=status))
     return status
 
@@ -430,7 +512,8 @@ async def execute_get_transcript_segments_query(
 async def get_aggregated_sentiment(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
-) -> Dict:
+) -> Optional[Sentiment]:
+    """The meeting's sentiment aggregation, or None if the segments were unreadable."""
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
@@ -440,15 +523,48 @@ async def get_aggregated_sentiment(
         raise ValueError("invalid AppSync schema")
     DSLSchema(appsync_session.client.schema)
 
-    result = await execute_get_transcript_segments_query(
-        message=message, appsync_session=appsync_session
-    )
+    try:
+        result = await execute_get_transcript_segments_query(
+            message=message, appsync_session=appsync_session
+        )
+    except Exception as error:  # pylint: disable=broad-except
+        # The segments could not be read at all -- a response carrying errors
+        # arrives from gql as a raised exception rather than as a null field.
+        # Letting it out would fail the record, and the transcript segment goes
+        # with it: its own write is gathered after this read. The aggregation is
+        # recomputed on the next final segment, so it is the cheaper thing to
+        # lose. `get_call_details` reads the same meeting earlier in this record
+        # and would already have failed it if AppSync were unreachable.
+        LOGGER.error(
+            "could not read the scored segments for call %s; aggregating nothing - error: [%s]",
+            call_id,
+            describe_exception(error),
+            extra=dict(frames=traceback_frames(error)),
+        )
+        return None
 
     sentiment_entry_list_by_channel: Dict[ChannelType, SentimentPerChannel] = {}
 
-    for segment in result.get("getTranscriptSegmentsWithSentiment").get(
-        "TranscriptSegmentsWithSentiment"
-    ):
+    # An empty list is a valid answer -- the meeting has no scored segments yet
+    # -- and aggregates to nothing. No list at all is not an answer: the caller
+    # returns None for it so that nothing is written, because an empty
+    # aggregation written with a fresh UpdatedAt passes updateCall's condition
+    # and would replace the stored one. Failing instead would fail the record
+    # that carried the segment, which is the outcome this read exists to avoid.
+    segments = optional_graphql_field(
+        result,
+        "getTranscriptSegmentsWithSentiment",
+        "TranscriptSegmentsWithSentiment",
+        logger=LOGGER,
+    )
+    if segments is None:
+        return None
+
+    for segment in segments:
+        # The list's element type is nullable, and a null entry carries nothing
+        # to aggregate.
+        if not isinstance(segment, dict):
+            continue
         channel = segment.get("Channel", None)
         if channel and channel in ["AGENT", "CALLER"]:
             if segment.get("SentimentWeighted", None):
@@ -499,7 +615,8 @@ async def get_aggregated_sentiment(
 async def get_aggregate_call_data(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
-) -> Dict:
+) -> Optional[Dict]:
+    """The meeting aggregation to write, or None when there is nothing to write."""
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
@@ -508,6 +625,10 @@ async def get_aggregate_call_data(
     total_duration = float(message.get("EndTime", 0.0)) * 1000
 
     sentiment = await get_aggregated_sentiment(message=message, appsync_session=appsync_session)
+    if sentiment is None:
+        # The scored segments could not be read. Writing the aggregation anyway
+        # would replace the stored one with an empty aggregation.
+        return None
 
     updated_at = message.get("UpdatedAt", datetime.utcnow().astimezone().isoformat())
     event_type = message.get("EventType", "")
@@ -528,9 +649,13 @@ async def get_call_aggregation_tasks(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
 ) -> List[Coroutine]:
+    """The updateCallAggregation task for this message, or none to send."""
     call_aggregation = await get_aggregate_call_data(
         message=message, appsync_session=appsync_session
     )
+    if call_aggregation is None:
+        return []
+
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
@@ -545,15 +670,12 @@ async def get_call_aggregation_tasks(
 
     tasks = []
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
     tasks.append(
         execute_gql_query_with_retries(
             query,
             client_session=appsync_session,
             logger=LOGGER,
-            should_ignore_exception_fn=ignore_exception_fn,
+            should_ignore_exception_fn=is_put_condition_failure,
         ),
     )
 
@@ -567,6 +689,10 @@ async def execute_update_call_aggregation_mutation(
     call_aggregation = await get_aggregate_call_data(
         message=message, appsync_session=appsync_session
     )
+    if call_aggregation is None:
+        # Same reasoning as get_call_aggregation_tasks: nothing to write beats
+        # replacing the stored aggregation with an empty one.
+        return {"ok": True}
 
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
@@ -580,14 +706,11 @@ async def execute_update_call_aggregation_mutation(
         )
     )
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
-        should_ignore_exception_fn=ignore_exception_fn,
+        should_ignore_exception_fn=is_put_condition_failure,
     )
 
     query_string = print_ast(query)
@@ -1107,13 +1230,21 @@ async def get_call_details(
         logger=LOGGER,
     )
 
-    result = result["getCall"]
-    LOGGER.debug("Get Call result %s", json.dumps(result))
+    # Required, not optional: every field returned below comes from the meeting
+    # record, so a response without one leaves nothing to return. Raising fails
+    # the Kinesis record, which the event source mapping redelivers and finally
+    # describes to its on-failure destination -- the opposite of returning blanks
+    # and reporting success.
+    call = require_graphql_field(result, "getCall", logger=LOGGER)
+    LOGGER.debug("Get Call result %s", json.dumps(call))
 
-    CUSTOMER_PHONE_NUMBER = result["CustomerPhoneNumber"]
-    CALL_ID = result["CallId"]
-    call_summary = result.get("CallSummaryText", "")
-    people_can_access = result.get("SharedWith", None)
+    # CallId is required because it is how the caller names the meeting. The
+    # other three the schema declares nullable, so a stored meeting with any of
+    # them unset is a response this has to return.
+    CALL_ID = require_graphql_field(call, "CallId", logger=LOGGER)
+    CUSTOMER_PHONE_NUMBER = call.get("CustomerPhoneNumber")
+    call_summary = call.get("CallSummaryText", "")
+    people_can_access = call.get("SharedWith", None)
 
     return dict(
         CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
@@ -1336,7 +1467,19 @@ async def execute_process_event_api_mutation(
         else:
             return_value["successes"].append(response)
 
-        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN:
+        # At most once per meeting. Redelivery is routine on this stream -- the
+        # END branch below explains why -- and a deployment's own start-of-call
+        # hook would read a second invocation as a second meeting starting.
+        #
+        # At most, not exactly: a rejected condition is read as "somebody already
+        # created this meeting", and it is also what a first delivery sees when
+        # its own earlier attempt stored the meeting and then came back as a
+        # transport error, or when the invoke below raised after the meeting was
+        # created and the record came back. Delivering the hook exactly once
+        # needs a durable record of having delivered it, which this does not
+        # have; skipping it is the safer of the two mistakes, because invoking it
+        # twice is visible in whatever the hook does.
+        if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN and not was_already_created(response):
             payload = dict(
                 CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
                 CallId=CALL_ID,
@@ -1346,6 +1489,12 @@ async def execute_process_event_api_mutation(
                 FunctionName=START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN,
                 InvocationType="Event",
                 Payload=json.dumps(payload),
+            )
+        elif START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN:
+            LOGGER.info(
+                "START event for a meeting that is already created; not invoking the "
+                "start-of-call hook again",
+                extra=dict(call_id=message.get("CallId")),
             )
 
     elif event_type in [

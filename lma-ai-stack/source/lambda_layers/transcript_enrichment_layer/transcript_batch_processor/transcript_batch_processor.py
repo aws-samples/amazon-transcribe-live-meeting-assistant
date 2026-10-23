@@ -19,6 +19,7 @@ from gql.client import AsyncClientSession
 # module imports from Lambda layer
 # pylint: disable=import-error
 from appsync_utils import AppsyncAioGqlClient
+from graphql_helpers import describe_exception, traceback_frames
 
 # pylint: enable=import-error
 
@@ -102,7 +103,19 @@ class TranscriptBatchProcessor:
                 )
                 for result in results:
                     if isinstance(result, Exception):
-                        LOGGER.error("transcript api mutation exception: %s", result)
+                        # The exception named by type with its GraphQL errors
+                        # reduced to errorType/path, and its traceback as frames
+                        # -- the chain is what says which of a record's mutations
+                        # this was. The frames carry nothing from the response,
+                        # and the description falls back to str(result) only for
+                        # an exception with no GraphQL errors to reduce, whose
+                        # text is its own and not the server's. The frames go in
+                        # without the line a rendered traceback ends in.
+                        LOGGER.error(
+                            "transcript api mutation exception: %s",
+                            describe_exception(result),
+                            extra=dict(frames=traceback_frames(result)),
+                        )
                         self._has_error = True
                         self._errors.append(result)
                     else:

@@ -5,7 +5,35 @@
 """GraphQL Helpers"""
 
 from .call_fields import call_fields
+from .response import (
+    GraphQLResponseError,
+    describe_exception,
+    describe_graphql_response,
+    graphql_error_messages,
+    graphql_errors,
+    is_graphql_error_object,
+    is_retryable_graphql_response,
+    optional_graphql_field,
+    require_graphql_field,
+    summarise_graphql_error,
+    traceback_frames,
+)
 from .transcript_segment_fields import transcript_segment_fields
 from .transcript_segment_sentiment_fields import transcript_segment_sentiment_fields
 
-__all__ = ["call_fields", "transcript_segment_fields", "transcript_segment_sentiment_fields"]
+__all__ = [
+    "GraphQLResponseError",
+    "call_fields",
+    "describe_exception",
+    "describe_graphql_response",
+    "graphql_error_messages",
+    "graphql_errors",
+    "is_graphql_error_object",
+    "is_retryable_graphql_response",
+    "optional_graphql_field",
+    "require_graphql_field",
+    "summarise_graphql_error",
+    "traceback_frames",
+    "transcript_segment_fields",
+    "transcript_segment_sentiment_fields",
+]

@@ -25,6 +25,7 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from batch_item_failures import SequenceTrackingBatchProcessor, send_discarded_records
 from botocore.config import Config as BotoCoreConfig
 from event_processor import execute_process_event_api_mutation
+from graphql_helpers import describe_exception, traceback_frames
 
 # pylint: enable=import-error
 
@@ -131,10 +132,18 @@ def handler(event, context: LambdaContext) -> Dict[str, List[Dict[str, str]]]:
 
     errors = event_processor_results.get("errors", [])
     for error in errors:
+        # The exception's type with its GraphQL errors reduced to errorType/path
+        # -- that is what a log query or metric filter matches on -- and the
+        # traceback as frames, which is the chain that makes an unexpected
+        # response shape diagnosable. Frames rather than `exc_info` because a
+        # rendered traceback ends in the exception's own text, and a GraphQL
+        # transport exception's text is its first error message.
         LOGGER.error(
             "event processor error: %s",
-            error,
-            exc_info=error if isinstance(error, BaseException) else None,
+            describe_exception(error) if isinstance(error, BaseException) else error,
+            extra=dict(
+                frames=(traceback_frames(error) if isinstance(error, BaseException) else []),
+            ),
         )
 
     discarded = processor.discarded_sequence_numbers

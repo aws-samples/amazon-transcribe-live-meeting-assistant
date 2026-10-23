@@ -345,6 +345,11 @@ test-cli: ## Run LMA CLI unit tests
 # (transcript normalisation, the TTLs, the AppSync helpers), so a test there
 # covers every function at once; it was previously outside this glob, which meant
 # a test placed beside the layer would have been collected by nothing.
+#
+# -rs lists the skips. Several suites skip themselves when a runtime dependency
+# is absent, which is right for a developer who has run only `make setup-python`
+# and wrong to pass silently in CI, where `make setup-cli-dev` installs them: a
+# suite that has quietly stopped running shows up in this output.
 test-lambdas: ## Run all Lambda function + layer unit tests (no AWS; each dir isolated)
 	@echo "Running Lambda function unit tests..."
 	@FAILED=0; RAN=0; \
@@ -355,7 +360,7 @@ test-lambdas: ## Run all Lambda function + layer unit tests (no AWS; each dir is
 		echo -e "$(CYAN)  pytest $$d$(NC)"; \
 		if ! ( cd "$$d" && AWS_DEFAULT_REGION=$${AWS_DEFAULT_REGION:-us-east-1} \
 			AWS_REGION=$${AWS_REGION:-us-east-1} \
-			$(PYTHON) -m pytest -q $$files ); then FAILED=1; fi; \
+			$(PYTHON) -m pytest -q -rs $$files ); then FAILED=1; fi; \
 	done; \
 	if [ $$RAN -eq 0 ]; then echo -e "$(YELLOW)  no lambda tests found$(NC)"; fi; \
 	if [ $$FAILED -ne 0 ]; then echo -e "$(RED)❌ Some Lambda tests failed$(NC)"; exit 1; fi; \
