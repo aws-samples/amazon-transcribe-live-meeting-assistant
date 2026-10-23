@@ -260,6 +260,15 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
     return () => clearTimeout(timer);
   }, [starting, fingerprint]);
 
+  // A refusal belongs to the press that produced it and does not outlive the
+  // summary it was refused for. The common refusal is "a run is already going",
+  // raised against a run in another tab; it is hidden while that run is in
+  // flight and would otherwise come back beside the result when the run landed
+  // and the spinner stopped covering it.
+  useEffect(() => {
+    setStartError(null);
+  }, [fingerprint]);
+
   const startRegeneration = async () => {
     setConfirmReplace(false);
     setStartError(null);

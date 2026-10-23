@@ -15,6 +15,12 @@
 ## CallSummaryState and writes no text, which is what leaves the previous
 ## summary standing.
 ##
+## What this does NOT express: the meeting page offers Edit only once a meeting
+## has ended, because the end-of-meeting summary replaces the stored text when
+## it does. That is a rule of the page, not of this field -- a write that arrives
+## while a meeting is still running is accepted here and will be replaced by the
+## end-of-meeting summary.
+##
 ## UpdatedAt is deliberately NOT written here, and not used as a guard, matching
 ## updateSpeakerIdentities. Every Call update fed by the Kinesis pipeline carries
 ## `#UpdatedAt < :UpdatedAt` so out-of-order events cannot clobber newer state.

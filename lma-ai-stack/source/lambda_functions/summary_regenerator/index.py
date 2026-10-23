@@ -426,8 +426,9 @@ def start(call_id, identity, self_arn):
         )
     except Exception:  # pylint: disable=broad-except
         # The run is already queued, so reporting a failure here would be
-        # wrong. All that is lost is the progress shown in other open pages;
-        # the page that pressed the button shows its own.
+        # wrong. What is lost is the progress shown while it goes: the pressing
+        # page shows its own for REGENERATE_HANDOVER_MS (30s in CallPanel.jsx),
+        # and after that no page shows the run until its result lands.
         LOGGER.exception("Could not mark %s as regenerating; the run continues", call_id)
     return {"Success": True, "Message": "regenerating the summary"}
 

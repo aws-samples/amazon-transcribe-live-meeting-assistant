@@ -107,6 +107,22 @@ describe('CallSummary — regenerating', () => {
     expect(screen.queryByText(/^Regenerating$/)).not.toBeInTheDocument();
   });
 
+  it('drops a refusal once a new summary arrives', async () => {
+    // The usual refusal is "a run is already going", raised against a run in
+    // another tab. It is hidden while that run is in flight, so without this it
+    // would come back beside that run's result when it landed.
+    const { rerender } = renderPanel({
+      regenerateResult: { Success: false, Message: 'a summary is already being regenerated' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /regenerate/i }));
+    await waitFor(() => expect(screen.getByText(/already being regenerated/i)).toBeInTheDocument());
+
+    const arrived = { ...ITEM, callSummaryText: JSON.stringify({ Summary: 'Sarah Lee owns the migration.' }) };
+    rerender(<CallSummary item={arrived} onSave={onSave} onRegenerate={onRegenerate} readOnly={false} />);
+    await waitFor(() => expect(screen.queryByText(/already being regenerated/i)).not.toBeInTheDocument());
+    expect(screen.getByText(/owns the migration/)).toBeInTheDocument();
+  });
+
   it('surfaces a failed run and keeps the previous summary on screen', () => {
     renderPanel({ item: withState({ status: STATUS_FAILED, message: 'could not regenerate the summary just now' }) });
     expect(screen.getByText(/could not regenerate the summary just now/i)).toBeInTheDocument();
