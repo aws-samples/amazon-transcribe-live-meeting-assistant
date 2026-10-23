@@ -11,9 +11,11 @@ from .response import (
     describe_graphql_response,
     graphql_error_messages,
     graphql_errors,
+    is_graphql_error_object,
     is_retryable_graphql_response,
     optional_graphql_field,
     require_graphql_field,
+    summarise_graphql_error,
     traceback_frames,
 )
 from .transcript_segment_fields import transcript_segment_fields
@@ -26,9 +28,11 @@ __all__ = [
     "describe_graphql_response",
     "graphql_error_messages",
     "graphql_errors",
+    "is_graphql_error_object",
     "is_retryable_graphql_response",
     "optional_graphql_field",
     "require_graphql_field",
+    "summarise_graphql_error",
     "traceback_frames",
     "transcript_segment_fields",
     "transcript_segment_sentiment_fields",

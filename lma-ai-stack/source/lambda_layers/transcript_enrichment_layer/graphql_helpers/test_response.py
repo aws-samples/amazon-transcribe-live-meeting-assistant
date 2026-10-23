@@ -359,6 +359,27 @@ def test_a_graphql_error_object_is_summarised_like_its_wire_form():
     assert "the figures we discussed" not in repr(summary)
 
 
+def test_a_raised_graphql_error_is_summarised_rather_than_stringified():
+    """Its ``str()`` prints an excerpt of the query document, arguments and all.
+
+    gql validates a document against the schema before sending it, so a mutation
+    the schema rejects raises this locally rather than returning it.
+    """
+    document = (
+        'mutation { addTranscriptSegment(input: {Transcript: "the figures we discussed"})'
+        " { CallId } }"
+    )
+    error = GraphQLError("Field is not defined", source=Source(document), positions=[11])
+    # The guard this stands in for: the exception's own text does carry it.
+    assert "the figures we discussed" in str(error)
+
+    described = describe_exception(error)
+    assert "GraphQLError" in described
+    assert "messageLength" in described
+    assert "the figures we discussed" not in described
+    assert "addTranscriptSegment" not in described
+
+
 def test_a_graphql_error_object_reports_the_servers_error_type_when_it_has_one():
     """So the object and wire forms say the same thing about the same failure."""
     error = GraphQLError("rejected", extensions={"errorType": "Unauthorized"})

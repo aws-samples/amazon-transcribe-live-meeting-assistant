@@ -125,6 +125,12 @@ def describe_exception(error: BaseException) -> str:
     errors = graphql_errors(error)
     if errors:
         return f"{type(error).__name__}: {errors}"
+    if is_graphql_error_object(error):
+        # A GraphQLError raised rather than returned. gql validates a document
+        # against the schema before sending it, so a mutation the schema rejects
+        # raises locally -- and this error's str() prints an excerpt of the query
+        # document, which inlines the mutation's arguments. Summarised instead.
+        return f"{type(error).__name__}: {[summarise_graphql_error(error)]}"
     text = str(error)
     return f"{type(error).__name__}: {text}" if text else type(error).__name__
 
@@ -188,33 +194,45 @@ def graphql_errors(response: Any) -> List[Dict[str, Any]]:
     if not isinstance(raw, (list, tuple)):
         return []
 
-    summaries: List[Dict[str, Any]] = []
-    for entry in raw:
-        if isinstance(entry, Mapping):
-            summary: Dict[str, Any] = {
-                key: entry[key] for key in LOGGABLE_ERROR_KEYS if key in entry
-            }
-            message = entry.get("message")
-            summary["messageLength"] = len(message) if isinstance(message, str) else 0
-        else:
-            # A GraphQLError object rather than the wire form. It exposes the
-            # same safe fields as attributes, so the summary is as useful either
-            # way; `message` is read for its length only, as above. The server's
-            # own type is preferred where the error carries one, so the two forms
-            # report the same `errorType` for the same failure.
-            extensions = getattr(entry, "extensions", None) or {}
-            server_type = None
-            if isinstance(extensions, Mapping):
-                server_type = extensions.get("errorType") or extensions.get("code")
-            summary = {"errorType": str(server_type) if server_type else type(entry).__name__}
-            for key in ("path", "locations"):
-                value = getattr(entry, key, None)
-                if value is not None:
-                    summary[key] = [str(item) for item in value]
-            message = getattr(entry, "message", None)
-            summary["messageLength"] = len(message) if isinstance(message, str) else 0
-        summaries.append(summary)
-    return summaries
+    return [summarise_graphql_error(entry) for entry in raw]
+
+
+def is_graphql_error_object(error: Any) -> bool:
+    """Whether this looks like a ``GraphQLError`` rather than a plain exception.
+
+    Those two attributes together are what graphql-core's error type adds, and
+    they are what :func:`summarise_graphql_error` reads.
+    """
+    return hasattr(error, "locations") and hasattr(error, "extensions")
+
+
+def summarise_graphql_error(entry: Any) -> Dict[str, Any]:
+    """One error reduced to the fields that are safe to log.
+
+    Accepts the wire form -- a mapping -- or a ``GraphQLError`` object, which
+    exposes the same fields as attributes, so the summary is as useful either
+    way. The ``message`` is read for its length only. For an object the server's
+    own type is preferred where the error carries one, so the two forms report
+    the same ``errorType`` for the same failure.
+    """
+    if isinstance(entry, Mapping):
+        summary: Dict[str, Any] = {key: entry[key] for key in LOGGABLE_ERROR_KEYS if key in entry}
+        message = entry.get("message")
+        summary["messageLength"] = len(message) if isinstance(message, str) else 0
+        return summary
+
+    extensions = getattr(entry, "extensions", None) or {}
+    server_type = None
+    if isinstance(extensions, Mapping):
+        server_type = extensions.get("errorType") or extensions.get("code")
+    summary = {"errorType": str(server_type) if server_type else type(entry).__name__}
+    for key in ("path", "locations"):
+        value = getattr(entry, key, None)
+        if value is not None:
+            summary[key] = [str(item) for item in value]
+    message = getattr(entry, "message", None)
+    summary["messageLength"] = len(message) if isinstance(message, str) else 0
+    return summary
 
 
 def graphql_error_messages(error: Any) -> List[str]:

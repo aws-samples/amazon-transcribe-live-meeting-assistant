@@ -1431,9 +1431,18 @@ async def execute_process_event_api_mutation(
         else:
             return_value["successes"].append(response)
 
-        # Once per meeting. Redelivery is routine on this stream -- the END
-        # branch below explains why -- and a deployment's own start-of-call hook
-        # would read a second invocation as a second meeting starting.
+        # At most once per meeting. Redelivery is routine on this stream -- the
+        # END branch below explains why -- and a deployment's own start-of-call
+        # hook would read a second invocation as a second meeting starting.
+        #
+        # At most, not exactly: a rejected condition is read as "somebody already
+        # created this meeting", and it is also what a first delivery sees when
+        # its own earlier attempt stored the meeting and then came back as a
+        # transport error, or when the invoke below raised after the meeting was
+        # created and the record came back. Delivering the hook exactly once
+        # needs a durable record of having delivered it, which this does not
+        # have; skipping it is the safer of the two mistakes, because invoking it
+        # twice is visible in whatever the hook does.
         if START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN and not was_already_created(response):
             payload = dict(
                 CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,
