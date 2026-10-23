@@ -33,6 +33,9 @@ from gql.dsl import DSLMutation, DSLQuery, DSLSchema, dsl_gql
 from graphql.language.printer import print_ast
 from graphql_helpers import (
     call_fields,
+    graphql_error_messages,
+    optional_graphql_field,
+    require_graphql_field,
     transcript_segment_fields,
     transcript_segment_sentiment_fields,
 )
@@ -133,6 +136,25 @@ CALL_ID = ""
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
+# The createCall and addTranscriptSegment resolvers write with a condition
+# expression, so writing the same item twice comes back as this GraphQL error.
+PUT_CONDITION_FAILURE_MESSAGE = "item put condition failure"
+
+
+def is_put_condition_failure(error: Any) -> bool:
+    """Whether a mutation failed only because the item is already stored.
+
+    Passed to ``execute_gql_query_with_retries`` as its
+    ``should_ignore_exception_fn``: the item being there already is the state the
+    mutation was aiming for, so retrying buys nothing. The messages are read off
+    whatever the transport raised -- gql keeps them in an ``errors`` attribute on
+    the exception, and a bare error mapping is accepted as well -- and any other
+    shape yields no messages, so an unrecognised failure is retried and reported
+    rather than ignored.
+    """
+    return PUT_CONDITION_FAILURE_MESSAGE in graphql_error_messages(error)
+
+
 ##########################################################################
 # Transcripts
 ##########################################################################
@@ -173,15 +195,12 @@ def add_transcript_segments(
             )
         )
 
-        def ignore_exception_fn(e):
-            return True if (e["message"] == "item put condition failure") else False
-
         tasks.append(
             execute_gql_query_with_retries(
                 query,
                 client_session=appsync_session,
                 logger=LOGGER,
-                should_ignore_exception_fn=ignore_exception_fn,
+                should_ignore_exception_fn=is_put_condition_failure,
             ),
         )
 
@@ -283,14 +302,11 @@ async def execute_create_call_mutation(
         )
     )
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
-        should_ignore_exception_fn=ignore_exception_fn,
+        should_ignore_exception_fn=is_put_condition_failure,
     )
 
     query_string = print_ast(query)
@@ -377,7 +393,10 @@ async def get_call_status(
         LOGGER.exception("could not read current status for call %s", call_id)
         return None
 
-    status = (result or {}).get("getCall", {}).get("Status")
+    # Optional, not required: a null getCall or a response without one leaves the
+    # status unknown, and an unknown status is what the fail-open contract above
+    # is for. The shape that came back is logged by the helper.
+    status = optional_graphql_field(result, "getCall", "Status", logger=LOGGER)
     LOGGER.debug("current call status", extra=dict(call_id=call_id, status=status))
     return status
 
@@ -446,9 +465,25 @@ async def get_aggregated_sentiment(
 
     sentiment_entry_list_by_channel: Dict[ChannelType, SentimentPerChannel] = {}
 
-    for segment in result.get("getTranscriptSegmentsWithSentiment").get(
-        "TranscriptSegmentsWithSentiment"
-    ):
+    # An empty aggregation is a valid answer -- the meeting has no scored
+    # segments yet -- so a response that carries no list is logged and treated as
+    # one. Failing here would fail the record that carried the segment.
+    segments = (
+        optional_graphql_field(
+            result,
+            "getTranscriptSegmentsWithSentiment",
+            "TranscriptSegmentsWithSentiment",
+            logger=LOGGER,
+            default=[],
+        )
+        or []
+    )
+
+    for segment in segments:
+        # The list's element type is nullable, and a null entry carries nothing
+        # to aggregate.
+        if not isinstance(segment, dict):
+            continue
         channel = segment.get("Channel", None)
         if channel and channel in ["AGENT", "CALLER"]:
             if segment.get("SentimentWeighted", None):
@@ -545,15 +580,12 @@ async def get_call_aggregation_tasks(
 
     tasks = []
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
     tasks.append(
         execute_gql_query_with_retries(
             query,
             client_session=appsync_session,
             logger=LOGGER,
-            should_ignore_exception_fn=ignore_exception_fn,
+            should_ignore_exception_fn=is_put_condition_failure,
         ),
     )
 
@@ -580,14 +612,11 @@ async def execute_update_call_aggregation_mutation(
         )
     )
 
-    def ignore_exception_fn(e):
-        return True if (e["message"] == "item put condition failure") else False
-
     result = await execute_gql_query_with_retries(
         query,
         client_session=appsync_session,
         logger=LOGGER,
-        should_ignore_exception_fn=ignore_exception_fn,
+        should_ignore_exception_fn=is_put_condition_failure,
     )
 
     query_string = print_ast(query)
@@ -1107,13 +1136,18 @@ async def get_call_details(
         logger=LOGGER,
     )
 
-    result = result["getCall"]
-    LOGGER.debug("Get Call result %s", json.dumps(result))
+    # Required, not optional: every field returned below comes from the meeting
+    # record, so a response without one leaves nothing to return. Raising fails
+    # the Kinesis record, which the event source mapping redelivers and finally
+    # preserves on its on-failure destination -- the opposite of returning blanks
+    # and reporting success.
+    call = require_graphql_field(result, "getCall", logger=LOGGER)
+    LOGGER.debug("Get Call result %s", json.dumps(call))
 
-    CUSTOMER_PHONE_NUMBER = result["CustomerPhoneNumber"]
-    CALL_ID = result["CallId"]
-    call_summary = result.get("CallSummaryText", "")
-    people_can_access = result.get("SharedWith", None)
+    CUSTOMER_PHONE_NUMBER = call["CustomerPhoneNumber"]
+    CALL_ID = call["CallId"]
+    call_summary = call.get("CallSummaryText", "")
+    people_can_access = call.get("SharedWith", None)
 
     return dict(
         CustomerPhoneNumber=CUSTOMER_PHONE_NUMBER,

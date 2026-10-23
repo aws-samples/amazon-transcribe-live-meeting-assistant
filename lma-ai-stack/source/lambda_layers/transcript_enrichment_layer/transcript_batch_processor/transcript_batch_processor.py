@@ -102,7 +102,16 @@ class TranscriptBatchProcessor:
                 )
                 for result in results:
                     if isinstance(result, Exception):
-                        LOGGER.error("transcript api mutation exception: %s", result)
+                        # The exception type and its traceback, not just str():
+                        # this is the only log line that names the mutation that
+                        # failed, and the frame it raised in is what identifies
+                        # which of a record's mutations it was.
+                        LOGGER.error(
+                            "transcript api mutation exception: %s: %s",
+                            type(result).__name__,
+                            result,
+                            exc_info=result,
+                        )
                         self._has_error = True
                         self._errors.append(result)
                     else:
