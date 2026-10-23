@@ -1745,7 +1745,15 @@ export class NovaAgent implements VoiceAssistantProvider {
       // milliseconds old was spawned for this acknowledgement, which means the
       // barge-in killed the previous one and the word is still in the buffer
       // rather than in the room. Hence draining rather than discarding.
-      const playbackAgeMs = this.pacatSpawnedAt ? Date.now() - this.pacatSpawnedAt : -1;
+      //
+      // Read through pacatProcess rather than from pacatSpawnedAt alone, so
+      // that a stream which has gone away reports -1 instead of the age of a
+      // process that no longer exists. Conditioning on the stream covers every
+      // teardown path at once, where clearing the timestamp would have to be
+      // kept in step with each of them.
+      const playbackAgeMs = this.pacatProcess && this.pacatSpawnedAt
+        ? Date.now() - this.pacatSpawnedAt
+        : -1;
       // `gate=` says which of the two outcomes this line records: engaging the
       // gate behind the acknowledgement, or finding it already shut because the
       // fallback got there first — in which case nothing was drained and the
@@ -2527,9 +2535,13 @@ export class NovaAgent implements VoiceAssistantProvider {
   unmute(reason?: string): void {
     // Being asked back supersedes a stop request that is still resolving.
     // Without this, a fallback or backstop armed moments ago would silence the
-    // assistant again immediately after a wake phrase made it audible. The
-    // utterance that asked for silence cannot reach here: both wake-phrase
-    // routes recognise it and leave the mute state alone.
+    // assistant again immediately after a wake phrase made it audible.
+    //
+    // The utterance that asked for silence is not expected to reach here: both
+    // wake-phrase routes treat a strict stop as a stop and leave the mute state
+    // alone. A misreading of it that arrives after the gate has engaged does
+    // reach here, and is accepted as being asked back — see
+    // handleUserTurnWakePhrase for why that trade is made in that direction.
     this.cancelStopRequest(reason ? `unmuted:${reason.replace(/\s+/g, '-')}` : 'unmuted');
     // The stretch of silence that request caused is over, so a tool call from
     // here on belongs to something else and must not be timed against it.

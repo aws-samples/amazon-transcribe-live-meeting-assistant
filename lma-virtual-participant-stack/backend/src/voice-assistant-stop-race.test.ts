@@ -681,6 +681,25 @@ test('a stream reporting its exit forgets only itself', () => {
     assert.equal((agent as any).pacatProcess, null);
 });
 
+test('a playback stream that has gone away reports no age', async () => {
+    // playback_age_ms is the line that says whether the acknowledgement was
+    // written to a stream spawned for it. The age of a process that no longer
+    // exists would answer that question wrongly, and confidently.
+    capture();
+    try {
+        const agent = novaAgent();
+        (agent as any).pacatSpawnedAt = Date.now() - 5000;
+        (agent as any).pacatProcess = null;
+
+        await (agent as any).handleMuteTool('tool-use-id');
+        const acknowledged = stopLines().find((line) => line.includes('action=acknowledged'));
+        assert.ok(acknowledged);
+        assert.match(acknowledged!, /playback_age_ms=-1/);
+    } finally {
+        release();
+    }
+});
+
 test('the translator pause still cuts playback off immediately', async () => {
     // Its cue has already sounded and the pause is meant to be absolute.
     capture();
