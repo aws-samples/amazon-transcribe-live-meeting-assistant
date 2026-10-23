@@ -22,7 +22,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from unittest import mock
 
 import pytest
@@ -50,18 +50,41 @@ def load_seeder() -> Any:
 SEEDER = load_seeder()
 
 
-class FakeTable:
-    def __init__(self) -> None:
-        self.written: List[Dict[str, Any]] = []
+class ConditionalCheckFailed(Exception):
+    """Stands in for botocore's ConditionalCheckFailedException."""
 
-    def put_item(self, Item: Dict[str, Any]) -> Dict[str, str]:  # noqa: N803
+    response = {"Error": {"Code": "ConditionalCheckFailedException"}}
+
+
+class FakeTable:
+    """Records writes, and can refuse a conditional one as DynamoDB would.
+
+    `existing` names the partition keys already present, so a conditional
+    `put_item` on one of them fails the way the real table would.
+    """
+
+    def __init__(self, existing: Optional[set[str]] = None) -> None:
+        self.written: List[Dict[str, Any]] = []
+        self.conditional_keys: List[str] = []
+        self.existing = existing or set()
+
+    def put_item(
+        self, Item: Dict[str, Any], ConditionExpression: Optional[str] = None  # noqa: N803
+    ) -> Dict[str, str]:
+        key = Item["LLMPromptTemplateId"]
+        if ConditionExpression:
+            self.conditional_keys.append(key)
+            if key in self.existing:
+                raise ConditionalCheckFailed()
         self.written.append(Item)
         return {"ResponseMetadata": {"HTTPStatusCode": "200"}}
 
 
-def invoke(request_type: str) -> List[Dict[str, Any]]:
+def invoke(
+    request_type: str, existing: Optional[set[str]] = None
+) -> List[Dict[str, Any]]:
     """Run the custom resource for one request type; return the items written."""
-    table = FakeTable()
+    table = FakeTable(existing)
     resource = mock.MagicMock()
     resource.Table.return_value = table
     responses: List[Any] = []
@@ -70,6 +93,8 @@ def invoke(request_type: str) -> List[Dict[str, Any]]:
         "os.environ", {"LAMBDA_TASK_ROOT": str(SEEDER_DIR), "DOMAIN": "Default"}
     ), mock.patch.object(
         SEEDER.cfnresponse, "send", lambda *args, **kwargs: responses.append(args)
+    ), mock.patch.object(
+        SEEDER.botocore.exceptions, "ClientError", ConditionalCheckFailed
     ):
         SEEDER.lambda_handler(
             {
@@ -129,6 +154,115 @@ def test_the_custom_item_is_seeded_without_a_prompt() -> None:
     assert "systemPrompt" not in item
 
 
+# ── the custom item reaches upgraded stacks too ─────────────────────────────
+
+
+def test_an_update_seeds_the_custom_item_when_it_is_absent() -> None:
+    """A stack created before this release has no custom item, and the
+    deployment's console link for editing the prompt would open an item that is
+    not there. Seeding only on Create would leave every upgraded stack so.
+    """
+    item = item_for(invoke("Update"), SEEDER.CUSTOM_TROUBLESHOOTING_PROMPT_PK)
+
+    assert "systemPrompt" not in item
+    assert "no redeployment is needed" in item["*Information*"]
+
+
+def test_an_existing_custom_item_is_never_overwritten() -> None:
+    """This is what makes seeding on Update safe. An operator's tuned prompt
+    surviving an upgrade is the whole reason the prompt lives in DynamoDB.
+    """
+    written = invoke("Update", existing={SEEDER.CUSTOM_TROUBLESHOOTING_PROMPT_PK})
+
+    assert SEEDER.CUSTOM_TROUBLESHOOTING_PROMPT_PK not in written_keys(written)
+
+
+def test_the_custom_item_is_written_only_under_a_condition() -> None:
+    """An unconditional write on Update would discard a tuned prompt, so the
+    condition is not an optimisation -- it is the safety property."""
+    table = FakeTable()
+    resource = mock.MagicMock()
+    resource.Table.return_value = table
+    with mock.patch.object(
+        SEEDER.boto3, "resource", return_value=resource
+    ), mock.patch.dict(
+        "os.environ", {"LAMBDA_TASK_ROOT": str(SEEDER_DIR), "DOMAIN": "Default"}
+    ), mock.patch.object(SEEDER.cfnresponse, "send", lambda *a, **k: None):
+        SEEDER.lambda_handler(
+            {
+                "RequestType": "Update",
+                "ResourceProperties": {"LLMPromptTemplateTableName": "prompt-table"},
+            },
+            None,
+        )
+
+    assert table.conditional_keys == [SEEDER.CUSTOM_TROUBLESHOOTING_PROMPT_PK]
+
+
+def test_a_conditional_failure_is_not_reported_as_a_stack_failure() -> None:
+    """An already-present custom item is the normal case on every upgrade after
+    the first; failing the custom resource for it would fail the deployment."""
+    table = FakeTable(existing={SEEDER.CUSTOM_TROUBLESHOOTING_PROMPT_PK})
+    resource = mock.MagicMock()
+    resource.Table.return_value = table
+    responses: List[Any] = []
+    with mock.patch.object(
+        SEEDER.boto3, "resource", return_value=resource
+    ), mock.patch.dict(
+        "os.environ", {"LAMBDA_TASK_ROOT": str(SEEDER_DIR), "DOMAIN": "Default"}
+    ), mock.patch.object(
+        SEEDER.cfnresponse, "send", lambda *args, **kwargs: responses.append(args)
+    ), mock.patch.object(
+        SEEDER.botocore.exceptions, "ClientError", ConditionalCheckFailed
+    ):
+        SEEDER.lambda_handler(
+            {
+                "RequestType": "Update",
+                "ResourceProperties": {"LLMPromptTemplateTableName": "prompt-table"},
+            },
+            None,
+        )
+
+    assert responses[0][2] == SEEDER.cfnresponse.SUCCESS
+
+
+def test_any_other_write_failure_still_fails_the_stack() -> None:
+    """Only the conditional check is tolerated; a throttle or a denial must not
+    be swallowed into a deployment that looks successful."""
+
+    class Exploding(FakeTable):
+        def put_item(self, Item, ConditionExpression=None):  # noqa: N803
+            if ConditionExpression:
+                raise ConditionalCheckFailedWithOtherCode()
+            return super().put_item(Item)
+
+    class ConditionalCheckFailedWithOtherCode(Exception):
+        response = {"Error": {"Code": "ProvisionedThroughputExceededException"}}
+
+    table = Exploding()
+    resource = mock.MagicMock()
+    resource.Table.return_value = table
+    responses: List[Any] = []
+    with mock.patch.object(
+        SEEDER.boto3, "resource", return_value=resource
+    ), mock.patch.dict(
+        "os.environ", {"LAMBDA_TASK_ROOT": str(SEEDER_DIR), "DOMAIN": "Default"}
+    ), mock.patch.object(
+        SEEDER.cfnresponse, "send", lambda *args, **kwargs: responses.append(args)
+    ), mock.patch.object(
+        SEEDER.botocore.exceptions, "ClientError", ConditionalCheckFailedWithOtherCode
+    ):
+        SEEDER.lambda_handler(
+            {
+                "RequestType": "Update",
+                "ResourceProperties": {"LLMPromptTemplateTableName": "prompt-table"},
+            },
+            None,
+        )
+
+    assert responses[0][2] == SEEDER.cfnresponse.FAILED
+
+
 def test_the_custom_item_documents_how_to_override() -> None:
     """Its '*Information*' attribute is the only in-product documentation an
     operator who finds this table will see."""
@@ -154,11 +288,6 @@ def test_an_update_rewrites_the_default_so_a_new_prompt_ships() -> None:
     item = item_for(invoke("Update"), SEEDER.DEFAULT_TROUBLESHOOTING_PROMPT_PK)
 
     assert item["systemPrompt"] == PROMPT_FILE.read_text(encoding="utf-8")
-
-
-def test_an_update_does_not_touch_the_custom_item() -> None:
-    """This is the assertion that protects a tuned prompt across an upgrade."""
-    assert SEEDER.CUSTOM_TROUBLESHOOTING_PROMPT_PK not in written_keys(invoke("Update"))
 
 
 def test_a_delete_writes_nothing() -> None:

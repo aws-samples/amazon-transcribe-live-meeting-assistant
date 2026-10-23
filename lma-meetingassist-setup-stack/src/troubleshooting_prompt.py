@@ -20,9 +20,11 @@ already uses for its summarization prompts:
 
 * ``DefaultTroubleshootingAgentPrompt`` is written by the deployment and
   rewritten on every stack update. Operator edits to it are lost, by design.
-* ``CustomTroubleshootingAgentPrompt`` is seeded empty once, on stack create,
-  and never touched again. An operator who puts a ``systemPrompt`` attribute
-  here overrides the default, and the override survives upgrades.
+* ``CustomTroubleshootingAgentPrompt`` is seeded empty under a condition that
+  can only create it, so it appears on an upgraded stack as well as a new one
+  and is never rewritten once it exists. An operator who puts a
+  ``systemPrompt`` attribute here overrides the default, and the override
+  survives upgrades.
 
 This is the interim home named in the design: when the unified configuration
 store lands it becomes one more item to migrate, which is the same cost as the
@@ -108,9 +110,12 @@ def get_system_prompt(dynamodb_client: Any, table_name: str) -> str:
             "the prompt template table is not configured for this function"
         )
 
-    # Two reads rather than one BatchGetItem: the custom item is absent on a
-    # deployment that has never been updated, and BatchGetItem's partial-result
-    # handling would make "absent" and "throttled" look the same here.
+    # Two reads rather than one BatchGetItem. The custom item is normally
+    # present but empty, and can be absent entirely if an operator deleted it,
+    # so both "no override" and "no item" are ordinary outcomes here —
+    # BatchGetItem's partial-result handling would make either of those
+    # indistinguishable from a throttle, and a throttle must not be read as
+    # "the operator set no override".
     try:
         custom = dynamodb_client.get_item(
             TableName=table_name,

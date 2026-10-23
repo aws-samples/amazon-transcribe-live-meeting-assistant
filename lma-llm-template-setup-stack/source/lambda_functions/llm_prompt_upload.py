@@ -4,6 +4,7 @@
 
 #
 import boto3
+import botocore.exceptions
 import cfnresponse
 import json
 import os
@@ -122,14 +123,27 @@ def lambda_handler(event, context):
             response = promptTable.put_item(Item=item)
             print("DDB response", response)
 
-            if the_event in ('Create'):
-                print("Seeding empty custom troubleshooting prompt item (for Create event):", promptTemplateTableName)
-                item = get_troubleshooting_prompt_item(
-                    CUSTOM_TROUBLESHOOTING_PROMPT_PK, CUSTOM_TROUBLESHOOTING_PROMPT_INFO
+            # Seeded on Update as well as Create, guarded so it can only ever
+            # create. A stack that existed before this release has no custom
+            # item, and the deployment's console link for editing the prompt
+            # would open an item that is not there; seeding only on Create
+            # would leave every upgraded stack in that state. The condition is
+            # what makes the Update pass safe: it writes only when the item is
+            # absent, so an operator's tuned prompt is never overwritten.
+            print("Seeding empty custom troubleshooting prompt item if absent:", promptTemplateTableName)
+            item = get_troubleshooting_prompt_item(
+                CUSTOM_TROUBLESHOOTING_PROMPT_PK, CUSTOM_TROUBLESHOOTING_PROMPT_INFO
+            )
+            try:
+                response = promptTable.put_item(
+                    Item=item,
+                    ConditionExpression='attribute_not_exists(LLMPromptTemplateId)',
                 )
-                print("Writing initial custom item to DDB:", json.dumps(item))
-                response = promptTable.put_item(Item=item)
                 print("DDB response", response)
+            except botocore.exceptions.ClientError as condition_error:
+                if condition_error.response['Error']['Code'] != 'ConditionalCheckFailedException':
+                    raise
+                print("Custom troubleshooting prompt item already exists, leaving it alone")
 
     except Exception as e:
         print("Operation failed...")

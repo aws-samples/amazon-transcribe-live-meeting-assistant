@@ -57,9 +57,19 @@ _LIMITS: Dict[str, Tuple[int, int]] = {
     # usage figures Bedrock returns. The system prompt is large and resent on
     # every turn, which is what makes a per-turn cap insufficient.
     "token_budget": (250_000, 1_000_000),
-    # Wall clock for the whole run, well inside the Lambda timeout so the
-    # agent can report "I ran out of time" instead of being killed mid-answer.
+    # Wall clock for the whole run. This is a *requested* budget: the effective
+    # one is the smaller of this and the time the Lambda invocation actually
+    # has left, minus a reserve for the final model turn — see
+    # RunBudget.__init__. That indirection is deliberate. The function's
+    # Timeout is a template value an operator can raise or lower, so a ceiling
+    # written here could not stay inside it; measuring the remaining time
+    # instead keeps the agent able to report "I ran out of time" rather than
+    # being killed mid-answer, whatever Timeout is set to.
     "wall_clock_seconds": (240, 870),
+    # Held back from the wall clock for the model to write its answer in once
+    # evidence gathering stops. The answer is short by contract, but it is a
+    # full model turn and it happens after the last tool returns.
+    "answer_reserve_seconds": (30, 120),
     # ── Per-tool result caps ───────────────────────────────────────────────
     # Log groups returned by discovery. An LMA stack has ~70; a value below
     # that truncates discovery, which is why the default is above it.
@@ -115,6 +125,9 @@ class AgentLimits:
     max_output_tokens: int = field(default_factory=lambda: _read("max_output_tokens"))
     token_budget: int = field(default_factory=lambda: _read("token_budget"))
     wall_clock_seconds: int = field(default_factory=lambda: _read("wall_clock_seconds"))
+    answer_reserve_seconds: int = field(
+        default_factory=lambda: _read("answer_reserve_seconds")
+    )
     max_log_groups: int = field(default_factory=lambda: _read("max_log_groups"))
     max_log_events: int = field(default_factory=lambda: _read("max_log_events"))
     max_log_message_length: int = field(

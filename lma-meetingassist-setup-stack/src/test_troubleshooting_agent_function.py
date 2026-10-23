@@ -173,6 +173,119 @@ def test_elapsed_time_is_reported() -> None:
     assert budget.as_dict()["elapsedSeconds"] == 12.3
 
 
+# ── the wall clock cannot outrun the invocation ─────────────────────────────
+#
+# The configured budget is a request. The function's Timeout is a template
+# value an operator can raise or lower, so a budget written in configuration
+# cannot be guaranteed to sit inside it; the invocation's own remaining time is
+# what actually bounds the run.
+
+
+def budget_for(remaining: float, clock: Clock, **env: str) -> agent_function.RunBudget:
+    environ = {f"TROUBLESHOOTING_{k.upper()}": v for k, v in env.items()}
+    with mock.patch.dict("os.environ", environ, clear=False):
+        limits = AgentLimits()
+    return agent_function.RunBudget(limits, monotonic=clock, remaining_seconds=remaining)
+
+
+def test_a_budget_longer_than_the_invocation_is_cut_to_fit() -> None:
+    """Otherwise the deadline is one the run can never reach, and the Lambda is
+    killed mid-answer instead of the agent reporting that it ran out of time."""
+    clock = Clock()
+    budget = budget_for(
+        100.0, clock, wall_clock_seconds="600", answer_reserve_seconds="30"
+    )
+
+    assert budget.wall_clock_seconds == 70.0
+    assert budget.capped_by_invocation is True
+
+
+def test_a_budget_inside_the_invocation_is_left_alone() -> None:
+    clock = Clock()
+    budget = budget_for(
+        600.0, clock, wall_clock_seconds="240", answer_reserve_seconds="30"
+    )
+
+    assert budget.wall_clock_seconds == 240.0
+    assert budget.capped_by_invocation is False
+
+
+def test_time_is_reserved_for_the_model_to_write_its_answer() -> None:
+    """Evidence gathering stopping is not the end of the run: a full model turn
+    happens after the last tool returns."""
+    clock = Clock()
+    budget = budget_for(
+        200.0, clock, wall_clock_seconds="900", answer_reserve_seconds="45"
+    )
+
+    assert budget.wall_clock_seconds == 155.0
+
+
+def test_an_invocation_with_no_time_left_still_produces_a_reason() -> None:
+    """A deadline already past makes the first tool refuse, which yields "ran
+    out of time" rather than an empty answer with no explanation."""
+    clock = Clock()
+    budget = budget_for(1.0, clock, answer_reserve_seconds="30")
+
+    assert budget.wall_clock_seconds == 1.0
+    clock.advance(2)
+    assert "time budget" in (budget.exhausted_reason() or "")
+
+
+def test_an_unknown_remaining_time_falls_back_to_the_configured_budget() -> None:
+    clock = Clock()
+    budget = budget_for(None, clock, wall_clock_seconds="240")
+
+    assert budget.wall_clock_seconds == 240.0
+    assert budget.capped_by_invocation is False
+
+
+def test_the_effective_budget_is_reported_not_the_requested_one() -> None:
+    clock = Clock()
+    budget = budget_for(
+        100.0, clock, wall_clock_seconds="600", answer_reserve_seconds="30"
+    )
+
+    reported = budget.as_dict()
+    assert reported["wallClockSeconds"] == 70.0
+    assert reported["wallClockCappedByInvocation"] is True
+
+
+def test_the_stop_reason_quotes_the_effective_budget() -> None:
+    """Quoting the configured 600 while stopping at 70 would make the limit
+    look broken."""
+    clock = Clock()
+    budget = budget_for(
+        100.0, clock, wall_clock_seconds="600", answer_reserve_seconds="30"
+    )
+    clock.advance(71)
+
+    assert "70-second time budget" in (budget.exhausted_reason() or "")
+
+
+# ── reading the invocation's remaining time ─────────────────────────────────
+
+
+def test_the_remaining_time_is_read_from_the_lambda_context() -> None:
+    context = mock.Mock()
+    context.get_remaining_time_in_millis.return_value = 285_000
+
+    assert agent_function.remaining_seconds(context) == 285.0
+
+
+@pytest.mark.parametrize("context", [None, object(), "not a context"])
+def test_a_context_that_cannot_report_its_time_yields_nothing(context: Any) -> None:
+    assert agent_function.remaining_seconds(context) is None
+
+
+def test_a_context_whose_clock_raises_yields_nothing() -> None:
+    """An unreadable clock costs the cap its precision, not the run."""
+    context = mock.Mock()
+    context.get_remaining_time_in_millis.side_effect = RuntimeError("no clock")
+
+    assert agent_function.remaining_seconds(context) is None
+
+
 # ── there is no whole-run retry ─────────────────────────────────────────────
 
 
@@ -183,7 +296,7 @@ def test_the_handler_does_not_retry_a_failed_run() -> None:
     """
     attempts = []
 
-    def failing(event: Dict[str, Any]) -> Dict[str, Any]:
+    def failing(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         attempts.append(event)
         raise RuntimeError("bedrock said no")
 
@@ -208,7 +321,10 @@ def test_a_successful_run_returns_the_answer_and_the_run_metadata() -> None:
     with mock.patch.object(
         agent_function,
         "run_diagnosis",
-        lambda event: {"answer": "## Root Cause\nX", "usage": {"toolCalls": 3}},
+        lambda event, context=None: {
+            "answer": "## Root Cause\nX",
+            "usage": {"toolCalls": 3},
+        },
     ):
         response = agent_function.handler({"query": "why?"}, None)
 
@@ -222,7 +338,7 @@ def test_an_unavailable_prompt_is_a_configuration_error_not_a_crash() -> None:
     """A diagnosis produced from an unknown prompt is worse than none, so this
     path refuses rather than substituting a prompt."""
 
-    def unavailable(event: Dict[str, Any]) -> Dict[str, Any]:
+    def unavailable(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         raise agent_function.troubleshooting_prompt.PromptUnavailableError("no item")
 
     with mock.patch.object(agent_function, "run_diagnosis", unavailable):
@@ -233,7 +349,9 @@ def test_an_unavailable_prompt_is_a_configuration_error_not_a_crash() -> None:
 
 
 def test_an_empty_event_is_accepted() -> None:
-    with mock.patch.object(agent_function, "run_diagnosis", lambda event: {"answer": "x"}):
+    with mock.patch.object(
+        agent_function, "run_diagnosis", lambda event, context=None: {"answer": "x"}
+    ):
         assert agent_function.handler(None, None)["statusCode"] == 200
 
 

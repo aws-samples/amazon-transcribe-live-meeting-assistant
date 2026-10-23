@@ -81,10 +81,23 @@ class FakeLogsClient:
         return [{"logGroups": matching[:1]}, {"logGroups": matching[1:]}]
 
 
-def discover(client: Any = None, **kwargs: Any) -> List[discovery.LogGroupInfo]:
-    options: Dict[str, Any] = {"max_log_groups": 500, "graphql_url": APPSYNC_URL}
+#: The nested stack names a resolved deployment would report. Supplying these
+#: is what makes discovery exact rather than prefix-matched.
+NESTED_STACKS = [AISTACK, VPSTACK, TRANSCRIBERSTACK]
+
+
+def discover_result(client: Any = None, **kwargs: Any) -> discovery.DiscoveryResult:
+    options: Dict[str, Any] = {
+        "max_log_groups": 500,
+        "graphql_url": APPSYNC_URL,
+        "nested_stack_names": NESTED_STACKS,
+    }
     options.update(kwargs)
     return discovery.discover_log_groups(client or FakeLogsClient(), STACK, **options)
+
+
+def discover(client: Any = None, **kwargs: Any) -> List[discovery.LogGroupInfo]:
+    return discover_result(client, **kwargs).groups
 
 
 def by_name(groups: List[discovery.LogGroupInfo]) -> Dict[str, discovery.LogGroupInfo]:
@@ -94,7 +107,7 @@ def by_name(groups: List[discovery.LogGroupInfo]) -> Dict[str, discovery.LogGrou
 # ── prefixes ────────────────────────────────────────────────────────────────
 
 
-def test_all_four_stack_namespaces_are_searched() -> None:
+def test_every_namespace_is_searched_including_the_aws_rooted_ones() -> None:
     """Three of LMA's log groups are unreachable from the obvious two prefixes.
 
     The MicroVM groups and the state machine's vended group are rooted under
@@ -102,16 +115,55 @@ def test_all_four_stack_namespaces_are_searched() -> None:
     the VP container's logs entirely -- which under the default launch type is
     the only place a join attempt is recorded.
     """
-    assert discovery.stack_log_group_prefixes(STACK) == [
-        f"/{STACK}-",
-        f"/{STACK}/",
-        f"/aws/lambda-microvms/{STACK}-",
-        f"/aws/vendedlogs/states/{STACK}-",
-    ]
+    prefixes = discovery.stack_log_group_prefixes(STACK, NESTED_STACKS)
+
+    assert f"/aws/lambda-microvms/{STACK}-vp-logs" in prefixes
+    assert f"/aws/lambda-microvms/{STACK}-asr-logs" in prefixes
+    assert f"/aws/vendedlogs/states/{VPSTACK}" in prefixes
+    assert f"/{AISTACK}/" in prefixes
+    assert f"/{STACK}/" in prefixes
+
+
+def test_the_aws_rooted_prefixes_are_searched_first() -> None:
+    """Ordering decides what a cap drops, and the two most valuable groups --
+    the VP container's and the launch state machine's -- are the /aws/ ones.
+    Leading with the broad stack prefix would drop exactly those."""
+    prefixes = discovery.stack_log_group_prefixes(STACK, NESTED_STACKS)
+
+    assert prefixes[0].startswith("/aws/lambda-microvms/")
+    assert prefixes.index(f"/aws/vendedlogs/states/{VPSTACK}") < prefixes.index(
+        f"/{STACK}/"
+    )
+
+
+def test_a_resolved_deployment_matches_each_nested_stack_by_name() -> None:
+    """Not by the parent's prefix: "/LMA-" also matches "LMA-dev-AISTACK-x", so
+    a neighbouring deployment's groups would be listed as this one's evidence.
+    """
+    prefixes = discovery.stack_log_group_prefixes(STACK, NESTED_STACKS)
+
+    assert f"/{STACK}-" not in prefixes
+    for nested in NESTED_STACKS:
+        assert f"/{nested}/" in prefixes
+
+
+def test_the_parent_prefix_always_carries_its_separator() -> None:
+    """So that "/LMA/" cannot match a group belonging to "LMA-dev"."""
+    for nested in (NESTED_STACKS, None):
+        assert f"/{STACK}/" in discovery.stack_log_group_prefixes(STACK, nested)
+
+
+def test_an_unresolved_deployment_falls_back_to_the_parent_prefix() -> None:
+    """Degraded but usable, and the result says so -- see the caveat tests."""
+    prefixes = discovery.stack_log_group_prefixes(STACK, None)
+
+    assert f"/{STACK}-" in prefixes
+    assert f"/aws/vendedlogs/states/{STACK}-" in prefixes
 
 
 def test_no_prefixes_are_offered_for_an_unnamed_stack() -> None:
     assert discovery.stack_log_group_prefixes("") == []
+    assert discovery.stack_log_group_prefixes("", NESTED_STACKS) == []
 
 
 def test_every_real_log_group_is_found() -> None:
@@ -129,10 +181,57 @@ def test_pagination_is_followed() -> None:
 
 def test_a_group_reachable_from_two_prefixes_is_reported_once() -> None:
     client = FakeLogsClient(
-        [(f"/{STACK}/lambda/Thing", 1), (f"/{STACK}-NESTED/lambda/Thing", 1)]
+        [(f"/{STACK}/lambda/Thing", 1), (f"/{AISTACK}/lambda/Thing", 1)]
     )
 
     assert len(discover(client)) == 2
+
+
+# ── scoping to this deployment ──────────────────────────────────────────────
+
+
+def test_a_neighbouring_deployments_groups_are_not_listed_as_this_ones() -> None:
+    """An account can hold both "LMA-Test" and "LMA-Test-dev". Quoting the
+    second one's log line as the first one's evidence is the worst answer this
+    agent could give, so nested stacks are matched by name."""
+    neighbour = f"{STACK}-dev-AISTACK-DEADBEEF"
+    client = FakeLogsClient(
+        REAL_GROUPS + [(f"/{neighbour}/lambda/CallEventProcessorFunction", 999)]
+    )
+
+    found = by_name(discover(client))
+
+    assert f"/{neighbour}/lambda/CallEventProcessorFunction" not in found
+    assert f"/{AISTACK}/lambda/CallEventProcessorFunction" in found
+
+
+def test_a_neighbouring_microvm_group_is_not_listed_either() -> None:
+    """"/aws/lambda-microvms/LMA-Test-" would match "LMA-Test-dev-vp-logs", so
+    those two groups are named exactly rather than by prefix."""
+    client = FakeLogsClient(
+        REAL_GROUPS + [(f"/aws/lambda-microvms/{STACK}-dev-vp-logs", 999)]
+    )
+
+    found = by_name(discover(client))
+
+    assert f"/aws/lambda-microvms/{STACK}-dev-vp-logs" not in found
+    assert f"/aws/lambda-microvms/{STACK}-vp-logs" in found
+
+
+def test_a_resolved_discovery_reports_that_it_is_scoped() -> None:
+    assert discover_result().scoped_to_nested_stacks is True
+    assert discover_result().caveats() == []
+
+
+def test_an_unresolved_discovery_says_a_neighbour_may_be_included() -> None:
+    """Degrading is acceptable; degrading silently is not. The agent is told,
+    so it can check a name before quoting it."""
+    result = discover_result(nested_stack_names=None)
+
+    assert result.scoped_to_nested_stacks is False
+    caveats = " ".join(result.caveats())
+    assert "matched by stack-name prefix" in caveats
+    assert "may appear here" in caveats
 
 
 # ── the AppSync group ───────────────────────────────────────────────────────
@@ -320,11 +419,48 @@ def test_the_cap_bounds_the_result() -> None:
 
 
 def test_the_cap_stops_paginating_rather_than_slicing_afterwards() -> None:
-    """The cap bounds the API calls as well as the result."""
+    """The cap bounds the API calls as well as the result.
+
+    One prefix past the cap is still requested, which is how the shortfall is
+    detected at all: the flag is set on meeting a group there is no room for,
+    so something has to be found that does not fit.
+    """
     client = FakeLogsClient()
+    all_prefixes = discovery.stack_log_group_prefixes(STACK, NESTED_STACKS)
+
     discover(client, max_log_groups=1)
 
-    assert len(client.prefixes_requested) == 1
+    assert len(client.prefixes_requested) < len(all_prefixes)
+
+
+def test_a_truncated_list_says_so() -> None:
+    """Otherwise the shortfall reads as an absence: search_logs would reject
+    the dropped names as not existing in this deployment, and an empty result
+    from a name that was never searched is indistinguishable from a component
+    that produced nothing."""
+    result = discover_result(max_log_groups=3)
+
+    assert result.truncated is True
+    caveats = " ".join(result.caveats())
+    assert "cut short" in caveats
+    assert "not as absent from the deployment" in caveats
+
+
+def test_a_complete_list_carries_no_truncation_caveat() -> None:
+    result = discover_result()
+
+    assert result.truncated is False
+    assert not any("cut short" in note for note in result.caveats())
+
+
+def test_a_truncated_list_keeps_the_most_valuable_groups() -> None:
+    """The cap drops whatever is paged last, so the ordering has to put the VP
+    container's group and the launch state machine's first. These are the two
+    the prompt calls the most important and the two that, under the default
+    launch type, hold the only record a join was attempted."""
+    kept = {g.name for g in discover(max_log_groups=3)}
+
+    assert f"/aws/lambda-microvms/{STACK}-vp-logs" in kept
 
 
 def test_groups_are_grouped_by_component_so_related_ones_are_adjacent() -> None:

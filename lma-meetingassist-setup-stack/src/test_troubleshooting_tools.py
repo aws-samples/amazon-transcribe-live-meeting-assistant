@@ -162,6 +162,105 @@ def test_discovery_is_cached_across_tool_calls_within_one_run() -> None:
     assert len(client.prefixes_requested) == first
 
 
+class FakeStackResourcesClient:
+    """A CloudFormation client that lists this deployment's nested stacks."""
+
+    def __init__(
+        self, nested: Optional[List[str]] = None, raises: Optional[Exception] = None
+    ):
+        self.nested = [AISTACK, VPSTACK] if nested is None else nested
+        self.raises = raises
+        self.stacks_listed: List[str] = []
+
+    def get_paginator(self, operation: str) -> "FakeStackResourcesClient":
+        assert operation == "list_stack_resources"
+        return self
+
+    def paginate(self, StackName: str) -> List[Dict[str, Any]]:  # noqa: N803
+        self.stacks_listed.append(StackName)
+        if self.raises:
+            raise self.raises
+        return [
+            {
+                "StackResourceSummaries": [
+                    # A nested stack's physical id is its ARN.
+                    {
+                        "ResourceType": "AWS::CloudFormation::Stack",
+                        "PhysicalResourceId": (
+                            f"arn:aws:cloudformation:us-east-1:111122223333:"
+                            f"stack/{name}/abcd-1234"
+                        ),
+                    }
+                    for name in self.nested
+                ]
+                # Something that is not a nested stack, to be skipped.
+                + [
+                    {
+                        "ResourceType": "AWS::DynamoDB::Table",
+                        "PhysicalResourceId": "some-table",
+                    }
+                ]
+            }
+        ]
+
+
+def test_discovery_resolves_this_deployments_nested_stacks() -> None:
+    """Resolving them is what keeps a neighbouring stack whose name begins with
+    this one's out of the evidence."""
+    cfn = FakeStackResourcesClient()
+
+    result = parsed(make_tools(cloudformation_client=cfn).discover_log_groups())
+
+    assert cfn.stacks_listed == [STACK]
+    assert result["scopedToThisDeploymentOnly"] is True
+    assert "matched by stack-name prefix" not in result["guidance"]
+
+
+def test_the_nested_stack_lookup_happens_once_per_run() -> None:
+    cfn = FakeStackResourcesClient()
+    tools = make_tools(cloudformation_client=cfn)
+
+    tools.discover_log_groups()
+    tools.discover_log_groups()
+
+    assert cfn.stacks_listed == [STACK]
+
+
+def test_a_failed_nested_stack_lookup_degrades_but_says_so() -> None:
+    """Falling back silently to a prefix match would let a neighbouring
+    deployment's log line be quoted as this deployment's evidence."""
+    cfn = FakeStackResourcesClient(raises=RuntimeError("AccessDenied"))
+
+    result = parsed(make_tools(cloudformation_client=cfn).discover_log_groups())
+
+    assert result["scopedToThisDeploymentOnly"] is False
+    assert "matched by stack-name prefix" in result["guidance"]
+    assert result["logGroupCount"] > 0
+
+
+def test_a_truncated_discovery_tells_the_agent_the_list_is_incomplete() -> None:
+    limits = AgentLimits()
+    object.__setattr__(limits, "max_log_groups", 3)
+
+    result = parsed(
+        make_tools(
+            cloudformation_client=FakeStackResourcesClient(), limits=limits
+        ).discover_log_groups()
+    )
+
+    assert result["listIsComplete"] is False
+    assert "cut short" in result["guidance"]
+
+
+def test_a_complete_discovery_reports_the_list_as_complete() -> None:
+    result = parsed(
+        make_tools(cloudformation_client=FakeStackResourcesClient()).discover_log_groups()
+    )
+
+    assert result["listIsComplete"] is True
+    assert "cut short" not in result["guidance"]
+
+
 def test_a_filtered_discovery_does_not_poison_the_cache() -> None:
     """A filtered call must not leave search_logs believing only those exist."""
     tools = make_tools()
@@ -539,6 +638,55 @@ def test_work_proceeds_before_the_deadline() -> None:
     tools = make_tools(deadline=1000.0, clock=[0.0])
 
     assert parsed(tools.discover_log_groups())["logGroupCount"] > 0
+
+
+def test_a_query_waits_no_longer_than_the_run_has_left() -> None:
+    """The per-query timeout alone is not enough. A query started just inside
+    the deadline would otherwise run past it, and the model still has to write
+    an answer after this returns -- so the wait is bounded by both.
+    """
+    clock = [0.0]
+    limits = AgentLimits()
+    object.__setattr__(limits, "query_timeout_seconds", 120)
+    object.__setattr__(limits, "query_poll_seconds", 1)
+    # Ten seconds of run left against a 120-second per-query timeout.
+    client = FakeInsightsClient(statuses=["Running"] * 400)
+
+    with pytest.raises(ToolError, match="was cancelled"):
+        make_tools(client, limits=limits, deadline=10.0, clock=clock).search_logs(VP_GROUP)
+
+    # The fake's sleep advances the shared clock, so this is the real elapsed
+    # wait rather than a count of polls.
+    assert clock[0] <= 12, clock[0]
+    assert client.stopped == ["query-1"]
+
+
+def test_the_per_query_timeout_still_applies_when_the_run_has_longer() -> None:
+    clock = [0.0]
+    limits = AgentLimits()
+    object.__setattr__(limits, "query_timeout_seconds", 5)
+    object.__setattr__(limits, "query_poll_seconds", 1)
+    client = FakeInsightsClient(statuses=["Running"] * 400)
+
+    with pytest.raises(ToolError, match="was cancelled"):
+        make_tools(client, limits=limits, deadline=10_000.0, clock=clock).search_logs(
+            VP_GROUP
+        )
+
+    assert clock[0] <= 7, clock[0]
+
+
+def test_a_query_with_no_deadline_uses_the_per_query_timeout() -> None:
+    limits = AgentLimits()
+    object.__setattr__(limits, "query_timeout_seconds", 3)
+    object.__setattr__(limits, "query_poll_seconds", 1)
+    clock = [0.0]
+    client = FakeInsightsClient(statuses=["Running"] * 400)
+
+    with pytest.raises(ToolError, match="was cancelled"):
+        make_tools(client, limits=limits, deadline=None, clock=clock).search_logs(VP_GROUP)
+
+    assert clock[0] <= 5, clock[0]
 
 
 # ── get_vp_record ───────────────────────────────────────────────────────────

@@ -131,11 +131,44 @@ class RunBudget:
     write an answer: immediately before a tool does any work.
     """
 
-    def __init__(self, limits: AgentLimits, monotonic: Callable[[], float] = time.monotonic):
+    def __init__(
+        self,
+        limits: AgentLimits,
+        monotonic: Callable[[], float] = time.monotonic,
+        remaining_seconds: Optional[float] = None,
+    ):
+        """Bound this run.
+
+        Args:
+            limits: The resolved limits.
+            monotonic: Clock, injected for the tests.
+            remaining_seconds: How long this Lambda invocation has left, from
+                ``context.get_remaining_time_in_millis()``. When supplied it
+                caps the wall clock: the configured budget is a *request*, and
+                a request longer than the invocation has left would be a
+                deadline the run could never reach, so the agent would be
+                killed mid-answer instead of reporting that it ran out of time.
+                A reserve is held back for the final model turn, which happens
+                after the last tool returns.
+        """
         self._limits = limits
         self._monotonic = monotonic
         self.started_at = monotonic()
-        self.deadline = self.started_at + limits.wall_clock_seconds
+
+        budget = float(limits.wall_clock_seconds)
+        self.capped_by_invocation = False
+        if remaining_seconds is not None:
+            available = remaining_seconds - limits.answer_reserve_seconds
+            # A floor of one second rather than zero or a negative: a deadline
+            # already in the past makes the first tool refuse, which produces
+            # "ran out of time" instead of an empty answer with no reason.
+            available = max(1.0, available)
+            if available < budget:
+                budget = available
+                self.capped_by_invocation = True
+
+        self.wall_clock_seconds = budget
+        self.deadline = self.started_at + budget
         self.tool_calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
@@ -171,7 +204,7 @@ class RunBudget:
             )
         if self._monotonic() >= self.deadline:
             return (
-                f"the {self._limits.wall_clock_seconds}-second time budget for one "
+                f"the {self.wall_clock_seconds:.0f}-second time budget for one "
                 "diagnosis has been reached"
             )
         return None
@@ -182,6 +215,8 @@ class RunBudget:
             "inputTokens": self.input_tokens,
             "outputTokens": self.output_tokens,
             "elapsedSeconds": round(self.elapsed_seconds, 1),
+            "wallClockSeconds": round(self.wall_clock_seconds, 1),
+            "wallClockCappedByInvocation": self.capped_by_invocation,
             "stoppedBecause": self.stopped_because,
         }
 
@@ -539,11 +574,30 @@ def build_question(event: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def run_diagnosis(event: Dict[str, Any]) -> Dict[str, Any]:
+def remaining_seconds(context: Any) -> Optional[float]:
+    """Seconds left in this Lambda invocation, or None if it cannot be read.
+
+    Read from the context rather than from the function's configured Timeout,
+    because the Timeout is a template value an operator can change and the
+    agent's own budget has to stay inside whatever it currently is.
+    """
+    getter = getattr(context, "get_remaining_time_in_millis", None)
+    if not callable(getter):
+        return None
+    try:
+        return float(getter()) / 1000.0
+    except Exception:  # noqa: BLE001 - an unreadable clock is not fatal
+        return None
+
+
+def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     """Diagnose one question and return the answer with its run metadata."""
     limits = AgentLimits()
-    budget = RunBudget(limits)
-    logger.info("troubleshooting run starting", extra={"limits": limits.as_dict()})
+    budget = RunBudget(limits, remaining_seconds=remaining_seconds(context))
+    logger.info(
+        "troubleshooting run starting",
+        extra={"limits": limits.as_dict(), "budget": budget.as_dict()},
+    )
 
     system_prompt = troubleshooting_prompt.get_system_prompt(
         DYNAMODB_CLIENT, PROMPT_TABLE_NAME
@@ -605,7 +659,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     see the module docstring.
     """
     try:
-        result = run_diagnosis(event or {})
+        result = run_diagnosis(event or {}, context)
     except troubleshooting_prompt.PromptUnavailableError as exc:
         logger.error("refusing to diagnose without a system prompt: %s", exc)
         return {

@@ -38,12 +38,15 @@ limit and conflating them is how a cheap query still blows the context window.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import time
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import troubleshooting_discovery as discovery
 from troubleshooting_config import AgentLimits, truncate
+
+LOGGER = logging.getLogger(__name__)
 
 # Logs Insights accepts at most 50 log groups in one query.
 _INSIGHTS_MAX_GROUPS = 50
@@ -154,9 +157,11 @@ class TroubleshootingTools:
         self._deadline = deadline
         self._sleep = sleep
         self._monotonic = monotonic
-        # Cached across tool calls within one run: discovery is the same answer
-        # every time and the model reliably asks for it more than once.
-        self._discovered: Optional[List[discovery.LogGroupInfo]] = None
+        # Cached across tool calls within one run: both answers are the same
+        # every time and the model reliably asks for the log groups more than
+        # once.
+        self._discovered: Optional[discovery.DiscoveryResult] = None
+        self._nested_names: Optional[List[str]] = None
 
     # ── Shared helpers ─────────────────────────────────────────────────────
 
@@ -176,15 +181,54 @@ class TroubleshootingTools:
         )
 
     def _known_log_group_names(self) -> set[str]:
-        return {g.name for g in self._all_log_groups()}
+        return {g.name for g in self._discovery().groups}
 
-    def _all_log_groups(self) -> List[discovery.LogGroupInfo]:
-        """Every log group in this deployment, discovered at most once per run.
+    def _nested_stack_names(self) -> List[str]:
+        """This deployment's nested stacks' generated physical names.
+
+        Resolved rather than inferred from the parent's name, because the
+        obvious inference is wrong in a way that is hard to notice: a log group
+        whose name begins ``/<parent>-`` belongs to *a* stack whose name begins
+        with the parent's, which in an account holding both ``LMA`` and
+        ``LMA-dev`` is not necessarily this one. Reporting a neighbouring
+        deployment's log line as this deployment's evidence is the worst answer
+        this agent could give, so the names are looked up.
+
+        Returns an empty list when the lookup is not possible, and the caller
+        says so in its result rather than quietly falling back.
+        """
+        if self._nested_names is not None:
+            return self._nested_names
+        names: List[str] = []
+        try:
+            paginator = self._cfn.get_paginator("list_stack_resources")
+            for page in paginator.paginate(StackName=self._stack_name):
+                for resource in page.get("StackResourceSummaries", []):
+                    if resource.get("ResourceType") != "AWS::CloudFormation::Stack":
+                        continue
+                    physical_id = resource.get("PhysicalResourceId") or ""
+                    # The physical id of a nested stack is its ARN; the stack
+                    # name is the second-to-last segment.
+                    parts = physical_id.split("/")
+                    if len(parts) >= 2 and parts[-2]:
+                        names.append(parts[-2])
+        except Exception:  # noqa: BLE001 - reported, not raised
+            LOGGER.warning(
+                "could not resolve nested stack names for %s; log group "
+                "discovery will match by stack-name prefix",
+                self._stack_name,
+            )
+            names = []
+        self._nested_names = names
+        return names
+
+    def _discovery(self) -> discovery.DiscoveryResult:
+        """One discovery pass per run, cached.
 
         Cached because the answer cannot change inside one diagnosis and the
         model reliably asks for it more than once — and because every
-        ``search_logs`` call validates its arguments against this list, so an
-        uncached lookup would re-page ``describe_log_groups`` on every query.
+        ``search_logs`` call validates its arguments against it, so an uncached
+        lookup would re-page ``describe_log_groups`` on every query.
         """
         if self._discovered is None:
             self._discovered = discovery.discover_log_groups(
@@ -192,6 +236,7 @@ class TroubleshootingTools:
                 self._stack_name,
                 max_log_groups=self._limits.max_log_groups,
                 graphql_url=self._graphql_url,
+                nested_stack_names=self._nested_stack_names() or None,
             )
         return self._discovered
 
@@ -212,14 +257,26 @@ class TroubleshootingTools:
         # a second discovery pass: a filtered pass must not be what populates
         # the cache, or a later search_logs would validate its log group names
         # against only the components the model happened to ask about first.
+        result = self._discovery()
         wanted = _as_term_list(components) or None
-        groups = self._all_log_groups()
+        groups = result.groups
         if wanted is not None:
             allowed = set(wanted)
             groups = [g for g in groups if g.component in allowed]
 
         present = [g for g in groups if g.has_data]
         empty = [g for g in groups if not g.has_data]
+        guidance = [
+            f"{len(present)} of {len(groups)} groups hold data. A group with "
+            "hasData=false has never been written to, which means this "
+            "deployment does not use that path — it is not evidence that the "
+            "component failed. Query only the groups that hold data."
+        ]
+        # Caveats come after the reading advice and before anything else the
+        # model does: each one names a way this list is incomplete or wider
+        # than this deployment, and reasoning past either produces a confident
+        # wrong answer rather than a visible gap.
+        guidance.extend(result.caveats())
         return self._render(
             {
                 "stackName": self._stack_name,
@@ -231,13 +288,9 @@ class TroubleshootingTools:
                     if c in discovery.COMPONENT_NOTES
                 },
                 "emptyLogGroupCount": len(empty),
-                "guidance": (
-                    f"{len(present)} of {len(groups)} groups hold data. A group "
-                    "with hasData=false has never been written to, which means "
-                    "this deployment does not use that path — it is not "
-                    "evidence that the component failed. Query only the groups "
-                    "that hold data."
-                ),
+                "listIsComplete": not result.truncated,
+                "scopedToThisDeploymentOnly": result.scoped_to_nested_stacks,
+                "guidance": " ".join(guidance),
             }
         )
 
@@ -355,6 +408,13 @@ class TroubleshootingTools:
         The query is cancelled on our own timeout rather than left running:
         an account has a bounded number of concurrent Insights queries, and
         abandoning them is how one runaway diagnosis starves the next.
+
+        **The wait is bounded by the run's deadline as well as by
+        ``query_timeout_seconds``.** Checking only the per-query timeout lets a
+        query started just inside the deadline run on past it, and the model
+        still has to write an answer after this returns — so a query that
+        cannot finish in the time the run has left is cancelled at that point
+        instead.
         """
         started = self._logs.start_query(
             logGroupNames=list(log_group_names),
@@ -367,19 +427,23 @@ class TroubleshootingTools:
         if not query_id:
             raise ToolError("CloudWatch Logs did not return a query id")
 
+        budget = float(self._limits.query_timeout_seconds)
+        if self._deadline is not None:
+            budget = min(budget, self._deadline - self._monotonic())
+
         waited = 0.0
         while True:
             response = self._logs.get_query_results(queryId=query_id)
             status = response.get("status", "Unknown")
             if status in _QUERY_DONE:
                 break
-            if waited >= self._limits.query_timeout_seconds:
+            if waited >= budget:
                 self._stop_query(query_id)
                 raise ToolError(
-                    f"the query was still {status} after "
-                    f"{self._limits.query_timeout_seconds}s and was cancelled. "
-                    "Narrow it: fewer log groups, a shorter lookbackHours, or a "
-                    "more specific search term."
+                    f"the query was still {status} after {waited:.0f}s of an "
+                    f"available {budget:.0f}s and was cancelled. Narrow it: "
+                    "fewer log groups, a shorter lookbackHours, or a more "
+                    "specific search term."
                 )
             self._sleep(self._limits.query_poll_seconds)
             waited += self._limits.query_poll_seconds
@@ -538,7 +602,6 @@ class TroubleshootingTools:
         "EnableAudioRecording": "Whether meeting audio is retained.",
         "EnableVideoRecording": "Whether meeting screen capture is retained.",
         "TranscribeLanguageCode": "Affects both engines' behaviour.",
-        "IsSentimentAnalysisEnabled": "Affects the transcript pipeline's work per segment.",
         "MeetingInactivityTimeoutInMinutes": (
             "Zero removes the stale-meeting reaper's schedule entirely rather "
             "than changing a number, so a meeting stuck In Progress has no "

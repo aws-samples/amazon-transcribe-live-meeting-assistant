@@ -511,10 +511,19 @@ Resources:
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       Policies:
-        # Reading this deployment's logs. The four log-group prefixes are the
-        # four namespaces LMA writes to: nested-stack groups, groups named
-        # after the parent stack, the MicroVM groups outside the stack-name
-        # namespace, and the EXPRESS state machine's vended group.
+        # Reading this deployment's logs.
+        #
+        # Named per nested stack rather than by the bare "/${LMAStackName}-*"
+        # prefix. A nested stack's log groups are named after its generated
+        # name, "<parent>-<LOGICALID>-<suffix>", so including the logical id
+        # keeps the grant to stacks this template's own parent created: in an
+        # account holding both "LMA" and "LMA-dev", "/LMA-*" would also cover
+        # the latter's groups, and this agent's whole value rests on the
+        # evidence it quotes belonging to the deployment it was asked about.
+        #
+        # The MicroVM groups are named exactly for the same reason, and the
+        # parent-stack prefix carries its trailing separator so it cannot match
+        # a longer sibling name.
         - PolicyName: DiagnosticLogReadPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -525,10 +534,21 @@ Resources:
                   - "logs:DescribeLogStreams"
                   - "logs:StartQuery"
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}/*"
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-*"
-                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${LMAStackName}-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-AISTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-MEETINGASSISTSETUP-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-VIRTUALPARTICIPANTSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-WEBSOCKETTRANSCRIBERSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-ASRMICROVMSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-COGNITOSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-LLMTEMPLATESTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-CHATBUTTONCONFIGSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-NOVASONICONFIGSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-BROWSEREXTENSIONSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-DESKTOPCAPTUREAPPSTACK-*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-vp-logs*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-asr-logs*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${LMAStackName}-VIRTUALPARTICIPANTSTACK-*"
                   - !If
                     - HasAppSyncApiId
                     - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/appsync/apis/${AppSyncApiId}*"
@@ -550,17 +570,21 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
-        # Which components this deployment runs. Scoped to the LMA stack tree:
-        # the parent by name, and its nested stacks by the generated prefix.
+        # Which components this deployment runs, and which nested stacks it
+        # owns. ListStackResources is what lets log-group discovery match this
+        # deployment's own nested stacks by name instead of by a prefix that a
+        # neighbouring stack could share; both calls are on the parent stack
+        # alone, named exactly.
         - PolicyName: DiagnosticStackReadPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
               - Effect: Allow
-                Action: "cloudformation:DescribeStacks"
+                Action:
+                  - "cloudformation:DescribeStacks"
+                  - "cloudformation:ListStackResources"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LMAStackName}/*"
-                  - !Sub "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/${LMAStackName}-*/*"
         - PolicyName: BedrockPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -586,7 +610,8 @@ Resources:
                     - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
                 - !Ref AWS::NoValue
         # Narrating the investigation to the UI. One mutation field, the same
-        # one the meeting assistant streams through.
+        # one the meeting assistant streams through, on this deployment's own
+        # API where the id is known.
         - PolicyName: AppSyncGraphQLPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -594,7 +619,10 @@ Resources:
               - Effect: Allow
                 Action: "appsync:GraphQL"
                 Resource:
-                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
+                  - !If
+                    - HasAppSyncApiId
+                    - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/addChatToken"
+                    - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
         # Reading the CMK-encrypted tables and log groups. Scoped to reads made
         # through those two services, so the key is not usable for anything
         # else this role can reach.

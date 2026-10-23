@@ -75,8 +75,11 @@ Supply search_terms for reading lines; supply query_string for everything else:
   fields @message | parse @message "trigger=*" as trigger
   | filter ispresent(trigger) | stats count() by trigger
 - Find when it started:
-  fields @timestamp | filter @message like "MicroVM ASR could not start"
+  fields @timestamp | filter @message like "fallback is disabled"
   | stats count() by bin(30m)
+  Note the term chosen there. "MicroVM ASR could not start" also appears in the
+  designed fallback line, which is not a cause; the two are told apart by what
+  follows it, so filter on the half you mean.
 - Correlate two components in one call by naming both log groups.
 
 Use at least two independent sources before naming a cause. If a search returns

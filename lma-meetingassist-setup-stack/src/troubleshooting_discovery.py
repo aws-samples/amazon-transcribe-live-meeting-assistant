@@ -226,22 +226,77 @@ def appsync_log_group_candidate(graphql_url: str) -> Optional[str]:
     return f"/aws/appsync/apis/{label}"
 
 
-def stack_log_group_prefixes(stack_name: str) -> List[str]:
-    """The prefixes under which an LMA deployment's log groups can appear.
+def stack_log_group_prefixes(
+    stack_name: str, nested_stack_names: Optional[Sequence[str]] = None
+) -> List[str]:
+    """The prefixes under which this deployment's log groups can appear.
 
-    ``/<stack>-`` catches every nested stack's groups, whose names begin with
-    the generated nested stack name; ``/<stack>/`` catches the groups named
-    after the parent stack directly. The two ``/aws/``-rooted prefixes are the
-    namespaces CloudWatch, not CloudFormation, controls.
+    **Ordered most specific first, and that ordering is load-bearing.** When
+    the ``max_log_groups`` cap is reached pagination stops, so whatever is
+    paged last is what gets dropped. The virtual participant's container group
+    and the launch state machine's vended group are the two the prompt calls
+    the most important, and both live in the ``/aws/``-rooted namespaces, so
+    those are paged first. Leading with the broad stack prefix would drop
+    exactly the evidence the agent most needs, and ``search_logs`` would then
+    reject those names as not existing in this deployment.
+
+    When ``nested_stack_names`` is supplied, each nested stack is matched by
+    its own full name. Otherwise the parent stack's name is used as a prefix,
+    which also matches any *other* stack in the account whose name begins with
+    it — ``LMA`` matching ``LMA-dev``. The caller is told which of the two it
+    got, because evidence from a neighbouring deployment attributed to this one
+    is the worst answer this agent could give.
     """
     if not stack_name:
         return []
-    return [
-        f"/{stack_name}-",
-        f"/{stack_name}/",
-        f"/aws/lambda-microvms/{stack_name}-",
-        f"/aws/vendedlogs/states/{stack_name}-",
-    ]
+    prefixes: List[str] = []
+
+    # Named exactly rather than by prefix: "/aws/lambda-microvms/LMA-" would
+    # also match "LMA-dev-vp-logs".
+    prefixes.append(f"/aws/lambda-microvms/{stack_name}-vp-logs")
+    prefixes.append(f"/aws/lambda-microvms/{stack_name}-asr-logs")
+
+    if nested_stack_names:
+        for nested in nested_stack_names:
+            prefixes.append(f"/aws/vendedlogs/states/{nested}")
+            prefixes.append(f"/{nested}/")
+    else:
+        prefixes.append(f"/aws/vendedlogs/states/{stack_name}-")
+        prefixes.append(f"/{stack_name}-")
+
+    # Groups named after the parent stack rather than a nested one. Always
+    # carries the trailing separator, so it cannot match a longer sibling name.
+    prefixes.append(f"/{stack_name}/")
+    return prefixes
+
+
+@dataclass(frozen=True)
+class DiscoveryResult:
+    """Everything one discovery pass found, and what it could not reach."""
+
+    groups: List[LogGroupInfo]
+    truncated: bool
+    scoped_to_nested_stacks: bool
+
+    def caveats(self) -> List[str]:
+        """Statements the agent must not reason past. Empty when there are none."""
+        notes: List[str] = []
+        if self.truncated:
+            notes.append(
+                "This list was cut short at the configured log group cap, so "
+                "some of this deployment's log groups are missing from it and "
+                "cannot be searched. Treat a group you expected and cannot see "
+                "as absent from THIS LIST, not as absent from the deployment."
+            )
+        if not self.scoped_to_nested_stacks:
+            notes.append(
+                "This deployment's nested stack names could not be resolved, so "
+                "groups were matched by stack-name prefix. If another stack in "
+                "this account has a name beginning with this one's, its log "
+                "groups may appear here. Check that a group you rely on belongs "
+                "to this deployment before quoting it as evidence."
+            )
+        return notes
 
 
 def discover_log_groups(
@@ -250,8 +305,9 @@ def discover_log_groups(
     *,
     max_log_groups: int,
     graphql_url: str = "",
-) -> List[LogGroupInfo]:
-    """Page `describe_log_groups` over every namespace LMA writes to.
+    nested_stack_names: Optional[Sequence[str]] = None,
+) -> DiscoveryResult:
+    """Page `describe_log_groups` over every namespace this deployment uses.
 
     Deliberately returns everything it finds rather than taking a filter:
     callers cache this result and filter it afterwards, so a filtered pass can
@@ -263,14 +319,19 @@ def discover_log_groups(
         max_log_groups: Hard cap on the number returned.
         graphql_url: AppSync endpoint, used to look for the service-managed
             AppSync group. Optional.
+        nested_stack_names: This deployment's nested stacks' physical names.
+            Supplying them is what makes the match exact rather than by prefix.
 
     Returns:
-        Groups sorted by component then name, so related groups are adjacent
-        in the model's context.
+        A DiscoveryResult whose groups are sorted by component then name, so
+        related groups sit adjacent in the model's context, and which reports
+        whether the list is complete and whether it covers this deployment
+        alone.
     """
     found: Dict[str, LogGroupInfo] = {}
+    truncated = False
 
-    prefixes = stack_log_group_prefixes(stack_name)
+    prefixes = stack_log_group_prefixes(stack_name, nested_stack_names)
     candidate = appsync_log_group_candidate(graphql_url)
     if candidate:
         # A full group name is also a valid prefix, which is how the candidate
@@ -279,22 +340,33 @@ def discover_log_groups(
 
     paginator = logs_client.get_paginator("describe_log_groups")
     for prefix in prefixes:
+        if truncated:
+            break
         for page in paginator.paginate(logGroupNamePrefix=prefix):
             for group in page.get("logGroups", []):
                 name = group.get("logGroupName")
                 if not name or name in found:
                     continue
+                if len(found) >= max_log_groups:
+                    # Stop paginating rather than collecting and slicing: the
+                    # cap bounds the API calls as well as the result. The flag
+                    # is what keeps the shortfall from reading as an absence.
+                    truncated = True
+                    break
                 found[name] = LogGroupInfo(
                     name=name,
                     component=classify_log_group(name),
                     stored_bytes=int(group.get("storedBytes") or 0),
                     retention_days=group.get("retentionInDays"),
                 )
-                if len(found) >= max_log_groups:
-                    # Stop paginating rather than collecting and slicing: the
-                    # cap exists to bound the API calls as well as the result.
-                    return _sorted(found.values())
-    return _sorted(found.values())
+            if truncated:
+                break
+
+    return DiscoveryResult(
+        groups=_sorted(found.values()),
+        truncated=truncated,
+        scoped_to_nested_stacks=bool(nested_stack_names),
+    )
 
 
 def _sorted(groups: Iterable[LogGroupInfo]) -> List[LogGroupInfo]:

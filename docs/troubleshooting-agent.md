@@ -92,7 +92,7 @@ Four tools, each read-only:
 
 | Tool | Reads | Why |
 |---|---|---|
-| `get_stack_parameters` | `cloudformation:DescribeStacks` on your LMA stack | Which components this deployment actually runs, and therefore where evidence can exist at all. |
+| `get_stack_parameters` | `cloudformation:DescribeStacks` and `ListStackResources` on your LMA stack | Which components this deployment actually runs, and therefore where evidence can exist at all. |
 | `discover_log_groups` | `logs:DescribeLogGroups` | The log group names, their owning component, and how many bytes each holds. |
 | `search_logs` | CloudWatch Logs Insights (`logs:StartQuery`) | Every "why", timeline, count and cross-component correlation. |
 | `get_vp_record` | `dynamodb:GetItem` on the VirtualParticipant table | One Virtual Participant's current status and its structured exit code. |
@@ -118,6 +118,16 @@ It also reports, for every log group, whether that group holds any data at all �
 so "this path is unused in this deployment" and "this component failed silently"
 stay distinguishable.
 
+**Discovery is scoped to this deployment, and says so when it cannot be.** The
+agent resolves your stack's own nested stacks by name before looking for log
+groups, so an account holding both `LMA` and `LMA-dev` never gets the second
+one's log lines reported as the first one's evidence. If that lookup is not
+possible it falls back to matching on the stack-name prefix and tells the agent
+that a neighbouring deployment's groups may be included, rather than degrading
+silently. Likewise, if the `TROUBLESHOOTING_MAX_LOG_GROUPS` cap cuts the list
+short, the agent is told the list is incomplete so a group it cannot see is not
+read as a group that does not exist.
+
 ## Tuning the prompt
 
 The agent's judgement is its system prompt, and the prompt is meant to be
@@ -127,7 +137,7 @@ templates, as a Default/Custom pair:
 | Item | Behaviour |
 |---|---|
 | `DefaultTroubleshootingAgentPrompt` | Shipped with the stack and **rewritten on every stack update**. Edits to it are lost. |
-| `CustomTroubleshootingAgentPrompt` | Seeded empty once, on stack create, and never written again. |
+| `CustomTroubleshootingAgentPrompt` | Created empty if it is absent, on create *and* on update, so it is there on an upgraded deployment as well as a new one. Once it exists it is never written again, so your prompt survives every later upgrade. |
 
 To override it, set a `systemPrompt` attribute on
 `CustomTroubleshootingAgentPrompt`. The change applies to the **next
@@ -160,7 +170,8 @@ original question re-pays for every tool call it already made.
 |---|---|---|---|
 | `TROUBLESHOOTING_MAX_ITERATIONS` | 8 | 20 | Tool calls per diagnosis |
 | `TROUBLESHOOTING_TOKEN_BUDGET` | 250,000 | 1,000,000 | Input + output tokens per diagnosis |
-| `TROUBLESHOOTING_WALL_CLOCK_SECONDS` | 240 | 870 | Seconds per diagnosis |
+| `TROUBLESHOOTING_WALL_CLOCK_SECONDS` | 240 | 870 | Seconds per diagnosis — **requested**; see below |
+| `TROUBLESHOOTING_ANSWER_RESERVE_SECONDS` | 30 | 120 | Time held back for the model to write its answer |
 | `TROUBLESHOOTING_MAX_OUTPUT_TOKENS` | 4,096 | 16,384 | Output tokens per model turn |
 | `TROUBLESHOOTING_MAX_LOG_GROUPS` | 120 | 400 | Log groups returned by discovery |
 | `TROUBLESHOOTING_MAX_LOG_EVENTS` | 100 | 1,000 | Rows per log query |
@@ -169,11 +180,22 @@ original question re-pays for every tool call it already made.
 | `TROUBLESHOOTING_DEFAULT_LOOKBACK_HOURS` | 4 | 72 | Search window when none is asked for |
 | `TROUBLESHOOTING_MAX_LOOKBACK_HOURS` | 72 | 336 | Largest search window allowed |
 | `TROUBLESHOOTING_QUERY_TIMEOUT_SECONDS` | 45 | 120 | Seconds to wait for one log query |
+| `TROUBLESHOOTING_QUERY_POLL_SECONDS` | 1 | 10 | Seconds between polls of a running query |
 
 Set these on the `STRANDS-<stack>-Troubleshooting` Lambda function. They take
 effect on the next invocation. A value above its maximum is clamped rather than
 refused, and an unreadable value falls back to the default, so a typo costs
 money or precision rather than stopping a diagnosis from starting.
+
+**The wall clock is a request, not a guarantee of how long a run may take.**
+The effective budget is the smaller of `TROUBLESHOOTING_WALL_CLOCK_SECONDS` and
+the time the invocation actually has left, less
+`TROUBLESHOOTING_ANSWER_RESERVE_SECONDS` for the final model turn. So raising
+the wall clock above the function's `Timeout` does not extend a run — it is
+simply ignored, and the agent still reports that it ran out of time rather than
+being killed mid-answer. To genuinely allow longer diagnoses, raise the
+function's `Timeout` as well. Each run logs the effective budget it used and
+whether the invocation was what capped it.
 
 `TROUBLESHOOTING_MAX_LOOKBACK_HOURS` is the costliest of these: CloudWatch Logs
 Insights bills by bytes scanned, and the Virtual Participant's container log
