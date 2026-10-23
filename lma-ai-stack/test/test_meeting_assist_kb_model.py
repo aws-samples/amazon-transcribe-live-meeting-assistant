@@ -13,12 +13,15 @@ Orchestration and Generation.
 **Which models are usable is a property of the individual model, not of its
 generation.** `us.anthropic.claude-opus-4-1-20250805-v1:0` is refused and
 `us.anthropic.claude-opus-4-6-v1` is accepted, and both are Claude 4; five of the
-six Claude 5.5 ids were measured and all five were refused. The inference-profile
-prefix makes no difference either way. `us.anthropic.claude-opus-5-5` is the one
+six Claude 5.5 ids were measured -- all three `global.` forms, and the `us.`
+Haiku and Sonnet -- and all five were refused. The inference-profile prefix makes
+no difference either way. `us.anthropic.claude-opus-5-5` is the sixth and the one
 Claude 5.5 id nobody called, so it is absent from KB_MODELS_VERIFIED_REFUSED
 below; it is withheld at runtime by the generation default in
 `kb_model_supports_retrieve_and_generate`, which is a default for unchecked ids
-rather than a measurement. There is therefore no rule to derive the list from, which is why the
+rather than a measurement.
+
+There is therefore no rule to derive the list from, which is why the
 list is a record of measurements -- see KB_MODELS_VERIFIED_WORKING below -- and
 why `test_the_knowledge_base_choices_are_exactly_the_verified_set` asserts the
 CloudFormation parameter matches that record exactly. Adding a model to the

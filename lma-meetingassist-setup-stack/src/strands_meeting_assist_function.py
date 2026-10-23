@@ -148,10 +148,10 @@ def kb_model_supports_retrieve_and_generate(model_id: str) -> bool:
     be provided for both Orchestration and Generation. Which models those are is a
     property of the individual model: Claude Opus 4.1 is refused and Claude Opus
     4.6 is accepted, though both are Claude 4, and the five Claude 5.5 ids that
-    were measured were refused in both their ``global.`` and their ``us.`` forms.
-    The inference-profile prefix makes no difference either way.
-    ``us.anthropic.claude-opus-5-5`` was not measured; it is covered by the
-    generation rule below, not by a result.
+    were measured -- all three ``global.`` forms, and the ``us.`` Haiku and
+    Sonnet -- were all refused. The inference-profile prefix makes no difference
+    either way. ``us.anthropic.claude-opus-5-5`` is the sixth and was not
+    measured; it is covered by the generation rule below, not by a result.
 
     The agent's own model is unaffected and may be any of them: it reaches Bedrock
     through Converse, which carries no such requirement. That difference is why
