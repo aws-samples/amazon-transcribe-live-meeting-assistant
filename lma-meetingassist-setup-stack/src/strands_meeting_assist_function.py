@@ -20,6 +20,7 @@ from bedrock_compat import (
     MEETING_ASSIST_FALLBACK_MAX_TOKENS,
     accepts_temperature,
     build_inference_config,
+    claude_major_version,
     extract_text,
 )
 import tavily_secret
@@ -56,6 +57,38 @@ ENABLE_STREAMING = os.environ.get('ENABLE_STREAMING', 'false').lower() == 'true'
 # Sampling temperature for the assistant's answers, on the models that accept one.
 # Above zero because this path is conversational rather than extractive.
 AGENT_TEMPERATURE = 0.3
+
+# Fallback for KB_MODEL_ID, reached only by a deployment whose environment does not
+# set it. Tracks the default of the MeetingAssistKnowledgeBaseModelID parameter.
+DEFAULT_KB_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+
+# Claude generation from which a model is assumed to require custom prompt
+# templates. This is a default for ids nobody has checked, not the boundary: see
+# kb_model_supports_retrieve_and_generate().
+KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR = 5
+
+# Models known to be refused by a live knowledge base that the generation default
+# above does not already cover. Claude Opus 4.1 returns the same "custom prompt
+# templates must be provided" ValidationException as the Claude 5.5 models, while
+# Claude Opus 4.6 is accepted, so a generation number alone cannot decide this.
+#
+# The us. profile is the measured one (us-west-2, 2026-10-21; its inference
+# profile exists in that account, so this is a refusal and not an availability
+# problem). Its global. twin is listed with it by inference, since every earlier
+# measurement found the two profile forms of one model behaving alike, and
+# withholding a tool for an id LMA does not offer anywhere is the harmless
+# direction to be wrong in.
+KB_MODELS_REQUIRING_CUSTOM_PROMPTS = frozenset({
+    'us.anthropic.claude-opus-4-1-20250805-v1:0',
+    'global.anthropic.claude-opus-4-1-20250805-v1:0',
+})
+
+# Upper bound on Query pages for one meeting's transcript. A 1 MB page holds a
+# great many segments, so this is far above any real meeting; it exists so that a
+# table which keeps handing back a continuation key cannot spin this function for
+# its whole timeout. Matches the limit the fetch_transcript Lambda applies to the
+# same read.
+MAX_TRANSCRIPT_PAGES = 100
 
 # Optional Bedrock Guardrail, set from the BedrockGuardrailId / BedrockGuardrailVersion
 # CloudFormation parameters. Both are empty by default.
@@ -94,6 +127,59 @@ def get_guardrail_config() -> Dict[str, str]:
     return {}
 
 
+def build_kb_model_arn(model_id: str, kb_region: str, kb_account_id: str) -> str:
+    """The ``modelArn`` a RetrieveAndGenerate call generates its answer with.
+
+    A bare foundation-model id is addressed in the model catalogue, which has no
+    account in its ARN; anything else is an inference profile, which lives in the
+    deployment's own account.
+    """
+    if model_id.startswith("anthropic"):
+        return f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
+    return f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
+
+
+def kb_model_supports_retrieve_and_generate(model_id: str) -> bool:
+    """Whether a Bedrock Knowledge Base can generate an answer with ``model_id``.
+
+    A Knowledge Base supplies its own orchestration and generation prompt
+    templates, and asking RetrieveAndGenerate for a model those templates do not
+    cover returns a ValidationException stating that custom prompt templates must
+    be provided for both Orchestration and Generation. Which models those are is a
+    property of the individual model: Claude Opus 4.1 is refused and Claude Opus
+    4.6 is accepted, though both are Claude 4, and the five Claude 5.5 ids that
+    were measured -- all three ``global.`` forms, and the ``us.`` Haiku and
+    Sonnet -- were all refused. The inference-profile prefix makes no difference
+    either way. ``us.anthropic.claude-opus-5-5`` is the sixth and was not
+    measured; it is covered by the generation rule below, not by a result.
+
+    The agent's own model is unaffected and may be any of them: it reaches Bedrock
+    through Converse, which carries no such requirement. That difference is why
+    the knowledge-base model is a CloudFormation parameter of its own
+    (MeetingAssistKnowledgeBaseModelID) rather than the agent's, and that
+    parameter -- whose AllowedValues are the ids verified against a live knowledge
+    base -- is what normally decides this. This function is the backstop for a
+    value that did not come through it, such as a standalone deployment of the
+    nested template.
+
+    Two rules, in order: an id known to be refused is refused, and otherwise a
+    Claude generation at or above ``KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR`` is
+    assumed to be. The assumption is there because the two failure directions are
+    not symmetrical, the same reasoning bedrock_compat.accepts_temperature sets
+    out: treating a usable model as unusable costs one tool and is logged, while
+    treating an unusable one as usable costs every call that tool makes. It is a
+    default for ids nobody has checked and not a claim about where the boundary
+    lies -- there is no generational boundary to claim. Anything that is not a
+    Claude model keeps the knowledge base's defaults.
+    """
+    if model_id in KB_MODELS_REQUIRING_CUSTOM_PROMPTS:
+        return False
+    major = claude_major_version(model_id)
+    if major is None:
+        return True
+    return major < KB_CUSTOM_PROMPTS_ASSUMED_FROM_MAJOR
+
+
 def apply_kb_guardrail(kb_input: Dict[str, Any]) -> Dict[str, Any]:
     """
     Attach the configured guardrail to a retrieve_and_generate request, in place.
@@ -117,19 +203,138 @@ def apply_kb_guardrail(kb_input: Dict[str, Any]) -> Dict[str, Any]:
     }
     return kb_input
 
-# Module-level reusable AppSync client (avoids recreating SigV4 auth on every call)
-_appsync_client = None
+def new_appsync_client(url: str):
+    """A fresh AppSync GraphQL client for ``url``.
 
-def _get_appsync_client():
-    """Get or create a reusable AppSync GraphQL client."""
-    global _appsync_client
-    if _appsync_client is None and APPSYNC_GRAPHQL_URL:
-        from asst_gql_client import AppsyncRequestsGqlClient
-        _appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-    return _appsync_client
+    One seam for constructing a client, so that the publisher below is the only
+    thing deciding how long one lives.
+    """
+    from asst_gql_client import AppsyncRequestsGqlClient
+    return AppsyncRequestsGqlClient(url=url, fetch_schema_from_transport=False)
+
+
+class AppsyncPublisher:
+    """One AppSync connection, reused for the mutations of a single invocation.
+
+    gql's ``Client.execute`` opens a transport session, runs the mutation and
+    closes the session again, and the requests transport's session is where the
+    TLS connection lives. Publishing a streamed answer token by token through
+    ``Client.execute`` therefore costs one TLS handshake per token: measured
+    against the deployed function's logs, 0.107s per streamed chunk, which on a
+    median answer is of the order of ten seconds spent connecting. Holding one
+    session open for the whole answer leaves a single handshake.
+
+    **Scoped to one invocation, deliberately, rather than cached at module
+    level.** AppSyncIAMAuthentication resolves credentials once, when the client
+    is constructed, and signs every later request with that object. In the Lambda
+    environment those come from botocore's environment-variable provider, which
+    returns static credentials unless AWS_CREDENTIAL_EXPIRATION is set -- and
+    Lambda does not set it -- so a client held at module level would go on signing
+    with whatever was resolved at cold start. This function is kept warm by
+    periodic warmup pings, so its execution environments are long-lived by design,
+    which is exactly the case where that matters. A publisher per invocation
+    always signs with the credentials the environment holds now, and still removes
+    all but one of the handshakes, because one invocation is one answer.
+
+    A failed mutation discards the session instead of keeping one whose state is
+    unknown: the next publish opens a fresh one, so a single failure costs one
+    reconnect rather than the remainder of the answer.
+    """
+
+    def __init__(self, url: str):
+        self._url = url
+        self._client = None
+        self._session = None
+
+    def _connect(self):
+        if self._session is None:
+            client = new_appsync_client(self._url)
+            # connect_sync() hands back a session that stays open until it is
+            # closed, unlike Client.execute(), which opens and closes one per call.
+            self._session = client.connect_sync()
+            self._client = client
+        return self._session
+
+    def execute(self, document, variables: Dict[str, Any]):
+        """Run one mutation on the shared session, reconnecting if it is gone."""
+        session = self._connect()
+        try:
+            return session.execute(document, variable_values=variables)
+        except Exception:
+            self.close()
+            raise
+
+    def close(self):
+        """Release the session. Safe to call more than once, and after a failure."""
+        client, self._client, self._session = self._client, None, None
+        if client is None:
+            return
+        try:
+            client.close_sync()
+        except Exception as e:
+            # Nothing is retried on the way out: the connection is being
+            # abandoned either way, and raising here would mask whatever ended
+            # the stream.
+            logger.warning(f"Error closing AppSync client: {str(e)}")
+
+
+# Parsed once per execution environment rather than per published token: the
+# document is a constant, and gql re-parses the string on every gql() call.
+_CHAT_TOKEN_MUTATION = None
+
+
+def get_chat_token_mutation():
+    """The addChatToken mutation document, parsed on first use."""
+    global _CHAT_TOKEN_MUTATION
+    if _CHAT_TOKEN_MUTATION is None:
+        from gql import gql
+        _CHAT_TOKEN_MUTATION = gql("""
+        mutation AddChatToken($input: AddChatTokenInput!) {
+            addChatToken(input: $input) {
+                CallId
+                MessageId
+                Token
+                IsComplete
+                Sequence
+                Timestamp
+                ThinkingStep {
+                    Type
+                    Content
+                    ToolName
+                    ToolInput
+                    ToolResult
+                    Success
+                }
+            }
+        }
+        """)
+    return _CHAT_TOKEN_MUTATION
+
+
+def subscriber_message_id(transcript_segment_args: Dict[str, Any]) -> Optional[str]:
+    """The MessageId a UI subscriber could be listening on, or None if there is none.
+
+    ``onAddChatToken`` takes both a CallId and a MessageId and both are required,
+    so a published token only ever reaches a subscriber that knows the MessageId
+    in advance. Every caller that has one supplies it in ``transcript_segment_args``:
+    the chat path generates it (``chat-<uuid>``) and returns it to the browser to
+    subscribe with, and the wake-phrase path supplies the SegmentId it is about to
+    write. The Virtual Participant's voice assistant invokes this function
+    directly with no ``transcript_segment_args`` at all, waits for the whole
+    RequestResponse payload and hands the single returned string to its speech
+    model, so nothing is listening and nothing persists the tokens -- addChatToken
+    resolves against a NONE data source that only broadcasts.
+
+    Returning None for that caller is what lets the streaming publish be skipped
+    where it has no audience. It is decided from the payload rather than from a
+    guess about who sent it, and in the direction that fails safe: an unrecognised
+    caller that does supply an id keeps its tokens published.
+    """
+    return (
+        transcript_segment_args.get('MessageId')
+        or transcript_segment_args.get('SegmentId')
+        or None
+    )
 
 
 def send_thinking_step_async(call_id: str, message_id: str, thinking_step: Dict[str, Any], sequence: int):
@@ -252,11 +457,27 @@ class ThinkingStepHookProvider:
             logger.error(f"   Traceback: {traceback.format_exc()}")
 
 
-def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, model_id: str,
+def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, kb_model_id: str,
                                 call_id: str = None, message_id: str = None):
-    """Factory function to create document search tool with closure"""
+    """Factory function to create document search tool with closure.
+
+    Returns None when ``kb_model_id`` cannot drive RetrieveAndGenerate, so the
+    caller offers the agent no document_search tool at all. A tool that is offered
+    but cannot answer is worse than an absent one: the agent spends a turn calling
+    it and reads the failure back as though it were retrieved material.
+    """
+    if not kb_model_supports_retrieve_and_generate(kb_model_id):
+        logger.error(
+            "document_search is not being offered to the agent: knowledge-base model '%s' "
+            "requires custom Orchestration and Generation prompt templates, which LMA does "
+            "not supply. Set the MeetingAssistKnowledgeBaseModelID CloudFormation parameter "
+            "to a model a knowledge base can generate with.",
+            kb_model_id,
+        )
+        return None
+
     from strands import tool
-    
+
     @tool
     def document_search(query: str) -> str:
         """Search company knowledge base for internal documents, policies, procedures, or reference materials.
@@ -288,13 +509,11 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
             
             logger.info(f"Document search tool executing: {query}")
-            
-            # Determine model ARN based on model type
-            if model_id.startswith("anthropic"):
-                model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-            else:
-                model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-            
+
+            # The knowledge base generates its answer with its own model, not the
+            # agent's. See kb_model_supports_retrieve_and_generate().
+            model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
             # Query knowledge base
             kb_input = {
                 "input": {'text': query},
@@ -328,9 +547,22 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
             return result
             
         except Exception as e:
-            logger.error(f"Error in document search: {str(e)}")
-            return f"Error retrieving documents: {str(e)}"
-    
+            logger.error(
+                "document_search failed: retrieve_and_generate on knowledge base %s with "
+                "model '%s' raised %s: %s",
+                kb_id, kb_model_id, type(e).__name__, e,
+            )
+            # Phrased so the agent cannot mistake it for retrieved material. The
+            # previous wording began "Error retrieving documents" and was followed
+            # by the exception text, which reads enough like content that the
+            # model answered from it.
+            return (
+                "DOCUMENT_SEARCH_FAILED. No documents were retrieved and this text is not "
+                "a search result -- it carries no knowledge base content. Tell the user "
+                "that document search is unavailable right now instead of answering from "
+                f"this. Cause: {type(e).__name__}: {e}"
+            )
+
     return document_search
 
 
@@ -475,10 +707,29 @@ def create_recent_meetings_tool(dynamodb_table_name: str, user_email: str, call_
 
 
 def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_account_id: str,
-                                model_id: str, user_email: str, call_id: str = None, message_id: str = None):
-    """Factory function to create meeting history tool with closure"""
+                                kb_model_id: str, user_email: str, call_id: str = None,
+                                message_id: str = None):
+    """Factory function to create meeting history tool with closure.
+
+    Returns None when ``kb_model_id`` cannot drive RetrieveAndGenerate, so the
+    agent is offered no meeting_history tool. The transcript knowledge base is
+    created by default, which makes this the tool most often affected: offered but
+    unable to answer, it was called on most interactions and its failure read back
+    as though past meetings had been searched and found wanting.
+    """
+    if not kb_model_supports_retrieve_and_generate(kb_model_id):
+        logger.error(
+            "meeting_history is not being offered to the agent: knowledge-base model '%s' "
+            "requires custom Orchestration and Generation prompt templates, which LMA does "
+            "not supply. Set the MeetingAssistKnowledgeBaseModelID CloudFormation parameter "
+            "to a model a knowledge base can generate with. The recent_meetings_list tool "
+            "is unaffected, so chronological listing of past meetings still works.",
+            kb_model_id,
+        )
+        return None
+
     from strands import tool
-    
+
     @tool
     def meeting_history(query: str, call_ids: str = "") -> str:
         """Search past meeting transcripts and summaries with semantic search and user-based access control.
@@ -518,15 +769,13 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             logger.info(f"🔍 DEBUG: KB Configuration:")
             logger.info(f"   transcript_kb_id: {transcript_kb_id}")
             logger.info(f"   kb_region: {kb_region}")
-            logger.info(f"   model_id: {model_id}")
+            logger.info(f"   kb_model_id: {kb_model_id}")
             logger.info(f"   user_email (filter): {user_email}")
-            
-            # Determine model ARN based on model type
-            if model_id.startswith("anthropic"):
-                model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-            else:
-                model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-            
+
+            # The knowledge base generates its answer with its own model, not the
+            # agent's. See kb_model_supports_retrieve_and_generate().
+            model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
             logger.info(f"   model_arn: {model_arn}")
             
             # Query with user-based access control filter
@@ -584,9 +833,22 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
             return result
             
         except Exception as e:
-            logger.error(f"Error in meeting history search: {str(e)}")
-            error_msg = f"Error retrieving meeting history: {str(e)}"
-            
+            logger.error(
+                "meeting_history failed: retrieve_and_generate on transcript knowledge base "
+                "%s with model '%s' raised %s: %s",
+                transcript_kb_id, kb_model_id, type(e).__name__, e,
+            )
+            # Phrased so the agent cannot mistake it for a search result. The
+            # previous wording began "Error retrieving meeting history" and was
+            # followed by the exception text, which reads enough like an answer
+            # that the model summarised it as though past meetings had been read.
+            error_msg = (
+                "MEETING_HISTORY_SEARCH_FAILED. No past meetings were searched and this "
+                "text is not a search result -- it carries no meeting content. Tell the "
+                "user that past-meeting search is unavailable right now instead of "
+                f"answering from this. Cause: {type(e).__name__}: {e}"
+            )
+
             # Send error thinking step
             if call_id and message_id and APPSYNC_GRAPHQL_URL:
                 from datetime import datetime
@@ -1156,47 +1418,21 @@ def create_vp_browser_control_tool(call_id: str, event_api_http_url: str, messag
     return control_vp_browser
 
 
-def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool, sequence: int):
+def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_complete: bool,
+                               sequence: int, publisher: Optional[AppsyncPublisher] = None):
     """
     Send a chat token to AppSync for real-time streaming
+
+    ``publisher`` is the AppsyncPublisher holding the connection this answer's
+    tokens go out on; the streaming loop creates one and passes it for every
+    token. Without one a connection is opened and closed for this single token,
+    which is what a caller publishing a single token on its own wants.
     """
     try:
         if not APPSYNC_GRAPHQL_URL:
             logger.warning("APPSYNC_GRAPHQL_URL not configured, skipping token streaming")
             return
-        
-        from asst_gql_client import AppsyncRequestsGqlClient
-        from datetime import datetime
-        from gql import gql
-        
-        # Initialize AppSync client
-        appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-        
-        # GraphQL mutation - parse it into an AST
-        mutation = gql("""
-        mutation AddChatToken($input: AddChatTokenInput!) {
-            addChatToken(input: $input) {
-                CallId
-                MessageId
-                Token
-                IsComplete
-                Sequence
-                Timestamp
-                ThinkingStep {
-                    Type
-                    Content
-                    ToolName
-                    ToolInput
-                    ToolResult
-                    Success
-                }
-            }
-        }
-        """)
-        
+
         variables = {
             'input': {
                 'CallId': call_id,
@@ -1206,11 +1442,14 @@ def send_chat_token_to_appsync(call_id: str, message_id: str, token: str, is_com
                 'Sequence': sequence
             }
         }
-        
-        # Execute mutation
-        result = appsync_client.execute(mutation, variable_values=variables)
+
+        mutation = get_chat_token_mutation()
+        if publisher is None:
+            new_appsync_client(APPSYNC_GRAPHQL_URL).execute(mutation, variable_values=variables)
+        else:
+            publisher.execute(mutation, variables)
         logger.debug(f"Sent token {sequence} to AppSync: {token[:50]}...")
-        
+
     except Exception as e:
         logger.error(f"Error sending token to AppSync: {str(e)}")
 
@@ -1233,38 +1472,17 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
             logger.warning("APPSYNC_GRAPHQL_URL not configured, skipping thinking step streaming")
             return
         
-        from asst_gql_client import AppsyncRequestsGqlClient
-        from datetime import datetime
-        from gql import gql
-        
-        # Initialize AppSync client
-        appsync_client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL,
-            fetch_schema_from_transport=False
-        )
-        
-        # Use addChatToken mutation but with empty token and thinking step data
-        mutation = gql("""
-        mutation AddChatToken($input: AddChatTokenInput!) {
-            addChatToken(input: $input) {
-                CallId
-                MessageId
-                Token
-                IsComplete
-                Sequence
-                Timestamp
-                ThinkingStep {
-                    Type
-                    Content
-                    ToolName
-                    ToolInput
-                    ToolResult
-                    Success
-                }
-            }
-        }
-        """)
-        
+        # A connection of its own, not the streaming publisher's: these are sent
+        # from tool bodies and from background threads (send_thinking_step_async),
+        # and a requests session is not safe to share across threads. There are a
+        # few of these per answer rather than one per token, so they are not what
+        # the measured per-chunk cost was about.
+        appsync_client = new_appsync_client(APPSYNC_GRAPHQL_URL)
+
+        # The same addChatToken mutation the tokens use, with an empty token and
+        # the thinking step attached.
+        mutation = get_chat_token_mutation()
+
         # Create thinking step data
         thinking_step_data = {
             'Type': thinking_step.get('type', 'unknown'),
@@ -1287,7 +1505,7 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
         }
         
         # Execute mutation
-        result = appsync_client.execute(mutation, variable_values=variables)
+        appsync_client.execute(mutation, variable_values=variables)
         logger.debug(f"Sent thinking step {sequence} ({thinking_step.get('type')}) via ChatToken")
         
     except Exception as e:
@@ -1300,19 +1518,48 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
     try:
         table = dynamodb.Table(dynamodb_table_name)
         pk = f'trs#{call_id}'
-        
-        # Query for transcript segments
-        response = table.query(
-            KeyConditionExpression=Key('PK').eq(pk),
-            FilterExpression=(
-                (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT')) 
+
+        # Read every page, not just the first. DynamoDB caps a Query response at
+        # 1 MB of items *read* and applies FilterExpression only afterwards, and
+        # the partial segments excluded here are numerous, so they spend the
+        # budget without appearing in the result: even a moderately long meeting
+        # spans several pages. A single query therefore hands the agent the
+        # opening stretch of the meeting as though it were the whole thing, with
+        # nothing to say otherwise. Mirrors get_transcripts() in
+        # lma-ai-stack/source/lambda_functions/fetch_transcript/index.py.
+        query_args = {
+            'KeyConditionExpression': Key('PK').eq(pk),
+            'FilterExpression': (
+                (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT'))
                 & Attr('IsPartial').eq(False)
+            ),
+        }
+        items = []
+        start_key = None
+        pages = 0
+        while pages < MAX_TRANSCRIPT_PAGES:
+            response = table.query(
+                **query_args,
+                **({'ExclusiveStartKey': start_key} if start_key else {}),
             )
-        )
-        
+            items.extend(response.get('Items', []))
+            pages += 1
+            next_key = response.get('LastEvaluatedKey')
+            if not next_key or next_key == start_key:
+                # A key identical to the one just used would ask for the same page
+                # again forever. Stop rather than spin.
+                break
+            start_key = next_key
+        if pages >= MAX_TRANSCRIPT_PAGES:
+            logger.warning(
+                "Stopped reading the transcript for %s at the %d page limit; "
+                "the transcript handed to the assistant may be incomplete",
+                call_id, MAX_TRANSCRIPT_PAGES,
+            )
+
         # Sort by EndTime and format transcript
-        items = sorted(response.get('Items', []), key=lambda x: x.get('EndTime', 0))
-        
+        items = sorted(items, key=lambda x: x.get('EndTime', 0))
+
         transcript_parts = []
         for item in items:
             speaker = item.get('Speaker', 'Unknown')
@@ -1326,7 +1573,10 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
                 transcript_parts.append(f"{speaker}: {transcript}")
         
         full_transcript = '\n'.join(transcript_parts)
-        logger.info(f"Fetched transcript for {call_id}: {len(full_transcript)} characters")
+        logger.info(
+            f"Fetched transcript for {call_id}: {len(full_transcript)} characters "
+            f"from {len(items)} segments over {pages} page(s)"
+        )
         
         return full_transcript
         
@@ -1337,22 +1587,23 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
 def query_knowledge_base(user_input: str, call_id: str) -> str:
     """
     Query Bedrock Knowledge Base for relevant context
+
+    Nothing in this module calls this today; the per-meeting context it fetches is
+    reached through the current_meeting_transcript tool instead. It is kept on the
+    knowledge-base model for the same reason the two tools are, so that re-enabling
+    it cannot reintroduce the coupling to the agent's model.
     """
     try:
         kb_id = os.environ.get('KB_ID')
         if not kb_id:
             return ""
-        
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+
+        kb_model_id = os.environ.get('KB_MODEL_ID', DEFAULT_KB_MODEL_ID)
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID')
-        
-        # Determine model ARN based on model type
-        if model_id.startswith("anthropic"):
-            model_arn = f"arn:aws:bedrock:{kb_region}::foundation-model/{model_id}"
-        else:
-            model_arn = f"arn:aws:bedrock:{kb_region}:{kb_account_id}:inference-profile/{model_id}"
-        
+
+        model_arn = build_kb_model_arn(kb_model_id, kb_region, kb_account_id)
+
         # Query knowledge base
         kb_input = {
             "input": {
@@ -1477,6 +1728,9 @@ def handler(event, context):
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID', '')
         model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+        # The model the knowledge bases generate with, which is deliberately
+        # separate from the agent's: see kb_model_supports_retrieve_and_generate().
+        kb_model_id = os.environ.get('KB_MODEL_ID', DEFAULT_KB_MODEL_ID)
         # Whether the web search tool is available is decided from the secret's
         # ARN alone, so a deployment without a Tavily API key makes no Secrets
         # Manager call. The key itself is read inside the tool, on the first
@@ -1486,10 +1740,14 @@ def handler(event, context):
         # Fetch meeting transcript from DynamoDB
         transcript = fetch_meeting_transcript(call_id, dynamodb_table_name) if dynamodb_table_name else event.get('transcript', '')
         
-        # Get message ID early for tool wrappers and status updates
+        # Get message ID early for tool wrappers and status updates. A caller that
+        # supplies no id of its own has no subscriber either; see
+        # subscriber_message_id(). The synthetic id is still used for logging and
+        # for the thinking-step sequence counters.
         transcript_segment_args = event.get('transcript_segment_args', {})
-        message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
-        
+        subscriber_id = subscriber_message_id(transcript_segment_args)
+        message_id = subscriber_id or f"msg-{call_id}"
+
         # Initialize tools list (includes both regular tools and MCP clients)
         tools = []
         
@@ -1635,17 +1893,21 @@ def handler(event, context):
             except Exception as e:
                 logger.warning(f"Could not enable web search tool: {str(e)}")
         
-        # Add document retrieval tool if KB configured
+        # Add document retrieval tool if KB configured. The factory returns None
+        # when the knowledge-base model cannot generate an answer, in which case
+        # the agent is offered no such tool rather than one that cannot answer.
         if kb_id:
-            tools.append(create_document_search_tool(
+            document_search_tool = create_document_search_tool(
                 kb_id=kb_id,
                 kb_region=kb_region,
                 kb_account_id=kb_account_id,
-                model_id=model_id,
+                kb_model_id=kb_model_id,
                 call_id=call_id,
                 message_id=message_id
-            ))
-            logger.info("Document retrieval tool enabled")
+            )
+            if document_search_tool is not None:
+                tools.append(document_search_tool)
+                logger.info(f"Document retrieval tool enabled (KB model: {kb_model_id})")
         
         # Add recent meetings list tool if DynamoDB table and transcript KB configured
         if dynamodb_table_name and transcript_kb_id and user_email:
@@ -1657,18 +1919,21 @@ def handler(event, context):
             ))
             logger.info("Recent meetings list tool enabled")
         
-        # Add meeting history tool if transcript KB configured
+        # Add meeting history tool if transcript KB configured. As above, the
+        # factory returns None when the knowledge-base model cannot generate.
         if transcript_kb_id and user_email:
-            tools.append(create_meeting_history_tool(
+            meeting_history_tool = create_meeting_history_tool(
                 transcript_kb_id=transcript_kb_id,
                 kb_region=kb_region,
                 kb_account_id=kb_account_id,
-                model_id=model_id,
+                kb_model_id=kb_model_id,
                 user_email=user_email,
                 call_id=call_id,
                 message_id=message_id
-            ))
-            logger.info("Meeting history tool enabled")
+            )
+            if meeting_history_tool is not None:
+                tools.append(meeting_history_tool)
+                logger.info(f"Meeting history tool enabled (KB model: {kb_model_id})")
         
         # Add current meeting transcript tool
         if dynamodb_table_name:
@@ -1702,10 +1967,8 @@ def handler(event, context):
             from strands import Agent
             from strands.models import BedrockModel
             
-            # Get message ID for streaming - use MessageId if provided, otherwise fall back to SegmentId
-            transcript_segment_args = event.get('transcript_segment_args', {})
-            message_id = transcript_segment_args.get('MessageId') or transcript_segment_args.get('SegmentId', f"msg-{call_id}")
-            
+            # message_id and subscriber_id were resolved above, from the same event.
+
             logger.info(f"Using MessageId for streaming: {message_id}")
             logger.info(f"Tools enabled: {len(tools)}")
             
@@ -1782,19 +2045,30 @@ def handler(event, context):
             else:
                 context_message = f"User Request: {user_input}"
             
-            # Handle streaming vs non-streaming
-            if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL:
+            # Handle streaming vs non-streaming. Tokens are only streamed when
+            # some caller is listening for them: onAddChatToken requires the
+            # MessageId, so a caller that supplied none cannot be subscribed, and
+            # the mutation persists nothing. The Virtual Participant's voice
+            # assistant is that caller -- it waits for the whole response payload
+            # and speaks the single string this returns -- so it takes the
+            # non-streaming path and the answer reaches it unchanged.
+            if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL and subscriber_id:
                 logger.info("Streaming mode enabled - sending tokens to AppSync")
-                
+
                 # Import asyncio for async streaming
                 import asyncio
-                
+
+                # One AppSync connection for every token of this answer, created
+                # here so it can be closed whether the stream finishes or raises.
+                # See AppsyncPublisher.
+                token_publisher = AppsyncPublisher(APPSYNC_GRAPHQL_URL)
+
                 async def stream_response():
                     from datetime import datetime
                     sequence = 0
                     thinking_sequence = 0
                     full_response = []
-                    
+
                     # Use stream_async to get async iterator
                     async for event in agent.stream_async(context_message):
                         logger.debug(f"Stream event received: {type(event)} - {event}")
@@ -1869,10 +2143,11 @@ def handler(event, context):
                                     message_id=message_id,
                                     token=token_text,
                                     is_complete=False,
-                                    sequence=sequence
+                                    sequence=sequence,
+                                    publisher=token_publisher
                                 )
                                 sequence += 1
-                        
+
                         # Handle string events (simple text tokens)
                         elif isinstance(event, str):
                             full_response.append(event)
@@ -1881,27 +2156,39 @@ def handler(event, context):
                                 message_id=message_id,
                                 token=event,
                                 is_complete=False,
-                                sequence=sequence
+                                sequence=sequence,
+                                publisher=token_publisher
                             )
                             sequence += 1
-                    
+
                     # Send completion token
                     send_chat_token_to_appsync(
                         call_id=call_id,
                         message_id=message_id,
                         token='',  # nosec B106 - Empty string is not a hardcoded password, it's a completion marker
                         is_complete=True,
-                        sequence=sequence
+                        sequence=sequence,
+                        publisher=token_publisher
                     )
-                    
+
                     logger.info(f"Streaming complete. Response tokens: {sequence}, Thinking steps: {thinking_sequence}")
                     return ''.join(full_response)
-                
+
                 # Run the async streaming function
-                response_text = asyncio.run(stream_response())
+                try:
+                    response_text = asyncio.run(stream_response())
+                finally:
+                    token_publisher.close()
                 
             else:
-                # Non-streaming mode (current behavior)
+                # Non-streaming mode (current behavior). Also the path taken when
+                # streaming is configured but the caller supplied no MessageId, so
+                # no subscription for these tokens can exist.
+                if ENABLE_STREAMING and APPSYNC_GRAPHQL_URL and not subscriber_id:
+                    logger.info(
+                        "The caller supplied no MessageId, so no subscriber can be listening "
+                        "for this answer's tokens; answering without publishing a token stream"
+                    )
                 response = agent(context_message)
                 
                 # Convert AgentResult to string if needed

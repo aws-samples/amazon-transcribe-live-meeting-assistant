@@ -269,6 +269,7 @@ def test_the_summary_model_default_matches_across_the_templates(
         ("lma-ai-stack.yaml", "BedrockModelId"),
         ("lma-main.yaml", "BedrockModelId"),
         ("lma-main.yaml", "MeetingAssistServiceBedrockModelID"),
+        ("lma-main.yaml", "MeetingAssistKnowledgeBaseModelID"),
     ],
 )
 def test_every_model_parameter_defaults_to_one_of_its_own_choices(
