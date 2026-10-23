@@ -13,6 +13,12 @@ from graphql import print_ast
 from graphql.language.ast import DocumentNode
 from gql.client import AsyncClientSession, ExecutionResult
 
+# module imports from Lambda layer
+# pylint: disable=import-error
+from graphql_helpers import graphql_errors
+
+# pylint: enable=import-error
+
 LOGGER = logging.getLogger(__name__)
 DEFAULT_IGNORED_EXCEPTION_RESPONSE: Dict[str, object] = {"ok": True}
 
@@ -69,18 +75,28 @@ async def execute_gql_query_with_retries(
             )
             break
         except Exception as error:  # pylint: disable=broad-except
+            # errorType/path where the exception carries GraphQL errors; its
+            # str() otherwise. A transport exception stringifies as its first
+            # GraphQL error message, and the mutations on this path inline their
+            # arguments into the query document.
+            #
+            # The query document itself stays on the debug line above, which is
+            # the attempt these lines are about. Repeating it here would put the
+            # arguments of every retried write into a log stream that is on at
+            # the default level, and the retry counts and the reduced errors are
+            # what these lines are read for.
+            reduced_error: object = graphql_errors(error) or error
             if retries >= max_retries:
                 logger.error(
                     "max retries on query - retries: [%d] - error: [%s]",
                     retries,
-                    error,
-                    extra=dict(query=query_string),
+                    reduced_error,
                 )
                 logger.exception("gql query exception")
                 raise
 
             if should_ignore_exception_fn(error):
-                logger.info("ignorable exception - not retrying - error: [%s]", error)
+                logger.info("ignorable exception - not retrying - error: [%s]", reduced_error)
                 result = _ignored_exception_response
                 break
 
@@ -91,8 +107,7 @@ async def execute_gql_query_with_retries(
                 "error on query - retry: [%d] - sleeping for [%f]s - error: [%s]",
                 retries,
                 sleep_time,
-                error,
-                extra=dict(query=query_string),
+                reduced_error,
             )
             await asyncio.sleep(sleep_time)
 

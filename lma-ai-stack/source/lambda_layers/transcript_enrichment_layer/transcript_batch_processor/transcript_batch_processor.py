@@ -28,6 +28,25 @@ LOGGER = Logger(child=True, location="%(filename)s:%(lineno)d - %(funcName)s()")
 KDS_BATCH_PROCESSOR = BatchProcessor(event_type=EventType.KinesisDataStreams)
 
 
+def raising_frame(error: BaseException) -> str:
+    """Where an exception was raised, as ``file:line in function``.
+
+    The innermost frame of the exception's traceback, which is the one that
+    identifies the failure. Returned as a string rather than a rendered
+    traceback because a rendered traceback ends in the exception's own text,
+    which for a GraphQL transport exception is its first error message. An
+    exception with no traceback -- one built but never raised -- gives
+    ``"unknown"``.
+    """
+    traceback_obj = error.__traceback__
+    if traceback_obj is None:
+        return "unknown"
+    while traceback_obj.tb_next is not None:
+        traceback_obj = traceback_obj.tb_next
+    frame = traceback_obj.tb_frame
+    return f"{frame.f_code.co_filename}:{traceback_obj.tb_lineno} in {frame.f_code.co_name}"
+
+
 class TranscriptBatchProcessor:
     """Call Transcript Batch Processor"""
 
@@ -103,20 +122,24 @@ class TranscriptBatchProcessor:
                 )
                 for result in results:
                     if isinstance(result, Exception):
-                        # The exception type, and its errors reduced to
-                        # errorType/path where it carries GraphQL errors: the
-                        # str() of such an exception is its first error message,
-                        # and these mutations inline their arguments into the
-                        # query document, so a server-side validation message can
-                        # quote meeting content. Anything else stringifies as
-                        # itself. exc_info names the frame it raised in, which is
-                        # what identifies which of a record's mutations it was.
+                        # Three content-free fields: the exception type, the
+                        # frame it raised in -- which is what says which of a
+                        # record's mutations this was -- and its GraphQL errors
+                        # reduced to errorType/path. The str() of a transport
+                        # exception is its first GraphQL error message, so it is
+                        # used only for an exception carrying no such errors.
+                        #
+                        # No traceback here, deliberately: a rendered traceback
+                        # ends in the exception's own text. The handler that
+                        # collects these errors logs one with the traceback, so
+                        # this line can stay content-free without the frame
+                        # becoming unobtainable.
                         errors = graphql_errors(result)
                         LOGGER.error(
-                            "transcript api mutation exception: %s: %s",
+                            "transcript api mutation exception: %s at %s: %s",
                             type(result).__name__,
+                            raising_frame(result),
                             errors if errors else result,
-                            exc_info=result,
                         )
                         self._has_error = True
                         self._errors.append(result)

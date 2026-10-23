@@ -7,14 +7,15 @@
 mutation, and that line is what an operator searching CloudWatch finds. Two
 things about it are asserted here:
 
-* It names the exception's type. A line carrying only ``str()`` of an exception
-  reads identically for a transport failure and for a response the code could
-  not use, which is not enough to act on.
-* Where the exception carries GraphQL errors, the line carries their
-  ``errorType`` and ``path`` rather than the exception's own text. A transport
-  exception stringifies as its first GraphQL error message, and the mutations
-  this processor sends inline their arguments into the query document, so a
-  server-side validation message can quote meeting content.
+* It names the exception's type and the frame it was raised in. A line carrying
+  only ``str()`` of an exception reads identically for a transport failure and
+  for a response the code could not use, which is not enough to act on.
+* Where the exception carries GraphQL errors, the whole record carries their
+  ``errorType`` and ``path`` and not the exception's own text -- not in the
+  message, not in ``extra``, and not as a traceback, since a rendered traceback
+  ends in that text. A transport exception stringifies as its first GraphQL
+  error message, and the mutations this processor sends inline their arguments
+  into the query document.
 
 Powertools and gql's HTTP transports are stubbed, so this runs wherever the
 lint/test tooling is installed; the processor itself is the real one.
@@ -134,22 +135,34 @@ def empty_log():
     tbp.LOGGER.records.clear()
 
 
-def failure_lines() -> List[str]:
-    """The mutation-failure lines logged at error level."""
+def failure_records() -> List[Dict[str, Any]]:
+    """The mutation-failure records logged at error level."""
     return [
-        record["message"]
+        record
         for record in tbp.LOGGER.records
         if record["level"] == "ERROR" and "api mutation exception" in record["message"]
     ]
 
 
-def test_the_failure_line_names_the_exception_type():
+def rendered(record: Dict[str, Any]) -> str:
+    """Everything the record would put in a log stream, message and kwargs.
+
+    `exc_info` lands in the kwargs, so a traceback cannot slip past an assertion
+    that only reads the message.
+    """
+    return f"{record['message']} {record['kwargs']!r}"
+
+
+def test_the_failure_line_names_the_exception_type_and_frame():
     """A line carrying only str() reads the same for every kind of failure."""
     processor = processor_for(ValueError("invalid AppSync schema"))
     assert asyncio.new_event_loop().run_until_complete(processor.__aexit__(None, None, None))
-    assert len(failure_lines()) == 1
-    assert "ValueError" in failure_lines()[0]
-    assert "invalid AppSync schema" in failure_lines()[0]
+    assert len(failure_records()) == 1
+    line = failure_records()[0]["message"]
+    assert "ValueError" in line
+    assert "invalid AppSync schema" in line
+    # The frame, so the line says which of a record's mutations this was.
+    assert f"{__file__}:" in line and "failing_mutation" in line
 
 
 def test_the_failure_line_carries_error_types_not_the_graphql_message():
@@ -168,11 +181,14 @@ def test_the_failure_line_carries_error_types_not_the_graphql_message():
 
     processor = processor_for(error)
     assert asyncio.new_event_loop().run_until_complete(processor.__aexit__(None, None, None))
-    line = failure_lines()[0]
-    assert "TransportQueryError" in line
-    assert "ValidationError" in line and "addTranscriptSegment" in line
-    assert MESSAGE_QUOTING_CONTENT not in line
-    assert "the figures we discussed" not in line
+    assert len(failure_records()) == 1
+    whole_record = rendered(failure_records()[0])
+    assert "TransportQueryError" in whole_record
+    assert "ValidationError" in whole_record and "addTranscriptSegment" in whole_record
+    assert MESSAGE_QUOTING_CONTENT not in whole_record
+    assert "the figures we discussed" not in whole_record
+    # No traceback anywhere in the record: a rendered one ends in that text.
+    assert "exc_info" not in failure_records()[0]["kwargs"]
 
 
 def test_the_failure_is_still_recorded_as_an_error():

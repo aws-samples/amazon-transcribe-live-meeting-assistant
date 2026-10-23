@@ -26,9 +26,10 @@ what is under test is the decision each one makes:
 None of them may raise ``AttributeError``: that names neither the field nor the
 response, so a batch failing on one leaves nothing to act on.
 
-Powertools and aiohttp are stubbed, so this runs in the environment the root
-Makefile's setup-python target builds. gql, graphql-core and the layer are the
-real ones -- the queries and the response reads are the pipeline's own.
+Powertools and gql's two HTTP transport modules are stubbed, so this runs in the
+environment the root Makefile's setup-python target builds. gql's client and DSL,
+graphql-core and the layer are the real ones -- the queries and the response reads
+are the pipeline's own.
 """
 
 from __future__ import annotations

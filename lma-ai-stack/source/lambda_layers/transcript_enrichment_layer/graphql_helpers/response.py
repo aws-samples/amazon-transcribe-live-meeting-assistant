@@ -38,6 +38,11 @@ and those arguments carry meeting content. ``errorType``, ``path`` and
 anything, and the message's length is reported in its place.
 :func:`graphql_error_messages` exists for matching an error, and its result is
 deliberately not part of any description.
+
+The scope of that is the descriptions, not the log stream. A rendered Python
+traceback ends in the exception's own text, so a handler logging one for a
+transport exception logs the GraphQL message with it; the lines that go through
+:func:`describe_graphql_response` are the ones this covers.
 """
 
 from __future__ import annotations

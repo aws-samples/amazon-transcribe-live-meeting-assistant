@@ -1145,8 +1145,11 @@ async def get_call_details(
     call = require_graphql_field(result, "getCall", logger=LOGGER)
     LOGGER.debug("Get Call result %s", json.dumps(call))
 
-    CUSTOMER_PHONE_NUMBER = call["CustomerPhoneNumber"]
-    CALL_ID = call["CallId"]
+    # CallId is required because it is how the caller names the meeting. The
+    # other three the schema declares nullable, so a stored meeting with any of
+    # them unset is a response this has to return.
+    CALL_ID = require_graphql_field(call, "CallId", logger=LOGGER)
+    CUSTOMER_PHONE_NUMBER = call.get("CustomerPhoneNumber")
     call_summary = call.get("CallSummaryText", "")
     people_can_access = call.get("SharedWith", None)
 
