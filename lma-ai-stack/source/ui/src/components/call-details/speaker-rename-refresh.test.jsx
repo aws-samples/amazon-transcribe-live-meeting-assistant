@@ -23,6 +23,7 @@
 import { describe, it, expect } from 'vitest';
 
 import updateSpeakerIdentitiesMutation from '../../graphql/queries/updateSpeakerIdentities';
+import updateCallSummaryTextMutation from '../../graphql/queries/updateCallSummaryText';
 import onUpdateCallSubscription from '../../graphql/queries/onUpdateCall';
 import mapCallsAttributes from '../common/map-call-attributes';
 
@@ -58,6 +59,27 @@ describe('the rename mutation feeds the onUpdateCall broadcast', () => {
   });
 });
 
+describe('the summary mutation feeds the onUpdateCall broadcast', () => {
+  // Same rule, same reason: this mutation is in onUpdateCall's @aws_subscribe
+  // list too, so a narrow selection set would blank the rest of the meeting in
+  // every connected client's list.
+  it('selects every field the subscription does', () => {
+    const missing = [...selected(onUpdateCallSubscription)].filter(
+      (f) => !selected(updateCallSummaryTextMutation).has(f),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it('selects the fields it actually writes', () => {
+    expect(selected(updateCallSummaryTextMutation).has('CallSummaryText')).toBe(true);
+    expect(selected(updateCallSummaryTextMutation).has('CallSummaryState')).toBe(true);
+  });
+
+  it('is a field the subscription carries, so a new summary reaches open pages', () => {
+    expect(selected(onUpdateCallSubscription).has('CallSummaryState')).toBe(true);
+  });
+});
+
 /**
  * The guard the three views that render CallPanel use to decide whether to
  * replace the meeting they are showing, extracted so it can be driven directly.
@@ -68,7 +90,10 @@ const shouldReplace = (current, incoming) => {
   const timestampAdvanced = incoming?.updatedAt && current.updatedAt < incoming.updatedAt;
   const speakerNamesChanged =
     incoming?.speakerIdentities !== undefined && current.speakerIdentities !== incoming.speakerIdentities;
-  return Boolean(timestampAdvanced || speakerNamesChanged);
+  const summaryChanged =
+    (incoming?.callSummaryText !== undefined && current.callSummaryText !== incoming.callSummaryText) ||
+    (incoming?.callSummaryState !== undefined && current.callSummaryState !== incoming.callSummaryState);
+  return Boolean(timestampAdvanced || speakerNamesChanged || summaryChanged);
 };
 
 describe('the meeting-refresh guard', () => {
@@ -103,6 +128,76 @@ describe('the meeting-refresh guard', () => {
 
   it('does not replace it when nothing changed', () => {
     expect(shouldReplace(loaded, { ...loaded })).toBe(false);
+  });
+
+  it('replaces the meeting when a regenerated summary arrives', () => {
+    // Editing and regenerating leave UpdatedAt alone for the same reason a
+    // rename does, so this is the only signal that the summary moved.
+    const summarised = { ...loaded, callSummaryText: 'A new summary.' };
+    expect(shouldReplace({ ...loaded, callSummaryText: 'The old summary.' }, summarised)).toBe(true);
+  });
+
+  it('replaces the meeting when only the summary state changed', () => {
+    // How the panel learns a run has started, or failed, in another tab.
+    const running = { ...loaded, callSummaryState: '{"status":"running"}' };
+    expect(shouldReplace({ ...loaded, callSummaryState: '{"status":"idle"}' }, running)).toBe(true);
+  });
+
+  it('does NOT replace it from a copy that carries no summary information', () => {
+    const fromList = { updatedAt: loaded.updatedAt, speakerIdentities: undefined };
+    expect(shouldReplace({ ...loaded, callSummaryText: 'A summary.' }, fromList)).toBe(false);
+  });
+});
+
+/**
+ * The guard above is a copy. These assert that the three views it stands in for
+ * really do carry each clause, since a copy that silently drifts from the code
+ * is worse than no test at all.
+ */
+/** A sibling source file, read as text. */
+const read = async (relativePath) => {
+  const { readFileSync } = await import('fs');
+  const { fileURLToPath } = await import('url');
+  return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf-8');
+};
+
+describe('every view that renders CallPanel uses the same refresh guard', () => {
+  const views = [
+    '../call-details/CallDetails.js',
+    '../embed/EmbedCallDetails.jsx',
+    '../embed/EmbedVirtualParticipant.jsx',
+  ];
+
+  it.each(views)('%s tests the timestamp, the names and the summary', async (view) => {
+    const source = await read(view);
+    expect(source).toContain('const timestampAdvanced =');
+    expect(source).toContain('const speakerNamesChanged =');
+    expect(source).toContain('const summaryChanged =');
+    expect(source).toContain('timestampAdvanced || speakerNamesChanged || summaryChanged');
+  });
+});
+
+/**
+ * The calls context is built by three separate components, each enumerating its
+ * fields by hand -- once where the hook's return value is destructured and again
+ * where the context object is assembled. A writer added to the hook but not to
+ * all six places is `undefined` at the point of use, so the control it drives
+ * renders and then throws on the click. Nothing else notices: the components
+ * that consume it are tested with their callbacks injected.
+ */
+describe('every provider of the calls context supplies the summary writers', () => {
+  const providers = [
+    '../call-analytics-layout/CallAnalyticsLayout.jsx',
+    '../embed/EmbedCallDetails.jsx',
+    '../embed/EmbedVirtualParticipant.jsx',
+  ];
+
+  it.each(providers)('%s destructures and re-exports both', async (provider) => {
+    const source = await read(provider);
+    ['sendUpdateCallSummary', 'sendRegenerateCallSummary', 'sendUpdateSpeakerIdentities'].forEach((name) => {
+      // Twice: once out of the hook, once into the context value.
+      expect(source.split(`${name},`).length - 1).toBeGreaterThanOrEqual(2);
+    });
   });
 });
 

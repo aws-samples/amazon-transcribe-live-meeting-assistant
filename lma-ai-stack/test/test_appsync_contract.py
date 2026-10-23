@@ -207,6 +207,11 @@ OTHER_FIELDS = [
     # owner and share list rather than by group.
     ("Mutation", "updateSpeakerIdentities"),
     ("Mutation", "resolveSpeakerNames"),
+    # The summary of one meeting: updateCallSummaryText carries the owner/share
+    # rule as a DynamoDB condition, and regenerateCallSummary is a Lambda
+    # resolver that applies the same rule in `caller_may_edit`.
+    ("Mutation", "updateCallSummaryText"),
+    ("Mutation", "regenerateCallSummary"),
     ("Mutation", "deleteCall"),
     ("Mutation", "shareCall"),
     ("Mutation", "unshareCall"),

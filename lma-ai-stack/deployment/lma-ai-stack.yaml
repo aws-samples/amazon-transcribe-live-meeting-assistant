@@ -4334,6 +4334,181 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/resolveSpeakerNames.js
 
+  SummaryRegeneratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      # Named explicitly so its own execution role can grant it permission to
+      # invoke itself without a circular dependency on the function resource.
+      # The second leg of a regeneration is an asynchronous self-invoke: a
+      # model call per prompt template routinely outlives the 30 seconds
+      # AppSync allows a resolver, so the mutation starts the run and returns.
+      FunctionName: !Sub "${AWS::StackName}-SummaryRegenerator"
+      Handler: index.handler
+      Role: !GetAtt SummaryRegeneratorFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/summary_regenerator
+      Description: Re-runs a meeting's summary on demand and stores the result
+      MemorySize: 256
+      # Lambda's maximum. The Bedrock summariser it waits on has the same
+      # ceiling, which is why SUMMARY_READ_TIMEOUT below stops the wait early
+      # rather than matching it.
+      Timeout: 900
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          # The same summariser the end-of-meeting orchestrator uses, so a
+          # regeneration is a re-run of that path rather than a second one.
+          TRANSCRIPT_SUMMARY_FUNCTION_ARN:
+            !If [
+              ShouldEnableBedrockSummarizer,
+              !GetAtt BedrockSummaryLambda.Arn,
+              !Ref EndOfCallLambdaHookFunctionArn,
+            ]
+          # Deliberately shorter than this function's own Timeout, so that a
+          # summariser which never answers is abandoned with enough time left
+          # to record the failure on the meeting. Both functions stop at
+          # Lambda's 900s maximum, so waiting one out in full is not possible.
+          SUMMARY_READ_TIMEOUT: 780
+      # The platform's own retries are off for this function. Its second leg is
+      # an asynchronous invoke, which Lambda retries twice by default, and a
+      # retry re-runs every model call for a summary already computed in the
+      # frame that failed -- and rewrites the Knowledge Base snapshot again. The
+      # only error that reaches Lambda is a failure to store a finished result,
+      # and write_summary retries that itself, within the one invocation, which
+      # is the retry that costs nothing. Two further attempts would also stretch
+      # a single run past SUMMARY_REGENERATION_STALE_SECONDS, after which a
+      # second run can be accepted beside the first.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/SummaryRegeneratorFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a function whose work is re-runnable on demand"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names, function ARNs and an endpoint"
+    DependsOn:
+      - SummaryRegeneratorFunctionLogGroup
+
+  SummaryRegeneratorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/SummaryRegeneratorFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  SummaryRegeneratorFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: SummaryRegenerator Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-SummaryRegenerator
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Read only: the summary is written back through AppSync, so that
+              # open meeting pages show it without being reloaded.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateCallSummaryText"
+              # The configured summariser, plus this function itself for the
+              # second leg of a run. Spelled out rather than taken from the
+              # function resource, which would be circular.
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !Sub "arn:${AWS::Partition}:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-SummaryRegenerator"
+              - !If
+                - ShouldEnableBedrockSummarizer
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource: !GetAtt BedrockSummaryLambda.Arn
+                - !Ref AWS::NoValue
+              - !If
+                - ShouldEnableEndOfCallLambdaHookFunction
+                - Effect: Allow
+                  Action:
+                    - lambda:InvokeFunction
+                  Resource: !Sub "${EndOfCallLambdaHookFunctionArn}"
+                - !Ref AWS::NoValue
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncSummaryRegeneratorLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-AppSyncInvokeSummaryRegenerator
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt SummaryRegeneratorFunction.Arn
+
+  SummaryRegeneratorLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: SummaryRegeneratorLambda
+      Description: Lambda function for regenerateCallSummary
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncSummaryRegeneratorLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt SummaryRegeneratorFunction.Arn
+
+  RegenerateCallSummaryResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt SummaryRegeneratorLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: regenerateCallSummary
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/regenerateCallSummary.js
+
   UpdateAsrConfigLambdaDataSource:
     Type: AWS::AppSync::DataSource
     Condition: HasAsrConfigTable
@@ -5057,6 +5232,22 @@ Resources:
       TypeName: Mutation
       FieldName: updateSpeakerIdentities
       RequestMappingTemplateS3Location: ../source/appsync/updateSpeakerIdentities.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
+  # Also reachable by signed-in users, so it uses a dedicated request template
+  # that writes only the summary text and the state object beside it, and
+  # restricts a Cognito caller to Admin, the meeting owner, or a user it is
+  # shared with. Distinct from addCallSummaryText, which the Kinesis pipeline
+  # writes the end-of-meeting summary through and which is IAM-only.
+  UpdateCallSummaryTextAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: updateCallSummaryText
+      RequestMappingTemplateS3Location: ../source/appsync/updateCallSummaryText.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
   AddCallCategoryAppSyncResolver:

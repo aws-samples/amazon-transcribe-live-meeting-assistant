@@ -133,6 +133,19 @@ def caller_may_edit(meeting, identity):
     checked here instead: Admin, the meeting's owner, or a user it has been
     shared with. An invocation with no Cognito identity is the backend calling
     itself (the end-of-meeting pass) and is allowed.
+
+    `SharedWith` is read here in Python, so the share list is compared entry by
+    entry in both shapes it is stored in -- the DynamoDB List `shareCall` writes
+    and the comma-separated String on older rows. The templates that express the
+    same rule as a DynamoDB condition use `contains`, which is a whole-element
+    test on the List and a substring test on the String, because a condition
+    expression cannot split a string; this path is the exact one.
+
+    One difference from the templates is deliberate: a caller with no
+    `username` falls back to `sub` here, where a VTL condition matches on
+    `username` alone. An AppSync Cognito caller always carries a username, so
+    the fallback is a belt for a shape that does not arrive rather than a
+    second way in.
     """
     if not identity:
         return True
@@ -140,13 +153,21 @@ def caller_may_edit(meeting, identity):
     groups = identity.get("groups") or []
     if "Admin" in groups:
         return True
+    # Only a named caller can match one of the fields below. A meeting row
+    # carries no Owner attribute until someone owns it, and absent reads as
+    # None, so every comparison needs a name on both sides to mean anything.
+    if not username:
+        return False
     if meeting.get("Owner") == username:
         return True
     shared_with = meeting.get("SharedWith")
     if isinstance(shared_with, (list, set)):
         return username in shared_with
     if isinstance(shared_with, str):
-        return bool(username) and username in shared_with
+        # Whole entries, not a substring of the joined string: the older
+        # comma-separated form holds one username per element, and membership is
+        # a property of the elements.
+        return username in {entry.strip() for entry in shared_with.split(",")}
     return False
 
 
@@ -287,14 +308,17 @@ def resolve(call_id, identity=None, force=False, final=False):
 
 def handler(event, context):  # pylint: disable=unused-argument
     """Entry point for both the AppSync resolver and the backend invoke."""
-    LOGGER.debug("Speaker name resolver event: %s", json.dumps(event, default=str)[:2000])
-
-    # An AppSync Lambda resolver receives the whole context; a backend invoke
-    # sends the Kinesis message, which carries CallId at the top level.
+    # The AppSync resolver sends the mutation's arguments and the caller's
+    # identity; a backend invoke sends the Kinesis message, which carries CallId
+    # at the top level.
     arguments = (event.get("arguments") or {}).get("input") or {}
     call_id = arguments.get("CallId") or event.get("CallId")
     if not call_id:
         raise ValueError("no CallId in event")
+
+    # Which meeting and which leg: the two fields of the event this function acts
+    # on, named rather than serialised, so the log line says what ran.
+    LOGGER.debug("Speaker name resolver event for %s, trigger %s", call_id, event.get("Trigger"))
 
     identity = event.get("identity")
     # The backend's end-of-meeting invoke says so, and only the backend can: a

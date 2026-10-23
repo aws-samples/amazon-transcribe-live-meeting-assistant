@@ -17,6 +17,13 @@ export default /* GraphQL */ `
         CallCategories
         IssuesDetected
         CallSummaryText
+        # Selected here as well as in getCall, for the same reason
+        # SpeakerIdentities is below: the meetings-list split panel renders the
+        # meeting detail from a list-derived object, which exists before
+        # setCallsDeduped has any stored value to carry over. Without this the
+        # panel would read a hand-edited summary as generated and show no
+        # regeneration in flight.
+        CallSummaryState
         # Selected here as well as in getCall, even though only the open meeting
         # needs it. The meetings-list split panel renders the full meeting
         # detail from a list-derived object, and a rename made there with this

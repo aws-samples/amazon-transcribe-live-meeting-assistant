@@ -53,6 +53,13 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	CallCategories: [String]
 	IssuesDetected: String
 	CallSummaryText: String
+	# Small JSON object describing where the summary text came from and whether a
+	# regeneration is in flight: {"source","status","startedAt","updatedAt",
+	# "message"}. `source` is "generated" or "manual"; `status` is "running",
+	# "failed" or absent. Absent altogether on a meeting summarised before this
+	# field existed, which readers treat as a generated summary with nothing
+	# running. See ui/src/components/common/summary-state.js for the shape.
+	CallSummaryState: String
 	# JSON map from a transcript segment's STORED speaker (its channel plus the
 	# voice id the engine assigned, e.g. 'Other Participant (spk_0)') to a real
 	# name, plus any merges of two voice ids onto one person, single-segment
@@ -190,6 +197,8 @@ type Mutation @aws_iam {
 	updateAgent(input: UpdateAgentInput!): Call
 	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
 	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
+	updateCallSummaryText(input: UpdateCallSummaryTextInput!): Call @aws_cognito_user_pools @aws_iam
+	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
 	revokeVoiceConsent(input: RevokeVoiceConsentInput): VoiceEnrollmentResult @aws_cognito_user_pools
@@ -535,7 +544,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "updateSpeakerIdentities", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
@@ -731,6 +740,39 @@ input RevokeVoiceConsentInput {
 input UpdateSpeakerIdentitiesInput {
 	CallId: ID!
 	SpeakerIdentities: String!
+}
+
+# ----------------------------------------------------------------------------
+# Meeting summary: hand edits and regeneration
+#
+# The end-of-meeting summary is written by the Kinesis pipeline through
+# addCallSummaryText, which is reachable by IAM callers only. These two fields
+# are the browser-reachable surface, so each is held to the same access rule the
+# read path applies -- Admin, the meeting's owner, or a user it has been shared
+# with -- and each enforces it rather than relying on the client.
+# ----------------------------------------------------------------------------
+
+input UpdateCallSummaryTextInput {
+	CallId: ID!
+	# The summary text to store. Optional so the same mutation can record a state
+	# change (a run starting, a run failing) without touching the text -- which is
+	# what keeps the previous summary intact when a regeneration fails. At least
+	# one of CallSummaryText and CallSummaryState must be supplied.
+	CallSummaryText: String
+	CallSummaryState: String
+}
+
+input RegenerateCallSummaryInput {
+	CallId: ID!
+}
+
+type RegenerateCallSummaryOutput @aws_cognito_user_pools
+@aws_iam {
+	# True when a run was accepted. The summary itself is not in this response:
+	# summarisation outlives a GraphQL request, so the run continues in the
+	# background and the new text arrives through onUpdateCall.
+	Success: Boolean
+	Message: String
 }
 
 input ResolveSpeakerNamesInput {
