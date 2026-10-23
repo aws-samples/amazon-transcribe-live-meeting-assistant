@@ -236,9 +236,19 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
   const handEdited = isHandEdited(summaryState);
   // Editing waits until the meeting has ended. A meeting still running gets an
   // end-of-meeting summary from the Kinesis pipeline when it does end, and that
-  // write replaces the text without asking -- so an edit made beforehand would
-  // be discarded with none of the confirmation an edit is promised, and the
-  // panel would go on showing the Edited badge over generated text.
+  // write replaces the text without asking -- so an edit made during the
+  // meeting would be discarded with none of the confirmation an edit is
+  // promised, and the panel would go on showing the Edited badge over generated
+  // text, because addCallSummaryText does not write CallSummaryState.
+  //
+  // This narrows that window rather than closing it. `ENDED` is set on the END
+  // event, and the orchestrator then runs the speaker-naming pass and a model
+  // call per template before its summary lands, which takes minutes. An edit
+  // saved in between is still replaced, and the stale Edited label still
+  // follows. Closing it properly means having the pipeline's write reset the
+  // state, which is a change to that mutation's input and to how the browser
+  // carries the field over -- out of scope here, and recorded in the docs as
+  // the behaviour it is.
   //
   // Regenerate stays available during a meeting, which is one of the documented
   // reasons to press it: a meeting summarised while it was still going has
