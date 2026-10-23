@@ -3,8 +3,8 @@
 # See the LICENSE file in the project root for full license information.
 """Tests for reading a field out of an AppSync GraphQL response.
 
-Every mutation and query in the call event processor goes through
-``graphql_helpers.response``, and the shapes exercised here are the ones AppSync
+The reads in the call event processor go through ``graphql_helpers.response``,
+and the shapes exercised here are the ones AppSync
 can answer with: the field populated, the field present but null, the field
 absent, ``errors`` with no ``data``, an empty object, and a response that is not
 a mapping at all. Each has a defined outcome -- a value, a default, or
@@ -241,6 +241,40 @@ def test_the_retry_classification_reaches_the_exception():
         require_graphql_field(PERMANENT_ERRORS, "getCall", logger=LOGGER)
     assert raised.value.retryable is False
     assert raised.value.description["errors"][0]["errorType"] == "ValidationError"
+
+
+def test_error_summaries_are_read_off_an_exception_without_its_message():
+    """What the batch processor logs in place of an exception's own str().
+
+    A transport exception stringifies as its first GraphQL error message, so the
+    summary is what a log line can carry.
+    """
+
+    class _TransportQueryError(Exception):
+        def __init__(self, errors):
+            super().__init__(str(errors[0]))
+            self.errors = errors
+
+    error = _TransportQueryError(
+        [
+            {
+                "errorType": "ValidationError",
+                "path": ["addTranscriptSegment"],
+                "message": "rejected Transcript 'the figures we discussed'",
+            }
+        ]
+    )
+    summaries = graphql_errors(error)
+    assert summaries == [
+        {
+            "errorType": "ValidationError",
+            "path": ["addTranscriptSegment"],
+            "messageLength": len(error.errors[0]["message"]),
+        }
+    ]
+    assert "the figures we discussed" not in repr(summaries)
+    # The guard this stands in for: the exception's own text does carry it.
+    assert "the figures we discussed" in str(error)
 
 
 def test_error_messages_are_read_off_an_exception_that_carries_them():

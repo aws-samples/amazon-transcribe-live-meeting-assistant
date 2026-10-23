@@ -136,8 +136,9 @@ CALL_ID = ""
 
 CALL_DATA_STREAM_NAME = getenv("CALL_DATA_STREAM_NAME", "")
 
-# The createCall and addTranscriptSegment resolvers write with a condition
-# expression, so writing the same item twice comes back as this GraphQL error.
+# Every resolver that writes with a condition expression shares
+# ``source/appsync/dDbPutCondition.response.vtl``, which turns DynamoDB's
+# conditional check failure into this GraphQL error message.
 PUT_CONDITION_FAILURE_MESSAGE = "item put condition failure"
 
 

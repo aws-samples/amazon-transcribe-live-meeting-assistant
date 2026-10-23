@@ -186,6 +186,15 @@ def is_retryable_graphql_response(response: Any) -> bool:
     :data:`PERMANENT_ERROR_TYPES`. A response with no errors at all -- a field
     that simply came back null -- is retryable on the same reasoning: the likely
     causes are ordering and eventual consistency, both of which pass.
+
+    Informational, not a control. It can only answer from errors the caller
+    actually holds, and a gql session configured the way this project's clients
+    are raises ``TransportQueryError`` for any response carrying ``errors``
+    before a caller sees the response at all -- so on that path this reports
+    retryable for everything, which is also the behaviour the Kinesis consumer
+    applies to every attributed failure. It becomes meaningful for a caller
+    holding an ``ExecutionResult`` or a raw response envelope, and for reading an
+    exception that kept its errors (see :func:`graphql_errors`).
     """
     error_types = {
         str(summary["errorType"])
@@ -289,8 +298,9 @@ def require_graphql_field(
     """The value at ``path``, or :class:`GraphQLResponseError`.
 
     For a field the caller cannot proceed without. The response's shape is
-    logged at error level together with the retryable classification, and the
-    exception carries both.
+    logged at error level together with the retryable classification from
+    :func:`is_retryable_graphql_response` -- read that one's note on how far the
+    classification can see -- and the exception carries both.
     """
     value, missing = _resolve(response_data(response), path)
     if missing is None:
