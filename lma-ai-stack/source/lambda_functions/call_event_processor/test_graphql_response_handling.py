@@ -399,9 +399,18 @@ SENTIMENT_RESPONSES = {
     "null entry in the list": {
         "getTranscriptSegmentsWithSentiment": {"TranscriptSegmentsWithSentiment": [None]}
     },
+    "empty list": {"getTranscriptSegmentsWithSentiment": {"TranscriptSegmentsWithSentiment": []}},
 }
 
-EMPTY_SENTIMENT = [name for name in SENTIMENT_RESPONSES if name != "populated"]
+# A list that came back, holding nothing worth scoring. An empty aggregation is
+# the right answer and writing it is right.
+SCORES_NOTHING = ["empty list", "null entry in the list"]
+
+# No list came back at all. That is not an answer, and writing an empty
+# aggregation for it would replace the stored one.
+NO_SEGMENT_LIST = [
+    name for name in SENTIMENT_RESPONSES if name not in {"populated", *SCORES_NOTHING}
+]
 
 
 def test_aggregated_sentiment_scores_the_segments_the_response_carries(schema):
@@ -413,15 +422,57 @@ def test_aggregated_sentiment_scores_the_segments_the_response_carries(schema):
     assert aggregated["OverallSentiment"]["CALLER"] == 2.5
 
 
-@pytest.mark.parametrize("shape", EMPTY_SENTIMENT)
-def test_aggregated_sentiment_is_empty_for_a_response_without_segments(shape, schema):
-    """No segments to score is a valid answer; failing here fails the record."""
+@pytest.mark.parametrize("shape", SCORES_NOTHING)
+def test_an_empty_segment_list_aggregates_to_an_empty_aggregation(shape, schema):
+    """A list with nothing to score is a valid answer, and writing it is right."""
     session = FakeSession(schema, SENTIMENT_RESPONSES[shape])
     aggregated = run(
         cep.get_aggregated_sentiment(message={"CallId": "call-1"}, appsync_session=session)
     )
-    assert aggregated["OverallSentiment"] == {}
-    assert aggregated["SentimentByPeriod"] == {"QUARTER": {}}
+    assert aggregated == {"OverallSentiment": {}, "SentimentByPeriod": {"QUARTER": {}}}
+
+
+@pytest.mark.parametrize("shape", NO_SEGMENT_LIST)
+def test_a_response_carrying_no_segment_list_aggregates_nothing_at_all(shape, schema):
+    """Not an answer, so there is nothing to write -- and no failure either.
+
+    An empty aggregation written with a fresh ``UpdatedAt`` passes
+    ``updateCall.request.vtl``'s condition, so it would replace the stored one.
+    Failing instead would fail the record that carried the transcript segment.
+    """
+    session = FakeSession(schema, SENTIMENT_RESPONSES[shape])
+    assert (
+        run(cep.get_aggregated_sentiment(message={"CallId": "call-1"}, appsync_session=session))
+        is None
+    )
+
+
+@pytest.mark.parametrize("shape", NO_SEGMENT_LIST)
+def test_no_aggregation_is_sent_when_no_segment_list_came_back(shape, schema):
+    """The decision has to reach the writes, not just the aggregation."""
+    session = FakeSession(schema, SENTIMENT_RESPONSES[shape])
+    assert (
+        run(
+            cep.get_call_aggregation_tasks(
+                message={"CallId": "call-1", "EndTime": 1.0}, appsync_session=session
+            )
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize("shape", ["populated", *SCORES_NOTHING])
+def test_an_aggregation_is_sent_when_a_segment_list_came_back(shape, schema):
+    """Including an empty one, which is a real answer about the meeting."""
+    session = FakeSession(schema, SENTIMENT_RESPONSES[shape])
+    tasks = run(
+        cep.get_call_aggregation_tasks(
+            message={"CallId": "call-1", "EndTime": 1.0}, appsync_session=session
+        )
+    )
+    assert len(tasks) == 1
+    for task in tasks:
+        task.close()
 
 
 # ── recognising a duplicate write ───────────────────────────────────────────

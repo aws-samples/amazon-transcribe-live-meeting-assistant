@@ -510,7 +510,8 @@ async def execute_get_transcript_segments_query(
 async def get_aggregated_sentiment(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
-) -> Dict:
+) -> Optional[Sentiment]:
+    """The meeting's sentiment aggregation, or None if the segments were unreadable."""
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
@@ -526,16 +527,20 @@ async def get_aggregated_sentiment(
 
     sentiment_entry_list_by_channel: Dict[ChannelType, SentimentPerChannel] = {}
 
-    # An empty aggregation is a valid answer -- the meeting has no scored
-    # segments yet -- so a response that carries no list is logged and treated as
-    # one. Failing here would fail the record that carried the segment.
+    # An empty list is a valid answer -- the meeting has no scored segments yet
+    # -- and aggregates to nothing. No list at all is not an answer: the caller
+    # returns None for it so that nothing is written, because an empty
+    # aggregation written with a fresh UpdatedAt passes updateCall's condition
+    # and would replace the stored one. Failing instead would fail the record
+    # that carried the segment, which is the outcome this read exists to avoid.
     segments = optional_graphql_field(
         result,
         "getTranscriptSegmentsWithSentiment",
         "TranscriptSegmentsWithSentiment",
         logger=LOGGER,
-        default=[],
     )
+    if segments is None:
+        return None
 
     for segment in segments:
         # The list's element type is nullable, and a null entry carries nothing
@@ -592,7 +597,8 @@ async def get_aggregated_sentiment(
 async def get_aggregate_call_data(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
-) -> Dict:
+) -> Optional[Dict]:
+    """The meeting aggregation to write, or None when there is nothing to write."""
     call_id = message.get("CallId")
     if not call_id:
         error_message = "callid does not exist"
@@ -601,6 +607,10 @@ async def get_aggregate_call_data(
     total_duration = float(message.get("EndTime", 0.0)) * 1000
 
     sentiment = await get_aggregated_sentiment(message=message, appsync_session=appsync_session)
+    if sentiment is None:
+        # The scored segments could not be read. Writing the aggregation anyway
+        # would replace the stored one with an empty aggregation.
+        return None
 
     updated_at = message.get("UpdatedAt", datetime.utcnow().astimezone().isoformat())
     event_type = message.get("EventType", "")
@@ -621,9 +631,13 @@ async def get_call_aggregation_tasks(
     message: Dict[str, object],
     appsync_session: AppsyncAsyncClientSession,
 ) -> List[Coroutine]:
+    """The updateCallAggregation task for this message, or none to send."""
     call_aggregation = await get_aggregate_call_data(
         message=message, appsync_session=appsync_session
     )
+    if call_aggregation is None:
+        return []
+
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
     schema = DSLSchema(appsync_session.client.schema)
@@ -657,6 +671,10 @@ async def execute_update_call_aggregation_mutation(
     call_aggregation = await get_aggregate_call_data(
         message=message, appsync_session=appsync_session
     )
+    if call_aggregation is None:
+        # Same reasoning as get_call_aggregation_tasks: nothing to write beats
+        # replacing the stored aggregation with an empty one.
+        return {"ok": True}
 
     if not appsync_session.client.schema:
         raise ValueError("invalid AppSync schema")
