@@ -47,6 +47,17 @@ function novaAgent(overrides: { meetingMode?: MeetingMode; activationMode?: stri
     return agent;
 }
 
+/** The same agent without the playback stub, for the tests whose subject is
+ *  the real stopPacatStream. */
+function bareAgent(): NovaAgent {
+    return new NovaAgent({
+        modelId: 'amazon.nova-2-sonic-v1:0',
+        systemPrompt: 'You are Alex, an AI meeting assistant.',
+        activationMode: 'wake_phrase',
+        meetingMode: 'normal',
+    });
+}
+
 let playbackTeardowns: string[] = [];
 let captured: string[] = [];
 const realLog = console.log;
@@ -299,6 +310,32 @@ test('a stop request for an assistant that is already silent defers nothing', ()
     }
 });
 
+test('group mode asked back inside the window keeps the assistant audible', async () => {
+    // Group mode clears the audio gate directly rather than through unmute(),
+    // so it has to call the request off itself. Without that, "Hey Alex, what's
+    // next?" right after a stop would be answered and then cut off by the
+    // backstop a second later.
+    capture();
+    try {
+        const agent = novaAgent({ meetingMode: 'group', activationMode: 'always_active' });
+        (agent as any)._isMuted = false; // as if a wake phrase had made it audible
+        agent.requestStopTalking('test');
+        (agent as any).noteMuteToolRequested();
+        await (agent as any).handleMuteTool('tool-use-id');
+        assert.equal(agent.isMuted(), true);
+
+        (agent as any).handleUserTurnWakePhrase('Hey Alex, what is next on the agenda?');
+        assert.equal(agent.isMuted(), false, 'the wake phrase must make it audible');
+
+        await delay(PAST_BACKSTOP_MS);
+        assert.equal(agent.isMuted(), false, 'the backstop must not re-silence it');
+        assert.match(stopLines().join('\n'), /action=cancelled why=addressed-again/);
+        (agent as any).clearConversationTimeout();
+    } finally {
+        release();
+    }
+});
+
 test('being addressed again inside the window keeps the assistant audible', async () => {
     // A wake phrase after the tool route has acted means the participant wants
     // the assistant back. Without superseding the request still in flight, its
@@ -449,15 +486,7 @@ test('a handed-off playback stream stays reachable', () => {
     // streams on `agent_output` at once would be audible as garble, so barge-in
     // has to be able to cut off the one still draining, and an assistant that
     // speaks again has to replace rather than talk over it.
-    //
-    // Built without the playback stub the other tests use, because the real
-    // stopPacatStream is the thing under test.
-    const agent = new NovaAgent({
-        modelId: 'amazon.nova-2-sonic-v1:0',
-        systemPrompt: 'You are Alex, an AI meeting assistant.',
-        activationMode: 'wake_phrase',
-        meetingMode: 'normal',
-    });
+    const agent = bareAgent();
 
     const killed: string[] = [];
     const fakePacat = () => ({
@@ -491,6 +520,82 @@ test('a handed-off playback stream stays reachable', () => {
     assert.deepEqual(killed, ['SIGTERM', 'SIGTERM']);
 });
 
+test('a second hand-off does not leave the first stream playing', () => {
+    // Only one stream can be held, so an earlier hand-off that has not finished
+    // gives way rather than being forgotten while still audible.
+    const agent = bareAgent();
+
+    const killed: string[] = [];
+    const fakePacat = (tag: string) => ({
+        tag,
+        killed: false,
+        kill: (signal: string) => killed.push(`${tag}:${signal}`),
+        stdin: { end: () => {}, destroyed: false },
+    });
+
+    (agent as any).pacatProcess = fakePacat('first');
+    (agent as any).stopPacatStream('drain');
+    (agent as any).pacatProcess = fakePacat('second');
+    (agent as any).stopPacatStream('drain');
+
+    assert.deepEqual(killed, ['first:SIGTERM'], 'the earlier stream gives way');
+    assert.equal((agent as any).drainingPacatProcess.tag, 'second');
+});
+
+test('one hand-off\'s cap cannot cut short a later one', async () => {
+    // Each hand-off is bounded, and by its own clock. An earlier cap firing
+    // must not end a stream handed off after it, which would clip a later
+    // acknowledgement to whatever was left of the earlier budget.
+    const agent = bareAgent();
+    const capMs: number = (agent as any).PLAYBACK_DRAIN_CAP_MS;
+
+    const killed: string[] = [];
+    const fakePacat = (tag: string) => ({
+        tag,
+        killed: false,
+        kill: (signal: string) => killed.push(`${tag}:${signal}`),
+        stdin: { end: () => {}, destroyed: false },
+    });
+
+    (agent as any).pacatProcess = fakePacat('first');
+    (agent as any).stopPacatStream('drain');
+    await delay(300);
+    (agent as any).pacatProcess = fakePacat('second');
+    (agent as any).stopPacatStream('drain');
+    assert.deepEqual(killed, ['first:SIGTERM']);
+
+    // Past the first hand-off's cap, inside the second's.
+    await delay(capMs - 300 + 150);
+    assert.deepEqual(killed, ['first:SIGTERM'], 'the later stream must still be playing');
+    assert.equal((agent as any).drainingPacatProcess?.tag, 'second');
+
+    // And its own cap does end it.
+    await delay(450);
+    assert.deepEqual(killed, ['first:SIGTERM', 'second:SIGTERM']);
+    assert.equal((agent as any).drainingPacatProcess, null);
+});
+
+test('a stream reporting its exit forgets only itself', () => {
+    // A handed-off stream exits after a replacement may already have been
+    // spawned. Clearing the replacement's reference would orphan it: nothing
+    // left could stop it, and the next chunk would spawn a third alongside it.
+    const agent = bareAgent();
+    const live = { killed: false, kill: () => {}, stdin: { end: () => {}, destroyed: false } };
+    const departed = { killed: true, kill: () => {}, stdin: { end: () => {}, destroyed: false } };
+
+    (agent as any).pacatProcess = live;
+    (agent as any).drainingPacatProcess = departed;
+
+    // What every pacat close/error handler calls with the stream it was given.
+    (agent as any).forgetPacatStream(departed);
+    assert.equal((agent as any).pacatProcess, live, 'the stream in use must survive');
+    assert.equal((agent as any).drainingPacatProcess, null, 'the departed stream is forgotten');
+
+    // And a stream that is the one in use is forgotten, as before.
+    (agent as any).forgetPacatStream(live);
+    assert.equal((agent as any).pacatProcess, null);
+});
+
 test('the translator pause still cuts playback off immediately', async () => {
     // Its cue has already sounded and the pause is meant to be absolute.
     capture();
@@ -522,6 +627,10 @@ test('an acknowledgement lost to the barge-in gate is reported once, by gate', a
         const drops = stopLines().filter((line) => line.includes('action=ack-dropped'));
         assert.equal(drops.length, 1, 'a chunk-rate gate must not flood the log');
         assert.match(drops[0], /gate=interrupted/);
+        // `route` names where the request was recognised, as on every other
+        // line in the family — here the transcript, with no tool call seen.
+        assert.match(drops[0], /route=transcript/);
+        assert.match(drops[0], /tool_seen=false/);
 
         await delay(PAST_GRACE_MS);
     } finally {
@@ -544,8 +653,35 @@ test('an acknowledgement lost to the mute gate names that gate instead', async (
         const drops = stopLines().filter((line) => line.includes('action=ack-dropped'));
         assert.equal(drops.length, 1);
         assert.match(drops[0], /gate=muted/);
+        assert.match(drops[0], /route=transcript/);
 
         await delay(PAST_BACKSTOP_MS);
+    } finally {
+        release();
+    }
+});
+
+test('a request the model raised on its own is reported as the tool route', async () => {
+    // No transcript segment matched — the model noticed by itself. The report
+    // has to say so, or a CloudWatch filter reading these lines attributes the
+    // request to a route that never saw it.
+    capture();
+    try {
+        const agent = novaAgent();
+        (agent as any).noteMuteToolRequested();
+        assert.match(stopLines().join('\n'), /route=tool action=claimed[^\n]*transcript_deferred=false/);
+        assert.match(stopLines().join('\n'), /tool_latency_ms=n\/a/);
+
+        await (agent as any).handleMuteTool('tool-use-id');
+        assert.equal(agent.isMuted(), true);
+        await (agent as any).playAudio(Buffer.alloc(320));
+
+        const drops = stopLines().filter((line) => line.includes('action=ack-dropped'));
+        assert.equal(drops.length, 1);
+        assert.match(drops[0], /route=tool/);
+
+        await delay(PAST_BACKSTOP_MS);
+        assert.equal(agent.isMuted(), true);
     } finally {
         release();
     }

@@ -1506,12 +1506,21 @@ export class NovaAgent implements VoiceAssistantProvider {
     // command. "Hey Alex, stop talking about that" carries a wake phrase and is
     // not a stop command, so a single misheard word would otherwise disarm the
     // fallback for the very request that armed it, leaving a participant who
-    // asked for quiet with an assistant still talking. Below, unmute() calls
-    // the request off once the assistant is actually silent, which is the state
-    // in which a wake phrase unambiguously means "come back".
+    // asked for quiet with an assistant still talking.
+    //
+    // Both branches below do call it off, but only once the assistant is
+    // already silent — the state in which a wake phrase unambiguously means
+    // "come back", and the same condition that already governs making it
+    // audible again. Without that, a fallback or backstop still armed would
+    // silence the assistant again a moment after it was asked back.
     if (this.groupMeetingMode) {
       if (this._isMuted && !askedToStop) {
         console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
+        // Group mode clears the gate directly rather than through unmute(),
+        // because unmute() marks the conversation active and would suppress the
+        // session started just below — so the request in flight has to be
+        // called off here by hand.
+        this.cancelStopRequest('addressed-again');
         this._isMuted = false;
         // Start conversation session if not already active
         if (!this.conversationActive) {
@@ -1952,8 +1961,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log(
       `🔊 Starting persistent pacat playback stream (${playbackRate}Hz, ${playbackLatencyMs}ms buffer)...`,
     );
-    this.pacatSpawnedAt = Date.now();
-    this.pacatProcess = spawn('pacat', [
+    const spawned = spawn('pacat', [
       '--playback',
       '--device=agent_output',
       '--format=s16le',
@@ -1961,33 +1969,37 @@ export class NovaAgent implements VoiceAssistantProvider {
       '--channels=1',
       '--latency-msec=' + playbackLatencyMs,
     ]);
+    this.pacatSpawnedAt = Date.now();
+    this.pacatProcess = spawned;
 
-    this.pacatProcess.stdin?.on('error', (error: any) => {
+    // Every handler reports the stream it was given, never "whatever is current
+    // now" — see forgetPacatStream.
+    spawned.stdin?.on('error', (error: any) => {
       if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
         console.log('🔊 pacat stdin closed (expected during cleanup)');
       } else {
         console.error('❌ pacat stdin error:', error);
       }
-      this.pacatProcess = null;
+      this.forgetPacatStream(spawned);
     });
 
-    this.pacatProcess.on('close', (code: number) => {
+    spawned.on('close', (code: number) => {
       console.log(`🔊 pacat process exited with code ${code}`);
-      this.pacatProcess = null;
+      this.forgetPacatStream(spawned);
     });
 
-    this.pacatProcess.on('error', (error: Error) => {
+    spawned.on('error', (error: Error) => {
       console.error('❌ pacat process error:', error);
-      this.pacatProcess = null;
+      this.forgetPacatStream(spawned);
     });
 
-    this.pacatProcess.stderr?.on('data', (data: Buffer) => {
+    spawned.stderr?.on('data', (data: Buffer) => {
       const msg = data.toString().trim();
       if (msg) console.log(`pacat: ${msg}`);
     });
 
     console.log('✓ Persistent pacat playback stream started');
-    return this.pacatProcess;
+    return spawned;
   }
 
   /**
@@ -2012,12 +2024,21 @@ export class NovaAgent implements VoiceAssistantProvider {
         if (mode === 'immediate') {
           process_.kill('SIGTERM');
         } else {
+          // An earlier hand-off that has not finished gives way first: two
+          // streams on `agent_output` at once would be audible as garble, and
+          // only one can be held.
+          this.killDrainingPacatStream();
+
           // Hand the process off: it exits on its own once the buffer empties,
           // and the cap stops one that never drains from outliving the request
           // that silenced it.
           this.drainingPacatProcess = process_;
           const cap = setTimeout(() => {
-            this.killDrainingPacatStream();
+            // This hand-off's own stream and no other: a later one has its own
+            // cap and must not be cut short by this timer.
+            if (this.drainingPacatProcess === process_) {
+              this.killDrainingPacatStream();
+            }
           }, this.PLAYBACK_DRAIN_CAP_MS);
           cap.unref?.();
         }
@@ -2033,6 +2054,25 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.speakingTimeout = null;
     }
     this._isSpeaking = false;
+  }
+
+  /**
+   * Drop the references to a playback stream that has gone away, and only to
+   * that stream.
+   *
+   * A stream reporting its exit is not necessarily the one in use: a handed-off
+   * stream (see stopPacatStream's `drain` mode) exits after a replacement may
+   * already have been spawned, and clearing the replacement's reference would
+   * orphan it — audible, because nothing left could stop it and the next audio
+   * chunk would spawn a third alongside it.
+   */
+  private forgetPacatStream(spawned: ChildProcess): void {
+    if (this.pacatProcess === spawned) {
+      this.pacatProcess = null;
+    }
+    if (this.drainingPacatProcess === spawned) {
+      this.drainingPacatProcess = null;
+    }
   }
 
   /** End a handed-off playback stream, whether its own cap or a later teardown
@@ -2654,8 +2694,11 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     request.ackDropLogged = true;
+    // `route` names where the request was recognised, the same as on every
+    // other line in the family, so that one CloudWatch filter reads coherently.
     console.log(
-      `[stop-request] route=tool action=ack-dropped gate=${gate}`
+      `[stop-request] route=${request.fromTranscript ? 'transcript' : 'tool'}`
+      + ` action=ack-dropped gate=${gate}`
       + ` elapsed_ms=${Date.now() - request.seenAt} tool_seen=${request.toolSeen}`,
     );
   }
