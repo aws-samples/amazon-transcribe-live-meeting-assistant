@@ -36,8 +36,9 @@ export const shouldClearManualAlert = (status) => !!status && status !== 'MANUAL
  * A subscription payload carries the fields the mutation selected; one that did
  * not select the prompt fields reports the status and nulls. Such an update
  * cannot be acted on — there is nothing to show, and nothing to conclude from
- * its absence either. Every writer selects the prompt fields today, so this is
- * a backstop against one added later that does not.
+ * its absence either. Only a prompting status reaches this, and the Virtual
+ * Participant container is the only thing that writes one; it selects the
+ * prompt fields, so this is a backstop against a writer that does not.
  *
  * Separate from the deduplication below, which covers the opposite case: a
  * fully described payload for a prompt that is already on screen. The two guard
@@ -358,8 +359,9 @@ const ManualActionAlerts = () => {
       // with the prompt status and nothing to describe it. That payload is not
       // evidence about the prompt in either direction: rebuilding the alert
       // from it would replace the real message with generic text, and clearing
-      // it would drop an alert the VP still needs. Every writer selects those
-      // fields, so this is the backstop for one added later that does not.
+      // it would drop an alert the VP still needs. The container selects those
+      // fields on every write, so this is the backstop for a writer that
+      // does not.
       if (isUndescribedPrompt(vp)) {
         return;
       }

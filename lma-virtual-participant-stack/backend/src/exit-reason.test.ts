@@ -143,13 +143,11 @@ const splitTrigger = (template: string) => {
 };
 
 test('every trigger that carries a detail puts it after a colon', () => {
-    // Read from the handlers rather than restated, because a fixture that
-    // encoded the shape a handler used to emit would keep passing while the
-    // handler drifted away from it — which is how the Teams SDK's end-of-call
-    // trigger came to carry the platform's codes with no colon, and so never
-    // be slugged. normalizeExitTrigger leaves everything before the first colon
-    // alone, so an interpolated value placed before it is stored verbatim and
-    // its rows cannot be counted.
+    // Read from the handlers rather than restated, because a fixture encoding
+    // one shape keeps passing while the handler drifts away from it.
+    // normalizeExitTrigger leaves everything before the first colon alone, so
+    // an interpolated value placed before it is stored verbatim and its rows
+    // cannot be counted.
     //
     // A trigger may interpolate before the colon as well, as long as it also
     // interpolates after one: the Teams SDK picks its prefix from two fixed
@@ -172,14 +170,10 @@ test('every trigger that carries a detail puts it after a colon', () => {
 });
 
 test('every trigger the code can write is documented', () => {
-    // The published vocabulary and the code have drifted apart more than once,
-    // always in the same direction: a trigger added or reshaped in a handler
-    // while the page kept describing the old one. Reading both and comparing is
-    // the only version of this that stays true.
-    //
-    // Fixed literals must appear verbatim. A trigger built from a template
-    // contributes its prefix instead, since the detail after the colon comes
-    // from the platform and cannot be enumerated.
+    // Reading both and comparing is the only version of this that stays true as
+    // triggers are added or reshaped. Fixed literals must appear verbatim; a
+    // trigger built from a template contributes its prefix instead, since the
+    // detail after the colon comes from the platform and cannot be enumerated.
     const docs = readFileSync(
         new URL('../../../docs/virtual-participant.md', new URL('.', import.meta.url)),
         'utf8',

@@ -170,8 +170,8 @@ export const shouldClearStatusDetail = (status: string, statusDetail?: string): 
   !statusDetail && (HEALTHY_VP_STATUSES as readonly string[]).includes(status);
 
 /**
- * The fields every mutation on the VP record selects, shared so that no write
- * can be narrower than the UI is subscribed to.
+ * The fields every mutation in this file selects, shared so that no write from
+ * the container can be narrower than the UI is subscribed to.
  *
  * An AppSync subscription delivers the fields the *mutation* selected: one the
  * subscriber asked for that the mutation did not return arrives as null. Most

@@ -356,9 +356,8 @@ test('a second prompt does not overwrite the recorded interrupted status', async
 });
 
 test('no status write rewinds a VP that is already further along', async () => {
-  // The two methods that used to carry a hardcoded status are the ones a live
-  // VP can reach while it is mid-meeting. Neither may move it: setCallId never
-  // writes a status at all, and clearing a prompt only ever restores one.
+  // Both are reachable while a VP is mid-meeting, and neither may move it:
+  // setCallId never writes a status, and clearing a prompt only restores one.
   for (const call of [
     (manager: any) => manager.setCallId('call-1234'),
     (manager: any) => manager.clearManualAction(),
@@ -420,12 +419,10 @@ test('every mutation selects at least the fields the UI subscribes to', () => {
   }
 });
 
-test('the status manager is the only writer of the VP record', () => {
-  // There used to be a second one: the Kinesis manager linked the CallId with
-  // its own GraphQL call, which read the row's status and wrote it straight
-  // back. A duplicate implementation is how a field ends up being written by
-  // code that does not own it, and that one ran mid-meeting, moments before
-  // the write that reports recording has started.
+test('the status manager is the only writer in the container source', () => {
+  // The state machine, the task reaper, entrypoint.sh and the UI all write the
+  // row too; this is about the container, where a second implementation is how
+  // a field ends up written by code that does not own it.
   const here = new URL('.', import.meta.url);
   const sources = readdirSync(new URL('../src/', here)).filter(
     (name) => name.endsWith('.ts') && !name.endsWith('.test.ts') && name !== 'status-manager.ts',
