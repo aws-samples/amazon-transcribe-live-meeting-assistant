@@ -322,6 +322,62 @@ test('being addressed again inside the window keeps the assistant audible', asyn
     }
 });
 
+test('a new question inside the window is answered, not cut off', async () => {
+    // Two completed segments can land close enough together that the second is
+    // a fresh request while the first is still resolving. Addressing the
+    // assistant means it is wanted, so the pending silence must give way —
+    // otherwise the answer to the new question is cut off mid-sentence.
+    capture();
+    try {
+        const agent = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+        agent.requestStopTalking('test');
+        (agent as any).handleUserTurnWakePhrase('Hey Alex, actually what is the launch date?');
+
+        await delay(PAST_GRACE_MS);
+        assert.equal(agent.isMuted(), false, 'the new question must not be silenced');
+        assert.match(stopLines().join('\n'), /action=cancelled why=addressed-again/);
+    } finally {
+        release();
+    }
+});
+
+test('a repeated stop request inside the window is not mistaken for being addressed', async () => {
+    // "Hey Alex, stop talking" contains a wake phrase, so the same turn reaches
+    // the code above. It must not call off the silence it just asked for.
+    capture();
+    try {
+        for (const mode of ['normal', 'group'] as MeetingMode[]) {
+            const agent = novaAgent({ meetingMode: mode, activationMode: 'always_active' });
+            (agent as any)._isMuted = false; // group starts muted
+            agent.requestStopTalking('test');
+            (agent as any).handleUserTurnWakePhrase('Hey Alex, stop talking');
+
+            await delay(PAST_GRACE_MS);
+            assert.equal(agent.isMuted(), true, `${mode}: the request must still be honoured`);
+            (agent as any).clearConversationTimeout();
+        }
+    } finally {
+        release();
+    }
+});
+
+test('a fresh wake-phrase activation inside the window keeps the assistant audible', async () => {
+    capture();
+    try {
+        const agent = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+        (agent as any)._isActive = true; // stand in for an established session
+        agent.requestStopTalking('test');
+        await agent.activate(1);
+
+        await delay(PAST_GRACE_MS);
+        assert.equal(agent.isMuted(), false, 'an activation must not be followed by silence');
+        assert.match(stopLines().join('\n'), /action=cancelled why=activated/);
+        agent.deactivate();
+    } finally {
+        release();
+    }
+});
+
 // ---------------------------------------------------------------------------
 // Modes that stay out of the race
 // ---------------------------------------------------------------------------

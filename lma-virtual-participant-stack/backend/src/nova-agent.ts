@@ -1493,6 +1493,16 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     const askedToStop = isStopTalkingRequest(content, configuredWakePhrases());
 
+    if (!askedToStop) {
+      // Being addressed by a wake phrase that is not itself a request for
+      // silence means the assistant is wanted. Supersede any stop request still
+      // resolving: the two utterances can land close enough together that a
+      // fallback armed for the first would otherwise cut off the answer to the
+      // second. The stop utterance cannot reach here, because askedToStop
+      // recognises it.
+      this.cancelStopRequest('addressed-again');
+    }
+
     if (this.groupMeetingMode) {
       if (this._isMuted && !askedToStop) {
         console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
@@ -2134,6 +2144,12 @@ export class NovaAgent implements VoiceAssistantProvider {
     // machine (and starts muted by design) and `translator` is driven by its
     // explicit pause/resume trigger phrases. Both of those run always_active,
     // where this method returns above.
+    // Same reasoning as handleUserTurnWakePhrase: a fresh activation means the
+    // assistant has been addressed, which supersedes a stop request still
+    // resolving. The utterance that asked for silence does not activate — the
+    // scribe routes it to the stop path instead of the wake-phrase path.
+    this.cancelStopRequest('activated');
+
     if (this.meetingMode === 'normal' && this._isMuted) {
       this.unmute('wake phrase activation');
     }
