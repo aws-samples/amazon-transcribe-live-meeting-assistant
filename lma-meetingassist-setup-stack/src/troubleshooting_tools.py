@@ -516,15 +516,69 @@ class TroubleshootingTools:
         ),
     }
 
+    #: The attributes of a virtual participant row this tool will return.
+    #:
+    #: An allowlist, not a denylist, and that direction is the point: the row
+    #: carries a meeting password and a VNC password, and whatever this tool
+    #: returns goes into the model's context *and* onto the thinking-step
+    #: stream the UI renders. A field added to the row later is withheld until
+    #: somebody adds it here on purpose, which is the safe way for this list to
+    #: be out of date.
+    #:
+    #: The prompt also tells the agent to redact credentials from the evidence
+    #: it quotes. That instruction is worth keeping, but it is a request to a
+    #: model and cannot be the control: this list is.
+    DIAGNOSTIC_FIELDS = frozenset(
+        {
+            # Identity of the attempt and what it was trying to join. The
+            # meeting name and id are here because a failure that reproduces
+            # for one meeting name and not others is a documented pattern.
+            "id",
+            "meetingName",
+            "meetingPlatform",
+            "meetingId",
+            "CallId",
+            # Lifecycle.
+            "status",
+            "errorMessage",
+            "endTrigger",
+            "endReason",
+            "userAcknowledgedFailure",
+            "statusBeforeManualAction",
+            # Timing.
+            "meetingTime",
+            "scheduledFor",
+            "isScheduled",
+            "createdAt",
+            "updatedAt",
+            # The manual-action interruption, whose rate is itself a signal.
+            "manualActionType",
+            "manualActionMessage",
+            "manualActionTimeoutSeconds",
+            "manualActionStartTime",
+            # Live-view reachability. Endpoint and port, never the password.
+            "vncEndpoint",
+            "vncPort",
+            "vncReady",
+            "taskPrivateIp",
+            # Per-VP toggles that change what evidence exists.
+            "enableVideoRecording",
+        }
+    )
+
     def get_vp_record(self, vp_id: Any) -> str:
         """Read one virtual participant row from DynamoDB.
+
+        Only the attributes in DIAGNOSTIC_FIELDS are returned. The names of the
+        rest are reported so the agent knows the record was filtered and a
+        reader can see what was held back, but their values never leave here.
 
         Args:
             vp_id: The virtual participant id.
 
         Returns:
-            A JSON object with the row's attributes and the field-level caveats
-            needed to read them correctly.
+            A JSON object with the row's diagnostic attributes and the
+            field-level caveats needed to read them correctly.
         """
         self._check_deadline("a virtual participant lookup")
         identifier = str(vp_id or "").strip()
@@ -556,19 +610,29 @@ class TroubleshootingTools:
                 }
             )
 
-        record = {name: _plain_value(value) for name, value in item.items()}
+        record = {
+            name: _plain_value(value)
+            for name, value in item.items()
+            if name in self.DIAGNOSTIC_FIELDS
+        }
+        withheld = sorted(set(item) - self.DIAGNOSTIC_FIELDS)
         notes = {k: v for k, v in self.VP_FIELD_NOTES.items() if k in record}
         return self._render(
             {
                 "vpId": identifier,
                 "found": True,
                 "record": record,
+                "withheldFields": withheld,
                 "fieldNotes": notes,
                 "guidance": (
                     "This row is the current state, not a timeline. The ~28-value "
                     "exit taxonomy and the AI vision classifier's admission "
                     "verdicts are not persisted here; search the "
-                    "virtual-participant log group for them."
+                    "virtual-participant log group for them. The attributes named "
+                    "in withheldFields exist on the row but are not returned, "
+                    "because they are credentials or identify a person rather "
+                    "than describing the failure; do not ask for them and do not "
+                    "treat their absence as a finding."
                 ),
             }
         )

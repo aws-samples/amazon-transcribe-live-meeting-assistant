@@ -53,6 +53,50 @@ def test_an_unusable_value_falls_back_to_the_default(value: str) -> None:
     assert limits_with(max_log_events=value).max_log_events == default
 
 
+def test_a_clamped_limit_says_so_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A limit that silently became something else is an hour of debugging:
+    the agent stops earlier than the configured value says, and nothing
+    anywhere explains why."""
+    _default, maximum = _LIMITS["max_lookback_hours"]
+
+    with caplog.at_level("WARNING"):
+        limits_with(max_lookback_hours="100000")
+
+    assert "TROUBLESHOOTING_MAX_LOOKBACK_HOURS" in caplog.text
+    assert "above the maximum" in caplog.text
+    assert str(maximum) in caplog.text
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-5"])
+def test_an_unusable_value_says_so_in_the_log(
+    value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING"):
+        limits_with(max_log_events=value)
+
+    assert "TROUBLESHOOTING_MAX_LOG_EVENTS" in caplog.text
+    assert "using the default" in caplog.text
+
+
+def test_an_unset_limit_is_not_warned_about(caplog: pytest.LogCaptureFixture) -> None:
+    """Every default being warned about would make the real warnings invisible."""
+    with caplog.at_level("WARNING"):
+        limits_with()
+
+    assert caplog.text == ""
+
+
+def test_a_limit_inside_its_ceiling_is_not_warned_about(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"):
+        limits_with(max_iterations="4")
+
+    assert caplog.text == ""
+
+
 def test_limits_are_read_per_run_not_per_cold_start() -> None:
     """A change to the function's environment applies to the next invocation.
 

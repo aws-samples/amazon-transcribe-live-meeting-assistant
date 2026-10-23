@@ -21,7 +21,9 @@ Three rules this module exists to enforce:
 2. **Every limit has a hard ceiling the operator cannot raise.** The
    environment variables let a deployment tune *down* freely and tune *up*
    only to a bound set here, so a mistyped value degrades cost rather than
-   exhausting the Lambda timeout or the Logs Insights concurrency quota.
+   exhausting the Lambda timeout or the Logs Insights concurrency quota. A
+   value that is clamped, or that could not be read at all, is logged — see
+   ``_read``.
 3. **There is no whole-run retry, and this module deliberately offers no knob
    for one.** Restarting an agent run from the original question re-pays for
    every tool call it already made. A run that failed should surface the
@@ -35,9 +37,12 @@ stalled HTTP call burns time without burning tokens.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass, field, fields
 from typing import Any, Dict, Tuple
+
+LOGGER = logging.getLogger(__name__)
 
 # ── Hard ceilings ───────────────────────────────────────────────────────────
 #
@@ -47,8 +52,9 @@ from typing import Any, Dict, Tuple
 # high is less useful than one that starts with a sane limit.
 
 _LIMITS: Dict[str, Tuple[int, int]] = {
-    # Model turns that may call a tool. Four tools need far fewer than this;
-    # the headroom is for a follow-up query after a first one returns nothing.
+    # Tool calls, counted individually — so a single turn that calls three
+    # tools in parallel spends three. Four tools need far fewer than this; the
+    # headroom is for a follow-up query after a first one returns nothing.
     "max_iterations": (8, 20),
     # Output tokens per model turn. Diagnoses are short by contract (the
     # prompt's output section caps them), so this is generous already.
@@ -98,18 +104,40 @@ _LIMITS: Dict[str, Tuple[int, int]] = {
 
 
 def _read(name: str) -> int:
-    """Resolve one limit from the environment, clamped to its ceiling."""
+    """Resolve one limit from the environment, clamped to its ceiling.
+
+    Every departure from what the operator asked for is logged. A limit that
+    silently became something else is the kind of thing somebody debugs for an
+    hour: the agent would stop earlier than the configured value says it
+    should, and nothing anywhere would explain why.
+    """
+    variable = f"TROUBLESHOOTING_{name.upper()}"
     default, maximum = _LIMITS[name]
-    raw = os.environ.get(f"TROUBLESHOOTING_{name.upper()}", "").strip()
+    raw = os.environ.get(variable, "").strip()
     if not raw:
         return default
     try:
         value = int(raw)
     except ValueError:
+        LOGGER.warning(
+            "%s=%r is not a whole number; using the default of %d", variable, raw, default
+        )
         return default
     if value < 1:
+        LOGGER.warning(
+            "%s=%d is not a usable limit; using the default of %d", variable, value, default
+        )
         return default
-    return min(value, maximum)
+    if value > maximum:
+        LOGGER.warning(
+            "%s=%d is above the maximum of %d for this setting; using %d",
+            variable,
+            value,
+            maximum,
+            maximum,
+        )
+        return maximum
+    return value
 
 
 @dataclass(frozen=True)

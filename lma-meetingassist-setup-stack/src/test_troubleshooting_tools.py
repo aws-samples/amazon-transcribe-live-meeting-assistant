@@ -711,6 +711,14 @@ FAILED_VP_ITEM = {
     "enableVideoRecording": {"BOOL": False},
     "vncPort": {"N": "5901"},
     "userAcknowledgedFailure": {"NULL": True},
+    # Present on a real row and never returned by the tool.
+    "meetingPassword": {"S": "s3cr3t-passcode"},
+    "vncPassword": {"S": "s3cr3t-vnc"},
+    "owner": {"S": "someone@example.com"},
+    "Owner": {"S": "someone@example.com"},
+    "SharedWith": {"L": [{"S": "other@example.com"}]},
+    "userSub": {"S": "11111111-2222-3333"},
+    "userZoomSub": {"S": "44444444-5555"},
 }
 
 
@@ -796,6 +804,100 @@ def test_an_unconfigured_table_is_reported_rather_than_queried() -> None:
         make_tools(dynamodb_client=client, vp_table_name="").get_vp_record("vp-abc")
 
     assert client.calls == []
+
+
+# ── what the record tool will and will not hand to the model ────────────────
+#
+# Whatever this tool returns goes into the model's context and onto the
+# thinking-step stream the UI renders, so the filter is an allowlist and these
+# tests are about the two directions it has to get right.
+
+
+def record_for(item: Dict[str, Any] = FAILED_VP_ITEM) -> Dict[str, Any]:
+    return parsed(
+        make_tools(dynamodb_client=FakeDynamoDBClient(item)).get_vp_record("vp-abc")
+    )
+
+
+@pytest.mark.parametrize("secret", ["meetingPassword", "vncPassword"])
+def test_a_credential_on_the_row_is_never_returned(secret: str) -> None:
+    """The row carries a meeting passcode and a VNC password. The prompt also
+    asks the agent to redact credentials, but that is a request to a model and
+    cannot be the control."""
+    result = record_for()
+
+    assert secret not in result["record"]
+    assert secret in result["withheldFields"]
+
+
+def test_no_credential_value_appears_anywhere_in_the_result() -> None:
+    """Not in the record, not in the notes, not in the guidance -- the whole
+    serialised result is what reaches the model."""
+    rendered = make_tools(
+        dynamodb_client=FakeDynamoDBClient(FAILED_VP_ITEM)
+    ).get_vp_record("vp-abc")
+
+    assert "s3cr3t-passcode" not in rendered
+    assert "s3cr3t-vnc" not in rendered
+
+
+@pytest.mark.parametrize(
+    "identifying", ["owner", "Owner", "SharedWith", "userSub", "userZoomSub"]
+)
+def test_a_field_that_identifies_a_person_is_not_returned(identifying: str) -> None:
+    """None of these describe the failure, and a diagnosis is the kind of text
+    somebody pastes into an issue tracker."""
+    assert identifying not in record_for()["record"]
+
+
+def test_the_diagnostic_fields_are_returned() -> None:
+    record = record_for()["record"]
+
+    assert record["status"] == "FAILED"
+    assert record["endTrigger"] == "pre-join:no-name-input"
+    assert record["errorMessage"] == "Could not find the name input"
+    assert record["meetingPlatform"] == "TEAMS"
+    assert record["enableVideoRecording"] is False
+    assert record["vncPort"] == 5901
+
+
+def test_an_unknown_attribute_is_withheld_rather_than_returned() -> None:
+    """The allowlist's failure direction: a field added to the row later is
+    held back until somebody adds it here deliberately."""
+    item = dict(FAILED_VP_ITEM, someFutureField={"S": "whatever"})
+
+    result = record_for(item)
+
+    assert "someFutureField" not in result["record"]
+    assert "someFutureField" in result["withheldFields"]
+
+
+def test_the_withheld_names_are_reported_but_not_their_values() -> None:
+    """Naming them stops the agent treating the absence as a finding, and lets
+    a human see what was held back."""
+    result = record_for()
+
+    assert "meetingPassword" in result["withheldFields"]
+    assert "do not treat their absence as a finding" in result["guidance"]
+
+
+def test_a_row_with_only_diagnostic_fields_withholds_nothing() -> None:
+    result = record_for({"id": {"S": "vp-abc"}, "status": {"S": "JOINING"}})
+
+    assert result["withheldFields"] == []
+
+
+def test_no_credential_shaped_field_is_on_the_allowlist() -> None:
+    """A guard on the list itself, so adding "vncPassword" to it later fails
+    here rather than in production."""
+    allowed = TroubleshootingTools.DIAGNOSTIC_FIELDS
+
+    for name in allowed:
+        lowered = name.lower()
+        assert "password" not in lowered, name
+        assert "secret" not in lowered, name
+        assert "token" not in lowered, name
+        assert "credential" not in lowered, name
 
 
 # ── DynamoDB wire-format conversion ─────────────────────────────────────────

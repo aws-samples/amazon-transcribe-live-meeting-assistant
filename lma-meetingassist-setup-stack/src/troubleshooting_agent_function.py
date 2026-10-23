@@ -229,6 +229,56 @@ _STOP_INSTRUCTION = (
 )
 
 
+class RunBudgetExhausted(BaseException):
+    """Unwinds the agent loop when a limit has been reached twice.
+
+    Derived from BaseException, not Exception, deliberately. The first time a
+    limit is hit the wrapper returns ``_STOP_INSTRUCTION``, which asks the
+    model to write its answer — the cooperative path, and the one that produces
+    a real diagnosis from the evidence already gathered. But a request to a
+    model is not a limit: a model that calls another tool anyway gets another
+    full turn, and a turn re-sends the whole system prompt. Asking politely
+    cannot be the only thing standing between a reached limit and the Lambda
+    timeout.
+
+    So the second refusal stops the loop instead of asking again. An agent SDK
+    catches ``Exception`` around a tool call and turns it into a tool error the
+    model can react to — which is the right default and exactly the wrong
+    behaviour here — so this inherits from BaseException to pass through that
+    handling untouched. ``run_diagnosis`` catches it and writes the answer
+    itself.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+#: Written by run_diagnosis when the loop had to be unwound, so the caller
+#: still gets the contract's three sections rather than an error page.
+_TRUNCATED_ANSWER = """## Root Cause
+**Confidence:** LOW
+Not determined. The investigation was stopped before it reached a conclusion: \
+{reason}. The evidence gathered up to that point is in this run's tool-call \
+trace; what was missing is whatever the next step would have read.
+
+## Recommendations
+1. Ask again with a narrower question, naming the component or the virtual \
+participant id, so the available tool calls are spent on one thing.
+2. If the question genuinely needs a wider search, raise the limit that was \
+reached on the troubleshooting function before asking again.
+
+<details>
+<summary><strong>Evidence</strong></summary>
+
+**Source:** this diagnosis run
+```
+{usage}
+```
+</details>
+"""
+
+
 # ── AppSync streaming ───────────────────────────────────────────────────────
 
 _ADD_CHAT_TOKEN = """
@@ -438,7 +488,18 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
         budget.note_tool_call()
         reason = budget.exhausted_reason()
         if reason:
+            already_refused = budget.stopped_because is not None
             budget.stopped_because = reason
+            if already_refused:
+                # The model was already told to stop and called a tool anyway.
+                # Asking a second time would buy another full turn, so the loop
+                # ends here and run_diagnosis writes the answer.
+                logger.warning(
+                    "ending the run: %s was called after the stop instruction (%s)",
+                    name,
+                    reason,
+                )
+                raise RunBudgetExhausted(reason)
             logger.info("refusing %s: %s", name, reason)
             return _STOP_INSTRUCTION.format(reason=reason)
         try:
@@ -595,8 +656,9 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     limits = AgentLimits()
     budget = RunBudget(limits, remaining_seconds=remaining_seconds(context))
     logger.info(
-        "troubleshooting run starting",
-        extra={"limits": limits.as_dict(), "budget": budget.as_dict()},
+        "troubleshooting run starting: limits=%s budget=%s",
+        json.dumps(limits.as_dict()),
+        json.dumps(budget.as_dict()),
     )
 
     system_prompt = troubleshooting_prompt.get_system_prompt(
@@ -637,11 +699,24 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         hooks=[hook],
     )
 
-    answer = str(agent(build_question(event)))
+    try:
+        answer = str(agent(build_question(event)))
+    except RunBudgetExhausted as exhausted:
+        # Not an error: the run reached a limit and the loop was unwound rather
+        # than paying for another turn. The caller still gets the output
+        # contract's three sections, saying plainly that nothing was concluded.
+        answer = _TRUNCATED_ANSWER.format(
+            reason=exhausted.reason, usage=json.dumps(budget.as_dict(), indent=2)
+        )
 
+    # Formatted into the message rather than passed as `extra`: this function
+    # logs through the stdlib logger to a log group with no JSON format, where
+    # `extra` fields are dropped. These numbers are the only record of what a
+    # diagnosis cost, so they have to be in the line itself.
     logger.info(
-        "troubleshooting run finished",
-        extra={"budget": budget.as_dict(), "modelId": MODEL_ID},
+        "troubleshooting run finished: model=%s budget=%s",
+        MODEL_ID,
+        json.dumps(budget.as_dict()),
     )
     return {
         "answer": answer,

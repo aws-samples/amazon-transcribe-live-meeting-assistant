@@ -30,7 +30,7 @@ DEFAULT_TROUBLESHOOTING_PROMPT_PK = "DefaultTroubleshootingAgentPrompt"
 CUSTOM_TROUBLESHOOTING_PROMPT_PK = "CustomTroubleshootingAgentPrompt"
 TROUBLESHOOTING_PROMPT_FILE = "TroubleshootingAgentSystemPrompt.md"
 DEFAULT_TROUBLESHOOTING_PROMPT_INFO = f"""LMA default troubleshooting agent system prompt. Do not edit - this item is rewritten on every stack update.
-To override it, set a 'systemPrompt' attribute on item: {CUSTOM_TROUBLESHOOTING_PROMPT_PK}. That item is seeded once, on stack create, and is never rewritten.
+To override it, set a 'systemPrompt' attribute on item: {CUSTOM_TROUBLESHOOTING_PROMPT_PK}. That item is created if it is absent, on stack create and on stack update, and is never rewritten once it exists - so an override you set there survives every later update.
 """
 CUSTOM_TROUBLESHOOTING_PROMPT_INFO = f"""LMA custom troubleshooting agent system prompt. Set a 'systemPrompt' attribute here to replace the default in item: {DEFAULT_TROUBLESHOOTING_PROMPT_PK}.
 The replacement takes effect on the next diagnosis - no redeployment is needed. Leave it empty, absent, or set to 'NONE' to use the default. Use <br> for a line break when editing in the DynamoDB console.

@@ -649,6 +649,64 @@ def test_a_stopped_run_is_reported_as_truncated() -> None:
     assert "1-tool-call limit" in budget.as_dict()["stoppedBecause"]
 
 
+# ── a reached limit ends the loop, it does not just ask ─────────────────────
+
+
+def test_a_second_refused_call_ends_the_run_instead_of_asking_again() -> None:
+    """The stop instruction is a request to a model, and a request is not a
+    limit: a model that calls another tool anyway buys a full turn, which
+    re-sends the whole system prompt. The second refusal unwinds the loop."""
+    budget = budget_with(max_iterations="1")
+    impl = FakeTools()
+    tools = build_tools(impl, budget)
+
+    tools["get_stack_parameters"]()
+    assert "STOP GATHERING EVIDENCE" in tools["discover_log_groups"]()
+
+    with pytest.raises(agent_function.RunBudgetExhausted):
+        tools["search_logs"]("whatever")
+
+    # No tool did any work after the first call.
+    assert impl.calls == ["get_stack_parameters"]
+
+
+def test_the_loop_ending_signal_passes_through_an_sdk_s_error_handling() -> None:
+    """An agent SDK catches `Exception` around a tool call and turns it into a
+    tool error the model can react to, which is the right default and exactly
+    the wrong behaviour for a reached limit. Deriving from BaseException is
+    what makes this signal pass through untouched."""
+    assert issubclass(agent_function.RunBudgetExhausted, BaseException)
+    assert not issubclass(agent_function.RunBudgetExhausted, Exception)
+
+
+def test_the_loop_ending_signal_carries_the_reason() -> None:
+    budget = budget_with(max_iterations="1")
+    tools = build_tools(FakeTools(), budget)
+    tools["get_stack_parameters"]()
+    tools["discover_log_groups"]()
+
+    with pytest.raises(agent_function.RunBudgetExhausted) as raised:
+        tools["search_logs"]("whatever")
+
+    assert "1-tool-call limit" in raised.value.reason
+
+
+def test_a_truncated_run_still_answers_in_the_three_section_format() -> None:
+    """The caller gets a diagnosis saying nothing was concluded, rather than an
+    error: "Not determined" with the missing evidence named is a valid answer
+    and the output contract is what the UI will render."""
+    answer = agent_function._TRUNCATED_ANSWER.format(
+        reason="the 8-tool-call limit for one diagnosis has been reached",
+        usage='{"toolCalls": 9}',
+    )
+
+    assert "## Root Cause" in answer
+    assert "## Recommendations" in answer
+    assert "Not determined" in answer
+    assert "8-tool-call limit" in answer
+    assert "<summary><strong>Evidence</strong></summary>" in answer
+
+
 def test_a_tool_error_becomes_readable_text_rather_than_an_exception() -> None:
     """A raise into the agent loop gives the model an opaque failure; a
     sentence naming the log group that was not found gives it a next action."""

@@ -491,11 +491,13 @@ Resources:
         rules_to_suppress:
           - id: W11
             reason: >-
-              logs:GetQueryResults and logs:StopQuery take a query id rather
-              than a log group and support no resource-level permissions, so the
-              statement that carries them cannot be narrowed. The queries they
-              read are only the ones logs:StartQuery could start, and that is
-              scoped to this deployment's log groups.
+              Three read actions support no resource-level permissions, so the
+              statements that carry them cannot be narrowed.
+              logs:DescribeLogGroups lists the account's log groups and takes
+              no log group as input; logs:GetQueryResults and logs:StopQuery
+              take a query id. What the agent can read is bounded by
+              logs:StartQuery, which is scoped to this deployment's own log
+              groups, and by the role holding no write action at all.
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -528,9 +530,19 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              # DescribeLogGroups returns the log groups of the whole account
+              # and takes no log group as input, so the IAM service
+              # authorization reference lists no resource type for it: the
+              # logGroupNamePrefix in the request is a filter on the response,
+              # not the resource authorized against. Scoping it would deny
+              # every call. Which groups are *reported* is decided in
+              # troubleshooting_discovery, and which can be *read* is decided
+              # by the scoped StartQuery below.
+              - Effect: Allow
+                Action: "logs:DescribeLogGroups"
+                Resource: "*"
               - Effect: Allow
                 Action:
-                  - "logs:DescribeLogGroups"
                   - "logs:DescribeLogStreams"
                   - "logs:StartQuery"
                 Resource:

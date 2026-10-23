@@ -97,6 +97,14 @@ Four tools, each read-only:
 | `search_logs` | CloudWatch Logs Insights (`logs:StartQuery`) | Every "why", timeline, count and cross-component correlation. |
 | `get_vp_record` | `dynamodb:GetItem` on the VirtualParticipant table | One Virtual Participant's current status and its structured exit code. |
 
+`get_vp_record` returns a fixed allowlist of diagnostic attributes. The meeting
+passcode, the VNC password, and the fields identifying who owns or shares the
+Virtual Participant are never returned — their names are reported so the agent
+knows the record was filtered and does not treat the absence as a finding, but
+their values do not reach the model or the thinking-step stream. A field added
+to the row in a future release is withheld until it is added to that list
+deliberately.
+
 Two design points worth knowing, because they are what make the answers
 trustworthy:
 
@@ -165,6 +173,13 @@ Every run is bounded in four independent ways, and all four are enforced in
 code rather than requested in the prompt. There is deliberately **no whole-run
 retry**: a failed run is reported once, because restarting a diagnosis from the
 original question re-pays for every tool call it already made.
+
+When a limit is reached, the agent is first asked to write its answer from the
+evidence it has — the cooperative path, and the one that produces a real
+diagnosis. If it calls another tool anyway, the run ends there rather than
+paying for a further model turn, and you get a diagnosis in the usual three
+sections whose Root Cause is "Not determined" and which names the limit that
+was reached. The response's `truncated` field is `true` in that case.
 
 | Environment variable | Default | Maximum | Bounds |
 |---|---|---|---|

@@ -1,0 +1,366 @@
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
+"""The troubleshooting agent's IAM role, asserted from the template (no AWS).
+
+Two kinds of assertion here, and they pull in opposite directions, which is
+why they are tested together:
+
+* **Narrow enough.** The role is read-only and scoped to one deployment, and
+  the grants that could widen it are named individually so a later edit has to
+  change a test to loosen one.
+* **Wide enough to actually work.** Three CloudWatch Logs read actions support
+  no resource-level permissions, and scoping those denies every call. The unit
+  tests for the tools stub the Logs client, so nothing else in this repository
+  would catch that — a diagnosis would simply fail on a deployed stack with
+  every log group reported as unknown.
+
+The resource-type facts are from the IAM service authorization reference for
+Amazon CloudWatch Logs: ``StartQuery`` and ``DescribeLogStreams`` take a
+``log-group``; ``DescribeLogGroups``, ``GetQueryResults`` and ``StopQuery``
+take none.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any, Dict, Iterator, List
+
+import pytest
+import yaml
+
+REPO = Path(__file__).resolve().parents[2]
+TEMPLATE = REPO / "lma-meetingassist-setup-stack" / "template.yaml"
+
+ROLE = "TroubleshootingAgentFunctionRole"
+FUNCTION = "TroubleshootingAgentFunction"
+LOG_GROUP = "TroubleshootingAgentFunctionLogGroup"
+
+#: Actions whose IAM authorization uses no resource, so a scoped grant denies
+#: every call. Each is paired with the reason, for whoever reads a failure.
+RESOURCELESS_LOG_ACTIONS = {
+    "logs:DescribeLogGroups": (
+        "lists the account's log groups and takes no log group as input; the "
+        "logGroupNamePrefix in the request filters the response, it is not the "
+        "resource authorized against"
+    ),
+    "logs:GetQueryResults": "takes a query id, not a log group",
+    "logs:StopQuery": "takes a query id, not a log group",
+}
+
+#: Actions that do take a log group, and so must stay scoped.
+SCOPED_LOG_ACTIONS = {"logs:StartQuery", "logs:DescribeLogStreams"}
+
+
+class _Loader(yaml.SafeLoader):
+    """Parses CloudFormation short-form intrinsics into plain data."""
+
+
+def _intrinsic(loader: _Loader, suffix: str, node: yaml.Node) -> Any:
+    name = "Fn::" + suffix if suffix not in ("Ref", "Condition") else suffix
+    if isinstance(node, yaml.ScalarNode):
+        return {name: loader.construct_scalar(node)}
+    if isinstance(node, yaml.SequenceNode):
+        return {name: loader.construct_sequence(node, deep=True)}
+    return {name: loader.construct_mapping(node, deep=True)}
+
+
+_Loader.add_multi_constructor("!", _intrinsic)
+
+
+@pytest.fixture(name="template", scope="module")
+def _template() -> Dict[str, Any]:
+    return yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_Loader)
+
+
+@pytest.fixture(name="role", scope="module")
+def _role(template: Dict[str, Any]) -> Dict[str, Any]:
+    return template["Resources"][ROLE]["Properties"]
+
+
+def statements(role: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
+    """Every statement in every inline policy on the role."""
+    for policy in role.get("Policies", []):
+        if not isinstance(policy, dict) or "PolicyDocument" not in policy:
+            # A whole policy wrapped in an Fn::If; take the non-NoValue branch.
+            for branch in (policy.get("Fn::If") or [])[1:]:
+                if isinstance(branch, dict) and "PolicyDocument" in branch:
+                    yield from branch["PolicyDocument"]["Statement"]
+            continue
+        for statement in policy["PolicyDocument"]["Statement"]:
+            if "Fn::If" in statement:
+                for branch in statement["Fn::If"][1:]:
+                    if isinstance(branch, dict) and "Effect" in branch:
+                        yield branch
+                continue
+            yield statement
+
+
+def actions_of(statement: Dict[str, Any]) -> List[str]:
+    action = statement.get("Action", [])
+    return [action] if isinstance(action, str) else list(action)
+
+
+def resources_of(statement: Dict[str, Any]) -> List[Any]:
+    resource = statement.get("Resource", [])
+    return [resource] if not isinstance(resource, list) else list(resource)
+
+
+def rendered_resources(statement: Dict[str, Any]) -> List[str]:
+    """Every ARN a statement can resolve to, as the strings in the template.
+
+    An entry may be a plain string, an ``Fn::Sub``, or an ``Fn::If`` whose
+    branches are either of those plus ``AWS::NoValue``. Both branches of a
+    conditional are returned: each one ships on some deployment, so an
+    assertion about the grant has to hold for all of them.
+    """
+    out: List[str] = []
+    pending: List[Any] = resources_of(statement)
+    while pending:
+        entry = pending.pop()
+        if isinstance(entry, str):
+            out.append(entry)
+        elif isinstance(entry, dict) and "Fn::Sub" in entry:
+            out.append(entry["Fn::Sub"])
+        elif isinstance(entry, dict) and "Fn::If" in entry:
+            pending.extend(entry["Fn::If"][1:])
+        elif entry == {"Ref": "AWS::NoValue"}:
+            continue
+    return out
+
+
+def statements_granting(role: Dict[str, Any], action: str) -> List[Dict[str, Any]]:
+    return [s for s in statements(role) if action in actions_of(s)]
+
+
+# ── wide enough to work ─────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("action", "why"), sorted(RESOURCELESS_LOG_ACTIONS.items())
+)
+def test_an_action_with_no_resource_type_is_granted_on_all_resources(
+    role: Dict[str, Any], action: str, why: str
+) -> None:
+    """Scoping one of these denies every call, and the tools' own unit tests
+    stub the Logs client, so nothing else here would notice.
+
+    If this fails, the grant was narrowed: `{action}` {why}.
+    """
+    granting = statements_granting(role, action)
+
+    assert granting, f"{action} is not granted at all"
+    for statement in granting:
+        assert resources_of(statement) == ["*"], (
+            f"{action} is scoped, which denies every call: it {why}"
+        )
+
+
+def test_the_resourceless_actions_are_the_only_wildcards_on_the_role(
+    role: Dict[str, Any],
+) -> None:
+    """So a future wildcard has to be argued for here rather than appearing."""
+    for statement in statements(role):
+        if resources_of(statement) != ["*"]:
+            continue
+        assert set(actions_of(statement)) <= set(RESOURCELESS_LOG_ACTIONS), (
+            "a new wildcard grant appeared on this role: "
+            f"{sorted(set(actions_of(statement)) - set(RESOURCELESS_LOG_ACTIONS))}"
+        )
+
+
+# ── narrow enough ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("action", sorted(SCOPED_LOG_ACTIONS))
+def test_an_action_that_takes_a_log_group_stays_scoped(
+    role: Dict[str, Any], action: str
+) -> None:
+    """These are what bound what the agent can actually read."""
+    granting = statements_granting(role, action)
+
+    assert granting, f"{action} is not granted at all"
+    for statement in granting:
+        assert resources_of(statement) != ["*"], f"{action} must stay scoped"
+
+
+def test_the_log_read_grant_names_nested_stacks_rather_than_the_bare_prefix(
+    role: Dict[str, Any],
+) -> None:
+    """A grant on "/${LMAStackName}-*" would also cover a neighbouring stack
+    whose name begins with this one's."""
+    rendered = rendered_resources(statements_granting(role, "logs:StartQuery")[0])
+
+    assert not any(r.endswith("log-group:/${LMAStackName}-*") for r in rendered)
+    assert any("log-group:/${LMAStackName}-AISTACK-*" in r for r in rendered)
+    assert any("log-group:/${LMAStackName}/*" in r for r in rendered)
+
+
+def test_the_microvm_log_groups_are_named_in_full(role: Dict[str, Any]) -> None:
+    """"/aws/lambda-microvms/${LMAStackName}-" would match a neighbour's
+    "-dev-vp-logs"."""
+    rendered = rendered_resources(statements_granting(role, "logs:StartQuery")[0])
+
+    assert any("lambda-microvms/${LMAStackName}-vp-logs" in r for r in rendered)
+    assert any("lambda-microvms/${LMAStackName}-asr-logs" in r for r in rendered)
+
+
+def test_the_role_can_read_records_from_two_named_tables_only(
+    role: Dict[str, Any],
+) -> None:
+    granting = statements_granting(role, "dynamodb:GetItem")
+
+    assert len(granting) == 1
+    rendered = rendered_resources(granting[0])
+    assert len(rendered) == 2
+    assert any("${VirtualParticipantTableName}" in r for r in rendered)
+    assert any("${LLMPromptTemplateTableName}" in r for r in rendered)
+    assert not any(r.endswith("table/*") for r in rendered)
+
+
+def test_the_role_reads_its_own_stack_tree_only(role: Dict[str, Any]) -> None:
+    granting = statements_granting(role, "cloudformation:DescribeStacks")
+
+    assert len(granting) == 1
+    rendered = rendered_resources(granting[0])
+    assert rendered == [
+        "arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}"
+        ":stack/${LMAStackName}/*"
+    ]
+
+
+def test_resolving_nested_stack_names_is_granted_on_the_parent_only(
+    role: Dict[str, Any],
+) -> None:
+    """This is what makes discovery exact; it must not become a wildcard."""
+    granting = statements_granting(role, "cloudformation:ListStackResources")
+
+    assert len(granting) == 1
+    assert resources_of(granting[0]) != ["*"]
+
+
+def test_the_role_holds_no_write_action(role: Dict[str, Any]) -> None:
+    """The whole role is read-only. A write action here is a design change."""
+    write_prefixes = (
+        "logs:Put",
+        "logs:Create",
+        "logs:Delete",
+        "logs:Tag",
+        "dynamodb:Put",
+        "dynamodb:Update",
+        "dynamodb:Delete",
+        "dynamodb:BatchWrite",
+        "cloudformation:Create",
+        "cloudformation:Update",
+        "cloudformation:Delete",
+        "cloudformation:Execute",
+        "iam:",
+        "s3:Put",
+        "s3:Delete",
+    )
+    for statement in statements(role):
+        for action in actions_of(statement):
+            assert not action.startswith(write_prefixes), action
+
+
+def test_the_role_cannot_invoke_a_lambda_function(role: Dict[str, Any]) -> None:
+    """Deliberately absent: no tool needs it, and it is the broadest mutating
+    capability an otherwise read-only role could carry."""
+    for statement in statements(role):
+        for action in actions_of(statement):
+            assert not action.startswith("lambda:"), action
+
+
+def test_the_role_cannot_read_ecs_or_step_functions(role: Dict[str, Any]) -> None:
+    """The tools that would use these are not in this release, and an unused
+    grant is one nobody re-reads before relying on."""
+    for statement in statements(role):
+        for action in actions_of(statement):
+            assert not action.startswith(("ecs:", "states:")), action
+
+
+def test_the_appsync_grant_is_one_mutation_field(role: Dict[str, Any]) -> None:
+    granting = statements_granting(role, "appsync:GraphQL")
+
+    assert len(granting) == 1
+    for rendered in rendered_resources(granting[0]):
+        assert rendered.endswith("/types/Mutation/fields/addChatToken")
+
+
+def test_the_kms_grant_is_conditioned_on_the_services_that_use_it(
+    role: Dict[str, Any],
+) -> None:
+    granting = statements_granting(role, "kms:Decrypt")
+
+    assert len(granting) == 1
+    via = granting[0]["Condition"]["StringEquals"]["kms:ViaService"]
+    assert len(via) == 2
+    assert any("dynamodb" in entry["Fn::Sub"] for entry in via)
+    assert any("logs" in entry["Fn::Sub"] for entry in via)
+
+
+# ── the house conventions ───────────────────────────────────────────────────
+
+
+def test_the_role_carries_the_permissions_boundary_conditional(
+    role: Dict[str, Any],
+) -> None:
+    boundary = role["PermissionsBoundary"]["Fn::If"]
+
+    assert boundary[0] == "HasPermissionsBoundary"
+    assert boundary[1] == {"Ref": "PermissionsBoundaryArn"}
+
+
+def test_every_arn_in_the_role_is_partition_aware(role: Dict[str, Any]) -> None:
+    """A hardcoded arn:aws: breaks in GovCloud and China."""
+    for statement in statements(role):
+        for rendered in rendered_resources(statement):
+            if rendered == "*":
+                continue
+            assert rendered.startswith("arn:${AWS::Partition}:"), rendered
+
+
+def test_every_wildcard_grant_has_a_written_cfn_nag_reason(
+    template: Dict[str, Any],
+) -> None:
+    suppressions = template["Resources"][ROLE]["Metadata"]["cfn_nag"][
+        "rules_to_suppress"
+    ]
+    by_id = {entry["id"]: entry.get("reason", "") for entry in suppressions}
+
+    assert "W11" in by_id
+    for action in RESOURCELESS_LOG_ACTIONS:
+        assert action in by_id["W11"], f"W11's reason does not mention {action}"
+
+
+def test_the_function_and_its_log_group_share_a_condition(
+    template: Dict[str, Any],
+) -> None:
+    resources = template["Resources"]
+
+    assert (
+        resources[FUNCTION]["Condition"]
+        == resources[LOG_GROUP]["Condition"]
+        == resources[ROLE]["Condition"]
+        == "ShouldDeployTroubleshootingAgent"
+    )
+
+
+def test_the_function_waits_for_its_log_group(template: Dict[str, Any]) -> None:
+    assert LOG_GROUP in template["Resources"][FUNCTION]["DependsOn"]
+
+
+def test_the_log_group_is_encrypted_and_expires(template: Dict[str, Any]) -> None:
+    properties = template["Resources"][LOG_GROUP]["Properties"]
+
+    assert properties["KmsKeyId"] == {"Ref": "CustomerManagedEncryptionKeyArn"}
+    assert properties["RetentionInDays"] == {"Ref": "CloudWatchLogsExpirationInDays"}
+
+
+def test_the_function_timeout_leaves_room_for_the_agents_own_budget(
+    template: Dict[str, Any],
+) -> None:
+    """The agent reports running out of time rather than being killed, so the
+    Lambda has to outlast the default wall-clock budget of 240s."""
+    assert template["Resources"][FUNCTION]["Properties"]["Timeout"] >= 300
