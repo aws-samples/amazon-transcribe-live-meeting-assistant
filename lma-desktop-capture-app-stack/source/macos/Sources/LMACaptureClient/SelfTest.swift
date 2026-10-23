@@ -266,7 +266,7 @@ enum SelfTest {
         let later = first.addingTimeInterval(3600)
         check("default callId uses the session start time",
               Config.sessionCallId(requested: nil, configured: "", now: later),
-              Config.defaultCallId(at: later))
+              "LMA native prototype - 2026-10-19T09:53:20Z")
         check("two default sessions get distinct callIds",
               "\(Config.sessionCallId(requested: nil, configured: "", now: first) != Config.sessionCallId(requested: nil, configured: "", now: later))",
               "true")
