@@ -163,18 +163,26 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: Bumped when the prompt or the skill contract changes in a way that makes an
-#: existing review stale. It is part of the idempotency marker, so bumping it
-#: re-reviews every open request on the next run — which is the point.
+#: existing review stale. It is part of the idempotency marker, so a bump
+#: invalidates every review already posted: each affected request is reviewed again,
+#: and paid for again, the next time a path reaches it. Which requests, and when,
+#: differs per path — see revision 2.
 #:
 #: 2: the metadata contract changed (``changed_files`` counts the sections in the
 #:    supplied diff, ``ci_status_when_review_started`` is populated on GitHub, and
 #:    the instruction-file fields were renamed and derived from the merge base). The
 #:    reviews already posted at revision 1 are stale in a way that matters rather
 #:    than cosmetically: five of the first nine carry a finding about a `CLAUDE.md`
-#:    change the request never made. Note this does NOT trigger a mass re-review —
-#:    the `pull_request` path only fires on a push, and the scheduled sweep covers
-#:    forks only — so each open request is re-reviewed when it next pushes, which
-#:    paces the spend naturally.
+#:    change the request never made.
+#:
+#:    What the bump spends, per path. On GitHub, a same-repository pull request is
+#:    re-reviewed on its next push, because that is the only trigger that reaches
+#:    one; but every open FORK pull request is re-reviewed by the scheduled sweep
+#:    without anybody pushing, up to 2 per hourly tick — the workflow passes
+#:    ``--max-mrs 2``, not this script's default of 10. On GitLab only the
+#:    MR-pipeline path exists: ``ai_mr_review`` has no ``schedule`` rule, so its
+#:    sweep is unreachable and nothing is re-reviewed until an MR pushes. That job
+#:    also has no credentials provisioned, so today it does not run at all.
 PROMPT_REVISION = 2
 
 #: The marker that makes this idempotent. Keyed on (head SHA, prompt revision): a new
@@ -1750,10 +1758,16 @@ def request_file_changes(iid: int, target_branch: str) -> dict[str, str]:
         if len(parts) < 2:
             continue
         letter = parts[0][:1].upper()
-        # A rename or copy line is `R097\told\tnew`; the new path is what a reader
-        # opens, so that is the key.
+        # A rename or copy line is `R097\told\tnew`. The new path is what a reader
+        # opens, so it is the key — but BOTH are recorded, because keying only the
+        # new one hides a rename that moves a file OUT of a set the caller filters
+        # on: `.claude/skills/x.md` -> `docs/x.md` would appear nowhere in
+        # instruction_changes, and the review would not be told a criteria file had
+        # been moved away.
         path = parts[-1]
         changes[path] = _STATUS_WORDS.get(letter, letter)
+        if letter in ("R", "C") and len(parts) >= 3 and parts[1] != path:
+            changes[parts[1]] = "renamed away"
     return changes
 
 

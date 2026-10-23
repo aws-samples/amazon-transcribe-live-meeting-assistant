@@ -1352,14 +1352,19 @@ def test_a_real_instruction_change_is_still_reported_with_its_status(monkeypatch
 
     A request that genuinely edits the criteria has to be reported, because the
     pinning means the reviewer is NOT reading the version the request proposes and the
-    reader needs to know that. A rename is keyed on its new path — the one a reader
-    can open.
+    reader needs to know that.
+
+    A rename records BOTH paths. Keying only the new one — which an earlier version of
+    this test asserted — hides the case where the rename moves a file OUT of the
+    instruction set: `.claude/skills/moved-out.md` -> `docs/moved-out.md` has a new
+    path that is not an instruction file, so nothing about it would reach the review.
     """
     name_status = (
         "M\tCLAUDE.md\n"
         "A\t.claude/skills/new-thing.md\n"
         "D\t.claude/skills/old-thing.md\n"
         "R095\t.claude/skills/was.md\t.claude/skills/now.md\n"
+        "R098\t.claude/skills/moved-out.md\tdocs/moved-out.md\n"
         "M\tREADME.md\n"
     )
 
@@ -1379,10 +1384,17 @@ def test_a_real_instruction_change_is_still_reported_with_its_status(monkeypatch
         ".claude/skills/new-thing.md": "added",
         ".claude/skills/old-thing.md": "deleted",
         ".claude/skills/now.md": "renamed",
+        ".claude/skills/was.md": "renamed away",
+        ".claude/skills/moved-out.md": "renamed away",
     }, f"got {changes}"
     assert "README.md" not in changes, "README.md is not an instruction file"
-    assert ".claude/skills/was.md" not in changes, (
-        "a rename should be keyed on the NEW path, which is the one a reader opens"
+    assert ".claude/skills/moved-out.md" in changes, (
+        "a criteria file renamed OUT of the instruction set must still be reported; "
+        "its new path is not an instruction file, so keying only the new path would "
+        "hide the move entirely"
+    )
+    assert "docs/moved-out.md" not in changes, (
+        "the destination is not an instruction file and does not belong in this set"
     )
 
 
