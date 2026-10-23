@@ -142,11 +142,12 @@ export interface VoiceAssistantProvider {
    * declines — and because only it knows whether it has another way of
    * recognising the request. Where it does, it may hold the request for a short
    * window so that route can answer out loud first; it silences the assistant
-   * itself if that does not happen, so an accepted request ends in silence. The
-   * provider may make an exception for being addressed again inside its own
-   * window, which it reads as wanting the assistant back; whether it can tell
-   * that apart from the request itself depends on the mode, so this is the
-   * provider's judgement and not part of the contract.
+   * itself if that does not happen, so an accepted request ends in silence.
+   *
+   * A provider may still call a request off before it resolves, if something
+   * unambiguously asks the assistant back inside the window. Whether it can
+   * tell that apart from the request itself depends on what it can observe, so
+   * that is the provider's judgement and callers should not count on it.
    *
    * @param reason Optional log tag identifying the source of the call.
    * @returns true when the request has been accepted and the assistant will be

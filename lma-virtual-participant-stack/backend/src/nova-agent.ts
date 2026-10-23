@@ -1502,7 +1502,9 @@ export class NovaAgent implements VoiceAssistantProvider {
    * the model honours from the prompt alone — wording the matcher does not list
    * — is only safe while this turn is seen before the tool call it provokes. If
    * a live meeting ever shows that order flipping, the fix is to ignore
-   * wake-phrase unmutes for a short window after a `mute('tool')`.
+   * wake-phrase unmutes for a short window after the mute-tool route engages
+   * the gate — muteDrainingPlayback in the conversational modes, mute() in
+   * translator mode.
    */
   private handleUserTurnWakePhrase(content: string): void {
     if (!this.containsWakePhrase(content)) {
@@ -1522,10 +1524,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     // asked for quiet with an assistant still talking.
     //
     // Both branches below do call it off, but only once the assistant is
-    // already silent — the state in which a wake phrase unambiguously means
-    // "come back", and the same condition that already governs making it
-    // audible again. Without that, a fallback or backstop still armed would
-    // silence the assistant again a moment after it was asked back.
+    // already silent — the state in which a wake phrase is far more likely to
+    // mean "come back" than to be a second reading of the request, and the same
+    // condition that already governs making it audible again. Without that, a
+    // fallback or backstop still armed would silence the assistant again a
+    // moment after it was asked back.
     if (this.groupMeetingMode) {
       if (this._isMuted && !askedToStop) {
         console.log('🔓 Wake phrase detected in user speech - proactively unmuting agent');
@@ -2228,6 +2231,23 @@ export class NovaAgent implements VoiceAssistantProvider {
     
     this._isActivated = true;
 
+    // An activation is a decision to listen, so a stop request still resolving
+    // is called off rather than being allowed to silence the session that has
+    // just begun.
+    //
+    // This is narrower than it looks, and deliberately not relied on anywhere:
+    // the scribe only activates an assistant that is not already activated, and
+    // only asks an activated one to stop, so a request in flight is normally
+    // resolved by one route or the other and not by this. What is left is a
+    // request that outlives its own activation — the activation lapsing and a
+    // wake phrase starting a new one inside the window — which this covers.
+    //
+    // Safe here, and not on Nova's own transcript turn, because this and the
+    // stop route read the same Amazon Transcribe segments and the scribe sends
+    // a segment down one path or the other, never both, so the utterance that
+    // asked for silence cannot be the one that activates.
+    this.cancelStopRequest('activated');
+
     // Being addressed by wake phrase is how the agent becomes audible again
     // after it was asked to stop talking — otherwise a single stop request
     // would silence it for the rest of the meeting.
@@ -2236,19 +2256,6 @@ export class NovaAgent implements VoiceAssistantProvider {
     // machine (and starts muted by design) and `translator` is driven by its
     // explicit pause/resume trigger phrases. Both of those run always_active,
     // where this method returns above.
-    // A fresh activation means the assistant has been addressed, which
-    // supersedes a stop request still resolving: the two utterances can land
-    // close enough together that a fallback armed for the first would otherwise
-    // cut off the answer to the second.
-    //
-    // Safe here, and not on Nova's own transcript turn, because this and the
-    // stop route read the same Amazon Transcribe segments and the scribe sends
-    // a segment down one path or the other, never both — so the utterance that
-    // asked for silence cannot be the one that activates. There is no
-    // equivalent in always_active mode, where this method returns above; a
-    // request there runs its course, which is the safe direction to fail.
-    this.cancelStopRequest('activated');
-
     if (this.meetingMode === 'normal' && this._isMuted) {
       this.unmute('wake phrase activation');
     }

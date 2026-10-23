@@ -433,7 +433,15 @@ test('the model\'s own reading of the request cannot disarm the fallback', async
     }
 });
 
-test('a fresh wake-phrase activation inside the window keeps the assistant audible', async () => {
+test('an activation inside the window keeps the assistant audible', async () => {
+    // A request can outlive the activation it was made during: the activation
+    // lapses and a wake phrase starts a new one while the window is still open.
+    // Starting to listen must not be followed by silence.
+    //
+    // activate() is driven directly because it is the entry point under test.
+    // Reaching it through the scribe is not the point and is not possible for
+    // an assistant that is still activated, which is the only kind the scribe
+    // asks to stop — hence the narrow claim here, and none in the user docs.
     capture();
     try {
         const agent = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });

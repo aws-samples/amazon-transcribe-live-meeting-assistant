@@ -16,8 +16,11 @@
  * covered in voice-assistant-stop-race.test.ts, and is only something to wait
  * for here.
  *
- * The provider is selected from the environment at import time, so the imports
- * below are deliberately dynamic.
+ * The scribe and the provider are both selected from the environment at import
+ * time, so those two imports are deliberately dynamic and come after the
+ * assignments below. The constant is a plain static import: nova-agent.ts reads
+ * nothing from the environment at module load, only inside the agent, so
+ * hoisting it above the assignments changes nothing.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
