@@ -65,8 +65,10 @@ Accepted fields, all optional except that a `query` is strongly advised:
 | `messageId` | When present, each tool call is streamed to the UI's thinking-step panel over the existing `onAddChatToken` subscription. |
 
 Because there is no UI entry point, the only way to invoke it is with an IAM
-principal that holds `lambda:InvokeFunction` on the function. On a default
-deployment that is nobody — you have to grant it deliberately.
+principal that holds `lambda:InvokeFunction` on the function. **The stack grants
+that to no principal**, so unless you already have it through a broad
+account-level policy such as an administrator role, you have to grant it
+deliberately.
 
 ## What it answers with
 
@@ -250,7 +252,8 @@ security channel, it is told to say so and stop rather than write it up.
 Those are instructions to a model, so the controls that do not depend on it
 sit in the tools: `get_vp_record`'s field allowlist, the parameter redaction
 described above, and the fact that the thinking-step stream publishes only a
-tool result's **shape** — "42 rows from 2 log groups" — never its content. That
+tool result's **shape** — "2 log groups, 42 rows, 90000 bytes scanned" —
+never its content. That
 last one matters most, because that stream reaches the UI without the model in
 the loop, and a log line can contain whatever the component that wrote it put
 there.

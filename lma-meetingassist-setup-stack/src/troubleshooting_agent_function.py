@@ -14,7 +14,9 @@ ENTRY POINTS
 This increment deliberately ships **no** user-facing entry point. There is no
 AppSync resolver, no function URL and no API Gateway route, so the only way to
 invoke this function is an IAM principal holding ``lambda:InvokeFunction`` on
-it — which, in a default deployment, is nobody. The two entry points the design
+it, and the stack grants that to no principal. (A principal with a broad
+account-level policy, such as an administrator role, has it already — this is
+the absence of a grant, not a barrier.) The two entry points the design
 calls for (an Admin-only stack-wide page, and a per-resource "Diagnose" button
 available to the resource owner) are a separate change, because each needs an
 authorization decision re-checked in this function and neither is testable

@@ -173,12 +173,73 @@ class TroubleshootingTools:
                 "this as the evidence that is missing"
             )
 
-    def _render(self, payload: Dict[str, Any]) -> str:
-        """Serialise a tool result, capped at the configured size."""
-        return truncate(
-            json.dumps(payload, default=str, indent=None),
-            self._limits.max_tool_result_chars,
-        )
+    def _render(
+        self,
+        payload: Dict[str, Any],
+        *,
+        bulk_key: Optional[str] = None,
+        shed_count_key: str = "itemsOmittedForSize",
+    ) -> str:
+        """Serialise a tool result, kept under the configured size.
+
+        Oversize results shed trailing items from ``bulk_key`` rather than
+        having the serialised string cut at the end. Cutting the string is the
+        obvious implementation and it is wrong twice over:
+
+        * The fields the agent is *told* to read — ``guidance``, the
+          completeness flags, the caveats — are small and are serialised after
+          the bulk array, so they are the first thing a tail cut removes. The
+          warning saying "these log groups were not searched" would be lost in
+          exactly the case that produces it.
+        * A cut string is no longer valid JSON, so every reader downstream
+          (including the thinking-step summariser) falls back to knowing
+          nothing about the result.
+
+        Shedding items keeps the payload valid and keeps the small fields,
+        which is the opposite priority to a tail cut and the right one: 40 rows
+        and an accurate caveat beat 100 rows and no caveat.
+        """
+        cap = self._limits.max_tool_result_chars
+
+        def serialise(body: Dict[str, Any]) -> str:
+            return json.dumps(body, default=str, indent=None)
+
+        rendered = serialise(payload)
+        items = payload.get(bulk_key) if bulk_key else None
+        if len(rendered) <= cap or not isinstance(items, list) or not items:
+            # No bulk array to shed from. truncate() is the last resort, and
+            # its marker is what tells a reader the result is unparseable.
+            return truncate(rendered, cap)
+
+        kept = list(items)
+        while kept:
+            # Halving rather than one-at-a-time: a result can be far over the
+            # cap, and each attempt re-serialises the whole payload.
+            kept = kept[: max(1, len(kept) // 2)] if len(kept) > 1 else []
+            trial = dict(payload)
+            trial[bulk_key] = kept
+            trial[shed_count_key] = len(items) - len(kept)
+            trial["guidance"] = " ".join(
+                part
+                for part in (
+                    payload.get("guidance"),
+                    f"{len(items) - len(kept)} of {len(items)} items were "
+                    "removed from this result because it was too large to "
+                    "return in full. What remains is accurate; ask a narrower "
+                    "question for the rest.",
+                )
+                if part
+            )
+            rendered = serialise(trial)
+            if len(rendered) <= cap:
+                return rendered
+
+        # Even the small fields alone are over the cap, which means a caller
+        # configured an unusably small limit. Say so rather than return a
+        # fragment.
+        minimal = {k: v for k, v in payload.items() if k != bulk_key}
+        minimal[shed_count_key] = len(items)
+        return truncate(serialise(minimal), cap)
 
     def _known_log_group_names(self) -> set[str]:
         return {g.name for g in self._discovery().groups}
@@ -277,21 +338,25 @@ class TroubleshootingTools:
         # than this deployment, and reasoning past either produces a confident
         # wrong answer rather than a visible gap.
         guidance.extend(result.caveats())
+        # Key order is load-bearing: everything the agent must read sits ahead
+        # of the bulk array, so it survives even the last-resort tail cut.
         return self._render(
             {
                 "stackName": self._stack_name,
                 "logGroupCount": len(groups),
-                "logGroups": [g.to_dict() for g in groups],
+                "emptyLogGroupCount": len(empty),
+                "listIsComplete": not result.truncated,
+                "scopedToThisDeploymentOnly": result.scoped_to_nested_stacks,
+                "guidance": " ".join(guidance),
                 "componentNotes": {
                     c: discovery.COMPONENT_NOTES[c]
                     for c in sorted({g.component for g in groups})
                     if c in discovery.COMPONENT_NOTES
                 },
-                "emptyLogGroupCount": len(empty),
-                "listIsComplete": not result.truncated,
-                "scopedToThisDeploymentOnly": result.scoped_to_nested_stacks,
-                "guidance": " ".join(guidance),
-            }
+                "logGroups": [g.to_dict() for g in groups],
+            },
+            bulk_key="logGroups",
+            shed_count_key="logGroupsOmittedForSize",
         )
 
     # ── Tool 2: search_logs ────────────────────────────────────────────────
@@ -383,19 +448,25 @@ class TroubleshootingTools:
                 f"{_INSIGHTS_MAX_GROUPS}: see omittedLogGroupNames. Nothing "
                 "here says anything about those groups. Query them separately."
             )
+        # Key order is load-bearing: see _render. `rows` is last so it is what
+        # gets shed, and `guidance` is ahead of it so a caveat is never the
+        # thing that falls off the end.
         return self._render(
             {
-                "logGroupNames": groups,
-                "unknownLogGroupNames": unknown,
-                "omittedLogGroupNames": [g for g in omitted],
-                "queryString": resolved_query,
-                "lookbackHours": hours,
+                "guidance": " ".join(guidance) if guidance else None,
                 "status": status,
                 "rowCount": len(rows),
+                "logGroupCount": len(groups),
+                "logGroupNames": groups,
+                "unknownLogGroupNames": unknown,
+                "omittedLogGroupNames": list(omitted),
+                "queryString": resolved_query,
+                "lookbackHours": hours,
                 "bytesScanned": scanned,
                 "rows": rows,
-                "guidance": " ".join(guidance) if guidance else None,
-            }
+            },
+            bulk_key="rows",
+            shed_count_key="rowsOmittedForSize",
         )
 
     def _resolve_limit(self, limit: Any) -> int:

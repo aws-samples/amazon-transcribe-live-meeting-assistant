@@ -571,17 +571,105 @@ def test_a_non_empty_result_carries_no_guidance() -> None:
     assert parsed(make_tools(client).search_logs(VP_GROUP))["guidance"] is None
 
 
-def test_a_whole_result_is_capped_so_one_call_cannot_fill_the_context() -> None:
-    """A query can be cheap in bytes scanned and still return far too much."""
-    limits = AgentLimits()
+def oversize_search(limits: Optional[AgentLimits] = None) -> str:
+    """A search whose rows are far more than max_tool_result_chars."""
+    limits = limits or AgentLimits()
     client = FakeInsightsClient(
         rows=[row(message="y" * 1500) for _ in range(limits.max_log_events)]
     )
+    return make_tools(client, limits=limits).search_logs(VP_GROUP)
+
+
+def test_a_whole_result_is_capped_so_one_call_cannot_fill_the_context() -> None:
+    """A query can be cheap in bytes scanned and still return far too much."""
+    limits = AgentLimits()
+
+    assert len(oversize_search(limits)) <= limits.max_tool_result_chars
+
+
+def test_an_oversize_result_sheds_rows_and_stays_valid_json() -> None:
+    """Cutting the serialised string is the obvious implementation and is
+    wrong: the result stops being parseable, so every reader downstream —
+    including the thinking-step summariser — learns nothing from it."""
+    result = parsed(oversize_search())
+
+    assert isinstance(result["rows"], list)
+    assert result["rows"]
+
+
+def test_an_oversize_result_says_how_many_rows_it_dropped() -> None:
+    limits = AgentLimits()
+    result = parsed(oversize_search(limits))
+
+    assert result["rowsOmittedForSize"] == limits.max_log_events - len(result["rows"])
+    assert "too large to return in full" in result["guidance"]
+
+
+def test_the_row_count_still_reports_what_the_query_matched() -> None:
+    """So the agent can tell "the query matched 100 lines and I was shown 12"
+    from "the query matched 12 lines"."""
+    limits = AgentLimits()
+    result = parsed(oversize_search(limits))
+
+    assert result["rowCount"] == limits.max_log_events
+    assert len(result["rows"]) < result["rowCount"]
+
+
+def test_a_caveat_survives_a_result_too_large_to_return_in_full() -> None:
+    """The fields the agent is told to read are small and used to be
+    serialised after the rows, so a size cut removed the warning saying some
+    log groups had not been searched — in exactly the case that produces it.
+    """
+    many = [(f"/{STACK}/lambda/F{i}", 10) for i in range(60)]
+    client = FakeInsightsClient(
+        groups=many, rows=[row(message="y" * 1500) for _ in range(100)]
+    )
+
+    result = parsed(
+        make_tools(client).search_logs(",".join(name for name, _ in many))
+    )
+
+    assert "were NOT searched" in result["guidance"]
+    assert len(result["omittedLogGroupNames"]) == 10
+    assert "too large to return in full" in result["guidance"]
+
+
+def test_an_oversize_discovery_sheds_groups_and_keeps_its_flags() -> None:
+    # Above the small fields and the component notes (~1.9k), below the full
+    # group list (~170 characters each), so groups are what has to give.
+    limits = AgentLimits()
+    object.__setattr__(limits, "max_tool_result_chars", 2600)
+    client = FakeInsightsClient()
+
+    result = parsed(
+        make_tools(
+            client, limits=limits, cloudformation_client=FakeStackResourcesClient()
+        ).discover_log_groups()
+    )
+
+    assert result["logGroupsOmittedForSize"] > 0
+    # The flags and the full count survive, which is the whole point: the
+    # agent can tell "this deployment has 18 groups and I was shown 6" from
+    # "this deployment has 6 groups".
+    assert result["scopedToThisDeploymentOnly"] is True
+    assert result["listIsComplete"] is True
+    assert result["logGroupCount"] > len(result["logGroups"])
+    assert result["logGroupCount"] == (
+        len(result["logGroups"]) + result["logGroupsOmittedForSize"]
+    )
+
+
+def test_an_unusably_small_cap_drops_the_array_rather_than_the_fields() -> None:
+    """A limit too small for even the small fields is a misconfiguration; the
+    result says so instead of returning an unparseable fragment of rows."""
+    limits = AgentLimits()
+    object.__setattr__(limits, "max_tool_result_chars", 40)
+    client = FakeInsightsClient(rows=[row(message="y" * 1500) for _ in range(10)])
 
     result = make_tools(client, limits=limits).search_logs(VP_GROUP)
 
-    assert len(result) <= limits.max_tool_result_chars + 100
-    assert "truncated" in result
+    assert len(result) <= 40 + 100
+    assert "y" * 100 not in result
 
 
 # ── search_logs: the query lifecycle ────────────────────────────────────────
