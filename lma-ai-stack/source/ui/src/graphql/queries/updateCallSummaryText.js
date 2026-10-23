@@ -18,7 +18,10 @@
  * arrives as null. Since the subscription handler replaces the stored call with
  * what it receives, a two-field payload would blank out the meeting's status,
  * timestamps and speaker names in every connected client's meeting list. Every
- * other Call mutation in this repo enumerates the full set for the same reason.
+ * other browser-reachable Call mutation enumerates the full set for the same
+ * reason. The pipeline's own Call mutations select a fixed list that leaves
+ * CallSummaryState out, deliberately -- see setCallsDeduped, which carries the
+ * stored value over when one of those arrives.
  */
 export default /* GraphQL */ `
   mutation UpdateCallSummaryText($input: UpdateCallSummaryTextInput!) {

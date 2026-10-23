@@ -110,15 +110,38 @@ describe('regenerationFailure', () => {
   });
 
   it('reports the stored message', () => {
-    expect(regenerationFailure({ status: STATUS_FAILED, message: 'model unavailable' }, NOW)).toBe('model unavailable');
+    expect(
+      regenerationFailure({ status: STATUS_FAILED, message: 'model unavailable', updatedAt: iso(-1000) }, NOW),
+    ).toBe('model unavailable');
   });
 
   it('falls back to a sentence when no message was stored', () => {
-    expect(regenerationFailure({ status: STATUS_FAILED }, NOW)).toBeTruthy();
+    expect(regenerationFailure({ status: STATUS_FAILED, updatedAt: iso(-1000) }, NOW)).toBeTruthy();
   });
 
   it('is suppressed once another run is going', () => {
     // Otherwise the previous failure sits next to the new spinner.
     expect(regenerationFailure({ status: STATUS_RUNNING, startedAt: iso(-1000), message: 'old' }, NOW)).toBeNull();
+  });
+
+  it('ages a failure out rather than showing it for ever', () => {
+    // The stored message says "just now". Nothing dismisses the state, so a
+    // meeting whose last run failed would show that error to every later
+    // visitor for as long as the meeting existed.
+    const stale = { status: STATUS_FAILED, message: 'old news', updatedAt: iso(-STALE_RUN_MS - 1000) };
+    expect(regenerationFailure(stale, NOW)).toBeNull();
+    expect(regenerationFailure({ ...stale, updatedAt: iso(-STALE_RUN_MS + 1000) }, NOW)).toBe('old news');
+  });
+
+  it('does not show a failure it cannot date', () => {
+    // An undateable failure would never age out, which is the case above.
+    expect(regenerationFailure({ status: STATUS_FAILED, message: 'when?' }, NOW)).toBeNull();
+    expect(regenerationFailure({ status: STATUS_FAILED, message: 'when?', updatedAt: 'lately' }, NOW)).toBeNull();
+    expect(
+      regenerationFailure(
+        { status: STATUS_FAILED, message: 'when?', updatedAt: iso(CLOCK_SKEW_ALLOWANCE_MS + 60000) },
+        NOW,
+      ),
+    ).toBeNull();
   });
 });

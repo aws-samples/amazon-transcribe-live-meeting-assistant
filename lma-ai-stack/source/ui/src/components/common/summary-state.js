@@ -98,9 +98,21 @@ export const isHandEdited = (state) => state?.source === SOURCE_MANUAL;
  *
  * Suppressed once a run is going again, so pressing the button a second time
  * does not leave the previous failure sitting next to the new spinner.
+ *
+ * And suppressed once it is old. A failure describes a run just attempted --
+ * the message the Lambda writes says "just now" -- but nothing dismisses the
+ * stored state, so a meeting whose last regeneration failed would show that
+ * error to every later visitor for as long as the meeting existed. It is shown
+ * over the same window a run may be in flight for, measured from the `updatedAt`
+ * the Lambda writes beside it, and a failure that cannot be dated is not shown:
+ * an undateable one would never age out, which is the case being fixed.
  */
 export const regenerationFailure = (state, now = Date.now()) => {
   if (isRegenerating(state, now) || state?.status !== STATUS_FAILED) {
+    return null;
+  }
+  const at = new Date(state.updatedAt ?? '').getTime();
+  if (Number.isNaN(at) || at < now - STALE_RUN_MS || at > now + CLOCK_SKEW_ALLOWANCE_MS) {
     return null;
   }
   return state.message || 'could not regenerate the summary';

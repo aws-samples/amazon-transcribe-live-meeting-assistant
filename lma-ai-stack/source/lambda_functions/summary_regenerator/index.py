@@ -151,10 +151,16 @@ def _deserialize(item):
 
 
 def read_meeting(call_id):
-    """The meeting row, which carries the summary state and the access fields."""
+    """The meeting row, which carries the summary state and the access fields.
+
+    Read consistently: `start` decides from this whether a run is already going,
+    and an eventually consistent read could miss a mark written moments ago by
+    the press it is meant to notice.
+    """
     response = dynamodb.get_item(
         TableName=EVENT_SOURCING_TABLE,
         Key={"PK": {"S": f"c#{call_id}"}, "SK": {"S": f"c#{call_id}"}},
+        ConsistentRead=True,
     )
     item = response.get("Item")
     return _deserialize(item) if item else None

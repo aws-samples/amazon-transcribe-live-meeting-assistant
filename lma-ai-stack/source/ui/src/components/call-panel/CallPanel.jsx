@@ -383,7 +383,11 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
                   <StatusIndicator type="error">{failure}</StatusIndicator>
                 </Box>
               )}
-              {!regenerating && !failure && handEdited && !editing && <Badge color="blue">Edited</Badge>}
+              {/* Shown beside a failure, not instead of it: whose words the
+                  stored summary is does not depend on how the last run went,
+                  and a failed regeneration is exactly when it matters that the
+                  text on screen is somebody's own. */}
+              {!regenerating && handEdited && !editing && <Badge color="blue">Edited</Badge>}
               {editing ? (
                 <SpaceBetween size="xxs" direction="horizontal">
                   <Button onClick={() => setEditing(false)} disabled={saving}>

@@ -41,7 +41,7 @@ A meeting's summary is generated once, from the transcript and the prompt templa
 
 Regenerating goes through the same summarizer the end-of-meeting summary uses -- the Bedrock summarizer, or your own function under the LAMBDA option -- with nothing but the meeting id, so it reads the current transcript and the current prompts rather than a copy of either.
 
-It also **refreshes the Bedrock Knowledge Base snapshot**. The copy of the transcript and summary written to S3 for the Knowledge Base to ingest is taken when the summary runs, and the Meeting Assistant's meeting-history search reads that copy; regenerating writes it again with whatever speaker names are stored now. Ingestion into the Knowledge Base itself runs on a schedule the stack fixes at every 15 minutes, so the refreshed copy becomes searchable at the next sync rather than immediately.
+Under the BEDROCK option it also **refreshes the Bedrock Knowledge Base snapshot**. The copy of the transcript and summary written to S3 for the Knowledge Base to ingest is taken when the summary runs, and the Meeting Assistant's meeting-history search reads that copy; regenerating writes it again with whatever speaker names are stored now. It is the summarizer that writes that copy, so under the LAMBDA option the snapshot is refreshed only if your own function writes it. Ingestion into the Knowledge Base itself runs on a schedule the stack fixes at every 15 minutes, so the refreshed copy becomes searchable at the next sync rather than immediately.
 
 Three things are worth knowing about how it behaves:
 

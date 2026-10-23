@@ -124,9 +124,44 @@ describe('CallSummary — regenerating', () => {
   });
 
   it('surfaces a failed run and keeps the previous summary on screen', () => {
-    renderPanel({ item: withState({ status: STATUS_FAILED, message: 'could not regenerate the summary just now' }) });
+    renderPanel({
+      item: withState({
+        status: STATUS_FAILED,
+        message: 'could not regenerate the summary just now',
+        updatedAt: new Date().toISOString(),
+      }),
+    });
     expect(screen.getByText(/could not regenerate the summary just now/i)).toBeInTheDocument();
     expect(screen.getByText(/migration plan/)).toBeInTheDocument();
+  });
+
+  it('stops showing a failure that is no longer recent', () => {
+    // The stored message says "just now", and nothing dismisses the state, so
+    // every later visitor to this meeting would otherwise be shown the error.
+    renderPanel({
+      item: withState({
+        status: STATUS_FAILED,
+        message: 'could not regenerate the summary just now',
+        updatedAt: new Date(Date.now() - 86400000).toISOString(),
+      }),
+    });
+    expect(screen.queryByText(/could not regenerate the summary just now/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/migration plan/)).toBeInTheDocument();
+  });
+
+  it('still marks a hand-edited summary as edited when a run failed', () => {
+    // Whose words the stored text is does not depend on how the last run went,
+    // and a failed regeneration is when it matters most that it is somebody's.
+    renderPanel({
+      item: withState({
+        source: SOURCE_MANUAL,
+        status: STATUS_FAILED,
+        message: 'could not regenerate the summary just now',
+        updatedAt: new Date().toISOString(),
+      }),
+    });
+    expect(screen.getByText('Edited')).toBeInTheDocument();
+    expect(screen.getByText(/could not regenerate the summary just now/i)).toBeInTheDocument();
   });
 
   it('disables both controls for a user who may not edit the meeting', () => {
