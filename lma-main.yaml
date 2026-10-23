@@ -4165,8 +4165,10 @@ Resources:
     Properties:
       AlarmName: !Sub "${AWS::StackName}-meetings-without-transcript"
       AlarmDescription: >-
-        Three or more meetings streamed audio for at least thirty seconds and
-        produced no transcript at all. Nothing else reports this: the audio
+        Three or more audio sessions streamed for at least thirty seconds and
+        produced no transcript at all. Sessions rather than meetings, since a
+        client that reconnects for the same meeting opens a second session.
+        Nothing else reports this: the audio
         session closes normally, the meeting record reaches ENDED, and the
         meeting page shows an empty transcript with no error on it. Check the
         transcriber's container log group for '[TRANSCRIBING]' and

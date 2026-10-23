@@ -24,13 +24,17 @@ The record is built by hand rather than with a library. Two reasons:
   the standard library, so those tests run anywhere ``pytest`` does — including
   CI, where this layer's ``requirements.txt`` is not installed.
 
-Usage, once per invocation:
+Usage. Import the shared ``METRICS`` rather than constructing an emitter: it
+accumulates for the whole invocation, which only works if every module of a
+function adds to the same one, and if the single ``flush()`` in the handler is
+flushing that one. A module with its own emitter is never flushed by the
+handler and publishes nothing.
 
-    EMITTER = MetricEmitter.from_environment()
+    from metrics_utils.emf import METRICS
+
+    METRICS.count(catalogue.MEETINGS_STARTED)   # anywhere in the function
     ...
-    EMITTER.count(catalogue.MEETINGS_STARTED)
-    ...
-    EMITTER.flush()
+    METRICS.flush()                             # once, in the handler's finally
 
 Nothing here raises. A metric that cannot be written must not take down the
 pipeline it is measuring, so every failure path logs and continues; the gate in

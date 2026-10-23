@@ -22,7 +22,7 @@
  *
  * Unlike the Python emitter, which accumulates for an invocation and flushes
  * once, this one writes immediately. There is no invocation boundary in a
- * long-lived server to flush at; these metrics are emitted once per meeting
+ * long-lived server to flush at; these metrics are emitted once per session
  * rather than per record, so the log volume is the same either way; and the
  * process can be replaced by ECS without `endCall` running, which would lose
  * whatever an accumulator was holding.

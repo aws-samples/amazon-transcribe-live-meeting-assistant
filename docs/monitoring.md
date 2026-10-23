@@ -64,7 +64,7 @@ problem.
 | `bedrock-throttling` | Amazon Bedrock throttled five or more invocations (`Sum` over 5 min, `>= 5`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `vp-launch-failures` | The Virtual Participant launch state machine failed or timed out an execution in any of the last three 5-minute windows (`Sum`, `>= 1`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `transcript-segment-write-failures` | One or more transcript segments failed to be written in any of the last three 5-minute windows (`Sum` of `TranscriptSegmentWriteFailed`, `>= 1`). Reads a metric LMA publishes. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
-| `meetings-without-transcript` | Three or more meetings streamed audio for at least thirty seconds and produced no transcript at all, in any of the last three 5-minute windows (`Sum` of `StreamingSessionsWithoutTranscript`, `>= 3`). Reads a metric LMA publishes. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
+| `meetings-without-transcript` | Three or more audio sessions streamed for at least thirty seconds and produced no transcript at all, in any of the last three 5-minute windows (`Sum` of `StreamingSessionsWithoutTranscript`, `>= 3`). Reads a metric LMA publishes. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 
 Each alarm carries an `AlarmDescription` written as the first few steps of a
 runbook, because the description is the only context that travels with the
@@ -194,7 +194,7 @@ name without being edited.
 | `TranscriptSegmentsWritten` | Count | Call Event Processor | Transcript segment writes that AppSync accepted. Counts partial segments as well as final ones, so it tracks pipeline throughput rather than the number of things said. |
 | `TranscriptSegmentWriteFailed` | Count | Call Event Processor | Transcript segment writes that failed. Alarmed; see the note above for why nothing else reports these. |
 | `StreamingSessionsStarted` | Count | WebSocket transcriber | A live audio session opened for a meeting, and the denominator for the metric below. One per audio session, not per meeting: a client that drops its socket and reconnects for the same meeting opens a second session and is counted again, where `MeetingsStarted` is not. Video sockets are separate and are not counted. Lower than `MeetingsStarted` on a deployment that also transcribes uploaded recordings, which never open a live session. |
-| `TimeToFirstTranscriptSegmentMs` | Milliseconds | WebSocket transcriber | Milliseconds from a meeting's audio session opening to its first transcript segment reaching Kinesis, emitted once per meeting. Graphed, not alarmed; see the note above. |
+| `TimeToFirstTranscriptSegmentMs` | Milliseconds | WebSocket transcriber | Milliseconds from a meeting's audio session opening to its first transcript segment reaching Kinesis, emitted once per audio session, so a client that reconnects produces a second value measured from the reconnect. Graphed, not alarmed; see the note above. |
 | `StreamingSessionsWithoutTranscript` | Count | WebSocket transcriber | A session closed having produced no transcript segment at all, after running long enough that silence is a fault. Alarmed. |
 
 ### How they are published, and what that implies
