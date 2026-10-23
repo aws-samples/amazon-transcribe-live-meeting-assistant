@@ -1038,6 +1038,16 @@ export class NovaAgent implements VoiceAssistantProvider {
   private checkAndExecuteQueuedRefresh(): void {
     if (!this.refreshQueued) return;
 
+    // A refresh already in flight is building the session this one would build.
+    // Retry rather than fall through: `refreshSession` declines to start a
+    // second teardown, so going on from here would clear the flag and then do
+    // nothing, dropping the queued refresh entirely.
+    if (this.isRefreshing) {
+      console.log('🔄 Refresh already in flight - will retry refresh check in 2 seconds');
+      setTimeout(() => this.checkAndExecuteQueuedRefresh(), 2000);
+      return;
+    }
+
     // Check if agent is busy
     if (this._isSpeaking || this._isProcessingTool) {
       console.log('🔊 Agent busy - will retry refresh check in 2 seconds');
@@ -2954,7 +2964,22 @@ export class NovaAgent implements VoiceAssistantProvider {
         this.applyActivationMode(request.activationMode as ActivationMode);
       }
 
-      const sessionRebuilt = await this.rebuildSessionForNewMode();
+      // The new values are on the agent by this point, so a rebuild that throws
+      // is a session left behind rather than a request that did not happen. It
+      // is reported as applied with no rebuild and the reason attached, which
+      // keeps the one-line-per-attempt contract and gives the participant an
+      // answer, instead of escaping into a platform chat handler as a rejected
+      // promise. The queued refresh is how the session catches up.
+      let sessionRebuilt = false;
+      let detail: string | undefined;
+      try {
+        sessionRebuilt = await this.rebuildSessionForNewMode();
+      } catch (error) {
+        console.error('❌ Error rebuilding the Nova session for a mode change:', error);
+        this.refreshQueued = true;
+        this.checkAndExecuteQueuedRefresh();
+        detail = 'the assistant will finish switching shortly';
+      }
 
       return this.recordReconfigure(request, {
         result: 'applied',
@@ -2964,6 +2989,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         meetingModeAfter: this.meetingMode,
         activationModeBefore,
         activationModeAfter: this.activationMode as ActivationMode,
+        detail,
       });
     } finally {
       this._reconfiguring = false;
@@ -3064,12 +3090,17 @@ export class NovaAgent implements VoiceAssistantProvider {
       // depends on how far through its prompt it already was — report no rebuild
       // rather than claim one.
       //
-      // Queue one so the session converges on the new mode at the next idle
-      // moment instead of waiting for the four-minute timer: if that in-flight
-      // refresh had already sent its promptStart, the live session is running the
-      // old mode's prompt and tools while everything else says otherwise.
+      // Queue one and start the idle-refresh machinery after it, so the session
+      // converges on the new mode rather than waiting for the four-minute timer:
+      // if that in-flight refresh had already sent its promptStart, the live
+      // session is running the old mode's prompt and tools while everything else
+      // says otherwise. Setting the flag alone would not be enough — it is only
+      // acted on when the assistant finishes speaking or when the periodic timer
+      // fires, and a freshly switched group-mode assistant starts muted and so
+      // may not speak for a long time.
       console.warn('⚠️  Session refresh still in flight — queueing a rebuild behind it');
       this.refreshQueued = true;
+      this.checkAndExecuteQueuedRefresh();
       return false;
     }
 

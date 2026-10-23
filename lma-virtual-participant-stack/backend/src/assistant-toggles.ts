@@ -17,10 +17,9 @@
  *
  * This module holds the parts that every route into that change can share: the
  * request and outcome shapes, the chat vocabulary, the confirmation wording, and
- * the single log line each toggle emits. Routes differ only in how they arrive
- * at a request — chat today, meeting-page buttons, voice phrases and a GraphQL
- * mutation next — so a new route supplies an `AssistantToggleRoute` and reuses
- * everything below.
+ * the single log line each toggle emits. The meeting chat is the only route that
+ * calls it today; a route differs only in how it arrives at a request, so
+ * another one supplies an `AssistantToggleRoute` and reuses everything below.
  *
  * Nothing here is persisted. A toggle changes the assistant running this one
  * meeting and lasts until the meeting ends; the configuration record keeps
@@ -37,8 +36,15 @@ import type { ActivationMode, VoiceAssistantProvider } from './voice-assistant-i
 import type { MeetingMode } from './nova-sonic-config-loader.js';
 import { details } from './details.js';
 
-/** Which surface asked for the change. Recorded on every toggle so a live test
- *  can tell a chat command from a button press from a voice phrase. */
+/**
+ * Which surface asked for the change, recorded on every toggle so one log line
+ * says where a change came from.
+ *
+ * Only `chat` has a caller today — the other three are the surfaces the log
+ * would otherwise be unable to distinguish once they do, and naming them here
+ * keeps that a one-line change rather than a change to the outcome shape and
+ * every provider.
+ */
 export type AssistantToggleRoute = 'chat' | 'voice' | 'api' | 'config';
 
 export interface AssistantReconfigureRequest {
@@ -73,7 +79,12 @@ export interface AssistantReconfigureOutcome {
     meetingModeAfter: MeetingMode;
     activationModeBefore: ActivationMode;
     activationModeAfter: ActivationMode;
-    /** Why nothing was applied. Set whenever `result` is not `applied`. */
+    /**
+     * Extra context for the participant and for the log. Always set when
+     * `result` is not `applied`, saying why; may also be set on an applied
+     * request that has not finished settling, such as one whose session rebuild
+     * is still to come.
+     */
     detail?: string;
 }
 
@@ -326,6 +337,11 @@ export function assistantToggleChatReply(outcome: AssistantReconfigureOutcome): 
     }
     if (outcome.changed.includes('activationMode')) {
         parts.push(`now ${describeActivationMode(outcome.activationModeAfter)}`);
+    }
+    // A change that landed but has not finished settling says so, rather than
+    // reading as complete while the assistant is still catching up.
+    if (outcome.detail) {
+        parts.push(outcome.detail);
     }
     return [`${prefix} ${parts.join(', ')}.`];
 }

@@ -171,8 +171,8 @@ test('switching into translator mode mid-meeting leaves the assistant transcript
     // mode keeps transcribing the assistant for the rest of the run.
     //
     // This is a difference in what appears in the transcript, not a gap in it:
-    // the meeting channel is untouched either way. Closing it needs the engine
-    // run to react to a mode change, which is the next increment's work.
+    // the meeting channel is untouched either way. Closing it would need the
+    // engine run to react to a mode change rather than read it once.
     const run = methodBody(scribe, 'private async runMicrovmTranscriptionOnce(');
     assert.match(run, /voiceAssistant\.isEnabled\(\) && details\.meetingMode !== 'translator'/);
     // The decision is made once, before the audio loop, from a local const.

@@ -28,7 +28,11 @@ import { NovaAgent } from './nova-agent.js';
 import { ElevenLabsAgent } from './elevenlabs-agent.js';
 import { NoOpAgent } from './noop-agent.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
-import { ASSISTANT_TOGGLE_LOG_TAG, AssistantReconfigureRequest } from './assistant-toggles.js';
+import {
+    ASSISTANT_TOGGLE_LOG_TAG,
+    AssistantReconfigureRequest,
+    assistantToggleChatReply,
+} from './assistant-toggles.js';
 import { details } from './details.js';
 
 const BASE_PROMPT = 'You are Alex, an AI meeting assistant. Mention the quarterly roadmap.';
@@ -416,6 +420,10 @@ test('a refresh that will not settle is left to finish, with a rebuild queued be
     withLiveSession(agent);
     (agent as any).isRefreshing = true;
     (agent as any).RECONFIGURE_REFRESH_WAIT_MS = 50;
+    // Recorded rather than called through, so the assertion is about this path
+    // starting the machinery and no 2-second retry timer is left behind.
+    const started: string[] = [];
+    (agent as any).checkAndExecuteQueuedRefresh = () => started.push('checkAndExecuteQueuedRefresh');
 
     const outcome = await agent.reconfigure(chat({ meetingMode: 'group' }));
 
@@ -423,6 +431,75 @@ test('a refresh that will not settle is left to finish, with a rebuild queued be
     assert.equal(outcome.sessionRebuilt, false);
     assert.deepEqual(calls, []);
     assert.equal((agent as any).refreshQueued, true, 'the session must still converge on the new mode');
+
+    // Setting the flag is not enough on its own: it is acted on only when the
+    // assistant finishes speaking or when the four-minute timer fires, and a
+    // group-mode assistant starts muted and so may not speak for a long time.
+    assert.deepEqual(started, ['checkAndExecuteQueuedRefresh'], 'the queue must be started, not just set');
+});
+
+test('a queued refresh is not spent on a refresh already in flight', async () => {
+    // checkAndExecuteQueuedRefresh clears the flag and then calls
+    // refreshSession, which declines to start a second teardown — so without
+    // this the queued refresh would be dropped and the session would stay on the
+    // old mode's prompt until the periodic timer came round.
+    const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any).isRefreshing = true;
+    (agent as any).refreshQueued = true;
+
+    (agent as any).checkAndExecuteQueuedRefresh();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(calls, [], 'nothing may be rebuilt while a refresh is in flight');
+    assert.equal((agent as any).refreshQueued, true, 'the queued refresh must survive');
+
+    // Leave no retry timer behind for the rest of the suite.
+    (agent as any).refreshQueued = false;
+});
+
+test('a rebuild that fails still answers the participant and leaves one log line', async () => {
+    // The new values are on the agent by the time the rebuild runs, so a failure
+    // is a session left behind rather than a request that did not happen.
+    // Letting it escape would reject the promise a platform chat handler is
+    // awaiting, and write no toggle line at all.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    let attempts = 0;
+    (agent as any).refreshSession = async () => {
+        attempts += 1;
+        throw new Error('bidirectional stream refused');
+    };
+
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+        const line = args.map(String).join(' ');
+        if (line.includes(ASSISTANT_TOGGLE_LOG_TAG)) lines.push(line);
+    };
+    let outcome;
+    try {
+        outcome = await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    } finally {
+        console.log = originalLog;
+    }
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.equal((agent as any).meetingMode, 'translator');
+    assert.equal(lines.length, 1, 'one attempt, one line');
+    assert.match(lines[0], /session=kept/);
+    assert.match(lines[0], /detail="the assistant will finish switching shortly"/);
+
+    // And the session is queued to catch up rather than left on the old prompt:
+    // the failure path hands it to the same idle-refresh machinery, which makes
+    // one more attempt and then leaves it to the periodic refresh.
+    assert.equal(attempts, 2, 'the failed rebuild must be queued for another go');
+    assert.equal((agent as any).refreshQueued, false, 'no retry timer left behind');
+
+    // The participant is told it landed, and that it is still settling.
+    assert.deepEqual(assistantToggleChatReply(outcome), [
+        'Live Meeting Assistant: switched to translator mode, the assistant will finish switching shortly.',
+    ]);
 });
 
 // ---------------------------------------------------------------------------
