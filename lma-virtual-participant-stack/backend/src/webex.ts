@@ -4,6 +4,7 @@ import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptio
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
+import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
@@ -846,6 +847,13 @@ export default class Webex {
             ) {
                 return;
             }
+            // Checked ahead of pause/resume so an assistant-mode toggle lands
+            // whether or not transcription is paused; the two vocabularies are
+            // disjoint. No `endHandled`-style latch: the observer's duplicate add
+            // events are harmless here, because the second one finds the
+            // assistant already in the requested mode and is answered as such
+            // rather than rebuilding the session a second time.
+            const assistantToggle = parseAssistantChatCommand(message);
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
                 // (it can emit duplicate add events) — only act on the first.
@@ -870,6 +878,8 @@ export default class Webex {
                     requestedBy: sender,
                     matchedMessage: message,
                 });
+            } else if (assistantToggle) {
+                await this.sendMessages(frame, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
             } else if (
                 details.start &&
                 message.includes(details.pauseCommand)

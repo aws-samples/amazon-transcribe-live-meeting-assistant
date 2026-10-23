@@ -1,0 +1,549 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
+
+/**
+ * Changing the assistant's meeting mode and activation mode on a running agent.
+ *
+ * The meeting mode decides the system prompt and the registered tool set, and
+ * both are sent once when the Nova session opens — so the thing that has to work
+ * is not a flag flip but a session rebuilt around the new configuration, with
+ * the agent's own derived state moved across to match. Translator mode is the
+ * sharpest case because it replaces the base prompt instead of adding to it, but
+ * every mode change is a rebuild for the same reason.
+ *
+ * The guards are each asserted separately, because each of them exists to
+ * prevent a specific way of making a live meeting worse: applying half a
+ * request, tearing down a working session to change nothing, and two changes
+ * racing each other through the same teardown.
+ *
+ * What is NOT covered here: whether the model obeys the new prompt, and how long
+ * the gap in the assistant's hearing actually lasts. Both need a live meeting.
+ */
+import { strict as assert } from 'node:assert';
+import { test } from 'node:test';
+import { NovaAgent } from './nova-agent.js';
+import { ElevenLabsAgent } from './elevenlabs-agent.js';
+import { NoOpAgent } from './noop-agent.js';
+import { MeetingMode } from './nova-sonic-config-loader.js';
+import { ASSISTANT_TOGGLE_LOG_TAG, AssistantReconfigureRequest } from './assistant-toggles.js';
+import { details } from './details.js';
+
+const BASE_PROMPT = 'You are Alex, an AI meeting assistant. Mention the quarterly roadmap.';
+const STRANDS_ARN = 'arn:aws:lambda:us-east-1:123456789012:function:strands';
+
+/** Session lifecycle calls the rebuild made, in order. */
+type Calls = string[];
+
+/**
+ * A Nova agent with no Bedrock client, whose three session lifecycle methods are
+ * replaced by recorders — enough to drive a reconfiguration and inspect what it
+ * did to the prompt, the tool set and the session, with no network.
+ */
+function novaAgent(
+    overrides: { meetingMode?: MeetingMode; activationMode?: string; strandsLambdaArn?: string } = {},
+): { agent: NovaAgent; calls: Calls } {
+    const agent = new NovaAgent({
+        modelId: 'amazon.nova-2-sonic-v1:0',
+        systemPrompt: BASE_PROMPT,
+        activationMode: overrides.activationMode || 'wake_phrase',
+        meetingMode: overrides.meetingMode || 'normal',
+        strandsLambdaArn: overrides.strandsLambdaArn,
+    });
+    const calls: Calls = [];
+    const inner = agent as any;
+    inner.createSession = async () => {
+        calls.push('createSession');
+        inner.session = liveSession();
+    };
+    inner.closeSession = async () => {
+        calls.push('closeSession');
+        inner.session = null;
+    };
+    inner.refreshSession = async () => {
+        calls.push('refreshSession');
+        inner.session = liveSession();
+    };
+    return { agent, calls };
+}
+
+function liveSession() {
+    return {
+        queue: [],
+        isActive: true,
+        promptName: 'prompt',
+        audioContentId: 'audio',
+        isPromptStartSent: true,
+        isAudioContentStartSent: true,
+        sessionStartTime: Date.now(),
+        lastRefreshTime: Date.now(),
+    };
+}
+
+/** Put the agent in the state of one that has been talking to a live session. */
+function withLiveSession(agent: NovaAgent): NovaAgent {
+    const inner = agent as any;
+    inner.session = liveSession();
+    inner._isActive = true;
+    inner.streamingActive = true;
+    return agent;
+}
+
+function toolNames(agent: NovaAgent): string[] {
+    return (agent as any).buildToolSpecs().map((tool: any) => tool.toolSpec.name);
+}
+
+function systemPrompt(agent: NovaAgent): string {
+    return (agent as any).buildSystemPromptContent();
+}
+
+function chat(over: Partial<AssistantReconfigureRequest> = {}): AssistantReconfigureRequest {
+    return { route: 'chat', requestedBy: 'Alice', ...over };
+}
+
+// ---------------------------------------------------------------------------
+// A request is taken whole or not at all
+// ---------------------------------------------------------------------------
+
+test('a meeting mode that is not one of the configured modes is refused', async () => {
+    const { agent, calls } = novaAgent({ meetingMode: 'normal' });
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'interpreter' as MeetingMode }));
+
+    assert.equal(outcome.result, 'declined');
+    assert.deepEqual(outcome.changed, []);
+    assert.equal(outcome.meetingModeAfter, 'normal');
+    assert.match(outcome.detail || '', /unrecognised meeting mode/);
+    assert.deepEqual(calls, [], 'a refused request must not touch the session');
+});
+
+test('an activation mode that is not one of the configured modes is refused', async () => {
+    const { agent, calls } = novaAgent({ activationMode: 'wake_phrase' });
+    const outcome = await agent.reconfigure(chat({ activationMode: 'always' as any }));
+
+    assert.equal(outcome.result, 'declined');
+    assert.equal(outcome.activationModeAfter, 'wake_phrase');
+    assert.match(outcome.detail || '', /unrecognised activation mode/);
+    assert.deepEqual(calls, []);
+});
+
+test('a request with one good half and one bad half applies neither', async () => {
+    // Applying the half that parsed would leave the assistant in a
+    // configuration nobody asked for — a translator still on wake-phrase
+    // activation, say, which translates nothing.
+    const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    const outcome = await agent.reconfigure(
+        chat({ meetingMode: 'translator', activationMode: 'whenever' as any }),
+    );
+
+    assert.equal(outcome.result, 'declined');
+    assert.equal(outcome.meetingModeAfter, 'normal');
+    assert.equal((agent as any).meetingMode, 'normal');
+    assert.deepEqual(calls, []);
+});
+
+// ---------------------------------------------------------------------------
+// Asking for what it already is costs the meeting nothing
+// ---------------------------------------------------------------------------
+
+test('a request for the configuration it is already in rebuilds nothing', async () => {
+    // Without this a participant retyping a command, or a button pressed twice,
+    // would tear down a working session each time.
+    const { agent, calls } = novaAgent({ meetingMode: 'translator', activationMode: 'always_active' });
+    withLiveSession(agent);
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+
+    assert.equal(outcome.result, 'unchanged');
+    assert.deepEqual(outcome.changed, []);
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.match(outcome.detail || '', /already in the requested configuration/);
+    assert.deepEqual(calls, []);
+});
+
+test('a request that changes one axis and restates the other changes only the one', async () => {
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'group', activationMode: 'wake_phrase' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.deepEqual(outcome.changed, ['meetingMode']);
+});
+
+// ---------------------------------------------------------------------------
+// The meeting mode: prompt, tools and derived state
+// ---------------------------------------------------------------------------
+
+test('switching into translator mode replaces the prompt rather than adding to it', async () => {
+    // Translator mode is the reason a mode change cannot be a flag flip: the
+    // base prompt is gone, not appended to, so a session built for assistant
+    // mode cannot be reused.
+    const { agent, calls } = novaAgent({
+        meetingMode: 'normal',
+        activationMode: 'always_active',
+        strandsLambdaArn: STRANDS_ARN,
+    });
+    withLiveSession(agent);
+    assert.match(systemPrompt(agent), /quarterly roadmap/);
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.deepEqual(outcome.changed, ['meetingMode']);
+    assert.equal(outcome.sessionRebuilt, true);
+    assert.deepEqual(calls, ['refreshSession']);
+
+    const prompt = systemPrompt(agent);
+    assert.match(prompt, /TRANSLATOR MODE:/);
+    assert.match(prompt, /PAUSE TRIGGER/);
+    assert.doesNotMatch(prompt, /quarterly roadmap/, 'the base prompt must be gone, not appended to');
+    assert.doesNotMatch(prompt, /INTERRUPTION HANDLING/);
+    assert.doesNotMatch(prompt, /STOP REQUESTS/);
+    // The meeting-assistant tool is not offered to a translator.
+    assert.deepEqual(toolNames(agent), ['mute']);
+});
+
+test('switching out of translator mode restores the assistant prompt and tools', async () => {
+    const { agent, calls } = novaAgent({
+        meetingMode: 'translator',
+        activationMode: 'always_active',
+        strandsLambdaArn: STRANDS_ARN,
+    });
+    withLiveSession(agent);
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'normal' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.deepEqual(calls, ['refreshSession']);
+
+    const prompt = systemPrompt(agent);
+    assert.match(prompt, /quarterly roadmap/);
+    assert.match(prompt, /STOP REQUESTS:/);
+    assert.match(prompt, /INTERRUPTION HANDLING:/);
+    assert.doesNotMatch(prompt, /TRANSLATOR MODE/);
+    assert.deepEqual(toolNames(agent), ['strands_agent', 'mute']);
+});
+
+test('translator pause state starts from unpaused on the way in and on the way out', async () => {
+    // The pause state decides which single tool is registered. Carrying MUTED
+    // across a mode change would register `unmute` against a prompt that never
+    // mentions it, and the translator would have no way back.
+    const { agent } = novaAgent({ meetingMode: 'translator', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any)._translatorState = 'MUTED';
+    assert.deepEqual(toolNames(agent), ['unmute']);
+
+    await agent.reconfigure(chat({ meetingMode: 'normal' }));
+    assert.equal((agent as any)._translatorState, 'UNMUTED');
+
+    await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+    assert.equal((agent as any)._translatorState, 'UNMUTED');
+    assert.deepEqual(toolNames(agent), ['mute']);
+});
+
+test('a mode reached by toggle starts in the same audible state as one configured up front', async () => {
+    // Group is the only mode that starts muted and waits to be addressed.
+    // Anything else here would make "LMA group" mean something different from
+    // deploying with group mode configured.
+    const toGroup = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' }).agent;
+    withLiveSession(toGroup);
+    await toGroup.reconfigure(chat({ meetingMode: 'group' }));
+    assert.equal(toGroup.isMuted(), true);
+    assert.equal((toGroup as any).groupMeetingMode, true);
+
+    const fromGroup = novaAgent({ meetingMode: 'group', activationMode: 'always_active' }).agent;
+    withLiveSession(fromGroup);
+    assert.equal(fromGroup.isMuted(), true);
+    await fromGroup.reconfigure(chat({ meetingMode: 'normal' }));
+    assert.equal(fromGroup.isMuted(), false);
+    assert.equal((fromGroup as any).groupMeetingMode, false);
+
+    const toTranslator = novaAgent({ meetingMode: 'group', activationMode: 'always_active' }).agent;
+    withLiveSession(toTranslator);
+    await toTranslator.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal(toTranslator.isMuted(), false);
+});
+
+test('the group auto-mute timer does not outlive the mode that armed it', async () => {
+    const { agent } = novaAgent({ meetingMode: 'group', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any).startConversationSession();
+    assert.notEqual((agent as any).conversationTimeout, null);
+
+    await agent.reconfigure(chat({ meetingMode: 'normal' }));
+
+    assert.equal((agent as any).conversationTimeout, null, 'a timer from the old mode would re-mute the new one');
+    assert.equal((agent as any).conversationActive, false);
+    assert.equal((agent as any).autoMuteQueued, false);
+});
+
+test('a mode change does not replay the old mode conversation into the new prompt', async () => {
+    // The next session is built for the new mode. Replaying turns from the old
+    // one primes it with a conversation that mode never had — most visibly a
+    // translator opening by answering the last question the assistant was asked.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any).addToConversationHistory('USER', 'what did we decide about hiring?');
+    (agent as any).addToConversationHistory('ASSISTANT', 'you deferred it to next quarter');
+    assert.equal((agent as any).conversationHistory.length, 2);
+
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.deepEqual((agent as any).conversationHistory, []);
+});
+
+test('an activation-only change keeps the conversation it was having', async () => {
+    // Same assistant, same prompt, same mode — only when it is listening
+    // changed, so the conversation so far is still its own.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    withLiveSession(agent);
+    (agent as any).addToConversationHistory('USER', 'what did we decide about hiring?');
+
+    await agent.reconfigure(chat({ activationMode: 'always_active' }));
+    assert.equal((agent as any).conversationHistory.length, 1);
+});
+
+// ---------------------------------------------------------------------------
+// The activation mode: whether a session is held open at all
+// ---------------------------------------------------------------------------
+
+test('switching to always listening opens a session straight away', async () => {
+    // On wake-phrase activation the agent holds no session between
+    // activations, so there is nothing to refresh — it has to start listening
+    // now rather than at the next wake phrase.
+    const { agent, calls } = novaAgent({ activationMode: 'wake_phrase' });
+    assert.equal(agent.isActivated(), false);
+
+    const outcome = await agent.reconfigure(chat({ activationMode: 'always_active' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.deepEqual(outcome.changed, ['activationMode']);
+    assert.equal(outcome.sessionRebuilt, true);
+    assert.equal(agent.isActivated(), true);
+    assert.deepEqual(calls, ['createSession']);
+});
+
+test('switching to the wake phrase closes the session it was holding open', async () => {
+    const { agent, calls } = novaAgent({ activationMode: 'always_active' });
+    withLiveSession(agent);
+    assert.equal(agent.isActivated(), true);
+
+    const outcome = await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, true);
+    assert.equal(agent.isActivated(), false);
+    assert.deepEqual(calls, ['closeSession']);
+});
+
+test('a mode change on a wake-phrase agent with no session waits for the next wake phrase', async () => {
+    // Nothing to tear down and nothing to hold open: the new values are on the
+    // agent and the session built by the next activation carries them.
+    const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'group' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.equal((agent as any).meetingMode, 'group');
+    assert.deepEqual(calls, []);
+});
+
+test('the activation window the old mode was counting down is dropped', async () => {
+    const { agent } = novaAgent({ activationMode: 'wake_phrase' });
+    withLiveSession(agent);
+    await agent.activate(600);
+    assert.notEqual((agent as any).activationTimeout, null);
+
+    await agent.reconfigure(chat({ activationMode: 'always_active' }));
+    await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
+
+    try {
+        assert.equal((agent as any).activationTimeout, null);
+    } finally {
+        // A window that survived would hold the event loop open for ten
+        // minutes, so clear it here: this assertion should fail, not hang.
+        const surviving = (agent as any).activationTimeout;
+        if (surviving) clearTimeout(surviving);
+    }
+});
+
+// ---------------------------------------------------------------------------
+// Two changes cannot race through the same teardown
+// ---------------------------------------------------------------------------
+
+test('a second mode change arriving mid-rebuild is refused rather than interleaved', async () => {
+    // Both would be tearing down and rebuilding the same session. The second
+    // one is told so; the participant can retype it once the first has landed.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+
+    let second: ReturnType<NovaAgent['reconfigure']> | null = null;
+    (agent as any).refreshSession = async () => {
+        second = agent.reconfigure(chat({ meetingMode: 'group' }));
+        await second;
+    };
+
+    const first = await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal(first.result, 'applied');
+
+    const secondOutcome = await second!;
+    assert.equal(secondOutcome.result, 'declined');
+    assert.match(secondOutcome.detail || '', /already in progress/);
+    assert.equal((agent as any).meetingMode, 'translator', 'the first change must stand');
+});
+
+test('a periodic refresh already queued is superseded by the rebuild', async () => {
+    // The queued refresh was going to produce a fresh session; this rebuild
+    // produces it instead. Leaving the flag set would tear the new session down
+    // again as soon as the agent next went idle.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any).refreshQueued = true;
+
+    await agent.reconfigure(chat({ meetingMode: 'group' }));
+
+    assert.equal((agent as any).refreshQueued, false);
+});
+
+test('a refresh that will not settle is left to finish rather than raced', async () => {
+    // refreshSession declines to start a second teardown, so claiming a rebuild
+    // here would be reporting one that never happened.
+    const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any).isRefreshing = true;
+    (agent as any).RECONFIGURE_REFRESH_WAIT_MS = 50;
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'group' }));
+
+    assert.equal(outcome.result, 'applied', 'the new values are on the agent either way');
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.deepEqual(calls, []);
+});
+
+// ---------------------------------------------------------------------------
+// What the transcription path is told
+// ---------------------------------------------------------------------------
+
+test('the mode the transcription path reads follows the mode the assistant is in', async () => {
+    // scribe.ts consults details.meetingMode for every transcript result on the
+    // Amazon Transcribe path, to keep the assistant's own translations out of a
+    // translator meeting's transcript. A stale value there either lets
+    // translations through or — switching the other way — goes on dropping real
+    // segments after the meeting has left translator mode.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal(details.meetingMode, 'translator');
+
+    await agent.reconfigure(chat({ meetingMode: 'normal' }));
+    assert.equal(details.meetingMode, 'normal');
+
+    await agent.reconfigure(chat({ meetingMode: 'group' }));
+    assert.equal(details.meetingMode, 'group');
+});
+
+test('a refused or unchanged request leaves the transcription path where it was', async () => {
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal(details.meetingMode, 'translator');
+
+    await agent.reconfigure(chat({ meetingMode: 'nonsense' as MeetingMode }));
+    assert.equal(details.meetingMode, 'translator');
+
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal(details.meetingMode, 'translator');
+
+    // Leave the shared singleton as the rest of the suite expects to find it.
+    await agent.reconfigure(chat({ meetingMode: 'normal' }));
+});
+
+// ---------------------------------------------------------------------------
+// The transcript is on a different audio path
+// ---------------------------------------------------------------------------
+
+test('a rebuild does not touch the audio streams', async () => {
+    // The agent owns exactly one audio process, the pacat stream it plays its
+    // own voice into. A rebuild is a Bedrock teardown and nothing else, so even
+    // that one is left alone — and the transcript, which is cut from a different
+    // sink entirely, has nothing in this path that could interrupt it.
+    const audio: string[] = [];
+    for (const to of ['translator', 'group', 'normal'] as MeetingMode[]) {
+        const from: MeetingMode = to === 'normal' ? 'group' : 'normal';
+        const { agent } = novaAgent({ meetingMode: from, activationMode: 'always_active' });
+        withLiveSession(agent);
+        (agent as any).stopPacatStream = () => audio.push(`stopPacatStream:${to}`);
+        (agent as any).ensurePacatStream = () => {
+            audio.push(`ensurePacatStream:${to}`);
+            return null;
+        };
+
+        await agent.reconfigure(chat({ meetingMode: to }));
+    }
+    assert.equal(audio.length, 0, `a mode change touched the audio stream: ${audio.join(', ')}`);
+
+    const { agent } = novaAgent({ activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any).stopPacatStream = () => audio.push('stopPacatStream:activation');
+    await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
+    assert.equal(audio.length, 0, `an activation change touched the audio stream: ${audio.join(', ')}`);
+});
+
+// ---------------------------------------------------------------------------
+// Every attempt leaves one record
+// ---------------------------------------------------------------------------
+
+test('each attempt logs exactly one toggle line, whether or not it landed', async () => {
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+        const line = args.map(String).join(' ');
+        if (line.includes(ASSISTANT_TOGGLE_LOG_TAG)) lines.push(line);
+    };
+    try {
+        await agent.reconfigure(chat({ meetingMode: 'translator' }));
+        await agent.reconfigure(chat({ meetingMode: 'translator' }));
+        await agent.reconfigure(chat({ meetingMode: 'nonsense' as MeetingMode }));
+    } finally {
+        console.log = originalLog;
+    }
+
+    assert.equal(lines.length, 3);
+    assert.match(lines[0], /route=chat by="Alice" result=applied meetingMode=normal->translator/);
+    assert.match(lines[1], /result=unchanged/);
+    assert.match(lines[2], /result=declined .*detail="unrecognised meeting mode/);
+    for (const line of lines) {
+        assert.match(line, /vp=\S+/, 'a toggle must name the VP it happened on');
+    }
+});
+
+// ---------------------------------------------------------------------------
+// The providers that cannot do this
+// ---------------------------------------------------------------------------
+
+test('a meeting with no voice assistant reports a mode change as not made', async () => {
+    const outcome = await new NoOpAgent().reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal(outcome.result, 'declined');
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.match(outcome.detail || '', /not enabled/);
+});
+
+test('the ElevenLabs provider reports a mode change as not made and stays where it was', async () => {
+    // Its prompt and tools live in the ElevenLabs dashboard, so LMA has nothing
+    // to rebuild a session around. Moving only the mute gating and the
+    // wake-phrase handling would leave the agent following instructions for the
+    // mode it is no longer in.
+    const agent = new ElevenLabsAgent({ apiKey: 'test-key', meetingMode: 'normal', activationMode: 'wake_phrase' });
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+
+    assert.equal(outcome.result, 'declined');
+    assert.equal(outcome.meetingModeAfter, 'normal');
+    assert.equal(outcome.activationModeAfter, 'wake_phrase');
+    assert.match(outcome.detail || '', /cannot change mode during a meeting/);
+    assert.equal((agent as any).meetingMode, 'normal');
+    assert.equal((agent as any).activationMode, 'wake_phrase');
+});

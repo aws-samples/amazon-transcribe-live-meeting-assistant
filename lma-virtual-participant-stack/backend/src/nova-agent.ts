@@ -20,6 +20,15 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { ActivationMode } from './voice-assistant-interface.js';
+import {
+  AssistantReconfigureOutcome,
+  AssistantReconfigureRequest,
+  formatAssistantToggleLog,
+  isActivationMode,
+  isMeetingMode,
+  publishMeetingMode,
+} from './assistant-toggles.js';
 
 /**
  * Whether the assistant is given a `mute` tool it can call when a participant
@@ -2852,5 +2861,245 @@ export class NovaAgent implements VoiceAssistantProvider {
       + ` window_ms=${STOP_REQUEST_TOOL_GRACE_MS} speaking=${this._isSpeaking}`
       + ` interrupted=${this._isInterrupted} muted=${this._isMuted}`,
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Changing mode mid-meeting (see VoiceAssistantProvider.reconfigure)
+  // -------------------------------------------------------------------------
+
+  /** True while a reconfiguration is applying its change and rebuilding. */
+  private _reconfiguring: boolean = false;
+
+  /** How long to wait for a session refresh already in flight before giving up
+   *  on rebuilding on top of it. The refresh itself is a teardown, a 300ms
+   *  flush and a fresh session, so this is several times the expected wait. */
+  private readonly RECONFIGURE_REFRESH_WAIT_MS = 5000;
+
+  /**
+   * Change the meeting mode and/or activation mode on a running agent.
+   *
+   * Both are baked into the Nova session rather than consulted per turn: the
+   * meeting mode decides the system prompt (`buildSystemPromptContent`) and the
+   * registered tool set (`buildToolSpecs`), and both are sent once at
+   * `promptStart`. Translator mode is the clearest case — it *replaces* the base
+   * prompt rather than adding to it — but it is not a special case: no meeting
+   * mode can change without a new session. So this applies the new values to the
+   * agent's own state and then rebuilds the session through the same
+   * `refreshSession` path the four-minute keep-alive refresh and the translator
+   * pause/resume transitions already use.
+   *
+   * The rebuild touches nothing outside the Bedrock stream. The transcript is
+   * cut from `combined_audio`, which is fed by the Virtual Participant's own
+   * pacat stream and by a PulseAudio loopback — neither of which this method
+   * starts, stops or reaches — so the assistant goes quiet for the length of a
+   * rebuild and the transcript does not.
+   */
+  async reconfigure(request: AssistantReconfigureRequest): Promise<AssistantReconfigureOutcome> {
+    const meetingModeBefore = this.meetingMode;
+    // Written from the stack parameter and the provider config, both of which
+    // the factory has already narrowed to this union.
+    const activationModeBefore = this.activationMode as ActivationMode;
+
+    const notApplied = (
+      result: 'unchanged' | 'declined',
+      detail: string,
+    ): AssistantReconfigureOutcome =>
+      this.recordReconfigure(request, {
+        result,
+        changed: [],
+        sessionRebuilt: false,
+        meetingModeBefore,
+        meetingModeAfter: meetingModeBefore,
+        activationModeBefore,
+        activationModeAfter: activationModeBefore,
+        detail,
+      });
+
+    // A request is taken whole or not at all. Applying the half that parsed
+    // would leave the assistant in a configuration nobody asked for, and the
+    // routes that will arrive next — a GraphQL mutation, a voice phrase — carry
+    // strings from further away than this module can see.
+    if (request.meetingMode !== undefined && !isMeetingMode(request.meetingMode)) {
+      return notApplied('declined', `unrecognised meeting mode "${request.meetingMode}"`);
+    }
+    if (request.activationMode !== undefined && !isActivationMode(request.activationMode)) {
+      return notApplied('declined', `unrecognised activation mode "${request.activationMode}"`);
+    }
+
+    const changed: Array<'meetingMode' | 'activationMode'> = [];
+    if (request.meetingMode !== undefined && request.meetingMode !== meetingModeBefore) {
+      changed.push('meetingMode');
+    }
+    if (request.activationMode !== undefined && request.activationMode !== activationModeBefore) {
+      changed.push('activationMode');
+    }
+
+    // Asking for the configuration it is already in costs the meeting nothing.
+    // Without this, a participant retyping a command — or a button pressed
+    // twice — would tear down a working session each time.
+    if (changed.length === 0) {
+      return notApplied('unchanged', 'already in the requested configuration');
+    }
+
+    if (this._reconfiguring) {
+      return notApplied('declined', 'a mode change is already in progress');
+    }
+
+    this._reconfiguring = true;
+    try {
+      if (changed.includes('meetingMode')) {
+        this.applyMeetingMode(request.meetingMode as MeetingMode);
+      }
+      if (changed.includes('activationMode')) {
+        this.applyActivationMode(request.activationMode as ActivationMode);
+      }
+
+      const sessionRebuilt = await this.rebuildSessionForNewMode();
+
+      return this.recordReconfigure(request, {
+        result: 'applied',
+        changed,
+        sessionRebuilt,
+        meetingModeBefore,
+        meetingModeAfter: this.meetingMode,
+        activationModeBefore,
+        activationModeAfter: this.activationMode as ActivationMode,
+      });
+    } finally {
+      this._reconfiguring = false;
+    }
+  }
+
+  /** Emit the one canonical log line for a toggle and return the outcome
+   *  unchanged, so every exit from `reconfigure` is recorded. */
+  private recordReconfigure(
+    request: AssistantReconfigureRequest,
+    outcome: AssistantReconfigureOutcome,
+  ): AssistantReconfigureOutcome {
+    console.log(formatAssistantToggleLog(request, outcome));
+    return outcome;
+  }
+
+  /**
+   * Move the agent's own state onto a new meeting mode.
+   *
+   * Every derivation here matches the constructor and `start()`, so a mode
+   * reached by toggle is indistinguishable from the same mode configured up
+   * front. Group mode starts muted and waits for a wake phrase; the other two
+   * start audible.
+   */
+  private applyMeetingMode(mode: MeetingMode): void {
+    this.meetingMode = mode;
+    this.groupMeetingMode = (mode === 'group');
+    // Set directly rather than through mute(), which also flushes the playback
+    // stream and the avatar's buffer. Those belong to a stop request, where the
+    // point is to cut the assistant off mid-word. A mode change is not that: the
+    // rebuild below stops new audio arriving within a few hundred milliseconds
+    // anyway, and letting the last of an utterance play out is better than
+    // clipping it.
+    this._isMuted = (mode === 'group');
+
+    // The transcription path reads the mode from the shared meeting details, per
+    // transcript result on the Amazon Transcribe path. Leaving it on the mode the
+    // meeting started in would decide whether the assistant's own speech belongs
+    // in the transcript from a mode the assistant is no longer in.
+    publishMeetingMode(mode);
+
+    // Translator pause/resume is a two-state machine whose state decides which
+    // single tool is registered. A mode change arrives with no opinion about it,
+    // so both entering and leaving translator mode start from unpaused — leaving
+    // MUTED behind would register `unmute` against a prompt that never mentions
+    // it.
+    this._translatorState = 'UNMUTED';
+
+    // The group-mode auto-mute timer belongs to the mode that armed it.
+    this.clearConversationTimeout();
+    this.conversationActive = false;
+    this.autoMuteQueued = false;
+
+    // The next session's prompt is written for the new mode, so replaying the
+    // old mode's turns into it primes it with a conversation that mode never
+    // had — a translator opening by answering the last question it was asked.
+    this.conversationHistory = [];
+
+    console.log(`🔀 Meeting mode is now ${mode}`);
+    if (mode === 'translator') {
+      console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+    }
+  }
+
+  /** Move the agent's own state onto a new activation mode, matching the
+   *  constructor's derivation of `_isActivated`. */
+  private applyActivationMode(mode: ActivationMode): void {
+    this.activationMode = mode;
+    this._isActivated = (mode === 'always_active');
+
+    if (mode !== 'always_active' && this.activationTimeout) {
+      // The window the old mode was counting down belongs to that mode.
+      clearTimeout(this.activationTimeout);
+      this.activationTimeout = null;
+    }
+
+    console.log(`🔀 Activation mode is now ${mode}`);
+  }
+
+  /**
+   * Give the agent a session built for the configuration it is now in.
+   *
+   * @returns whether a session was built or torn down. False means the agent is
+   *   holding no session that needs replacing — on `wake_phrase` activation
+   *   that is the normal, correct state, and the next wake phrase builds one
+   *   from the new configuration.
+   */
+  private async rebuildSessionForNewMode(): Promise<boolean> {
+    // A periodic refresh already queued is superseded: this rebuild produces the
+    // fresh session it was going to produce, and leaving the flag set would tear
+    // the new session down again as soon as the agent next went idle.
+    this.refreshQueued = false;
+
+    if (!(await this.waitWhileRefreshing())) {
+      // A refresh that has not settled within the bound is itself building a
+      // session, and `refreshSession` declines to start a second one. The new
+      // values are already on the agent, so whether that session carries them
+      // depends on how far through its prompt it is — report no rebuild rather
+      // than claim one.
+      console.warn('⚠️  Session refresh still in flight — leaving the rebuild to it');
+      return false;
+    }
+
+    const hasLiveSession = !!(this.session && this.session.isActive);
+
+    if (this.activationMode !== 'always_active') {
+      // The wake-phrase contract is that no session is held open between
+      // activations, so the rebuild is a teardown.
+      if (hasLiveSession) {
+        await this.closeSession();
+        return true;
+      }
+      return false;
+    }
+
+    if (!hasLiveSession) {
+      // Switching to always_active from a mode that was holding no session: the
+      // assistant has to start listening now, not at the next wake phrase.
+      await this.createSession();
+      return true;
+    }
+
+    await this.refreshSession();
+    return true;
+  }
+
+  /** Wait, with a bound, for a session refresh already in flight to settle, so
+   *  the rebuild replaces a finished session rather than racing one that is
+   *  still sending its prompt.
+   *
+   *  @returns true when nothing is refreshing and the caller may proceed. */
+  private async waitWhileRefreshing(): Promise<boolean> {
+    const deadline = Date.now() + this.RECONFIGURE_REFRESH_WAIT_MS;
+    while (this.isRefreshing && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return !this.isRefreshing;
   }
 }

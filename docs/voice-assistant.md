@@ -20,6 +20,11 @@ title: "Voice Assistant"
 - [Meeting Mode](#meeting-mode)
   - [Group Meeting Mode](#group-meeting-mode)
   - [Translator Mode](#translator-mode)
+- [Changing Mode During a Meeting](#changing-mode-during-a-meeting)
+  - [Chat Commands](#chat-commands)
+  - [What Happens When the Mode Changes](#what-happens-when-the-mode-changes)
+  - [Reading the Log](#reading-the-log)
+  - [Other Providers](#other-providers)
 - [Turn-Taking Sensitivity](#turn-taking-sensitivity)
 - [Custom System Prompts](#custom-system-prompts)
   - [base](#base)
@@ -41,6 +46,7 @@ LMA can optionally add a voice assistant to the Virtual Participant, allowing it
 | Latency | Low (native AWS) | Moderate (external API) |
 | Session duration | Unlimited (auto-refresh every 5 min) | 8-minute sessions (auto-refresh) |
 | Meeting modes | `normal`, `group`, `translator` | `normal`, `group`, `translator` |
+| Mode changes during a meeting | Yes ([chat commands](#chat-commands)) | No |
 | Barge-in support | Yes | Yes |
 | "Stop talking" on request | Yes (tool + prompt + transcript + barge-in) | Yes (transcript + barge-in) |
 | Custom system prompts | Yes (base/inject/replace modes) | Yes (via ElevenLabs agent config) |
@@ -112,7 +118,7 @@ On **ElevenLabs**, only the transcript mechanism and audio barge-in apply. The E
 
 ## Meeting Mode
 
-The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic Configuration page (admin-only). The `group` and `translator` modes require the stack to be deployed with `VoiceAssistantActivationMode = always_active` — in `wake_phrase` mode they have no effect and the UI will surface a warning.
+The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic Configuration page (admin-only). The `group` and `translator` modes need the assistant to be always listening: if the stack is deployed with `VoiceAssistantActivationMode = wake_phrase` they have no effect and the UI surfaces a warning. On Nova Sonic, participants can switch activation to always-listening for the current meeting from the chat — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting).
 
 | Mode | Starts muted? | Speaks when… | Stops when asked to? | Typical use |
 |---|---|---|---|---|
@@ -168,8 +174,74 @@ The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA
 #### Limitations
 
 - A single agent voice is used for both translation directions. For different voices per direction, two concurrent agents would be required (not supported today).
-- Translator mode only takes effect when the stack is deployed with `VoiceAssistantActivationMode = always_active`, as does `group`. The default `normal` mode works under either activation mode.
+- Translator mode only takes effect while the assistant is always listening, as does `group`. The default `normal` mode works under either activation mode. On Nova Sonic, `LMA translate` in the meeting chat switches activation for the current meeting as well as the mode — see [Changing Mode During a Meeting](#changing-mode-during-a-meeting) — so the stack parameter is the default rather than the only way in.
 - If an utterance is in a language other than the two configured, Nova Sonic falls back to translating it into `translatorLanguageA` per the system prompt.
+
+## Changing Mode During a Meeting
+
+*Nova Sonic only.*
+
+The meeting mode and the activation mode are both read when the Virtual Participant starts, from the Nova Sonic Configuration page and the **VoiceAssistantActivationMode** stack parameter respectively. Participants can also change either one while the meeting is running, by typing a command in the meeting chat.
+
+A runtime change lasts for the rest of that meeting and is not written back to configuration: the configuration page keeps holding the deployment's default, and the next meeting starts in it. Anyone in the meeting may issue these commands, like the existing `LMA leave`.
+
+### Chat Commands
+
+Every command must address LMA by name, and the whole message must be the name plus the command — nothing else. That is what keeps ordinary meeting chat from switching modes: "can LMA translate the slides?" and "the LMA group meets on Tuesdays" are left alone, and a bare "translate" is read as one participant talking to another. Matching is case-insensitive and ignores punctuation, so `@LMA, Translate!` works.
+
+**Meeting mode:**
+
+| Type in chat | Effect |
+|---|---|
+| `LMA translate` | Switch to translator mode. Also switches activation to always-listening, because a translator with a wake phrase translates nothing until it is addressed. Aliases: `LMA translator`, `LMA translate mode`, `LMA translator mode`, `LMA interpret` |
+| `LMA assist` | Switch to `normal` assistant mode. Aliases: `LMA assistant`, `LMA assist mode`, `LMA assistant mode`, `LMA normal`, `LMA normal mode` |
+| `LMA group` | Switch to group mode: the assistant goes quiet and waits to be addressed by wake phrase. Alias: `LMA group mode` |
+
+**Activation mode:**
+
+| Type in chat | Effect |
+|---|---|
+| `LMA always` | Always listening. Aliases: `LMA always on`, `LMA always active`, `LMA always listen`, `LMA open mic` |
+| `LMA wake` | Listen only after a wake phrase. Aliases: `LMA wake word`, `LMA wake phrase`, `LMA on request` |
+
+Going back from translator mode with `LMA assist` leaves activation where `LMA translate` put it, because the command carries no record of what it was before. Use `LMA wake` to get the wake phrase back.
+
+The assistant replies in chat either way — naming the mode it is now in, or saying that nothing changed and why. A command for the mode the meeting is already in is answered and does nothing else, so it costs the meeting no interruption.
+
+These commands do not overlap with the existing chat commands: `LMA leave` / `LMA end` / `LMA stop` still dismiss the Virtual Participant, and `PAUSE` / `START` still pause and resume transcription. A mode command is acted on whether or not transcription is paused.
+
+### What Happens When the Mode Changes
+
+The meeting mode decides the assistant's system prompt and the set of tools it is given, and both are sent once when its Nova session opens — translator mode most visibly, because it *replaces* the base prompt rather than adding to it. So a mode change is not a flag flip: LMA rebuilds the session around the new configuration, using the same mechanism as the periodic session refresh.
+
+What that means in a live meeting:
+
+- **The assistant pauses briefly.** It cannot hear or answer for the length of a rebuild, the same gap the periodic refresh already produces.
+- **The transcript is not affected.** Transcription reads a separate PulseAudio sink that the Virtual Participant feeds itself, and that the assistant's voice reaches through a loopback inside the sound server. Nothing on the mode-change path starts or stops an audio process.
+- **The conversation so far is not carried into a new mode.** The next session is built for the mode it is now in, so replaying earlier turns would prime it with a conversation that mode never had. An activation-mode change on its own keeps the conversation, since the mode and the prompt are unchanged.
+- **Group mode starts quiet.** Switching to `group` leaves the assistant muted until a wake phrase, exactly as deploying in group mode would.
+- **On the wake-phrase path nothing is rebuilt immediately.** No session is held open between activations, so the new mode is picked up by the session the next wake phrase creates.
+
+One known limitation on the optional [MicroVM ASR engine](microvm-asr.md): whether the assistant's own speech is transcribed on its own channel is decided once, when the engine run starts. A meeting switched into translator mode partway through keeps transcribing the assistant for the rest of that run, so translations appear in the transcript alongside the speech they translate. The meeting's own transcript is unaffected either way.
+
+### Reading the Log
+
+Every attempt leaves one line in the Virtual Participant's CloudWatch log stream, tagged `[assistant-toggle]`, whether or not it changed anything:
+
+```
+[assistant-toggle] vp=<vpId> call=<callId> route=chat by="Alice" result=applied meetingMode=normal->translator activationMode=wake_phrase->always_active session=rebuilt
+```
+
+- `route` — which surface asked (`chat` today)
+- `by` — who asked, where the surface knows; `-` otherwise
+- `result` — `applied`, `unchanged` (already in that configuration), or `declined`
+- both modes appear on every line, with `(unchanged)` on the one nobody asked about, so the whole configuration can be read off any single line
+- `session` — whether the model session was rebuilt or left alone
+- `detail` — present when nothing was applied, saying why
+
+### Other Providers
+
+**ElevenLabs** declines mode changes during a meeting. Its system prompt and tools live in the ElevenLabs dashboard rather than in LMA, so there is nothing for LMA to rebuild a session around; moving only LMA's own mute and wake-phrase handling would leave the agent following instructions for the mode it is no longer in. The command is answered in chat and logged with `result=declined`.
 
 ## Turn-Taking Sensitivity
 

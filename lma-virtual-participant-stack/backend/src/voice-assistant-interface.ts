@@ -4,6 +4,10 @@
  * Generic interface for voice AI assistants (ElevenLabs, AWS Nova, etc.)
  */
 
+// Type-only: assistant-toggles.ts imports ActivationMode back from here, and
+// erasing the import keeps the two modules out of a runtime cycle.
+import type { AssistantReconfigureRequest, AssistantReconfigureOutcome } from './assistant-toggles.js';
+
 export type VoiceAssistantProviderType = 'none' | 'elevenlabs' | 'amazon_nova_sonic';
 export type ActivationMode = 'always_active' | 'wake_phrase' | 'strands_tool';
 
@@ -58,6 +62,30 @@ export interface VoiceAssistantProvider {
    * Stop the voice assistant (disconnect, cleanup)
    */
   stop(): Promise<void>;
+
+  /**
+   * Change the assistant's meeting mode and/or activation mode while the
+   * meeting is running.
+   *
+   * Both are read once when the provider starts, so changing either means the
+   * provider has to rebuild whatever it baked them into. Only the provider knows
+   * what that is: for Nova Sonic the meeting mode decides the system prompt and
+   * the registered tool set, both of which are fixed for the life of a
+   * bidirectional stream, so a mode change is a session rebuild rather than a
+   * flag flip. A brief gap in what the assistant can hear is expected; the
+   * transcript is produced by a separate audio path and is not affected.
+   *
+   * Providers that cannot honour a request return it undone, with `applied`
+   * false and a `detail` explaining why, rather than half-applying it.
+   *
+   * Every call logs one line (see `formatAssistantToggleLog`), including the
+   * calls that change nothing, so the record of what a meeting was asked to do
+   * does not depend on the request succeeding.
+   *
+   * @param request What to change, which route asked, and who asked.
+   * @returns What actually changed, and whether the session was rebuilt.
+   */
+  reconfigure(request: AssistantReconfigureRequest): Promise<AssistantReconfigureOutcome>;
 
   /**
    * Send audio chunk to the voice assistant

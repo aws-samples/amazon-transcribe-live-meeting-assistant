@@ -4,6 +4,7 @@ import { CommunicationIdentityClient } from '@azure/communication-identity';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
@@ -421,7 +422,16 @@ export default class TeamsSdk {
                         this.requestEnd({ reason: 'end-command', trigger: 'chat', requestedBy: sender, matchedMessage: body });
                         return;
                     }
-                    if (details.start && body.includes(details.pauseCommand)) {
+                    // Checked ahead of pause/resume so an assistant-mode toggle
+                    // lands whether or not transcription is paused; the two
+                    // vocabularies are disjoint.
+                    const assistantToggle = parseAssistantChatCommand(body);
+                    if (assistantToggle) {
+                        await this.sendMessages(
+                            page,
+                            await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender),
+                        );
+                    } else if (details.start && body.includes(details.pauseCommand)) {
                         details.start = false;
                         console.log(details.pauseMessages[0]);
                         await this.sendMessages(page, details.pauseMessages);

@@ -13,7 +13,7 @@
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
-import { details } from './details.js';
+import { isMeetingMode, publishMeetingMode } from './assistant-toggles.js';
 
 /**
  * Supported meeting modes.
@@ -98,17 +98,13 @@ function parsePhraseList(value: unknown): string[] | undefined {
   return phrases.length > 0 ? phrases : undefined;
 }
 
-const VALID_MEETING_MODES: ReadonlySet<MeetingMode> = new Set<MeetingMode>([
-  'normal',
-  'group',
-  'translator',
-]);
-
+/**
+ * One definition of what the meeting modes are, shared with the runtime toggle
+ * route — a stored value and a value typed into the meeting chat have to be
+ * accepted on exactly the same terms.
+ */
 function parseMeetingMode(value: unknown): MeetingMode | undefined {
-  if (typeof value === 'string' && VALID_MEETING_MODES.has(value as MeetingMode)) {
-    return value as MeetingMode;
-  }
-  return undefined;
+  return isMeetingMode(value) ? value : undefined;
 }
 
 /**
@@ -148,7 +144,11 @@ export async function loadNovaSonicConfig(
       translatorLanguageB: mergedConfig.translatorLanguageB,
     });
 
-    details.meetingMode = mergedConfig.meetingMode;
+    // The transcription path reads the mode from the shared meeting details; a
+    // runtime toggle publishes it the same way.
+    if (mergedConfig.meetingMode) {
+      publishMeetingMode(mergedConfig.meetingMode);
+    }
 
     return mergedConfig;
   } catch (error) {
