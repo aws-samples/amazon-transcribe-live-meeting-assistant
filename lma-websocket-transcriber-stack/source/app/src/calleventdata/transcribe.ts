@@ -62,6 +62,7 @@ import {
 // offline tests that import this module.
 import { normalizeErrorForLogging } from '../utils/common';
 import { stringifyCallMetaData } from '../utils/log-redaction';
+import { noteTranscriptSegment } from '../metrics/session';
 
 const formatPath = function (path: string) {
     let pathOut = path;
@@ -923,6 +924,13 @@ export const writeSegmentToKds = async (
 
     try {
         await kinesisClient.send(new PutRecordCommand(putParams));
+        // After the write, not before: a segment that did not reach Kinesis has
+        // not been transcribed as far as anything downstream is concerned, and
+        // counting it here would mark the meeting as having produced a
+        // transcript and so suppress the metric that reports it did not. Both
+        // engines write through this function, so this is the only place the
+        // first segment of a meeting has to be recognised.
+        noteTranscriptSegment(callMetadata);
         server.log.debug(
             `[${kdsObject.EventType}]: [${callMetadata.callId}] - Written ${
                 kdsObject.EventType

@@ -8,6 +8,14 @@ Transform: AWS::Serverless-2016-10-31
 Description: Amazon Transcribe Live Meeting Assist - Websocket Server
 
 Parameters:
+  LMAStackName:
+    Description: >-
+      Name of the top-level LMA stack. Used as the CloudWatch namespace for the
+      application metrics this service publishes, so that the dashboard and the
+      alarms in the parent template -- which are named for the parent stack --
+      select the series this task writes.
+    Type: String
+
   # networking parameters
   VPC:
     Description: VPC ID
@@ -1419,6 +1427,19 @@ Resources:
               Value: !Ref VoiceEnrollmentSeedsFunctionArn
             - Name: WS_LOG_LEVEL
               Value: !Ref LogLevel
+            # The CloudWatch namespace for the application metrics this task
+            # publishes. The parent stack's name, not this nested stack's: the
+            # dashboard and the alarms that read these metrics are named for the
+            # parent. Unset or wrong and the task runs normally while publishing
+            # to a namespace nothing reads.
+            #
+            # No cloudwatch:PutMetricData grant accompanies this. The records are
+            # Embedded Metric Format written to stdout, which the container's
+            # awslogs driver already carries, and CloudWatch Logs extracts the
+            # metrics from them -- AWS documents that as needing only the
+            # log-writing permission the task already has.
+            - Name: METRIC_NAMESPACE
+              Value: !Ref LMAStackName
             - Name: DEBUG
               Value: "false"
           Essential: true

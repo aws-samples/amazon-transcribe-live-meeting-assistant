@@ -26,6 +26,7 @@ from batch_item_failures import SequenceTrackingBatchProcessor, send_discarded_r
 from botocore.config import Config as BotoCoreConfig
 from event_processor import execute_process_event_api_mutation
 from graphql_helpers import describe_exception, traceback_frames
+from metrics_utils.emf import METRICS
 
 # pylint: enable=import-error
 
@@ -123,7 +124,22 @@ def handler(event, context: LambdaContext) -> Dict[str, List[Dict[str, str]]]:
     configured with ``FunctionResponseTypes: [ReportBatchItemFailures]``, so the
     shard checkpoint advances past every record except the ones named here. See
     ``batch_item_failures`` for which failures are reported and why.
+
+    The body is a separate function so that the metric record is written on
+    every exit path. ``finally`` rather than a trailing call: this handler
+    raises deliberately when a failure cannot be expressed as a sequence
+    number, and that invocation's measurements -- which include the segment
+    write failures that are the reason for measuring at all -- would otherwise
+    be the ones lost.
     """
+    try:
+        return _handle(event)
+    finally:
+        METRICS.flush()
+
+
+def _handle(event) -> Dict[str, List[Dict[str, str]]]:
+    """Process one Kinesis batch. See :func:`handler`."""
     LOGGER.debug("lambda event", extra={"event": event})
 
     processor = EVENT_LOOP.run_until_complete(process_event(event=event))
