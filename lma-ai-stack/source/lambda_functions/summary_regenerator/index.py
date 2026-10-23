@@ -73,6 +73,14 @@ TRANSCRIPT_SUMMARY_FUNCTION_ARN = os.environ.get("TRANSCRIPT_SUMMARY_FUNCTION_AR
 # longer than the summary function's own 900s ceiling.
 STALE_RUN_SECONDS = int(os.environ.get("SUMMARY_REGENERATION_STALE_SECONDS", "1200"))
 
+# How far ahead of now a run's start stamp may be and still be believed. The
+# stamp is written by this function from its own clock and read back by it and by
+# the browser, so a small disagreement between the two is ordinary. Anything
+# further ahead is not a clock, and is not believed: a stamp dated hours from now
+# would otherwise mark the meeting as regenerating until that hour arrived. Must
+# match CLOCK_SKEW_ALLOWANCE_MS in ui/src/components/common/summary-state.js.
+CLOCK_SKEW_ALLOWANCE_SECONDS = 60
+
 # Storing a result: how many attempts, how long each waits for an answer, and
 # the base of the backoff between them (doubling, so 1s then 2s). See
 # write_summary for why this is retried here rather than by Lambda. Named rather
@@ -212,29 +220,40 @@ def parse_state(raw):
 def is_running(state, now):
     """True when a run started recently enough to still be in flight.
 
-    A stamp older than STALE_RUN_SECONDS is treated as finished however it was
-    left, so a run whose Lambda was killed cannot block the meeting for ever.
-    A mark with no readable stamp is treated the same way, for the same reason.
+    Only a stamp inside the window [now - STALE_RUN_SECONDS, now + CLOCK_SKEW]
+    counts. An older one is treated as finished however the run was left, so a
+    run whose Lambda was killed cannot block the meeting for ever; a stamp
+    further ahead than the skew allowance, and a mark with no readable stamp at
+    all, are treated the same way, because neither is a window this can ever
+    read its way out of.
 
     This is a guard against a second click, not a lock: the stamp is read and
     then written, so two callers within the same instant can both pass. The cost
     of that is one extra set of model calls and a last-write-wins on the text,
-    not a corrupt summary. Bounding it properly needs a conditional write per
-    caller, which buys little for a button a handful of people press.
+    not a corrupt summary. The same last-write-wins applies to a hand edit saved
+    while a run is going: the run writes its result when it finishes, so the
+    edit is replaced. The panel's confirmation covers the ordinary case -- it is
+    read before a run starts -- and not an edit that arrives mid-run from a page
+    that had not yet seen the mark. Bounding either properly needs a conditional
+    write per caller, which buys little for a button a handful of people press.
     """
     if state.get("status") != STATUS_RUNNING:
         return False
-    # A mark with no usable stamp reads as finished. The stamp is what the
-    # cut-off below is measured from, so a mark without one would block this
-    # meeting with nothing able to clear it. `updateCallSummaryText` stores
-    # whatever state string it is given, so the shape of this field is not
-    # something a reader can take for granted.
+    # `updateCallSummaryText` stores whatever state string it is given, so the
+    # shape of this field is not something a reader can take for granted: a mark
+    # with no usable stamp reads as finished rather than blocking the meeting
+    # with nothing able to clear it.
     try:
         started = datetime.fromisoformat(state.get("startedAt"))
     except (TypeError, ValueError):
         return False
     if started.tzinfo is None:
         started = started.replace(tzinfo=timezone.utc)
+    if started > now + timedelta(seconds=CLOCK_SKEW_ALLOWANCE_SECONDS):
+        # Dated in the future: a stamp this side of the skew allowance is a
+        # clock disagreeing, and beyond it is a value nothing here wrote, which
+        # would otherwise hold the meeting until that time arrived.
+        return False
     return started > now - timedelta(seconds=STALE_RUN_SECONDS)
 
 
@@ -417,7 +436,11 @@ def run(call_id):
     """Do the summarisation and write whatever came of it."""
     now = datetime.now(timezone.utc).isoformat()
     # Re-read rather than trusting what the first leg saw: the two legs are
-    # separate invocations and somebody may have edited the summary in between.
+    # separate invocations, so an edit saved in between would make the first
+    # leg's `source` out of date. It is only the label that this preserves --
+    # a successful run replaces the text whatever the label says, which is what
+    # regenerating means, and `is_running` records the one case the panel's
+    # confirmation does not cover.
     state = parse_state((read_meeting(call_id) or {}).get("CallSummaryState"))
     previous_source = state.get("source") or SOURCE_GENERATED
 

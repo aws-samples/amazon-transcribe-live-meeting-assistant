@@ -38,6 +38,17 @@ export const STATUS_IDLE = 'idle';
  */
 export const STALE_RUN_MS = 1200 * 1000;
 
+/**
+ * How far ahead of now a run's start stamp may be and still be believed.
+ *
+ * The stamp is written by the regenerator Lambda from its clock and read here
+ * from the browser's, so a small disagreement is ordinary. Anything further
+ * ahead is not a clock, and is not believed: a stamp dated hours from now would
+ * otherwise show this meeting as regenerating, and disable both controls, until
+ * that hour arrived. Must match CLOCK_SKEW_ALLOWANCE_SECONDS in the Lambda.
+ */
+export const CLOCK_SKEW_ALLOWANCE_MS = 60 * 1000;
+
 export const parseSummaryState = (raw) => {
   if (!raw) {
     return {};
@@ -58,20 +69,22 @@ export const serializeSummaryState = (state) => JSON.stringify(state || {});
 /**
  * True when a regeneration started recently enough to still be running.
  *
- * The staleness cut-off is what stops a run whose Lambda was killed from
- * disabling the button for ever.
+ * Only a stamp inside the window [now - STALE_RUN_MS, now + skew allowance]
+ * counts. The staleness cut-off is what stops a run whose Lambda was killed
+ * from disabling the controls for ever; the forward allowance, and treating an
+ * unreadable stamp as finished, do the same for a stamp this cannot ever read
+ * its way out of.
  */
 export const isRegenerating = (state, now = Date.now()) => {
   if (state?.status !== STATUS_RUNNING) {
     return false;
   }
-  // A mark with no usable stamp reads as finished. The stamp is what the cut-off
-  // is measured from, so a mark without one would otherwise disable the button
-  // on this meeting with nothing able to clear it. `updateCallSummaryText`
-  // stores whatever state string it is given, so the shape of this field is not
-  // something a reader can take for granted.
+  // `updateCallSummaryText` stores whatever state string it is given, so the
+  // shape of this field is not something a reader can take for granted: a mark
+  // with no usable stamp reads as finished rather than disabling the controls on
+  // this meeting with nothing able to clear it.
   const started = new Date(state.startedAt ?? '').getTime();
-  if (Number.isNaN(started)) {
+  if (Number.isNaN(started) || started > now + CLOCK_SKEW_ALLOWANCE_MS) {
     return false;
   }
   return started > now - STALE_RUN_MS;

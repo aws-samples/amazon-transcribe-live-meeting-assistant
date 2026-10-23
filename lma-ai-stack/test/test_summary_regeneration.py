@@ -341,6 +341,16 @@ def test_the_stale_run_cut_off_is_the_same_on_both_sides(regenerator: str) -> No
     assert seconds == ui_seconds
 
 
+def test_the_clock_skew_allowance_is_the_same_on_both_sides(regenerator: str) -> None:
+    """The other end of the same window: a stamp further ahead than this is not
+    a clock disagreeing, and is read as finished rather than holding the meeting
+    until that time arrives. Both sides have to draw the line in one place."""
+    seconds = int(re.search(r"CLOCK_SKEW_ALLOWANCE_SECONDS = (\d+)", regenerator).group(1))
+    js = SUMMARY_STATE_JS.read_text(encoding="utf-8")
+    ui_seconds = int(re.search(r"CLOCK_SKEW_ALLOWANCE_MS = (\d+) \* 1000", js).group(1))
+    assert seconds == ui_seconds
+
+
 def test_the_summary_state_vocabulary_matches_on_both_sides(regenerator: str) -> None:
     """The Lambda writes these strings and the UI reads them."""
     js = SUMMARY_STATE_JS.read_text(encoding="utf-8")

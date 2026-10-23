@@ -15,6 +15,7 @@
 import { describe, it, expect } from 'vitest';
 
 import {
+  CLOCK_SKEW_ALLOWANCE_MS,
   SOURCE_GENERATED,
   SOURCE_MANUAL,
   STALE_RUN_MS,
@@ -72,6 +73,19 @@ describe('isRegenerating', () => {
 
   it('is false for an unreadable timestamp', () => {
     expect(isRegenerating({ status: STATUS_RUNNING, startedAt: 'yesterday' }, NOW)).toBe(false);
+  });
+
+  it('ignores a mark dated further ahead than the clock-skew allowance', () => {
+    // Nothing here writes a future stamp, and the window could not be read its
+    // way out of, so both controls would stay disabled until that time came.
+    expect(isRegenerating({ status: STATUS_RUNNING, startedAt: iso(CLOCK_SKEW_ALLOWANCE_MS + 60000) }, NOW)).toBe(
+      false,
+    );
+  });
+
+  it('still believes a mark inside the clock-skew allowance', () => {
+    // Two clocks disagreeing by a few seconds, not a value to throw away.
+    expect(isRegenerating({ status: STATUS_RUNNING, startedAt: iso(CLOCK_SKEW_ALLOWANCE_MS - 10000) }, NOW)).toBe(true);
   });
 
   it('is false once the run reached an outcome', () => {

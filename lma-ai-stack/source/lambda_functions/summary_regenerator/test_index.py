@@ -391,20 +391,56 @@ def test_a_run_whose_mark_went_stale_does_not_block_a_new_one(
     assert starter.calls
 
 
-@pytest.mark.parametrize("stamp", [None, "", "yesterday"])
-def test_a_mark_with_no_readable_stamp_does_not_block_a_new_run(
+def _ahead(seconds: int) -> str:
+    return (datetime.now(timezone.utc) + timedelta(seconds=seconds)).isoformat()
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        None,
+        "",
+        "yesterday",
+        # Dated further ahead than the clock-skew allowance: nothing here wrote
+        # it, and the window could not be read its way out of.
+        _ahead(index.CLOCK_SKEW_ALLOWANCE_SECONDS + 600),
+        _ahead(86400),
+    ],
+)
+def test_a_mark_with_an_unusable_stamp_does_not_block_a_new_run(
     monkeypatch: pytest.MonkeyPatch, stamp: str | None
 ) -> None:
-    """The stale cut-off is measured from the stamp, so a running mark without a
-    readable one would block this meeting with nothing able to clear it.
-    `updateCallSummaryText` stores whatever state string it is given, so a
-    reader cannot take the shape of this field for granted."""
+    """The in-flight window is measured from the stamp, so a running mark whose
+    stamp falls outside what this can read would block the meeting with nothing
+    able to clear it. `updateCallSummaryText` stores whatever state string it is
+    given, so a reader cannot take the shape of this field for granted."""
     state = {"status": index.STATUS_RUNNING}
     if stamp is not None:
         state["startedAt"] = stamp
     _, _, starter, _ = install(monkeypatch, meeting=row_with_state(state))
     assert index.handler(start_event({"username": OWNER}), FakeContext())["Success"] is True
     assert starter.calls
+
+
+def test_a_stamp_inside_the_clock_skew_allowance_is_still_believed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stamp a little ahead of this clock is two clocks disagreeing, not a
+    value to throw away: a run really is in flight."""
+    _, _, starter, written = install(
+        monkeypatch,
+        meeting=row_with_state(
+            {
+                "status": index.STATUS_RUNNING,
+                "startedAt": _ahead(index.CLOCK_SKEW_ALLOWANCE_SECONDS - 10),
+            }
+        ),
+    )
+    result = index.handler(start_event({"username": OWNER}), FakeContext())
+    assert result["Success"] is False
+    assert result["Message"] == "a summary is already being regenerated"
+    assert starter.calls == []
+    assert written == []
 
 
 def test_a_failed_previous_run_does_not_block_a_new_one(
