@@ -193,12 +193,15 @@ unrelated accounts and will fail with `AccessDenied`.
 
 - [ ] No comment, docstring or doc describes an **earlier commit of your own
       branch** as though it were released behaviour
+- [ ] No comment refers to **the changeset itself** — "this change", "this PR",
+      "this round", "the review that prompted this". True when written, meaningless
+      once merged, because there is then nothing for "this" to point at
 
-This is the single most common defect the automated reviewer finds in this
-repository's own tooling — four times across four PRs — and it is invisible to
-the author, because the "before" state being described is vivid in your memory
-and absent from the repository. A reader at the merge base cannot see it, so the
-comment sends them looking for something that never existed.
+This is the defect the automated reviewer reports most often in this repository's
+own tooling, and it is close to invisible to the author: the "before" state being
+described is vivid in your memory and absent from the repository. A reader at the
+merge base cannot see it, so the comment sends them looking for something that
+never existed.
 
 The test: **would this sentence still be true and findable for someone reading
 only `develop`?**
@@ -212,14 +215,24 @@ only `develop`?**
   function is new; nothing ever failed silently in a released version.
 - ❌ *"`X` **used to** sit here."* — if `X` never merged, this describes a state
   no deployed system had.
+- ❌ *"…which is precisely the mistake **this change** exists to correct."* —
+  the second class: not false about history, just unresolvable. After merge there
+  is no "this change". Say the durable form — *"untested code on a path that never
+  runs is not added"* — which is the rule, not the occasion for it.
 
 Development history **is** worth recording when it explains why code has the
 shape it does — keep it, and label it as history so it cannot be mistaken for a
 changelog: *"an earlier version of this guard tripped on 15 of 49 documentation
 pages — measured"* teaches, where *"the guard no longer over-matches"* misleads.
 
-Watch `now`, `no longer`, `used to`, `previously` and `was renamed`. Note that
-these are all fine in a **test assertion message**, which fires on a future
+⚠️ **The watch-list is a trigger, not the test.** Grepping `now`, `no longer`,
+`used to`, `previously`, `was renamed`, `an earlier version` and `the first
+version` finds most of it. The phrasings that survive a grep contain none of those
+words — *"which an earlier version of this test asserted"*, *"the mistake this
+change exists to correct"* — so apply the question to every comment you touched.
+The list only tells you where to start looking.
+
+Those words are all fine in a **test assertion message**, which fires on a future
 regression (`"the job no longer excludes drafts"` is correct — it describes the
 state that caused the failure), and in a runtime diagnostic.
 

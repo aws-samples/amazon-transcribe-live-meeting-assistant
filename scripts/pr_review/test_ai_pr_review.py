@@ -1354,10 +1354,10 @@ def test_a_real_instruction_change_is_still_reported_with_its_status(monkeypatch
     pinning means the reviewer is NOT reading the version the request proposes and the
     reader needs to know that.
 
-    A rename records BOTH paths. Keying only the new one — which an earlier version of
-    this test asserted — hides the case where the rename moves a file OUT of the
-    instruction set: `.claude/skills/moved-out.md` -> `docs/moved-out.md` has a new
-    path that is not an instruction file, so nothing about it would reach the review.
+    A rename records BOTH paths. Keying only the new path would hide a rename that
+    moves a file out of the instruction set: `.claude/skills/moved-out.md` ->
+    `docs/moved-out.md` has a new path that is not an instruction file, so nothing
+    about it would reach the review.
     """
     name_status = (
         "M\tCLAUDE.md\n"

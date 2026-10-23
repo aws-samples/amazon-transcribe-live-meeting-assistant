@@ -2355,8 +2355,8 @@ def review_one(
     #
     # Not implemented for GitLab deliberately: that job has no credentials provisioned
     # and so never runs today, which means anything added to it could not be exercised
-    # even once. Shipping untested code down an inert path is precisely the mistake
-    # this change exists to correct, so it waits for someone who can run it.
+    # even once. Untested code on a path that never runs is not added; it waits for
+    # someone who can exercise it.
     if isinstance(forge, Github):
         merge_request.ci_status = forge.check_status(merge_request.head_sha)
 

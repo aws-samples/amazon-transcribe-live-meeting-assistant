@@ -25,13 +25,11 @@ things make the workflow do nothing, and neither fails the job:
 - **No `AI_REVIEW_ROLE_ARN` repository variable.** The role check reports a skip and
   every later step is conditional on it, so no credential is minted, no model is
   called and no comment is posted.
-- **The harness is not on the target branch yet.** The pinning step refuses to run
-  the pull request's own copy of the reviewer, and when the files it needs are not on
-  `develop` it says so and exits 0 with the review skipped. That is the state on the
-  pull request that *adds* this directory — `ai_pr_review.py` and `pr-review-ci.md`
-  genuinely do not exist on `develop` until it merges — so the first run a maintainer
-  sees from this change is a green job that skipped. It starts reviewing on the next
-  pull request after the merge.
+- **A file the harness pins is missing from the target branch.** The pinning step
+  refuses to run the pull request's own copy of the reviewer, and when the files it
+  needs are not on `develop` it says so and exits 0 with the review skipped. A pull
+  request that *adds or renames* one of those files sees a green job that skipped,
+  and reviewing resumes on the next pull request after it merges.
 
   `exit 1` is kept for `pr-review.md` and `CLAUDE.md`, which always exist on
   `develop`: a failure to resolve *those* means a rename nobody updated here, which
@@ -312,10 +310,10 @@ Two things that only bite locally:
   `aws sts get-caller-identity` works. Run with
   `CLAUDE_CONFIG_DIR=$(mktemp -d)` to bypass the machine's settings. A CI runner
   has no user settings file, so this does not apply there.
-- **`.claude/skills/pr-review-ci.md` has to exist on the target branch** for the
-  harness to pin it. Until this change is merged it does not, so a dry run reviews
-  with `pr-review.md` and `CLAUDE.md` alone and says so in its own output. That is
-  the "first landing" case both CI jobs' pinning steps describe.
+- **Every file the harness pins has to exist on the target branch.** When one does
+  not — on a branch that adds or renames it — a dry run reviews with whatever does
+  resolve and says so in its own output. That is the "first landing" case both CI
+  jobs' pinning steps describe.
 
 ## Tests
 
