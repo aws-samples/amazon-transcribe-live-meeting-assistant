@@ -531,6 +531,144 @@ def test_an_unrecognised_result_publishes_nothing_about_itself(content: Any) -> 
     assert summary == "completed"
 
 
+# ── the hooks against the SDK's real event shapes ───────────────────────────
+#
+# The Strands Agents SDK models a tool use and a tool result as TypedDicts --
+# plain dicts at runtime -- while the hook events carrying them are objects.
+# So the event needs attribute access and its payload needs key access, and a
+# reader that assumes attributes everywhere silently gets None from the
+# payload: the summary would always say "completed" and every call would report
+# success. These drive the hooks with the dict shapes rather than testing the
+# summariser in isolation.
+
+
+def published_steps(event: Any, after: bool = True) -> List[Dict[str, Any]]:
+    """Run a hook against `event` and return the thinking steps it published."""
+    captured: List[Dict[str, Any]] = []
+    provider = agent_function.ThinkingStepHookProvider(
+        budget_with(), call_id="call-1", message_id="message-1"
+    )
+    with mock.patch.object(
+        agent_function,
+        "send_thinking_step",
+        lambda call_id, message_id, step, sequence: captured.append(step),
+    ):
+        if after:
+            provider.on_after_tool_call(event)
+        else:
+            provider.on_before_tool_call(event)
+    return captured
+
+
+def tool_result_event(payload: Dict[str, Any], status: str = "success") -> Any:
+    """An AfterToolCallEvent as the SDK builds it: object, with a dict result."""
+    event = mock.Mock()
+    event.selected_tool = mock.Mock(tool_name="search_logs")
+    # ToolResult is a TypedDict: content is a list of blocks carrying `text`.
+    event.result = {
+        "status": status,
+        "toolUseId": "tu-1",
+        "content": [{"text": json.dumps(payload)}],
+    }
+    event.agent = None
+    return event
+
+
+def test_a_dict_shaped_tool_result_is_read_and_summarised() -> None:
+    """The bug this guards: with attribute access the summary was always
+    "completed", so the progress panel never showed any shape at all."""
+    steps = published_steps(tool_result_event({"rowCount": 42, "logGroupCount": 2}))
+
+    assert len(steps) == 1
+    assert "42 rows" in steps[0]["result"]
+    assert "2 log groups" in steps[0]["result"]
+    assert steps[0]["tool_name"] == "search_logs"
+
+
+def test_a_tool_result_split_across_content_blocks_is_joined() -> None:
+    event = tool_result_event({})
+    body = json.dumps({"rowCount": 7})
+    event.result["content"] = [{"text": body[:4]}, {"text": body[4:]}]
+
+    assert "7 rows" in published_steps(event)[0]["result"]
+
+
+def test_a_json_content_block_is_read_too() -> None:
+    event = tool_result_event({})
+    event.result["content"] = [{"json": {"logGroupCount": 11}}]
+
+    assert "11 log groups" in published_steps(event)[0]["result"]
+
+
+def test_an_error_status_is_reported_as_a_failed_call() -> None:
+    """With attribute access `success` was always True, so a failed tool call
+    rendered as a successful one."""
+    steps = published_steps(tool_result_event({"rowCount": 0}, status="error"))
+
+    assert steps[0]["success"] is False
+
+
+def test_a_success_status_is_reported_as_a_successful_call() -> None:
+    assert published_steps(tool_result_event({"rowCount": 1}))[0]["success"] is True
+
+
+def test_an_unknown_status_counts_as_success() -> None:
+    """Narration that reported every call as failed would be worse than one
+    that reported none."""
+    event = tool_result_event({"rowCount": 1})
+    del event.result["status"]
+
+    assert published_steps(event)[0]["success"] is True
+
+
+def test_an_older_attribute_shaped_result_still_works() -> None:
+    """Belt and braces: the reader tries both, so neither shape is a cliff."""
+    event = mock.Mock()
+    event.selected_tool = mock.Mock(tool_name="search_logs")
+    event.result = mock.Mock(
+        content=json.dumps({"rowCount": 5}), is_error=False, status=None
+    )
+    event.agent = None
+
+    steps = published_steps(event)
+
+    assert "5 rows" in steps[0]["result"]
+    assert steps[0]["success"] is True
+
+
+def test_a_dict_shaped_tool_use_publishes_its_input() -> None:
+    """ToolUse is a TypedDict too, so the arguments were never published."""
+    event = mock.Mock()
+    event.selected_tool = mock.Mock(tool_name="search_logs")
+    event.tool_use = {
+        "toolUseId": "tu-1",
+        "name": "search_logs",
+        "input": {"log_group_names": "/a/b", "search_terms": "VP exit:"},
+    }
+
+    steps = published_steps(event, after=False)
+
+    assert steps[0]["tool_input"] == {
+        "log_group_names": "/a/b",
+        "search_terms": "VP exit:",
+    }
+
+
+def test_the_tool_name_is_found_on_the_tool_use_when_there_is_no_selected_tool() -> None:
+    event = mock.Mock(spec=["tool_use"])
+    event.tool_use = {"name": "get_vp_record", "input": {}}
+
+    assert published_steps(event, after=False)[0]["tool_name"] == "get_vp_record"
+
+
+def test_a_hook_failure_never_ends_a_diagnosis() -> None:
+    """An observability failure must not cost the answer."""
+    provider = agent_function.ThinkingStepHookProvider(budget_with())
+
+    provider.on_after_tool_call(object())
+    provider.on_before_tool_call(object())
+
+
 # ── narrating the investigation to the UI ───────────────────────────────────
 
 

@@ -633,20 +633,24 @@ Resources:
                   Resource:
                     - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:guardrail/${BedrockGuardrailId}"
                 - !Ref AWS::NoValue
-        # Narrating the investigation to the UI. One mutation field, the same
+        # Narrating the investigation to the UI: one mutation field, the same
         # one the meeting assistant streams through, on this deployment's own
-        # API where the id is known.
-        - PolicyName: AppSyncGraphQLPolicy
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: "appsync:GraphQL"
-                Resource:
-                  - !If
-                    - HasAppSyncApiId
+        # API. Omitted entirely rather than widened to apis/* when no API id
+        # was supplied — the deployment then simply publishes no thinking
+        # steps, which costs narration and nothing else. lma-main.yaml always
+        # supplies the id, so this only affects a standalone deployment of this
+        # template.
+        - !If
+          - HasAppSyncApiId
+          - PolicyName: AppSyncGraphQLPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: "appsync:GraphQL"
+                  Resource:
                     - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiId}/types/Mutation/fields/addChatToken"
-                    - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
+          - !Ref AWS::NoValue
         # Reading the CMK-encrypted tables and log groups. Scoped to reads made
         # through those two services, so the key is not usable for anything
         # else this role can reach.

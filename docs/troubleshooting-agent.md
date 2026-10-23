@@ -97,6 +97,13 @@ Four tools, each read-only:
 | `search_logs` | CloudWatch Logs Insights (`logs:StartQuery`) | Every "why", timeline, count and cross-component correlation. |
 | `get_vp_record` | `dynamodb:GetItem` on the VirtualParticipant table | One Virtual Participant's current status and its structured exit code. |
 
+`get_stack_parameters` returns parameter values, because deployment
+configuration is what the agent is reading them for — but any parameter whose
+name suggests a credential, an email address or other personal data is reported
+by name only. That is defence in depth rather than the control: this solution's
+five third-party credential parameters are all declared `NoEcho`, so
+CloudFormation already masks them in `DescribeStacks` output.
+
 `get_vp_record` returns a fixed allowlist of diagnostic attributes. The meeting
 passcode, the VNC password, and the fields identifying who owns or shares the
 Virtual Participant are never returned — their names are reported so the agent
@@ -179,7 +186,10 @@ evidence it has — the cooperative path, and the one that produces a real
 diagnosis. If it calls another tool anyway, the run ends there rather than
 paying for a further model turn, and you get a diagnosis in the usual three
 sections whose Root Cause is "Not determined" and which names the limit that
-was reached. The response's `truncated` field is `true` in that case.
+was reached. The response's `truncated` field is `true` whenever a limit was
+reached at all — on the cooperative path as well as the forced one — so treat
+it as "this diagnosis did not get to search as widely as it wanted", not as
+"the agent was cut off mid-sentence".
 
 | Environment variable | Default | Maximum | Bounds |
 |---|---|---|---|

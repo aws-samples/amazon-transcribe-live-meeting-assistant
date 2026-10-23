@@ -62,6 +62,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -183,6 +184,10 @@ class RunBudget:
         return self._monotonic() - self.started_at
 
     def note_tool_call(self) -> None:
+        # Not locked. Tools run one at a time in the agent's loop, and if that
+        # ever changes the worst case is an undercount by one on a turn with
+        # parallel calls -- which costs one extra tool call against the cap,
+        # not a run that does not stop.
         self.tool_calls += 1
 
     def note_usage(self, input_tokens: int, output_tokens: int) -> None:
@@ -241,7 +246,16 @@ class RunBudgetExhausted(BaseException):
     cannot be the only thing standing between a reached limit and the Lambda
     timeout.
 
-    So the second refusal stops the loop instead of asking again. An agent SDK
+    So the second refusal stops the loop instead of asking again. One caveat
+    on "second": refusals are counted, not turns. If the model issues several
+    tool calls in parallel in the turn that crosses a limit, the first is
+    refused and the second ends the run in that same turn, so it never gets
+    the cooperative answer turn. That is the right trade — a limit has been
+    reached either way, and the caller still gets a written answer — but it
+    means a parallel-calling model sees the forced path more often than a
+    serial one.
+
+    An agent SDK
     catches ``Exception`` around a tool call and turns it into a tool error the
     model can react to — which is the right default and exactly the wrong
     behaviour here — so this inherits from BaseException to pass through that
@@ -401,22 +415,83 @@ class ThinkingStepHookProvider:
         registry.add_callback(AfterToolCallEvent, self.on_after_tool_call)
 
     @staticmethod
-    def _tool_name(event: Any) -> str:
-        selected = getattr(event, "selected_tool", None)
-        if not selected:
-            return "unknown"
-        return (
-            getattr(selected, "tool_name", None)
-            or getattr(selected, "name", None)
-            or "unknown"
-        )
+    def _field(container: Any, name: str) -> Any:
+        """Read one field whether it is a mapping key or an attribute.
+
+        The Strands Agents SDK models a tool use and a tool result as
+        ``TypedDict``s — plain dicts at runtime — while the hook *events* that
+        carry them are objects. So the outer event needs attribute access and
+        its payload needs key access, and a reader that assumes either one
+        everywhere silently gets ``None`` from the other. Trying both is
+        cheaper than depending on which it is, and survives the SDK changing
+        its mind.
+        """
+        if container is None:
+            return None
+        if isinstance(container, Mapping):
+            return container.get(name)
+        return getattr(container, name, None)
+
+    @classmethod
+    def _tool_name(cls, event: Any) -> str:
+        for container in (
+            getattr(event, "selected_tool", None),
+            getattr(event, "tool_use", None),
+        ):
+            name = cls._field(container, "tool_name") or cls._field(container, "name")
+            if name:
+                return str(name)
+        return "unknown"
+
+    @classmethod
+    def _result_text(cls, result: Any) -> str:
+        """The text a tool returned, out of a ToolResult's content blocks.
+
+        ``ToolResult`` carries ``content`` as a list of blocks, each of which
+        may hold ``text``, ``json``, an image or a document. Only the text and
+        JSON blocks are of interest here, and they are joined so a tool that
+        split its output across blocks still summarises correctly.
+        """
+        content = cls._field(result, "content")
+        if content is None:
+            content = cls._field(result, "output")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, (list, tuple)):
+            parts: List[str] = []
+            for block in content:
+                text = cls._field(block, "text")
+                if text is None:
+                    text = cls._field(block, "json")
+                if text is not None:
+                    parts.append(text if isinstance(text, str) else json.dumps(text))
+                elif isinstance(block, str):
+                    parts.append(block)
+            return "".join(parts)
+        if content is None:
+            return ""
+        return str(content)
+
+    @classmethod
+    def _result_succeeded(cls, result: Any) -> bool:
+        """Whether a tool reported success.
+
+        ``ToolResult.status`` is the SDK's own signal and is checked first;
+        ``is_error`` is the shape an older provider used. Unknown counts as
+        success, because a narration that reported every call as failed would
+        be worse than one that reported none.
+        """
+        status = cls._field(result, "status")
+        if isinstance(status, str):
+            return status.lower() != "error"
+        return not bool(cls._field(result, "is_error"))
 
     def on_before_tool_call(self, event: Any) -> None:
         try:
             tool_use = getattr(event, "tool_use", None)
-            tool_input = getattr(tool_use, "input", None) or getattr(
-                tool_use, "arguments", None
-            )
+            tool_input = self._field(tool_use, "input")
+            if tool_input is None:
+                tool_input = self._field(tool_use, "arguments")
             send_thinking_step(
                 self._call_id,
                 self._message_id,
@@ -477,19 +552,14 @@ class ThinkingStepHookProvider:
         try:
             self._record_usage(event)
             result = getattr(event, "result", None)
-            content = (
-                getattr(result, "content", None)
-                or getattr(result, "output", None)
-                or result
-            )
             send_thinking_step(
                 self._call_id,
                 self._message_id,
                 {
                     "type": "tool_result",
                     "tool_name": self._tool_name(event),
-                    "result": self.summarise_result(content),
-                    "success": not getattr(result, "is_error", False),
+                    "result": self.summarise_result(self._result_text(result)),
+                    "success": self._result_succeeded(result),
                 },
                 self._sequence,
             )
