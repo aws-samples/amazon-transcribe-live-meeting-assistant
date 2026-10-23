@@ -117,14 +117,14 @@ const PROMPT = {
   updatedAt: '2026-10-22T10:00:00.000Z',
 };
 
-class FakeNotification {
-  constructor(title, options) {
-    notifications.push({ title, ...options });
-  }
-
-  // eslint-disable-next-line class-methods-use-this
-  close() {}
+// Stands in for the browser's Notification, recording each construction so a
+// test can count the chimes. A constructor function rather than a class,
+// because the only class this file needs is the ConsoleLogger the mock above
+// stubs out.
+function FakeNotification(title, options) {
+  notifications.push({ title, ...options });
 }
+FakeNotification.prototype.close = () => {};
 FakeNotification.permission = 'granted';
 FakeNotification.requestPermission = async () => 'granted';
 

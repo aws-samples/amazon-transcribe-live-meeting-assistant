@@ -226,10 +226,8 @@ test('the triggers the handlers build normalise to groupable values', () => {
 });
 
 test('normalizeExitTrigger slugs what follows the colon however short it is', () => {
-    // Slugging only long triggers would store a short platform message
-    // verbatim, and two reports of one failure differing by a word or a full
-    // stop would land in groups of one — which is the property the field
-    // exists for.
+    // Two reports of one failure differing by a word or a full stop have to
+    // land on the same string, which is the property the field exists for.
     assert.equal(normalizeExitTrigger('error:Target closed'), 'error:target-closed');
     assert.equal(normalizeExitTrigger('error:Target closed.'), 'error:target-closed');
     assert.equal(normalizeExitTrigger('poll-error:Target closed'), 'poll-error:target-closed');
@@ -256,10 +254,9 @@ test('normalizeExitTrigger leaves a trigger with no colon alone', () => {
 });
 
 test('normalizeExitTrigger reduces an interpolated error message to something groupable', () => {
-    // A Playwright message is long, multi-line and near enough unique. Stored
-    // whole it would put every such row in a group of one and duplicate
-    // errorMessage; the part that classifies is the prefix plus the start of
-    // the message, which is stable.
+    // A Playwright message is long, multi-line and near enough unique, so what
+    // is kept is the part that classifies: the prefix plus the start of the
+    // message, which is stable.
     const playwright =
         'error:page.waitForSelector: Target closed\n' +
         '=========================== logs ===========================\n' +
