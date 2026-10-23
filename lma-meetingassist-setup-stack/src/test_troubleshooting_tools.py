@@ -170,6 +170,26 @@ def test_a_filtered_discovery_does_not_poison_the_cache() -> None:
     assert len(parsed(tools.discover_log_groups())["logGroups"]) == len(REAL_GROUPS)
 
 
+def test_a_search_still_works_after_a_filtered_discovery() -> None:
+    """The consequence of the above, stated as the behaviour that matters: a
+    group outside the filter must still be queryable afterwards."""
+    client = FakeInsightsClient()
+    tools = make_tools(client)
+    tools.discover_log_groups("asr-microvm")
+
+    result = parsed(tools.search_logs(VP_GROUP))
+
+    assert result["logGroupNames"] == [VP_GROUP]
+
+
+def test_filtering_on_an_unknown_component_returns_nothing_visibly() -> None:
+    """An empty result the agent can see beats a silently unfiltered one."""
+    result = parsed(make_tools().discover_log_groups("not-a-component"))
+
+    assert result["logGroups"] == []
+    assert result["logGroupCount"] == 0
+
+
 # ── search_logs: query construction ─────────────────────────────────────────
 
 

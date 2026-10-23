@@ -250,9 +250,12 @@ def discover_log_groups(
     *,
     max_log_groups: int,
     graphql_url: str = "",
-    components: Optional[Iterable[str]] = None,
 ) -> List[LogGroupInfo]:
     """Page `describe_log_groups` over every namespace LMA writes to.
+
+    Deliberately returns everything it finds rather than taking a filter:
+    callers cache this result and filter it afterwards, so a filtered pass can
+    never be what populates a cache that a later unfiltered read depends on.
 
     Args:
         logs_client: A CloudWatch Logs client.
@@ -260,16 +263,11 @@ def discover_log_groups(
         max_log_groups: Hard cap on the number returned.
         graphql_url: AppSync endpoint, used to look for the service-managed
             AppSync group. Optional.
-        components: Restrict the result to these components. A name that is
-            not a known component matches nothing, which is deliberate — the
-            agent gets an empty result it can see rather than a silently
-            unfiltered one.
 
     Returns:
         Groups sorted by component then name, so related groups are adjacent
         in the model's context.
     """
-    wanted = set(components) if components is not None else None
     found: Dict[str, LogGroupInfo] = {}
 
     prefixes = stack_log_group_prefixes(stack_name)
@@ -286,12 +284,9 @@ def discover_log_groups(
                 name = group.get("logGroupName")
                 if not name or name in found:
                     continue
-                component = classify_log_group(name)
-                if wanted is not None and component not in wanted:
-                    continue
                 found[name] = LogGroupInfo(
                     name=name,
-                    component=component,
+                    component=classify_log_group(name),
                     stored_bytes=int(group.get("storedBytes") or 0),
                     retention_days=group.get("retentionInDays"),
                 )

@@ -217,6 +217,28 @@ mutation AddChatToken($input: AddChatTokenInput!) {
 """
 
 
+#: One AppSync client and one parsed mutation per execution environment. A
+#: diagnosis publishes two steps per tool call, and building a fresh SigV4
+#: client and re-parsing the document each time pays for a connection setup per
+#: step for no benefit.
+_APPSYNC_CLIENT: Any = None
+_PARSED_MUTATION: Any = None
+
+
+def _appsync_publisher() -> tuple[Any, Any]:
+    """The cached AppSync client and parsed mutation, built on first use."""
+    global _APPSYNC_CLIENT, _PARSED_MUTATION  # noqa: PLW0603
+    if _APPSYNC_CLIENT is None:
+        from asst_gql_client import AppsyncRequestsGqlClient
+        from gql import gql
+
+        _APPSYNC_CLIENT = AppsyncRequestsGqlClient(
+            url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=False
+        )
+        _PARSED_MUTATION = gql(_ADD_CHAT_TOKEN)
+    return _APPSYNC_CLIENT, _PARSED_MUTATION
+
+
 def send_thinking_step(
     call_id: str, message_id: str, step: Dict[str, Any], sequence: int
 ) -> None:
@@ -231,14 +253,9 @@ def send_thinking_step(
     if not (APPSYNC_GRAPHQL_URL and call_id and message_id):
         return
     try:
-        from asst_gql_client import AppsyncRequestsGqlClient
-        from gql import gql
-
-        client = AppsyncRequestsGqlClient(
-            url=APPSYNC_GRAPHQL_URL, fetch_schema_from_transport=False
-        )
+        client, mutation = _appsync_publisher()
         client.execute(
-            gql(_ADD_CHAT_TOKEN),
+            mutation,
             variable_values={
                 "input": {
                     "CallId": call_id,

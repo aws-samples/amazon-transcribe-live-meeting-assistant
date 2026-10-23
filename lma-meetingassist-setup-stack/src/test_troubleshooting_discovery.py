@@ -257,15 +257,18 @@ def test_every_component_the_classifier_can_return_has_a_note() -> None:
     assert set(discovery.COMPONENT_NOTES) >= produced
 
 
-def test_the_component_filter_restricts_the_result() -> None:
-    found = discover(components=[discovery.VP_LAUNCH_STATE_MACHINE])
+def test_discovery_takes_no_filter_of_its_own() -> None:
+    """Filtering belongs to the caller, which caches this result.
 
-    assert [g.name for g in found] == [f"/aws/vendedlogs/states/{VPSTACK}"]
+    A filtered pass must never be what populates that cache, or a later
+    unfiltered read would see only the components somebody asked about first.
+    The filter therefore lives in the tool; see test_troubleshooting_tools.
+    """
+    import inspect
 
+    parameters = inspect.signature(discovery.discover_log_groups).parameters
 
-def test_filtering_on_an_unknown_component_returns_nothing_visibly() -> None:
-    """An empty result the agent can see beats a silently unfiltered one."""
-    assert discover(components=["not-a-component"]) == []
+    assert "components" not in parameters
 
 
 # ── stored bytes ────────────────────────────────────────────────────────────

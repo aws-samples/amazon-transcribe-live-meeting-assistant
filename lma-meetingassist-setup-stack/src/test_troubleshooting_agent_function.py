@@ -319,6 +319,104 @@ def test_diagnosis_is_deterministic_where_the_model_allows_it() -> None:
     assert agent_function.AGENT_TEMPERATURE == 0.0
 
 
+# ── narrating the investigation to the UI ───────────────────────────────────
+
+
+def send_steps(count: int, **env: str) -> Any:
+    """Publish `count` thinking steps against a stubbed AppSync client."""
+    client = mock.MagicMock()
+    environ = {"APPSYNC_GRAPHQL_URL": "https://example.invalid/graphql"}
+    environ.update(env)
+    with mock.patch.multiple(
+        agent_function,
+        APPSYNC_GRAPHQL_URL=environ["APPSYNC_GRAPHQL_URL"],
+        _APPSYNC_CLIENT=None,
+        _PARSED_MUTATION=None,
+    ), mock.patch.object(
+        agent_function, "_appsync_publisher", return_value=(client, "mutation")
+    ):
+        for sequence in range(count):
+            agent_function.send_thinking_step(
+                "call-1", "message-1", {"type": "tool_use", "tool_name": "x"}, sequence
+            )
+    return client
+
+
+def test_a_thinking_step_is_published_on_the_meeting_s_channel() -> None:
+    client = send_steps(1)
+
+    variables = client.execute.call_args.kwargs["variable_values"]["input"]
+    assert variables["CallId"] == "call-1"
+    assert variables["MessageId"] == "message-1"
+    assert variables["ThinkingStep"]["ToolName"] == "x"
+
+
+def test_a_thinking_step_carries_an_empty_token() -> None:
+    """It rides the token stream, so the UI must not render it as an answer."""
+    client = send_steps(1)
+
+    variables = client.execute.call_args.kwargs["variable_values"]["input"]
+    assert variables["Token"] == ""
+    assert variables["IsComplete"] is False
+
+
+def test_the_appsync_client_is_reused_across_steps() -> None:
+    """A diagnosis publishes two steps per tool call; building a fresh SigV4
+    client each time would pay for a connection setup per step."""
+    client = send_steps(6)
+
+    assert client.execute.call_count == 6
+
+
+def test_the_cached_client_is_not_rebuilt_once_set() -> None:
+    sentinel = mock.MagicMock()
+    with mock.patch.multiple(
+        agent_function,
+        APPSYNC_GRAPHQL_URL="https://example.invalid/graphql",
+        _APPSYNC_CLIENT=sentinel,
+        _PARSED_MUTATION="mutation",
+    ):
+        client, mutation = agent_function._appsync_publisher()
+
+    assert client is sentinel
+    assert mutation == "mutation"
+
+
+@pytest.mark.parametrize(
+    ("url", "call_id", "message_id"),
+    [
+        ("", "call-1", "message-1"),
+        ("https://example.invalid/graphql", "", "message-1"),
+        ("https://example.invalid/graphql", "call-1", ""),
+    ],
+)
+def test_nothing_is_published_without_somewhere_to_publish_it(
+    url: str, call_id: str, message_id: str
+) -> None:
+    """onAddChatToken needs the message id, so a caller that supplied none
+    cannot be subscribed and the mutation would persist nothing."""
+    client = mock.MagicMock()
+    with mock.patch.multiple(agent_function, APPSYNC_GRAPHQL_URL=url), mock.patch.object(
+        agent_function, "_appsync_publisher", return_value=(client, "mutation")
+    ):
+        agent_function.send_thinking_step(call_id, message_id, {"type": "tool_use"}, 0)
+
+    client.execute.assert_not_called()
+
+
+def test_a_publishing_failure_does_not_end_the_diagnosis() -> None:
+    """A run that completed but could not narrate itself is still a run."""
+    client = mock.MagicMock()
+    client.execute.side_effect = RuntimeError("appsync unreachable")
+
+    with mock.patch.multiple(
+        agent_function, APPSYNC_GRAPHQL_URL="https://example.invalid/graphql"
+    ), mock.patch.object(
+        agent_function, "_appsync_publisher", return_value=(client, "mutation")
+    ):
+        agent_function.send_thinking_step("c", "m", {"type": "tool_use"}, 0)
+
+
 # ── the tool wrapper ────────────────────────────────────────────────────────
 #
 # build_tools needs the Strands layer, which is absent here. The wrapper's
