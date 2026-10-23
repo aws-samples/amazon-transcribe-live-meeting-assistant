@@ -25,6 +25,7 @@ import {
 import { voiceAssistant } from './voice-assistant.js';
 import { RosterTimeline } from './roster-timeline.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
+import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 
 const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
 
@@ -181,8 +182,7 @@ export class TranscriptionService {
         this.transcribeClient = new TranscribeStreamingClient(clientConfig);
         
         // Initialize voice assistant wake phrases from environment variable
-        const wakePhraseEnv = process.env.VOICE_ASSISTANT_WAKE_PHRASES || 'hey alex,ok alex,hi alex,hello alex';
-        this.wakePhrases = wakePhraseEnv.split(',').map(p => p.trim().toLowerCase());
+        this.wakePhrases = configuredWakePhrases();
         console.log('Wake phrases configured:', this.wakePhrases);
     }
 
@@ -940,13 +940,35 @@ export class TranscriptionService {
             const cutoff = timestamp - this.bufferWindowMs;
             this.transcriptBuffer = this.transcriptBuffer.filter(t => t.timestamp > cutoff);
             
-            // Check for wake phrase in the completed segment
-            if (this.detectWakePhrase(transcript) || this.preConnectTriggered) {
+            // "Hey Alex, stop talking" while the assistant is already answering.
+            // The wake phrase on its own would be dropped here, because
+            // handleWakePhraseDetected has nothing to do for an assistant that
+            // is already activated — so recognise the stop intent and silence it
+            // directly. This is a supplementary path: the `mute` tool the model
+            // calls itself remains the primary mechanism, because a transcript
+            // segment is only finalized after the speaker pauses.
+            const stopRequested =
+                voiceAssistant.isEnabled() &&
+                voiceAssistant.isActivated() &&
+                isStopTalkingRequest(transcript, this.wakePhrases);
+
+            if (stopRequested) {
+                console.log(`🔇 Stop request detected in transcript: "${transcript}"`);
+                // A stop request never starts a conversation, so drop any
+                // pre-connect armed by the wake phrase in this utterance. The
+                // reset keys off recognising the request, not off the provider
+                // acting on it: translator mode declines, and an armed flag
+                // would otherwise pull the following segment into the
+                // wake-phrase branch below whether it is addressed or not.
+                this.preConnectTriggered = false;
+                this.wakeDetectionTimestamp = null;
+                voiceAssistant.requestStopTalking('stop requested in transcript');
+            } else if (this.detectWakePhrase(transcript) || this.preConnectTriggered) {
                 const detectionTime = this.wakeDetectionTimestamp || timestamp;
                 // Reset pre-connect state for next wake phrase
                 this.preConnectTriggered = false;
                 this.wakeDetectionTimestamp = null;
-                
+
                 this.handleWakePhraseDetected(detectionTime);
             }
         }
@@ -1093,7 +1115,10 @@ export class TranscriptionService {
     }
 
     private async handleWakePhraseDetected(detectionTime: number): Promise<void> {
-        // Don't activate if already activated or if voice assistant not enabled
+        // Don't activate if already activated or if voice assistant not enabled.
+        // A repeated wake phrase while activated has nothing to add here — the
+        // assistant is already listening. The one intent it can carry, "stop
+        // talking", is handled by its caller before this is reached.
         if (!voiceAssistant.isEnabled() || voiceAssistant.isActivated()) {
             return;
         }

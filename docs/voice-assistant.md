@@ -16,6 +16,7 @@ title: "Voice Assistant"
   - [Nova Sonic 2](#nova-sonic-2)
   - [ElevenLabs](#elevenlabs)
 - [Barge-In](#barge-in)
+- [Asking the Assistant to Stop Talking](#asking-the-assistant-to-stop-talking)
 - [Meeting Mode](#meeting-mode)
   - [Group Meeting Mode](#group-meeting-mode)
   - [Translator Mode](#translator-mode)
@@ -41,6 +42,7 @@ LMA can optionally add a voice assistant to the Virtual Participant, allowing it
 | Session duration | Unlimited (auto-refresh every 5 min) | 8-minute sessions (auto-refresh) |
 | Meeting modes | `normal`, `group`, `translator` | `normal`, `group`, `translator` |
 | Barge-in support | Yes | Yes |
+| "Stop talking" on request | Yes (tool + prompt + transcript + barge-in) | Yes (transcript + barge-in) |
 | Custom system prompts | Yes (base/inject/replace modes) | Yes (via ElevenLabs agent config) |
 | Voice selection | Multiple AWS voice IDs | Multiple ElevenLabs voice IDs |
 | Turn-taking sensitivity | Configurable (HIGH/MEDIUM/LOW) | Via ElevenLabs settings |
@@ -80,21 +82,45 @@ ElevenLabs session timeout is configured within the ElevenLabs platform. Auto-re
 
 The voice assistant supports barge-in, allowing meeting participants to interrupt the assistant mid-sentence. This is implemented through separate audio routing for VP meeting audio versus agent output, ensuring that the assistant can detect incoming speech even while it is speaking and stop its current response to listen.
 
+When the interruption is a correction or a new question, the assistant acknowledges it in one or two words ("Got it", "Of course") and then answers the new request. When the interruption is a request for silence, it is handled as described next.
+
+## Asking the Assistant to Stop Talking
+
+Saying something like **"Hey Alex, stop talking"** stops the assistant. It does not explain itself, summarize what it was saying, or offer further help — it stops.
+
+Usually it gets a single short word out first, "Okay", but treat that as a courtesy rather than a guarantee. Silencing the assistant promptly is the point, so whichever of the mechanisms below reaches it first wins: when the transcript path gets there, the audio stops immediately and an "Okay" the model was about to say is dropped with the rest. The acknowledgement is most likely on the tool path, which gives it a moment to play before the audio stops.
+
+This works in `normal` mode under either activation mode, and in `group` mode (which itself requires `always_active`), and while other participants are talking. Phrasings that are recognized include "stop", "stop talking", "be quiet", "shut up", "mute yourself" and "that's enough", with or without "please" or "can you".
+
+Three mechanisms act together, so that a stop does not depend on any one of them:
+
+1. **A `mute` tool.** Nova Sonic is given a tool it can call to silence itself, and its system prompt tells it that a request to stop is a request for silence rather than the preface to a new request. This is the primary mechanism and the fastest, because the model acts as soon as it hears the request.
+2. **The transcript.** LMA watches completed transcript segments for a stop request addressed to the assistant and silences it directly, without waiting on the model. Matching is deliberately strict: the utterance has to name the assistant by wake phrase and has to contain no other request, so "Hey Alex, can you stop the recording and summarize the last hour?" and "Hey Alex, why did the build stop?" leave the assistant talking. This path only finalizes after the speaker pauses, which is why it backs up the tool rather than replacing it.
+3. **Audio barge-in.** Speaking over the assistant at all cuts its current utterance short, as described under [Barge-In](#barge-in).
+
+**Getting the assistant back.** Being asked to stop silences the assistant until it is addressed again — it is not silenced for the rest of the meeting. Saying a wake phrase makes it audible again, whether that comes in as a fresh `wake_phrase` activation or as a wake phrase in an `always_active` session's transcript.
+
+On an `always_active` deployment a wake phrase is the **only** way back, so it is worth knowing the configured phrase even if you never otherwise need it: an always-on assistant is normally addressed without one. Because the assistant hears the whole meeting, the `mute` tool and its prompt both require a stop request to be addressed to the assistant — by name or wake phrase, or as a direct reply to something it just said — so that participants telling each other to be quiet is read as ordinary conversation and leaves it alone.
+
+Translator mode is not affected: it is paused and resumed only by its own configured trigger phrases (see [Translator Mode](#translator-mode)), so a stop request from the transcript route is ignored there.
+
+On **ElevenLabs**, only the transcript mechanism and audio barge-in apply. The ElevenLabs agent's system prompt and tools live in the ElevenLabs dashboard rather than in LMA, so LMA cannot give it a `mute` tool or amend its instructions — which also means it may keep speaking for a moment, and may say more than one word, before LMA's transcript path drops its audio. To get the one-word behavior there, add the equivalent instruction to the agent's own system prompt in the ElevenLabs dashboard.
+
 ## Meeting Mode
 
-The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic Configuration page (admin-only). All three modes require the stack to be deployed with `VoiceAssistantActivationMode = always_active` — in `wake_phrase` mode, `group` and `translator` have no effect and the UI will surface a warning.
+The voice assistant supports three meeting modes, configured via the **Meeting Mode** selector on the Nova Sonic Configuration page (admin-only). The `group` and `translator` modes require the stack to be deployed with `VoiceAssistantActivationMode = always_active` — in `wake_phrase` mode they have no effect and the UI will surface a warning.
 
-| Mode | Starts muted? | Speaks when… | Typical use |
-|---|---|---|---|
-| `normal` (default) | No | Activated by wake phrase or always-active session | Standard assistant behavior |
-| `group` | Yes | A configured wake phrase (e.g. "hey Alex") is detected in the transcript | Multi-participant meetings where the assistant should remain unobtrusive until addressed |
-| `translator` | No | Every completed utterance | Live bidirectional interpreter between two languages |
+| Mode | Starts muted? | Speaks when… | Stops when asked to? | Typical use |
+|---|---|---|---|---|
+| `normal` (default) | No | Activated by wake phrase or always-active session | Yes — `mute` tool, transcript, barge-in | Standard assistant behavior |
+| `group` | Yes | A configured wake phrase (e.g. "hey Alex") is detected in the transcript | Yes — `mute` tool, transcript, barge-in | Multi-participant meetings where the assistant should remain unobtrusive until addressed |
+| `translator` | No | Every completed utterance | No — paused by its own trigger phrase only | Live bidirectional interpreter between two languages |
 
 ### Group Meeting Mode
 
 Group meeting mode enables passive listening where the assistant monitors the full meeting conversation but only speaks when directly addressed. The assistant starts muted and unmutes when a wake phrase is detected in a participant's transcript; after `VoiceAssistantActivationDuration` seconds without further wake-phrase mentions it automatically mutes again.
 
-- **Nova Sonic:** Wake-phrase detection is performed by LMA on Nova's FINAL USER transcripts, and a `mute` tool is registered so the assistant can re-mute when asked (e.g. "stop talking").
+- **Nova Sonic:** Wake-phrase detection is performed by LMA on Nova's FINAL USER transcripts. A wake phrase that is itself a request to stop ("hey Alex, stop talking") does not unmute the assistant. Muting is silent, with no tone — the same as `normal` mode, and the same whichever of the [stop mechanisms](#asking-the-assistant-to-stop-talking) acts first. A tone is used only in [translator mode](#translator-mode), where the assistant speaks no acknowledgement and so has nothing else to confirm the pause with.
 - **ElevenLabs:** Wake-phrase detection is performed by LMA on ElevenLabs `user_transcript` messages. The ElevenLabs agent's persona (system prompt, first message, tools, voice, language) is configured in the ElevenLabs dashboard — LMA does not override it. Configure your ElevenLabs agent normally and set LMA's Meeting Mode to `group`; LMA will drop the agent's audio output until a wake phrase is detected.
 
 ### Translator Mode
@@ -115,7 +141,7 @@ Configuration attributes (set on the Nova Sonic Configuration page or directly i
 
 #### Nova Sonic
 
-LMA replaces the agent's system prompt with a translator-specific prompt parameterized on `translatorLanguageA` / `translatorLanguageB`, and registers no tools (no `strands_agent`, no `mute`). Nova Sonic speaks the translation directly using the configured `voiceId`. A polyglot voice such as `tiffany` (feminine) or `matthew` (masculine) is recommended so the same voice can render both languages.
+LMA replaces the agent's system prompt with a translator-specific prompt parameterized on `translatorLanguageA` / `translatorLanguageB`. No `strands_agent` tool is registered, and the only tool offered is the pause/resume trigger for the current state — `mute` while translating, `unmute` while paused — which is why translator mode does not take stop requests from anywhere else. Nova Sonic speaks the translation directly using the configured `voiceId`. A polyglot voice such as `tiffany` (feminine) or `matthew` (masculine) is recommended so the same voice can render both languages.
 
 Example:
 
@@ -138,7 +164,7 @@ The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA
 #### Limitations
 
 - A single agent voice is used for both translation directions. For different voices per direction, two concurrent agents would be required (not supported today).
-- Meeting Mode settings only take effect when the stack is deployed with `VoiceAssistantActivationMode = always_active`.
+- Translator mode only takes effect when the stack is deployed with `VoiceAssistantActivationMode = always_active`, as does `group`. The default `normal` mode works under either activation mode.
 - If an utterance is in a language other than the two configured, Nova Sonic falls back to translating it into `translatorLanguageA` per the system prompt.
 
 ## Turn-Taking Sensitivity

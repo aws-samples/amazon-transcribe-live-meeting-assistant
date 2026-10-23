@@ -131,4 +131,20 @@ export interface VoiceAssistantProvider {
    * Whether the voice assistant is currently muted.
    */
   isMuted(): boolean;
+
+  /**
+   * Act on a participant asking the assistant to stop talking: silence the
+   * utterance in progress and stay silent until the assistant is addressed
+   * again by wake phrase.
+   *
+   * The provider decides, because only it knows which meeting mode it is in —
+   * translator mode is driven by its own pause/resume trigger phrases and
+   * declines.
+   *
+   * @param reason Optional log tag identifying the source of the call.
+   * @returns true when the assistant is now silent and will stay silent until
+   *   addressed again; false when the current mode does not take stop requests
+   *   from this route.
+   */
+  requestStopTalking(reason?: string): boolean;
 }
