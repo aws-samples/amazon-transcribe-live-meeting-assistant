@@ -45,8 +45,10 @@ deliberately not part of any description.
 A rendered Python traceback ends in the exception's own text, so the places that
 log a failure at the pipeline's default level use :func:`traceback_frames`
 instead: the chain of frames a traceback is read for, without the line it ends
-in. That chain is what makes an unexpected response shape diagnosable, so it is
-kept everywhere a traceback used to go rather than traded away.
+in. That chain is what makes an unexpected response shape diagnosable, so it
+goes wherever a traceback would have rather than being traded away -- for the
+exception in hand, which is what these paths raise; a chained cause's own frames
+are not followed.
 """
 
 from __future__ import annotations
@@ -125,7 +127,10 @@ def traceback_frames(error: BaseException) -> List[str]:
     :class:`GraphQLResponseError` keeps :func:`require_graphql_field` -- the same
     frame whichever call failed. It is the rest of the chain that names the call.
 
-    An exception with no traceback, one built but never raised, gives ``[]``.
+    This exception's own traceback only: a chained ``__cause__`` or
+    ``__context__`` is not followed, so a wrapped exception's inner frames are
+    not listed. An exception with no traceback, one built but never raised, gives
+    ``[]``.
     """
     return [
         f"{frame.filename}:{frame.lineno} in {frame.name}"

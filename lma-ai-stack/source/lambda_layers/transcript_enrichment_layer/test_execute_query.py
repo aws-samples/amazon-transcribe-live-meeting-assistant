@@ -12,7 +12,8 @@ asserted:
   GraphQL errors. A transport exception stringifies as its first GraphQL error
   message, and these mutations inline their arguments into the query document.
 * They carry no traceback. A rendered traceback ends in the exception's own text,
-  so the frame a traceback would be read for is logged on its own instead.
+  so the chain of frames a traceback would be read for is logged instead,
+  without the line it ends in.
 * They carry no ``query`` field. The query document -- arguments and all -- is
   logged on the debug line for the attempt they are about, which is where it
   belongs; repeating it on a line that is on at the default level would put the

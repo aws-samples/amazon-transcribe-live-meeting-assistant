@@ -19,8 +19,9 @@ things about it are asserted here:
   error message, and the mutations this processor sends inline their arguments
   into the query document.
 
-Powertools and gql's HTTP transports are stubbed, so this runs wherever the
-lint/test tooling is installed; the processor itself is the real one.
+Powertools and gql's HTTP transports are stubbed, so the only runtime
+dependency left is gql, which ``make setup-cli-dev`` installs with
+``lib/lma_sdk[dev]``; the processor itself is the real one.
 
 It sits at the layer root rather than beside the module it tests because
 ``transcript_batch_processor/__init__.py`` imports Powertools at import time, and
