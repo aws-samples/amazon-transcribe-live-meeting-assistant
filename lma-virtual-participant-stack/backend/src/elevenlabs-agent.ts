@@ -904,6 +904,14 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       return false;
     }
 
+    // Same log family as Nova Sonic, so one CloudWatch filter covers both
+    // providers. There is nothing to defer for: with no tool to call and no
+    // prompt to amend, this provider has no way to answer the request out loud,
+    // so the transcript route is the whole mechanism and acts at once.
+    console.log(
+      '[stop-request] route=transcript action=muted-immediately provider=elevenlabs'
+      + ` mode=${this.meetingMode} speaking=${this.isSpeaking()} muted=${this._isMuted}`,
+    );
     this.mute(reason || 'stop requested');
     return true;
   }

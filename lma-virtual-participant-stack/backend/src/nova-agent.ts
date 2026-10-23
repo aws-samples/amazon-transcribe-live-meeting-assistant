@@ -39,6 +39,40 @@ export function hasStopTalkingTool(meetingMode: MeetingMode): boolean {
 }
 
 /**
+ * How long the transcript route waits for Nova to call the `mute` tool itself
+ * before silencing the assistant on its own.
+ *
+ * Two routes recognise the same request and only one of them can speak. The
+ * tool route is the model noticing, so it is the only route that can produce
+ * the spoken "Okay" the prompt asks for — and it is also the slower of the two,
+ * because Nova has to hear the audio, decide, and emit a tool-use event where
+ * Amazon Transcribe only has to finalise a segment. Left to race, the
+ * transcript route wins: it shuts the gate before the word exists, and the
+ * meeting is left with silence and no acknowledgement at all.
+ *
+ * 500 ms is a starting value and not a measured one: long enough for a tool-use
+ * event to arrive on an established bidirectional stream, short enough that
+ * someone asking for quiet does not hear the assistant hesitate. Every request
+ * logs the tool's actual latency (`[stop-request] ... tool_latency_ms=`), so the
+ * next live meeting replaces this estimate with a measurement.
+ */
+export const STOP_REQUEST_TOOL_GRACE_MS = 500;
+
+/**
+ * How long the transcript route keeps its fallback armed after Nova's own
+ * `mute` tool call has been seen.
+ *
+ * The tool route owns the request from that point — it holds the gate open long
+ * enough for the acknowledgement to reach the meeting — but the tool-use event
+ * and the handler that acts on it are two steps, and the bidirectional stream
+ * can close in between. A stop request that silences nothing is the one outcome
+ * this feature may not produce, so the fallback is extended rather than
+ * cancelled: long enough to sit behind the tool route's own flush, short enough
+ * that nobody is left waiting on it.
+ */
+export const STOP_REQUEST_TOOL_BACKSTOP_MS = 1500;
+
+/**
  * Which region to reach Amazon Nova Sonic in.
  *
  * Nova Sonic is available in fewer regions than LMA itself, so a deployment
@@ -145,8 +179,42 @@ export class NovaAgent implements VoiceAssistantProvider {
   
   // Persistent audio playback stream (replaces per-batch paplay spawning)
   private pacatProcess: ChildProcess | null = null;
+  /** When the current pacat process was spawned. Reported with the mute-tool
+   *  acknowledgement, because a stream spawned milliseconds earlier may not have
+   *  finished connecting to PulseAudio and so has played nothing yet. */
+  private pacatSpawnedAt: number = 0;
+  /** Upper bound on letting the playback buffer empty instead of discarding it
+   *  (see muteDrainingPlayback). Generous for the one word the prompt asks for,
+   *  tight enough that a model which ignored the prompt cannot keep talking. */
+  private readonly PLAYBACK_DRAIN_CAP_MS = 1500;
+  /** How long the mute-tool route waits for trailing audio chunks of the
+   *  acknowledgement before engaging the gate. It does not have to cover
+   *  playback itself — muteDrainingPlayback lets the buffer empty — so it only
+   *  has to outlast the stream's own event delivery. */
+  private readonly MUTE_TOOL_AUDIO_FLUSH_MS = 280;
   private speakingTimeout: NodeJS.Timeout | null = null;
   private readonly SPEAKING_TIMEOUT_MS = 500; // Mark as not speaking after 500ms of silence
+
+  /**
+   * The stop request currently being resolved, if any.
+   *
+   * One record for both routes, which is what makes them safe to fire in either
+   * order: a second "stop talking" inside the window finds it already set and
+   * stacks no timer, the tool route extends the same timer instead of adding
+   * one, and whichever route reaches mute() first makes the other a no-op.
+   */
+  private stopRequest: {
+    /** When this request was first recognised, by either route. */
+    seenAt: number;
+    /** Whether the transcript route is the one that recognised it. */
+    fromTranscript: boolean;
+    /** Whether Nova's own `mute` tool call has been seen for it. */
+    toolSeen: boolean;
+    /** Whether a dropped acknowledgement has already been reported, so a
+     *  chunk-rate audio gate cannot flood the log. */
+    ackDropLogged: boolean;
+    timer: NodeJS.Timeout | null;
+  } | null = null;
   
   // Session refresh configuration. Nova closes the stream itself after 295s
   // without interactive content ("Timed out waiting for audio bytes or
@@ -1329,6 +1397,12 @@ export class NovaAgent implements VoiceAssistantProvider {
               toolUseContent = jsonResponse.event.toolUse;
               toolUseId = jsonResponse.event.toolUse.toolUseId;
               toolName = jsonResponse.event.toolUse.toolName;
+              if (toolName === 'mute') {
+                // Earliest point the transcript route can be told to stand
+                // down: the handler below is a step later, and every
+                // millisecond of this window belongs to the acknowledgement.
+                this.noteMuteToolRequested();
+              }
             } else if (jsonResponse.event?.contentEnd && jsonResponse.event?.contentEnd?.type === 'TOOL') {
               // Process tool use asynchronously when content ends
               console.log(`Processing tool use: ${toolName}`);
@@ -1619,14 +1693,27 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.meetingMode === 'translator') {
       this.playConfirmationTone('mute');
     }
-    // mute() tears down the pacat stream, so wait either way: this is what lets
-    // the tone, or the spoken "Okay" the conversational prompt asks for, reach
-    // the meeting instead of dying in the buffer. Only this path can offer that
-    // — scribe.ts mutes the moment it recognises a stop in the transcript, and
-    // silencing promptly is worth more there than the courtesy word, so the
-    // "Okay" is best-effort overall and the docs say so.
-    await new Promise(resolve => setTimeout(resolve, 280));
-    this.mute('tool');
+    // Wait for trailing audio chunks of the tone, or of the spoken "Okay" the
+    // conversational prompt asks for, before the gate engages — events for a
+    // turn can still be arriving when its tool call is dispatched.
+    await new Promise(resolve => setTimeout(resolve, this.MUTE_TOOL_AUDIO_FLUSH_MS));
+
+    if (hasStopTalkingTool(this.meetingMode)) {
+      // playback_age_ms is the diagnostic that matters most here: a pacat only
+      // milliseconds old was spawned for this acknowledgement, which means the
+      // barge-in killed the previous one and the word is still in the buffer
+      // rather than in the room. Hence draining rather than discarding.
+      const playbackAgeMs = this.pacatSpawnedAt ? Date.now() - this.pacatSpawnedAt : -1;
+      console.log(
+        `[stop-request] route=tool action=acknowledged flush_ms=${this.MUTE_TOOL_AUDIO_FLUSH_MS}`
+        + ` playback_age_ms=${playbackAgeMs} interrupted=${this._isInterrupted}`
+        + ` speaking=${this._isSpeaking} mode=${this.meetingMode}`,
+      );
+      this.muteDrainingPlayback('tool');
+    } else {
+      // Translator mode: the tone has flushed and the pause should be absolute.
+      this.mute('tool');
+    }
 
     // Acknowledge the tool result on the current session before refreshing.
     if (this.session && this.session.isActive) {
@@ -1842,6 +1929,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log(
       `🔊 Starting persistent pacat playback stream (${playbackRate}Hz, ${playbackLatencyMs}ms buffer)...`,
     );
+    this.pacatSpawnedAt = Date.now();
     this.pacatProcess = spawn('pacat', [
       '--playback',
       '--device=agent_output',
@@ -1881,17 +1969,35 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   /**
    * Stop the persistent pacat process (called during cleanup/session close).
+   *
+   * `immediate` discards whatever PulseAudio still has buffered, which is what
+   * barge-in, an ordinary mute and shutdown all want. `drain` closes the input
+   * and lets the buffer play out, bounded by PLAYBACK_DRAIN_CAP_MS; only the
+   * stop-request acknowledgement uses it (see muteDrainingPlayback).
    */
-  private stopPacatStream(): void {
-    if (this.pacatProcess && !this.pacatProcess.killed) {
+  private stopPacatStream(mode: 'immediate' | 'drain' = 'immediate'): void {
+    const process_ = this.pacatProcess;
+    if (process_ && !process_.killed) {
       try {
-        this.pacatProcess.stdin?.end();
-        this.pacatProcess.kill('SIGTERM');
+        process_.stdin?.end();
+        if (mode === 'immediate') {
+          process_.kill('SIGTERM');
+        } else {
+          // Hand the process off: it exits on its own once the buffer empties,
+          // and the cap stops one that never drains from outliving the request
+          // that silenced it.
+          const cap = setTimeout(() => {
+            if (!process_.killed) {
+              process_.kill('SIGTERM');
+            }
+          }, this.PLAYBACK_DRAIN_CAP_MS);
+          cap.unref?.();
+        }
       } catch (e) {
         // Ignore errors during cleanup
       }
       this.pacatProcess = null;
-      console.log('✓ Persistent pacat stream stopped');
+      console.log(`✓ Persistent pacat stream stopped (${mode})`);
     }
     // Clear speaking state
     if (this.speakingTimeout) {
@@ -1902,14 +2008,25 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private async playAudio(audioBuffer: Buffer): Promise<void> {
-    // Drop all audio after barge-in until Nova starts a new response turn
+    // Drop all audio after barge-in until Nova starts a new response turn.
+    //
+    // This gate is cleared by the contentStart that opens the next AUDIO block
+    // (see processResponseStream), which arrives before that block's first
+    // audioOutput — so an acknowledgement generated in a new turn after the
+    // barge-in passes, and the gate is deliberately NOT relaxed for it.
+    // Relaxing it would let the tail of the very utterance the participant
+    // asked to stop through, which is the one thing barge-in exists to prevent.
+    // noteStopAckDropped is how a live meeting tells us if that assumption is
+    // wrong on the stop path.
     if (this._isInterrupted) {
+      this.noteStopAckDropped('interrupted');
       return;
     }
-    
+
     // Mute gate: drops outgoing audio while the agent is muted (group-mode
     // auto-mute, mute-tool, or translator-mode pause).
     if (this._isMuted) {
+      this.noteStopAckDropped('muted');
       console.log('🔇 Audio dropped - agent is muted');
       return;
     }
@@ -2200,6 +2317,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Clear conversation timeout
     this.clearConversationTimeout();
 
+    // Nothing left to silence once the agent is going away.
+    this.cancelStopRequest('agent-stopped');
+
     // Close session if active
     if (this.session) {
       await this.closeSession();
@@ -2250,9 +2370,45 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   /**
+   * Engage the audio gate, but let the playback buffer empty first instead of
+   * discarding it.
+   *
+   * mute() tears the stream down, which is right everywhere else: an ordinary
+   * mute has to stop the assistant mid-word. Here the audio already buffered IS
+   * the answer to the request — and the barge-in that precedes a stop request
+   * has usually just killed the stream, so the acknowledgement is written to a
+   * pacat spawned for it. A process that has not finished connecting to
+   * PulseAudio has played nothing yet, and no fixed wait can tell the
+   * difference, so waiting on the buffer rather than on the clock is what makes
+   * the word audible. PLAYBACK_DRAIN_CAP_MS bounds it.
+   *
+   * The avatar's own buffer is deliberately left alone, unlike in mute(): the
+   * audio is still going to play, so the lips should keep up with it.
+   */
+  private muteDrainingPlayback(reason: string): void {
+    if (this._isMuted) {
+      return;
+    }
+    console.log(`🔇 Nova agent muted (${reason}, draining playback)`);
+    this._isMuted = true;
+    this.conversationActive = false;
+    try {
+      this.stopPacatStream('drain');
+    } catch (err) {
+      console.warn('draining playback during mute failed (non-fatal):', err);
+    }
+  }
+
+  /**
    * Unmute the agent — resumes outgoing audio. Idempotent.
    */
   unmute(reason?: string): void {
+    // Being asked back supersedes a stop request that is still resolving.
+    // Without this, a fallback or backstop armed moments ago would silence the
+    // assistant again immediately after a wake phrase made it audible. The
+    // utterance that asked for silence cannot reach here: both wake-phrase
+    // routes recognise it and leave the mute state alone.
+    this.cancelStopRequest(reason ? `unmuted:${reason.replace(/\s+/g, '-')}` : 'unmuted');
     if (!this._isMuted) {
       return;
     }
@@ -2271,6 +2427,13 @@ export class NovaAgent implements VoiceAssistantProvider {
    *
    * In `normal` and `group` mode this silences the agent; it becomes audible
    * again the next time it is addressed by wake phrase.
+   *
+   * Where Nova has a `mute` tool to call, the gate is not closed here and now:
+   * it is deferred by STOP_REQUEST_TOOL_GRACE_MS so the model has room to answer
+   * out loud first. If the tool call arrives in that window the tool route
+   * finishes the job and this one stands down; if it does not, this one mutes
+   * anyway. The fallback is unconditional — being asked for quiet and ignored is
+   * a worse outcome than being answered without the courtesy word.
    */
   requestStopTalking(reason?: string): boolean {
     // Translator mode declines. Its pause/resume is a state machine keyed on
@@ -2279,10 +2442,177 @@ export class NovaAgent implements VoiceAssistantProvider {
     // would have no tool to call and the translator would never speak again.
     if (this.meetingMode === 'translator') {
       console.log('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
+      this.logStopRequest('transcript', 'declined-translator');
       return false;
     }
 
-    this.mute(reason || 'stop requested');
+    if (this._isMuted) {
+      // Already silent, most likely because the tool route got there first.
+      this.logStopRequest('transcript', 'already-silent');
+      return true;
+    }
+
+    // Deferring only buys something where there is a tool to wait for, because
+    // the tool call is what produces the spoken acknowledgement. Translator —
+    // the only mode without one — has already declined above.
+    if (!hasStopTalkingTool(this.meetingMode)) {
+      this.logStopRequest('transcript', 'muted-immediately');
+      this.mute(reason || 'stop requested');
+      return true;
+    }
+
+    if (this.stopRequest) {
+      // Someone repeating themselves inside the window must not stack a second
+      // timer or push the deadline out: the request already in flight is
+      // guaranteed to silence the assistant.
+      this.logStopRequest('transcript', 'already-deferred');
+      return true;
+    }
+
+    this.stopRequest = {
+      seenAt: Date.now(),
+      fromTranscript: true,
+      toolSeen: false,
+      ackDropLogged: false,
+      timer: null,
+    };
+    this.logStopRequest('transcript', 'deferred');
+    this.stopRequest.timer = setTimeout(
+      () => this.resolveStopRequest(reason || 'stop requested'),
+      STOP_REQUEST_TOOL_GRACE_MS,
+    );
     return true;
+  }
+
+  /**
+   * Record that Nova has asked to mute itself, and hand the request in flight
+   * over to the tool route.
+   *
+   * Called when the tool-use event is seen, which is a step earlier than the
+   * handler that acts on it — the earliest point at which the transcript route
+   * can be told to stand down, and so the point that gives the acknowledgement
+   * the most room.
+   */
+  private noteMuteToolRequested(): void {
+    // Translator mode's `mute` is a different tool with different semantics and
+    // no spoken acknowledgement; it has nothing to do with this race.
+    if (!hasStopTalkingTool(this.meetingMode)) {
+      return;
+    }
+
+    const existing = this.stopRequest;
+    const latency = existing?.fromTranscript ? `${Date.now() - existing.seenAt}` : 'n/a';
+    console.log(
+      `[stop-request] route=tool action=claimed transcript_deferred=${existing?.fromTranscript === true}`
+      + ` tool_latency_ms=${latency} speaking=${this._isSpeaking} interrupted=${this._isInterrupted}`
+      + ` muted=${this._isMuted} mode=${this.meetingMode}`,
+    );
+
+    if (existing) {
+      existing.toolSeen = true;
+      if (existing.timer) {
+        clearTimeout(existing.timer);
+      }
+      existing.timer = setTimeout(
+        () => this.resolveStopRequest('stop requested (tool backstop)'),
+        STOP_REQUEST_TOOL_BACKSTOP_MS,
+      );
+      return;
+    }
+
+    // No transcript route to stand down — the model noticed on its own. Still
+    // worth recording, so that a dropped acknowledgement is reported and the
+    // backstop covers a stream that closes before handleMuteTool runs.
+    this.stopRequest = {
+      seenAt: Date.now(),
+      fromTranscript: false,
+      toolSeen: true,
+      ackDropLogged: false,
+      timer: setTimeout(
+        () => this.resolveStopRequest('stop requested (tool backstop)'),
+        STOP_REQUEST_TOOL_BACKSTOP_MS,
+      ),
+    };
+  }
+
+  /**
+   * Close out the stop request in flight: mute if nothing else has, and report
+   * which route got there.
+   */
+  private resolveStopRequest(reason: string): void {
+    const request = this.stopRequest;
+    if (!request) {
+      return;
+    }
+    if (request.timer) {
+      clearTimeout(request.timer);
+    }
+    this.stopRequest = null;
+
+    const elapsedMs = Date.now() - request.seenAt;
+    if (this._isMuted) {
+      // The other route already silenced the assistant — on the tool path that
+      // means the meeting heard "Okay" and then nothing, which is the whole
+      // point of the window.
+      console.log(
+        `[stop-request] route=transcript action=stood-down elapsed_ms=${elapsedMs}`
+        + ` tool_seen=${request.toolSeen} interrupted=${this._isInterrupted}`,
+      );
+      return;
+    }
+
+    console.log(
+      `[stop-request] route=transcript action=fired-fallback elapsed_ms=${elapsedMs}`
+      + ` tool_seen=${request.toolSeen} interrupted=${this._isInterrupted}`
+      + ` speaking=${this._isSpeaking}`,
+    );
+    this.mute(reason);
+  }
+
+  /** Drop a stop request that is still resolving. */
+  private cancelStopRequest(why: string): void {
+    const request = this.stopRequest;
+    if (!request) {
+      return;
+    }
+    if (request.timer) {
+      clearTimeout(request.timer);
+    }
+    this.stopRequest = null;
+    console.log(
+      `[stop-request] route=transcript action=cancelled why=${why}`
+      + ` elapsed_ms=${Date.now() - request.seenAt} tool_seen=${request.toolSeen}`,
+    );
+  }
+
+  /**
+   * Note that assistant audio was dropped while a stop request was resolving —
+   * that audio is the acknowledgement the meeting was supposed to hear, and
+   * `gate` says which of the two gates discarded it.
+   *
+   * Reported once per request, and only while a request is in flight, so
+   * ordinary barge-in and ordinary muting are unaffected.
+   */
+  private noteStopAckDropped(gate: 'interrupted' | 'muted'): void {
+    const request = this.stopRequest;
+    if (!request || request.ackDropLogged) {
+      return;
+    }
+    request.ackDropLogged = true;
+    console.log(
+      `[stop-request] route=tool action=ack-dropped gate=${gate}`
+      + ` elapsed_ms=${Date.now() - request.seenAt} tool_seen=${request.toolSeen}`,
+    );
+  }
+
+  /** One line per stop-request decision on the transcript route. Carries the
+   *  route, the flags and the timings — never the utterance, which is
+   *  participant speech. */
+  private logStopRequest(route: 'transcript' | 'tool', action: string): void {
+    console.log(
+      `[stop-request] route=${route} action=${action} mode=${this.meetingMode}`
+      + ` window_ms=${STOP_REQUEST_TOOL_GRACE_MS} speaking=${this._isSpeaking}`
+      + ` interrupted=${this._isInterrupted} muted=${this._isMuted}`,
+    );
   }
 }

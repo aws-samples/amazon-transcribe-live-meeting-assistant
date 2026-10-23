@@ -20,10 +20,20 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { NovaAgent, hasStopTalkingTool } from './nova-agent.js';
+import { NovaAgent, hasStopTalkingTool, STOP_REQUEST_TOOL_GRACE_MS } from './nova-agent.js';
 import { ElevenLabsAgent } from './elevenlabs-agent.js';
 import { NoOpAgent } from './noop-agent.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
+
+/**
+ * Wait out the window the transcript route gives Nova to answer the request out
+ * loud before silencing the assistant itself. The handover between the two
+ * routes is covered in voice-assistant-stop-race.test.ts; here it is only
+ * something to wait for.
+ */
+function afterStopWindow(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, STOP_REQUEST_TOOL_GRACE_MS + 150));
+}
 
 /** A Nova agent with no session and no Bedrock client — enough to inspect the
  *  prompt, the tool set and the mute state machine without any network. */
@@ -172,16 +182,18 @@ test('each meeting mode starts in its own audible state', () => {
     assert.equal(novaAgent({ meetingMode: 'translator', activationMode: 'always_active' }).isMuted(), false);
 });
 
-test('a stop request silences the assistant in normal mode', () => {
+test('a stop request silences the assistant in normal mode', async () => {
     const agent = novaAgent({ meetingMode: 'normal' });
     assert.equal(agent.requestStopTalking('test'), true);
+    await afterStopWindow();
     assert.equal(agent.isMuted(), true);
 });
 
-test('a stop request silences the assistant in group mode', () => {
+test('a stop request silences the assistant in group mode', async () => {
     const agent = novaAgent({ meetingMode: 'group', activationMode: 'always_active' });
     (agent as any)._isMuted = false; // as if a wake phrase had made it audible
     assert.equal(agent.requestStopTalking('test'), true);
+    await afterStopWindow();
     assert.equal(agent.isMuted(), true);
 });
 
@@ -195,6 +207,9 @@ test('translator mode takes stop requests only from its own pause phrase', () =>
     assert.equal(agent.isMuted(), false);
     assert.equal((agent as any)._translatorState, 'UNMUTED');
     assert.deepEqual(toolNames(agent), ['mute']);
+    // A decline must leave nothing armed either: see
+    // voice-assistant-stop-race.test.ts for the deferral it is declining.
+    assert.equal((agent as any).stopRequest, null);
 });
 
 test('only translator mode sounds a cue when the mute tool fires', async () => {
@@ -237,6 +252,7 @@ test('being addressed again makes the assistant audible after a stop request', a
     // rest of the meeting.
     const agent = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
     agent.requestStopTalking('test');
+    await afterStopWindow();
     assert.equal(agent.isMuted(), true);
 
     // Stand in for an established session so activate() does not reach Bedrock.
@@ -246,21 +262,23 @@ test('being addressed again makes the assistant audible after a stop request', a
     agent.deactivate();
 });
 
-test('a wake phrase in the user transcript makes it audible again in normal mode', () => {
+test('a wake phrase in the user transcript makes it audible again in normal mode', async () => {
     // The always_active path: activate() returns early there, so the FINAL user
     // transcript is the only route back.
     const agent = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
     agent.requestStopTalking('test');
+    await afterStopWindow();
     (agent as any).handleUserTurnWakePhrase('Hey Alex, what did we decide about the launch date?');
     assert.equal(agent.isMuted(), false);
 });
 
-test('the utterance that asked for silence does not itself undo it', () => {
+test('the utterance that asked for silence does not itself undo it', async () => {
     // "Hey Alex, stop talking" contains a wake phrase, and the mute it causes
     // can land either side of this transcript turn.
     for (const mode of ['normal', 'group'] as MeetingMode[]) {
         const agent = novaAgent({ meetingMode: mode, activationMode: 'always_active' });
         agent.requestStopTalking('test');
+        await afterStopWindow();
         assert.equal(agent.isMuted(), true);
         (agent as any).handleUserTurnWakePhrase('Hey Alex, stop talking');
         assert.equal(agent.isMuted(), true, `${mode}: a stop request must not unmute`);
@@ -278,13 +296,14 @@ test('group mode still unmutes on an ordinary wake phrase', () => {
     (agent as any).clearConversationTimeout();
 });
 
-test('an utterance with no wake phrase leaves the mute state alone', () => {
+test('an utterance with no wake phrase leaves the mute state alone', async () => {
     const agent = novaAgent({ meetingMode: 'group', activationMode: 'always_active' });
     (agent as any).handleUserTurnWakePhrase('so the next thing on the agenda is hiring');
     assert.equal(agent.isMuted(), true, 'group mode must stay muted until addressed');
 
     const normal = novaAgent({ meetingMode: 'normal' });
     normal.requestStopTalking('test');
+    await afterStopWindow();
     (normal as any).handleUserTurnWakePhrase('anyway, back to the roadmap');
     assert.equal(normal.isMuted(), true, 'normal mode must stay silent until addressed');
 });
