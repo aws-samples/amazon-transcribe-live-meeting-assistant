@@ -88,21 +88,21 @@ class RecordingLogger:
 
 
 # Each dotted name needs its own entry: `from a.b import c` imports a, then a.b,
-# so a stub for `a` alone does not satisfy the later step. aiohttp is reached
-# through gql's own transport module, which the layer's appsync_utils imports.
+# so a stub for `a` alone does not satisfy the later step.
+#
+# The two gql transport modules are stubbed rather than the packages behind them
+# (aiohttp, requests_toolbelt), which are optional gql extras the lint/test
+# environment does not install. Stubbing at the transport boundary keeps the list
+# short and independent of which extras happen to be present: the layer's
+# appsync_utils only needs the transport classes to exist, and nothing here
+# builds a client or opens a connection.
 _STUBS: Dict[str, Any] = {
     "aws_lambda_powertools": mock.MagicMock(Logger=RecordingLogger),
     "aws_lambda_powertools.utilities": mock.MagicMock(),
     "aws_lambda_powertools.utilities.typing": mock.MagicMock(),
+    "gql.transport.aiohttp": mock.MagicMock(),
+    "gql.transport.requests": mock.MagicMock(),
 }
-for _name in (
-    "aiohttp",
-    "aiohttp.client_exceptions",
-    "aiohttp.client_reqrep",
-    "aiohttp.helpers",
-    "aiohttp.typedefs",
-):
-    _STUBS[_name] = mock.MagicMock()
 
 # Imported out here, ahead of the stubs, on purpose. ``mock.patch.dict`` restores
 # sys.modules to the contents it had on entry, which drops everything imported
