@@ -2995,9 +2995,12 @@ export class NovaAgent implements VoiceAssistantProvider {
         sessionRebuilt = await this.rebuildSessionForNewMode();
       } catch (error) {
         console.error('❌ Error rebuilding the Nova session for a mode change:', error);
-        this.refreshQueued = true;
-        this.checkAndExecuteQueuedRefresh();
-        detail = 'the assistant will finish switching shortly';
+        // Only promise the participant a recovery when one was actually
+        // scheduled. Where none is needed the mode change is simply done, and
+        // the session the next wake phrase builds carries it.
+        detail = this.scheduleSessionRecovery()
+          ? 'the assistant will finish switching shortly'
+          : undefined;
       }
 
       return this.recordReconfigure(request, {
@@ -3152,6 +3155,50 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     await this.refreshSession();
+    return true;
+  }
+
+  /**
+   * Get the agent back towards a session built for the mode it is now in, after
+   * a rebuild failed.
+   *
+   * The two failures need different recoveries, and the one that matters is the
+   * second. `refreshSession` declines to act when there is no active session, so
+   * queueing a refresh after a failed `createSession` would clear the queue and
+   * do nothing — and that is exactly the path `LMA translate` or `LMA group`
+   * takes on a wake-phrase deployment, where there is no session to begin with.
+   * An `always_active` agent with no session is also not recoverable by being
+   * addressed, because `activate()` returns early in that mode.
+   *
+   * @returns whether a recovery was scheduled, so the caller only promises one
+   *   when there is one.
+   */
+  private scheduleSessionRecovery(): boolean {
+    if (this.session && this.session.isActive) {
+      // A session exists but was built for the mode the agent has left. The
+      // idle-refresh machinery replaces it.
+      this.refreshQueued = true;
+      this.checkAndExecuteQueuedRefresh();
+      return true;
+    }
+
+    if (this.activationMode !== 'always_active') {
+      // No session is meant to be open, so there is nothing to recover: the one
+      // the next wake phrase builds carries the new mode.
+      return false;
+    }
+
+    // Build it directly — the same recovery `refreshSession` makes for itself
+    // when its own rebuild fails.
+    setTimeout(() => {
+      if (this.session && this.session.isActive) {
+        return;
+      }
+      console.log('🔄 Recovering the Nova session after a failed mode change');
+      this.createSession().catch(error => {
+        console.error('Error recovering the Nova session after a mode change:', error);
+      });
+    }, 1000);
     return true;
   }
 

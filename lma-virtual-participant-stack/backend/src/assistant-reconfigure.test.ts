@@ -211,7 +211,25 @@ test('a mode change does not close an activation window somebody opened', async 
 });
 
 test('a mode change with no activation window closes the session it finds', async () => {
-    // The wake-phrase cost contract: nothing is held open between activations.
+    // The wake-phrase cost contract: nothing is held open between activations,
+    // so a session left over from an activation that has lapsed is torn down
+    // rather than replaced.
+    //
+    // Reached by `LMA assist` on a deployment configured as group mode with
+    // wake-phrase activation — the one combination that leaves a wake-phrase
+    // agent holding a session it is not activated for.
+    const { agent, calls } = novaAgent({ meetingMode: 'group', activationMode: 'wake_phrase' });
+    withLiveSession(agent);
+    (agent as any)._isActivated = false;
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'normal' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, true);
+    assert.deepEqual(calls, ['closeSession']);
+});
+
+test('a mode change that keeps the assistant listening replaces the session rather than closing it', async () => {
     const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
     withLiveSession(agent);
     (agent as any)._isActivated = false;
@@ -219,15 +237,7 @@ test('a mode change with no activation window closes the session it finds', asyn
     const outcome = await agent.reconfigure(chat({ meetingMode: 'group', activationMode: 'always_active' }));
 
     assert.equal(outcome.result, 'applied');
-    // Now on always_active, so the session is refreshed rather than closed.
     assert.deepEqual(calls, ['refreshSession']);
-
-    const stale = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
-    withLiveSession(stale.agent);
-    (stale.agent as any)._isActivated = false;
-    await stale.agent.reconfigure(chat({ meetingMode: 'normal', activationMode: 'wake_phrase' }));
-    // Nothing changed, so nothing was touched.
-    assert.deepEqual(stale.calls, []);
 });
 
 // ---------------------------------------------------------------------------
@@ -588,6 +598,61 @@ test('a rebuild that fails still answers the participant and leaves one log line
     // The participant is told it landed, and that it is still settling.
     assert.deepEqual(assistantToggleChatReply(outcome), [
         'Live Meeting Assistant: switched to translator mode, the assistant will finish switching shortly.',
+    ]);
+});
+
+test('a first session that fails to open is retried, not handed to the refresh path', async () => {
+    // The headline case: `LMA translate` on a wake-phrase deployment, where
+    // there is no session yet, so the rebuild calls createSession directly.
+    // Queueing a refresh cannot recover that — refreshSession declines to act
+    // without an active session — and an always_active agent with no session is
+    // not recoverable by being addressed either, because activate() returns
+    // early in that mode. So the session has to be built again.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    let attempts = 0;
+    (agent as any).createSession = async () => {
+        attempts += 1;
+        if (attempts === 1) throw new Error('bidirectional stream refused');
+        (agent as any).session = liveSession();
+    };
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.equal((agent as any).meetingMode, 'translator');
+    assert.equal(
+        (agent as any).refreshQueued,
+        false,
+        'a refresh cannot recover a session that was never opened',
+    );
+
+    // The retry is on a one-second timer, matching the recovery refreshSession
+    // makes for itself.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal(attempts, 2, 'the session must be built again');
+    assert.equal((agent as any).session?.isActive, true);
+});
+
+test('a first session that fails on the wake-phrase path promises nothing, because nothing is owed', async () => {
+    // Nothing is meant to be open between activations, so there is no recovery
+    // to schedule and no caveat to put in the reply: the session the next wake
+    // phrase builds carries the new mode.
+    const { agent } = novaAgent({ meetingMode: 'group', activationMode: 'wake_phrase' });
+    withLiveSession(agent);
+    (agent as any)._isActivated = false;
+    (agent as any).closeSession = async () => {
+        (agent as any).session = null;
+        throw new Error('stream already gone');
+    };
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'normal' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.detail, undefined);
+    assert.equal((agent as any).refreshQueued, false);
+    assert.deepEqual(assistantToggleChatReply(outcome), [
+        'Live Meeting Assistant: switched to assistant mode.',
     ]);
 });
 
