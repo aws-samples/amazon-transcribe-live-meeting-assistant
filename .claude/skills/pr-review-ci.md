@@ -21,10 +21,36 @@ into the working directory:
 
 | Path | Contents |
 |---|---|
-| `.ai-review/metadata.json` | number, title, author, source/target branch, head SHA, changed-file and line counts |
+| `.ai-review/metadata.json` | number, title, author, source/target branch, head SHA, `ci_status_when_review_started`, line counts, `changed_files` (the number of sections in the diff you were **given**), and which instruction files this request changes |
 | `.ai-review/diff.patch` | unified diff against the **merge base** with the target branch |
 | `.ai-review/base/` | the **whole repository at the merge base** — the "before" tree |
 | `.ai-review/commits.log` | this request's own commits |
+
+⚠️ **Cite repository-relative paths in findings, never `.ai-review/…` ones.**
+`.ai-review/` is a scratch directory inside a throwaway worktree that is deleted
+when the run ends, so `.ai-review/base/lma-ai-stack/.../index.py:40` is a path no
+reader can open — and `.ai-review/diff.patch:120` is a line number in a file that
+no longer exists. Read them freely; cite the real path. When the point *is* that
+something differs from the baseline, say so in words — and name the baseline
+accurately: `.ai-review/base/` is **the merge base**, not the target branch's
+current tip. "This field does not exist at the branch point" is supportable from
+it; "`develop` has no such field" is not, because `develop` may have moved since
+this branch started. That distinction is exactly what produced the
+`CLAUDE.md`-was-modified reports this file now warns about.
+
+⚠️ `changed_files` counts the sections in the diff **you were given**. It cannot
+disagree with what you can see. If the diff was truncated,
+`changed_files_before_truncation` is the whole change — those two differing is
+the only case where any count differs, and it means exactly that. Do not infer a
+missing hunk from a count.
+
+⚠️ `instruction_files_changed_by_this_request` is derived from the same merge-base
+diff you were given, so every path in it has a hunk you can read. Treat it as
+authoritative and do not report an instruction-file change that is not in it: an
+earlier version of the orchestrator derived this by comparing against the target
+branch's *current* copy, which made every request that branched before an
+unrelated `CLAUDE.md` edit look like it had modified the file. Five reviews in a
+row spent a finding telling the maintainer to read a hunk that did not exist.
 
 There is **no git tool and no shell**, so those last two are your history. Use
 `.ai-review/base/` for targeted comparison rather than browsing — it is a full
@@ -268,6 +294,21 @@ explicit about what it could not do:
 
 - It read the diff and the checkout. It did **not** deploy, run the test suite,
   run SRT, build an image, open the UI, join a meeting, or call any AWS service.
-- CI status comes from `metadata.json` only if the orchestrator put it there — do
-  not assert a pipeline is green from having seen no failure.
+- **CI status** is in `metadata.json` as `ci_status_when_review_started`, as a
+  count per outcome ("12 success, 1 failure, 2 queued") for the head commit. On
+  GitHub it is populated from the Checks and commit-status APIs; on the GitLab
+  mirror, and under `--no-api`, it is empty.
+
+  ⚠️ **It is named for when it was taken, and you must report it that way.** It was
+  sampled before you started, and you take minutes — so on the common case, where
+  the same push triggered both CI and this review, more checks will have finished
+  by the time your comment is posted. Write "CI when this review started: …", not
+  "CI status: ✅ passing". The orchestrator samples again just before posting and
+  the footer carries that fresher reading, so the comment makes exactly one
+  present-tense claim about CI and it is not yours to make.
+
+  If the field says some checks were still running, say so plainly in the verdict
+  table rather than reading it as either colour; the string itself will tell you.
+  If it is empty, say the status was not supplied rather than inferring one — "no
+  failure in the diff" has never been evidence that a pipeline passed.
 - A ✅ on "Safe to merge?" is one machine reading a diff, not an approval.

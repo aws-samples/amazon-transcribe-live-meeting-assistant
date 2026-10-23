@@ -25,13 +25,11 @@ things make the workflow do nothing, and neither fails the job:
 - **No `AI_REVIEW_ROLE_ARN` repository variable.** The role check reports a skip and
   every later step is conditional on it, so no credential is minted, no model is
   called and no comment is posted.
-- **The harness is not on the target branch yet.** The pinning step refuses to run
-  the pull request's own copy of the reviewer, and when the files it needs are not on
-  `develop` it says so and exits 0 with the review skipped. That is the state on the
-  pull request that *adds* this directory — `ai_pr_review.py` and `pr-review-ci.md`
-  genuinely do not exist on `develop` until it merges — so the first run a maintainer
-  sees from this change is a green job that skipped. It starts reviewing on the next
-  pull request after the merge.
+- **A file the harness pins is missing from the target branch.** The pinning step
+  refuses to run the pull request's own copy of the reviewer, and when the files it
+  needs are not on `develop` it says so and exits 0 with the review skipped. A pull
+  request that *adds or renames* one of those files sees a green job that skipped,
+  and reviewing resumes on the next pull request after it merges.
 
   `exit 1` is kept for `pr-review.md` and `CLAUDE.md`, which always exist on
   `develop`: a failure to resolve *those* means a rename nobody updated here, which
@@ -205,6 +203,37 @@ What to do when a review is withheld:
   channel in [CONTRIBUTING.md](../../CONTRIBUTING.md#security-issue-notifications).
   That is the one non-public channel that exists.
 
+## Two baselines, and they are not interchangeable
+
+The harness uses the target branch at **two different revisions**, for two different
+questions, and mixing them up has already caused one defect worth not repeating.
+
+| Question | Revision | Where |
+|---|---|---|
+| Which criteria should the review apply? | target branch **tip** | `instruction_files`, `pin_instructions_to_target_branch` |
+| What did this request change? | **merge base** with the target branch | `request_file_changes`, `instruction_changes`, `build_diff`, `diff_stat`, `export_base_tree` |
+
+The tip is right for the first because the review should apply the *current*
+criteria, not whatever they were when the branch started. The merge base is right
+for the second because that is the request's own baseline — and it is what the
+supplied diff is computed against, so anything derived from it is guaranteed to
+have a hunk the reviewer can read.
+
+Using the tip for the second question is what produced the first live defect in
+this tooling. A changed instruction file was detected by comparing the worktree
+copy against the target branch's *current* copy, so when a `CLAUDE.md` edit landed
+on `develop`, every open request that had branched earlier looked like it had
+modified the file. Five of the first nine reviews spent a `🟡 Should fix` telling
+the maintainer to go and read a hunk that does not exist — noise in exactly the
+place the design most needs to be trustworthy, and a good way to train somebody to
+ignore the warning on the day it is real. Measured before and after on PRs 779,
+777, 800 and 791: all four reported `['CLAUDE.md']`, all four now report nothing,
+and `git diff <merge-base>..<head>` agrees.
+
+`.ai-review/base/` is the **merge base** tree, which is why `pr-review-ci.md` tells
+the review it can say "this does not exist at the branch point" but not "`develop`
+has no such field".
+
 ## Keeping the reviewer out of the reviewer
 
 The job hands a model a checkout of author-controlled code plus a token that can
@@ -281,10 +310,10 @@ Two things that only bite locally:
   `aws sts get-caller-identity` works. Run with
   `CLAUDE_CONFIG_DIR=$(mktemp -d)` to bypass the machine's settings. A CI runner
   has no user settings file, so this does not apply there.
-- **`.claude/skills/pr-review-ci.md` has to exist on the target branch** for the
-  harness to pin it. Until this change is merged it does not, so a dry run reviews
-  with `pr-review.md` and `CLAUDE.md` alone and says so in its own output. That is
-  the "first landing" case both CI jobs' pinning steps describe.
+- **Every file the harness pins has to exist on the target branch.** When one does
+  not — on a branch that adds or renames it — a dry run reviews with whatever does
+  resolve and says so in its own output. That is the "first landing" case both CI
+  jobs' pinning steps describe.
 
 ## Tests
 

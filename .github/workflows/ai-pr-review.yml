@@ -217,6 +217,23 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository
       )
 
+    # ⚠️ EVERY SCOPE NOT LISTED HERE IS `none`, which is why reading the head
+    # commit's checks needs two entries of its own. `Github.check_status` in
+    # ai_pr_review.py calls `/commits/{sha}/check-runs` (Checks API, which carries
+    # GitHub Actions) and `/commits/{sha}/status` (the older commit-status API, which
+    # carries external CI). Both are read-only on data that is already world-readable
+    # on this public repository — measured: both return 200 with NO credential at all
+    # — so neither widens what this job can reach.
+    #
+    # Whether omitting them would actually 403 is NOT established, and the honest
+    # version of that matters more than the guess: the Checks API reference scopes its
+    # access requirement to PRIVATE repositories, while the workflow-permissions
+    # reference says unlisted scopes are `none` with no public-repository exemption.
+    # The two documents do not settle it and a scoped-down GITHUB_TOKEN cannot be
+    # minted outside Actions to test it. So they are listed because they are the
+    # documented scopes for these two endpoints and cost nothing — and because
+    # check_status logs a warning when the lookup fails, so if this guess is wrong the
+    # first run says so instead of the field being quietly empty forever.
     permissions:
       contents: read
       # Posting the review. Unlike GitLab's CI_JOB_TOKEN, the built-in Actions token
@@ -225,6 +242,12 @@ jobs:
       pull-requests: write
       # Minting the OIDC token that assumes the Bedrock role.
       id-token: write
+      # Reading the head commit's check runs, so the review can report a real CI
+      # verdict instead of disclaiming that it has none.
+      checks: read
+      # The older commit-status API, for any CI that posts there rather than to
+      # Checks. Summarising only check-runs would call a red external status green.
+      statuses: read
 
     steps:
       - name: Check out the repository

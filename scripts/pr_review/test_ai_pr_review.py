@@ -34,6 +34,7 @@ that assert nothing.
 
 from __future__ import annotations
 
+import http.client
 import importlib.util
 import re
 import sys
@@ -523,6 +524,32 @@ def test_the_footer_and_notice_are_themselves_publishable() -> None:
         "compose_note's own footer trips the guard, so no review could ever be posted"
     )
 
+    # The CI line is part of the footer and so part of the guard's input, and it
+    # carries words the harness does not choose — a check outcome is whatever GitHub
+    # calls it. `failure` is the one most likely to look alarming to a word-based
+    # rule, so both the fresh and the fallback wordings are scanned with it present.
+    for kwargs in (
+        {"ci_status_now": "9 success, 2 failure, 1 queued — 1 still running"},
+        {"ci_status_at_start": "9 success, 2 failure, 1 cancelled"},
+        {"ci_status_now": "no checks reported for this commit"},
+    ):
+        with_ci = review.compose_note(
+            merge_request,
+            "## PR/MR Review: a title (#800)\n\nLooks fine.",
+            (3, 40, 2),
+            True,
+            review.DEFAULT_MODEL,
+            **kwargs,
+        )
+        assert not review.scan_for_disclosure(with_ci), (
+            f"the footer's CI line trips the guard for {kwargs}, which would withhold "
+            f"every review of a pull request whose checks are in that state"
+        )
+        # And the fallback must be labelled as the earlier reading, never presented as
+        # current — that distinction is the whole point of sampling twice.
+        if "ci_status_at_start" in kwargs:
+            assert "when the review STARTED" in with_ci
+
     notice = review.withheld_notice(
         merge_request, ["attack-narrative/attacker"], review.DEFAULT_MODEL
     )
@@ -724,9 +751,10 @@ PINNED_PATHS = (
 def _pinning_step_bodies() -> dict[str, str]:
     """The pinning shell on each platform, keyed by file name.
 
-    BOTH are checked, because they drifted: the GitLab version used to warn and then
-    run the MR's own copy, where the GitHub one refused. A warning makes the failure
-    visible in a log; it does not stop it.
+    BOTH are checked, because the two are written separately and can drift. The shape
+    to guard against is a platform that only WARNS on a resolution failure and then
+    runs the request's own copy: a warning makes the failure visible in a log without
+    stopping it, which is the one thing the step exists to prevent.
     """
     bodies: dict[str, str] = {}
     workflow = yaml.safe_load(GITHUB_WORKFLOW.read_text())
@@ -819,18 +847,75 @@ def test_the_checkout_does_not_persist_the_job_token(gh_job: dict) -> None:
 
 
 def test_the_job_requests_only_the_permissions_it_needs(gh_job: dict) -> None:
-    """Three scopes, each with a specific job, and `contents` stays read.
+    """Five scopes, each with a specific job, only two of them write.
 
     `pull-requests: write` posts the comment and `id-token: write` mints the OIDC
     token for the Bedrock role. `contents: write` would let a review that went wrong
     push to the repository, and nothing here needs it.
+
+    The two read scopes are the ones easy to leave off, and leaving them off fails
+    SILENTLY — see the next test.
     """
     permissions = gh_job.get("permissions") or {}
     assert permissions.get("contents") == "read"
     assert permissions.get("pull-requests") == "write"
     assert permissions.get("id-token") == "write"
-    assert set(permissions) == {"contents", "pull-requests", "id-token"}, (
-        f"the job's permissions grew beyond the three it needs: {permissions}"
+    assert permissions.get("checks") == "read"
+    assert permissions.get("statuses") == "read"
+    assert set(permissions) == {
+        "contents",
+        "pull-requests",
+        "id-token",
+        "checks",
+        "statuses",
+    }, f"the job's permissions grew beyond the five it needs: {permissions}"
+    writes = {scope for scope, access in permissions.items() if access == "write"}
+    assert writes == {"pull-requests", "id-token"}, (
+        f"the job now requests write on {writes - {'pull-requests', 'id-token'}}, "
+        f"which nothing in a read-only review needs"
+    )
+
+
+def test_the_ci_status_scopes_are_granted_and_their_absence_would_be_silent(
+    gh_job: dict,
+) -> None:
+    """`checks: read` and `statuses: read`, because every unlisted scope is `none`.
+
+    `Github.check_status` calls `/commits/{sha}/check-runs` and `/commits/{sha}/status`.
+    Without these two scopes those calls can 403, which `_request` turns into `Skip`,
+    which `check_status` turns into `""`, which makes the review disclaim having any
+    CI status — **which is exactly what the GitLab side looks like when working
+    correctly.** So the feature would be dead and indistinguishable from fine.
+
+    ⚠️ Whether omitting them really does 403 on a PUBLIC repository is not
+    established, and this test does not claim it: both endpoints return 200 with no
+    credential at all here, the Checks API reference scopes its access requirement to
+    private repositories, and a scoped-down `GITHUB_TOKEN` cannot be minted outside
+    Actions to settle it. They are asserted because they are the documented scopes for
+    these two endpoints, they cost nothing on world-readable data, and the
+    alternative is a feature whose liveness depends on an undocumented interaction.
+
+    The second half of the defence is in the harness and is what makes a wrong guess
+    survivable: a failed lookup prints a warning naming this block as the first thing
+    to check, instead of returning an empty field in silence.
+    """
+    permissions = gh_job.get("permissions") or {}
+    for scope in ("checks", "statuses"):
+        assert permissions.get(scope) == "read", (
+            f"`{scope}: read` is missing from the job's permissions. Every scope not "
+            f"listed in a permissions block is `none`, so the CI-status lookup can "
+            f"403 — and it fails to an empty field that reads exactly like the "
+            f"GitLab side working as designed."
+        )
+
+    source = HARNESS.read_text()
+    assert "could not read the checks for" in source, (
+        "check_status no longer warns when the lookup fails, so a missing scope "
+        "would once again be indistinguishable from there being no checks"
+    )
+    assert "checks: read" in source, (
+        "the warning should name the likely cause so a reader does not have to "
+        "rediscover the permissions model"
     )
 
 
@@ -914,8 +999,8 @@ def test_a_failed_review_cannot_redden_the_job_on_either_platform(gh_job: dict) 
 
     GitLab says this with `allow_failure: true`. GitHub has no such key, so the Review
     step carries `continue-on-error: true`; without it a Bedrock incident marks the
-    check failed. Asserting only the GitLab half, which is what this test used to do,
-    left the platform that actually runs on every pull request uncovered.
+    check failed. Both halves are asserted deliberately — checking only the GitLab one
+    would leave the platform that actually runs on every pull request uncovered.
     """
     config = yaml.safe_load(GITLAB_CI.read_text())
     job = config["ai_mr_review"]
@@ -1153,12 +1238,12 @@ def test_pinning_rebuilds_the_claude_directory_and_reports_truthfully(
     * a file on NEITHER tree (`AGENTS.md` is in the required set and is absent from
       `develop` today) must not be reported as "added by this request" — otherwise
       every review is told the request adds AGENTS.md;
-    * a file the request CHANGES must still be reported as modified, which needs the
-      head's content captured before the directory is deleted — after it, there is
-      nothing on disk left to compare against.
+    * the pinned content must actually be written back, or the reviewer has no
+      criteria to read at all.
 
-    And the pinned content must actually be written back, or the reviewer has no
-    criteria to read at all.
+    What the REQUEST changed is no longer this function's business — see
+    ``test_an_instruction_file_changed_on_the_target_branch_is_not_the_requests_change``
+    for that half, which is where the real defect lived.
     """
     worktree = tmp_path / "wt"
     (worktree / ".claude" / "skills").mkdir(parents=True)
@@ -1185,28 +1270,428 @@ def test_pinning_rebuilds_the_claude_directory_and_reports_truthfully(
         raise AssertionError(f"unexpected command: {command}")
 
     monkeypatch.setattr(review, "_run", fake_run)
-    modified, removed = review.pin_instructions_to_target_branch(worktree, "develop")
+    pinned, removed = review.pin_instructions_to_target_branch(worktree, "develop")
 
     assert (worktree / ".claude" / "skills" / "pr-review.md").read_text() == (
         "THE REAL CRITERIA"
     ), "the pinned criteria were not written back, so the reviewer has none"
+    assert ".claude/skills/pr-review.md" in pinned
     assert not (worktree / ".claude" / "skills" / "evil").exists(), (
         "a skill DIRECTORY the request adds survived, which is the auto-discovered "
         "shape an authored glob list missed"
     )
-    assert ".claude/skills/pr-review.md" in modified, (
-        "the request edits the review criteria and the review was not told; the "
-        "head's content has to be captured before the directory is removed"
-    )
-    joined = " ".join(removed)
-    assert "AGENTS.md" not in joined, (
-        "AGENTS.md is on neither tree, so reporting it as added by this request "
+    assert "AGENTS.md" not in removed, (
+        "AGENTS.md is on neither tree, so nothing was removed for it and saying so "
         "would be false on every single review"
     )
-    assert "pr-review-ci.md" not in joined, "likewise for a required file on neither tree"
-    assert any("evil/SKILL.md" in entry for entry in removed), (
+    assert ".claude/skills/pr-review-ci.md" not in removed, (
+        "likewise for a required file on neither tree"
+    )
+    assert ".claude/skills/evil/SKILL.md" in removed, (
         "the added skill directory was removed but the review was not told, so it "
         "cannot assess the proposal it just had taken away"
+    )
+
+
+def test_an_instruction_file_changed_on_the_target_branch_is_not_the_requests_change(
+    monkeypatch,
+) -> None:
+    """THE REGRESSION TEST. A request whose merge base predates a `CLAUDE.md` edit on
+    the target branch must report NO instruction-file change.
+
+    This is the exact shape five of the first nine live reviews got wrong. The
+    orchestrator classified a changed instruction file by comparing the worktree copy
+    against the TARGET BRANCH TIP, so when PR #801 landed a `CLAUDE.md` edit on
+    `develop`, every open request that had branched earlier suddenly looked like it
+    had modified the file — and each review then spent a 🟡 finding telling the
+    maintainer to go and read a hunk that does not exist. Reproduced before the fix
+    against PR #779: `git diff <merge-base>..<head>` does not mention `CLAUDE.md`,
+    while the harness reported `['CLAUDE.md']`.
+
+    The fix is to derive it from the same merge-base range as the supplied diff, so
+    the two agree by construction rather than by two code paths happening to match.
+    The fixture below is that exact topology:
+
+        merge base ── request head          (touches one Lambda file only)
+             │
+             └─────── target branch tip     (CLAUDE.md edited by an unrelated merge)
+    """
+    # `git diff --name-status <merge-base>..<head>` for a request that touches one
+    # ordinary file. Note what is NOT here: CLAUDE.md.
+    name_status = (
+        "M\tlma-ai-stack/source/lambda_functions/thing/index.py\n"
+        "A\tlma-ai-stack/source/lambda_functions/thing/test_index.py\n"
+    )
+
+    def fake_run(command, cwd=None, env=None, timeout=300):
+        import subprocess as sp
+
+        if command[:2] == ["git", "merge-base"]:
+            return sp.CompletedProcess(command, 0, "aaaaaaa\n", "")
+        if command[:3] == ["git", "diff", "--name-status"]:
+            return sp.CompletedProcess(command, 0, name_status, "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(review, "_run", fake_run)
+
+    assert review.instruction_changes(779, "develop") == {}, (
+        "an instruction file edited on the TARGET BRANCH after this request branched "
+        "is not a change this request made. Reporting it sends the reader to a hunk "
+        "the diff does not contain, and trains them to ignore this warning for the "
+        "day it is real."
+    )
+    # The non-instruction files are still classified, so the mechanism works.
+    assert review.request_file_changes(779, "develop") == {
+        "lma-ai-stack/source/lambda_functions/thing/index.py": "modified",
+        "lma-ai-stack/source/lambda_functions/thing/test_index.py": "added",
+    }
+
+
+def test_a_real_instruction_change_is_still_reported_with_its_status(monkeypatch) -> None:
+    """The other half: narrowing must not make the warning useless.
+
+    A request that genuinely edits the criteria has to be reported, because the
+    pinning means the reviewer is NOT reading the version the request proposes and the
+    reader needs to know that.
+
+    A rename records BOTH paths. Keying only the new path would hide a rename that
+    moves a file out of the instruction set: `.claude/skills/moved-out.md` ->
+    `docs/moved-out.md` has a new path that is not an instruction file, so nothing
+    about it would reach the review.
+    """
+    name_status = (
+        "M\tCLAUDE.md\n"
+        "A\t.claude/skills/new-thing.md\n"
+        "D\t.claude/skills/old-thing.md\n"
+        "R095\t.claude/skills/was.md\t.claude/skills/now.md\n"
+        "R098\t.claude/skills/moved-out.md\tdocs/moved-out.md\n"
+        "M\tREADME.md\n"
+    )
+
+    def fake_run(command, cwd=None, env=None, timeout=300):
+        import subprocess as sp
+
+        if command[:2] == ["git", "merge-base"]:
+            return sp.CompletedProcess(command, 0, "bbbbbbb\n", "")
+        if command[:3] == ["git", "diff", "--name-status"]:
+            return sp.CompletedProcess(command, 0, name_status, "")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(review, "_run", fake_run)
+    changes = review.instruction_changes(1, "develop")
+    assert changes == {
+        "CLAUDE.md": "modified",
+        ".claude/skills/new-thing.md": "added",
+        ".claude/skills/old-thing.md": "deleted",
+        ".claude/skills/now.md": "renamed",
+        ".claude/skills/was.md": "renamed away",
+        ".claude/skills/moved-out.md": "renamed away",
+    }, f"got {changes}"
+    assert "README.md" not in changes, "README.md is not an instruction file"
+    assert ".claude/skills/moved-out.md" in changes, (
+        "a criteria file renamed OUT of the instruction set must still be reported; "
+        "its new path is not an instruction file, so keying only the new path would "
+        "hide the move entirely"
+    )
+    assert "docs/moved-out.md" not in changes, (
+        "the destination is not an instruction file and does not belong in this set"
+    )
+
+
+def test_the_ci_status_lookup_never_costs_a_review(monkeypatch) -> None:
+    """A cosmetic field must not be able to abort a run.
+
+    `ci_status` saves the review from opening with "CI status: not supplied" and then
+    disclaiming that nothing it says should be read as green. It is two extra API
+    calls, and two extra API calls are two more things that can fail — so every
+    failure returns "" and the review is told the status was not supplied, which is
+    the same state the GitLab side is always in. In particular it must not raise
+    `Skip`, which `_review_all` treats as a global precondition failure and uses to
+    BREAK out of the sweep: a flaky status endpoint would then cancel the reviews of
+    every remaining pull request.
+    """
+    forge = review.Github("owner/name", "token")
+
+    def raise_skip(*args, **kwargs):
+        raise review.Skip("the checks endpoint is unhappy")
+
+    monkeypatch.setattr(forge, "_request", raise_skip)
+    assert forge.check_status("abc1234") == ""
+
+    # ⚠️ THE ERRORS THAT ACTUALLY REACH IT, which is the property this pins and the
+    # one easiest to get wrong by reading `_request` and stopping there.
+    # `Github._request` converts failures at CONNECT time into Skip/Failure (urllib
+    # raises URLError there), but an error while reading the response BODY is raised
+    # as-is from inside the `with` block — a socket timeout or a reset peer — and
+    # `IncompleteRead` is an `http.client.HTTPException`, which is not an `OSError`
+    # at all. `_review_all` handles only Skip, Failure and TimeoutExpired, so any of
+    # these escaping stops the whole run.
+    #
+    # The worst case is the SECOND lookup, after the paid model call: a blip there
+    # discards a finished review. That is the hazard `check_status`'s design exists
+    # to remove, and the tuple has to implement it, not just the docstring.
+    for error in (
+        TimeoutError("timed out reading the response"),
+        ConnectionResetError("peer reset the connection"),
+        http.client.IncompleteRead(b"half a payload"),
+        http.client.HTTPException("protocol confusion"),
+        OSError("something at the socket layer"),
+    ):
+
+        def raise_it(*args, _error=error, **kwargs):
+            raise _error
+
+        monkeypatch.setattr(forge, "_request", raise_it)
+        assert forge.check_status("abc1234") == "", (
+            f"{type(error).__name__} escaped check_status. _review_all does not "
+            f"handle it, so it would abort the run — and after the second lookup "
+            f"that means discarding a review that has already been paid for."
+        )
+
+    def raise_unexpected(*args, **kwargs):
+        raise ValueError("malformed payload")
+
+    monkeypatch.setattr(forge, "_request", raise_unexpected)
+    assert forge.check_status("abc1234") == ""
+
+    # Both surfaces are consulted: check-runs carries Actions, and the older
+    # commit-status API carries external CI. Summarising only the first would call a
+    # red external status green.
+    seen: list[str] = []
+
+    def both(method, url, body=None):
+        seen.append(url)
+        if "check-runs" in url:
+            return {"check_runs": [{"conclusion": "success"}, {"status": "queued"}]}, {}
+        return {"statuses": [{"state": "failure"}]}, {}
+
+    monkeypatch.setattr(forge, "_request", both)
+    summary = forge.check_status("abc1234")
+    assert any("check-runs" in url for url in seen)
+    assert any(url.endswith("/status") for url in seen)
+    assert "1 success" in summary and "1 queued" in summary and "1 failure" in summary, (
+        f"got {summary!r}; a queued run must not read as either colour and an "
+        f"external failure must not be dropped"
+    )
+
+
+def test_the_published_ci_status_is_sampled_after_the_model_run(tmp_path, monkeypatch) -> None:
+    """The status in the comment must be as fresh as the comment, not as the prompt.
+
+    A review takes minutes. The first sample has to happen BEFORE the model starts,
+    because `metadata.json` is composed before the process launches and the model
+    cannot see anything written later — and the CI state genuinely shapes a "Safe to
+    merge?" verdict. But publishing that early reading as a present-tense fact is
+    worse than publishing nothing: on the common case, where one push triggers both CI
+    and this review, checks are still running throughout, so the line would be stale
+    the moment it was written and would read as current.
+
+    So the status is sampled twice and the FOOTER carries the later reading. This
+    asserts the ordering behaviourally rather than by reading the source, because the
+    ordering is the whole property: a future edit that moved the second sample back
+    above `run_claude` would still pass any textual check for "two calls".
+    """
+    order: list[str] = []
+    statuses = iter(
+        ["3 success, 2 queued — 2 still running, so this is NOT a final verdict", "5 success"]
+    )
+
+    class FakeForge(review.Github):
+        def __init__(self):
+            super().__init__("owner/name", "token")
+
+        def reviewed_shas(self, iid):
+            return set()
+
+        def check_status(self, sha):
+            order.append("check_status")
+            return next(statuses)
+
+        def post_note(self, iid, body):
+            raise AssertionError("a dry run must not post")
+
+    def fake_run_claude(prompt, cwd, model, timeout):
+        order.append("run_claude")
+        return "## PR/MR Review: a title (#1)\n\nLooks fine.", 0.5
+
+    monkeypatch.setattr(review, "fetch_head", lambda *a, **k: "f" * 40)
+    monkeypatch.setattr(review, "diff_stat", lambda *a, **k: (2, 10, 1))
+    monkeypatch.setattr(
+        review, "build_diff", lambda *a, **k: ("diff --git a/a.py b/a.py\n+x\n", False)
+    )
+    monkeypatch.setattr(review, "instruction_changes", lambda *a, **k: {})
+    monkeypatch.setattr(review, "pin_instructions_to_target_branch", lambda *a, **k: ([], []))
+    monkeypatch.setattr(review, "neutralise_agent_config", lambda *a, **k: [])
+    monkeypatch.setattr(review, "export_base_tree", lambda *a, **k: "b" * 40)
+    monkeypatch.setattr(review, "write_commit_log", lambda *a, **k: None)
+    monkeypatch.setattr(review, "run_claude", fake_run_claude)
+    # The worktree add/remove and the ancestry probe are the only _run calls left.
+    monkeypatch.setattr(
+        review,
+        "_run",
+        lambda *a, **k: __import__("subprocess").CompletedProcess(a[0], 0, "", ""),
+    )
+
+    merge_request = review.MergeRequest(
+        iid=1,
+        title="a title",
+        author="someone",
+        source_branch="feature/x",
+        target_branch="develop",
+        web_url="https://example.invalid/pull/1",
+        head_sha="f" * 40,
+        draft=False,
+    )
+    args = review.parse_args(["--mr", "1", "--dry-run", "--artifact-dir", str(tmp_path)])
+    outcome = review.review_one(FakeForge(), merge_request, args, tmp_path)
+
+    assert outcome.status == "reviewed", outcome.detail
+    assert order == ["check_status", "run_claude", "check_status"], (
+        f"call order was {order}. The status must be sampled once before the model "
+        f"(so the prompt can carry it) and AGAIN after it (so the comment publishes a "
+        f"reading as fresh as itself)."
+    )
+
+    published = (tmp_path / "review-1.md").read_text()
+    assert "when this was posted: 5 success" in published, (
+        "the footer published something other than the post-model reading, so the "
+        "comment carries a CI verdict that was already stale when it was written"
+    )
+    assert "3 success, 2 queued" not in published, (
+        "the footer published the PRE-model reading as though it were current"
+    )
+
+
+def test_an_unfinished_check_is_stated_not_left_to_inference() -> None:
+    """ "7 success" with three still running is a half-truth that reads as a pass.
+
+    The counts alone put `queued` in a list next to `success` and leave the reader to
+    notice. Since the whole point of the field is that the review stops disclaiming CI
+    status, a reader who sees a success count and nothing else should be able to trust
+    it as the whole story — so the unfinished case says so in words.
+    """
+    forge = review.Github("owner/name", "token")
+
+    def runs_and_statuses(method, url, body=None):
+        if "check-runs" in url:
+            return {
+                "check_runs": [
+                    {"conclusion": "success"},
+                    {"conclusion": "success"},
+                    {"conclusion": None, "status": "in_progress"},
+                ]
+            }, {}
+        return {"statuses": []}, {}
+
+    forge._request = runs_and_statuses
+    summary = forge.check_status("abc1234")
+    assert "2 success" in summary
+    assert "1 in_progress" in summary
+    assert "still running" in summary and "NOT a final verdict" in summary, (
+        f"got {summary!r}; an unfinished run must be stated rather than left to be "
+        f"inferred from a state name in a list"
+    )
+
+    def all_done(method, url, body=None):
+        if "check-runs" in url:
+            return {"check_runs": [{"conclusion": "success"}]}, {}
+        return {"statuses": []}, {}
+
+    forge._request = all_done
+    assert "still running" not in forge.check_status("abc1234"), (
+        "a finished run must not carry the caveat, or the caveat stops meaning anything"
+    )
+
+
+def test_check_runs_beyond_the_first_page_are_declared_not_dropped() -> None:
+    """Only one page of 100 is fetched, so the shortfall has to be stated.
+
+    `Link` is deliberately not followed — LMA's pull requests run about eight check
+    runs, so pagination is a guard against a future shape rather than a present need.
+    But a summary that silently counted 100 of 120 would be the one thing a status
+    line must never be: a reader would see "100 success" with no way to know twenty
+    were never looked at. `total_count` makes the gap free to detect, so it is
+    reported and the counts are labelled a floor.
+    """
+    forge = review.Github("owner/name", "token")
+
+    def one_page_of_many(method, url, body=None):
+        if "check-runs" in url:
+            return {
+                "total_count": 120,
+                "check_runs": [{"conclusion": "success"}] * 100,
+            }, {}
+        return {"statuses": []}, {}
+
+    forge._request = one_page_of_many
+    summary = forge.check_status("abc1234")
+    assert "100 success" in summary
+    assert "20 further check run" in summary and "floor" in summary, (
+        f"got {summary!r}; the 20 unread runs must be declared, not dropped"
+    )
+
+    def one_complete_page(method, url, body=None):
+        if "check-runs" in url:
+            return {"total_count": 3, "check_runs": [{"conclusion": "success"}] * 3}, {}
+        return {"statuses": []}, {}
+
+    forge._request = one_complete_page
+    assert "further check run" not in forge.check_status("abc1234"), (
+        "a complete page must not carry the caveat, or it stops meaning anything"
+    )
+
+
+def test_nothing_after_the_paid_model_call_can_discard_the_review(tmp_path) -> None:
+    """The artifact write runs after the model has been paid for, so it cannot throw.
+
+    `Path.write_text` raises `OSError` on a full or read-only filesystem, and
+    `_review_all` catches only `Failure` and `TimeoutExpired` — so an unhandled one
+    would propagate out of `main` as a traceback and kill the whole run, having
+    already paid for a review it then did not post. The posted comment is the
+    deliverable and the artifact is a convenience copy, so a write failure is
+    reported and stepped over.
+
+    The same question applies to every step that runs after the model call, and this
+    is the one of them that writes to disk.
+    """
+    missing = tmp_path / "no" / "such" / "dir" / "review-1.md"
+    review._write_artifact(missing, "a review body")  # must not raise
+    assert not missing.exists()
+
+    written = tmp_path / "review-1.md"
+    review._write_artifact(written, "a review body")
+    assert written.read_text() == "a review body"
+
+
+def test_the_published_file_count_describes_the_diff_that_was_supplied() -> None:
+    """`changed_files` must never name files the review cannot see.
+
+    The two counts in play come from different commands: `git diff --numstat` over the
+    whole change, and the diff text itself after `build_diff` has truncated it at
+    `--max-diff-bytes`. Measured on this repository: a 30-file request cut to 20 KB
+    supplies 5 sections while numstat still says 30. Publishing the numstat figure as
+    `changed_files` therefore tells the reviewer about 25 files it was never given,
+    and the first thing it does is notice the discrepancy and report it as a finding.
+
+    (The 27-against-28 observation in one live review was the model's own miscount —
+    on every open request at the time the two figures agreed exactly. The mechanism
+    that would make it real is truncation, which is what this closes.)
+    """
+    diff = (
+        "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+        "diff --git a/b.py b/b.py\n--- a/b.py\n+++ b/b.py\n@@ -1 +1 @@\n-x\n+y\n"
+        "diff --git a/c.py b/c.py\n--- a/c.py\n+++ b/c.py\n@@ -1 +1 @@\n-x\n+y\n"
+    )
+    assert review.diff_file_count(diff) == 3
+    assert review.diff_file_count("") == 0
+    # A body line that merely mentions the marker must not be counted: only a real
+    # section header at the start of a line is a file.
+    assert review.diff_file_count("+# see diff --git a/x b/x for context\n") == 0
+
+    source = HARNESS.read_text()
+    assert '"changed_files": supplied_files' in source, (
+        "metadata's changed_files no longer comes from the supplied diff, so it can "
+        "once again name files the review was not given"
     )
 
 
