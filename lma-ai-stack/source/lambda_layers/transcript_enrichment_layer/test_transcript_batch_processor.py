@@ -144,6 +144,15 @@ def failure_records() -> List[Dict[str, Any]]:
     ]
 
 
+def exit_processor(processor: Any) -> Any:
+    """Runs ``__aexit__`` on a loop of its own, then closes it."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(processor.__aexit__(None, None, None))
+    finally:
+        loop.close()
+
+
 def rendered(record: Dict[str, Any]) -> str:
     """Everything the record would put in a log stream, message and kwargs.
 
@@ -156,7 +165,7 @@ def rendered(record: Dict[str, Any]) -> str:
 def test_the_failure_line_names_the_exception_type_and_frame():
     """A line carrying only str() reads the same for every kind of failure."""
     processor = processor_for(ValueError("invalid AppSync schema"))
-    assert asyncio.new_event_loop().run_until_complete(processor.__aexit__(None, None, None))
+    assert exit_processor(processor)
     assert len(failure_records()) == 1
     line = failure_records()[0]["message"]
     assert "ValueError" in line
@@ -180,7 +189,7 @@ def test_the_failure_line_carries_error_types_not_the_graphql_message():
     assert MESSAGE_QUOTING_CONTENT in str(error)
 
     processor = processor_for(error)
-    assert asyncio.new_event_loop().run_until_complete(processor.__aexit__(None, None, None))
+    assert exit_processor(processor)
     assert len(failure_records()) == 1
     whole_record = rendered(failure_records()[0])
     assert "TransportQueryError" in whole_record
@@ -195,6 +204,6 @@ def test_the_failure_is_still_recorded_as_an_error():
     """The log line is a diagnostic; the record must still fail."""
     error = TransportQueryError([{"errorType": "ServiceUnavailable", "message": "later"}])
     processor = processor_for(error)
-    asyncio.new_event_loop().run_until_complete(processor.__aexit__(None, None, None))
+    exit_processor(processor)
     assert processor.results["errors"] == [error]
     assert processor.results["successes"] == []

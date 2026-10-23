@@ -86,6 +86,15 @@ async def execute_gql_query_with_retries(
             # the default level, and the retry counts and the reduced errors are
             # what these lines are read for.
             reduced_error: object = graphql_errors(error) or error
+            # Asked before the retry budget is checked, so an error the caller
+            # recognises is recognised on the last attempt as well as the first.
+            # A write that timed out after it had in fact stored its item sees a
+            # condition failure on the retry, and that can be the final one.
+            if should_ignore_exception_fn(error):
+                logger.info("ignorable exception - not retrying - error: [%s]", reduced_error)
+                result = _ignored_exception_response
+                break
+
             if retries >= max_retries:
                 # The frame, not a traceback, for the reason above; and one line
                 # rather than two, because the exception is re-raised and the
@@ -97,11 +106,6 @@ async def execute_gql_query_with_retries(
                     reduced_error,
                 )
                 raise
-
-            if should_ignore_exception_fn(error):
-                logger.info("ignorable exception - not retrying - error: [%s]", reduced_error)
-                result = _ignored_exception_response
-                break
 
             retries = retries + 1
             # exponential backoff with jitter using base 2

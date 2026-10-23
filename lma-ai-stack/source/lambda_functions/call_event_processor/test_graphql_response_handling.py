@@ -18,10 +18,10 @@ what is under test is the decision each one makes:
   response without one aggregates nothing rather than failing the record that
   carried the transcript segment.
 * ``get_call_details`` returns fields the caller has no substitute for, so a
-  response without them fails the record. That is what gets it redelivered and,
-  once the event source mapping's retries are spent, preserved on the on-failure
-  destination; returning blanks would report success with the meeting half
-  written.
+  response without them fails the record. That is what gets it redelivered, and
+  once the event source mapping's retries are spent its shard and sequence
+  number are described to the on-failure destination; returning blanks would
+  report success with the meeting half written.
 
 None of them may raise ``AttributeError``: that names neither the field nor the
 response, so a batch failing on one leaves nothing to act on.
@@ -60,11 +60,14 @@ class RecordingLogger:
         self.records: List[Dict[str, Any]] = []
 
     def _record(self, level: str, message: str, *args: Any, **kwargs: Any) -> None:
+        # Every kwarg, not only `extra`: an `exc_info` dropped here would let a
+        # traceback -- which ends in the exception's own text -- past the
+        # assertions below unexamined.
         self.records.append(
             {
                 "level": level,
                 "message": message % args if args else message,
-                "extra": kwargs.get("extra"),
+                "kwargs": kwargs,
             }
         )
 
@@ -190,8 +193,12 @@ def quiet_logger():
 
 
 def run(coroutine):
-    """Runs one coroutine to completion."""
-    return asyncio.new_event_loop().run_until_complete(coroutine)
+    """Runs one coroutine to completion on a loop of its own, then closes it."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coroutine)
+    finally:
+        loop.close()
 
 
 # The response shapes AppSync can answer a getCall query with. "populated" is
@@ -216,6 +223,10 @@ GET_CALL_RESPONSES = {
 }
 
 UNUSABLE_GET_CALL = [name for name in GET_CALL_RESPONSES if name != "populated"]
+
+# A GraphQL error message that quotes the argument the server rejected, which is
+# what these mutations inline into the query document.
+MESSAGE_QUOTING_CONTENT = "rejected Transcript 'the figures we discussed'"
 
 
 # ── get_call_status: fail open ──────────────────────────────────────────────
@@ -246,6 +257,40 @@ def test_get_call_status_logs_the_field_and_the_shape(shape, schema):
     assert len(warnings) == 1, f"expected one warning, got {warnings}"
     assert "getCall" in warnings[0]
     assert "dataShape" in warnings[0]
+
+
+def test_get_call_status_records_a_raised_query_without_a_traceback(schema, monkeypatch):
+    """Nothing above sees this exception, so the line is the whole record of it.
+
+    The retry wrapper is replaced rather than driven, so the exception reaches
+    ``get_call_status``'s own ``except`` without four attempts of real backoff.
+    ``test_execute_query.py`` covers what the wrapper logs on the way.
+    """
+    error = TransportQueryError(
+        "boom",
+        errors=[{"errorType": "ServiceUnavailable", "message": MESSAGE_QUOTING_CONTENT}],
+    )
+
+    async def raising_execute(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(cep, "execute_gql_query_with_retries", raising_execute)
+    session = FakeSession(schema, None)
+    status = run(cep.get_call_status(message={"CallId": "call-1"}, appsync_session=session))
+    assert status is None, "fail-open: an unreadable status is unknown"
+
+    errors = cep.LOGGER.at_level("ERROR")
+    assert len(errors) == 1, f"expected one error line, got {errors}"
+    assert "ServiceUnavailable" in errors[0]
+    assert "raised at" in errors[0]
+    assert MESSAGE_QUOTING_CONTENT not in errors[0]
+    # No traceback anywhere in the record: a rendered one ends in that text.
+    assert cep.LOGGER.at_level("EXCEPTION") == []
+    assert all(
+        "exc_info" not in record["kwargs"]
+        for record in cep.LOGGER.records
+        if record["level"] == "ERROR"
+    )
 
 
 def test_get_call_status_does_not_log_a_transcript_or_an_error_message(schema):

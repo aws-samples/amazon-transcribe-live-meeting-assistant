@@ -99,8 +99,12 @@ def query():
 
 
 def run(coroutine):
-    """Runs one coroutine to completion."""
-    return asyncio.new_event_loop().run_until_complete(coroutine)
+    """Runs one coroutine to completion on a loop of its own, then closes it."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coroutine)
+    finally:
+        loop.close()
 
 
 def rendered(record: logging.LogRecord) -> str:
@@ -199,3 +203,38 @@ def test_an_ignorable_error_stops_the_retries_and_answers_with_the_given_respons
     )
     assert result == {"ok": True}
     assert session.attempts == 1, "an ignored error is not retried"
+
+
+def test_an_ignorable_error_is_recognised_on_the_last_attempt_too(query):
+    """A write that timed out after storing its item sees this on a retry.
+
+    That retry can be the final one, and the item being there is still the state
+    the write was aiming for, so the budget running out must not turn it into a
+    failure.
+    """
+    attempts = {"count": 0}
+
+    class LateDuplicateSession:
+        """Fails with something retryable until the final attempt."""
+
+        async def execute(self, _query: Any) -> Any:
+            attempts["count"] += 1
+            if attempts["count"] <= 3:
+                raise TransportQueryError([{"errorType": "ServiceUnavailable"}])
+            raise TransportQueryError([{"message": "item put condition failure"}])
+
+    result = run(
+        execute_gql_query_with_retries(
+            query,
+            client_session=LateDuplicateSession(),
+            logger=LOGGER,
+            min_sleep_time=0,
+            should_ignore_exception_fn=lambda error: (
+                "item put condition failure"
+                in [entry.get("message") for entry in getattr(error, "errors", [])]
+            ),
+            ignored_exception_response={"ok": True},
+        )
+    )
+    assert attempts["count"] == 4, "the duplicate arrives on the final attempt"
+    assert result == {"ok": True}

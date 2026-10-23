@@ -237,7 +237,7 @@ def test_anything_not_known_to_be_permanent_is_treated_as_retryable(response):
 
 
 def test_the_retry_classification_reaches_the_exception():
-    """A handler further up reads it off the exception rather than re-deriving it."""
+    """It is available on the exception, so a handler need not re-derive it."""
     with pytest.raises(GraphQLResponseError) as raised:
         require_graphql_field(PERMANENT_ERRORS, "getCall", logger=LOGGER)
     assert raised.value.retryable is False

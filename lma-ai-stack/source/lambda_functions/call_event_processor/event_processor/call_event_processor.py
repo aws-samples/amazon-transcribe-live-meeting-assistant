@@ -34,7 +34,9 @@ from graphql.language.printer import print_ast
 from graphql_helpers import (
     call_fields,
     graphql_error_messages,
+    graphql_errors,
     optional_graphql_field,
+    raising_frame,
     require_graphql_field,
     transcript_segment_fields,
     transcript_segment_sentiment_fields,
@@ -390,8 +392,17 @@ async def get_call_status(
             client_session=appsync_session,
             logger=LOGGER,
         )
-    except Exception:  # pylint: disable=broad-except
-        LOGGER.exception("could not read current status for call %s", call_id)
+    except Exception as error:  # pylint: disable=broad-except
+        # The frame and the reduced errors rather than a traceback: nothing above
+        # sees this exception, since the fail-open contract swallows it, so this
+        # line is the whole record of it and a traceback would end in the
+        # exception's own text.
+        LOGGER.error(
+            "could not read current status for call %s - raised at [%s] - error: [%s]",
+            call_id,
+            raising_frame(error),
+            graphql_errors(error) or error,
+        )
         return None
 
     # Optional, not required: a null getCall or a response without one leaves the
@@ -1137,7 +1148,7 @@ async def get_call_details(
     # Required, not optional: every field returned below comes from the meeting
     # record, so a response without one leaves nothing to return. Raising fails
     # the Kinesis record, which the event source mapping redelivers and finally
-    # preserves on its on-failure destination -- the opposite of returning blanks
+    # describes to its on-failure destination -- the opposite of returning blanks
     # and reporting success.
     call = require_graphql_field(result, "getCall", logger=LOGGER)
     LOGGER.debug("Get Call result %s", json.dumps(call))

@@ -18,10 +18,13 @@ These helpers make that choice explicit at the call site:
   returns ``default`` and logs the shape that came back.
 * :func:`require_graphql_field` for a value the caller cannot proceed without.
   It raises :class:`GraphQLResponseError`, which fails the unit of work holding
-  the field -- for a Kinesis consumer, the record -- so the work is redelivered
-  and, once the event source mapping's retry budget is spent, preserved on its
-  on-failure destination. Returning a default there would finish the work with
-  part of it missing and report success, which is the one outcome worth avoiding.
+  the field -- for a Kinesis consumer, the record -- so the work is redelivered.
+  Once the event source mapping's retry budget is spent, the batch's shard and
+  sequence-number range are described to its on-failure destination: the
+  record's location, not its data, which stays readable from the stream until
+  its retention period expires. Returning a default instead would finish the
+  work with part of it missing and report success, which is the one outcome
+  worth avoiding.
 
 Both accept a ``logger``; pass the calling module's Powertools logger so the
 line lands in that function's log stream with its request id.
