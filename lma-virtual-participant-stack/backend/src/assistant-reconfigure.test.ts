@@ -451,20 +451,25 @@ test('a mode change on a wake-phrase agent with no session waits for the next wa
     assert.deepEqual(calls, []);
 });
 
-test('the activation window the old mode was counting down is dropped', async () => {
+test('the activation window the old mode was counting down is dropped whatever the new mode is', async () => {
     const { agent } = novaAgent({ activationMode: 'wake_phrase' });
     withLiveSession(agent);
     await agent.activate(600);
     assert.notEqual((agent as any).activationTimeout, null);
 
-    await agent.reconfigure(chat({ activationMode: 'always_active' }));
-    await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
-
     try {
-        assert.equal((agent as any).activationTimeout, null);
+        // Dropped on the way to always_active, not only on the way back. A timer
+        // left armed there happens to do nothing because `deactivate()` returns
+        // early in that mode, which is not a reason worth relying on.
+        await agent.reconfigure(chat({ activationMode: 'always_active' }));
+        assert.equal((agent as any).activationTimeout, null, 'switching to always listening drops the window');
+
+        await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
+        assert.equal((agent as any).activationTimeout, null, 'switching back drops it too');
     } finally {
         // A window that survived would hold the event loop open for ten
-        // minutes, so clear it here: this assertion should fail, not hang.
+        // minutes, so clear it whichever assertion failed: these should fail,
+        // not hang.
         const surviving = (agent as any).activationTimeout;
         if (surviving) clearTimeout(surviving);
     }
@@ -535,6 +540,26 @@ test('a refresh that will not settle is left to finish, with a rebuild queued be
     // assistant finishes speaking or when the four-minute timer fires, and a
     // group-mode assistant starts muted and so may not speak for a long time.
     assert.deepEqual(started, ['checkAndExecuteQueuedRefresh'], 'the queue must be started, not just set');
+
+    // And the participant is not told it is finished while the live session is
+    // still the one the agent has left.
+    assert.equal(outcome.detail, 'the assistant will finish switching shortly');
+    assert.deepEqual(assistantToggleChatReply(outcome), [
+        'Live Meeting Assistant: switched to group mode, the assistant will finish switching shortly.',
+    ]);
+});
+
+test('a change that needed no rebuild is reported as finished, with no caveat', async () => {
+    // The deferred case above must not leak into the ordinary one: on the
+    // wake-phrase path with no session there is nothing outstanding.
+    const { agent } = novaAgent({ meetingMode: 'group', activationMode: 'wake_phrase' });
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'normal' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.equal(outcome.detail, undefined);
+    assert.deepEqual(assistantToggleChatReply(outcome), ['Live Meeting Assistant: switched to assistant mode.']);
 });
 
 test('a queued refresh is not spent on a refresh already in flight', async () => {
@@ -693,6 +718,58 @@ test('a refused or unchanged request leaves the transcription path where it was'
 
     // Leave the shared singleton as the rest of the suite expects to find it.
     await agent.reconfigure(chat({ meetingMode: 'normal' }));
+});
+
+// ---------------------------------------------------------------------------
+// A tool call in flight belongs to the session that asked for it
+// ---------------------------------------------------------------------------
+
+test('a tool result is not delivered into the session a mode change built', async () => {
+    // A Strands call takes 5-10 seconds, long enough for a mode change to
+    // replace the session underneath it. A toolUseId means nothing to a session
+    // that never issued it, and after a switch into translator mode the new
+    // session has no such tool at all.
+    const { agent } = novaAgent({
+        meetingMode: 'normal',
+        activationMode: 'always_active',
+        strandsLambdaArn: STRANDS_ARN,
+    });
+    withLiveSession(agent);
+
+    const sent: string[] = [];
+    (agent as any).sendToolResult = async (toolUseId: string) => sent.push(toolUseId);
+    let releaseTool: () => void = () => {};
+    (agent as any).invokeStrandsAgent = async () =>
+        new Promise((resolve) => {
+            releaseTool = () => resolve({ answer: 'from the old session' });
+        });
+
+    const toolCall = (agent as any).processToolUseAsync('tool-use-1', 'strands_agent', {});
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    // The mode change replaces the session while the tool call is outstanding.
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+
+    releaseTool();
+    await toolCall;
+    assert.deepEqual(sent, [], 'the result must not reach a session that never asked for it');
+});
+
+test('a tool result is delivered when the session is still the one that asked', async () => {
+    // The guard must not swallow the ordinary case.
+    const { agent } = novaAgent({
+        meetingMode: 'normal',
+        activationMode: 'always_active',
+        strandsLambdaArn: STRANDS_ARN,
+    });
+    withLiveSession(agent);
+
+    const sent: string[] = [];
+    (agent as any).sendToolResult = async (toolUseId: string) => sent.push(toolUseId);
+    (agent as any).invokeStrandsAgent = async () => ({ answer: 'still here' });
+
+    await (agent as any).processToolUseAsync('tool-use-1', 'strands_agent', {});
+    assert.deepEqual(sent, ['tool-use-1']);
 });
 
 // ---------------------------------------------------------------------------

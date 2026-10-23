@@ -1590,6 +1590,16 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private async processToolUseAsync(toolUseId: string, toolName: string, toolUseContent: any): Promise<void> {
+    // The session that issued this tool use. A Strands call takes 5-10 seconds,
+    // which is long enough for the session to be replaced underneath it — by a
+    // mid-meeting mode change, by the periodic refresh, or by a translator
+    // pause/resume transition. A `toolUseId` means nothing to a session that
+    // never issued it, and after a switch into translator mode the new session
+    // has no such tool at all, so the result goes to the session that asked for
+    // it or to nothing.
+    const issuingSession = this.session;
+    const sessionStillOurs = () => this.session === issuingSession && !!this.session?.isActive;
+
     try {
       // Set flag to prevent deactivation while tool is processing
       this._isProcessingTool = true;
@@ -1602,17 +1612,18 @@ export class NovaAgent implements VoiceAssistantProvider {
       // Invoke Strands Lambda
       const toolResult = await this.invokeStrandsAgent(toolUseContent);
       
-      // Send tool result back to Nova immediately (only if session is still active)
-      if (this.session && this.session.isActive) {
+      // Send tool result back to Nova immediately (only to the session that
+      // issued the tool use, and only while it is still active)
+      if (sessionStillOurs()) {
         await this.sendToolResult(toolUseId, toolResult);
         console.log('✓ Tool result sent to Nova - Nova will now process and generate audio response');
       } else {
-        console.log('⚠️  Session closed before tool result could be sent');
+        console.log('⚠️  Session replaced or closed before tool result could be sent - discarding it');
       }
     } catch (error) {
       console.error('Error processing tool use:', error);
-      // Send error result back to Nova (only if session is still active)
-      if (this.session && this.session.isActive) {
+      // Send error result back to Nova, under the same condition
+      if (sessionStillOurs()) {
         await this.sendToolResult(toolUseId, {
           error: 'Failed to process tool request',
           details: error instanceof Error ? error.message : String(error)
@@ -2992,7 +3003,13 @@ export class NovaAgent implements VoiceAssistantProvider {
       let sessionRebuilt = false;
       let detail: string | undefined;
       try {
-        sessionRebuilt = await this.rebuildSessionForNewMode();
+        const rebuild = await this.rebuildSessionForNewMode();
+        sessionRebuilt = rebuild === 'rebuilt';
+        if (rebuild === 'deferred') {
+          // Applied, but the live session is still the one the agent has left,
+          // so the reply says it is finishing rather than reading as complete.
+          detail = 'the assistant will finish switching shortly';
+        }
       } catch (error) {
         console.error('❌ Error rebuilding the Nova session for a mode change:', error);
         // Only promise the participant a recovery when one was actually
@@ -3082,8 +3099,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.activationMode = mode;
     this._isActivated = (mode === 'always_active');
 
-    if (mode !== 'always_active' && this.activationTimeout) {
-      // The window the old mode was counting down belongs to that mode.
+    if (this.activationTimeout) {
+      // The window the old mode was counting down belongs to that mode, whatever
+      // the new one is. Cleared unconditionally: a timer left armed into
+      // `always_active` only fails to do anything because `deactivate()` returns
+      // early there, which is a reason the next reader should not have to find.
       clearTimeout(this.activationTimeout);
       this.activationTimeout = null;
     }
@@ -3094,12 +3114,14 @@ export class NovaAgent implements VoiceAssistantProvider {
   /**
    * Give the agent a session built for the configuration it is now in.
    *
-   * @returns whether a session was built or torn down. False means the agent is
-   *   holding no session that needs replacing — on `wake_phrase` activation
-   *   that is the normal, correct state, and the next wake phrase builds one
-   *   from the new configuration.
+   * @returns `'rebuilt'` when a session was built or torn down; `'not-needed'`
+   *   when the agent is holding no session that needs replacing, which on
+   *   `wake_phrase` activation is the normal, correct state and the next wake
+   *   phrase builds one from the new configuration; `'deferred'` when a refresh
+   *   already in flight has the rebuild and the live session is, for now, still
+   *   the one the agent has left.
    */
-  private async rebuildSessionForNewMode(): Promise<boolean> {
+  private async rebuildSessionForNewMode(): Promise<'rebuilt' | 'not-needed' | 'deferred'> {
     // A periodic refresh already queued is superseded: this rebuild produces the
     // fresh session it was going to produce, and leaving the flag set would tear
     // the new session down again as soon as the agent next went idle.
@@ -3123,14 +3145,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       console.warn('⚠️  Session refresh still in flight — queueing a rebuild behind it');
       this.refreshQueued = true;
       this.checkAndExecuteQueuedRefresh();
-      return false;
+      return 'deferred';
     }
 
     const hasLiveSession = !!(this.session && this.session.isActive);
 
     if (this.activationMode !== 'always_active') {
       if (!hasLiveSession) {
-        return false;
+        return 'not-needed';
       }
       if (this._isActivated) {
         // A session exists because somebody addressed the assistant and the
@@ -3138,24 +3160,24 @@ export class NovaAgent implements VoiceAssistantProvider {
         // close it: closing would leave the window counting down against no
         // session, so the assistant would be deaf for the rest of it.
         await this.refreshSession();
-        return true;
+        return 'rebuilt';
       }
       // Otherwise the wake-phrase contract applies — no session is held open
       // between activations, so the rebuild is a teardown and the next wake
       // phrase builds one from the new configuration.
       await this.closeSession();
-      return true;
+      return 'rebuilt';
     }
 
     if (!hasLiveSession) {
       // Switching to always_active from a mode that was holding no session: the
       // assistant has to start listening now, not at the next wake phrase.
       await this.createSession();
-      return true;
+      return 'rebuilt';
     }
 
     await this.refreshSession();
-    return true;
+    return 'rebuilt';
   }
 
   /**
