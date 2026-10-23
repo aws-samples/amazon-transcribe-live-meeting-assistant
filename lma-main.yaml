@@ -4138,18 +4138,17 @@ Resources:
         A transcript segment did not reach the meeting page and nothing else
         reports it. The Call Event Processor gathers these writes with
         return_exceptions set, so a failed one is collected into the
-        invocation's result rather than raised: the invocation succeeds, the
-        Kinesis record is not redelivered, AWS/Lambda Errors stays flat and the
-        discarded-records queue stays empty. The transcript simply has a gap.
-        Read the Call Event Processor's log group for 'max retries on query'
-        over the same period; that line carries the exception type and the
-        GraphQL errorType, and it is the one these failures produce -- the
-        handler's 'event processor error' lines report only failures that were
-        raised, which these are not. An expired caller token, an AppSync
-        resolver rejecting the write and a DynamoDB capacity error all land
-        here. Lines
-        already lost cannot be replayed from Kinesis once the records age out of
-        its 24-hour retention, so treat a sustained rate as urgent.
+        invocation's result rather than raised -- and is therefore never
+        redelivered. A raised failure would be attributed to its Kinesis record,
+        retried, and finally described to the on-failure destination another
+        alarm watches; this one is retried by nobody and the discarded-records
+        queue stays empty. The transcript simply has a gap. Read the Call Event
+        Processor's log group for 'max retries on query' over the same period:
+        that line carries the exception type and the GraphQL errorType, and is
+        the one these failures produce. The handler's 'event processor error'
+        lines report only failures that were raised, so grepping for those finds
+        nothing. Segments lost cannot be replayed once their records age out of
+        the stream's 24-hour retention, so treat a sustained rate as urgent.
       Namespace: !Ref AWS::StackName
       MetricName: TranscriptSegmentWriteFailed
       Statistic: Sum

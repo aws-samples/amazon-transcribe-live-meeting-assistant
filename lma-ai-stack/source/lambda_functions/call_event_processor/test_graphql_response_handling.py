@@ -881,10 +881,15 @@ def test_a_failed_status_write_counts_no_meeting_ended(schema, emitted, monkeypa
 
     Unlike the transcript-segment mutations, the status write is awaited
     directly rather than gathered, so its failure propagates out of the
-    dispatch and the record is reported as a Kinesis batch item failure. That
-    is asserted here as well, because it is the reason this metric needs no
-    alarm of its own: a failure on this path already reaches AWS/Lambda Errors
-    and the alarm PR 796 put on it.
+    dispatch. The raise is asserted here too, because it is the reason this
+    metric needs no alarm of its own -- but not because it reaches
+    AWS/Lambda Errors, which it does not: the batch processor attributes the
+    exception to the record's sequence number and the invocation returns a
+    partial-batch response normally. What makes the failure visible is that the
+    record is redelivered, and a record that cannot succeed eventually reaches
+    the event source's on-failure destination, which the
+    discarded-records-queue-depth alarm watches. A gathered segment failure gets
+    none of that, which is what the two metrics are for.
     """
     session = QueuedSession(
         schema,

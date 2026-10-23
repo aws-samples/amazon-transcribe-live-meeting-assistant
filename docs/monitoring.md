@@ -134,9 +134,14 @@ Participant's own log group and meeting record.
 gap.** The Call Event Processor issues the writes for a batch of segments
 together and collects the results, including the failures, rather than raising
 on them. That is deliberate — one rejected segment should not replay the whole
-Kinesis batch — but it means the invocation succeeds, the record is not
-redelivered, `AWS/Lambda Errors` stays flat and the discarded-records queue
-stays empty. The transcript simply has a line missing, on a meeting page with no
+Kinesis batch — but the consequence is that the record is **not redelivered**,
+and that is what sets these failures apart from every other failure in the
+pipeline. A raised failure is attributed to its record, retried, and finally
+described to the event source's on-failure destination, where the
+discarded-records-queue-depth alarm picks it up. This one is retried by nobody,
+the discarded-records queue stays empty, and `AWS/Lambda Errors` stays flat —
+as it does for a raised record failure too, since the invocation still returns a
+partial-batch response. The transcript simply has a line missing, on a meeting page with no
 error on it. If this alarm fires, read the Call Event Processor's log group for
 `max retries on query` over the same window; each of those lines carries the
 exception type and the GraphQL `errorType`. Search for that string rather than
@@ -216,10 +221,13 @@ consequences are worth knowing before you read a graph:
   a number you do not believe can be traced to the record that produced it with
   a Logs Insights query over the Call Event Processor's or the transcriber's log
   group, filtering on the metric's name.
-- **A count can be very slightly high.** AWS documents the format as
-  guaranteeing at-least-once delivery, with occasional duplicates. It is the
-  right trade for these metrics — none of them is a billing input — but do not
-  read `MeetingsStarted` as an exact meeting census.
+- **A count can be slightly out, in either direction.** AWS documents the
+  format as guaranteeing at-least-once delivery, with occasional duplicates, so
+  a count can read high. It can also read low: `MeetingsStarted` skips a start
+  event that finds the meeting already stored, and a first delivery whose own
+  earlier attempt stored the meeting and then failed in transit looks exactly
+  like a redelivery. Both are the right trade for these metrics — none is a
+  billing input — but do not read `MeetingsStarted` as an exact meeting census.
 - **Datapoints can arrive a little late**, because the log has to be flushed and
   ingested first, and neither Lambda nor the ECS `awslogs` driver lets the
   application control when. Both alarms on these metrics therefore need only one
