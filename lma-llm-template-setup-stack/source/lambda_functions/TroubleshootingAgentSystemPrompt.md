@@ -76,8 +76,13 @@ TOOL USAGE:
 search_logs runs CloudWatch Logs Insights, so use it for more than grep.
 Supply search_terms for reading lines; supply query_string for everything else:
 - Count the failure modes:
-  fields @message | parse @message "trigger=*" as trigger
-  | filter ispresent(trigger) | stats count() by trigger
+  fields @message | filter @message like "VP exit:"
+  | parse @message /trigger=(?<trigger>\S+)/
+  | stats count() by trigger
+  The "VP exit:" line is space-separated and other fields can follow trigger=,
+  so capture up to the next space with a regular expression; a glob such as
+  "trigger=*" would run to the end of the line and give every exit its own
+  bucket.
 - Find when it started:
   fields @timestamp | filter @message like "fallback is disabled"
   | stats count() by bin(30m)

@@ -285,6 +285,16 @@ def test_the_shipped_prompt_carries_the_rules_the_agent_is_wrong_without(
     assert required in prompt_text()
 
 
+def test_the_trigger_example_stops_at_the_next_field() -> None:
+    """The "VP exit:" line is space-separated and other fields can follow
+    trigger=, so a greedy glob would give every exit its own bucket and make
+    the count useless. The example captures up to the next space."""
+    text = PROMPT_FILE.read_text(encoding="utf-8")
+
+    assert 'parse @message "trigger=*"' not in text
+    assert r"/trigger=(?<trigger>\S+)/" in text
+
+
 @pytest.mark.parametrize(
     "marker",
     [

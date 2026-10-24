@@ -56,8 +56,11 @@ made, for a question whose answer did not change. A failed run reports the
 failure; asking again is the operator's decision, not this function's.
 
 Cost attribution for the Bedrock usage this agent incurs is reported in the
-run's own log line rather than as a metric, because LMA emits no custom metrics
-yet. When it does, ``usage`` below is the figure to publish.
+run's own log line rather than as a metric. LMA does publish custom metrics
+(see ``metrics_utils`` in the AI stack's layer), but this function does not
+emit any in this release, so it holds no ``METRIC_NAMESPACE`` and no
+``cloudwatch:PutMetricData`` grant. Publishing ``usage`` below as a metric is
+a follow-up, and would go through that catalogue and its namespace gate.
 """
 
 from __future__ import annotations
@@ -841,8 +844,8 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
             search_terms: Comma-separated literal substrings. A line matching
                 any of them is returned. Ignored if query_string is given.
             query_string: A complete Logs Insights query, for example
-                'fields @message | parse @message "trigger=*" as t
-                | filter ispresent(t) | stats count() by t'.
+                'fields @message | filter @message like "VP exit:"
+                | parse @message /trigger=(?<t>\\S+)/ | stats count() by t'.
             lookback_hours: How far back to search. Defaults to the
                 deployment's configured window.
             limit: Maximum rows. Defaults to the configured maximum.
