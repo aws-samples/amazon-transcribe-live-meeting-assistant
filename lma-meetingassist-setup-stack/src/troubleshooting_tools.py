@@ -71,7 +71,18 @@ class ToolError(RuntimeError):
     to stand in for an error: "no matching log lines" and "the query failed"
     lead to opposite conclusions, and a model cannot tell them apart if both
     arrive as an empty list.
+
+    ``summary`` is a short label written here, safe to publish on the
+    thinking-step stream. The message itself is not: several of these embed a
+    botocore exception's text, which can carry account-specific ARNs, or a log
+    group name the model supplied, which is model text. The message goes to the
+    agent, which needs the detail to act; the summary goes to the UI panel,
+    which needs to know only what kind of thing went wrong.
     """
+
+    def __init__(self, message: str, summary: str = "could not gather evidence"):
+        super().__init__(message)
+        self.summary = summary
 
 
 #: Error codes CloudWatch Logs returns for a query it would not accept. Read
@@ -198,7 +209,8 @@ class TroubleshootingTools:
             raise ToolError(
                 f"the time budget for this diagnosis was exhausted before {what} "
                 "could run; report what has been established so far and name "
-                "this as the evidence that is missing"
+                "this as the evidence that is missing",
+                summary="out of time",
             )
 
     def _render(
@@ -444,7 +456,8 @@ class TroubleshootingTools:
             raise ToolError(
                 "no log group was named. Call discover_log_groups first and "
                 "query the groups it returns; log group names in this solution "
-                "cannot be guessed from the stack name."
+                "cannot be guessed from the stack name.",
+                summary="no log group named",
             )
 
         known = self._known_log_group_names()
@@ -454,7 +467,8 @@ class TroubleshootingTools:
             raise ToolError(
                 "none of the named log groups exist in this deployment: "
                 f"{unknown}. Call discover_log_groups and use the names it "
-                "returns verbatim."
+                "returns verbatim.",
+                summary="named log groups do not exist in this deployment",
             )
         # Logs Insights takes at most 50 groups in one query. The ones past
         # that are reported rather than dropped quietly: a group the model
@@ -587,7 +601,8 @@ class TroubleshootingTools:
                     "this deployment's diagnostic role is not permitted to "
                     f"query at least one of these log groups: {exc}. Retry "
                     "with fewer groups, dropping any that discovery reported "
-                    "but that may belong outside this deployment."
+                    "but that may belong outside this deployment.",
+                    summary="not permitted to query one of those log groups",
                 ) from exc
             if _is_query_syntax_error(exc):
                 raise ToolError(
@@ -595,13 +610,17 @@ class TroubleshootingTools:
                     f"{exc}. The query is yours to fix — check the pipe "
                     "syntax, the field names and the quoting, then try again. "
                     "Omit queryString and pass search_terms instead if you "
-                    "only need matching lines."
+                    "only need matching lines.",
+                    summary="the query was rejected as malformed",
                 ) from exc
             raise
 
         query_id = started.get("queryId")
         if not query_id:
-            raise ToolError("CloudWatch Logs did not return a query id")
+            raise ToolError(
+                "CloudWatch Logs did not return a query id",
+                summary="the query could not be started",
+            )
 
         budget = float(self._limits.query_timeout_seconds)
         if self._deadline is not None:
@@ -625,7 +644,8 @@ class TroubleshootingTools:
                     f"the query was still {status} after {waited:.0f}s of an "
                     f"available {budget:.0f}s and was cancelled. Narrow it: "
                     "fewer log groups, a shorter lookbackHours, or a more "
-                    "specific search term."
+                    "specific search term.",
+                    summary="the query was cancelled for taking too long",
                 )
             self._sleep(self._limits.query_poll_seconds)
 
@@ -638,7 +658,8 @@ class TroubleshootingTools:
             raise ToolError(
                 f"the Logs Insights query ended as {status} rather than "
                 "Complete, so it produced no result. This is not evidence that "
-                "nothing matched. Retry it, or narrow it first if it was large."
+                "nothing matched. Retry it, or narrow it first if it was large.",
+                summary="the query did not complete",
             )
 
         statistics = response.get("statistics") or {}
@@ -773,11 +794,15 @@ class TroubleshootingTools:
         self._check_deadline("a virtual participant lookup")
         identifier = str(vp_id or "").strip()
         if not identifier:
-            raise ToolError("no virtual participant id was supplied")
+            raise ToolError(
+                "no virtual participant id was supplied",
+                summary="no virtual participant id",
+            )
         if not self._vp_table_name:
             raise ToolError(
                 "the virtual participant table is not configured for this "
-                "function, so the row cannot be read"
+                "function, so the row cannot be read",
+                summary="the virtual participant table is not configured",
             )
 
         response = self._ddb.get_item(
@@ -903,12 +928,18 @@ class TroubleshootingTools:
         """
         self._check_deadline("a stack parameter lookup")
         if not self._stack_name:
-            raise ToolError("the LMA stack name is not configured for this function")
+            raise ToolError(
+                "the LMA stack name is not configured for this function",
+                summary="the stack name is not configured",
+            )
 
         response = self._cfn.describe_stacks(StackName=self._stack_name)
         stacks = response.get("Stacks") or []
         if not stacks:
-            raise ToolError(f"stack {self._stack_name} was not found")
+            raise ToolError(
+                f"stack {self._stack_name} was not found",
+                summary="the stack was not found",
+            )
         stack = stacks[0]
 
         declared = {

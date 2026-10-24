@@ -284,14 +284,20 @@ sit in the tools: `get_vp_record`'s field allowlist, the parameter redaction
 described above, and the thinking-step stream's summaries.
 
 That stream matters most, because it reaches the UI without the model in the
-loop, so nothing the prompt says about what to quote applies to it. It
-publishes a tool result's **shape** and never its content — "2 log groups, 42
-rows, 90000 bytes scanned" — and the same for a tool call's arguments: log
-group names are published, because they come from discovery and cannot carry
-anything but themselves, while a `query_string` or `search_terms` the agent
-wrote appears only as a length. Those are the agent's own words, and it writes
-them from text it has just read out of a log line, which can contain whatever
-the component that wrote it put there.
+loop, so nothing the prompt says about what to quote applies to it. The rule
+it follows is: publish a shape, a count, or text written by this codebase —
+never text the model wrote, and never an AWS error message.
+
+In practice a progress line reads "2 log groups, 42 rows, 90000 bytes scanned"
+or "3 log groups in virtual-participant, transcript-pipeline". A
+`query_string`, `search_terms` or `components` the agent wrote appears only as
+a length, because it writes those from text it has just read out of a log line.
+Log group names are counted and reported by which component they belong to
+rather than quoted, because a name on this stream has not been checked against
+discovery yet. A failed call publishes the exception type, or a short label
+written at the point the error is raised — not the message, which may carry an
+account-specific ARN. The agent itself still receives all of it; this is about
+what leaves the function.
 
 ## Related
 

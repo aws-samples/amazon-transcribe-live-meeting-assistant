@@ -75,6 +75,7 @@ import troubleshooting_prompt
 from bedrock_compat import accepts_temperature
 from botocore.config import Config as BotoCoreConfig
 from troubleshooting_config import AgentLimits
+from troubleshooting_discovery import classify_log_group
 from troubleshooting_tools import ToolError, TroubleshootingTools
 
 logger = logging.getLogger()
@@ -259,12 +260,11 @@ class RunBudgetExhausted(BaseException):
     means a parallel-calling model sees the forced path more often than a
     serial one.
 
-    An agent SDK
-    catches ``Exception`` around a tool call and turns it into a tool error the
-    model can react to — which is the right default and exactly the wrong
-    behaviour here — so this inherits from BaseException to pass through that
-    handling untouched. ``run_diagnosis`` catches it and writes the answer
-    itself.
+    An agent SDK catches ``Exception`` around a tool call and turns it into a
+    tool error the model can react to, which is the right default and exactly
+    the wrong behaviour here. So this inherits from BaseException, to pass
+    through that handling untouched; ``run_diagnosis`` catches it and writes
+    the answer itself.
 
     **What is and is not verified.** That a catch-``Exception`` tool executor
     does not absorb this is asserted directly, against a stand-in for one. That
@@ -526,11 +526,10 @@ class ThinkingStepHookProvider:
         except Exception as exc:  # noqa: BLE001
             logger.warning("before-tool hook failed: %s", exc)
 
-    #: Tool arguments whose values are safe to publish: identifiers and
-    #: numbers the agent chose, none of which can carry log content.
-    _PUBLISHABLE_INPUT_FIELDS = frozenset(
-        {"vp_id", "components", "lookback_hours", "limit"}
-    )
+    #: Tool arguments whose values are safe to publish: an identifier the
+    #: caller supplied and numbers the agent chose, none of which can carry
+    #: log content. Everything else is published as a length or a count.
+    _PUBLISHABLE_INPUT_FIELDS = frozenset({"vp_id", "lookback_hours", "limit"})
 
     @classmethod
     def summarise_input(cls, tool_input: Any) -> Optional[str]:
@@ -552,11 +551,19 @@ class ThinkingStepHookProvider:
         parts: List[str] = []
         groups = tool_input.get("log_group_names")
         if groups:
+            # Counted and classified, never echoed. This runs in the
+            # before-tool hook, so a name here has not been checked against
+            # discovery yet -- it is whatever the model wrote. The component
+            # each one classifies as comes from a closed set, and is the more
+            # useful thing for a progress panel anyway: "in
+            # virtual-participant" rather than a path.
             names = [n.strip() for n in str(groups).split(",") if n.strip()]
-            parts.append(
-                names[0] if len(names) == 1 else f"{len(names)} log groups"
-            )
-        for field in ("query_string", "search_terms"):
+            plural = "" if len(names) == 1 else "s"
+            parts.append(f"{len(names)} log group{plural}")
+            components = sorted({classify_log_group(n) for n in names})
+            if components:
+                parts.append(f"in {', '.join(components)}")
+        for field in ("query_string", "search_terms", "components"):
             value = tool_input.get(field)
             if value:
                 # Length only. The content is the model's words, and may echo
@@ -599,9 +606,12 @@ class ThinkingStepHookProvider:
                 # and this stream reaches the UI without the model in the loop.
                 # The full text still goes to the model and to the log.
                 return f"failed: {payload['fault']}"
-            # A ToolError's own message, written for the agent to read. It
-            # names a log group or an argument, never log content.
-            return f"could not gather evidence: {str(payload['error'])[:200]}"
+            # A ToolError's author-written label, never its message: some of
+            # those embed botocore text or a name the model supplied.
+            summary = payload.get("errorSummary")
+            if isinstance(summary, str) and summary:
+                return f"could not gather evidence: {summary}"
+            return "could not gather evidence"
         parts: List[str] = []
         for label, key in (
             ("log groups", "logGroupCount"),
@@ -707,7 +717,16 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
             return call(**kwargs)
         except ToolError as exc:
             logger.info("%s could not gather evidence: %s", name, exc)
-            return json.dumps({"error": str(exc), "tool": name})
+            return json.dumps(
+                {
+                    "error": str(exc),
+                    # The author-written label, safe for the thinking-step
+                    # stream. Several of these messages embed a botocore
+                    # exception's text or a log group name the model supplied.
+                    "errorSummary": exc.summary,
+                    "tool": name,
+                }
+            )
         except Exception as exc:  # noqa: BLE001 - the model gets to see this
             logger.exception("%s failed", name)
             return json.dumps(

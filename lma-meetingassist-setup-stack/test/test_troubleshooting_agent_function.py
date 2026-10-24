@@ -505,14 +505,32 @@ def test_a_record_result_says_only_whether_it_was_found() -> None:
     assert missing == "no record"
 
 
-def test_a_tool_error_is_published_because_it_names_no_log_content() -> None:
-    """These messages are written for the agent to read and name a log group or
-    an argument, so they are safe and they are what a reader wants to see."""
+def test_a_tool_error_publishes_its_label_and_not_its_message() -> None:
+    """Some of those messages embed a botocore exception's text or a log group
+    name the model supplied, so the label written at the raise site is what
+    reaches the stream."""
     summary = agent_function.ThinkingStepHookProvider.summarise_result(
-        json.dumps({"error": "none of the named log groups exist", "tool": "search_logs"})
+        json.dumps(
+            {
+                "error": "none of the named log groups exist: "
+                "['/aws/lambda/invented-by-the-model']",
+                "errorSummary": "named log groups do not exist in this deployment",
+                "tool": "search_logs",
+            }
+        )
     )
 
-    assert "none of the named log groups exist" in summary
+    assert "named log groups do not exist in this deployment" in summary
+    assert "invented-by-the-model" not in summary
+
+
+def test_a_tool_error_with_no_label_still_says_what_kind_of_failure_it_was() -> None:
+    summary = agent_function.ThinkingStepHookProvider.summarise_result(
+        json.dumps({"error": "something with an arn:aws: in it"})
+    )
+
+    assert summary == "could not gather evidence"
+    assert "arn:aws:" not in summary
 
 
 def test_a_refused_call_is_published_as_a_refusal_not_a_success() -> None:
@@ -549,15 +567,16 @@ def test_a_tool_fault_publishes_its_type_and_not_its_message() -> None:
     assert provider._result_succeeded({"content": [{"text": fault}]}) is False
 
 
-def test_a_tool_error_is_still_published_with_its_message() -> None:
-    """A ToolError's text is written for the agent to read and names a log
-    group or an argument, never log content, so it is safe and useful."""
+def test_a_tool_error_is_reported_as_an_unsuccessful_call() -> None:
     failure = json.dumps(
-        {"error": "none of the named log groups exist", "tool": "search_logs"}
+        {
+            "error": "none of the named log groups exist",
+            "errorSummary": "named log groups do not exist in this deployment",
+            "tool": "search_logs",
+        }
     )
     provider = agent_function.ThinkingStepHookProvider
 
-    assert "none of the named log groups exist" in provider.summarise_result(failure)
     assert provider._result_succeeded({"content": [{"text": failure}]}) is False
 
 
@@ -709,7 +728,7 @@ def test_a_dict_shaped_tool_use_is_read_and_summarised() -> None:
 
     steps = published_steps(event, after=False)
 
-    assert "/a/b" in steps[0]["tool_input_summary"]
+    assert "1 log group" in steps[0]["tool_input_summary"]
     assert "lookback_hours=6" in steps[0]["tool_input_summary"]
 
 
@@ -738,16 +757,53 @@ def test_search_terms_are_not_published_verbatim_either() -> None:
     assert "search_terms (" in summary
 
 
-def test_log_group_names_are_published_because_they_are_what_a_reader_wants() -> None:
-    """They are infrastructure names the agent got from discovery, they cannot
-    carry anything but themselves, and they are the useful part of a progress
-    line."""
+def test_log_group_names_are_counted_and_classified_not_echoed() -> None:
+    """A name reaching the before-tool hook has not been checked against
+    discovery yet, so it is whatever the model wrote. The component it
+    classifies as comes from a closed set, and is the more useful thing for a
+    progress panel anyway.
+    """
     provider = agent_function.ThinkingStepHookProvider
 
-    assert "/a/b" in provider.summarise_input({"log_group_names": "/a/b"})
-    assert "3 log groups" in provider.summarise_input(
-        {"log_group_names": "/a/b,/c/d,/e/f"}
+    summary = provider.summarise_input(
+        {"log_group_names": "/aws/lambda-microvms/LMA-vp-logs"}
     )
+    assert "1 log group" in summary
+    assert "in virtual-participant" in summary
+    assert "LMA-vp-logs" not in summary
+
+
+def test_an_invented_log_group_name_does_not_reach_the_stream() -> None:
+    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+        {"log_group_names": "/aws/lambda/secret-sounding-name-the-model-made-up"}
+    )
+
+    assert "secret-sounding-name" not in summary
+    assert "1 log group" in summary
+
+
+def test_several_log_groups_are_counted_and_their_components_listed() -> None:
+    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+        {
+            "log_group_names": "/aws/lambda-microvms/LMA-vp-logs,"
+            "/aws/vendedlogs/states/LMA-VPSTACK-x,"
+            "/LMA-AISTACK-y/lambda/CallEventProcessorFunction"
+        }
+    )
+
+    assert "3 log groups" in summary
+    assert "virtual-participant" in summary
+    assert "transcript-pipeline" in summary
+
+
+def test_the_components_argument_is_not_published_by_value() -> None:
+    """It is free text the model wrote, like search_terms."""
+    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+        {"components": "virtual-participant,something-made-up"}
+    )
+
+    assert "something-made-up" not in summary
+    assert "components (" in summary
 
 
 def test_identifiers_and_numbers_the_agent_chose_are_published() -> None:
