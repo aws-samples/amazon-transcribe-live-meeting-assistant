@@ -2927,8 +2927,10 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   /** How long to wait for a session refresh already in flight before giving up
    *  on rebuilding on top of it. The refresh itself is a teardown, a 300ms
-   *  flush and a fresh session, so this is several times the expected wait. */
-  private readonly RECONFIGURE_REFRESH_WAIT_MS = 5000;
+   *  flush and a fresh session, so this is several times the expected wait.
+   *  Not `readonly`: the tests shorten it to exercise the bound without
+   *  waiting five seconds, and should not need a cast to do so. */
+  private RECONFIGURE_REFRESH_WAIT_MS = 5000;
 
   /**
    * Change the meeting mode and/or activation mode on a running agent.
@@ -3312,9 +3314,11 @@ export class NovaAgent implements VoiceAssistantProvider {
       return true;
     }
 
-    if (this.activationMode !== 'always_active') {
+    if (this.activationMode === 'wake_phrase') {
       // No session is meant to be open, so there is nothing to recover: the one
-      // the next wake phrase builds carries the new mode.
+      // the next wake phrase builds carries the new mode. Keyed on
+      // `wake_phrase` for the same reason as rebuildSessionForNewMode — it is
+      // the one mode that holds no session between activations.
       return false;
     }
 
@@ -3323,6 +3327,17 @@ export class NovaAgent implements VoiceAssistantProvider {
     setTimeout(() => {
       if (this.session && this.session.isActive) {
         return;
+      }
+      // `createSession` returns without doing anything while `streamingActive`
+      // is set, and a failure that left the flag behind would make this retry
+      // open nothing as well, after the participant was told the switch was
+      // finishing. With no active session the flag can only be stale: the
+      // session is assigned before the flag is set, and the event stream ends
+      // as soon as there is no session to read from, so nothing is streaming.
+      if (this.streamingActive) {
+        console.warn('⚠️  Clearing a stream flag left set with no session, so the recovery can open one');
+        this.streamingActive = false;
+        this._isActive = false;
       }
       console.log('🔄 Recovering the Nova session after a failed mode change');
       this.createSession().catch(error => {

@@ -44,7 +44,7 @@ LMA can optionally add a voice assistant to the Virtual Participant, allowing it
 |---|---|---|
 | Provider | AWS (Amazon) | Third-party |
 | Latency | Low (native AWS) | Moderate (external API) |
-| Session duration | Unlimited (auto-refresh every 5 min) | 8-minute sessions (auto-refresh) |
+| Session duration | Unlimited (auto-refresh every 4 min) | 8-minute sessions (auto-refresh) |
 | Meeting modes | `normal`, `group`, `translator` | `normal`, `group`, `translator` |
 | Mode changes during a meeting | Yes ([chat commands](#chat-commands)) | No |
 | Barge-in support | Yes | Yes |
@@ -58,7 +58,7 @@ LMA can optionally add a voice assistant to the Virtual Participant, allowing it
 
 ### always_active
 
-The voice agent is always listening and leads the conversation. Sessions auto-refresh automatically (every 5 minutes for Nova Sonic). This mode is best suited for dedicated assistant meetings where the VP is the primary or sole participant interacting with users.
+The voice agent is always listening and leads the conversation. Sessions auto-refresh automatically (every 4 minutes for Nova Sonic). This mode is best suited for dedicated assistant meetings where the VP is the primary or sole participant interacting with users.
 
 ### wake_phrase
 
@@ -78,7 +78,7 @@ Configure the wake phrase using the **VoiceAssistantWakePhrase** parameter:
 
 ### Nova Sonic 2
 
-Nova Sonic has a native 8-minute session timeout. LMA works around this by automatically refreshing sessions every 5 minutes using keep-alive signals (30-second silence chunks). Conversation history is maintained across session refreshes, so the assistant retains full context of the meeting.
+Nova Sonic has a native 8-minute session timeout. LMA works around this by automatically refreshing sessions every 4 minutes using keep-alive signals (30-second silence chunks). Conversation history is maintained across session refreshes, so the assistant retains full context of the meeting.
 
 ### ElevenLabs
 

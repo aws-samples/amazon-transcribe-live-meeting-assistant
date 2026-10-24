@@ -121,6 +121,11 @@ function systemPrompt(agent: NovaAgent): string {
     return (agent as any).buildSystemPromptContent();
 }
 
+/** Long enough for any stop-request timer still armed to have fired. */
+const PAST_STOP_WINDOWS_MS = STOP_REQUEST_TOOL_BACKSTOP_MS + 200;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function chat(over: Partial<AssistantReconfigureRequest> = {}): AssistantReconfigureRequest {
     return { route: 'chat', requestedBy: 'Alice', ...over };
 }
@@ -743,6 +748,49 @@ test('a session creation that opened nothing is reported as still switching', as
     assert.deepEqual(recoveries, ['scheduleSessionRecovery']);
 });
 
+test('the recovery opens a session even when a stale stream flag made the first attempt a no-op', async () => {
+    // The case above, end to end: `createSession` returns without doing
+    // anything while `streamingActive` is set, and the recovery calls that same
+    // method a second later. If the flag were left behind, the retry would open
+    // nothing either — after the participant was told the switch was finishing.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    let opened = 0;
+    (agent as any).createSession = async () => {
+        if ((agent as any).streamingActive) return; // the real method's guard
+        opened += 1;
+        (agent as any).session = liveSession();
+        (agent as any).streamingActive = true;
+    };
+    (agent as any).streamingActive = true; // left behind with no session
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.equal(outcome.detail, 'the assistant will finish switching shortly');
+
+    await wait(1100);
+    assert.equal(opened, 1, 'the recovery must actually open a session');
+    assert.equal((agent as any).session?.isActive, true);
+});
+
+test('the recovery builds a session for every mode that holds one, not only always-listening', async () => {
+    // Same rule as the rebuild: only `wake_phrase` holds no session between
+    // activations, so only it is left without one.
+    const { agent } = novaAgent({ meetingMode: 'normal' });
+    (agent as any).activationMode = 'strands_tool';
+    let opened = 0;
+    (agent as any).createSession = async () => {
+        opened += 1;
+        (agent as any).session = liveSession();
+    };
+
+    assert.equal((agent as any).scheduleSessionRecovery(), true);
+    await wait(1100);
+    assert.equal(opened, 1);
+
+    const { agent: wake } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    assert.equal((wake as any).scheduleSessionRecovery(), false, 'nothing is owed on the wake-phrase path');
+});
+
 test('a first session that fails to open is retried, not handed to the refresh path', async () => {
     // The headline case: `LMA translate` on a wake-phrase deployment, where
     // there is no session yet, so the rebuild calls createSession directly.
@@ -846,11 +894,6 @@ test('a refused or unchanged request leaves the transcription path where it was'
 // "Okay" through its own `mute` tool, and then silences the assistant
 // unconditionally. A mode change inside that window re-decides the mute state
 // from the new mode, so the request is superseded rather than carried across.
-
-/** Long enough for any stop-request timer still armed to have fired. */
-const PAST_STOP_WINDOWS_MS = STOP_REQUEST_TOOL_BACKSTOP_MS + 200;
-
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test('a deferred stop request does not survive a switch into translator mode', async () => {
     // The case that matters most. Its fallback would mute a translator whose
