@@ -3,6 +3,7 @@ import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js'
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 
@@ -220,7 +221,13 @@ export default class Chime {
                 }
                 this.prevSender = sender;
 
-                // Handle LMA commands
+                // Handle LMA commands. The assistant-mode toggles are checked
+                // ahead of pause/resume so that they land whether or not
+                // transcription is paused — what the assistant is doing is
+                // independent of whether the transcript is running. The two
+                // vocabularies are disjoint, so the order is not otherwise
+                // load-bearing.
+                const assistantToggle = text ? parseAssistantChatCommand(text) : null;
                 if (text && matchesEndCommand(text)) {
                     console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(text)}`);
                     await this.sendMessages(page, exitMessagesFor(sender));
@@ -231,6 +238,11 @@ export default class Chime {
                         requestedBy: sender,
                         matchedMessage: text,
                     });
+                } else if (assistantToggle) {
+                    await this.sendMessages(
+                        page,
+                        await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender),
+                    );
                 } else if (details.start && text === details.pauseCommand) {
                     details.start = false;
                     console.log(details.pauseMessages[0]);

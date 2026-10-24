@@ -2,6 +2,7 @@ import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
 import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
     findElementWithFallback,
@@ -1699,6 +1700,11 @@ export default class Zoom {
             );
             const sender = senderMatch?.[1]?.trim() || null;
             const body = senderMatch ? message.slice(senderMatch[0].length) : message;
+            // Checked ahead of pause/resume so an assistant-mode toggle lands
+            // whether or not transcription is paused; the two vocabularies are
+            // disjoint. Parsed from the body rather than the raw row, so the
+            // "<sender> to <recipient>" prefix is not part of the match.
+            const assistantToggle = parseAssistantChatCommand(body);
             if (matchesEndCommand(body)) {
                 console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                 await this.sendMessages(page, exitMessagesFor(sender));
@@ -1709,6 +1715,8 @@ export default class Zoom {
                     requestedBy: sender,
                     matchedMessage: body,
                 });
+            } else if (assistantToggle) {
+                await this.sendMessages(page, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
             } else if (details.start && message.includes(details.pauseCommand)) {
                 details.start = false;
                 console.log(details.pauseMessages[0]);

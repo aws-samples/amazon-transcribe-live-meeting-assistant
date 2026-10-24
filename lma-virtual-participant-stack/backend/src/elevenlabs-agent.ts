@@ -7,6 +7,12 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { simliAvatar } from './simli-avatar.js';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { ActivationMode } from './voice-assistant-interface.js';
+import {
+  AssistantReconfigureOutcome,
+  AssistantReconfigureRequest,
+  formatAssistantToggleLog,
+} from './assistant-toggles.js';
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
@@ -924,5 +930,30 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       `[stop-request] route=transcript action=${action} provider=elevenlabs`
       + ` mode=${this.meetingMode} speaking=${this.isSpeaking()} muted=${this._isMuted}`,
     );
+  }
+
+  /**
+   * Mid-meeting mode changes are declined on this provider.
+   *
+   * Changing mode means giving the agent a different system prompt and a
+   * different tool set, and on ElevenLabs both live in the ElevenLabs dashboard
+   * rather than in LMA — reconnecting here would move the mute gating and the
+   * wake-phrase handling onto a new mode while the agent itself kept following
+   * the instructions it was configured with, which is a worse state than the one
+   * the request started from. Declining says so instead.
+   */
+  async reconfigure(request: AssistantReconfigureRequest): Promise<AssistantReconfigureOutcome> {
+    const outcome: AssistantReconfigureOutcome = {
+      result: 'declined',
+      changed: [],
+      sessionRebuilt: false,
+      meetingModeBefore: this.meetingMode,
+      meetingModeAfter: this.meetingMode,
+      activationModeBefore: this.activationMode as ActivationMode,
+      activationModeAfter: this.activationMode as ActivationMode,
+      detail: 'this voice assistant cannot change mode during a meeting',
+    };
+    console.log(formatAssistantToggleLog(request, outcome));
+    return outcome;
   }
 }

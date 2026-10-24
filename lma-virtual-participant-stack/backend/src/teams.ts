@@ -5,6 +5,7 @@ import { details, matchesEndCommand, exitMessagesFor, ExitInfo, ExitReasonCode, 
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
+import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
@@ -787,6 +788,10 @@ export default class Teams {
     // lenient matcher and a generic farewell.
     private async handleIncomingMessage(page: Page, message: string): Promise<void> {
         if (!message) return;
+        // Checked ahead of pause/resume so an assistant-mode toggle lands
+        // whether or not transcription is paused; the two vocabularies are
+        // disjoint.
+        const assistantToggle = parseAssistantChatCommand(message);
         if (matchesEndCommand(message)) {
             console.log(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
             try {
@@ -803,6 +808,11 @@ export default class Teams {
                 trigger: 'chat',
                 matchedMessage: message,
             });
+        } else if (assistantToggle) {
+            // Teams chat text doesn't expose the sender on the same node, so the
+            // toggle is recorded without a requester — same limitation as the
+            // generic farewell above.
+            await this.sendMessages(page, await applyAssistantChatCommand(voiceAssistant, assistantToggle, null));
         } else if (
             details.start &&
             message.includes(details.pauseCommand) &&
