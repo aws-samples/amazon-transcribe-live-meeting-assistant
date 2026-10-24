@@ -175,9 +175,11 @@ had already created:
 
 The new groups receive both the image build output and the output of every
 MicroVM — each Virtual Participant and each ASR session — launched after the
-upgrade. A MicroVM that was already running when you upgraded, or that was
-launched while the update was still in progress, keeps logging to the old group
-until it ends.
+upgrade. A MicroVM that was already running when you upgraded keeps logging to
+the old group until it ends, and so does one launched during the update before
+its launcher function was updated. CloudFormation updates each launcher only
+after that stack's image rebuild finishes, so most launches during an update
+still go to the old group.
 
 Changing where a MicroVM image logs is an image update, so the Virtual
 Participant image (roughly 8–10 minutes) and the ASR image (longer — it

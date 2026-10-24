@@ -98,8 +98,10 @@ def test_an_unset_log_group_still_launches_with_the_service_default(
 
 def test_the_client_sends_the_logging_member_in_the_request_body(module) -> None:
     """The vendored client builds the body itself, so check the member survives
-    serialisation in the shape the service model defines: a union whose
-    `cloudWatch` arm carries `logGroup`."""
+    serialisation. The shape is the `Logging` union from botocore's
+    lambda-microvms 2025-09-09 model (a `cloudWatch` arm carrying `logGroup`).
+    This test pins serialisation only; whether the service honours the member
+    can only be seen on a deployed stack."""
     client = sys.modules["microvm_client"].MicrovmClient(
         region="us-west-2", session=mock.MagicMock()
     )

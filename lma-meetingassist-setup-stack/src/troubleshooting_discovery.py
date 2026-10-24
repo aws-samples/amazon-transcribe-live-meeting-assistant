@@ -25,8 +25,9 @@ operator typed. Four independent reasons, all of them live in the current tree:
   image's name and the stack does not own. Where a MicroVM's output went is
   fixed when it is launched, not when its image was built: an upgraded stack
   keeps both groups, and a MicroVM launched before the deployment was updated
-  to v0.3.11 — including one launched while the update was in progress —
-  wrote to the older one. Either name searched alone reports
+  to v0.3.11 — including one launched during the update before its launcher
+  function was updated, which CloudFormation does only after the image
+  rebuild — wrote to the older one. Either name searched alone reports
   "no logs" for some participants, and would be believed. See
   ``MICROVM_LOG_GENERATIONS``.
 * AppSync's group is created by the service, named after the API id rather
@@ -239,7 +240,8 @@ _GENERATION_NOTES: Dict[str, str] = {
         "stack, and kept with its contents when the stack was upgraded. A "
         "participant whose MicroVM was launched before the deployment was "
         "updated to this release logged here and not to the current group — "
-        "including one launched while the update was in progress. Its stream "
+        "including one launched during the update before its launcher was "
+        "updated, which happens only after the image rebuild. Its stream "
         "names contain the MicroVM id the launch state machine logs as "
         "microvmId."
     ),
