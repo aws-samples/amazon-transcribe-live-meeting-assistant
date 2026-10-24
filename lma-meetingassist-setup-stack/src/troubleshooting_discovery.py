@@ -215,10 +215,11 @@ def appsync_log_group_candidate(api_id: str) -> Optional[str]:
     CloudFormation parameter — the same value the IAM grant for this group is
     scoped to, so the two cannot disagree.
 
-    An earlier version read the first label of the GraphQL endpoint host
-    instead. That happens to be the api id today, but "happens to be" is not
-    something to build on when the stack already knows the answer, and the
-    cost of being wrong is a log group name that cannot be queried.
+    Taking it from the stack rather than reading it out of the GraphQL
+    endpoint host is deliberate: the host's first label happens to be the api
+    id, but "happens to be" is not worth building on when the deployment
+    already knows the answer, and the cost of being wrong is a log group name
+    the agent cannot query.
 
     This returns a *candidate*. The caller confirms it against
     ``describe_log_groups`` before reporting it, so a deployment with AppSync

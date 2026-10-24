@@ -428,10 +428,10 @@ def test_an_unsearched_name_is_called_out_in_the_guidance() -> None:
 
 
 def test_a_denied_log_group_is_a_scope_problem_not_a_tool_fault() -> None:
-    """Discovery can list a group the role cannot query — under the
-    prefix-matching fallback, or an AppSync group found from the endpoint with
-    no API id supplied. The generic handler would call that a fault in the
-    tool and leave the agent stuck."""
+    """Discovery can list a group the role cannot query: with the nested stack
+    names unresolved it matches by stack-name prefix, which can reach a
+    neighbouring deployment's groups. The generic handler would call that a
+    fault in the tool and leave the agent stuck."""
 
     class Denied(FakeInsightsClient):
         def start_query(self, **kwargs: Any):

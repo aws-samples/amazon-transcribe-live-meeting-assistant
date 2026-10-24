@@ -592,12 +592,12 @@ class TroubleshootingTools:
             # the tool, not evidence about LMA" and leave the agent with no
             # next step, when the next step is to correct the query.
             if _error_code(exc) == "AccessDeniedException":
-                # Discovery can list a group this role cannot query — under
-                # the prefix-matching fallback, or an AppSync group found from
-                # the endpoint on a deployment that supplied no API id. The
-                # generic handler would call that "a fault in the tool, not
-                # evidence about LMA" and leave the agent stuck; it is a scope
-                # problem it can work around.
+                # Discovery can list a group this role cannot query: when the
+                # nested stack names could not be resolved it matches by
+                # stack-name prefix, which can reach a neighbouring
+                # deployment's groups. The generic handler would call that "a
+                # fault in the tool, not evidence about LMA" and leave the
+                # agent stuck; it is a scope problem it can work around.
                 raise ToolError(
                     "this deployment's diagnostic role is not permitted to "
                     f"query at least one of these log groups: {exc}. Retry "
