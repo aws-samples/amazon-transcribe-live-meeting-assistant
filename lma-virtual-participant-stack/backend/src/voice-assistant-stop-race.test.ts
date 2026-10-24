@@ -31,6 +31,7 @@ import {
     STOP_REQUEST_TOOL_BACKSTOP_MS,
 } from './nova-agent.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
+import { simliAvatar } from './simli-avatar.js';
 
 /** A Nova agent with no session and no Bedrock client, with playback stubbed
  *  out so nothing tries to spawn pacat. */
@@ -679,6 +680,38 @@ test('a stream reporting its exit forgets only itself', () => {
     // And a stream that is the one in use is forgotten, as before.
     (agent as any).forgetPacatStream(live);
     assert.equal((agent as any).pacatProcess, null);
+});
+
+test('cutting a drain short stops the lips with the sound', async () => {
+    // The avatar holds its own copy of the speech for lip-sync. A drain that
+    // runs out has been heard in full and the lips are already done, but one
+    // cut short — by the cap, by barge-in, or by the assistant speaking again —
+    // discards audio the avatar would otherwise go on mouthing silently. The
+    // immediate path has always cleared it; the drain path has to as well.
+    const agent = bareAgent();
+    const realIsConnected = simliAvatar.isConnected;
+    const realClear = simliAvatar.clearAudioBuffer;
+    let cleared = 0;
+    try {
+        (simliAvatar as any).isConnected = () => true;
+        (simliAvatar as any).clearAudioBuffer = async () => {
+            cleared += 1;
+        };
+
+        // A stream still playing when something ends it.
+        (agent as any).drainingPacatProcess = { killed: false, kill: () => {} };
+        (agent as any).killDrainingPacatStream();
+        assert.equal(cleared, 1, 'the avatar must stop with the audio');
+
+        // A stream that already finished on its own leaves nothing to clear:
+        // its audio was played in full and the lips kept up with it.
+        (agent as any).drainingPacatProcess = { killed: true, kill: () => {} };
+        (agent as any).killDrainingPacatStream();
+        assert.equal(cleared, 1, 'a drain that ran out needs no intervention');
+    } finally {
+        (simliAvatar as any).isConnected = realIsConnected;
+        (simliAvatar as any).clearAudioBuffer = realClear;
+    }
 });
 
 test('a playback stream that has gone away reports no age', async () => {

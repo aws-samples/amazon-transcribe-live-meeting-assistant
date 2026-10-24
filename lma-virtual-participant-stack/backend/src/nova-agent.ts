@@ -69,6 +69,11 @@ export const STOP_REQUEST_TOOL_GRACE_MS = 500;
  * this feature may not produce, so the fallback is extended rather than
  * cancelled: long enough to sit behind the tool route's own flush, short enough
  * that nobody is left waiting on it.
+ *
+ * Read in two places: as this window, and as twice this window in
+ * noteMuteToolRequested, where it is the age beyond which a tool call is too
+ * old to be timed against a request at all. Both are answering "how long could
+ * a tool call still be about this request", so they are meant to move together.
  */
 export const STOP_REQUEST_TOOL_BACKSTOP_MS = 1500;
 
@@ -190,7 +195,9 @@ export class NovaAgent implements VoiceAssistantProvider {
   private drainingPacatProcess: ChildProcess | null = null;
   /** Upper bound on letting the playback buffer empty instead of discarding it
    *  (see muteDrainingPlayback). Generous for the one word the prompt asks for,
-   *  tight enough that a model which ignored the prompt cannot keep talking. */
+   *  and the limit on how long a model that ignored the prompt goes on being
+   *  heard after its own tool call — this much, plus whatever arrived during
+   *  MUTE_TOOL_AUDIO_FLUSH_MS. */
   private readonly PLAYBACK_DRAIN_CAP_MS = 1500;
   /** How long the mute-tool route waits for trailing audio chunks of the
    *  acknowledgement before engaging the gate. It does not have to cover
@@ -2116,6 +2123,14 @@ export class NovaAgent implements VoiceAssistantProvider {
         draining.kill('SIGTERM');
       } catch (e) {
         // Ignore errors during cleanup
+      }
+      // Cutting a drain short discards audio the avatar holds its own copy of,
+      // so the lips stop with the sound instead of finishing an utterance
+      // nobody can hear — the same call mute() makes on the immediate path. A
+      // drain that ran out on its own needs nothing: its audio was played in
+      // full, and by then there is no live process to find here.
+      if (simliAvatar.isConnected()) {
+        simliAvatar.clearAudioBuffer().catch(() => {});
       }
     }
   }
