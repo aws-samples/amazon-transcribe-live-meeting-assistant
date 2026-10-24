@@ -127,7 +127,7 @@ The LAMBDA option lets you provide your own Lambda function to generate meeting 
 Configure the LAMBDA option by setting the **EndOfCallLambdaHookFunctionArn** CloudFormation parameter to the ARN of your Lambda function.
 
 Your Lambda function:
-- Receives the `CallId` in the event payload.
+- Receives the `CallId` in the event payload. When the run comes from the **Regenerate** button, the payload also carries `"RefreshConfiguration": true`, which asks the function to re-read any configuration it caches rather than use a cached copy. A function that caches nothing can ignore it, but one that validates its input against a fixed schema must allow the extra field, or every Regenerate will fail.
 - Must return a JSON object with a `summary` key: `{"summary": "..."}`.
 - The summary value supports Markdown formatting.
 

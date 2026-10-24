@@ -345,9 +345,19 @@ deployments have run since — and the seeder runs on every release that changes
 either of its directories.
 
 The previous table is left in place and still seeded by the
-`lma-llm-template-setup-stack`, so a deployment can be rolled back to an earlier
-release. Nothing reads it any more except the seeder, and only when
-`Config#custom` is absent. Retiring it is part of a later release.
+`lma-llm-template-setup-stack`. The summary prompts in it are read only by the
+configuration seeder, and only when `Config#custom` is absent; they stay there so
+a deployment can be rolled back to an earlier release.
+
+The table is not otherwise retired, because it also holds the
+[troubleshooting agent's](troubleshooting-agent.md) system prompt — the
+`DefaultTroubleshootingAgentPrompt` and `CustomTroubleshootingAgentPrompt`
+items, seeded by the same stack and read by the agent directly. That prompt has
+not been moved into this store: it stays at the same two keys, the
+configuration seeder can only read that table and does not adopt those items,
+and `lma-ai-stack/test/test_troubleshooting_prompt_survives_the_store_migration.py`
+holds both of those true. Moving it in as a second section is one of the
+migrations still to come.
 
 One thing to know before rolling back, because it is not the obvious thing: a
 prompt edit saved *after* the upgrade exists only in `ConfigurationTable`, and
@@ -375,6 +385,7 @@ orphaned table is where to read the old values from.
 | Import / export | Export as a client-side download; import that always routes into a create-new-profile flow rather than applying in place |
 | Schema-driven UI | A profile table, a form generated from the `Schema` document, a diff against the baseline and per-field "restore default" |
 | Migrating the other five stores | The chat-button config, the Nova Sonic config, the ASR switches, the MCP server list, and the SSM settings blob |
+| Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired |
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
 
 One known gap belongs to that third row and is worth stating rather than leaving
