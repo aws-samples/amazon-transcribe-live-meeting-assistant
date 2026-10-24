@@ -171,14 +171,17 @@ language code or custom vocabulary the account does not have; and, where the
 MicroVM ASR engine is selected on the Transcription Engine page, an engine that
 could not start with fallback to Amazon Transcribe switched off.
 
-One case it does not cover: a transcriber task replaced mid-meeting — by a
-deployment, or by scale-in — shuts down without running the per-meeting
-teardown that emits this metric, so meetings it was carrying are not counted
-however little they transcribed. That is the right split of responsibility
-rather than a gap to work around: a meeting cut short by the infrastructure is
-what `transcriber-service-no-tasks` and the ECS task-count widget are for, and
-counting it here would report a transcription fault for something that was not
-one.
+One case to expect noise from: a transcriber task replaced mid-meeting, by a
+deployment or by scale-in. Its shutdown closes the server, which closes each
+connected socket, which runs the same per-meeting teardown a client
+disconnecting would — so a meeting it had carried for more than thirty seconds
+without a transcript yet is counted, even though what ended it was the
+infrastructure and not a transcription fault. Whether the count lands is
+a race: the process exits as soon as the server has closed, and the teardown
+runs from an asynchronous close handler. So treat a small number of these
+concurrent with a deployment or a scale-in event as explained by it, and read
+`transcriber-service-no-tasks` and the ECS task-count widget alongside. The
+alarm needs three in a five-minute window partly for this reason.
 
 **Why there is no alarm on how long a transcript takes to appear.**
 `TimeToFirstTranscriptSegmentMs` is the obvious thing to alarm on and the wrong

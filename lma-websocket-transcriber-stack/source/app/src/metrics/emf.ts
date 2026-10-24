@@ -27,9 +27,11 @@
  * Unlike the Python emitter, which accumulates for an invocation and flushes
  * once, this one writes immediately. There is no invocation boundary in a
  * long-lived server to flush at; these metrics are emitted once per session
- * rather than per record, so the log volume is the same either way; and the
- * process can be replaced by ECS without `endCall` running, which would lose
- * whatever an accumulator was holding.
+ * rather than per record, so the log volume is the same either way; and ECS
+ * replacing the task exits the process as soon as the server has closed, which
+ * races the asynchronous socket-close handlers the teardown runs from -- an
+ * accumulator would lose whatever it was still holding when that race went the
+ * wrong way.
  */
 
 import * as catalogue from './catalogue';
