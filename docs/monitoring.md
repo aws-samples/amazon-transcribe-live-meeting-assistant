@@ -8,7 +8,8 @@ SPDX-License-Identifier: MIT-0
 # Monitoring & Alerting
 
 LMA deploys an SNS topic for operational alerts, 14 alarms that notify it, and
-one CloudWatch dashboard per deployment. Everything described here is created by
+one CloudWatch dashboard per deployment. (One fewer alarm where the
+stale-meeting reaper is switched off, which removes the alarm that watches it.) Everything described here is created by
 `lma-main.yaml` as part of the normal stack deployment — there is nothing extra
 to install — but **one manual step is required before any alert is delivered**:
 the email subscription SNS creates for your `AdminEmail` address starts in
@@ -24,7 +25,7 @@ watched automatically and who hears about it.
 The alarms fall into two groups, and the difference matters when you are reading
 one.
 
-Twelve of them read a metric that an AWS service publishes on its own. None of
+All but two read a metric that an AWS service publishes on its own. None of
 those depend on LMA emitting anything, which means they work on a deployment
 that has never been touched and they keep working if application code changes.
 They cover infrastructure health well and application behaviour only indirectly:
