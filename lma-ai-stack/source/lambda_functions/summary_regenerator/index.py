@@ -393,8 +393,9 @@ def invoke_summary_function(call_id):
     prompt uses the prompt that was just saved. The summariser caches the prompt
     templates for a few minutes, which is right for the end-of-meeting runs it
     does unattended, and wrong for a button somebody pressed on purpose. A
-    summariser that does not recognise the field ignores it, so the customer's
-    own function under the LAMBDA option needs no change.
+    customer's own function under the LAMBDA option that does not recognise the
+    field can ignore it; one that validates its input against a fixed schema has
+    to allow it, which docs/transcript-summarization.md says.
     """
     response = lambda_client.invoke(
         FunctionName=TRANSCRIPT_SUMMARY_FUNCTION_ARN,

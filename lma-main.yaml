@@ -3178,14 +3178,14 @@ Resources:
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
+        # Keep in step with the Domain passed to LLMTEMPLATESTACK above; see the
+        # comment there.
+        Domain: "Default"
         # Substituted by the publish step with a digest of the shipped
         # configuration content and of the code that processes it. It is what
         # makes CloudFormation re-run the configuration seeder when either
         # changes; a property that never changes is a custom resource that is
         # never invoked again after the first deployment.
-        # Keep in step with the Domain passed to LLMTEMPLATESTACK above; see the
-        # comment there.
-        Domain: "Default"
         ConfigurationSeedHash: "<CONFIGURATION_SEED_HASH_TOKEN>"
         ChatButtonConfigTableName: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.ChatButtonConfigTableName
         NovaSonicConfigTableName: !GetAtt NOVASONICONFIGSTACK.Outputs.NovaSonicConfigTableName
