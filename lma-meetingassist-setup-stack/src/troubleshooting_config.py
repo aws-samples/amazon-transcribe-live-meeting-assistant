@@ -24,6 +24,13 @@ Three rules this module exists to enforce:
    exhausting the Lambda timeout or the Logs Insights concurrency quota. A
    value that is clamped, or that could not be read at all, is logged — see
    ``_read``.
+
+   None of these are declared in the CloudFormation template, which means a
+   value set by hand on the function does not survive a stack update. That is
+   the intended trade: these are a dozen cost knobs for someone looking at a
+   specific run, and a dozen stack parameters for them would be worse than
+   losing an ad-hoc change. A setting meant to persist belongs in a template
+   change — or, for the prompt, in the DynamoDB item that exists for it.
 3. **There is no whole-run retry, and this module deliberately offers no knob
    for one.** Restarting an agent run from the original question re-pays for
    every tool call it already made. A run that failed should surface the

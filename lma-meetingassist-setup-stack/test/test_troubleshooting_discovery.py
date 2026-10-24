@@ -317,6 +317,12 @@ def test_discovery_works_without_an_appsync_endpoint() -> None:
         (f"/{AISTACK}/lambda/StaleMeetingReaperFunction", discovery.TRANSCRIPT_PIPELINE),
         (f"/{AISTACK}/lambda/SpeakerNameResolverFunction", discovery.TRANSCRIPT_PIPELINE),
         (f"/{AISTACK}/lambda/StrandsMeetingAssistFunction", discovery.MEETING_ASSISTANT),
+        # The agent's own log group, so "why did the last diagnosis fail" is
+        # answerable by component like anything else.
+        (
+            f"/{STACK}-MEETINGASSISTSETUP-X1Y2/lambda/TroubleshootingAgentFunction",
+            discovery.MEETING_ASSISTANT,
+        ),
         (f"/{AISTACK}/lambda/BedrockSummaryLambda", discovery.MEETING_ASSISTANT),
         (f"/{STACK}/lambda/MCPServerAnalytics", discovery.MEETING_ASSISTANT),
         (APPSYNC_GROUP, discovery.GRAPHQL_API),

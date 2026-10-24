@@ -830,6 +830,31 @@ def test_the_per_query_timeout_still_applies_when_the_run_has_longer() -> None:
     assert clock[0] <= 7, clock[0]
 
 
+def test_the_wait_counts_the_api_latency_not_only_the_sleeps() -> None:
+    """Summing the sleep intervals undercounts by the poll count times the
+    latency of each get_query_results call — and the figure is compared against
+    a budget derived from the run deadline, which is real time."""
+    clock = [0.0]
+    limits = AgentLimits()
+    object.__setattr__(limits, "query_timeout_seconds", 10)
+    object.__setattr__(limits, "query_poll_seconds", 1)
+
+    class SlowApi(FakeInsightsClient):
+        def get_query_results(self, queryId: str):  # noqa: N803
+            # Each call takes four seconds of wall clock and no sleep.
+            clock[0] += 4
+            return {"status": "Running", "results": []}
+
+    with pytest.raises(ToolError, match="was cancelled"):
+        make_tools(SlowApi(), limits=limits, deadline=1000.0, clock=clock).search_logs(
+            VP_GROUP
+        )
+
+    # Three polls at 4s each plus two 1s sleeps crosses the 10s cap. Counting
+    # only the sleeps, it would have taken eleven polls.
+    assert clock[0] <= 16, clock[0]
+
+
 def test_a_query_with_no_deadline_uses_the_per_query_timeout() -> None:
     limits = AgentLimits()
     object.__setattr__(limits, "query_timeout_seconds", 3)

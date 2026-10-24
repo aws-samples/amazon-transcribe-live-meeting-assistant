@@ -521,12 +521,18 @@ class TroubleshootingTools:
         if self._deadline is not None:
             budget = min(budget, self._deadline - self._monotonic())
 
-        waited = 0.0
+        # Measured against the clock, not accumulated from the sleep intervals.
+        # Each get_query_results call takes time of its own, so summing the
+        # sleeps undercounts by the poll count times the API latency — and this
+        # figure is compared against a budget derived from the run deadline,
+        # which is real time.
+        started_at = self._monotonic()
         while True:
             response = self._logs.get_query_results(queryId=query_id)
             status = response.get("status", "Unknown")
             if status in _QUERY_DONE:
                 break
+            waited = self._monotonic() - started_at
             if waited >= budget:
                 self._stop_query(query_id)
                 raise ToolError(
@@ -536,7 +542,6 @@ class TroubleshootingTools:
                     "specific search term."
                 )
             self._sleep(self._limits.query_poll_seconds)
-            waited += self._limits.query_poll_seconds
 
         if status != _QUERY_SUCCEEDED:
             # Anything other than Complete, not just Failed and Cancelled. A

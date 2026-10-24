@@ -94,7 +94,11 @@ _COMPONENT_PATTERNS: Sequence[tuple[str, str]] = (
         TRANSCRIPT_PIPELINE,
     ),
     (
-        r"/lambda/(Strands\w+|BedrockSummaryLambda|Async\w+Orchestrator"
+        # TroubleshootingAgentFunction is this agent's own group. Classified
+        # rather than left as "other" so "why did the last diagnosis fail" is
+        # answerable by component like anything else.
+        r"/lambda/(Strands\w+|TroubleshootingAgentFunction"
+        r"|BedrockSummaryLambda|Async\w+Orchestrator"
         r"|QueryKnowledgeBaseResolverFunction|SummaryRegeneratorFunction"
         r"|MCPServer\w*|MCPApiKey\w*|StartIngestionJobFunction)",
         MEETING_ASSISTANT,

@@ -215,7 +215,17 @@ it as "this diagnosis did not get to search as widely as it wanted", not as
 Set these on the `STRANDS-<stack>-Troubleshooting` Lambda function. They take
 effect on the next invocation. A value above its maximum is clamped rather than
 refused, and an unreadable value falls back to the default, so a typo costs
-money or precision rather than stopping a diagnosis from starting.
+money or precision rather than stopping a diagnosis from starting — and every
+clamp or fallback is logged, so a limit never quietly becomes a different one.
+
+⚠️ **These are not carried in the CloudFormation template, so a value you set
+by hand does not survive a stack update** — CloudFormation restores the
+function's environment to what the template declares, which is none of these.
+That is deliberate: they are a dozen cost knobs for an operator looking at a
+specific run, not deployment configuration, and adding a dozen stack parameters
+for them would be worse. Treat a change here as temporary. The one setting that
+*is* meant to persist is the system prompt, which lives in DynamoDB precisely
+so that it does.
 
 **The wall clock is a request, not a guarantee of how long a run may take.**
 The effective budget is the smaller of `TROUBLESHOOTING_WALL_CLOCK_SECONDS` and
