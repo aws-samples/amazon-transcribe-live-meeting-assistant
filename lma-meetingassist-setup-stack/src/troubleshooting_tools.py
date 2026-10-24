@@ -39,8 +39,8 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import math
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
@@ -146,15 +146,22 @@ _VP_TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "ENDED", "CANCELLED"})
 #: The literal the container writes when it leaves through its own exit path.
 _VP_EXIT_MARKER = "VP exit:"
 
-#: Literals a participant writes when it is stopped from outside rather than
+#: Literals a participant writes when it is stopped by a signal rather than
 #: leaving on its own. The supervisor line is MicroVM-only; the other two come
-#: from the container's signal handler on every launch type. None of the three
-#: carries the VP id: the stream they are written to does.
+#: from the container's signal handler on every launch type. Only the last
+#: can carry the VP id ("VP <id> status updated to COMPLETED due to external
+#: termination", written once the status update succeeds); for the others the
+#: stream they are written to is what ties them to the participant.
 _VP_EXTERNAL_STOP_MARKERS = (
     "Received SIGTERM",
     "[terminate] signalling app to exit",
     "due to external termination",
 )
+
+
+#: Attributes only the end operation writes. ``endedAt`` is not one of them:
+#: the VP task reaper writes it too.
+_END_OPERATION_FIELDS = ("endReason", "ecsTerminated", "kinesisEndSent", "scheduleCancelled")
 
 
 def _vp_end_search_terms(vp_id: str) -> str:
@@ -198,21 +205,28 @@ def assess_vp_end(
     """Say what a virtual participant row records about how it ended.
 
     This reads the row the way the code that writes it does, so the model does
-    not have to infer it. Three writers set the end-related fields, and each
+    not have to infer it. Four writers set the end-related fields, and each
     leaves a different shape:
 
-    * The end operation (a user, a test or a reaper) sets ``endedAt``,
-      ``endReason`` and status ENDED, then stops the host. The participant is
-      signalled and logs the external-stop markers, never a ``VP exit:`` line.
+    * The end operation (``endVirtualParticipant`` from the UI, the SDK or
+      CLI, or a delete) sets ``endedAt``, ``endReason`` and status ENDED or
+      CANCELLED, plus ``ecsTerminated``/``kinesisEndSent`` or
+      ``scheduleCancelled``, then stops the host. The participant is
+      signalled and logs the stop markers, never a ``VP exit:`` line.
+    * The VP task reaper (ECS launch types only, on a task-stopped event)
+      sets FAILED, ``endedAt`` and an ``errorMessage`` carrying the ECS stop
+      code and reason, and no ``endReason``. The container may have been
+      killed outright, so it may have logged nothing at the end.
     * The container's own exit path sets COMPLETED or FAILED with an
       ``endTrigger``, and logs ``VP exit:``.
     * The container's signal handler sets COMPLETED with neither, when it is
       stopped by something that did not go through the end operation.
 
-    The participant also writes its own progress statuses while it starts up,
-    and one of those can land after the end operation's write. The row then
-    shows a non-terminal status alongside ``endedAt``, which reads as "still
-    running" unless something says otherwise.
+    So ``endedAt`` alone does not identify the end operation: the fields only
+    it writes do. The participant also writes its own progress statuses while
+    it starts up, and one of those can land after the end operation's write.
+    The row then shows a non-terminal status alongside ``endedAt``, which
+    reads as "still running" unless something says otherwise.
 
     The suggested search carries a ``lookback_hours`` reaching back to the
     row's ``createdAt``. search_logs only searches back from now, and its
@@ -222,7 +236,11 @@ def assess_vp_end(
     window one guess at a time.
     """
     status = str(record.get("status") or "")
-    ended = bool(record.get("endedAt") or record.get("endReason"))
+    # Presence, not truthiness: the end operation writes endReason even when
+    # the caller gave an empty one, and these fields are written by nothing
+    # else.
+    ended_by_operation = any(name in record for name in _END_OPERATION_FIELDS)
+    reaped = not ended_by_operation and bool(record.get("endedAt"))
     end_trigger = record.get("endTrigger")
     window = ""
     hours = _hours_since(record.get("createdAt"), time.time() if now is None else now)
@@ -250,10 +268,38 @@ def assess_vp_end(
         "a separate call."
     )
 
-    if ended:
-        # The values are not interpolated here. endReason is text a caller
-        # supplied, and this sentence is the tool's own voice; the record
-        # below is where the model reads and quotes it, as evidence.
+    # No row value is interpolated into these sentences. endReason and
+    # errorMessage are text written by callers, status is a free-form string
+    # on the row, and these sentences are the tool's own voice; the record
+    # below is where the model reads and quotes them, as evidence.
+    stale = (
+        "Its status (see the record) is not a terminal one even though the end "
+        "is recorded, so the status field is stale: a progress update the "
+        "participant wrote as it was shutting down landed after the end "
+        "(compare updatedAt with endedAt). Treat the participant as ended, and "
+        "say in your answer that the status shown is stale."
+    )
+
+    if reaped:
+        parts = [
+            "endedAt is set with no endReason: that is the shape the VP task "
+            "reaper leaves when ECS reports the participant's task stopped "
+            "(FARGATE and EC2 launch types). It sets FAILED and writes the ECS "
+            "stop code and stopped reason into errorMessage, so errorMessage "
+            "is the recorded reason it ended: quote it, with endedAt. A host "
+            "restarted for maintenance appears there as "
+            "EssentialContainerExited."
+        ]
+        if status not in _VP_TERMINAL_STATUSES:
+            parts.append(stale)
+        parts.append(
+            "The container may have been killed without logging a shutdown, "
+            "so an absent exit line or stop marker is expected here; its last "
+            "lines show what it was doing when it stopped. " + search
+        )
+        return " ".join(parts)
+
+    if ended_by_operation:
         parts = [
             "This row records that the participant was ended from outside, by "
             "the end operation: see endedAt and endReason in the record. That "
@@ -262,14 +308,7 @@ def assess_vp_end(
             "be explained."
         ]
         if status not in _VP_TERMINAL_STATUSES:
-            parts.append(
-                f"Its status, {status or 'absent'}, is not a terminal one even "
-                "though the end is recorded, so the status field is stale: a "
-                "progress update the participant wrote as it was shutting down "
-                "landed after the end (compare updatedAt with endedAt). Treat "
-                "the participant as ended, and say in your answer that the "
-                "status shown is stale."
-            )
+            parts.append(stale)
         parts.append(
             "A participant stopped from outside does not write a "
             f"'{_VP_EXIT_MARKER}' line, so do not look for one; it writes "
@@ -346,8 +385,10 @@ def _empty_result_guidance(
             "exit path. One stopped from outside, by the end operation or by "
             "its host shutting down, writes "
             + ", ".join(f"'{m}'" for m in _VP_EXTERNAL_STOP_MARKERS)
-            + " instead. Check get_vp_record for endReason and endedAt, and "
-            "search for those lines together with the VP id in one call."
+            + " instead, and one whose task was killed outright may write "
+            "neither. Check get_vp_record for endReason, endedAt and "
+            "errorMessage, and search for those lines together with the VP id "
+            "in one call."
         )
     elif len(terms) == 1:
         guidance.append(
@@ -950,19 +991,21 @@ class TroubleshootingTools:
             "The current status only. There is no status history on the row, so "
             "the order in which a join progressed has to come from the logs. It "
             "is also the last write, not necessarily the last event: when "
-            "endedAt is set the participant was ended even if status is not "
+            "endedAt is set the participant has ended even if status is not "
             "terminal."
         ),
         "endReason": (
-            "Why the virtual participant was ended from outside (by a user, a "
-            "test or a reaper, through the end operation), not why it exited on "
-            "its own. When present it is the recorded answer to why the "
-            "participant ended, written by the operation that ended it."
+            "Why the virtual participant was ended from outside, through the "
+            "end operation (a user, the SDK or CLI, or a delete), not why it "
+            "exited on its own. When present it is the recorded answer to why "
+            "the participant ended, written by the operation that ended it."
         ),
         "endedAt": (
-            "When the end operation ran. Written together with endReason, and "
-            "only by that operation, so a value here means the participant was "
-            "ended from outside at this time whatever status says."
+            "When the participant was ended from outside. Two writers set it: "
+            "the end operation, together with endReason; and the VP task "
+            "reaper, together with FAILED and an errorMessage giving the ECS "
+            "stop reason, with no endReason. Either way the participant ended "
+            "at this time whatever status says."
         ),
         "ecsTerminated": (
             "Whether the end operation stopped the participant's host. Named "

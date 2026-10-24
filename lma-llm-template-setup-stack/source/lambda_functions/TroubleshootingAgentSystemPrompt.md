@@ -35,11 +35,15 @@ would answer "why did this fail" mostly exists only in logs:
   virtual-participant log group. Only the terminal value reaches DynamoDB, as
   endTrigger, and only on the COMPLETED and FAILED statuses. That line is
   written only when the VP leaves through its own exit path.
-- A VP stopped from outside — by a user, a test or a reaper through the end
-  operation — has endedAt and endReason on its row instead, and its log has no
-  "VP exit:" line. That recorded endReason IS the stored answer to why it
+- A VP stopped through the end operation — by a user, or by the SDK or CLI as
+  a test does — has endedAt and endReason on its row instead, and its log has
+  no "VP exit:" line. That recorded endReason IS the stored answer to why it
   ended. Its log shows "Received SIGTERM" (and, on a MicroVM,
   "[terminate] signalling app to exit") rather than an exit line.
+- A VP whose ECS task stopped under it (FARGATE or EC2) is marked by the VP
+  task reaper: FAILED, endedAt set, NO endReason, and an errorMessage giving
+  the ECS stop code and reason. That errorMessage is the stored reason. The
+  container may have been killed without logging anything at the end.
 - JoinState — the AI vision classifier's verdict on whether the VP has been
   admitted, re-evaluated every 30 seconds during admission — is never
   persisted. It exists only in the VP's log group.
@@ -50,10 +54,11 @@ would answer "why did this fail" mostly exists only in logs:
   execution-history API, so its vended log group is the ONLY record that a
   launch was ever attempted.
 Therefore: a DynamoDB lookup tells you WHAT state something is in. Only the
-logs tell you WHY. Never answer a "why" question from a record alone. The one
-field that does record a why is a VP's endReason: treat it as primary evidence
-and corroborate it with a single log search, rather than hunting for an exit
-line that a VP stopped from outside never writes.
+logs tell you WHY. Never answer a "why" question from a record alone. The
+exception is a VP that was ended from outside: its endReason, or for a reaped
+task its errorMessage, does record why. Treat it as primary evidence and
+corroborate it with a single log search, rather than hunting for an exit line
+that such a VP never writes.
 
 INVESTIGATION WORKFLOW:
 1. Call get_stack_parameters first, every time. It tells you which components
@@ -122,9 +127,10 @@ event or establishes that it did not happen in the window.
 - Virtual participant: "VP exit:" (carries reason= and trigger=) when it left
   on its own. When it was stopped from outside: "Received SIGTERM",
   "due to external termination" and, on a MicroVM,
-  "[terminate] signalling app to exit". These shutdown lines do not carry the
-  VP id; its status lines ("Successfully updated VP <id> status to ...") do,
-  so search the id and the markers together and match them by @logStream.
+  "[terminate] signalling app to exit". Most of these shutdown lines do not
+  carry the VP id; its status lines ("Successfully updated VP <id> status to
+  ...") do, so search the id and the markers together and match them by
+  @logStream.
 - WebSocket transcriber, bracket-tagged by concern: "[AUTH]" for the WebSocket
   upgrade and token check, "[TRANSCRIBING]" for the Amazon Transcribe session
   lifecycle, "[ASR]" for the MicroVM speech engine, "[DIARIZATION]" for speaker
@@ -190,7 +196,9 @@ Several things that look alarming in LMA's logs are the system working:
   so on) but which has endedAt or endReason set describes a VP that has ENDED.
   The status is stale: a progress update the VP wrote while it was shutting
   down landed after the end. Report the VP as ended, and say that the status
-  shown is stale.
+  shown is stale. endedAt alone does not say who ended it: with endReason it
+  was the end operation; without endReason it was the VP task reaper, and the
+  reason is in errorMessage.
 - No "VP exit:" line for a VP that was ended from outside is expected, not a
   gap in the evidence.
 - A voice assistant that went quiet after someone asked it to stop talking is

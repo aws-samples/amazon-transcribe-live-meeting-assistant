@@ -1249,8 +1249,10 @@ def test_a_recorded_end_is_presented_as_the_reason_it_ended() -> None:
 def test_a_non_terminal_status_beside_a_recorded_end_is_called_stale() -> None:
     assessment = record_for(EXTERNALLY_ENDED_VP_ITEM)["endAssessment"]
 
-    assert "LAUNCHING_BROWSER" in assessment
     assert "status field is stale" in assessment
+    # status is a free-form string on the row; it is read from the record,
+    # not repeated in the tool's own sentences.
+    assert "LAUNCHING_BROWSER" not in assessment
 
 
 def test_a_terminal_status_beside_a_recorded_end_is_not_called_stale() -> None:
@@ -1274,7 +1276,50 @@ def test_a_recorded_end_comes_with_one_search_for_the_id_and_every_ending() -> N
     assert "ONE search_logs" in assessment
 
 
-CREATED_EPOCH = 1792845170.0  # EXTERNALLY_ENDED_VP_ITEM's createdAt
+# The epoch of the createdAt the lookback tests add (2026-10-24T12:32:50Z).
+CREATED_EPOCH = 1792845170.0
+
+
+# What the VP task reaper writes when ECS reports the task stopped: FAILED,
+# endedAt and the ECS stop reason in errorMessage, and no endReason.
+REAPED_VP_ITEM = {
+    "id": {"S": "vp-abc"},
+    "status": {"S": "FAILED"},
+    "endedAt": {"S": "2026-10-24T12:40:00+00:00"},
+    "errorMessage": {"S": "(stopCode=EssentialContainerExited: Essential container exited)"},
+}
+
+
+def test_a_reaped_row_points_at_its_error_message_not_an_end_reason() -> None:
+    """endedAt alone is not the end operation: the reaper writes it too, and
+    it records its reason in errorMessage."""
+    assessment = record_for(REAPED_VP_ITEM)["endAssessment"]
+
+    assert "VP task reaper" in assessment
+    assert "errorMessage is the recorded reason" in assessment
+    assert "by the end operation" not in assessment
+    assert "quoting endReason" not in assessment
+    # Its own text stays out of the tool's sentences, like endReason's.
+    assert "Essential container exited" not in assessment
+
+
+def test_a_reaped_row_does_not_promise_shutdown_lines() -> None:
+    """A task killed outright may log nothing at the end."""
+    assessment = record_for(REAPED_VP_ITEM)["endAssessment"]
+
+    assert "may have been killed without logging a shutdown" in assessment
+    assert "do not look for one" not in assessment
+
+
+def test_an_empty_end_reason_still_identifies_the_end_operation() -> None:
+    """The end operation writes endReason even when the caller passed an
+    empty one; presence, not truthiness, is what tells it from the reaper."""
+    item = dict(EXTERNALLY_ENDED_VP_ITEM, endReason={"S": ""}, status={"S": "ENDED"})
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "by the end operation" in assessment
+    assert "VP task reaper" not in assessment
 
 
 def test_the_suggested_search_reaches_back_to_when_the_participant_was_created() -> None:

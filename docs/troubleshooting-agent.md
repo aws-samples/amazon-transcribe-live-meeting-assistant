@@ -126,18 +126,21 @@ to the row in a future release is withheld until it is added to that list
 deliberately.
 
 The record also comes with an `endAssessment`: a reading of the row the way the
-code that writes it does. A Virtual Participant ends in one of three ways, and
-each leaves a different shape. Ended from outside (by a user, a test or a
-reaper, through the end operation), it has `endedAt` and `endReason` on its row,
-and its log has `Received SIGTERM` (and, on a MicroVM,
+code that writes it does. A Virtual Participant ends in one of four ways, and
+each leaves a different shape. Ended through the end operation (by a user, the
+SDK or CLI, or a delete), it has `endedAt` and `endReason` on its row, and its
+log has `Received SIGTERM` (and, on a MicroVM,
 `[terminate] signalling app to exit`) rather than a `VP exit:` line; the
-assessment presents that recorded reason as the answer to why it ended. Leaving
-through its own exit path, it is `COMPLETED` or `FAILED` with an `endTrigger`,
-and its log has a `VP exit:` line. Stopped by a signal that did not come through
-the end operation, it is `COMPLETED` with neither. A row whose status is not
-terminal but which has `endedAt` set describes a participant that has ended —
-a progress update it wrote while shutting down landed after the end — and the
-assessment says the status is stale. Each assessment ends with the one log
+assessment presents that recorded reason as the answer to why it ended. Marked
+by the VP task reaper after its ECS task stopped (`FARGATE` and `EC2` launch
+types), it is `FAILED` with `endedAt` but no `endReason`, and `errorMessage`
+carries the ECS stop code and reason; the assessment points at that instead.
+Leaving through its own exit path, it is `COMPLETED` or `FAILED` with an
+`endTrigger`, and its log has a `VP exit:` line. Stopped by a signal that did
+not come through the end operation, it is `COMPLETED` with none of these. A row
+whose status is not terminal but which has `endedAt` set describes a
+participant that has ended — a progress update it wrote while shutting down
+landed after the end — and the assessment says the status is stale. Each assessment ends with the one log
 search that corroborates it: the participant's id together with the markers for
 every way it could have ended, in one call, with a `lookback_hours` reaching
 back to the row's `createdAt`, because the default search window is only a few
