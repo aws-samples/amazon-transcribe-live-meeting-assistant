@@ -63,6 +63,7 @@ test('Nova Sonic keeps the 30 second default when no duration is configured', ()
     modelId: 'amazon.nova-2-sonic-v1:0',
     systemPrompt: 'You are Alex, an AI meeting assistant.',
   });
+  assert.ok(agent instanceof NovaAgent);
   assert.equal(activationDuration(agent), 30);
 });
 
