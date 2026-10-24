@@ -80,7 +80,7 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: ~/.cache/pip
-          key: pip-${{ runner.os }}-py313-${{ hashFiles('Makefile', 'lib/lma_sdk/pyproject.toml', 'lib/lma_cli_pkg/pyproject.toml', 'lma-asr-microvm-stack/source/requirements-dev.txt') }}
+          key: pip-${{ runner.os }}-py313-${{ hashFiles('Makefile', 'lib/lma_sdk/pyproject.toml', 'lib/lma_cli_pkg/pyproject.toml', 'lma-asr-microvm-stack/source/requirements-dev.txt', 'lma-meetingassist-setup-stack/strands_layer/requirements.txt') }}
           restore-keys: |
             pip-${{ runner.os }}-py313-
 

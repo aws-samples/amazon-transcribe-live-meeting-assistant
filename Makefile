@@ -41,6 +41,7 @@ VP_BACKEND_DIR := $(VP_DIR)/backend
 ASR_DIR := lma-asr-microvm-stack
 ASR_SOURCE_DIR := $(ASR_DIR)/source
 MEETINGASSIST_TEST_DIR := lma-meetingassist-setup-stack/test
+STRANDS_LAYER_REQUIREMENTS := lma-meetingassist-setup-stack/strands_layer/requirements.txt
 VERSION_FILE := VERSION
 PYTHON_LINE_LENGTH := 100
 
@@ -184,6 +185,12 @@ setup-cli-dev: ## Install LMA SDK and CLI with dev/test dependencies
 	$(CURDIR)/$(VENV_DIR)/bin/pip install -e "lib/lma_sdk[dev]"
 	@echo "Installing LMA CLI with dev dependencies..."
 	$(CURDIR)/$(VENV_DIR)/bin/pip install -e "lib/lma_cli_pkg[dev]"
+	@# The troubleshooting agent's budget is tested through the real Strands event
+	@# loop (lma-meetingassist-setup-stack/test/test_troubleshooting_real_strands.py),
+	@# which skips without it. The version is read from the layer's own pin so the
+	@# tests cannot drift from what is deployed.
+	@echo "Installing the Strands Agents SDK at the version the Strands layer pins..."
+	$(CURDIR)/$(VENV_DIR)/bin/pip install "$$(grep -E '^strands-agents==' $(STRANDS_LAYER_REQUIREMENTS))"
 	@echo -e "$(GREEN)✅ LMA SDK and CLI (with test deps) installed!$(NC)"
 
 .PHONY: check-node
