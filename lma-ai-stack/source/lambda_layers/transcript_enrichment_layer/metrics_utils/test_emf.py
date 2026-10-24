@@ -6,8 +6,9 @@
 These assert the record itself rather than a mock of a metrics library, because
 the record *is* the contract: CloudWatch Logs parses it at ingestion and, when
 it does not match the format, publishes nothing and says nothing. The only
-symptom is a widget that stays empty and an alarm that stays in
-INSUFFICIENT_DATA, which is indistinguishable from a quiet deployment.
+symptom is a widget that stays empty and an alarm reading OK, since both alarms
+on these metrics treat missing data as not breaching -- indistinguishable from a
+quiet deployment.
 
 Every constraint checked below is quoted from the embedded metric format
 specification, because each one, if broken, causes CloudWatch to drop either

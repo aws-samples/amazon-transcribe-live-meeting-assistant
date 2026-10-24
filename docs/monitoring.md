@@ -37,10 +37,11 @@ code otherwise swallows: a failure that is caught, recorded and not raised, so
 no AWS-published metric moves and nothing else would ever mention it. That is
 exactly why each is an alarm rather than only a graph. The cost of reading an
 application metric is that it depends on application code: if a component stops
-publishing, its alarm reads `OK` -- both are set to treat missing data as not
-breaching, so an alarm with no data at all is indistinguishable from one that is
-simply quiet, and it will not be the thing that tells you. A build-time gate checks the wiring that would cause that, and
-the dashboard band note explains how to tell the two apart by eye.
+publishing, its alarm reads `OK`. Both treat missing data as not breaching, so
+an alarm with no data at all looks exactly like one that is simply quiet and
+will not be the thing that tells you. A build-time gate checks the wiring that
+would cause that, and the dashboard band note says how to tell the two apart by
+eye.
 
 ### The alarm table
 
@@ -135,16 +136,17 @@ gap.** The Call Event Processor issues the writes for a batch of segments
 together and collects the results, including the failures, rather than raising
 on them. That is deliberate — one rejected segment should not replay the whole
 Kinesis batch — but the consequence is that the record is **not redelivered**,
-and that is what sets these failures apart from every other failure in the
+which is what sets these failures apart from every other failure in the
 pipeline. A raised failure is attributed to its record, retried, and finally
 described to the event source's on-failure destination, where the
 discarded-records-queue-depth alarm picks it up. This one reaches neither on its
-own account — only if some other record in the same batch happens to raise, which
-redelivers everything after it — so the discarded-records queue stays empty, and
-`AWS/Lambda Errors` stays flat —
-as it does for a raised record failure too, since the invocation still returns a
-partial-batch response. The transcript simply has a line missing, on a meeting page with no
-error on it. If this alarm fires, read the Call Event Processor's log group for
+own account, so that queue stays empty. It is redelivered only if some other
+record in the same batch raises, which redelivers everything after it.
+
+`AWS/Lambda Errors` does not move either way: a raised record failure still
+leaves the invocation returning a partial-batch response normally, so that
+metric is no help in distinguishing the two. The transcript simply has a line
+missing, on a meeting page with no error on it. If this alarm fires, read the Call Event Processor's log group for
 `max retries on query` over the same window; each of those lines carries the
 exception type and the GraphQL `errorType`. Search for that string rather than
 the handler's `event processor error`, which reports only failures that were
