@@ -1338,6 +1338,25 @@ def test_a_reaper_error_beside_an_end_reason_is_not_presented_as_a_second_cause(
     assert "not a second cause" in assessment
 
 
+def test_a_schedule_cancelled_before_launch_is_not_sent_looking_for_shutdown_lines() -> None:
+    """A participant cancelled while still scheduled never ran, so it has no
+    log of its own; the stream-matching search would only come back empty."""
+    item = {
+        "id": {"S": "vp-abc"},
+        "status": {"S": "CANCELLED"},
+        "endReason": {"S": "cancelled by user"},
+        "endedAt": {"S": "2026-10-24T12:00:00+00:00"},
+        "scheduleCancelled": {"BOOL": True},
+    }
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "before it launched" in assessment
+    assert "no participant log to search" in assessment
+    assert "run ONE search_logs" not in assessment
+    assert "Received SIGTERM" not in assessment
+
+
 def test_an_empty_end_reason_still_identifies_the_end_operation() -> None:
     """The end operation writes endReason even when the caller passed an
     empty one; presence, not truthiness, is what tells it from the reaper."""

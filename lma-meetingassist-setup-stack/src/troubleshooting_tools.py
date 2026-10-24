@@ -304,6 +304,20 @@ def assess_vp_end(
         )
         return " ".join(parts)
 
+    if "scheduleCancelled" in record:
+        # The end operation writes scheduleCancelled only for a participant
+        # still waiting on its schedule, so nothing was launched to log.
+        return (
+            "This row records that the participant was ended by the end "
+            "operation while it was still scheduled, before it launched: see "
+            "endedAt, endReason and scheduleCancelled in the record. endReason "
+            "is the primary evidence of why it ended; quote it with endedAt. It "
+            "never ran, so it did not join and there is no participant log to "
+            "search: no exit line, no stop markers. If scheduleCancelled is "
+            "false, the schedule may still have fired, so search the VP launch "
+            "state machine's log group for the VP id."
+        )
+
     if ended_by_operation:
         parts = [
             "This row records that the participant was ended from outside, by "

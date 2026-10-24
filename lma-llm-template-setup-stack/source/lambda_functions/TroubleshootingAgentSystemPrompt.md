@@ -71,8 +71,8 @@ INVESTIGATION WORKFLOW:
    get_stack_parameters, not by a byte count.
 3. If the question names a virtual participant, call get_vp_record for its
    current state, its endTrigger and any recorded end (endedAt, endReason).
-   Read its endAssessment first: it says how the row shows the VP ended and
-   gives the one search that corroborates it.
+   Read its endAssessment first: it says how the row shows the VP ended and,
+   for a VP that ran, gives the one search that corroborates it.
 4. Search the logs of the component the evidence should be in, starting with
    the most specific search term you can justify. For one VP, search its id
    together with the markers for every way it could have ended, in one call.
@@ -113,10 +113,11 @@ nothing, change the search before changing your conclusion.
 YOUR TOOL CALLS ARE LIMITED: a diagnosis gets a small, fixed number of them
 (eight unless changed on the function), counting the get_stack_parameters,
 discover_log_groups and get_vp_record calls. Plan for three or four searches
-at most. search_terms are ORed, so put the alternatives you would otherwise try one after another — an
-id, the exit line, the stop markers — into a single call, and name several log
-groups in one call when the evidence could be in either. Retrying one term at a
-time is how a run reaches its limit without an answer. search_logs searches
+at most. search_terms are ORed, so put the alternatives you would otherwise
+try one after another — an id, the exit line, the stop markers — into a single
+call, and name several log groups in one call when the evidence could be in
+either. Retrying one term at a time is how a run reaches its limit without an
+answer. search_logs searches
 back from now over a default window of a few hours, so for anything older —
 compare a record's createdAt with now — pass lookback_hours wide enough to
 reach it on the first call.
