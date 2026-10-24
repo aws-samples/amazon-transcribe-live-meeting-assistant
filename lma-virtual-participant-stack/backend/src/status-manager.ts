@@ -105,7 +105,12 @@ export const HEALTHY_VP_STATUSES: readonly VpStatus[] = [
   VP_STATUS.COMPLETED,
 ];
 
-/** Statuses from which a VP never moves on. */
+/**
+ * Statuses from which a VP never moves on. The updateVirtualParticipant
+ * resolver in `lma-ai-stack/deployment/lma-ai-stack.yaml` keeps the same set
+ * (`$terminalStatuses`) to decide which writes it conditions on the row's end;
+ * `vp-status-updates.test.ts` checks that the two agree.
+ */
 export const TERMINAL_VP_STATUSES: readonly VpStatus[] = [
   VP_STATUS.COMPLETED,
   VP_STATUS.FAILED,
@@ -867,8 +872,19 @@ export class VirtualParticipantStatusManager {
         variables.input.vncReady = current.vncReady;
       }
 
-      const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      
+      let result;
+      try {
+        result = await this.signAndSendGraphQLRequest(mutation, variables);
+      } catch (error) {
+        if (isConditionalCheckFailure(error)) {
+          // MANUAL_ACTION_REQUIRED is a progress status, so the resolver
+          // declines it on a row whose end has been recorded.
+          console.log(`VP ${this.participantId} has been ended — not raising a ${actionType} prompt`);
+          return false;
+        }
+        throw error;
+      }
+
       if (result) {
         console.log(`Successfully set manual action required for VP ${this.participantId}`);
         return true;

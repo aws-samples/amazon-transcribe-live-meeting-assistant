@@ -120,6 +120,19 @@ test('healthy and terminal statuses are drawn from the declared set', () => {
 // Clearing the status detail
 // ---------------------------------------------------------------------------
 
+test('the resolver and the container agree on which statuses are terminal', () => {
+  // The resolver conditions only non-terminal writes on the row's end, so a
+  // status terminal to one and not the other would be treated differently.
+  const template = readFileSync(
+    new URL('../../../lma-ai-stack/deployment/lma-ai-stack.yaml', new URL('.', import.meta.url)),
+    'utf8',
+  );
+  const declared = template.match(/#set\( \$terminalStatuses = \[([^\]]*)\] \)/);
+  assert.ok(declared, '$terminalStatuses was not found in the resolver');
+  const inResolver = [...declared[1].matchAll(/"(\w+)"/g)].map((match) => match[1]);
+  assert.deepEqual([...inResolver].sort(), [...TERMINAL_VP_STATUSES].sort());
+});
+
 test('shouldClearStatusDetail is true for a healthy transition with no detail', () => {
   for (const status of HEALTHY_VP_STATUSES) {
     assert.equal(shouldClearStatusDetail(status), true, status);

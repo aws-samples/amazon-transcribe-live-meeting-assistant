@@ -7253,7 +7253,9 @@ Resources:
         ## reaper carries no endReason, so a participant that is in fact still **
         ## running can carry on reporting progress after one. A write that **
         ## supplies no status -- a join sub-step's detail line, a CallId -- is **
-        ## not conditioned: it cannot move an ended row's status. **
+        ## not conditioned: it cannot move an ended row's status. The terminal **
+        ## set matches TERMINAL_VP_STATUSES in the VP container's **
+        ## status-manager.ts, and a VP backend test checks the two agree. **
         #set( $terminalStatuses = ["COMPLETED", "FAILED", "ENDED", "CANCELLED"] )
         #if( !$util.isNullOrBlank($ctx.args.input.status) && !$terminalStatuses.contains($ctx.args.input.status) )
           $util.qr( $conditionNames.put("#conditionEndReason", "endReason") )
