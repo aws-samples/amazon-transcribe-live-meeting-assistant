@@ -2091,7 +2091,13 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.pacatProcess = null;
       console.log(`✓ Persistent pacat stream stopped (${mode})`);
     }
-    // Clear speaking state
+    // Clear speaking state. Note what _isSpeaking means after a `drain`: this
+    // agent has stopped accepting speech, not that the meeting has stopped
+    // hearing any — the handed-off stream can still be playing out the
+    // acknowledgement. It is read to decide whether the agent is busy
+    // (deactivation, session refresh, auto-mute), for which "no longer
+    // producing audio" is the right question, so clearing it here is correct;
+    // anything that needs "nothing is audible" has to ask about the streams.
     if (this.speakingTimeout) {
       clearTimeout(this.speakingTimeout);
       this.speakingTimeout = null;
@@ -2281,6 +2287,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     // a segment down one path or the other, never both, so the utterance that
     // asked for silence cannot be the one that activates.
     this.cancelStopRequest('activated');
+    // The assistant was never silenced here, so the unmute() that normally
+    // clears this returns early. Clearing it anyway keeps a later tool call
+    // from being timed against a request that was called off — the same reason
+    // the group-mode branch of handleUserTurnWakePhrase clears it by hand.
+    this.lastTranscriptStopAt = null;
 
     // Being addressed by wake phrase is how the agent becomes audible again
     // after it was asked to stop talking — otherwise a single stop request
@@ -2687,11 +2698,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     const existing = this.stopRequest;
 
     // A tool call that misses the window is the measurement that matters most:
-    // it says by how much 500 ms was too short. The record it would have
-    // claimed is gone by then — resolveStopRequest clears it — so the time the
-    // transcript route recognised the request outlives it, and the latency is
-    // reported from there with `late=true` to say which side of the deadline it
-    // landed on.
+    // it says by how much STOP_REQUEST_TOOL_GRACE_MS was too short. The record
+    // it would have claimed is gone by then — resolveStopRequest clears it — so
+    // the time the transcript route recognised the request outlives it, and
+    // the latency is reported from there with `late=true` to say which side of
+    // the deadline it landed on.
     //
     // Only for as long as a tool call could still plausibly be answering that
     // request, though. A silenced assistant goes on hearing the meeting, and in

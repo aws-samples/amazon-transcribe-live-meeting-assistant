@@ -11,9 +11,10 @@
  * Both routes recognise "Hey Alex, stop talking" and only one of them can
  * speak. The tool route is the model noticing, so it is the only route that can
  * produce the spoken "Okay"; the transcript route is expected to be the faster
- * one, and is the one that guarantees silence either way. These tests pin the handover between them: the
- * transcript route holds its mute for STOP_REQUEST_TOOL_GRACE_MS, stands down
- * if the tool call lands inside that window, and acts if it does not. They also
+ * one, and is the one that guarantees silence either way. These tests pin the
+ * handover between them: the transcript route holds its mute for
+ * STOP_REQUEST_TOOL_GRACE_MS, stands down if the tool call lands inside that
+ * window, and acts if it does not. They also
  * pin the `[stop-request]` log lines, because those lines are the only account
  * a live meeting leaves of which route acted and why: renaming one without
  * noticing would leave a live test with nothing to read but the silence it was
@@ -103,6 +104,10 @@ const PAST_BACKSTOP_MS = STOP_REQUEST_TOOL_BACKSTOP_MS + 150;
 test('the transcript route holds its mute for the window the constant names', async () => {
     capture();
     try {
+        // The shipped value, so that retuning it from live measurements is a
+        // deliberate act with somewhere to record the new one. Everything else
+        // below derives from the constant, so a retune moves the behaviour
+        // assertions with it and only this line has to be updated.
         assert.equal(STOP_REQUEST_TOOL_GRACE_MS, 500);
 
         const agent = novaAgent();
@@ -123,7 +128,10 @@ test('the transcript route holds its mute for the window the constant names', as
         );
 
         const lines = stopLines().join('\n');
-        assert.match(lines, /route=transcript action=deferred[^\n]*window_ms=500/);
+        assert.match(
+            lines,
+            new RegExp(`route=transcript action=deferred[^\\n]*window_ms=${STOP_REQUEST_TOOL_GRACE_MS}`),
+        );
         assert.match(lines, /route=transcript action=fired-fallback[^\n]*tool_seen=false/);
     } finally {
         release();
@@ -502,6 +510,18 @@ test('an activation inside the window keeps the assistant audible', async () => 
         await delay(PAST_GRACE_MS);
         assert.equal(agent.isMuted(), false, 'an activation must not be followed by silence');
         assert.match(stopLines().join('\n'), /action=cancelled why=activated/);
+
+        // And it leaves no stop time behind. The assistant was never silenced,
+        // so the unmute() that normally clears it never ran; a tool call now is
+        // about something else, and timing it against the request that was
+        // called off would put a reading worth nothing into the data the window
+        // is tuned from.
+        (agent as any).noteMuteToolRequested();
+        const claimed = stopLines().filter((line) => line.includes('action=claimed')).pop();
+        assert.match(claimed!, /late=false/);
+        assert.match(claimed!, /tool_latency_ms=n\/a/);
+
+        await delay(PAST_BACKSTOP_MS);
         agent.deactivate();
     } finally {
         release();
