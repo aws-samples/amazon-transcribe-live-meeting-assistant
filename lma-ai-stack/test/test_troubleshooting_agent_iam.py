@@ -288,6 +288,49 @@ def test_the_microvm_log_groups_are_named_in_full(role: Dict[str, Any]) -> None:
     assert any("lambda-microvms/${LMAStackName}-asr-logs" in r for r in rendered)
 
 
+MICROVM_ARN_PREFIX = (
+    "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/"
+)
+
+#: Every MicroVM log group ARN form the role may name: each generation's group,
+#: for this deployment only. The current groups carry a trailing wildcard (their
+#: names are distinctive); the legacy ones are named exactly, as the group and
+#: as its streams, because "-vp*" would cover a neighbouring "-vpn" stack.
+ALLOWED_MICROVM_RESOURCES = {
+    MICROVM_ARN_PREFIX + "${LMAStackName}-vp-logs*",
+    MICROVM_ARN_PREFIX + "${LMAStackName}-asr-logs*",
+    MICROVM_ARN_PREFIX + "${LMAStackName}-vp",
+    MICROVM_ARN_PREFIX + "${LMAStackName}-vp:*",
+    MICROVM_ARN_PREFIX + "${LMAStackName}-asr",
+    MICROVM_ARN_PREFIX + "${LMAStackName}-asr:*",
+}
+
+
+@pytest.mark.parametrize("suffix", ["-vp", "-asr"])
+def test_the_legacy_microvm_log_groups_can_be_queried(
+    role: Dict[str, Any], suffix: str
+) -> None:
+    """A stack upgraded from before v0.3.11 keeps the groups its earlier images
+    logged to, and discovery lists them; a listed group the role cannot query
+    fails the whole Logs Insights query it is named in."""
+    rendered = set(rendered_resources(statements_granting(role, "logs:StartQuery")[0]))
+
+    assert MICROVM_ARN_PREFIX + "${LMAStackName}" + suffix in rendered
+    assert MICROVM_ARN_PREFIX + "${LMAStackName}" + suffix + ":*" in rendered
+
+
+def test_the_microvm_grant_covers_this_deployments_groups_and_nothing_wider(
+    role: Dict[str, Any],
+) -> None:
+    """Every MicroVM entry is one of this stack's own names. In particular no
+    "/aws/lambda-microvms/*", which reaches every deployment in the account,
+    and no "${LMAStackName}-vp*", which reaches a "-vpn" neighbour's."""
+    rendered = rendered_resources(statements_granting(role, "logs:StartQuery")[0])
+    microvm = {r for r in rendered if "lambda-microvms" in r}
+
+    assert microvm == ALLOWED_MICROVM_RESOURCES
+
+
 def test_active_tracing_is_matched_by_the_permission_it_needs(
     role: Dict[str, Any], template: Dict[str, Any]
 ) -> None:

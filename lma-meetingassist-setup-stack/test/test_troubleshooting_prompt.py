@@ -263,6 +263,11 @@ def prompt_text() -> str:
         # whose events have aged past retention reports none. Telling the
         # agent to skip those would send it past its own evidence.
         "Never skip a group on it alone",
+        # A stack upgraded from before v0.3.11 has two MicroVM groups, and a
+        # participant that ran on the pre-upgrade image logged only to the
+        # older one; the stream name is how its microvmId finds it.
+        "search the legacy group too",
+        "stream names contain the microvmId",
         # The disclosure restriction. This output may be pasted into a public
         # issue tracker, so the agent is told to describe a defect as observed
         # behaviour rather than characterising it in security terms.
