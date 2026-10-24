@@ -512,13 +512,14 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      # No AWSLambdaBasicExecutionRole. That managed policy grants
-      # logs:CreateLogGroup, CreateLogStream and PutLogEvents across the whole
-      # account, which are writes — so attaching it would make the claim this
-      # role's comment, the docs and the CHANGELOG all make ("it reads, and the
-      # only exceptions are the two that report progress") untrue. The function
-      # still needs to write its own logs, so that is granted inline below and
-      # scoped to the one log group it writes to.
+      # No AWSLambdaBasicExecutionRole, and no managed policy at all. That one
+      # grants logs:CreateLogGroup, CreateLogStream and PutLogEvents across the
+      # whole account, which are writes — and a managed policy's contents are
+      # not in this template, so attaching one would put permissions outside
+      # the reach of the assertions in
+      # lma-ai-stack/test/test_troubleshooting_agent_iam.py, which enumerate
+      # this role's entire action surface. The function's own log writes are
+      # granted inline below, scoped to the one log group it writes to.
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn

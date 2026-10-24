@@ -326,10 +326,12 @@ def test_resolving_nested_stack_names_is_granted_on_the_parent_only(
 #: is that its surface is enumerable. Adding to this list is the deliberate act
 #: that a reviewer should see.
 #:
-#: Two of these are not reads, and both exist so the investigation can report
-#: itself rather than act on the deployment: `appsync:GraphQL` publishes a
-#: progress step through one mutation field, and `logs:StopQuery` cancels a
-#: query this role started.
+#: Four of these are not reads, making up the three grants the role's comment,
+#: docs/troubleshooting-agent.md and the CHANGELOG all list. None touches the
+#: deployment: `appsync:GraphQL` publishes a progress step through one mutation
+#: field, `logs:StopQuery` cancels a query this role started, and
+#: `logs:CreateLogStream` with `logs:PutLogEvents` writes this function's own
+#: log group.
 PERMITTED_ACTIONS = {
     "logs:DescribeLogGroups",
     "logs:StartQuery",
@@ -354,6 +356,7 @@ PERMITTED_ACTIONS = {
 
 #: The permitted actions that are not reads, named so the claim "it reads and
 #: does not change anything it diagnoses" can be checked rather than trusted.
+#: Four actions, three grants: the two log-write actions are one grant.
 PERMITTED_NON_READS = {
     "appsync:GraphQL",
     "logs:StopQuery",
@@ -418,10 +421,12 @@ def test_the_role_cannot_create_a_log_group(role: Dict[str, Any]) -> None:
     assert not statements_granting(role, "logs:CreateLogGroup")
 
 
-def test_the_non_read_actions_are_only_the_ones_that_report_progress(
+def test_the_non_read_actions_are_only_the_three_grants_the_docs_describe(
     role: Dict[str, Any],
 ) -> None:
-    """Pins the claim the template comment, the docs and the CHANGELOG all make.
+    """Pins the claim the template comment, the docs and the CHANGELOG all make:
+    the role reads, and the exceptions are narrating progress, cancelling its
+    own query, and writing its own log stream.
 
     The write-prefix list below has to stay broad enough to catch an action
     that is not a read even when it is not called "Put" or "Create" —
@@ -457,10 +462,10 @@ def test_the_non_read_actions_are_only_the_ones_that_report_progress(
     non_reads = {a for a in held if a.startswith(write_prefixes)}
 
     assert non_reads == PERMITTED_NON_READS, (
-        f"the role's non-read surface changed: {sorted(non_reads)}. The "
-        "template comment, docs/troubleshooting-agent.md and the CHANGELOG all "
-        "describe it as the two that report progress; update all three if this "
-        "is intended."
+        f"the role's non-read surface changed: {sorted(non_reads)}. The role's "
+        "own comment, docs/troubleshooting-agent.md and the CHANGELOG all list "
+        "three non-read grants -- narrating progress, cancelling its own query, "
+        "and writing its own log stream. Update all three if this is intended."
     )
 
 

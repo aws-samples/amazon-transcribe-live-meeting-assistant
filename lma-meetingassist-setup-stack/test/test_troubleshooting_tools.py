@@ -1314,6 +1314,44 @@ def test_redaction_is_case_insensitive() -> None:
     assert sorted(result["redactedParameters"]) == ["MY_SECRET", "myapikey"]
 
 
+def test_an_oversize_parameter_set_sheds_parameters_and_stays_valid_json() -> None:
+    """Parameters are a dict, not a list, so _render has to shed by key as
+    well as by position. Without that this tool fell back to cutting the
+    serialised string, which is the outcome the rest of the module avoids."""
+    limits = AgentLimits()
+    object.__setattr__(limits, "max_tool_result_chars", 1500)
+    client = FakeCloudFormationClient(
+        stack_with(VPLaunchType="MICROVM", **{f"Param{i}": "x" * 40 for i in range(60)})
+    )
+
+    result = parsed(
+        make_tools(cloudformation_client=client, limits=limits).get_stack_parameters()
+    )
+
+    assert result["otherParametersOmittedForSize"] > 0
+    # The annotated architecture parameter is what a diagnosis depends on, and
+    # it is what shedding is meant to protect.
+    assert result["architectureParameters"]["VPLaunchType"] == "MICROVM"
+    assert "too large to return in full" in result["guidance"]
+
+
+def test_an_oversize_parameter_set_keeps_the_redaction_note() -> None:
+    limits = AgentLimits()
+    object.__setattr__(limits, "max_tool_result_chars", 1500)
+    client = FakeCloudFormationClient(
+        stack_with(
+            AdminEmail="a@example.com",
+            **{f"Param{i}": "x" * 40 for i in range(60)},
+        )
+    )
+
+    result = parsed(
+        make_tools(cloudformation_client=client, limits=limits).get_stack_parameters()
+    )
+
+    assert result["redactedParameters"] == ["AdminEmail"]
+
+
 def test_an_architecture_parameter_is_never_itself_redactable() -> None:
     """A guard on the two lists: a name on both would be annotated as needed
     for diagnosis and then withheld."""

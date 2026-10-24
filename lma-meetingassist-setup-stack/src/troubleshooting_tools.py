@@ -185,9 +185,10 @@ class TroubleshootingTools:
     ) -> str:
         """Serialise a tool result, kept under the configured size.
 
-        Oversize results shed trailing items from ``bulk_key`` rather than
-        having the serialised string cut at the end. Cutting the string is the
-        obvious implementation and it is wrong twice over:
+        Oversize results shed trailing items from ``bulk_key`` — a list or a
+        dict — rather than having the serialised string cut at the end.
+        Cutting the string is the obvious implementation and it is wrong twice
+        over:
 
         * The fields the agent is *told* to read — ``guidance``, the
           completeness flags, the caveats — are small and are serialised after
@@ -209,24 +210,36 @@ class TroubleshootingTools:
 
         rendered = serialise(payload)
         items = payload.get(bulk_key) if bulk_key else None
-        if len(rendered) <= cap or not isinstance(items, list) or not items:
-            # No bulk array to shed from. truncate() is the last resort, and
-            # its marker is what tells a reader the result is unparseable.
+        if len(rendered) <= cap or not isinstance(items, (list, dict)) or not items:
+            # No bulk collection to shed from. truncate() is the last resort,
+            # and its marker is what tells a reader the result is unparseable.
             return truncate(rendered, cap)
 
-        kept = list(items)
-        while kept:
+        # A dict bulk collection (a parameter map) sheds by key, a list (rows,
+        # log groups) by position. Both keep a prefix, so what remains is a
+        # coherent subset rather than a sample.
+        is_mapping = isinstance(items, dict)
+        order: List[Any] = list(items.keys()) if is_mapping else list(items)
+
+        def take(n: int) -> Any:
+            if is_mapping:
+                return {k: items[k] for k in order[:n]}
+            return order[:n]
+
+        remaining = len(order)
+        while remaining:
             # Halving rather than one-at-a-time: a result can be far over the
             # cap, and each attempt re-serialises the whole payload.
-            kept = kept[: max(1, len(kept) // 2)] if len(kept) > 1 else []
+            remaining = max(1, remaining // 2) if remaining > 1 else 0
+            kept = take(remaining)
             trial = dict(payload)
             trial[bulk_key] = kept
-            trial[shed_count_key] = len(items) - len(kept)
+            trial[shed_count_key] = len(order) - remaining
             trial["guidance"] = " ".join(
                 part
                 for part in (
                     payload.get("guidance"),
-                    f"{len(items) - len(kept)} of {len(items)} items were "
+                    f"{len(order) - remaining} of {len(order)} items were "
                     "removed from this result because it was too large to "
                     "return in full. What remains is accurate; ask a narrower "
                     "question for the rest.",
@@ -854,7 +867,6 @@ class TroubleshootingTools:
                     for key, note in self.ARCHITECTURE_PARAMETERS.items()
                     if key in architecture
                 },
-                "otherParameters": remainder,
                 "redactedParameters": redacted,
                 "guidance": (
                     "The parameters named in redactedParameters have values on "
@@ -865,7 +877,14 @@ class TroubleshootingTools:
                 )
                 if redacted
                 else None,
-            }
+                # Last, and the bulk collection, for the same reason rows are
+                # in search_logs: an oversize result sheds from here rather
+                # than losing the annotated architecture parameters or the
+                # redaction note.
+                "otherParameters": remainder,
+            },
+            bulk_key="otherParameters",
+            shed_count_key="otherParametersOmittedForSize",
         )
 
 
