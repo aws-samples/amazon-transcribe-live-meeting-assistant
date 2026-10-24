@@ -136,8 +136,11 @@ COMPONENT_NOTES: Dict[str, str] = {
     VIRTUAL_PARTICIPANT: (
         "Meeting-join and in-meeting behaviour of the virtual participant. The "
         "structured exit code is here and nowhere else: grep 'VP exit:' for a "
-        "line carrying reason= and trigger=. The AI vision classifier's "
-        "per-30-second verdict (JoinState) is also logs-only."
+        "line carrying reason= and trigger=. That line is written only when "
+        "the participant leaves on its own; one stopped from outside writes "
+        "'Received SIGTERM' and, on a MicroVM, '[terminate] signalling app to "
+        "exit' instead. The AI vision classifier's per-30-second verdict "
+        "(JoinState) is also logs-only."
     ),
     VP_LAUNCH_STATE_MACHINE: (
         "Whether a launch was attempted at all, and how it ended: "

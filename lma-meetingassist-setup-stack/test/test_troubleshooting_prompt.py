@@ -268,6 +268,17 @@ def prompt_text() -> str:
         # older one; the stream name is how its microvmId finds it.
         "search the legacy group too",
         "stream names contain the microvmId",
+        # A VP ended from outside has its reason on the row and no exit line
+        # in its log; one whose status is still non-terminal beside a recorded
+        # end has ended, and its status is stale.
+        "That recorded endReason IS the stored answer to why it ended",
+        "Received SIGTERM",
+        "[terminate] signalling app to exit",
+        "The status is stale",
+        # The tool-call limit, and the habit that spends it: one search per
+        # term when the terms are ORed and could have been one call.
+        "YOUR TOOL CALLS ARE LIMITED",
+        "search_terms are ORed",
         # The disclosure restriction. This output may be pasted into a public
         # issue tracker, so the agent is told to describe a defect as observed
         # behaviour rather than characterising it in security terms.

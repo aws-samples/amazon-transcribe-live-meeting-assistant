@@ -40,7 +40,9 @@ from __future__ import annotations
 import json
 import logging
 import re
+import math
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import troubleshooting_discovery as discovery
@@ -136,6 +138,224 @@ def build_search_query(
         f'@message like "{_escape_insights_string(term)}"' for term in search_terms
     )
     return f"{select}\n| filter {clauses}\n| sort @timestamp desc\n| limit {limit}"
+
+
+#: VP statuses after which the participant does not run again.
+_VP_TERMINAL_STATUSES = frozenset({"COMPLETED", "FAILED", "ENDED", "CANCELLED"})
+
+#: The literal the container writes when it leaves through its own exit path.
+_VP_EXIT_MARKER = "VP exit:"
+
+#: Literals a participant writes when it is stopped from outside rather than
+#: leaving on its own. The supervisor line is MicroVM-only; the other two come
+#: from the container's signal handler on every launch type. None of the three
+#: carries the VP id: the stream they are written to does.
+_VP_EXTERNAL_STOP_MARKERS = (
+    "Received SIGTERM",
+    "[terminate] signalling app to exit",
+    "due to external termination",
+)
+
+
+def _vp_end_search_terms(vp_id: str) -> str:
+    """The one search that answers "did it join, and how did it end".
+
+    The id matches the participant's own status lines, which show the join
+    progress and identify its stream; the stop markers and the exit line match
+    whichever way it ended. Terms are ORed, so this is one tool call where
+    searching for them in turn would be five.
+    """
+    return ", ".join((vp_id, *_VP_EXTERNAL_STOP_MARKERS, _VP_EXIT_MARKER))
+
+
+def _hours_since(timestamp: Any, now: float) -> Optional[int]:
+    """Whole hours, rounded up, from an ISO-8601 timestamp to ``now``.
+
+    None for anything that does not parse, so a row with an odd timestamp
+    gets no lookback advice rather than wrong advice.
+    """
+    if not isinstance(timestamp, str) or not timestamp.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(timestamp.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    elapsed = now - parsed.timestamp()
+    if elapsed < 0:
+        return None
+    return max(1, math.ceil(elapsed / 3600))
+
+
+def assess_vp_end(
+    vp_id: str,
+    record: Dict[str, Any],
+    *,
+    now: Optional[float] = None,
+    max_lookback_hours: Optional[int] = None,
+) -> str:
+    """Say what a virtual participant row records about how it ended.
+
+    This reads the row the way the code that writes it does, so the model does
+    not have to infer it. Three writers set the end-related fields, and each
+    leaves a different shape:
+
+    * The end operation (a user, a test or a reaper) sets ``endedAt``,
+      ``endReason`` and status ENDED, then stops the host. The participant is
+      signalled and logs the external-stop markers, never a ``VP exit:`` line.
+    * The container's own exit path sets COMPLETED or FAILED with an
+      ``endTrigger``, and logs ``VP exit:``.
+    * The container's signal handler sets COMPLETED with neither, when it is
+      stopped by something that did not go through the end operation.
+
+    The participant also writes its own progress statuses while it starts up,
+    and one of those can land after the end operation's write. The row then
+    shows a non-terminal status alongside ``endedAt``, which reads as "still
+    running" unless something says otherwise.
+
+    The suggested search carries a ``lookback_hours`` reaching back to the
+    row's ``createdAt``. search_logs only searches back from now, and its
+    default window is a few hours, so the same search run against a
+    participant from this morning returns nothing and reads as "no
+    evidence" — which is how a run spends its remaining calls widening the
+    window one guess at a time.
+    """
+    status = str(record.get("status") or "")
+    ended = bool(record.get("endedAt") or record.get("endReason"))
+    end_trigger = record.get("endTrigger")
+    window = ""
+    hours = _hours_since(record.get("createdAt"), time.time() if now is None else now)
+    if hours is not None:
+        # One hour of margin either side of a clock or rounding edge.
+        hours += 1
+        if max_lookback_hours is not None and hours > max_lookback_hours:
+            window = (
+                f" and lookback_hours {max_lookback_hours} (the most allowed; "
+                "this participant was created before that window, so its "
+                "earliest lines may be out of reach)"
+            )
+        else:
+            window = (
+                f" and lookback_hours {hours}, which reaches back to its "
+                "createdAt (the default window may not)"
+            )
+    search = (
+        "To corroborate this, and to see whether it joined first, run ONE "
+        "search_logs over the virtual-participant log groups with search_terms "
+        f'"{_vp_end_search_terms(vp_id)}"{window}. The lines carrying the id '
+        "show how far the join progressed (for example a status update to "
+        "JOINED) and name the participant's @logStream; the shutdown lines in "
+        "that same stream show how it stopped. Do not search for each term in "
+        "a separate call."
+    )
+
+    if ended:
+        # The values are not interpolated here. endReason is text a caller
+        # supplied, and this sentence is the tool's own voice; the record
+        # below is where the model reads and quotes it, as evidence.
+        parts = [
+            "This row records that the participant was ended from outside, by "
+            "the end operation: see endedAt and endReason in the record. That "
+            "is the primary evidence of why it ended: report it as the reason, "
+            "quoting endReason and endedAt, rather than as something still to "
+            "be explained."
+        ]
+        if status not in _VP_TERMINAL_STATUSES:
+            parts.append(
+                f"Its status, {status or 'absent'}, is not a terminal one even "
+                "though the end is recorded, so the status field is stale: a "
+                "progress update the participant wrote as it was shutting down "
+                "landed after the end (compare updatedAt with endedAt). Treat "
+                "the participant as ended, and say in your answer that the "
+                "status shown is stale."
+            )
+        parts.append(
+            "A participant stopped from outside does not write a "
+            f"'{_VP_EXIT_MARKER}' line, so do not look for one; it writes "
+            + ", ".join(f"'{m}'" for m in _VP_EXTERNAL_STOP_MARKERS)
+            + " instead."
+        )
+        parts.append(search)
+        return " ".join(parts)
+
+    if status in ("COMPLETED", "FAILED") and end_trigger:
+        return (
+            "The participant left through its own exit path: see endTrigger "
+            f"in the record. Its '{_VP_EXIT_MARKER}' line in the "
+            "virtual-participant log group carries the same trigger together "
+            "with reason=, and the lines before it explain the trigger."
+        )
+
+    if status == "COMPLETED":
+        return (
+            "COMPLETED with no endTrigger and no endReason is what the "
+            "participant's signal handler writes: it was stopped by a signal "
+            "that did not come through the end operation, such as its host "
+            f"shutting down, so there is no '{_VP_EXIT_MARKER}' line. " + search
+        )
+
+    if status in _VP_TERMINAL_STATUSES:
+        return (
+            f"The row is in the terminal status {status} but records no "
+            "endTrigger, endReason or endedAt. " + search
+        )
+
+    return (
+        "No end is recorded on this row. If the participant is no longer "
+        "running, it stopped without its own exit path or the end operation "
+        "writing here, for example because its host went away, so look for its "
+        "last log lines rather than only for an exit line. " + search
+    )
+
+
+def _empty_result_guidance(
+    resolved_query: str, terms: Sequence[str], hours: int, max_hours: int
+) -> List[str]:
+    """What to do next after a search that matched nothing.
+
+    Written for the ways a run actually runs out of tool calls: a window that
+    did not reach back far enough, and the same kind of search retried one
+    term at a time, each retry spending a call. So the advice names the window
+    that was searched, says to broaden within one call, and, for the one
+    marker whose absence is most often misread, says what is written instead.
+    """
+    if hours < max_hours:
+        window = (
+            f"This search covered only the last {hours} hour(s); if the event "
+            "could be older (compare a record's createdAt with now), pass "
+            f"lookback_hours to reach it, up to {max_hours}."
+        )
+    else:
+        window = f"This search covered the last {hours} hour(s), the most allowed."
+    guidance = [
+        "An empty rowCount means no line in this window matched. That is not a "
+        f"cause; it narrows where the cause can be. {window} Otherwise query a "
+        "different component, or add the alternative terms you would try next "
+        "to the same call (search_terms are ORed, so each extra term can only "
+        "add lines), before concluding anything from it. Each search spends one "
+        "of a small, fixed number of tool calls, so do not retry one term at a "
+        "time."
+    ]
+    if _VP_EXIT_MARKER in resolved_query and not any(
+        marker in resolved_query for marker in _VP_EXTERNAL_STOP_MARKERS
+    ):
+        guidance.append(
+            f"No '{_VP_EXIT_MARKER}' line is not the same as no ending: that "
+            "line is written only when the participant leaves through its own "
+            "exit path. One stopped from outside, by the end operation or by "
+            "its host shutting down, writes "
+            + ", ".join(f"'{m}'" for m in _VP_EXTERNAL_STOP_MARKERS)
+            + " instead. Check get_vp_record for endReason and endedAt, and "
+            "search for those lines together with the VP id in one call."
+        )
+    elif len(terms) == 1:
+        guidance.append(
+            "This search had a single term. If you are looking for one "
+            "participant or meeting, include its id as another term in the "
+            "same call."
+        )
+    return guidance
 
 
 def _as_term_list(search_terms: Any) -> List[str]:
@@ -490,10 +710,12 @@ class TroubleshootingTools:
         hours = self._limits.resolve_lookback_hours(lookback_hours)
         row_limit = self._resolve_limit(limit)
 
+        terms: List[str] = []
         if isinstance(query_string, str) and query_string.strip():
             resolved_query = query_string.strip()
         else:
-            resolved_query = build_search_query(_as_term_list(search_terms), row_limit)
+            terms = _as_term_list(search_terms)
+            resolved_query = build_search_query(terms, row_limit)
 
         end_time = int(time.time())
         start_time = end_time - hours * 3600
@@ -508,11 +730,10 @@ class TroubleshootingTools:
 
         guidance: List[str] = []
         if not rows:
-            guidance.append(
-                "An empty rowCount means no line in this window matched. That "
-                "is not a cause; it narrows where the cause can be. Widen "
-                "lookback_hours, drop a term, or query a different component "
-                "before concluding anything from it."
+            guidance.extend(
+                _empty_result_guidance(
+                    resolved_query, terms, hours, self._limits.max_lookback_hours
+                )
             )
         if unknown:
             guidance.append(
@@ -727,11 +948,29 @@ class TroubleshootingTools:
         ),
         "status": (
             "The current status only. There is no status history on the row, so "
-            "the order in which a join progressed has to come from the logs."
+            "the order in which a join progressed has to come from the logs. It "
+            "is also the last write, not necessarily the last event: when "
+            "endedAt is set the participant was ended even if status is not "
+            "terminal."
         ),
         "endReason": (
-            "Why the virtual participant was ended from outside (by a user or a "
-            "reaper), not why it exited on its own."
+            "Why the virtual participant was ended from outside (by a user, a "
+            "test or a reaper, through the end operation), not why it exited on "
+            "its own. When present it is the recorded answer to why the "
+            "participant ended, written by the operation that ended it."
+        ),
+        "endedAt": (
+            "When the end operation ran. Written together with endReason, and "
+            "only by that operation, so a value here means the participant was "
+            "ended from outside at this time whatever status says."
+        ),
+        "ecsTerminated": (
+            "Whether the end operation stopped the participant's host. Named "
+            "for ECS but set for a MicroVM host too."
+        ),
+        "kinesisEndSent": (
+            "Whether the end operation sent the meeting's END event, which is "
+            "what closes the transcript."
         ),
     }
 
@@ -766,6 +1005,15 @@ class TroubleshootingTools:
             "endReason",
             "userAcknowledgedFailure",
             "statusBeforeManualAction",
+            # Written by the end operation alongside endReason. They are how a
+            # row whose status was overwritten after the end still shows that
+            # the participant was ended, and whether its host and its
+            # transcript were closed down.
+            "endedAt",
+            "ecsTerminated",
+            "kinesisEndSent",
+            "albCleanedUp",
+            "scheduleCancelled",
             # Timing.
             "meetingTime",
             "scheduledFor",
@@ -842,10 +1090,17 @@ class TroubleshootingTools:
         }
         withheld = sorted(set(item) - self.DIAGNOSTIC_FIELDS)
         notes = {k: v for k, v in self.VP_FIELD_NOTES.items() if k in record}
+        # endAssessment sits ahead of the record: it is what the model should
+        # read first, and the record is the evidence it summarises.
         return self._render(
             {
                 "vpId": identifier,
                 "found": True,
+                "endAssessment": assess_vp_end(
+                    identifier,
+                    record,
+                    max_lookback_hours=self._limits.max_lookback_hours,
+                ),
                 "record": record,
                 "withheldFields": withheld,
                 "fieldNotes": notes,

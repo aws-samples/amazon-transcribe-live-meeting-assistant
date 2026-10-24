@@ -108,7 +108,7 @@ Four tools, each read-only:
 | `get_stack_parameters` | `cloudformation:DescribeStacks` on your LMA stack | Which components this deployment actually runs, and therefore where evidence can exist at all. |
 | `discover_log_groups` | `logs:DescribeLogGroups`, plus `cloudformation:ListStackResources` to resolve this deployment's own nested stacks | The log group names, their owning component, and how many bytes each holds. |
 | `search_logs` | CloudWatch Logs Insights (`logs:StartQuery`) | Every "why", timeline, count and cross-component correlation. |
-| `get_vp_record` | `dynamodb:GetItem` on the VirtualParticipant table | One Virtual Participant's current status and its structured exit code. |
+| `get_vp_record` | `dynamodb:GetItem` on the VirtualParticipant table | One Virtual Participant's current status, its structured exit code, and — when it was ended from outside — when and why (`endedAt`, `endReason`). |
 
 `get_stack_parameters` returns parameter values, because deployment
 configuration is what the agent is reading them for — but any parameter whose
@@ -124,6 +124,30 @@ knows the record was filtered and does not treat the absence as a finding, but
 their values do not reach the model or the thinking-step stream. A field added
 to the row in a future release is withheld until it is added to that list
 deliberately.
+
+The record also comes with an `endAssessment`: a reading of the row the way the
+code that writes it does. A Virtual Participant ends in one of three ways, and
+each leaves a different shape. Ended from outside (by a user, a test or a
+reaper, through the end operation), it has `endedAt` and `endReason` on its row,
+and its log has `Received SIGTERM` (and, on a MicroVM,
+`[terminate] signalling app to exit`) rather than a `VP exit:` line; the
+assessment presents that recorded reason as the answer to why it ended. Leaving
+through its own exit path, it is `COMPLETED` or `FAILED` with an `endTrigger`,
+and its log has a `VP exit:` line. Stopped by a signal that did not come through
+the end operation, it is `COMPLETED` with neither. A row whose status is not
+terminal but which has `endedAt` set describes a participant that has ended —
+a progress update it wrote while shutting down landed after the end — and the
+assessment says the status is stale. Each assessment ends with the one log
+search that corroborates it: the participant's id together with the markers for
+every way it could have ended, in one call, with a `lookback_hours` reaching
+back to the row's `createdAt`, because the default search window is only a few
+hours.
+
+A search that returns nothing says which window it covered, that its terms are
+ORed so alternatives belong in the same call, and — when it was looking for
+`VP exit:` — which lines a participant stopped from outside writes instead.
+These hints are in the tool results rather than only in the prompt, so a
+deployment that has replaced the prompt still gets them.
 
 Two design points worth knowing, because they are what make the answers
 trustworthy:
