@@ -421,8 +421,8 @@ def test_the_legacy_microvm_group_is_refused_where_it_does_not_exist() -> None:
 
 
 def test_the_legacy_microvm_group_is_searchable_where_it_exists() -> None:
-    """On an upgraded stack, a participant that ran on the pre-upgrade image
-    logged only to the legacy group, so discovery has to make it queryable."""
+    """On an upgraded stack, a participant whose MicroVM was launched before
+    the upgrade logged only to the legacy group, so discovery has to make it queryable."""
     client = FakeInsightsClient(groups=REAL_GROUPS + [(LEGACY_VP_GROUP, 9000)])
 
     make_tools(client).search_logs(LEGACY_VP_GROUP, search_terms="VP exit:")

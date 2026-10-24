@@ -17,14 +17,17 @@ operator typed. Four independent reasons, all of them live in the current tree:
   groups for the same component can sit under different prefixes. The virtual
   participant manager has one of each.
 * The MicroVM groups live outside the stack-name namespace altogether, under
-  ``/aws/lambda-microvms/``, and come in two generations. Images built from
-  v0.3.11 log to ``<stack>-vp-logs`` and ``<stack>-asr-logs``, which the stack
-  declares; images built before it logged to ``<stack>-vp`` and
-  ``<stack>-asr``, which the service created and the stack does not own. An
-  upgraded stack keeps both, and a MicroVM launched on the pre-upgrade image —
-  including one launched after the upgrade began but before the image rebuild
-  finished — writes to the older one. Either name searched alone reports "no
-  logs" for some participants, and would be believed. See
+  ``/aws/lambda-microvms/``, and come in two generations. The stack declares
+  ``<stack>-vp-logs`` and ``<stack>-asr-logs``; the image build logs there,
+  and so does every MicroVM whose RunMicrovm call named that group, which the
+  launchers do from this release on. Before that, a running MicroVM logged to
+  ``<stack>-vp`` or ``<stack>-asr``, which the service created after the
+  image's name and the stack does not own. Where a MicroVM's output went is
+  fixed when it is launched, not when its image was built: an upgraded stack
+  keeps both groups, and a MicroVM launched before the upgrade finished —
+  including one on a release whose image already logged its build to the
+  current group — wrote to the older one. Either name searched alone reports
+  "no logs" for some participants, and would be believed. See
   ``MICROVM_LOG_GENERATIONS``.
 * AppSync's group is created by the service, named after the API id rather
   than the stack.
@@ -199,7 +202,8 @@ LEGACY_GENERATION = "legacy"
 #: (suffix, generation) for each MicroVM log group name a deployment can hold,
 #: appended to ``/aws/lambda-microvms/<stack>``. Discovery looks each one up and
 #: reports only those CloudWatch returns: a deployment created at v0.3.11 or
-#: later never had the legacy groups, and one upgraded from earlier has both.
+#: later normally never had the legacy groups, and one upgraded from earlier
+#: has both.
 MICROVM_LOG_GENERATIONS: Sequence[tuple[str, str]] = (
     ("-vp-logs", CURRENT_GENERATION),
     ("-asr-logs", CURRENT_GENERATION),
@@ -207,25 +211,31 @@ MICROVM_LOG_GENERATIONS: Sequence[tuple[str, str]] = (
     ("-asr", LEGACY_GENERATION),
 )
 
-# The stream-name hint is given for the legacy group only, because only there
-# does it hold. The Lambda MicroVM service names a legacy group's streams
+# Stream names, as read from a deployed stack's groups; the service documents
+# neither form. A running MicroVM's stream is named
 # "<YYYY/MM/DD>[<image version>]<microvmId>" — e.g.
 # "2026/10/24[55.0]microvm-6ac75d14-…", the same "microvm-…" id the launch
-# state machine logs — while a current group's streams are named
-# "<image version>/<uuid>" and carry no MicroVM id. Both forms were read from
-# a deployed stack's groups; the service does not document either.
+# state machine logs. An image build's streams are named
+# "<image version>/<uuid>" and carry no MicroVM id. The runtime form was
+# observed in the service-created (legacy) group; that the service names
+# runtime streams the same way in the declared group is expected but was not
+# observed when this was written, which is why the notes below tell the agent
+# to fall back to message text rather than trust the stream name.
 _GENERATION_NOTES: Dict[str, str] = {
     CURRENT_GENERATION: (
-        "Current MicroVM log group: written by MicroVM images built from "
-        "v0.3.11 on. A MicroVM that ran on an image built before this stack "
-        "was upgraded logged to the legacy group instead, if one is listed."
+        "Current MicroVM log group, declared by the stack. Holds the image "
+        "build output and the output of every MicroVM launched since the "
+        "deployment was updated to this release. A MicroVM launched before "
+        "that update finished logged to the legacy group instead, if one is "
+        "listed. A running MicroVM's stream name should contain the MicroVM "
+        "id the launch state machine logs as microvmId; build streams do not."
     ),
     LEGACY_GENERATION: (
-        "Legacy MicroVM log group: written by MicroVM images built before "
-        "v0.3.11, and kept with its contents when the stack was upgraded. A "
-        "participant that ran on the pre-upgrade image — including one "
-        "launched after the upgrade began but before the image rebuild "
-        "finished — logged here and not to the current group. Its stream "
+        "Legacy MicroVM log group, created by the service rather than the "
+        "stack, and kept with its contents when the stack was upgraded. A "
+        "participant whose MicroVM was launched before the deployment was "
+        "updated to this release logged here and not to the current group — "
+        "including one launched while the update was in progress. Its stream "
         "names contain the MicroVM id the launch state machine logs as "
         "microvmId."
     ),
@@ -399,9 +409,10 @@ class DiscoveryResult:
                 "This deployment was upgraded from a release that logged "
                 "MicroVM output under older names, so it has legacy MicroVM "
                 f"log groups ({', '.join(sorted(legacy))}) as well as, or "
-                "instead of, the current ones. A participant that ran on an "
-                "image built before the upgrade logged ONLY to the legacy "
-                "group. If a current MicroVM group has no entries for the "
+                "instead of, the current ones. A participant whose MicroVM "
+                "was launched before the upgrade finished logged ONLY to the "
+                "legacy group, whichever image it ran on. If a current "
+                "MicroVM group has no entries for the "
                 "participant or meeting you are investigating, search the "
                 "legacy group before concluding there is no evidence. The "
                 "launch state machine's microvmId appears in the legacy "

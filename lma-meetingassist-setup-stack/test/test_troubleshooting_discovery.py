@@ -344,8 +344,8 @@ def test_a_log_group_is_attributed_to_the_right_component(name: str, expected: s
 def test_both_generations_of_microvm_group_land_on_the_same_component(
     suffix: str, expected: str
 ) -> None:
-    """Images built before v0.3.11 log to -vp/-asr, later ones to -vp-logs and
-    -asr-logs. Filtering discovery by component has to return both, or the
+    """MicroVMs launched before v0.3.11 log to -vp/-asr, later ones to -vp-logs
+    and -asr-logs. Filtering discovery by component has to return both, or the
     agent asking for "the virtual participant's logs" is handed only one."""
     assert discovery.classify_log_group(f"/aws/lambda-microvms/{STACK}{suffix}") == expected
 
@@ -426,8 +426,9 @@ def test_a_group_that_has_only_ever_had_one_name_carries_no_generation() -> None
 # ── MicroVM log group generations ───────────────────────────────────────────
 #
 # A stack upgraded from before v0.3.11 keeps the -vp/-asr groups its earlier
-# images logged to, alongside the -vp-logs/-asr-logs groups it now declares. A
-# participant that ran on the pre-upgrade image logged only to the former.
+# MicroVMs logged to, alongside the -vp-logs/-asr-logs groups it now declares. A
+# participant whose MicroVM was launched before the upgrade finished logged only
+# to the former, whichever image it ran on.
 
 CURRENT_VP = f"/aws/lambda-microvms/{STACK}-vp-logs"
 CURRENT_ASR = f"/aws/lambda-microvms/{STACK}-asr-logs"
@@ -464,7 +465,7 @@ def test_an_upgraded_deployment_reports_both_generations_labelled() -> None:
     assert found[LEGACY_VP].component == discovery.VIRTUAL_PARTICIPANT
     assert found[LEGACY_ASR].component == discovery.ASR_MICROVM
     legacy_note = found[LEGACY_VP].to_dict()["note"]
-    assert "before v0.3.11" in legacy_note
+    assert "launched before" in legacy_note
     assert "microvmId" in legacy_note
     # The caveat names the legacy groups so the agent cannot miss them, and
     # tells it how to find a participant's stream in one.
