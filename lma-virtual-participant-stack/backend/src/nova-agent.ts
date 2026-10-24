@@ -3186,6 +3186,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       // Otherwise the wake-phrase contract applies — no session is held open
       // between activations, so the rebuild is a teardown and the next wake
       // phrase builds one from the new configuration.
+      //
+      // This also closes a session `preConnect` opened on a wake phrase seen in
+      // a partial transcript, in the second or two before the final arrives.
+      // That is the right outcome rather than a loss: that session was built for
+      // the mode the agent has just left, so it could not be used as it stands,
+      // and `activate()` creates a replacement when the final transcript lands.
+      // The only cost is the pre-warm, for a wake phrase in flight at the moment
+      // someone changed the mode.
       await this.closeSession();
       return 'rebuilt';
     }

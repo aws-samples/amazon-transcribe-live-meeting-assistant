@@ -185,6 +185,8 @@ The meeting mode and the activation mode are both read when the Virtual Particip
 
 A runtime change lasts for the rest of that meeting and is not written back to configuration: the configuration page keeps holding the deployment's default, and the next meeting starts in it. Anyone in the meeting may issue these commands, like the existing `LMA leave`.
 
+**For operators:** this makes **VoiceAssistantActivationMode** a default rather than a fixed setting. `LMA always` — and `LMA translate` and `LMA group`, which both need an always-listening assistant — will put a meeting on always-listening whatever the stack was deployed with, on the word of any participant including a guest. Always-listening streams meeting audio to the model continuously rather than only after a wake phrase, so it changes both what the meeting costs and when audio leaves the Virtual Participant. There is no per-deployment switch to disable these commands; open an issue if your deployment needs one.
+
 ### Chat Commands
 
 Every command must address LMA by name, and the whole message must be the name plus the command — nothing else. That is what keeps ordinary meeting chat from switching modes: "can LMA translate the slides?" and "the LMA group meets on Tuesdays" are left alone, and a bare "translate" is read as one participant talking to another. Matching is case-insensitive and ignores punctuation, so `@LMA, Translate!` works.
