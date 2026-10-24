@@ -7209,17 +7209,12 @@ Resources:
             #end
         #end
 
-        {
-          "version": "2018-05-29",
-          "operation": "UpdateItem",
-          "key": {
-            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
-          },
-          "update": {
-            "expression": "$expression",
-            "expressionNames": $utils.toJson($expNames),
-            "expressionValues": $utils.toJson($expValues)
-          }
+        ## Conditions on the write. Each one is added to $conditions with the **
+        ## names and values it uses, and the request carries them ANDed. **
+        #set( $conditions = [] )
+        #set( $conditionNames = {} )
+        #set( $conditionValues = {} )
+
         ## A caller clearing a prompt decided what to do from a read of the row, **
         ## so both of its forms are conditional on the row still being what that **
         ## read saw. Whichever way the race goes, the writer that acted on **
@@ -7238,15 +7233,57 @@ Resources:
         ## its description removed from under it, leaving a row that reports a **
         ## prompt it cannot describe. **
         #if( $util.defaultIfNull($ctx.args.input.clearManualAction, false) == true )
+          $util.qr( $conditionNames.put("#conditionStatus", "status") )
+          $util.qr( $conditionValues.put(":promptingStatus", $util.dynamodb.toDynamoDB("MANUAL_ACTION_REQUIRED")) )
           #if( !$util.isNullOrBlank($ctx.args.input.status) )
-            #set( $conditionExpression = "#conditionStatus = :promptingStatus" )
+            $util.qr( $conditions.add("#conditionStatus = :promptingStatus") )
           #else
-            #set( $conditionExpression = "attribute_not_exists(#conditionStatus) OR #conditionStatus <> :promptingStatus" )
+            $util.qr( $conditions.add("(attribute_not_exists(#conditionStatus) OR #conditionStatus <> :promptingStatus)") )
           #end
+        #end
+
+        ## A progress (non-terminal) status lands only on a row whose end has **
+        ## not been recorded. endReason is written by the end request alone -- **
+        ## the user's Leave/End, and deletion, which ends first -- and that **
+        ## request also stops the task, so a progress status arriving after it **
+        ## is the participant reporting a step it will not complete: typically **
+        ## a write that was already in flight when the stop arrived. Terminal **
+        ## statuses are not conditioned, so the participant can still record how **
+        ## it ended. A FAILED written by the launcher state machine or the task **
+        ## reaper carries no endReason, so a participant that is in fact still **
+        ## running can carry on reporting progress after one. **
+        #set( $terminalStatuses = ["COMPLETED", "FAILED", "ENDED", "CANCELLED"] )
+        #if( !$util.isNullOrBlank($ctx.args.input.status) && !$terminalStatuses.contains($ctx.args.input.status) )
+          $util.qr( $conditionNames.put("#conditionEndReason", "endReason") )
+          $util.qr( $conditions.add("attribute_not_exists(#conditionEndReason)") )
+        #end
+
+        #set( $conditionExpression = "" )
+        #foreach( $condition in $conditions )
+            #set( $conditionExpression = "${conditionExpression}${condition}" )
+            #if ( $foreach.hasNext )
+                #set( $conditionExpression = "${conditionExpression} AND " )
+            #end
+        #end
+
+        {
+          "version": "2018-05-29",
+          "operation": "UpdateItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "update": {
+            "expression": "$expression",
+            "expressionNames": $utils.toJson($expNames),
+            "expressionValues": $utils.toJson($expValues)
+          }
+        #if( !$conditions.isEmpty() )
           ,"condition": {
             "expression": "$conditionExpression",
-            "expressionNames": { "#conditionStatus": "status" },
-            "expressionValues": { ":promptingStatus": $util.dynamodb.toDynamoDBJson("MANUAL_ACTION_REQUIRED") }
+            "expressionNames": $utils.toJson($conditionNames)
+            #if( !$conditionValues.isEmpty() )
+            ,"expressionValues": $utils.toJson($conditionValues)
+            #end
           }
         #end
         }

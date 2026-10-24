@@ -206,6 +206,14 @@ const SUBSCRIBED_FIELDS = `
             errorMessage
             updatedAt`;
 
+/**
+ * Whether this process has begun to shut down. Module state rather than a
+ * field, because it describes the process: the platform handlers create a
+ * manager of their own for each write, and every one of them has to see it.
+ * Set through `VirtualParticipantStatusManager.beginShutdown`.
+ */
+let processShuttingDown = false;
+
 export class VirtualParticipantStatusManager {
   private participantId: string;
   private graphqlEndpoint: string;
@@ -288,6 +296,34 @@ export class VirtualParticipantStatusManager {
   }
 
   /**
+   * Record that this process has begun to shut down, so it stops reporting
+   * progress.
+   *
+   * Called from the signal handler and the emergency cleanup. From then on the
+   * only status any manager in this process writes is a terminal one: whatever
+   * the setup or join code was in the middle of carries on running until the
+   * process exits, and each progress status it would otherwise write describes
+   * a participant that is no longer going to get there. A terminal status still goes through,
+   * because recording how the participant ended is what the shutdown path is
+   * for.
+   *
+   * This covers writes that start after the signal. One that was already on
+   * its way to AppSync is the resolver's to decline: a progress status does not
+   * land on a row whose end has been recorded (see the updateVirtualParticipant
+   * resolver).
+   */
+  beginShutdown(): void {
+    processShuttingDown = true;
+  }
+
+  /** Whether a progress write should be skipped because shutdown has begun. */
+  private skipProgressWrite(what: string): boolean {
+    if (!processShuttingDown) return false;
+    console.log(`VP ${this.participantId} is shutting down — not writing ${what}`);
+    return true;
+  }
+
+  /**
    * Write a lifecycle status, and with it the detail line the UI shows.
    *
    * `endTrigger` is the structured counterpart of `errorMessage`: the exact
@@ -300,6 +336,9 @@ export class VirtualParticipantStatusManager {
     errorMessage?: string,
     endTrigger?: string,
   ): Promise<boolean> {
+    if (!isTerminalVpStatus(status) && this.skipProgressWrite(`status ${status}`)) {
+      return false;
+    }
     try {
       // First, get the current VP to preserve existing CallId and VNC fields
       const getQuery = `
@@ -339,6 +378,12 @@ export class VirtualParticipantStatusManager {
         console.warn(
           `VP ${this.participantId} is ${current.status} and is being set to ${status}`,
         );
+      }
+
+      // Checked again after the read, which is where a write started before a
+      // shutdown spends most of its time.
+      if (!isTerminalVpStatus(status) && this.skipProgressWrite(`status ${status}`)) {
+        return false;
       }
 
       // Update with new status while preserving CallId and VNC fields.
@@ -403,8 +448,22 @@ export class VirtualParticipantStatusManager {
         console.error(`VP ${this.participantId} failed: ${errorMessage}`);
       }
 
-      const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      
+      let result;
+      try {
+        result = await this.signAndSendGraphQLRequest(mutation, variables);
+      } catch (error) {
+        if (!isTerminalVpStatus(status) && isConditionalCheckFailure(error)) {
+          // The resolver declines a progress status on a row whose end has
+          // been recorded: the user asked for this participant to end, and
+          // that outcome stands over any progress it reports afterwards.
+          console.log(
+            `VP ${this.participantId} has been ended — not setting its status to ${status}`,
+          );
+          return false;
+        }
+        throw error;
+      }
+
       if (result) {
         console.log(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
         return true;
@@ -675,6 +734,7 @@ export class VirtualParticipantStatusManager {
    * the user is still needed to clear it.
    */
   async setJoiningSubstep(message: string): Promise<void> {
+    if (this.skipProgressWrite('a join sub-step')) return;
     try {
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
@@ -731,6 +791,7 @@ export class VirtualParticipantStatusManager {
     message: string,
     timeoutSeconds: number
   ): Promise<boolean> {
+    if (this.skipProgressWrite(`a ${actionType} prompt`)) return false;
     try {
       // First, get the current VP to preserve existing CallId and VNC fields,
       // and to record the status this prompt is interrupting.

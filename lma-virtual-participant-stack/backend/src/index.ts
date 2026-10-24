@@ -902,6 +902,9 @@ const main = async (): Promise<void> => {
 const signalHandler = async (signal: string) => {
     console.log(`Received ${signal}, initiating graceful shutdown...`);
     shutdownRequested = true;
+    // From here on the setup or join code still running reports no further
+    // progress; only the terminal status below is written.
+    statusManager?.beginShutdown();
     
     // Deregister from ALB target group
     if (statusManager) {
@@ -989,6 +992,7 @@ process.on('SIGTERM', () => signalHandler('SIGTERM'));
 const emergencyCleanup = async (errorMessage: string): Promise<void> => {
     // Set flag to prevent recursive cleanup if another exception fires during this
     cleanupInProgress = true;
+    statusManager?.beginShutdown();
     console.log('Performing emergency cleanup before exit...');
 
     // Send END event to Kinesis so the meeting is marked as ended
