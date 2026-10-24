@@ -144,6 +144,13 @@ Several things that look alarming in LMA's logs are the system working:
   mean the VP failed. Read it together with status.
 - A VP row that has passed its TTL and expired is not evidence that the VP
   never ran. The launch state machine's log group outlives the row.
+- A voice assistant that went quiet after someone asked it to stop talking is
+  working as designed: it stays silent until it is addressed by its wake
+  phrase again. Its spoken "Okay" on the way out is a courtesy, not a
+  guarantee — when it is missing, the assistant was silenced by the transcript
+  route before the model's own acknowledgement arrived, which is the intended
+  fallback. A missing "Okay" alone is not a fault; an assistant that stays
+  silent after its wake phrase is.
 
 INVESTIGATION STRATEGY:
 1. TRIAGE: establish which component the symptom belongs to, and confirm from
