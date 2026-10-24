@@ -338,15 +338,34 @@ test('a chat message delivered twice in quick succession is answered once', () =
     // right after the first — "switched to translator mode." followed by
     // "already in the requested configuration.".
     const fresh = createDuplicateToggleFilter(5000);
-    assert.equal(fresh('LMA translate', 1_000), true);
-    assert.equal(fresh('LMA translate', 1_040), false, 'the duplicate event must be dropped');
-    assert.equal(fresh('@LMA, Translate!', 1_080), false, 'the same command differently typed is still the same');
+    assert.equal(fresh('LMA translate', 'Alice', 1_000), true);
+    assert.equal(fresh('LMA translate', 'Alice', 1_040), false, 'the duplicate event must be dropped');
+    assert.equal(
+        fresh('@LMA, Translate!', 'Alice', 1_080),
+        false,
+        'the same command differently typed is still the same',
+    );
 
     // A different command in the window is not a duplicate of the first.
-    assert.equal(fresh('LMA wake', 1_120), true);
+    assert.equal(fresh('LMA wake', 'Alice', 1_120), true);
 
     // And the same command typed again later is a real request.
-    assert.equal(fresh('LMA wake', 20_000), true);
+    assert.equal(fresh('LMA wake', 'Alice', 20_000), true);
+});
+
+test('two participants issuing the same command are two requests, not a duplicate', () => {
+    // The filter exists for one event delivered twice, not for two people. Both
+    // are owed an answer, even seconds apart — the second will be told the
+    // assistant is already in that mode, which is the honest reply.
+    const fresh = createDuplicateToggleFilter(5000);
+    assert.equal(fresh('LMA translate', 'Alice', 1_000), true);
+    assert.equal(fresh('LMA translate', 'Bob', 1_200), true, "Bob's command is his own");
+    assert.equal(fresh('LMA translate', 'Bob', 1_240), false, "but Bob's duplicate event is still dropped");
+
+    // A platform that supplies no sender still gets duplicate filtering.
+    const anonymous = createDuplicateToggleFilter(5000);
+    assert.equal(anonymous('LMA translate', null, 1_000), true);
+    assert.equal(anonymous('LMA translate', null, 1_040), false);
 });
 
 test('every provider is asked, so one attempt is always one log line', async () => {

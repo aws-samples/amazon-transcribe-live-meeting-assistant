@@ -199,7 +199,7 @@ Every command must address LMA by name, and the whole message must be the name p
 
 `LMA translate` and `LMA group` both switch activation to always-listening as well, because neither mode works without it. A translator speaks on every completed utterance, so with a wake phrase it would receive no audio until addressed and translate nothing in between. Group mode starts muted and the state machine that unmutes it runs on transcripts that only arrive while a session is open, so with a wake phrase it would never become audible at all.
 
-The same rule applies in the other direction: `LMA wake` is **declined** while the assistant is in translator or group mode, and the reply says to switch to assistant mode first with `LMA assist`. Switching back and then asking for the wake phrase takes two commands, which is deliberate — the alternative is one command silently changing the meeting mode nobody asked about.
+The same rule applies in the other direction: `LMA wake` is **declined** while the assistant is in translator or group mode, and the reply says to switch to assistant mode first with `LMA assist`. (On a deployment configured as group or translator mode with `wake_phrase` activation — the combination the configuration page warns about — `LMA wake` is instead answered as a no-op, since that is already what the meeting is doing. `LMA assist` is the way out of it.) Switching back and then asking for the wake phrase takes two commands, which is deliberate — the alternative is one command silently changing the meeting mode nobody asked about.
 
 **Activation mode:**
 

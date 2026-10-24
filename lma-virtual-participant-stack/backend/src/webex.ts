@@ -887,7 +887,7 @@ export default class Webex {
                     matchedMessage: message,
                 });
             } else if (assistantToggle) {
-                if (!this.freshToggle(message)) return;
+                if (!this.freshToggle(message, sender)) return;
                 await this.sendMessages(frame, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
             } else if (
                 details.start &&

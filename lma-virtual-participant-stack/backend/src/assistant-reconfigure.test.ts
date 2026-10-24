@@ -181,6 +181,9 @@ test('asking only for the wake phrase is refused in the modes that need to stay 
         assert.equal(outcome.result, 'declined', `${mode} must not be left on the wake phrase`);
         assert.equal(outcome.activationModeAfter, 'always_active');
         assert.equal((agent as any).activationMode, 'always_active');
+        // Worded for a request that is asking to leave a mode the assistant is
+        // already in, which is the other half of the rule.
+        assert.match(outcome.detail || '', new RegExp(`the assistant is in ${mode === 'group' ? 'group' : 'translator'} mode`));
         assert.match(outcome.detail || '', /has to stay always listening/);
         assert.match(outcome.detail || '', /LMA assist/, 'the reply must say how to get there');
         assert.deepEqual(calls, [], 'a refused request must not touch the session');
@@ -197,6 +200,9 @@ test('switching into a mode that needs listening without asking for it is refuse
 
     assert.equal(outcome.result, 'declined');
     assert.equal((agent as any).meetingMode, 'normal');
+    // Worded for a request that is asking to enter the mode. Saying "the
+    // assistant is in translator mode" here would name a mode it never reached.
+    assert.equal(outcome.detail, 'translator mode needs the assistant to be always listening — ask for that too');
 
     // Asking for both together is what the chat command does, and it works.
     const both = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));

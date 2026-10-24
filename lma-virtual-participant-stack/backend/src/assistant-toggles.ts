@@ -281,17 +281,24 @@ const DUPLICATE_WINDOW_MS = 5000;
  * the requested configuration.". This drops the repeat instead.
  *
  * Deliberately a short window rather than a permanent latch: typing the same
- * command again a minute later is a real request, not a duplicate event.
+ * command again a minute later is a real request, not a duplicate event. And
+ * keyed on the sender as well as the text, because two participants typing the
+ * same command seconds apart are two requests — each of which is owed an answer
+ * — not one event delivered twice.
  */
 export function createDuplicateToggleFilter(windowMs: number = DUPLICATE_WINDOW_MS) {
-    let lastMessage: string | null = null;
+    let lastKey: string | null = null;
     let lastAt = 0;
-    return function shouldHandle(message: string, now: number = Date.now()): boolean {
-        const key = normalize(message);
-        if (key === lastMessage && now - lastAt < windowMs) {
+    return function shouldHandle(
+        message: string,
+        sender?: string | null,
+        now: number = Date.now(),
+    ): boolean {
+        const key = `${normalize(sender || '')}|${normalize(message)}`;
+        if (key === lastKey && now - lastAt < windowMs) {
             return false;
         }
-        lastMessage = key;
+        lastKey = key;
         lastAt = now;
         return true;
     };

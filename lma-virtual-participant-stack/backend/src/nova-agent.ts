@@ -2983,10 +2983,18 @@ export class NovaAgent implements VoiceAssistantProvider {
     const resultingMeetingMode = request.meetingMode ?? meetingModeBefore;
     const resultingActivationMode = request.activationMode ?? activationModeBefore;
     if (requiresAlwaysListening(resultingMeetingMode) && resultingActivationMode !== 'always_active') {
+      // Worded from which half was asked for. A request that names the meeting
+      // mode is asking to enter it, and has not been told what it needs; a
+      // request that names only the activation mode is asking to leave a mode
+      // the assistant is already in. Saying "the assistant is in translator
+      // mode" to the first would name a mode it has not reached.
+      const named = describeMeetingMode(resultingMeetingMode);
       return notApplied(
         'declined',
-        `the assistant is in ${describeMeetingMode(resultingMeetingMode)}, which has to stay always listening`
-          + ' — switch to assistant mode first with "LMA assist"',
+        request.meetingMode !== undefined
+          ? `${named} needs the assistant to be always listening — ask for that too`
+          : `the assistant is in ${named}, which has to stay always listening`
+              + ' — switch to assistant mode first with "LMA assist"',
       );
     }
 
