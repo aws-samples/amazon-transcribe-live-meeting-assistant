@@ -196,10 +196,19 @@ original question re-pays for every tool call it already made.
 
 When a limit is reached, the agent is first asked to write its answer from the
 evidence it has — the cooperative path, and the one that produces a real
-diagnosis. If it calls another tool anyway, the run ends there rather than
-paying for a further model turn, and you get a diagnosis in the usual three
-sections whose Root Cause is "Not determined" and which names the limit that
-was reached.
+diagnosis. If it calls another tool anyway, the run is ended rather than paying
+for a further model turn, and you get a diagnosis in the usual three sections
+whose Root Cause is "Not determined" and which names the limit that was
+reached.
+
+> **Known limitation.** That forced ending works by raising out of the agent's
+> event loop, and whether the Strands Agents SDK passes the signal through its
+> own asynchronous and threaded code unchanged has not been verified against a
+> deployed stack — only against a stand-in for an SDK's tool executor. If it
+> did not get through, every subsequent tool call would refuse (the deadline is
+> checked inside each tool), and the invocation would finally be ended by the
+> Lambda `Timeout` rather than by the agent. Confirming this is the first item
+> on the entry-point change that follows.
 
 The response reports this in a `truncated` field, inside the JSON-encoded
 `body`. It is `true` whenever a limit was reached at all, on the cooperative

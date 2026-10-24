@@ -495,7 +495,17 @@ class ThinkingStepHookProvider:
         status = cls._field(result, "status")
         if isinstance(status, str):
             return status.lower() != "error"
-        return not bool(cls._field(result, "is_error"))
+        if cls._field(result, "is_error"):
+            return False
+        # A tool that refused or faulted returns normally, so the SDK reports
+        # it as a success. The payload is the only thing that knows otherwise.
+        try:
+            payload = json.loads(cls._result_text(result) or "{}")
+        except (TypeError, ValueError):
+            return True
+        if not isinstance(payload, dict):
+            return True
+        return not ("stopped" in payload or "error" in payload)
 
     def on_before_tool_call(self, event: Any) -> None:
         try:
@@ -539,9 +549,17 @@ class ThinkingStepHookProvider:
             return "completed"
         if not isinstance(payload, dict):
             return "completed"
+        if "stopped" in payload:
+            return f"refused: {str(payload['stopped'])[:200]}"
         if "error" in payload:
-            # The tool's own message, which is written for the agent to read
-            # and names a log group or an argument, never log content.
+            if payload.get("fault"):
+                # An unexpected exception. Its type is published and its text
+                # is not: botocore messages can carry account-specific ARNs,
+                # and this stream reaches the UI without the model in the loop.
+                # The full text still goes to the model and to the log.
+                return f"failed: {payload['fault']}"
+            # A ToolError's own message, written for the agent to read. It
+            # names a log group or an argument, never log content.
             return f"could not gather evidence: {str(payload['error'])[:200]}"
         parts: List[str] = []
         for label, key in (
@@ -635,7 +653,15 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
                 )
                 raise RunBudgetExhausted(reason)
             logger.info("refusing %s: %s", name, reason)
-            return _STOP_INSTRUCTION.format(reason=reason)
+            # JSON rather than bare text so the thinking-step stream can tell
+            # a refusal from a successful call: a plain string summarises as
+            # "completed" and reads as a success in the UI.
+            return json.dumps(
+                {
+                    "stopped": reason,
+                    "instruction": _STOP_INSTRUCTION.format(reason=reason),
+                }
+            )
         try:
             return call(**kwargs)
         except ToolError as exc:
@@ -646,6 +672,11 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
             return json.dumps(
                 {
                     "error": f"{type(exc).__name__}: {exc}",
+                    # The exception type alone, for the thinking-step stream.
+                    # The message above can carry account-specific ARNs from
+                    # botocore, and the model and the log are the right readers
+                    # for that, not a UI panel.
+                    "fault": type(exc).__name__,
                     "tool": name,
                     "note": "This is a fault in the tool, not evidence about LMA.",
                 }

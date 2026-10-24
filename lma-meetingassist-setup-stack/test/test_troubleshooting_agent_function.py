@@ -515,6 +515,63 @@ def test_a_tool_error_is_published_because_it_names_no_log_content() -> None:
     assert "none of the named log groups exist" in summary
 
 
+def test_a_refused_call_is_published_as_a_refusal_not_a_success() -> None:
+    """A refusal returns normally, so the SDK reports it as a success. Only
+    the payload knows otherwise, and a progress panel showing a refused call
+    as a completed one is actively misleading."""
+    refusal = json.dumps(
+        {"stopped": "the 8-tool-call limit has been reached", "instruction": "..."}
+    )
+    provider = agent_function.ThinkingStepHookProvider
+
+    assert "refused" in provider.summarise_result(refusal)
+    assert "8-tool-call limit" in provider.summarise_result(refusal)
+    assert provider._result_succeeded({"content": [{"text": refusal}]}) is False
+
+
+def test_a_tool_fault_publishes_its_type_and_not_its_message() -> None:
+    """botocore error text can carry account-specific ARNs, and this stream
+    reaches the UI without the model in the loop. The full message still goes
+    to the model and to the log."""
+    fault = json.dumps(
+        {
+            "error": "ClientError: User arn:aws:sts::111122223333:assumed-role/x is "
+            "not authorized",
+            "fault": "ClientError",
+            "tool": "search_logs",
+        }
+    )
+    provider = agent_function.ThinkingStepHookProvider
+
+    summary = provider.summarise_result(fault)
+    assert summary == "failed: ClientError"
+    assert "111122223333" not in summary
+    assert provider._result_succeeded({"content": [{"text": fault}]}) is False
+
+
+def test_a_tool_error_is_still_published_with_its_message() -> None:
+    """A ToolError's text is written for the agent to read and names a log
+    group or an argument, never log content, so it is safe and useful."""
+    failure = json.dumps(
+        {"error": "none of the named log groups exist", "tool": "search_logs"}
+    )
+    provider = agent_function.ThinkingStepHookProvider
+
+    assert "none of the named log groups exist" in provider.summarise_result(failure)
+    assert provider._result_succeeded({"content": [{"text": failure}]}) is False
+
+
+def test_a_successful_result_is_still_reported_as_a_success() -> None:
+    body = json.dumps({"rowCount": 3, "logGroupCount": 1})
+
+    assert (
+        agent_function.ThinkingStepHookProvider._result_succeeded(
+            {"content": [{"text": body}]}
+        )
+        is True
+    )
+
+
 @pytest.mark.parametrize(
     "content",
     [
@@ -863,11 +920,12 @@ def test_a_tool_past_the_cap_returns_a_stop_instruction_and_does_no_work() -> No
     tools = build_tools(impl, budget)
 
     tools["get_stack_parameters"]()
-    refused = tools["discover_log_groups"]()
+    refused = json.loads(tools["discover_log_groups"]())
 
     assert impl.calls == ["get_stack_parameters"]
-    assert "STOP GATHERING EVIDENCE" in refused
-    assert "Not determined" in refused
+    assert "1-tool-call limit" in refused["stopped"]
+    assert "STOP GATHERING EVIDENCE" in refused["instruction"]
+    assert "Not determined" in refused["instruction"]
     assert budget.stopped_because is not None
 
 
@@ -897,7 +955,8 @@ def test_a_second_refused_call_ends_the_run_instead_of_asking_again() -> None:
     tools = build_tools(impl, budget)
 
     tools["get_stack_parameters"]()
-    assert "STOP GATHERING EVIDENCE" in tools["discover_log_groups"]()
+    first_refusal = json.loads(tools["discover_log_groups"]())
+    assert "STOP GATHERING EVIDENCE" in first_refusal["instruction"]
 
     with pytest.raises(agent_function.RunBudgetExhausted):
         tools["search_logs"]("whatever")
@@ -948,7 +1007,7 @@ def test_a_tool_executor_that_catches_exception_does_not_absorb_the_stop() -> No
 
     # One refusal reached the model, then the loop was cut off.
     assert len(results) == 2
-    assert "STOP GATHERING EVIDENCE" in results[1]
+    assert "STOP GATHERING EVIDENCE" in json.loads(results[1])["instruction"]
     assert impl.calls == ["search_logs"]
 
 
