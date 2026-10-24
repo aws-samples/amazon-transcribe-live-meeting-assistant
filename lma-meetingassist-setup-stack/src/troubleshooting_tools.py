@@ -442,7 +442,7 @@ class TroubleshootingTools:
             query_string: A complete Logs Insights query, for aggregation
                 (`stats count() by`), field extraction (`parse`) or bucketing
                 (`bin()`). Use this when counting rather than reading.
-            lookback_hours: How far back to search.
+            lookback_hours: How far back to search, in hours.
             limit: Maximum rows to return.
 
         Returns:
@@ -503,7 +503,7 @@ class TroubleshootingTools:
             guidance.append(
                 "An empty rowCount means no line in this window matched. That "
                 "is not a cause; it narrows where the cause can be. Widen "
-                "lookbackHours, drop a term, or query a different component "
+                "lookback_hours, drop a term, or query a different component "
                 "before concluding anything from it."
             )
         if unknown:
@@ -609,7 +609,7 @@ class TroubleshootingTools:
                     "CloudWatch Logs rejected this query as malformed: "
                     f"{exc}. The query is yours to fix — check the pipe "
                     "syntax, the field names and the quoting, then try again. "
-                    "Omit queryString and pass search_terms instead if you "
+                    "Omit query_string and pass search_terms instead if you "
                     "only need matching lines.",
                     summary="the query was rejected as malformed",
                 ) from exc
@@ -643,7 +643,7 @@ class TroubleshootingTools:
                 raise ToolError(
                     f"the query was still {status} after {waited:.0f}s of an "
                     f"available {budget:.0f}s and was cancelled. Narrow it: "
-                    "fewer log groups, a shorter lookbackHours, or a more "
+                    "fewer log groups, a shorter lookback_hours, or a more "
                     "specific search term.",
                     summary="the query was cancelled for taking too long",
                 )
@@ -731,8 +731,10 @@ class TroubleshootingTools:
     #:
     #: An allowlist, not a denylist, and that direction is the point: the row
     #: carries a meeting password and a VNC password, and whatever this tool
-    #: returns goes into the model's context *and* onto the thinking-step
-    #: stream the UI renders. A field added to the row later is withheld until
+    #: returns reaches the model's context and the caller's response body. (It
+    #: does not reach the thinking-step stream, which publishes only "record
+    #: found" or "no record" — but the model's context and the response are
+    #: reason enough.) A field added to the row later is withheld until
     #: somebody adds it here on purpose, which is the safe way for this list to
     #: be out of date.
     #:

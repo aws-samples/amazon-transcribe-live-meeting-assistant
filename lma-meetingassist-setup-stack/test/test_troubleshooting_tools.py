@@ -1112,9 +1112,10 @@ def test_an_unconfigured_table_is_reported_rather_than_queried() -> None:
 
 # ── what the record tool will and will not hand to the model ────────────────
 #
-# Whatever this tool returns goes into the model's context and onto the
-# thinking-step stream the UI renders, so the filter is an allowlist and these
-# tests are about the two directions it has to get right.
+# Whatever this tool returns reaches the model's context and the caller's
+# response body, so the filter is an allowlist and these tests are about the
+# two directions it has to get right. The thinking-step stream sees only a
+# shape summary; that is tested beside the summariser.
 
 
 def record_for(item: Dict[str, Any] = FAILED_VP_ITEM) -> Dict[str, Any]:

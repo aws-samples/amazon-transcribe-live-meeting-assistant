@@ -207,8 +207,9 @@ reached.
 > deployed stack — only against a stand-in for an SDK's tool executor. If it
 > did not get through, every subsequent tool call would refuse (the deadline is
 > checked inside each tool), and the invocation would finally be ended by the
-> Lambda `Timeout` rather than by the agent. Confirming this is the first item
-> on the entry-point change that follows.
+> Lambda `Timeout` rather than by the agent. Tracked in
+> [issue #814](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/814),
+> to be closed by an integration test before the UI entry points land.
 
 The response reports this in a `truncated` field, inside the JSON-encoded
 `body`. It is `true` whenever a limit was reached at all, on the cooperative

@@ -732,11 +732,22 @@ def test_a_dict_shaped_tool_use_is_read_and_summarised() -> None:
     assert "lookback_hours=6" in steps[0]["tool_input_summary"]
 
 
+def summarise_input(tool_input: Any, vp_id: str = "") -> Optional[str]:
+    """Summarise a tool call's arguments as the before-tool hook would.
+
+    `vp_id` is the identifier the invocation supplied, which is what decides
+    whether a vp_id argument is this function's value to publish or the
+    model's.
+    """
+    provider = agent_function.ThinkingStepHookProvider(budget_with(), vp_id=vp_id)
+    return provider.summarise_input(tool_input)
+
+
 def test_a_model_authored_query_is_not_published_verbatim() -> None:
     """The input is written *by* the model, often from text it has just read
     out of a log line, so publishing it would put log content on this stream
     by a side door — which is what summarising the result prevents."""
-    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+    summary = summarise_input(
         {
             "log_group_names": "/a/b",
             "query_string": 'fields @message | filter @message like "sk_live_SECRET"',
@@ -749,7 +760,7 @@ def test_a_model_authored_query_is_not_published_verbatim() -> None:
 
 
 def test_search_terms_are_not_published_verbatim_either() -> None:
-    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+    summary = summarise_input(
         {"log_group_names": "/a/b", "search_terms": "Bearer abc.def.ghi"}
     )
 
@@ -763,9 +774,7 @@ def test_log_group_names_are_counted_and_classified_not_echoed() -> None:
     classifies as comes from a closed set, and is the more useful thing for a
     progress panel anyway.
     """
-    provider = agent_function.ThinkingStepHookProvider
-
-    summary = provider.summarise_input(
+    summary = summarise_input(
         {"log_group_names": "/aws/lambda-microvms/LMA-vp-logs"}
     )
     assert "1 log group" in summary
@@ -774,7 +783,7 @@ def test_log_group_names_are_counted_and_classified_not_echoed() -> None:
 
 
 def test_an_invented_log_group_name_does_not_reach_the_stream() -> None:
-    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+    summary = summarise_input(
         {"log_group_names": "/aws/lambda/secret-sounding-name-the-model-made-up"}
     )
 
@@ -783,7 +792,7 @@ def test_an_invented_log_group_name_does_not_reach_the_stream() -> None:
 
 
 def test_several_log_groups_are_counted_and_their_components_listed() -> None:
-    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+    summary = summarise_input(
         {
             "log_group_names": "/aws/lambda-microvms/LMA-vp-logs,"
             "/aws/vendedlogs/states/LMA-VPSTACK-x,"
@@ -798,7 +807,7 @@ def test_several_log_groups_are_counted_and_their_components_listed() -> None:
 
 def test_the_components_argument_is_not_published_by_value() -> None:
     """It is free text the model wrote, like search_terms."""
-    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+    summary = summarise_input(
         {"components": "virtual-participant,something-made-up"}
     )
 
@@ -806,25 +815,49 @@ def test_the_components_argument_is_not_published_by_value() -> None:
     assert "components (" in summary
 
 
-def test_identifiers_and_numbers_the_agent_chose_are_published() -> None:
-    summary = agent_function.ThinkingStepHookProvider.summarise_input(
-        {"vp_id": "vp-abc", "lookback_hours": 12, "limit": 50}
-    )
+def test_numbers_the_agent_chose_are_published() -> None:
+    """A number cannot carry log content whatever the model puts in it."""
+    summary = summarise_input({"lookback_hours": 12, "limit": 50})
 
-    assert "vp_id=vp-abc" in summary
     assert "lookback_hours=12" in summary
     assert "limit=50" in summary
 
 
+def test_the_scoped_virtual_participant_id_is_published() -> None:
+    """When the agent passes back the identifier the invocation gave it, the
+    value is this function's own and there is nothing to withhold."""
+    summary = summarise_input({"vp_id": "vp-abc"}, vp_id="vp-abc")
+
+    assert "vp_id=vp-abc" in summary
+
+
+def test_a_virtual_participant_id_the_model_invented_is_not_published() -> None:
+    """Any other value is model-written, and goes the way the other
+    model-written arguments do."""
+    summary = summarise_input({"vp_id": "vp-something-else"}, vp_id="vp-abc")
+
+    assert "vp-something-else" not in summary
+    assert "vp_id (" in summary
+
+
+def test_a_virtual_participant_id_with_no_scope_to_compare_is_not_published() -> None:
+    """A stack-wide question supplies no vpId, so there is nothing that makes
+    the argument anything but the model's."""
+    summary = summarise_input({"vp_id": "vp-abc"})
+
+    assert "vp-abc" not in summary
+    assert "vp_id (" in summary
+
+
 @pytest.mark.parametrize("tool_input", [None, {}, "not a mapping", 7, []])
 def test_an_input_with_nothing_to_say_publishes_nothing(tool_input: Any) -> None:
-    assert agent_function.ThinkingStepHookProvider.summarise_input(tool_input) is None
+    assert summarise_input(tool_input) is None
 
 
 def test_an_unrecognised_argument_is_not_published() -> None:
     """The allowlist's failure direction: a tool argument added later is left
     off the stream until somebody decides it is safe to publish."""
-    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+    summary = summarise_input(
         {"log_group_names": "/a/b", "some_future_argument": "sensitive"}
     )
 

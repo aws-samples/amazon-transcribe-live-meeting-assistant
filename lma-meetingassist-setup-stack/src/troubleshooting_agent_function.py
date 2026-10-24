@@ -281,7 +281,7 @@ class RunBudgetExhausted(BaseException):
     a reached limit end promptly and cleanly, the deadline makes every further
     tool call useless, and ``Timeout`` is the final backstop. Turning that last
     one into a checked property needs an integration run against a deployed
-    stack, which is noted as a follow-up rather than claimed here.
+    stack; that is tracked as issue #814 rather than claimed here.
     """
 
     def __init__(self, reason: str):
@@ -409,10 +409,21 @@ class ThinkingStepHookProvider:
     to the wrapper's own, never the only copy.
     """
 
-    def __init__(self, budget: RunBudget, call_id: str = "", message_id: str = ""):
+    def __init__(
+        self,
+        budget: RunBudget,
+        call_id: str = "",
+        message_id: str = "",
+        vp_id: str = "",
+    ):
         self._budget = budget
         self._call_id = call_id
         self._message_id = message_id
+        # The virtual participant this diagnosis was asked about, from the
+        # invocation. Used to tell "the agent passed the id it was given"
+        # from "the agent passed an id of its own", which decides whether the
+        # value is this function's to publish.
+        self._vp_id = vp_id
         # Starts high so these never collide with the token sequence numbers a
         # streaming response would use on the same channel.
         self._sequence = 100
@@ -526,25 +537,26 @@ class ThinkingStepHookProvider:
         except Exception as exc:  # noqa: BLE001
             logger.warning("before-tool hook failed: %s", exc)
 
-    #: Tool arguments whose values are safe to publish: an identifier the
-    #: caller supplied and numbers the agent chose, none of which can carry
-    #: log content. Everything else is published as a length or a count.
-    _PUBLISHABLE_INPUT_FIELDS = frozenset({"vp_id", "lookback_hours", "limit"})
+    #: Tool arguments whose values are safe to publish: numbers, which cannot
+    #: carry log content whatever the model puts in them. Everything else is
+    #: published as a length, a count, or not at all.
+    _PUBLISHABLE_INPUT_FIELDS = frozenset({"lookback_hours", "limit"})
 
-    @classmethod
-    def summarise_input(cls, tool_input: Any) -> Optional[str]:
+    def summarise_input(self, tool_input: Any) -> Optional[str]:
         """Describe a tool call's arguments without reproducing free text.
 
         The same rule as ``summarise_result``, and for the same reason: this
-        stream reaches the UI without the model in the loop. ``query_string``
-        and ``search_terms`` are written *by* the model, often from text it
-        has just read out of a log line, so publishing them verbatim would put
-        log content on the stream by a side door — which is exactly what
-        summarising the result was meant to prevent.
+        stream reaches the UI without the model in the loop, so nothing the
+        prompt says about what to quote applies to it. Publish a shape, a
+        count, or text written by this codebase; never text the model wrote.
 
-        Log group names are published: they are infrastructure names the agent
-        got from discovery, they are what a reader of a progress panel most
-        wants to see, and they cannot carry anything but themselves.
+        Every argument here is model-written, so none is echoed.
+        ``query_string``, ``search_terms`` and ``components`` appear as a
+        length. Log group names appear as a count plus the components they
+        classify as — a closed set, and the more useful thing for a progress
+        panel. ``vp_id`` is published only when it matches the identifier the
+        invocation itself supplied, which makes it this function's own value
+        rather than the model's.
         """
         if not isinstance(tool_input, Mapping):
             return None
@@ -569,10 +581,19 @@ class ThinkingStepHookProvider:
                 # Length only. The content is the model's words, and may echo
                 # a log line it has just read.
                 parts.append(f"{field} ({len(str(value))} chars)")
-        for field in sorted(cls._PUBLISHABLE_INPUT_FIELDS):
+        for field in sorted(self._PUBLISHABLE_INPUT_FIELDS):
             value = tool_input.get(field)
             if value:
                 parts.append(f"{field}={value}")
+        vp_id = tool_input.get("vp_id")
+        if vp_id:
+            # Published only when it is the identifier this invocation was
+            # given. Any other value is the model's, and goes the way the
+            # other model-written arguments do.
+            if self._vp_id and str(vp_id) == self._vp_id:
+                parts.append(f"vp_id={vp_id}")
+            else:
+                parts.append(f"vp_id ({len(str(vp_id))} chars)")
         return ", ".join(parts) if parts else None
 
     @staticmethod
@@ -923,6 +944,7 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         budget,
         call_id=str(event.get("callId") or ""),
         message_id=str(event.get("messageId") or ""),
+        vp_id=str(event.get("vpId") or ""),
     )
     agent = Agent(
         model=BedrockModel(**model_kwargs),
