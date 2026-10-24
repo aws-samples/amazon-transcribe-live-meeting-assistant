@@ -31,7 +31,7 @@ from botocore.exceptions import ClientError
 
 MODEL_ID = "us.amazon.nova-pro-v1:0"
 FETCH_ARN = "arn:aws:lambda:us-east-1:123456789012:function:fetch-transcript"
-TABLE_NAME = "llm-prompt-templates"
+TABLE_NAME = "lma-configuration"
 BUCKET = "lma-meeting-bucket"
 PREFIX = "kb/"
 
@@ -44,11 +44,19 @@ os.environ.setdefault("BEDROCK_MODEL_ID", MODEL_ID)
 os.environ.setdefault("FETCH_TRANSCRIPT_LAMBDA_ARN", FETCH_ARN)
 os.environ.setdefault("S3_BUCKET_NAME", BUCKET)
 os.environ.setdefault("S3_PREFIX", PREFIX)
-os.environ.setdefault("LLM_PROMPT_TEMPLATE_TABLE_NAME", TABLE_NAME)
+os.environ.setdefault("CONFIGURATION_TABLE_NAME", TABLE_NAME)
 # PROCESS_TRANSCRIPT is deliberately left unset: its default
 # are asserted below.
 
 HERE = Path(__file__).resolve().parent
+# source/lambda_functions/bedrock_summary_lambda -> source
+LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
+if str(LAYER) not in sys.path:
+    sys.path.insert(0, str(LAYER))
+
+from lma_config import codec  # noqa: E402
+from lma_config.keys import ACTIVE_POINTER_KEY, DEFAULT_KEY  # noqa: E402
+from lma_config.store import ConfigurationStore  # noqa: E402
 
 
 def _load_module():
@@ -121,19 +129,39 @@ class FakeLambdaClient:
         return {"Payload": io.BytesIO(json.dumps(self.payload).encode())}
 
 
-class FakeDynamoClient:
-    """Serves the default and custom prompt-template items."""
+class FakeConfigurationTable:
+    """The shared configuration table, holding a baseline and one profile.
+
+    Only `get_item` is needed: this function reads configuration and never
+    writes it. Its role stays read-only across the migration -- `GetItem` alone,
+    now on the configuration table instead of the previous per-store one.
+    """
+
+    SECTION = "summary_prompt_templates"
 
     def __init__(self, default=None, custom=None):
-        self.items = {
-            index.DEFAULT_PROMPT_TEMPLATES_PK: default,
-            index.CUSTOM_PROMPT_TEMPLATES_PK: custom,
-        }
+        self.items = {}
+        if default is not None:
+            self.items[DEFAULT_KEY] = self._record(DEFAULT_KEY, default)
+        if custom is not None:
+            self.items["Config#custom"] = self._record("Config#custom", custom)
+            self.items[ACTIVE_POINTER_KEY] = {
+                "Configuration": {"S": ACTIVE_POINTER_KEY},
+                "ActiveProfile": {"S": "custom"},
+            }
         self.requests = []
+
+    @classmethod
+    def _record(cls, key, values):
+        return {
+            "Configuration": {"S": key},
+            "Version": {"N": "1"},
+            "Body": {"B": codec.encode_body({cls.SECTION: values})},
+        }
 
     def get_item(self, **kwargs):
         self.requests.append(kwargs)
-        key = kwargs["Key"]["LLMPromptTemplateId"]["S"]
+        key = kwargs["Key"]["Configuration"]["S"]
         item = self.items.get(key)
         # A real get_item omits Item entirely when the key is absent.
         return {"Item": item} if item is not None else {}
@@ -150,10 +178,8 @@ class FakeS3Client:
 
 
 def ddb_item(**pairs):
-    """Build a DynamoDB item in wire form, as get_item returns it."""
-    item = {"LLMPromptTemplateId": {"S": "ignored"}}
-    item.update({key: {"S": value} for key, value in pairs.items()})
-    return item
+    """The stored contents of one configuration record's prompt section."""
+    return dict(pairs)
 
 
 def install(monkeypatch, bedrock=None, templates=None, custom=None, lambda_client=None):
@@ -161,7 +187,8 @@ def install(monkeypatch, bedrock=None, templates=None, custom=None, lambda_clien
     bedrock = bedrock if bedrock is not None else FakeBedrock()
     s3 = FakeS3Client()
     monkeypatch.setattr(index, "bedrock", bedrock)
-    monkeypatch.setattr(index, "dynamodb_client", FakeDynamoClient(templates, custom))
+    table = FakeConfigurationTable(templates, custom)
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
     monkeypatch.setattr(
         index, "lambda_client", lambda_client if lambda_client is not None else FakeLambdaClient()
     )
@@ -343,7 +370,7 @@ def test_only_keys_in_the_sequence_form_are_treated_as_prompts(
     assert prompts_sent(bedrock) == ["real prompt"]
 
 
-def test_a_key_that_is_not_a_prompt_or_bookkeeping_is_reported(
+def test_a_key_that_is_not_a_prompt_is_reported(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture,
 ) -> None:
@@ -368,40 +395,144 @@ def test_a_key_that_is_not_a_prompt_or_bookkeeping_is_reported(
     assert "N#Title" in logged
 
 
-def test_the_records_own_attributes_are_not_reported_as_unused_prompts(
+def test_a_records_provenance_never_reaches_the_prompt_section(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture,
 ) -> None:
-    """The partition key, the guidance text and the audit attributes belong there.
+    """Who saved a record is a metadata attribute of the item, not a prompt.
 
-    Reporting them would put a line in every summary's log and train an operator
-    to ignore the one that matters.
+    The configuration accessor keeps the metadata attributes out of the body, so
+    `UpdatedBy` and `UpdatedAt` cannot arrive in the prompt section -- which is
+    what lets this function report *every* key that is not a prompt without
+    putting a line in each summary's log and training an operator to ignore the
+    one that matters.
     """
-    bedrock, _ = install(
-        monkeypatch,
-        templates=ddb_item(**{"*Information*": "edit these in the UI", "1#Summary": "real prompt"}),
-        custom=ddb_item(
-            **{"UpdatedBy": "admin@example.com", "UpdatedAt": "2026-10-22T18:30:00.000000Z"}
-        ),
-    )
+    table = FakeConfigurationTable(ddb_item(**{"1#Summary": "real prompt"}), ddb_item())
+    table.items[DEFAULT_KEY]["UpdatedBy"] = {"S": "admin@example.com"}
+    table.items[DEFAULT_KEY]["UpdatedAt"] = {"S": "2026-10-22T18:30:00.000000Z"}
+    bedrock = FakeBedrock()
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
+    monkeypatch.setattr(index, "bedrock", bedrock)
+    monkeypatch.setattr(index.boto3, "client", lambda *_a, **_kw: FakeS3Client())
+
     index.generate_summary("T", None)
 
+    # Both halves: the prompt was sent, and the metadata attributes beside it
+    # produced no line of their own. A test asserting only the quiet log would
+    # pass against a reader that sent nothing at all.
     assert prompts_sent(bedrock) == ["real prompt"]
     assert "Not using" not in capsys.readouterr().out
 
 
-def test_templates_are_read_from_the_configured_table(
+def test_an_end_of_meeting_run_is_served_from_the_cache(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = FakeDynamoClient(ddb_item(**{"1#Summary": "p"}), ddb_item())
-    monkeypatch.setattr(index, "dynamodb_client", fake)
+    """The unattended path is what the section's cache tier is for."""
+    table = FakeConfigurationTable(ddb_item(**{"1#Summary": "p {transcript}"}), ddb_item())
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
+    monkeypatch.setattr(index, "bedrock", FakeBedrock())
+
+    index.get_templates_from_dynamodb(None)
+    reads = len(table.requests)
+    index.get_templates_from_dynamodb(None)
+    assert len(table.requests) == reads
+
+
+def test_a_regenerate_run_reads_the_prompts_again(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Meeting Summary panel promises the prompts "as they are now".
+
+    An administrator who saves a prompt and presses Regenerate within the
+    section's cache window would otherwise get a summary from the prompt they
+    just replaced, with nothing on the page saying so. The regenerator's invoke
+    asks for a re-read, and this is the assertion that the request is honoured.
+    """
+    table = FakeConfigurationTable(
+        ddb_item(**{"1#Summary": "the old prompt {transcript}"}), ddb_item()
+    )
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
+    monkeypatch.setattr(index, "bedrock", FakeBedrock())
+
+    assert index.get_templates_from_dynamodb(None) == [{"Summary": "the old prompt {transcript}"}]
+
+    table.items[DEFAULT_KEY]["Body"] = {
+        "B": codec.encode_body({FakeConfigurationTable.SECTION: {"1#Summary": "the new prompt"}})
+    }
+    assert index.get_templates_from_dynamodb(None, refresh_configuration=True) == [
+        {"Summary": "the new prompt"}
+    ]
+
+
+def test_the_handler_asks_for_a_re_read_only_when_the_invoke_does(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The flag reaches the read, and an end-of-meeting invoke does not set it."""
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False: seen.append(refresh) or "a summary",
+    )
+    install(monkeypatch, templates=ddb_item(**{"1#Summary": "p"}), custom=ddb_item())
+    index.handler({"CallId": CALL_ID}, None)
+    index.handler({"CallId": CALL_ID, "RefreshConfiguration": True}, None)
+    assert seen == [False, True]
+
+
+def test_templates_are_read_from_the_shared_configuration_table(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The keys are the shared table's, not the retired per-store table's.
+
+    Reading the wrong key reads nothing and generates a summary with no prompts
+    at all, which is a silent failure, so the requests are asserted exactly.
+    """
+    fake = FakeConfigurationTable(ddb_item(**{"1#Summary": "p"}), ddb_item())
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=fake))
     monkeypatch.setattr(index, "bedrock", FakeBedrock())
     index.get_templates_from_dynamodb(None)
-    assert [request["TableName"] for request in fake.requests] == [TABLE_NAME, TABLE_NAME]
-    assert [request["Key"]["LLMPromptTemplateId"]["S"] for request in fake.requests] == [
-        "DefaultSummaryPromptTemplates",
-        "CustomSummaryPromptTemplates",
+    assert {request["TableName"] for request in fake.requests} == {TABLE_NAME}
+    assert [request["Key"]["Configuration"]["S"] for request in fake.requests] == [
+        "Config#__active",
+        "Config#default",
+        "Config#custom",
     ]
+
+
+def test_a_warm_container_does_not_reread_the_prompts_for_every_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """What the section's declared standard cache tier is for.
+
+    Before the shared accessor this function issued two fresh get_item calls per
+    summary. The prompts are now read at most once per five minutes per
+    container, and the same prompts are still used in between.
+    """
+    fake = FakeConfigurationTable(ddb_item(**{"1#Summary": "p {transcript}"}), ddb_item())
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=fake))
+    monkeypatch.setattr(index, "bedrock", FakeBedrock())
+
+    assert index.get_templates_from_dynamodb(None) == [{"Summary": "p {transcript}"}]
+    reads = len(fake.requests)
+    assert reads > 0
+    assert index.get_templates_from_dynamodb(None) == [{"Summary": "p {transcript}"}]
+    assert len(fake.requests) == reads
+
+
+def test_a_prompt_that_is_not_text_is_reported_rather_than_sent(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+) -> None:
+    """Only a hand edit of the stored record can produce one."""
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "real prompt"}),
+        custom={"2#Topics": {"nested": "object"}},
+    )
+    index.generate_summary("T", None)
+    assert prompts_sent(bedrock) == ["real prompt"]
+    assert "2#Topics" in capsys.readouterr().out
 
 
 # --------------------------------------------------------------------------
@@ -634,13 +765,20 @@ def test_a_throttled_request_propagates_out_of_the_bedrock_call(
 def test_a_missing_template_item_is_raised_rather_than_summarized_from_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An unseeded template table must not yield an empty prompt set."""
+    """An unseeded configuration table must not yield an empty prompt set.
+
+    The accessor returns an empty section for a record that is not there, which
+    is the right answer for a shared library -- a profile nobody has written is
+    an ordinary state. It is this function that knows an empty prompt set is
+    meaningless, so the refusal lives here.
+    """
     install(monkeypatch, templates=None, custom=None)
-    with pytest.raises(KeyError):
+    with pytest.raises(RuntimeError) as raised:
         index.get_templates_from_dynamodb(None)
+    assert "seeder" in str(raised.value)
 
 
-def test_a_template_table_failure_is_reported_as_an_error_summary(
+def test_a_configuration_table_failure_is_reported_as_an_error_summary(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     install(monkeypatch, templates=None, custom=None)

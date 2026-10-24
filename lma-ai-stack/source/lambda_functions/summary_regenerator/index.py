@@ -382,16 +382,25 @@ def write_summary(call_id, text=None, state=None):
 def invoke_summary_function(call_id):
     """Run the configured summariser over the meeting's current transcript.
 
-    Only a CallId is sent. That is what makes this a re-run of the same path the
-    end-of-meeting summary takes: the summariser fetches the transcript itself
-    (with whatever speaker names are stored now), reads the prompt templates
-    itself (as they are now), and -- in the Bedrock summariser -- refreshes the
-    Knowledge Base snapshot, which it only does when no prompt override is given.
+    A CallId and a request to re-read configuration, and nothing else. That is
+    what makes this a re-run of the same path the end-of-meeting summary takes:
+    the summariser fetches the transcript itself (with whatever speaker names
+    are stored now), reads the prompt templates itself, and -- in the Bedrock
+    summariser -- refreshes the Knowledge Base snapshot, which it only does when
+    no prompt override is given.
+
+    `RefreshConfiguration` is why pressing Regenerate right after saving a
+    prompt uses the prompt that was just saved. The summariser caches the prompt
+    templates for a few minutes, which is right for the end-of-meeting runs it
+    does unattended, and wrong for a button somebody pressed on purpose. A
+    customer's own function under the LAMBDA option that does not recognise the
+    field can ignore it; one that validates its input against a fixed schema has
+    to allow it, which docs/transcript-summarization.md says.
     """
     response = lambda_client.invoke(
         FunctionName=TRANSCRIPT_SUMMARY_FUNCTION_ARN,
         InvocationType="RequestResponse",
-        Payload=json.dumps({"CallId": call_id}),
+        Payload=json.dumps({"CallId": call_id, "RefreshConfiguration": True}),
     )
     body = json.loads(response["Payload"].read().decode("utf-8"))
     if not isinstance(body, dict):

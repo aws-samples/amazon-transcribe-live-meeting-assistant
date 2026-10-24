@@ -39,7 +39,7 @@ A meeting's summary is generated once, from the transcript and the prompt templa
 - An administrator has changed the summary prompt templates, by adding a section or rewording one.
 - The meeting was summarized while it was still running, and has since continued.
 
-Regenerating goes through the same summarizer the end-of-meeting summary uses -- the Bedrock summarizer, or your own function under the LAMBDA option -- with nothing but the meeting id, so it reads the current transcript and the current prompts rather than a copy of either.
+Regenerating goes through the same summarizer the end-of-meeting summary uses -- the Bedrock summarizer, or your own function under the LAMBDA option -- with the meeting id and a request to re-read configuration, so it reads the current transcript and the current prompts rather than a copy of either. The Bedrock summarizer caches the prompt templates for a few minutes, which is right for the end-of-meeting runs it does unattended; that request is what makes **Regenerate** pressed straight after a save use the prompt that was just saved.
 
 Under the BEDROCK option it also **refreshes the Bedrock Knowledge Base snapshot**. The copy of the transcript and summary written to S3 for the Knowledge Base to ingest is taken when the summary runs, and the Meeting Assistant's meeting-history search reads that copy; regenerating writes it again with whatever speaker names are stored now. It is the summarizer that writes that copy, so under the LAMBDA option the snapshot is refreshed only if your own function writes it. Ingestion into the Knowledge Base itself runs on a schedule the stack fixes at every 15 minutes, so the refreshed copy becomes searchable at the next sync rather than immediately.
 
@@ -72,12 +72,16 @@ The BEDROCK option uses the selected Amazon Bedrock foundation model (default: C
 
 ### Prompt Template Storage
 
-Prompt templates are stored in DynamoDB as two separate items:
+Prompt templates live in the stack's shared configuration table, as two records:
 
-1. **Default prompt templates** -- Ship with LMA and may change with new releases. View the current defaults via the stack output **LLMDefaultPromptSummaryTemplate**.
-2. **Custom prompt templates** -- User-defined prompts that persist across stack updates and are never overwritten by LMA upgrades. View and edit via the stack output **LLMCustomPromptSummaryTemplate** or through the admin UI.
+1. **The deployment baseline** (`Config#default`) -- the prompts this release ships. CloudFormation rewrites it whenever a release changes the shipped prompts, so an edit made here is replaced the next time that happens and belongs in your profile instead. The stack output **LLMDefaultPromptSummaryTemplate** opens it in the DynamoDB console.
+2. **Your profile** (`Config#custom`) -- the prompts an administrator has edited. Written only when it does not already exist, so it survives every stack update and every upgrade. The stack output **LLMCustomPromptSummaryTemplate** opens it.
 
-Custom prompts always take precedence over default prompts when both exist for the same attribute name.
+Your profile is a *delta*: it holds only the sections you changed, and everything else keeps coming from the baseline, so a release that improves a prompt you never touched still reaches you. Where both hold the same section name, yours is the one used.
+
+**Prompts are edited in the web UI, not in DynamoDB.** Each record stores its prompts compressed into a single `Body` attribute, so an attribute added beside it in the console has no effect at all — the summarizer does not read it. The console links above are for seeing what is stored and who last saved it; the Transcript Summary page below is the way to change it, and it is also the only path that refuses a save somebody else has superseded.
+
+See [Unified Configuration Store](configuration-store.md) for the key layout, the caching tiers and the conditional-save behaviour.
 
 ### Attribute Naming Convention
 
@@ -98,21 +102,21 @@ Each attribute's value contains the prompt template text that instructs the mode
 - Use the `{transcript}` placeholder in your prompt template where the meeting transcript should be inserted.
 - Use `<br>` for newlines within the prompt template.
 
-**To add a new summary section:** Create a new attribute in the Custom prompts DynamoDB item with a unique `N#Label` name (for example, `4#Follow-Up Questions`).
-
-**To override a default section:** Create an attribute in the Custom prompts item with the same name as the default attribute you want to override (for example, `1#Summary` with your custom prompt text).
-
-**To remove a default section:** Create an attribute in the Custom prompts item with the same name as the default attribute and set its value to an empty string or `NONE`.
-
-### Admin UI
-
-Administrators can view and edit prompt templates directly in the LMA web interface at:
+The edits below are all made on the **Transcript Summary** page, which is at:
 
 ```
 /#/configuration/transcript-summary
 ```
 
-This provides a convenient way to manage prompts without directly editing DynamoDB items.
+**To add a new summary section:** add a template on the page and give it a label. It is stored under the next sequence number (for example `4#Follow-Up Questions`).
+
+**To override a default section:** edit the prompt of the section with that name. The page starts from the baseline's sections, so changing one and saving stores your version of it in your profile.
+
+**To remove a default section:** set its prompt to `NONE`, or leave it empty. The summarizer skips a section whose prompt is empty or `NONE`, and skipping it also saves a model call.
+
+**To go back to the shipped prompts:** **Reset to Defaults** clears your profile, so every section comes from the baseline again.
+
+Saving requires membership of the **Admin** group, and each save records which account made it.
 
 ## LAMBDA Option
 
@@ -123,7 +127,7 @@ The LAMBDA option lets you provide your own Lambda function to generate meeting 
 Configure the LAMBDA option by setting the **EndOfCallLambdaHookFunctionArn** CloudFormation parameter to the ARN of your Lambda function.
 
 Your Lambda function:
-- Receives the `CallId` in the event payload.
+- Receives the `CallId` in the event payload. When the run comes from the **Regenerate** button, the payload also carries `"RefreshConfiguration": true`, which asks the function to re-read any configuration it caches rather than use a cached copy. A function that caches nothing can ignore it, but one that validates its input against a fixed schema must allow the extra field, or every Regenerate will fail.
 - Must return a JSON object with a `summary` key: `{"summary": "..."}`.
 - The summary value supports Markdown formatting.
 

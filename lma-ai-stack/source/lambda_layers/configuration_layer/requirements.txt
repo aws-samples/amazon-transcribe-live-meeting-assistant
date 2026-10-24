@@ -1,0 +1,5 @@
+# No third-party dependencies. The accessor uses the standard library (gzip,
+# json, hashlib) plus the boto3 that ships with the python3.12 Lambda runtime.
+# That is what lets this layer be declared compatible with both architectures
+# and attached to every function that reads configuration, whichever
+# architecture that function runs on.

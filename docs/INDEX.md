@@ -77,6 +77,7 @@ title: "LMA Documentation"
 ### Administration
 
 - [CloudFormation Parameters Reference](cloudformation-parameters.md) — Complete reference of all stack parameters by category
+- [Unified Configuration Store](configuration-store.md) — The shared runtime-configuration table: its key layout, the compressed record body, the three caching tiers a section can declare, conditional saves, and deploy-time seeding
 - [Stack Updates & Upgrades](stack-updates-and-upgrades.md) — Updating existing stacks, template URLs, version migration notes
 - [Well-Architected Framework Assessment](well-architected.md) — Assessment of LMA against the six pillars of the AWS Well-Architected Framework
 - [Monitoring & Alerting](monitoring.md) — The operational alerts SNS topic and its alarms, the CloudWatch dashboard, how to subscribe a team rather than one person, and why an unconfirmed email subscription delivers nothing

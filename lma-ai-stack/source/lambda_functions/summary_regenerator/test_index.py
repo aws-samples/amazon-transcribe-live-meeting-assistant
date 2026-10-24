@@ -304,7 +304,7 @@ def test_the_second_leg_has_no_identity_and_is_allowed(
     """This function invoking itself is the backend calling itself."""
     _, fake_lambda, _, written = install(monkeypatch)
     assert index.handler(RUN_EVENT, FakeContext())["ok"] is True
-    assert fake_lambda.payloads == [{"CallId": CALL_ID}]
+    assert fake_lambda.payloads == [{"CallId": CALL_ID, "RefreshConfiguration": True}]
     assert written[-1]["text"] == NEW_SUMMARY
 
 
@@ -489,8 +489,24 @@ def test_the_run_passes_no_prompt_override(monkeypatch: pytest.MonkeyPatch) -> N
     reasons to regenerate."""
     _, fake_lambda, _, _ = install(monkeypatch)
     index.handler(RUN_EVENT, FakeContext())
-    assert fake_lambda.payloads == [{"CallId": CALL_ID}]
+    assert fake_lambda.payloads == [{"CallId": CALL_ID, "RefreshConfiguration": True}]
     assert "Prompt" not in fake_lambda.payloads[0]
+
+
+def test_the_run_asks_the_summariser_to_re_read_its_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Meeting Summary panel promises the prompt templates "as they are now".
+
+    The summariser caches them for a few minutes, which is right for the
+    end-of-meeting runs it does unattended and wrong for a button somebody
+    pressed straight after saving a prompt. Without this field an administrator
+    would get a summary from the prompt they had just replaced, with nothing on
+    the page saying so.
+    """
+    _, fake_lambda, _, _ = install(monkeypatch)
+    index.handler(RUN_EVENT, FakeContext())
+    assert fake_lambda.payloads[0]["RefreshConfiguration"] is True
 
 
 def test_the_run_waits_for_the_summariser(monkeypatch: pytest.MonkeyPatch) -> None:

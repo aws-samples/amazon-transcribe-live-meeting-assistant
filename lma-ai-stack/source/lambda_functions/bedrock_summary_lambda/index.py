@@ -15,6 +15,11 @@ import boto3
 from bedrock_compat import SUMMARY_MAX_TOKENS, build_inference_config, extract_text
 from botocore.config import Config
 
+# pylint: disable=import-error
+from lma_config import SUMMARY_PROMPT_TEMPLATES, ConfigurationStore  # configuration layer
+
+# pylint: enable=import-error
+
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
 
@@ -27,25 +32,18 @@ PROCESS_TRANSCRIPT = os.getenv("PROCESS_TRANSCRIPT", "False") == "True"
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
 S3_PREFIX = os.environ["S3_PREFIX"]
 
-# Table name and keys used for default and custom prompt templates items in DDB
-LLM_PROMPT_TEMPLATE_TABLE_NAME = os.environ["LLM_PROMPT_TEMPLATE_TABLE_NAME"]
-DEFAULT_PROMPT_TEMPLATES_PK = "DefaultSummaryPromptTemplates"
-CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
-
 # A prompt template is stored under a key of the form "N#Title", where N orders
 # the sections of the summary. Kept identical to the pattern that the
 # update_llm_prompt_template_resolver applies on write, so the reader and the
-# writer agree on which attributes of the item are prompts.
+# writer agree on which keys of the section are prompts.
+#
+# Everything in the section is a prompt: the record's provenance -- who saved it
+# and when -- lives in the stored item's metadata attributes, which the
+# configuration accessor keeps out of the body. So a key in any other form can
+# only have been added by hand in the DynamoDB console, and each one gets a line
+# in the log naming it, because the person who added it is the one who needs to
+# know it is not being used as a prompt.
 PROMPT_KEY_PATTERN = re.compile(r"^\d+#")
-
-# The item's other attributes, which are bookkeeping rather than prompts: the
-# partition key, the seeded guidance text, and the record of who last saved it.
-# Used only to keep the log quiet about them -- selection is the pattern above,
-# not this set -- so that a key which is neither a prompt nor one of these gets
-# a line of its own. The only way to store such a key is to add it to the table
-# by hand, and the operator who did that is the one who needs to know it is not
-# being used as a prompt.
-NON_PROMPT_KEYS = frozenset({"LLMPromptTemplateId", "*Information*", "UpdatedBy", "UpdatedAt"})
 
 # Optional environment variables allow region / endpoint override for bedrock Boto3
 BEDROCK_REGION = (
@@ -59,7 +57,13 @@ BEDROCK_ENDPOINT_URL = os.environ.get(
 
 
 lambda_client = boto3.client("lambda")
-dynamodb_client = boto3.client("dynamodb")
+
+# Built at module scope, not per invocation: the section's declared cache tier
+# only means anything if the store outlives a single call. A summary reads the
+# prompts once, so a container handling several meetings in a row reads DynamoDB
+# once per five minutes instead of twice per summary.
+CONFIG_STORE = ConfigurationStore()
+
 bedrock = boto3.client(
     service_name="bedrock-runtime",
     region_name=BEDROCK_REGION,
@@ -68,7 +72,7 @@ bedrock = boto3.client(
 )
 
 
-def get_templates_from_dynamodb(prompt_override):
+def get_templates_from_dynamodb(prompt_override, refresh_configuration=False):
     templates = []
     prompt_template_str = None
 
@@ -86,39 +90,58 @@ def get_templates_from_dynamodb(prompt_override):
 
     if prompt_template_str is None:
         try:
-            defaultPromptTemplatesResponse = dynamodb_client.get_item(
-                Key={"LLMPromptTemplateId": {"S": DEFAULT_PROMPT_TEMPLATES_PK}},
-                TableName=LLM_PROMPT_TEMPLATE_TABLE_NAME,
+            if refresh_configuration:
+                # Somebody pressed Regenerate, and the Meeting Summary panel
+                # promises that doing so uses the prompt templates as they are
+                # now. The section's cache is right for the end-of-meeting runs
+                # this function does unattended and wrong for a button an
+                # administrator pressed straight after saving a prompt, so this
+                # path drops the cached copy and reads again.
+                CONFIG_STORE.invalidate()
+            # One read of the shared configuration table, which resolves the
+            # deployment baseline with the active profile's edits merged over it.
+            # The section declares the standard cache tier, so the read is served
+            # from the store's cache for up to five minutes; the fingerprint in
+            # the line below is what tells one refetch from another in the log.
+            section = CONFIG_STORE.get_section(SUMMARY_PROMPT_TEMPLATES.name)
+            print(
+                f"Summary prompt templates: {len(section.values)} key(s), "
+                f"profile={section.active_profile or 'none'}, "
+                f"fingerprint={section.fingerprint}, cached={section.served_from_cache}"
             )
-            customPromptTemplatesResponse = dynamodb_client.get_item(
-                Key={"LLMPromptTemplateId": {"S": CUSTOM_PROMPT_TEMPLATES_PK}},
-                TableName=LLM_PROMPT_TEMPLATE_TABLE_NAME,
-            )
 
-            defaultPromptTemplates = defaultPromptTemplatesResponse["Item"]
-            customPromptTemplates = customPromptTemplatesResponse["Item"]
-            print("Default Prompt Template:", defaultPromptTemplates)
-            print("Custom Template:", customPromptTemplates)
+            # An empty section means the table has not been seeded, or the
+            # record was deleted. Raised rather than returning no prompts: a
+            # summary generated from nothing is stored and shown as if it were a
+            # real one, where an error is visible and the deployment is fixable.
+            if not section.values:
+                raise RuntimeError(
+                    f"the configuration section "
+                    f"{SUMMARY_PROMPT_TEMPLATES.name!r} holds nothing in "
+                    f"{CONFIG_STORE.table_name}; the stack's configuration "
+                    "seeder has not run or its records were removed"
+                )
 
-            mergedPromptTemplates = {**defaultPromptTemplates, **customPromptTemplates}
-            print("Merged Prompt Template:", mergedPromptTemplates)
-
-            # A prompt key is "N#Title" -- the form the seeded *Information* text
-            # states, and the one the sequence-number stripping below already
-            # assumes. Reading by that form rather than by excluding the attribute
-            # names known today keeps the item's other attributes out of the prompt
-            # list: the partition key, the *Information* text, the record of who
-            # last saved it, and whatever is added to the item later.
-            for k in sorted(mergedPromptTemplates):
+            # A prompt key is "N#Title" -- the form the Transcript Summary page
+            # writes, and the one the sequence-number stripping below assumes.
+            for k in sorted(section.values):
                 if PROMPT_KEY_PATTERN.match(k):
-                    prompt = mergedPromptTemplates[k]["S"]
+                    prompt = section.values[k]
+                    if not isinstance(prompt, str):
+                        # Only a hand edit can store one; reported rather than
+                        # dropped, since whoever made it needs to know.
+                        print(
+                            f"Not using '{k}' as a summary prompt: a prompt must be "
+                            f"text, and this one is {type(prompt).__name__}."
+                        )
+                        continue
                     # skip if prompt value is empty, or set to 'NONE'
                     if prompt and prompt != "NONE":
                         prompt = prompt.replace("<br>", "\n")
                         index = k.find("#")
                         k_stripped = k[index + 1 :]
                         templates.append({k_stripped: prompt})
-                elif k not in NON_PROMPT_KEYS:
+                else:
                     print(
                         f"Not using '{k}' as a summary prompt: a prompt is stored "
                         "under a key of the form 'N#Title', where N is a sequence "
@@ -170,9 +193,9 @@ def call_bedrock(prompt_data):
     return generated_text
 
 
-def generate_summary(transcript, prompt_override):
+def generate_summary(transcript, prompt_override, refresh_configuration=False):
     # first check to see if this is one prompt, or many prompts as a json
-    templates = get_templates_from_dynamodb(prompt_override)
+    templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
     result = {}
     for item in templates:
         key = list(item.keys())[0]
@@ -258,7 +281,11 @@ def handler(event, context):
         prompt_override = None
         if "Prompt" in event:
             prompt_override = event["Prompt"]
-        summary = generate_summary(transcript, prompt_override)
+        # The Regenerate button's invoke sets this, because the panel promises
+        # that pressing it uses the prompt templates as they are now. An
+        # end-of-meeting run does not, and is served from the cache.
+        refresh_configuration = bool(event.get("RefreshConfiguration"))
+        summary = generate_summary(transcript, prompt_override, refresh_configuration)
         if not prompt_override:
             # only write to S3 when using default summary prompt
             write_to_s3(callId, metadata, transcript, summary)

@@ -77,7 +77,7 @@ The eight nested stacks that do not receive the value are the LLM-template, chat
 
 1. Add the `PermissionsBoundary` property to the 16 `AWS::Serverless::Function` resources with a generated role — starting with the 3 in `lma-main.yaml`, which block everything else.
 2. Add the `PermissionsBoundaryArn` parameter to `lma-vpc-stack`, and pass the value to the eight nested stacks that do not currently receive it.
-3. Add the `PermissionsBoundary` property to the 48 declared roles that do not yet have it, 35 of them in `lma-ai-stack`.
+3. Add the `PermissionsBoundary` property to the 46 declared roles that do not yet have it, 33 of them in `lma-ai-stack`.
 4. Author the boundary policy itself. It must allow everything the LMA roles legitimately do; a practical starting point is the action lists from the three inline policies in `LMA-Cloudformation-Service-Role.yaml`, narrowed to your account's resources and regions.
 
 ### Trying it on a test stack
