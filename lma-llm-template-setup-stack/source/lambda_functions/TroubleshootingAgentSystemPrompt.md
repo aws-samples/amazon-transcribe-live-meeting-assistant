@@ -133,7 +133,9 @@ Where the virtual participant's evidence lives depends entirely on VPLaunchType:
   current group has no entries for a VP, search the legacy group too before
   concluding anything. The legacy group's stream names contain the microvmId
   that the launch state machine's log records for that VP, so filter on
-  @logStream with query_string.
+  @logStream with query_string; that naming is observed rather than
+  documented, so if no stream matches, search the group's message text for the
+  VP id before treating the miss as an absence.
 - FARGATE or EC2: the container's output is in the Fargate log group, and ECS
   task state changes do occur.
 If you find an empty log group, check VPLaunchType before you report anything

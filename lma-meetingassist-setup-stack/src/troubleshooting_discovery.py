@@ -345,7 +345,7 @@ def stack_log_group_prefixes(
 
     # Named exactly rather than by prefix: "/aws/lambda-microvms/LMA-" would
     # also match "LMA-dev-vp-logs". Both generations, current first, ahead of
-    # everything else: in the window after an upgrade the legacy group holds
+    # every broad prefix: in the window after an upgrade the legacy group holds
     # the evidence for the participants most likely to be asked about.
     # discover_log_groups keeps only exact matches for these, because the
     # legacy "-vp" is also a prefix of "-vp-logs" and of a neighbouring
@@ -403,7 +403,9 @@ class DiscoveryResult:
                 "legacy group before concluding there is no evidence. The "
                 "launch state machine's microvmId appears in the legacy "
                 "group's stream names, so filter on @logStream with "
-                "query_string to find it."
+                "query_string to find it; if no stream matches, search the "
+                "legacy group's message text for the participant's id before "
+                "treating the miss as an absence."
             )
         if self.truncated:
             notes.append(
