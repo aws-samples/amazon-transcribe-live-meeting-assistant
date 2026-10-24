@@ -42,6 +42,8 @@ from graphql_helpers import (
     transcript_segment_fields,
     transcript_segment_sentiment_fields,
 )
+from metrics_utils import catalogue as metric_names
+from metrics_utils.emf import METRICS
 from sns_utils import publish_sns
 
 # The AWS-free computation, split out so it can be tested without importing this
@@ -1466,6 +1468,18 @@ async def execute_process_event_api_mutation(
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
+            # Counted on the same condition as the start-of-call hook below, and
+            # for the same reason: a redelivered START must not read as a second
+            # meeting. Kept out of the hook's own branch because the count is
+            # wanted whether or not a deployment configures a hook.
+            #
+            # Inside the success branch, matching the END branch below. A
+            # non-duplicate failure raises rather than being returned here, so
+            # in practice this line is unreachable with an exception in hand --
+            # but the branch above shows the contract allows one, and a meeting
+            # that could not be created has not started.
+            if not was_already_created(response):
+                METRICS.count(metric_names.MEETINGS_STARTED)
 
         # At most once per meeting. Redelivery is routine on this stream -- the
         # END branch below explains why -- and a deployment's own start-of-call
@@ -1567,6 +1581,13 @@ async def execute_process_event_api_mutation(
             return_value["errors"].append(response)
         else:
             return_value["successes"].append(response)
+            # Counted once per meeting, on the write that closed it, so that a
+            # redelivered END does not produce a second ending. A failed write
+            # is not counted at all -- it raises rather than reaching here, the
+            # batch processor attributes it to this record's sequence number,
+            # and the record is redelivered with the meeting still open.
+            if not was_already_ended:
+                METRICS.count(metric_names.MEETINGS_ENDED)
 
     elif event_type == "ADD_SUMMARY":
         LOGGER.debug("ADD_SUMMARY MUTATION ")
@@ -1702,6 +1723,31 @@ async def execute_process_event_api_mutation(
             # *add_tca_agent_assist_tasks,
             return_exceptions=True,
         )
+
+        # Counted here because this is where a lost transcript line stops being
+        # visible to anything else. `return_exceptions=True` turns a failed
+        # mutation into an ordinary result, which is collected into
+        # return_value["errors"] below and never raised -- so the batch
+        # processor does not attribute the record, nothing redelivers it on its
+        # own account, and AWS/Lambda Errors stays flat. (Another record in the
+        # same batch raising would redeliver this one along with the rest of the
+        # tail, but nothing makes that happen for this failure's sake.) These
+        # two numbers are the only notice that a segment did not reach the
+        # meeting page.
+        #
+        # gather preserves the order it was given, so the transcript-segment
+        # results are exactly the leading slice. Sentiment, category and
+        # aggregation results follow and are deliberately not counted here:
+        # those failures cost an annotation, not a transcript line.
+        segment_responses = task_responses[: len(add_transcript_tasks)]
+        failed_segments = sum(1 for r in segment_responses if isinstance(r, Exception))
+        if failed_segments:
+            METRICS.count(metric_names.TRANSCRIPT_SEGMENT_WRITE_FAILED, failed_segments)
+        if len(segment_responses) - failed_segments:
+            METRICS.count(
+                metric_names.TRANSCRIPT_SEGMENTS_WRITTEN,
+                len(segment_responses) - failed_segments,
+            )
 
         for response in task_responses:
             if isinstance(response, Exception):

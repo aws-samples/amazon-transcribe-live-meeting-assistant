@@ -7,8 +7,9 @@ SPDX-License-Identifier: MIT-0
 
 # Monitoring & Alerting
 
-LMA deploys an SNS topic for operational alerts, 12 alarms that notify it, and
-one CloudWatch dashboard per deployment. Everything described here is created by
+LMA deploys an SNS topic for operational alerts, 14 alarms that notify it, and
+one CloudWatch dashboard per deployment. (One fewer alarm where the
+stale-meeting reaper is switched off, which removes the alarm that watches it.) Everything described here is created by
 `lma-main.yaml` as part of the normal stack deployment — there is nothing extra
 to install — but **one manual step is required before any alert is delivered**:
 the email subscription SNS creates for your `AdminEmail` address starts in
@@ -21,14 +22,27 @@ watched automatically and who hears about it.
 
 ## What is watched
 
-Every alarm on this page reads a metric that an AWS service publishes on its
-own. None of them depend on LMA emitting anything, which means they work on a
-deployment that has never been touched and they keep working if application code
-changes. The consequence is that they cover infrastructure health well and
-application behaviour only indirectly: there is no alarm for "a meeting produced
-no transcript", because nothing publishes a metric for that yet. Application
-metrics are a separate piece of work, and the dashboard has a band reserved for
-them.
+The alarms fall into two groups, and the difference matters when you are reading
+one.
+
+All but two read a metric that an AWS service publishes on its own. None of
+those depend on LMA emitting anything, which means they work on a deployment
+that has never been touched and they keep working if application code changes.
+They cover infrastructure health well and application behaviour only indirectly:
+they can tell you the Call Event Processor is failing, but not that a particular
+meeting produced no transcript.
+
+The remaining two read metrics LMA publishes itself — see
+[Metrics LMA publishes](#metrics-lma-publishes) below. Both watch a condition the
+code otherwise swallows: a failure that is caught, recorded and not raised, so
+no AWS-published metric moves and nothing else would ever mention it. That is
+exactly why each is an alarm rather than only a graph. The cost of reading an
+application metric is that it depends on application code: if a component stops
+publishing, its alarm reads `OK`. Both treat missing data as not breaching, so
+an alarm with no data at all looks exactly like one that is simply quiet and
+will not be the thing that tells you. A build-time gate checks the wiring that
+would cause that, and the dashboard band note says how to tell the two apart by
+eye.
 
 ### The alarm table
 
@@ -52,6 +66,8 @@ problem.
 | `stale-meeting-reaper-not-invoked` | The stale-meeting reaper recorded no invocations in each of two consecutive hours (`Sum`, `<= 0`). Also notifies on recovery. Not created at all when the reaper is switched off. | `AlertsTopic` | `MeetingInactivityTimeoutInMinutes` (`240`; `0` removes the alarm) |
 | `bedrock-throttling` | Amazon Bedrock throttled five or more invocations (`Sum` over 5 min, `>= 5`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 | `vp-launch-failures` | The Virtual Participant launch state machine failed or timed out an execution in any of the last three 5-minute windows (`Sum`, `>= 1`). | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
+| `transcript-segment-write-failures` | One or more transcript segments failed to be written in any of the last three 5-minute windows (`Sum` of `TranscriptSegmentWriteFailed`, `>= 1`). Reads a metric LMA publishes. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
+| `meetings-without-transcript` | Three or more audio sessions streamed for at least thirty seconds and produced no transcript at all, in any of the last three 5-minute windows (`Sum` of `StreamingSessionsWithoutTranscript`, `>= 3`). Reads a metric LMA publishes. | `AlertsTopic` | `EnableOperationalAlarms` (`true`) |
 
 Each alarm carries an `AlarmDescription` written as the first few steps of a
 runbook, because the description is the only context that travels with the
@@ -115,6 +131,151 @@ was asked for and did not start. It cannot tell you that a bot started, joined,
 and then left early — ECS publishes no metric for a task that stopped
 unexpectedly, and the launch-and-admission detail lives in the Virtual
 Participant's own log group and meeting record.
+
+**`transcript-segment-write-failures` is the only notice that a transcript has a
+gap.** The Call Event Processor issues the writes for a batch of segments
+together and collects the results, including the failures, rather than raising
+on them. That is deliberate — one rejected segment should not replay the whole
+Kinesis batch — but the consequence is that the record is **not redelivered**,
+which is what sets these failures apart from every other failure in the
+pipeline. A raised failure is attributed to its record, retried, and finally
+described to the event source's on-failure destination, where the
+discarded-records-queue-depth alarm picks it up. This one reaches neither on its
+own account, so that queue stays empty. It is redelivered only if some other
+record in the same batch raises, which redelivers everything after it.
+
+`AWS/Lambda Errors` does not move for either, so it cannot be used to tell
+them apart: a raised failure that the batch processor can attribute to a record
+still leaves the invocation returning a partial-batch response normally. It
+moves only where a failure carries no sequence number at all, which is the one
+case the handler fails the whole invocation for. The transcript simply has a line
+missing, on a meeting page with no error on it.
+
+If this alarm fires, read the Call Event Processor's log group for `max retries
+on query` over the same window; each of those lines carries the exception type
+and the GraphQL `errorType`. Search for that string rather than the handler's
+`event processor error`, which reports only failures that were raised — and the
+point of this metric is that these were not, so grepping for it finds nothing
+in the window that fired. Segments already lost cannot be replayed once their
+Kinesis records pass the stream's 24-hour retention, so a sustained rate
+is urgent in a way a single occurrence is not.
+
+**`meetings-without-transcript` deliberately ignores short sessions.** The
+transcriber counts a session only if it ran for at least thirty seconds and
+produced nothing, because below that the overwhelmingly common case is somebody
+who started streaming and changed their mind. The alarm then needs three in a
+five-minute window, so one genuinely odd meeting does not page anybody while a
+pattern does. The usual causes, in the order worth checking: the Amazon
+Transcribe concurrent-stream quota being exhausted, which
+`transcribe-concurrent-streams-near-quota` should have notified first; a
+language code or custom vocabulary the account does not have; and, where the
+MicroVM ASR engine is selected on the Transcription Engine page, an engine that
+could not start with fallback to Amazon Transcribe switched off.
+
+What it cannot see: meetings that do not go through the transcriber. A Virtual
+Participant runs Amazon Transcribe, or the MicroVM ASR engine, inside its own
+container and writes transcript segments straight to Kinesis, so a Virtual
+Participant that joins a meeting and transcribes nothing is not counted here
+and this alarm will not fire for it. The same goes for an uploaded recording.
+For a deployment whose meetings are mostly Virtual Participant ones, this alarm
+covers very little — the Virtual Participant publishes no metrics of its own
+yet, which is the first gap named under
+[What is not published yet](#what-is-not-published-yet).
+
+One case to expect noise from: a transcriber task replaced mid-meeting, by a
+deployment or by scale-in. Its shutdown closes the server, which closes each
+connected socket, which runs the same per-meeting teardown a client
+disconnecting would — so a meeting it had carried for more than thirty seconds
+without a transcript yet is counted, even though what ended it was the
+infrastructure and not a transcription fault. Whether the count lands is
+a race: the process exits as soon as the server has closed, and the teardown
+runs from an asynchronous close handler. So treat a small number of these
+concurrent with a deployment or a scale-in event as explained by it, and read
+`transcriber-service-no-tasks` and the ECS task-count widget alongside. The
+alarm needs three in a five-minute window partly for this reason.
+
+**Why there is no alarm on how long a transcript takes to appear.**
+`TimeToFirstTranscriptSegmentMs` is the obvious thing to alarm on and the wrong
+thing. It measures from a meeting's audio session opening to its first
+transcript segment, and what dominates that interval is when somebody first
+speaks — so a meeting that starts five minutes before anybody talks produces a
+five-minute value, and a threshold low enough to catch a real problem would fire
+on every quiet meeting. The failure worth alarming on is "no transcript at all",
+which `meetings-without-transcript` counts directly. The latency is graphed
+instead, where its distribution is informative and a single value is not.
+
+## Metrics LMA publishes
+
+Two of the alarms above, and one band of the dashboard, read metrics the
+application emits rather than metrics an AWS service emits. There are seven of
+them, and they answer one question end to end: a meeting was asked for — did a
+transcript come out of it, how long did that take, and was anything dropped on
+the way?
+
+They are published in the CloudWatch namespace **`<stack-name>`** — the name of
+the top-level LMA stack, so two deployments in one account never mix. Each
+emitting component is told that namespace by a `METRIC_NAMESPACE` environment
+variable, which is what makes the dashboard and the alarms work on any stack
+name without being edited.
+
+| Metric | Unit | Published by | What it means |
+|---|---|---|---|
+| `MeetingsStarted` | Count | Call Event Processor | A meeting record was created. Counted once per meeting: the Kinesis stream redelivers routinely, and a redelivered start event finds the record already there and is not counted again. |
+| `MeetingsEnded` | Count | Call Event Processor | A meeting was marked ended, counted on the write that closed it. Read against `MeetingsStarted` over a long window rather than a short one — a live meeting is legitimately started and not yet ended. |
+| `TranscriptSegmentsWritten` | Count | Call Event Processor | Transcript segment writes that AppSync accepted. Counts partial segments as well as final ones, so it tracks pipeline throughput rather than the number of things said. |
+| `TranscriptSegmentWriteFailed` | Count | Call Event Processor | Transcript segment writes that failed. Alarmed; see the note above for why nothing else reports these. |
+| `StreamingSessionsStarted` | Count | WebSocket transcriber | A live audio session opened for a meeting, and the denominator for the metric below. One per audio session, not per meeting: a client that drops its socket and reconnects for the same meeting opens a second session and is counted again, where `MeetingsStarted` is not. Video sockets are separate and are not counted. **Counts only meetings streamed through the transcriber** — Stream Audio, the browser extension and the desktop app. A Virtual Participant transcribes in its own container and writes to Kinesis itself, and an uploaded recording never opens a live session, so neither appears here even though both are counted by `MeetingsStarted`. |
+| `TimeToFirstTranscriptSegmentMs` | Milliseconds | WebSocket transcriber | Milliseconds from a meeting's audio session opening to its first transcript segment reaching Kinesis, emitted once per audio session, so a client that reconnects produces a second value measured from the reconnect. Graphed, not alarmed; see the note above. |
+| `StreamingSessionsWithoutTranscript` | Count | WebSocket transcriber | A session closed having produced no transcript segment at all, after running long enough that silence is a fault. Alarmed. |
+
+### How they are published, and what that implies
+
+The records are written in [CloudWatch's embedded metric
+format](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format.html):
+a line of JSON in the emitting component's own log group, which CloudWatch Logs
+turns into a metric at ingestion. Nothing calls `PutMetricData`, and no IAM role
+gained `cloudwatch:PutMetricData` — AWS documents the embedded format as needing
+only the log-writing permission these components already have. Three
+consequences are worth knowing before you read a graph:
+
+- **The log group is the audit trail.** Every datapoint is still a log event, so
+  a number you do not believe can be traced to the record that produced it with
+  a Logs Insights query over the Call Event Processor's or the transcriber's log
+  group, filtering on the metric's name.
+- **A count can be slightly out, in either direction.** AWS documents the
+  format as guaranteeing at-least-once delivery with occasional duplicates, so
+  any of these can read high. Two have their own reasons to drift.
+  `MeetingsStarted` can read low: it skips a start event that finds the meeting
+  already stored, and a first delivery whose own earlier attempt stored the
+  meeting and then failed in transit is indistinguishable from a redelivery.
+  `TranscriptSegmentsWritten` can read high: when one record in a Kinesis batch
+  raises, every record after it is redelivered, and segments already written by
+  those later records are written and counted again. None of these is a billing
+  input, so the trade is the right one — but do not read either as an exact
+  census.
+- **Datapoints can arrive a little late**, because the log has to be flushed and
+  ingested first, and neither Lambda nor the ECS `awslogs` driver lets the
+  application control when. Both alarms on these metrics therefore need only one
+  breaching period out of the last three, which is what AWS recommends for this
+  case: it absorbs a datapoint landing in the period after the one it belongs to
+  without missing the event.
+
+### What is not published yet
+
+The Virtual Participant, the MicroVM ASR engine and the Meeting Assistant
+publish nothing. That means there is still no metric for the fraction of
+Virtual Participant joins that fail and on which trigger, for how often ASR
+falls back to Amazon Transcribe, or for assistant and Bedrock latency and
+failure rates. The Virtual Participant is the significant one: it transcribes
+in its own container rather than through the transcriber, so none of the three
+session metrics above covers a Virtual Participant meeting, and the equivalent
+of `StreamingSessionsWithoutTranscript` for it does not exist.
+
+All of it remains diagnosable only from the log groups
+[Troubleshooting](troubleshooting.md) names. It is a separate piece of work,
+deliberately: the Virtual Participant's exit-reason taxonomy wants to be a
+metric dimension, and whether its value space is closed enough to be one needs
+checking before it becomes a billed dimension on a custom metric.
 
 ## Subscribing to the alerts topic
 
@@ -193,12 +354,23 @@ needing a second round trip through somebody's inbox.
 In us-east-1, a standard-resolution CloudWatch alarm costs $0.10 per alarm
 metric per month, with the first ten alarm metrics included at no charge. **An
 alarm built on a metric-math expression bills per metric referenced in the
-expression, not per alarm**, so the 12 alarms here are 14 billable alarm metrics
-— ten reading a single metric each, plus two metric-math alarms reading two
-metrics each. That is $0.40 per month for an account with the free allowance
-still available, and $1.40 per month for one that has already used it elsewhere.
+expression, not per alarm**, so the 14 alarms here are 16 billable alarm metrics
+— twelve reading a single metric each, plus two metric-math alarms reading two
+metrics each. That is $0.60 per month for an account with the free allowance
+still available, and $1.60 per month for one that has already used it elsewhere.
 
-The dashboard references 26 metrics, comfortably inside the metric allowance for
+The seven metrics LMA publishes are **custom metrics**, which are billed
+separately from the alarms that read them: $0.30 per metric per month in
+us-east-1 for the first 10,000, so $2.10 per month per stack, with the first ten
+custom metrics in an account included at no charge. None of them carries a
+dimension, which is the thing to keep an eye on if you add more: a custom metric
+is billed per unique combination of name and dimension values, so a dimension
+with a hundred values is a hundred metrics. Their records are also log events,
+so they add log ingestion and storage — a few hundred bytes per meeting and per
+batch of transcript segments, which is immaterial next to the transcript log
+volume itself.
+
+The dashboard references 37 metrics, comfortably inside the metric allowance for
 a free dashboard, and CloudWatch includes three dashboards per account at no
 charge. An account that already has three custom dashboards pays $3.00 per month
 for this one, which is the realistic case for anyone running several LMA stacks
@@ -231,7 +403,11 @@ mislead. Reading top to bottom:
 | Transcriber target health | `HealthyHostCount` and `UnHealthyHostCount` | Whether new meetings can connect at all. Zero healthy targets refuses every new connection. |
 | Transcriber load balancer | `TargetResponseTime` p99 and `HTTPCode_Target_5XX_Count` | Errors at the edge. Response time is of limited use here: a meeting is one long-lived WebSocket, so what is being timed is the upgrade handshake, not the meeting. |
 | GraphQL API | `4XXError`, `5XXError` and `Latency` p99 | What the web UI is experiencing. 4XX is usually an expired client token and is not alarmed; 5XX is a failing resolver and is. |
-| Application metrics | Nothing yet — a reserved band | Per-meeting counts, transcript-segment latency and assistant turn latency will appear here once the application publishes them. |
+| Application metrics (band header) | A note naming the namespace these widgets read | The four widgets in this band come from LMA rather than from an AWS service; the error tables further down are Logs Insights queries, not metrics. If a series in the band is empty while meetings are running, the component is not publishing rather than nothing having happened — check that `METRIC_NAMESPACE` is set on it. |
+| Meetings | `MeetingsStarted`, `MeetingsEnded` and `StreamingSessionsStarted` | Whether meetings are happening, and whether they are finishing. Started and ended will not match over a short window, because a live meeting has started and not ended; a persistent gap over hours is meetings that never closed, which is what the stale-meeting reaper exists for. Live audio sessions count only the meetings streamed through the transcriber, so they are lower than meetings started by however many Virtual Participant and uploaded-recording meetings the deployment has — not a fault. |
+| Time to first transcript segment | `TimeToFirstTranscriptSegmentMs` at minimum, average, p90 and p99 | How long a meeting waits for its transcript to begin. Read the shape, not a value: the interval is dominated by when somebody first speaks, so the minimum is the closest thing here to a measure of the pipeline itself, and a rising p90 with a flat minimum usually means meetings are starting earlier rather than the pipeline slowing. |
+| Transcript segment writes | `TranscriptSegmentsWritten` and `TranscriptSegmentWriteFailed`, annotated at the alarm threshold | Whether the transcript is reaching the meeting page. Any value on the failure series is a line that is simply missing, with no error on the meeting page and nothing on the discarded-records queue. |
+| Audio sessions that produced no transcript | `StreamingSessionsWithoutTranscript` against `StreamingSessionsStarted`, annotated at the alarm threshold | Sessions that streamed audio and got nothing back. Sessions under thirty seconds are not counted, so a value here is a session that ran long enough for silence to be a fault rather than a user who changed their mind — though a muted room or a meeting abandoned at minute two still lands here, which is why the alarm needs three in a window. Read against sessions opened: one in fifty is a different problem from one in two. |
 | Four error-log tables | The most recent 50 lines matching `/ERROR/` in the Call Event Processor, the Virtual Participant launch state machine, the Virtual Participant container and the WebSocket transcriber container log groups | A first look without leaving the dashboard. These are CloudWatch Logs Insights queries, so they run on demand and are billed per query, not continuously. |
 
 The dashboard is created whether or not `EnableOperationalAlarms` is `true`.

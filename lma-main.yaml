@@ -3373,6 +3373,7 @@ Resources:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-websocket-transcriber-stack/<VERSION_TOKEN>/template.yaml
       # yamllint enable rule:line-length
       Parameters:
+        LMAStackName: !Ref AWS::StackName
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
@@ -4106,13 +4107,108 @@ Resources:
         - !Ref AlertsTopic
 
   ##########################################################################
+  # Alarms on metrics LMA publishes itself
+  #
+  # Unlike every alarm above, these read metrics the application emits, in the
+  # namespace ${AWS::StackName}. Both watch a condition the code otherwise
+  # swallows -- a failure that is caught, recorded and not raised -- which is
+  # why each is an alarm and not only a dashboard widget: the metric is the
+  # only notice anybody gets, and a number nobody is paged on is not one.
+  #
+  # Both use one breaching period out of three rather than one out of one.
+  # These metrics arrive by way of CloudWatch Logs rather than PutMetricData,
+  # and AWS recommends an M-of-N alarm where the log flush interval is not
+  # under the application's control -- which on Lambda and on the ECS awslogs
+  # driver it is not. One of three absorbs a datapoint that lands in the next
+  # period without missing the event.
+  #
+  # Both alarms are named for meetings, which is what an operator is looking
+  # for, but the no-transcript one counts audio sessions: a client that
+  # reconnects for the same meeting opens a second session. The description and
+  # the docs say so; the name is left readable.
+  #
+  # Neither uses metric math. Alarming on the *absence* of a first transcript
+  # segment while meetings were starting would need two metrics and FILL;
+  # StreamingSessionsWithoutTranscript counts that condition directly in the one
+  # component that can observe it, so a plain threshold says the same thing and
+  # avoids FILL, which makes an expression dense and so stops TreatMissingData
+  # from ever being consulted.
+  ##########################################################################
+  TranscriptSegmentWriteFailuresAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-transcript-segment-write-failures"
+      AlarmDescription: >-
+        A transcript segment did not reach the meeting page and nothing else
+        reports it. The Call Event Processor gathers these writes with
+        return_exceptions set, so a failed one is collected into the
+        invocation's result rather than raised, and is therefore not redelivered
+        on its own account: a raised failure would be attributed to its Kinesis
+        record, retried, and finally described to the on-failure destination
+        another alarm watches, while this one reaches neither. The transcript
+        simply has a gap. Read the Call Event Processor's log group for 'max
+        retries on query' over the same period; that line carries the exception
+        type and the GraphQL errorType, and is the one these failures produce.
+        An expired caller token, a rejected AppSync write and a DynamoDB
+        capacity error all land here. Lines already lost cannot be replayed once
+        their records age out of the stream's 24-hour retention, so treat a
+        sustained rate as urgent.
+      Namespace: !Ref AWS::StackName
+      MetricName: TranscriptSegmentWriteFailed
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  MeetingsWithoutTranscriptAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Condition: ShouldCreateOperationalAlarms
+    Properties:
+      AlarmName: !Sub "${AWS::StackName}-meetings-without-transcript"
+      AlarmDescription: >-
+        Three or more audio sessions streamed for at least thirty seconds and
+        produced no transcript at all. Sessions, not meetings: a client
+        reconnecting for the same meeting opens a second one, and only meetings
+        streamed through the transcriber are counted -- a Virtual Participant
+        transcribes in its own container and never appears here. Nothing else
+        reports this: the session closes normally, the meeting reaches ENDED,
+        and the meeting page shows an empty transcript with no error on it. Read
+        the transcriber's container log group for '[TRANSCRIBING]' lines over
+        the same period. The usual causes are an exhausted Amazon Transcribe
+        streaming quota, which the near-quota alarm should have notified first;
+        a language code or custom vocabulary the account does not have; and,
+        where the MicroVM ASR engine is selected, an engine that could not start
+        with fallback switched off.
+      Namespace: !Ref AWS::StackName
+      MetricName: StreamingSessionsWithoutTranscript
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 3
+      DatapointsToAlarm: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref AlertsTopic
+
+  ##########################################################################
   # Operational dashboard
   #
   # One template-level dashboard rather than a Lambda that merges fragments
   # from each nested stack: every identifier the widgets need is already a
   # nested stack Output, so the variable map of the list form of Fn::Sub is
-  # enough. Widgets read only metrics AWS services publish; the band reserved
-  # near the bottom is where application metrics will go.
+  # enough. The widgets above the "Application metrics" band read metrics AWS
+  # services publish; the four metric widgets in that band read metrics LMA
+  # publishes itself, in the namespace ${AWS::StackName} -- which needs no
+  # variable in the map below, since Fn::Sub resolves the pseudo-parameter
+  # directly. The log tables after the band are Logs Insights queries, not
+  # metrics.
   ##########################################################################
   OperationalDashboard:
     Type: AWS::CloudWatch::Dashboard
@@ -4298,11 +4394,82 @@ Resources:
               {
                 "type": "text", "x": 0, "y": 38, "width": 24, "height": 2,
                 "properties": {
-                  "markdown": "## Application metrics\n\nReserved. Nothing is published here yet: every widget above reads a metric an AWS service emits on its own, and LMA does not yet emit metrics of its own. Per-meeting counts, transcript-segment latency and assistant turn latency will appear in this band once the application publishes them."
+                  "markdown": "## Application metrics\n\nThe four widgets in this band are published by LMA itself, in the namespace **${AWS::StackName}**, as Embedded Metric Format records in the emitting component's own log group. (The error tables below them are Logs Insights queries, not metrics.) A series that is empty here when meetings are running means the component is not publishing rather than that nothing happened — check that `METRIC_NAMESPACE` is set on it. Virtual Participant, MicroVM ASR and Meeting Assistant metrics are not published yet."
                 }
               },
               {
-                "type": "log", "x": 0, "y": 40, "width": 12, "height": 6,
+                "type": "metric", "x": 0, "y": 40, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Meetings — started and ended are counted once each; a live meeting is legitimately started and not ended",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "MeetingsStarted", {"label": "Meetings started"}],
+                    ["${AWS::StackName}", "MeetingsEnded", {"label": "Meetings ended"}],
+                    ["${AWS::StackName}", "StreamingSessionsStarted", {"label": "Live audio sessions opened"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 40, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Time to first transcript segment (ms) — mostly measures when somebody first spoke, so read the shape and not a value",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "TimeToFirstTranscriptSegmentMs", {"stat": "Minimum", "label": "Fastest"}],
+                    ["${AWS::StackName}", "TimeToFirstTranscriptSegmentMs", {"stat": "Average", "label": "Average"}],
+                    ["${AWS::StackName}", "TimeToFirstTranscriptSegmentMs", {"stat": "p90", "label": "p90"}],
+                    ["${AWS::StackName}", "TimeToFirstTranscriptSegmentMs", {"stat": "p99", "label": "p99"}]
+                  ]
+                }
+              },
+              {
+                "type": "metric", "x": 0, "y": 46, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Transcript segment writes — a failure here is a gap in a transcript that nothing else reports",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "TranscriptSegmentsWritten", {"label": "Written"}],
+                    ["${AWS::StackName}", "TranscriptSegmentWriteFailed", {"label": "Failed", "yAxis": "right"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-transcript-segment-write-failures notifies at or above this",
+                        "value": 1,
+                        "yAxis": "right"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "metric", "x": 12, "y": 46, "width": 12, "height": 6,
+                "properties": {
+                  "title": "Audio sessions that produced no transcript — under thirty seconds is not counted, so a value here is a session long enough that silence is usually a fault",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "StreamingSessionsWithoutTranscript", {"label": "Sessions with no transcript"}],
+                    ["${AWS::StackName}", "StreamingSessionsStarted", {"label": "Sessions opened", "yAxis": "right"}]
+                  ],
+                  "annotations": {
+                    "horizontal": [
+                      {
+                        "label": "${AWS::StackName}-meetings-without-transcript notifies at or above this",
+                        "value": 3
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "type": "log", "x": 0, "y": 52, "width": 12, "height": 6,
                 "properties": {
                   "title": "Errors — Call Event Processor",
                   "region": "${AWS::Region}",
@@ -4311,7 +4478,7 @@ Resources:
                 }
               },
               {
-                "type": "log", "x": 12, "y": 40, "width": 12, "height": 6,
+                "type": "log", "x": 12, "y": 52, "width": 12, "height": 6,
                 "properties": {
                   "title": "Errors — Virtual Participant launch state machine",
                   "region": "${AWS::Region}",
@@ -4320,7 +4487,7 @@ Resources:
                 }
               },
               {
-                "type": "log", "x": 0, "y": 46, "width": 12, "height": 6,
+                "type": "log", "x": 0, "y": 58, "width": 12, "height": 6,
                 "properties": {
                   "title": "Errors — Virtual Participant container",
                   "region": "${AWS::Region}",
@@ -4329,7 +4496,7 @@ Resources:
                 }
               },
               {
-                "type": "log", "x": 12, "y": 46, "width": 12, "height": 6,
+                "type": "log", "x": 12, "y": 58, "width": 12, "height": 6,
                 "properties": {
                   "title": "Errors — WebSocket transcriber container",
                   "region": "${AWS::Region}",

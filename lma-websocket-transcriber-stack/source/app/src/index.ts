@@ -46,6 +46,8 @@ import {
 
 import { jwtVerifier, getAuthenticatedCaller } from './utils/jwt-verifier';
 
+import { noteStreamingSessionStarted, noteStreamingSessionEnded } from './metrics/session';
+
 import {
     VideoSession,
     startVideoSession,
@@ -492,6 +494,11 @@ const onTextMessage = async (
             ownerSub: getAuthenticatedCaller(request)?.sub,
         };
         socketMap.set(ws, socketCallMap);
+        // Before transcription starts, so the clock the time-to-first-segment
+        // metric reads covers establishing the engine's stream as well. That is
+        // part of what an operator asking "why is there no transcript" is
+        // waiting on.
+        noteStreamingSessionStarted(socketCallMap.callMetadata);
         await startTranscription(socketCallMap, server);
     } else if (callMetaData.callEvent === 'SPEAKER_CHANGE') {
         const socketData = socketMap.get(ws);
@@ -637,6 +644,11 @@ const endCall = async (
 
     if (socketData !== undefined && socketData.ended === false) {
         socketData.ended = true;
+
+        // Inside the ran-once guard, so a second close does not count the same
+        // meeting twice. Emits only when the session produced no transcript at
+        // all, which is the one ending nothing else reports.
+        noteStreamingSessionEnded(socketData.callMetadata);
 
         if (callMetaData !== undefined && callMetaData != null) {
             await writeCallEndEvent(callMetaData, server);

@@ -2847,7 +2847,25 @@ Resources:
       Timeout: 900
       Environment:
         Variables:
-          POWERTOOLS_METRICS_NAMESPACE: !Sub "TranscriptProcessor-${AWS::StackName}"
+          # The CloudWatch namespace this function's application metrics are
+          # published under. LMAStackName, not AWS::StackName: this is a nested
+          # stack, so AWS::StackName is a generated name nobody can predict,
+          # while the dashboard and the alarms live in the parent template and
+          # select on the parent's name. Writing it as anything else publishes
+          # to a namespace nothing reads.
+          #
+          # No cloudwatch:PutMetricData grant accompanies this. The metrics are
+          # written as Embedded Metric Format records on stdout and extracted by
+          # CloudWatch Logs, which AWS documents as needing only the
+          # log-writing permission the function already has.
+          METRIC_NAMESPACE: !Ref LMAStackName
+          # Powertools' own name for the same thing, kept equal to it. Nothing
+          # reads this today -- the emitter is passed METRIC_NAMESPACE
+          # explicitly -- but aws-lambda-powertools is on this function's layer,
+          # so anything later written with powertools Metrics picks this up by
+          # default. Two names for one namespace that disagreed would publish
+          # half the metrics where nothing is looking; a gate asserts they match.
+          POWERTOOLS_METRICS_NAMESPACE: !Ref LMAStackName
           POWERTOOLS_SERVICE_NAME: TranscriptProcessor
           # Used by transcript_enrichment_layer's get_owner_from_jwt to validate
           # Cognito access tokens against the JWKS for the LMA user pool.

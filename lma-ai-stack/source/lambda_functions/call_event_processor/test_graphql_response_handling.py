@@ -121,6 +121,11 @@ try:
     from gql.transport.exceptions import TransportQueryError
     from graphql import build_ast_schema, parse
     from graphql_helpers.response import GraphQLResponseError
+
+    # The metric catalogue, imported here for the same reason as the others: the
+    # module under test must get this exact module object, so that the names the
+    # tests assert on are the names it emits.
+    from metrics_utils import catalogue as metric_names
 except ModuleNotFoundError as exc:  # pragma: no cover - depends on the environment
     pytest.skip(
         f"needs gql, graphql-core and the transcript enrichment layer; "
@@ -690,3 +695,309 @@ def test_only_the_already_created_marker_counts_as_already_created():
     assert cep.was_already_created({"ok": True}) is False
     assert cep.was_already_created({"createCall": {"CallId": "call-1"}}) is False
     assert cep.was_already_created(None) is False
+
+
+# ── what the application metrics count ──────────────────────────────────────
+#
+# These drive the real dispatch rather than calling the emitter directly, since
+# the thing that can be wrong is *when* a metric is counted, not how a record is
+# written -- metrics_utils/test_emf.py covers the record. Two kinds of mistake
+# are in range here and neither shows up anywhere else: counting a redelivered
+# event as a second meeting, which the Kinesis event source makes routine; and
+# counting a write that failed, which would make the meeting count disagree with
+# the meetings that exist while looking healthier than the truth.
+
+
+class QueuedSession:
+    """An AppSync session that answers each ``execute`` from a queue.
+
+    ``FakeSession`` answers everything with one response, which is enough for a
+    single-mutation path. The transcript-segment and END paths issue several
+    queries in a fixed order, and what is being asserted is the difference
+    between an earlier one succeeding and a later one failing.
+    """
+
+    def __init__(self, schema: Any, responses: List[Any]) -> None:
+        self.client = types.SimpleNamespace(schema=schema)
+        self.responses = list(responses)
+        self.queries: List[Any] = []
+
+    async def execute(self, query: Any) -> Any:
+        self.queries.append(query)
+        # The last response repeats, so a path that fans out to an unknown
+        # number of identical mutations does not need them all written out.
+        response = self.responses.pop(0) if len(self.responses) > 1 else self.responses[0]
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+class RecordingEmitter:
+    """Collects metric calls in place of writing records."""
+
+    def __init__(self) -> None:
+        self.counts: Dict[str, float] = {}
+        self.measurements: Dict[str, List[float]] = {}
+
+    @property
+    def enabled(self) -> bool:
+        return True
+
+    def count(self, name: str, value: float = 1) -> None:
+        self.counts[name] = self.counts.get(name, 0) + value
+
+    def measure(self, name: str, value: float) -> None:
+        self.measurements.setdefault(name, []).append(value)
+
+    def flush(self) -> None:
+        pass
+
+
+@pytest.fixture
+def emitted(monkeypatch) -> RecordingEmitter:
+    recorder = RecordingEmitter()
+    monkeypatch.setattr(cep, "METRICS", recorder, raising=True)
+    return recorder
+
+
+def process_event(session: Any, message: Dict[str, Any], monkeypatch) -> None:
+    """Runs one event through the real dispatch with the hooks switched off.
+
+    The retry backoff is made instant. The cases below that assert on a *failed*
+    write go through `execute_gql_query_with_retries`, whose default backoff
+    sleeps for real -- three attempts at a 0.75-second base cost about six
+    seconds per test, and these tests are about which metric is counted rather
+    than about how long a retry waits. The retries themselves still happen, so
+    the path under test is unchanged.
+    """
+
+    async def instant(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", instant)
+    monkeypatch.setattr(cep, "START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN", "", raising=False)
+    monkeypatch.setattr(cep, "TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN", "", raising=False)
+    monkeypatch.setattr(cep, "SPEAKER_NAME_RESOLVER_ARN", "", raising=False)
+    monkeypatch.setattr(cep, "IS_TRANSCRIPT_SUMMARY_ENABLED", False, raising=False)
+    monkeypatch.setattr(cep, "IS_SENTIMENT_ANALYSIS_ENABLED", False, raising=False)
+    monkeypatch.setattr(cep, "IS_LAMBDA_AGENT_ASSIST_ENABLED", False, raising=False)
+    monkeypatch.setattr(cep, "SETTINGS", {}, raising=False)
+    run(
+        cep.execute_process_event_api_mutation(
+            message=message,
+            settings={},
+            appsync_session=session,
+            sns_client=None,
+            agent_assist_args={},
+            sentiment_analysis_args={},
+        )
+    )
+
+
+def test_a_first_start_event_counts_one_meeting_started(schema, emitted, monkeypatch):
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    process_event(
+        FakeSession(schema, created),
+        {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"},
+        monkeypatch,
+    )
+    assert emitted.counts.get(metric_names.MEETINGS_STARTED) == 1
+
+
+def test_a_redelivered_start_event_counts_no_meeting_started(schema, emitted, monkeypatch):
+    """Otherwise the meeting count measures stream redelivery, not meetings.
+
+    The same condition the start-of-call hook uses, deliberately: if the two
+    ever disagree, one of them is wrong about whether a meeting began.
+    """
+    already_created = TransportQueryError(
+        "Item already exists",
+        errors=[{"message": "Item already exists", "errorType": "DynamoDB"}],
+    )
+    process_event(
+        FakeSession(schema, already_created),
+        {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"},
+        monkeypatch,
+    )
+    assert metric_names.MEETINGS_STARTED not in emitted.counts
+
+
+def test_a_failed_create_counts_no_meeting_started(schema, emitted, monkeypatch):
+    """A meeting that could not be created has not started.
+
+    `was_already_created` is false for an ordinary failure as well as for a
+    first delivery, so on its own it would not tell these two apart. What does
+    is that a failure the resolver did not reject as a duplicate propagates out
+    of the dispatch instead of being returned, so the count is never reached and
+    the record is redelivered. This asserts that, rather than leaving it to be
+    reasoned about: if `execute_create_call_mutation` ever starts returning its
+    exceptions, the meeting count silently begins including meetings that do not
+    exist.
+    """
+    rejected = TransportQueryError(
+        "service unavailable",
+        errors=[{"message": "service unavailable", "errorType": "ServiceUnavailable"}],
+    )
+    with pytest.raises(Exception):  # noqa: B017 - the transport's own type
+        process_event(
+            FakeSession(schema, rejected),
+            {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"},
+            monkeypatch,
+        )
+    assert metric_names.MEETINGS_STARTED not in emitted.counts
+
+
+def test_an_end_event_counts_one_meeting_ended(schema, emitted, monkeypatch):
+    # getCall first -- a meeting still open -- then the status write.
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "STARTED"}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert emitted.counts.get(metric_names.MEETINGS_ENDED) == 1
+
+
+def test_a_redelivered_end_event_counts_no_meeting_ended(schema, emitted, monkeypatch):
+    """A meeting already ENDED is not ending again."""
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "ENDED"}},
+            {"updateCallStatus": {"CallId": "call-1", "Status": "ENDED"}},
+        ],
+    )
+    process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert metric_names.MEETINGS_ENDED not in emitted.counts
+
+
+def test_a_failed_status_write_counts_no_meeting_ended(schema, emitted, monkeypatch):
+    """The record is redelivered, so the meeting has not ended yet.
+
+    Counting it here would both overstate the ending and count it twice: once
+    now, and again when the redelivery succeeds.
+
+    Unlike the transcript-segment mutations, the status write is awaited
+    directly rather than gathered, so its failure propagates out of the
+    dispatch. The raise is asserted here too, because it is the reason this
+    metric needs no alarm of its own -- but not because it reaches
+    AWS/Lambda Errors, which it does not: the batch processor attributes the
+    exception to the record's sequence number and the invocation returns a
+    partial-batch response normally. What makes the failure visible is that the
+    record is redelivered, and a record that cannot succeed eventually reaches
+    the event source's on-failure destination, which the
+    discarded-records-queue-depth alarm watches. A gathered segment failure gets
+    none of that, which is what the two metrics are for.
+    """
+    session = QueuedSession(
+        schema,
+        [
+            {"getCall": {"CallId": "call-1", "Status": "STARTED"}},
+            TransportQueryError("boom", errors=[{"message": "boom"}]),
+        ],
+    )
+    with pytest.raises(Exception):  # noqa: B017 - the transport's own type
+        process_event(session, {"EventType": "END", "CallId": "call-1"}, monkeypatch)
+    assert metric_names.MEETINGS_ENDED not in emitted.counts
+
+
+# The responses a transcript-segment event draws, in the order it draws them:
+# the meeting record for the segment being written, then the scored segments the
+# meeting aggregation is computed from. The last response in a QueuedSession
+# repeats, so it answers both the segment write and the aggregation write.
+def segment_path_responses(write_response: Any) -> List[Any]:
+    return [
+        {"getCall": {"CallId": "call-1", "Status": "STARTED"}},
+        SENTIMENT_RESPONSES["populated"],
+        write_response,
+    ]
+
+
+SEGMENT_EVENT = {
+    "EventType": "ADD_TRANSCRIPT_SEGMENT",
+    "CallId": "call-1",
+    "Transcript": "hello there",
+    "IsPartial": False,
+    # The schema declares both Float!, and normalisation passes through whatever
+    # the producer sent, so omitting them fails query building rather than the
+    # write. A non-zero EndTime also gives the meeting aggregation a duration to
+    # write, which is what puts a non-segment task in the gather below.
+    "StartTime": 0.0,
+    "EndTime": 1.5,
+}
+
+
+@pytest.fixture
+def gathered(monkeypatch) -> Dict[str, Any]:
+    """Records how many tasks the segment path hands to `asyncio.gather`.
+
+    The segment counts are taken from a *slice* of the gathered results, because
+    the gather also carries sentiment, category and meeting-aggregation tasks
+    whose failures are not lost transcript lines. A fixture whose gather holds
+    only segment tasks cannot tell that slice from the whole list, so the tests
+    below assert the gather holds more than the slice does before believing
+    their own counts.
+
+    Every call is recorded, and `total` is the largest. The dispatch gathers
+    once today, so the distinction does not bite -- but `asyncio.gather` is
+    replaced process-wide for the test (`cep.asyncio` *is* the module), so a
+    nested gather added anywhere under this call would otherwise leave the
+    guard reading whichever happened to run last.
+    """
+    seen: Dict[str, Any] = {"calls": []}
+    real_gather = asyncio.gather
+
+    async def counting_gather(*awaitables, **kwargs):
+        seen["calls"].append(len(awaitables))
+        seen["total"] = max(seen["calls"])
+        return await real_gather(*awaitables, **kwargs)
+
+    monkeypatch.setattr(cep.asyncio, "gather", counting_gather)
+    return seen
+
+
+def test_written_segments_are_counted_and_no_failure_is(schema, emitted, gathered, monkeypatch):
+    """The ordinary path, so the failure case below is not passing vacuously.
+
+    Also pins that only the segment writes are counted. The meeting aggregation
+    is gathered alongside them and succeeds here too, so a count that read the
+    whole gather would report two segments written where one was.
+    """
+    session = QueuedSession(
+        schema,
+        segment_path_responses({"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "s1"}}),
+    )
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+
+    assert gathered["total"] > 1, (
+        "this fixture put only segment tasks in the gather, so it cannot tell a count of "
+        "the segment slice from a count of everything"
+    )
+    assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENTS_WRITTEN) == 1
+    assert metric_names.TRANSCRIPT_SEGMENT_WRITE_FAILED not in emitted.counts
+
+
+def test_a_failed_segment_write_is_counted_as_a_failure(schema, emitted, gathered, monkeypatch):
+    """The reason this metric exists.
+
+    The segment mutations are gathered with ``return_exceptions=True``, so this
+    failure is collected into the invocation's result and never raised: the
+    batch processor does not attribute the record, nothing redelivers it on its
+    own account, and AWS/Lambda Errors stays flat. Another record in the same
+    batch raising would redeliver this one with the rest of the tail, but
+    nothing makes that happen for this failure's sake. So this count is the only
+    notice that a transcript line was lost.
+    """
+    session = QueuedSession(
+        schema,
+        segment_path_responses(
+            TransportQueryError("write rejected", errors=[{"message": "write rejected"}])
+        ),
+    )
+    process_event(session, dict(SEGMENT_EVENT), monkeypatch)
+
+    assert gathered["total"] > 1, "see test_written_segments_are_counted_and_no_failure_is"
+    assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENT_WRITE_FAILED) == 1
+    assert metric_names.TRANSCRIPT_SEGMENTS_WRITTEN not in emitted.counts
