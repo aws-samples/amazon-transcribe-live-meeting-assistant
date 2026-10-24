@@ -826,6 +826,18 @@ test('a recovery scheduled while the agent is stopping opens nothing either', as
     assert.equal(opened, 0, 'a recovery scheduled after stop() began must not run');
 });
 
+test('a mode command after the agent has stopped is declined and opens nothing', async () => {
+    const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    await agent.stop();
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+
+    assert.equal(outcome.result, 'declined');
+    assert.equal(outcome.detail, 'the voice assistant has stopped');
+    assert.deepEqual(calls.filter((c) => c !== 'closeSession'), [], 'no session may be opened');
+    assert.equal((agent as any).meetingMode, 'normal');
+});
+
 test('the refresh path recovery is stopped the same way', async () => {
     // refreshSession schedules a recovery of its own when its rebuild fails,
     // and that one was equally out of stop()'s reach. Both share one timer now.

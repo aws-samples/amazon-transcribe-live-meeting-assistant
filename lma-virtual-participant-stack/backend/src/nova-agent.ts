@@ -3010,6 +3010,14 @@ export class NovaAgent implements VoiceAssistantProvider {
         detail,
       });
 
+    // A stopped agent opens no session, whichever path would open it — the
+    // same rule the recovery timers follow. `stop()` leaves the Bedrock client
+    // in place, so without this a command arriving after it could still build
+    // one through the rebuild below.
+    if (this.stopped) {
+      return notApplied('declined', 'the voice assistant has stopped');
+    }
+
     // A request is taken whole or not at all. Applying the half that parsed
     // would leave the assistant in a configuration nobody asked for, and a
     // request can carry strings from further away than this method can see —
