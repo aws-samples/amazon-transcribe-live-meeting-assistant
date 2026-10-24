@@ -1013,6 +1013,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns 200 with the diagnosis, 400 when the deployment is not configured
     for diagnosis, or 500 when the run itself failed. A failure is not retried:
     see the module docstring.
+
+    **An error body carries a fixed message and an exception type, never the
+    exception's text.** The same rule the thinking-step stream follows, and for
+    a reason that is about to matter more: today this body only reaches an IAM
+    principal holding ``lambda:InvokeFunction``, but the resolvers the design
+    calls for will forward it to a browser, and a botocore message can carry an
+    account-specific ARN. The full text goes to the log, which is where someone
+    diagnosing the diagnoser should be looking anyway.
     """
     try:
         result = run_diagnosis(event or {}, context)
@@ -1023,7 +1031,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "body": json.dumps(
                 {
                     "error": "The troubleshooting agent's system prompt is not "
-                    f"available: {exc}",
+                    "available, so it will not run. The function's log says "
+                    "which item could not be read.",
+                    "errorType": type(exc).__name__,
                 }
             ),
         }
@@ -1031,6 +1041,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         logger.exception("the troubleshooting run failed")
         return {
             "statusCode": 500,
-            "body": json.dumps({"error": f"{type(exc).__name__}: {exc}"}),
+            "body": json.dumps(
+                {
+                    "error": "The diagnosis could not be completed. The "
+                    "function's log carries the failure.",
+                    "errorType": type(exc).__name__,
+                }
+            ),
         }
     return {"statusCode": 200, "body": json.dumps(result)}

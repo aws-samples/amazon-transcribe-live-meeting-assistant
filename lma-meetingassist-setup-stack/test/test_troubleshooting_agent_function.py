@@ -306,7 +306,6 @@ def test_the_handler_does_not_retry_a_failed_run() -> None:
 
     assert len(attempts) == 1
     assert response["statusCode"] == 500
-    assert "bedrock said no" in json.loads(response["body"])["error"]
 
 
 def test_no_retry_knob_is_offered_anywhere() -> None:
@@ -346,7 +345,65 @@ def test_an_unavailable_prompt_is_a_configuration_error_not_a_crash() -> None:
         response = agent_function.handler({}, None)
 
     assert response["statusCode"] == 400
-    assert "system prompt is not available" in json.loads(response["body"])["error"]
+    body = json.loads(response["body"])
+    assert "system prompt is not" in body["error"]
+    assert body["errorType"] == "PromptUnavailableError"
+
+
+# ── what an error response body carries ─────────────────────────────────────
+#
+# The same rule as the thinking-step stream, for a reason about to matter more:
+# today this body reaches only an IAM principal holding lambda:InvokeFunction,
+# but the resolvers the design calls for will forward it to a browser.
+
+
+def failing_with(exc: Exception) -> Any:
+    def run(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
+        raise exc
+
+    return run
+
+
+def test_a_failed_run_reports_the_exception_type_and_not_its_text() -> None:
+    message = (
+        "User arn:aws:sts::111122223333:assumed-role/secret-role-name/x is not "
+        "authorized to perform logs:StartQuery"
+    )
+    exc = RuntimeError(message)
+
+    with mock.patch.object(agent_function, "run_diagnosis", failing_with(exc)):
+        response = agent_function.handler({}, None)
+
+    assert response["statusCode"] == 500
+    assert "111122223333" not in response["body"]
+    assert "secret-role-name" not in response["body"]
+    assert json.loads(response["body"])["errorType"] == "RuntimeError"
+
+
+def test_a_failed_run_points_at_the_log_for_the_detail() -> None:
+    """The caller needs somewhere to go, and the log is where the full text
+    is -- which is where someone diagnosing the diagnoser should be looking."""
+    with mock.patch.object(
+        agent_function, "run_diagnosis", failing_with(RuntimeError("x"))
+    ):
+        body = json.loads(agent_function.handler({}, None)["body"])
+
+    assert "log" in body["error"]
+
+
+def test_an_unavailable_prompt_reports_its_type_and_not_the_table_detail() -> None:
+    exc = agent_function.troubleshooting_prompt.PromptUnavailableError(
+        "could not read DefaultTroubleshootingAgentPrompt from "
+        "LMA-secret-stack-name-LLMPromptTemplateTable: AccessDenied for "
+        "arn:aws:iam::111122223333:role/x"
+    )
+
+    with mock.patch.object(agent_function, "run_diagnosis", failing_with(exc)):
+        response = agent_function.handler({}, None)
+
+    assert response["statusCode"] == 400
+    assert "111122223333" not in response["body"]
+    assert "secret-stack-name" not in response["body"]
 
 
 def test_an_empty_event_is_accepted() -> None:

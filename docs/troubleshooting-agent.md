@@ -300,6 +300,10 @@ written at the point the error is raised — not the message, which may carry an
 account-specific ARN. The agent itself still receives all of it; this is about
 what leaves the function.
 
+The same applies to an error response: a 400 or a 500 carries a fixed message
+and an `errorType`, and the full text goes to the function's log. That matters
+more once the UI entry points forward this body to a browser.
+
 ## Related
 
 - [Troubleshooting](troubleshooting.md) — the manual procedures, and which log
