@@ -4122,6 +4122,11 @@ Resources:
   # driver it is not. One of three absorbs a datapoint that lands in the next
   # period without missing the event.
   #
+  # Both alarms are named for meetings, which is what an operator is looking
+  # for, but the no-transcript one counts audio sessions: a client that
+  # reconnects for the same meeting opens a second session. The description and
+  # the docs say so; the name is left readable.
+  #
   # Neither uses metric math. Alarming on the *absence* of a first transcript
   # segment while meetings were starting would need two metrics and FILL;
   # StreamingSessionsWithoutTranscript counts that condition directly in the one

@@ -17,8 +17,12 @@
  * through `server.log` reaches CloudWatch as a human-readable line rather than
  * JSON, and CloudWatch extracts metrics only from JSON. This module therefore
  * writes to stdout directly. A record is a few hundred bytes, comfortably under
- * the 4 KB a single pipe write is atomic for on Linux, so it cannot be
- * interleaved with a line the pretty transport is writing from its own worker.
+ * the 4 KB a single pipe write is atomic for on Linux, so our record is never
+ * split in two. That is not quite the same as never being interleaved: a line
+ * longer than 4 KB from the pretty transport's own worker -- verbose
+ * `[DIARIZATION]` debug output, say -- can itself be split, and a record landing
+ * between its halves corrupts that log event and loses this record's metric.
+ * Rare, and the alternative is a second log stream to maintain.
  *
  * Unlike the Python emitter, which accumulates for an invocation and flushes
  * once, this one writes immediately. There is no invocation boundary in a
