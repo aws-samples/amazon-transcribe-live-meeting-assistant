@@ -532,9 +532,9 @@ def test_the_legacy_lookup_matches_its_name_exactly() -> None:
 def test_the_current_group_is_labelled_current_whichever_prefix_finds_it(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The legacy name is also a prefix of the current one, so paging can reach
-    the current group from either lookup; its label follows its name, not the
-    lookup that returned it."""
+    """The legacy name is also a prefix of the current one. Whichever of the two
+    lookups is paged first, each group is reported once with its own
+    generation: the current group as current and the legacy group as legacy."""
     real = discovery.stack_log_group_prefixes
     monkeypatch.setattr(
         discovery,
@@ -548,6 +548,8 @@ def test_the_current_group_is_labelled_current_whichever_prefix_finds_it(
     assert client.prefixes_requested.index(LEGACY_VP) < client.prefixes_requested.index(
         CURRENT_VP
     )
+    names = [g.name for g in result.groups]
+    assert names.count(CURRENT_VP) == 1 and names.count(LEGACY_VP) == 1
     assert generations(result)[CURRENT_VP] == discovery.CURRENT_GENERATION
     assert generations(result)[LEGACY_VP] == discovery.LEGACY_GENERATION
 
