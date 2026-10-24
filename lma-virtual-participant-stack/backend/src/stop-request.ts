@@ -21,6 +21,10 @@
  * summarise the last hour?" both leave extra words behind and are not matched.
  */
 
+// Lowercases and reduces everything that is not a letter or digit to a single
+// space, so transcription punctuation and contractions do not affect matching.
+import { normalizeChatText as normalize } from './chat-text.js';
+
 export const DEFAULT_WAKE_PHRASES = 'hey alex,ok alex,hi alex,hello alex';
 
 /**
@@ -75,16 +79,6 @@ const STOP_COMMANDS = new Set([
     'that is enough',
     'that s enough',
 ]);
-
-/** Lowercases and reduces everything that is not a letter or digit to a single
- *  space, so transcription punctuation and contractions do not affect matching. */
-function normalize(text: string): string {
-    return text
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
 
 function escapeForRegExp(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

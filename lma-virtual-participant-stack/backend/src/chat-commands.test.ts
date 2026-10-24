@@ -28,7 +28,7 @@ import { splitZoomChatLabel } from './zoom.js';
 // ---------------------------------------------------------------------------
 
 test('the pause command matches as the whole message, in any case, with or without the LMA addressee', () => {
-    for (const message of ['PAUSE', 'pause', 'Pause', '  PAUSE  ', 'PAUSE.', 'pause!', 'LMA pause', '@LMA, PAUSE!', 'pause LMA', 'lma: Pause']) {
+    for (const message of ['PAUSE', 'pause', 'Pause', '  PAUSE  ', 'PAUSE.', 'pause!', 'Pause?', 'LMA pause', '@LMA, PAUSE!', 'pause LMA', 'lma: Pause']) {
         assert.equal(matchesChatCommand(message, details.pauseCommand), true, `no longer pauses: "${message}"`);
     }
 });
@@ -167,7 +167,8 @@ test('every platform handler matches pause and resume with matchesChatCommand', 
             assert.match(
                 src,
                 new RegExp(`matchesChatCommand\\(\\w+, details\\.${command}\\)`),
-                `${file} does not match details.${command} with matchesChatCommand`,
+                `${file} does not call matchesChatCommand(<identifier>, details.${command}) — either the ` +
+                    'handler stopped using the shared matcher, or the call was reformatted and this regex needs updating',
             );
             assert.doesNotMatch(
                 src,

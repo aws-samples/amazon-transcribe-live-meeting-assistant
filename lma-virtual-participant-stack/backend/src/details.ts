@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { normalizeChatText } from './chat-text.js';
 
 export interface MeetingInvite {
   meetingId: string;
@@ -283,17 +284,6 @@ export function matchesEndCommand(message: string): boolean {
   return addresseeFirst.test(trimmed) || verbFirst.test(trimmed);
 }
 
-/** Lowercases and reduces everything that is not a letter or digit to a single
- *  space. The same normalisation as the assistant-mode commands in
- *  assistant-toggles.ts, so "@LMA, pause!" and "lma pause" read the same. */
-function normalizeChatText(text: string): string {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
 /**
  * Returns true when a chat message is exactly `command` — the pause
  * (`details.pauseCommand`) or resume (`details.startCommand`) command — and
@@ -306,10 +296,12 @@ function normalizeChatText(text: string): string {
  * Matched case-insensitively and as the whole message, like the dismissal and
  * assistant-mode commands, so a message that merely contains the word — "PAUSED",
  * "please don't PAUSE", an introduction message that explains the command —
- * is ordinary chat.
+ * is ordinary chat. Punctuation is ignored, through the same normalisation as
+ * the assistant-mode commands (normalizeChatText), so a one-word reply such as
+ * "Pause?" or "start..." counts as the command, as "LMA translate?" does.
  *
  * Examples that match (for "PAUSE"):
- *   "PAUSE", "pause", "Pause.", "LMA pause", "@LMA, PAUSE!", "pause LMA"
+ *   "PAUSE", "pause", "Pause.", "Pause?", "LMA pause", "@LMA, PAUSE!", "pause LMA"
  *
  * Examples that do NOT match:
  *   "PAUSED", "please PAUSE", "Type PAUSE to stop the transcript", "LMA", ""
