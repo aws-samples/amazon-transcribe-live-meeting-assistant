@@ -204,6 +204,13 @@ MICROVM_LOG_GENERATIONS: Sequence[tuple[str, str]] = (
     ("-asr", LEGACY_GENERATION),
 )
 
+# The stream-name hint is given for the legacy group only, because only there
+# does it hold. The Lambda MicroVM service names a legacy group's streams
+# "<YYYY/MM/DD>[<image version>]<microvmId>" — e.g.
+# "2026/10/24[55.0]microvm-6ac75d14-…", the same "microvm-…" id the launch
+# state machine logs — while a current group's streams are named
+# "<image version>/<uuid>" and carry no MicroVM id. Both forms were read from
+# a deployed stack's groups; the service does not document either.
 _GENERATION_NOTES: Dict[str, str] = {
     CURRENT_GENERATION: (
         "Current MicroVM log group: written by MicroVM images built from "

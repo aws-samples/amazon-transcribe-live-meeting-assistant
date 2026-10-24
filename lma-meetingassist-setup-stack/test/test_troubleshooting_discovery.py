@@ -487,8 +487,10 @@ def test_a_fresh_deployment_reports_only_the_current_generation() -> None:
 
 
 def test_a_deployment_with_only_the_legacy_generation_reports_it() -> None:
-    """E.g. the ASR engine, whose current group appears only once its rebuilt
-    image runs; whatever exists is reported, and nothing is assumed."""
+    """E.g. an upgraded stack later moved off VPLaunchType=MICROVM or with
+    EnableMicrovmAsr turned off: the current groups are conditional and go with
+    the feature (unless retained), while the legacy ones, which the stack never
+    owned, stay. Whatever exists is reported, and nothing is assumed."""
     groups = NOT_MICROVM + [(LEGACY_VP, 9000), (LEGACY_ASR, 40)]
 
     result = discover_result(FakeLogsClient(groups))
