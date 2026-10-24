@@ -35,6 +35,24 @@ import {
 } from './assistant-toggles.js';
 import { details } from './details.js';
 
+// Building an agent and changing its mode both log a great deal, and this file
+// builds a few dozen agents. Node's test runner multiplexes a child's stdout
+// with its own report stream, and that much output from one file is enough to
+// corrupt the report when files run in parallel — this suite passed file by
+// file and failed as a whole until the output stopped. So the file keeps its
+// stdout to itself, and the tests that assert on log lines read them from here.
+const captured: string[] = [];
+console.log = (...args: unknown[]) => {
+    captured.push(args.map(String).join(' '));
+};
+
+/** The `[assistant-toggle]` lines written since this was last called. */
+function takeToggleLines(): string[] {
+    const lines = captured.filter((line) => line.includes(ASSISTANT_TOGGLE_LOG_TAG));
+    captured.length = 0;
+    return lines;
+}
+
 const BASE_PROMPT = 'You are Alex, an AI meeting assistant. Mention the quarterly roadmap.';
 const STRANDS_ARN = 'arn:aws:lambda:us-east-1:123456789012:function:strands';
 
@@ -184,6 +202,20 @@ test('switching into a mode that needs listening without asking for it is refuse
     const both = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
     assert.equal(both.result, 'applied');
     assert.deepEqual(both.changed, ['meetingMode', 'activationMode']);
+});
+
+test('a deployment already in a forbidden combination is told it is already there', async () => {
+    // Configured as group mode on wake-phrase activation, which is the
+    // combination the rule forbids and the UI warns about. `LMA wake` there
+    // changes nothing, and saying the assistant "has to stay always listening"
+    // would claim it was, when it never has been.
+    const { agent, calls } = novaAgent({ meetingMode: 'group', activationMode: 'wake_phrase' });
+
+    const outcome = await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
+
+    assert.equal(outcome.result, 'unchanged');
+    assert.match(outcome.detail || '', /already in the requested configuration/);
+    assert.deepEqual(calls, []);
 });
 
 test('the wake phrase is still available in assistant mode', async () => {
@@ -618,18 +650,9 @@ test('a rebuild that fails still answers the participant and leaves one log line
         throw new Error('bidirectional stream refused');
     };
 
-    const originalLog = console.log;
-    const lines: string[] = [];
-    console.log = (...args: unknown[]) => {
-        const line = args.map(String).join(' ');
-        if (line.includes(ASSISTANT_TOGGLE_LOG_TAG)) lines.push(line);
-    };
-    let outcome;
-    try {
-        outcome = await agent.reconfigure(chat({ meetingMode: 'translator' }));
-    } finally {
-        console.log = originalLog;
-    }
+    takeToggleLines();
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    const lines = takeToggleLines();
 
     assert.equal(outcome.result, 'applied');
     assert.equal(outcome.sessionRebuilt, false);
@@ -664,18 +687,9 @@ test('a refresh that produced no session is reported as still switching, not as 
         (agent as any)._isActive = false;
     };
 
-    const originalLog = console.log;
-    const lines: string[] = [];
-    console.log = (...args: unknown[]) => {
-        const line = args.map(String).join(' ');
-        if (line.includes(ASSISTANT_TOGGLE_LOG_TAG)) lines.push(line);
-    };
-    let outcome;
-    try {
-        outcome = await agent.reconfigure(chat({ meetingMode: 'group' }));
-    } finally {
-        console.log = originalLog;
-    }
+    takeToggleLines();
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'group' }));
+    const lines = takeToggleLines();
 
     assert.equal(outcome.result, 'applied');
     assert.equal(outcome.sessionRebuilt, false, 'a refresh that produced nothing is not a rebuild');
@@ -701,10 +715,10 @@ test('a refresh that produced a session is reported as rebuilt', async () => {
 
 test('a session creation that opened nothing is reported as still switching', async () => {
     // `createSession` returns early without doing anything when a stream is
-    // already marked active, so it can resolve having opened nothing. Reporting
-    // from the call alone would log `session=rebuilt` for a mode change that
-    // left the agent with no session, which is the same mistake the refresh path
-    // made before `refreshIntoNewMode`.
+    // already marked active, so it can resolve having opened nothing. The
+    // outcome is reported from the session that exists afterwards, not from the
+    // call returning, so a mode change that left the agent with nothing is not
+    // logged as `session=rebuilt`.
     const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
     (agent as any).createSession = async () => {
         /* as if streamingActive were already true */
@@ -908,19 +922,11 @@ test('each attempt logs exactly one toggle line, whether or not it landed', asyn
     const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
     withLiveSession(agent);
 
-    const originalLog = console.log;
-    const lines: string[] = [];
-    console.log = (...args: unknown[]) => {
-        const line = args.map(String).join(' ');
-        if (line.includes(ASSISTANT_TOGGLE_LOG_TAG)) lines.push(line);
-    };
-    try {
-        await agent.reconfigure(chat({ meetingMode: 'translator' }));
-        await agent.reconfigure(chat({ meetingMode: 'translator' }));
-        await agent.reconfigure(chat({ meetingMode: 'nonsense' as MeetingMode }));
-    } finally {
-        console.log = originalLog;
-    }
+    takeToggleLines();
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    await agent.reconfigure(chat({ meetingMode: 'nonsense' as MeetingMode }));
+    const lines = takeToggleLines();
 
     assert.equal(lines.length, 3);
     assert.match(lines[0], /route=chat by="Alice" result=applied meetingMode=normal->translator/);

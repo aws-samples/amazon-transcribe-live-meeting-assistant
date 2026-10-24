@@ -208,7 +208,7 @@ The same rule applies in the other direction: `LMA wake` is **declined** while t
 | `LMA always` | Always listening. Aliases: `LMA always on`, `LMA always active`, `LMA always listen`, `LMA open mic` |
 | `LMA wake` | Listen only after a wake phrase. Aliases: `LMA wake word`, `LMA wake phrase`, `LMA on request` |
 
-`LMA assist` leaves activation where `LMA translate` or `LMA group` put it, because `normal` mode works under either activation mode and the command carries no record of what it was before. Use `LMA wake` to get the wake phrase back.
+`LMA assist` leaves activation where `LMA translate` or `LMA group` put it, because `normal` mode works under either activation mode and the command carries no record of what it was before. Use `LMA wake` to get the wake phrase back. There is no command that restores the activation mode the meeting *started* in — nothing here is persisted, so that comes back by itself at the next meeting.
 
 The assistant replies in chat either way — naming the mode it is now in, or saying that nothing changed and why. A command for the mode the meeting is already in is answered and does nothing else, so it costs the meeting no interruption.
 

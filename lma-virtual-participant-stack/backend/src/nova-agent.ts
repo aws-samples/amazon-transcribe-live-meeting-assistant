@@ -1591,12 +1591,15 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private async processToolUseAsync(toolUseId: string, toolName: string, toolUseContent: any): Promise<void> {
     // The session that issued this tool use. A Strands call takes 5-10 seconds,
-    // which is long enough for the session to be replaced underneath it — by a
-    // mid-meeting mode change, by the periodic refresh, or by a translator
-    // pause/resume transition. A `toolUseId` means nothing to a session that
-    // never issued it, and after a switch into translator mode the new session
-    // has no such tool at all, so the result goes to the session that asked for
-    // it or to nothing.
+    // which is long enough for the session to be replaced underneath it: by the
+    // automatic refresh that recovers from the stream closing or erroring, and
+    // by a mid-meeting mode change. (Not by the periodic refresh, which waits
+    // for `_isProcessingTool` to clear, nor by a translator pause/resume
+    // transition, which runs in the one mode that registers no such tool.)
+    //
+    // A `toolUseId` means nothing to a session that never issued it, and after a
+    // switch into translator mode the new session has no such tool at all, so
+    // the result goes to the session that asked for it or to nothing.
     const issuingSession = this.session;
     const sessionStillOurs = () => this.session === issuingSession && !!this.session?.isActive;
 
@@ -2950,23 +2953,6 @@ export class NovaAgent implements VoiceAssistantProvider {
       return notApplied('declined', `unrecognised activation mode "${request.activationMode}"`);
     }
 
-    // Validate the combination, not just each axis. Group and translator mode
-    // are silent rather than merely limited without an always-listening
-    // assistant, which is why the chat commands for those modes ask for it — and
-    // the same rule has to hold coming the other way, or asking only for the
-    // wake phrase would leave a group-mode assistant inaudible for the rest of
-    // the meeting. Declined with the command that makes it possible, rather than
-    // quietly changing the meeting mode nobody asked about.
-    const resultingMeetingMode = request.meetingMode ?? meetingModeBefore;
-    const resultingActivationMode = request.activationMode ?? activationModeBefore;
-    if (requiresAlwaysListening(resultingMeetingMode) && resultingActivationMode !== 'always_active') {
-      return notApplied(
-        'declined',
-        `the assistant is in ${describeMeetingMode(resultingMeetingMode)}, which has to stay always listening`
-          + ' — switch to assistant mode first with "LMA assist"',
-      );
-    }
-
     const changed: Array<'meetingMode' | 'activationMode'> = [];
     if (request.meetingMode !== undefined && request.meetingMode !== meetingModeBefore) {
       changed.push('meetingMode');
@@ -2980,6 +2966,28 @@ export class NovaAgent implements VoiceAssistantProvider {
     // delivering one twice — would tear down a working session each time.
     if (changed.length === 0) {
       return notApplied('unchanged', 'already in the requested configuration');
+    }
+
+    // Validate the combination, not just each axis. Group and translator mode
+    // are silent rather than merely limited without an always-listening
+    // assistant, which is why the chat commands for those modes ask for it — and
+    // the same rule has to hold coming the other way, or asking only for the
+    // wake phrase would leave a group-mode assistant inaudible for the rest of
+    // the meeting. Declined with the command that makes it possible, rather than
+    // quietly changing the meeting mode nobody asked about.
+    //
+    // After the no-change check, not before it: a deployment configured as group
+    // mode on wake-phrase activation is already in a combination this rule
+    // forbids, and `LMA wake` there should say the assistant is already doing
+    // that rather than claim it has to stay always listening when it never was.
+    const resultingMeetingMode = request.meetingMode ?? meetingModeBefore;
+    const resultingActivationMode = request.activationMode ?? activationModeBefore;
+    if (requiresAlwaysListening(resultingMeetingMode) && resultingActivationMode !== 'always_active') {
+      return notApplied(
+        'declined',
+        `the assistant is in ${describeMeetingMode(resultingMeetingMode)}, which has to stay always listening`
+          + ' — switch to assistant mode first with "LMA assist"',
+      );
     }
 
     if (this._reconfiguring) {
