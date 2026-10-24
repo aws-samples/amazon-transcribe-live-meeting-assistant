@@ -32,14 +32,20 @@ component labelling the agent needs in order to pick a group to query.
 
 ON ``stored_bytes``
 -------------------
-Every group is reported with the bytes CloudWatch holds for it, because an
-empty group is the single most misleading piece of evidence in this solution.
-Under the default ``VPLaunchType=MICROVM`` the Fargate group
+Every group is reported with the bytes CloudWatch currently stores for it,
+because an empty group is the single most misleading piece of evidence in this
+solution. Under the default ``VPLaunchType=MICROVM`` the Fargate group
 ``/<vpstack>/fargate/VirtualParticipant`` — declared in the Virtual
 Participant stack — exists and is permanently empty, so an agent that queries
-it finds nothing and concludes the virtual participant never ran. Handing it
-``stored_bytes: 0`` up front turns that into "this deployment does not use this
-group" instead.
+it finds nothing and could conclude the virtual participant never ran.
+
+**But the figure is weaker than it looks, and every reader of it says so.** It
+counts what is stored *now*, so a group in active use also reports zero once
+everything in it has aged past the retention period. The signal is therefore a
+hint about where to look first, never grounds for skipping a group: a
+participant idle for a fortnight and failing today reports zero on the very
+group holding the failure. Whether a path is genuinely unused is a question
+about configuration, which ``get_stack_parameters`` answers.
 """
 
 from __future__ import annotations

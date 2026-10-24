@@ -1148,6 +1148,29 @@ def test_every_tool_has_a_docstring_for_the_model_to_route_on() -> None:
         assert fn.__doc__ and len(fn.__doc__) > 100, name
 
 
+def test_no_tool_description_claims_an_empty_log_group_proves_disuse() -> None:
+    """Strands builds the tool spec the model sees from these docstrings, so a
+    stale one here contradicts the system prompt on the exact case the prompt
+    calls most misleading — and the model reads both.
+
+    A group reports no stored bytes once everything in it has aged past the
+    retention period, so the count is a hint about where to look first and not
+    grounds for skipping anything.
+    """
+    for name, fn in build_tools(FakeTools(), budget_with()).items():
+        doc = fn.__doc__ or ""
+        assert "means the path is unused" not in doc, name
+        assert "has never been written to" not in doc, name
+
+
+def test_the_discovery_tool_tells_the_model_what_the_byte_count_is_worth() -> None:
+    doc = build_tools(FakeTools(), budget_with())["discover_log_groups"].__doc__ or ""
+
+    assert "hint" in doc
+    assert "never skip a group on that alone" in doc.lower()
+    assert "get_stack_parameters" in doc
+
+
 def test_a_tool_call_reaches_the_implementation() -> None:
     tools = FakeTools()
 

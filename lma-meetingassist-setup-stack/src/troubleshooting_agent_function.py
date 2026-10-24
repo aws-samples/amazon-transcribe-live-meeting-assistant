@@ -808,9 +808,14 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
                 everything.
 
         Returns:
-            The log groups with their owning component, how many bytes each
-            holds (zero means the path is unused in this deployment, not that it
-            failed), and a note on what each component's logs contain.
+            The log groups with their owning component, whether CloudWatch
+            currently stores bytes for each, and a note on what each
+            component's logs contain. A group with no stored bytes is a hint
+            about where to look first and NOT proof that the path is unused —
+            a group reports none once everything in it has aged past the
+            retention period — so never skip a group on that alone. Use
+            get_stack_parameters to find the paths this deployment genuinely
+            does not run.
         """
         return guarded(
             "discover_log_groups", tools.discover_log_groups, components=components or None
