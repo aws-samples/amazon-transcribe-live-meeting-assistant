@@ -1372,6 +1372,23 @@ def test_an_own_exit_points_at_the_exit_line() -> None:
     assert "pre-join:no-name-input" not in assessment
 
 
+@pytest.mark.parametrize(
+    "item",
+    [
+        FAILED_VP_ITEM,
+        {"id": {"S": "vp-abc"}, "status": {"S": "COMPLETED"}},
+        {"id": {"S": "vp-abc"}, "status": {"S": "JOINING"}},
+        {"id": {"S": "vp-abc"}, "status": {"S": "FAILED"}},
+        REAPED_VP_ITEM,
+        EXTERNALLY_ENDED_VP_ITEM,
+    ],
+)
+def test_every_assessment_ends_with_the_one_search(item: Dict[str, Any]) -> None:
+    """The prompt and the docs promise a corroborating search on every
+    branch, so every branch has to carry one."""
+    assert "run ONE search_logs" in record_for(item)["endAssessment"]
+
+
 def test_completed_without_a_trigger_or_end_is_read_as_a_signal_stop() -> None:
     item = {"id": {"S": "vp-abc"}, "status": {"S": "COMPLETED"}}
 

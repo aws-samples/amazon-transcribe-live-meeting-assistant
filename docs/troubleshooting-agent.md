@@ -140,11 +140,11 @@ Leaving through its own exit path, it is `COMPLETED` or `FAILED` with an
 not come through the end operation, it is `COMPLETED` with none of these. A row
 whose status is not terminal but which has `endedAt` set describes a
 participant that has ended — a progress update it wrote while shutting down
-landed after the end — and the assessment says the status is stale. Each assessment ends with the one log
-search that corroborates it: the participant's id together with the markers for
-every way it could have ended, in one call, with a `lookback_hours` reaching
-back to the row's `createdAt`, because the default search window is only a few
-hours.
+landed after the end — and the assessment says the status is stale. Each
+assessment ends with the one log search that corroborates it: the participant's
+id together with the markers for every way it could have ended, in one call,
+with a `lookback_hours` reaching back to the row's `createdAt`, because the
+default search window is only a few hours.
 
 A search that returns nothing says which window it covered, that its terms are
 ORed so alternatives belong in the same call, and — when it was looking for

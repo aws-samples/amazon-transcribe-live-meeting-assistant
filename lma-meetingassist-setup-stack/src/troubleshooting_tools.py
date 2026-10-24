@@ -323,7 +323,8 @@ def assess_vp_end(
             "The participant left through its own exit path: see endTrigger "
             f"in the record. Its '{_VP_EXIT_MARKER}' line in the "
             "virtual-participant log group carries the same trigger together "
-            "with reason=, and the lines before it explain the trigger."
+            "with reason=, and the lines before it explain the trigger. "
+            + search
         )
 
     if status == "COMPLETED":
@@ -1048,10 +1049,11 @@ class TroubleshootingTools:
             "endReason",
             "userAcknowledgedFailure",
             "statusBeforeManualAction",
-            # Written by the end operation alongside endReason. They are how a
-            # row whose status was overwritten after the end still shows that
-            # the participant was ended, and whether its host and its
-            # transcript were closed down.
+            # Written by the end operation alongside endReason; endedAt is also
+            # written by the VP task reaper. They are how a row whose status
+            # was overwritten after the end still shows that the participant
+            # was ended, and whether its host and its transcript were closed
+            # down.
             "endedAt",
             "ecsTerminated",
             "kinesisEndSent",
