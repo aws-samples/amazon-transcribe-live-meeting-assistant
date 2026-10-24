@@ -24,7 +24,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { NovaAgent } from './nova-agent.js';
+import { NovaAgent, STOP_REQUEST_TOOL_BACKSTOP_MS, STOP_REQUEST_TOOL_GRACE_MS } from './nova-agent.js';
 import { ElevenLabsAgent } from './elevenlabs-agent.js';
 import { NoOpAgent } from './noop-agent.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
@@ -835,6 +835,187 @@ test('a refused or unchanged request leaves the transcription path where it was'
 
     // Leave the shared singleton as the rest of the suite expects to find it.
     await agent.reconfigure(chat({ meetingMode: 'normal' }));
+});
+
+// ---------------------------------------------------------------------------
+// A stop request still resolving when the meeting mode changes
+// ---------------------------------------------------------------------------
+//
+// In the conversational modes a stop request from the transcript route is not
+// acted on at once: it is held for STOP_REQUEST_TOOL_GRACE_MS so Nova can say
+// "Okay" through its own `mute` tool, and then silences the assistant
+// unconditionally. A mode change inside that window re-decides the mute state
+// from the new mode, so the request is superseded rather than carried across.
+
+/** Long enough for any stop-request timer still armed to have fired. */
+const PAST_STOP_WINDOWS_MS = STOP_REQUEST_TOOL_BACKSTOP_MS + 200;
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+test('a deferred stop request does not survive a switch into translator mode', async () => {
+    // The case that matters most. Its fallback would mute a translator whose
+    // pause state still says UNMUTED with only the `mute` tool registered, so
+    // the resume phrase would have no tool to call and the translator would
+    // never speak again — the reason translator declines stop requests at all.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    assert.equal(agent.requestStopTalking('test'), true);
+    assert.notEqual((agent as any).stopRequest, null, 'the request must be deferred, not applied');
+    assert.equal(agent.isMuted(), false);
+
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal((agent as any).stopRequest, null, 'the request must be called off by the mode change');
+
+    await wait(PAST_STOP_WINDOWS_MS);
+    assert.equal(agent.isMuted(), false, 'the translator must not be silenced by a request from assistant mode');
+    assert.equal((agent as any)._translatorState, 'UNMUTED');
+    assert.deepEqual(toolNames(agent), ['mute']);
+});
+
+test('a deferred stop request does not silence an assistant a mode change has just made audible', async () => {
+    // Group mode made audible by a wake phrase, asked to stop, then switched to
+    // assistant mode inside the window. `normal` starts audible, and the
+    // request was made under the mode the meeting has left.
+    const { agent } = novaAgent({ meetingMode: 'group', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any)._isMuted = false; // as if addressed by wake phrase
+    assert.equal(agent.requestStopTalking('test'), true);
+    assert.notEqual((agent as any).stopRequest, null);
+
+    await agent.reconfigure(chat({ meetingMode: 'normal' }));
+    await wait(PAST_STOP_WINDOWS_MS);
+
+    assert.equal(agent.isMuted(), false);
+    assert.equal((agent as any).stopRequest, null);
+});
+
+test('a tool-claimed stop request and its backstop are called off by a mode change too', async () => {
+    // The tool route arms its own backstop when the tool-use event is seen,
+    // which would mute the assistant if the stream closed before the handler
+    // ran. The mode change tears that stream down on purpose.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any).noteMuteToolRequested();
+    assert.notEqual((agent as any).stopRequest, null);
+
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    await wait(PAST_STOP_WINDOWS_MS);
+
+    assert.equal((agent as any).stopRequest, null);
+    assert.equal(agent.isMuted(), false);
+});
+
+test('a mute tool call in the new mode is not timed against a stop request from the old one', async () => {
+    // A `mute` call that arrives after the window is reported `late=true` with
+    // its latency from the transcript request — the measurement the grace
+    // window is meant to be tuned from. A call made after a mode change answers
+    // something in the new session, so timing it against the old request would
+    // put a reading worth nothing into that set of numbers.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    agent.requestStopTalking('test');
+    await agent.reconfigure(chat({ meetingMode: 'group' }));
+
+    captured.length = 0;
+    (agent as any).noteMuteToolRequested();
+    const claimed = captured.find((line) => line.includes('[stop-request] route=tool action=claimed'));
+    assert.ok(claimed, 'the tool claim must still be logged');
+    assert.match(claimed!, /transcript_deferred=false/);
+    assert.match(claimed!, /tool_latency_ms=n\/a late=false/);
+    (agent as any).cancelStopRequest('test-cleanup');
+});
+
+test('after a switch the new mode decides how the next stop request is taken', async () => {
+    // Into a conversational mode the request is deferred so the model can
+    // answer first; into translator it is declined, because translator is
+    // paused only by its own trigger phrase.
+    const { agent } = novaAgent({ meetingMode: 'translator', activationMode: 'always_active' });
+    withLiveSession(agent);
+    assert.equal(agent.requestStopTalking('test'), false, 'translator declines');
+
+    await agent.reconfigure(chat({ meetingMode: 'normal' }));
+    assert.equal(agent.requestStopTalking('test'), true);
+    assert.notEqual((agent as any).stopRequest, null, 'assistant mode defers for the acknowledgement');
+    assert.equal(agent.isMuted(), false, 'deferred, so not yet silent');
+    await wait(STOP_REQUEST_TOOL_GRACE_MS + 100);
+    assert.equal(agent.isMuted(), true, 'and the fallback still silences it if the tool never comes');
+
+    const { agent: back } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(back);
+    await back.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal(back.requestStopTalking('test'), false, 'and once in translator, declined again');
+    assert.equal((back as any).stopRequest, null);
+});
+
+test('an activation-only change leaves a stop request standing', async () => {
+    // The activation mode does not decide the mute state, so a participant who
+    // asked for quiet a moment before somebody typed `LMA wake` still gets it.
+    // The mute is a gate on the agent, not on the session, so the teardown
+    // does not make it unsafe.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    assert.equal(agent.requestStopTalking('test'), true);
+
+    await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
+    assert.notEqual((agent as any).stopRequest, null, 'the request must still be in flight');
+
+    await wait(STOP_REQUEST_TOOL_GRACE_MS + 100);
+    assert.equal(agent.isMuted(), true, 'and it must still resolve');
+});
+
+test('a mute tool call already past its tool-use event stands down if the mode changes under it', async () => {
+    // handleMuteTool waits for the acknowledgement to flush before engaging the
+    // gate, and reads the meeting mode after that wait. Called in assistant
+    // mode and resumed in translator, it would otherwise pause a translator
+    // nobody asked to pause and send its result to a session that never issued
+    // the tool use.
+    const { agent, calls } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    const sent: string[] = [];
+    (agent as any).sendToolResult = async (toolUseId: string) => sent.push(toolUseId);
+
+    const toolCall = (agent as any).handleMuteTool('tool-use-1');
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    await toolCall;
+
+    assert.equal(agent.isMuted(), false, 'the translator must stay audible');
+    assert.equal((agent as any)._translatorState, 'UNMUTED', 'and must not be paused');
+    assert.deepEqual(sent, [], 'the result must not reach the new session');
+    assert.deepEqual(calls, ['refreshSession'], 'only the mode change rebuilds the session');
+    assert.ok(
+        captured.some((line) => line.includes('[stop-request] route=tool action=superseded-by-mode-change')),
+        'the stand-down must be on the record',
+    );
+});
+
+test('a mute tool call that outlives an activation-only refresh still mutes, but keeps its result to itself', async () => {
+    // The meeting mode is unchanged, so the request still stands and the gate
+    // still engages. The session that issued the tool use is gone, though, and
+    // its toolUseId means nothing to the replacement.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    const sent: string[] = [];
+    (agent as any).sendToolResult = async (toolUseId: string) => sent.push(toolUseId);
+
+    const toolCall = (agent as any).handleMuteTool('tool-use-1');
+    (agent as any).session = liveSession(); // replaced during the flush
+    await toolCall;
+
+    assert.equal(agent.isMuted(), true);
+    assert.deepEqual(sent, []);
+});
+
+test('a mute tool call with no change under it is unaffected', async () => {
+    // The guards must not touch the ordinary case 809 is built around.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    const sent: string[] = [];
+    (agent as any).sendToolResult = async (toolUseId: string) => sent.push(toolUseId);
+
+    await (agent as any).handleMuteTool('tool-use-1');
+
+    assert.equal(agent.isMuted(), true);
+    assert.deepEqual(sent, ['tool-use-1']);
 });
 
 // ---------------------------------------------------------------------------

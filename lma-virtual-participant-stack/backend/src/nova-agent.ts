@@ -1782,10 +1782,30 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.meetingMode === 'translator') {
       this.playConfirmationTone('mute');
     }
+    // Everything below reads the meeting mode, so note which one this call was
+    // made in before awaiting.
+    const generation = this.meetingModeGeneration;
+    const calledInMode = this.meetingMode;
+    const issuingSession = this.session;
     // Wait for trailing audio chunks of the tone, or of the spoken "Okay" the
     // conversational prompt asks for, before the gate engages — events for a
     // turn can still be arriving when its tool call is dispatched.
     await new Promise(resolve => setTimeout(resolve, this.MUTE_TOOL_AUDIO_FLUSH_MS));
+
+    // A participant changed the meeting mode during that wait. The tool call
+    // belonged to the session the change has torn down, and the change has
+    // already decided whether the assistant is audible — so finishing here
+    // would act on the wrong mode: gating an assistant that was just made
+    // audible, or, called from `normal` and resumed in translator, pausing a
+    // translator nobody asked to pause. Its tool result would also go to a
+    // session that never issued the tool use.
+    if (this.meetingModeGeneration !== generation) {
+      console.log(
+        `[stop-request] route=tool action=superseded-by-mode-change`
+        + ` from=${calledInMode} to=${this.meetingMode}`,
+      );
+      return;
+    }
 
     if (hasStopTalkingTool(this.meetingMode)) {
       // playback_age_ms is the diagnostic that matters most here: a pacat only
@@ -1818,8 +1838,12 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.mute('tool');
     }
 
-    // Acknowledge the tool result on the current session before refreshing.
-    if (this.session && this.session.isActive) {
+    // Acknowledge the tool result on the current session before refreshing —
+    // provided it is still the session that issued the tool use. An
+    // activation-only change can replace the session during the flush above
+    // without changing the meeting mode, and the mute still stands then, but
+    // its toolUseId means nothing to the replacement.
+    if (this.session && this.session.isActive && this.session === issuingSession) {
       const muteInstruction = (this.meetingMode === 'translator')
         ? 'You are now paused. The session is being refreshed.'
         : 'You are now muted.';
@@ -2896,6 +2920,11 @@ export class NovaAgent implements VoiceAssistantProvider {
   /** True while a reconfiguration is applying its change and rebuilding. */
   private _reconfiguring: boolean = false;
 
+  /** Incremented on every meeting-mode change. A handler that awaits partway
+   *  through compares it before acting, so it does not finish a job that
+   *  belonged to the mode the agent has since left. */
+  private meetingModeGeneration: number = 0;
+
   /** How long to wait for a session refresh already in flight before giving up
    *  on rebuilding on top of it. The refresh itself is a teardown, a 300ms
    *  flush and a fresh session, so this is several times the expected wait. */
@@ -3080,6 +3109,29 @@ export class NovaAgent implements VoiceAssistantProvider {
     // anyway, and letting the last of an utterance play out is better than
     // clipping it.
     this._isMuted = (mode === 'group');
+
+    // A stop request still resolving was made under the mode being left, and
+    // the new mode has just decided whether the assistant is audible, so the
+    // request is superseded rather than carried across. Called off by hand
+    // because the mute state is set directly above, and the cancellation that
+    // unmute() performs never runs.
+    //
+    // Carrying it would go wrong in every direction. Into translator, its
+    // fallback would mute a translator whose pause state still says UNMUTED,
+    // with only the `mute` tool registered — so the resume phrase would have no
+    // tool to call and it would never speak again, which is why translator
+    // declines stop requests in the first place. Into `normal`, it would
+    // silence an assistant the mode change has just made audible. And either
+    // way the session the request was waiting on is about to be torn down.
+    //
+    // Only the meeting mode does this. An activation-only change leaves the
+    // mute state alone, so a request made a moment before it still stands and
+    // is resolved as usual — mute() is a gate on the agent, not on the session.
+    this.cancelStopRequest('mode-changed');
+    this.lastTranscriptStopAt = null;
+    // Lets a mute tool call already past its tool-use event see that the mode
+    // it was answering has gone (see handleMuteTool).
+    this.meetingModeGeneration += 1;
 
     // The transcription path reads the mode from the shared meeting details, per
     // transcript result on the Amazon Transcribe path. Leaving it on the mode the
