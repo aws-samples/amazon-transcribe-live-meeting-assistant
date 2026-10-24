@@ -187,11 +187,18 @@ class LogGroupInfo:
 
     @property
     def has_data(self) -> bool:
-        """False for a group that exists but has never been written to.
+        """Whether CloudWatch reports stored bytes for this group.
 
-        The distinction the agent needs: a group with no data is not evidence
-        of absence, it is absence of evidence, and usually means this
-        deployment does not use that code path.
+        **Weaker than "has ever been written to", and the difference matters.**
+        ``storedBytes`` counts what is stored *now*, so a group reports zero
+        when every event in it has aged past its retention — and also, briefly,
+        when its first events are very recent, because the figure is not
+        updated in real time.
+
+        So a zero here is a hint that a path may be unused, not proof that it
+        is. A virtual participant idle for a fortnight and failing today would
+        report zero on the group holding the failure. The guidance built on
+        this says so, and does not tell the agent to skip such a group.
         """
         return self.stored_bytes > 0
 

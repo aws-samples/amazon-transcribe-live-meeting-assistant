@@ -156,9 +156,11 @@ Parameters:
       in this stack, providing an additional layer of security.
 
   # Inputs for the troubleshooting agent. Each defaults to empty so a
-  # standalone deployment of this template still creates a stack; the agent is
-  # only created when all three are supplied, because without them it has
-  # nothing to read.
+  # standalone deployment of this template still creates a stack. The agent is
+  # created when the two table names are supplied, because without them it has
+  # nothing to read; AppSyncApiId is optional and gates only the grants that
+  # name this deployment's API — see ShouldDeployTroubleshootingAgent and
+  # HasAppSyncApiId below.
   VirtualParticipantTableName:
     Type: String
     Default: ""

@@ -296,18 +296,14 @@ class RunBudgetExhausted(BaseException):
 #: Written by run_diagnosis when the loop had to be unwound, so the caller
 #: still gets the contract's three sections rather than an error page.
 #:
-#: Deliberately promises nothing about where the evidence went. Two things it
-#: must not say, both of which have been got wrong once:
+#: Names only what this function's log actually holds: the resolved limits,
+#: how much of each was spent, and any tool call that was refused or failed.
 #:
-#: * not the thinking-step trace — that is published only when the caller
-#:   supplied both a callId and a messageId, and the one way to invoke this
-#:   function today supplies neither;
-#: * not "what each tool returned" from the log — successful tool results are
-#:   never logged. What the log does carry is the resolved limits, the budget
-#:   spent, and any tool call that was refused or failed.
-#:
-#: Sending a reader to something that is not there is worse than sending them
-#: nowhere, so this names only what exists.
+#: Two things it deliberately does not name, because neither is guaranteed to
+#: be there and sending a reader to something absent is worse than sending them
+#: nowhere: the thinking-step trace, which exists only when the caller supplies
+#: both a callId and a messageId; and what a successful tool returned, which is
+#: never logged.
 _TRUNCATED_ANSWER = """## Root Cause
 **Confidence:** LOW
 Not determined. The investigation was stopped before it reached a conclusion: \

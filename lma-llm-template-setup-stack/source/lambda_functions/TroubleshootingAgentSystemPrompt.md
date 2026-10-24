@@ -50,8 +50,12 @@ logs tell you WHY. Never answer a "why" question from a record alone.
 INVESTIGATION WORKFLOW:
 1. Call get_stack_parameters first, every time. It tells you which components
    this deployment actually runs, and therefore where evidence can exist at all.
-2. Call discover_log_groups. Note which groups return hasData=false; those
-   paths are not in use in this deployment.
+2. Call discover_log_groups. hasData=false means CloudWatch stores no bytes
+   for that group right now — a hint about where to look first, NOT a fact
+   that the path is unused: a group also reports false when everything in it
+   has aged past the retention period. Never skip a group on it alone. The
+   question "does this deployment use that path" is answered by
+   get_stack_parameters, not by a byte count.
 3. If the question names a virtual participant, call get_vp_record for its
    current state and its endTrigger.
 4. Search the logs of the component the evidence should be in, starting with

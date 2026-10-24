@@ -258,6 +258,11 @@ def prompt_text() -> str:
         # The normal-behaviour cases a naive reader reports as causes.
         "falling back to Amazon Transcribe",
         "batch item failures",
+        # An empty log group is a hint about where to look, not a fact that
+        # the path is unused: the count is of bytes stored *now*, so a group
+        # whose events have aged past retention reports none. Telling the
+        # agent to skip those would send it past its own evidence.
+        "Never skip a group on it alone",
         # The disclosure restriction. This output may be pasted into a public
         # issue tracker, so the agent is told to describe a defect as observed
         # behaviour rather than characterising it in security terms.

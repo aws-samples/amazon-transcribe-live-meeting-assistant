@@ -142,9 +142,13 @@ ECS task-stopped event is ever emitted. An agent that did not know this would
 report "no evidence the Virtual Participant ran" on a perfectly healthy
 deployment. It reads the parameter first and routes accordingly.
 
-It also reports, for every log group, whether that group holds any data at all —
-so "this path is unused in this deployment" and "this component failed silently"
-stay distinguishable.
+It also reports, for every log group, whether CloudWatch currently stores any
+bytes for it. That is a hint about where to look first rather than proof that a
+path is unused: a group reports no stored bytes when everything in it has aged
+past the retention period too, so a participant idle for a fortnight and
+failing today would report none on the very group holding the failure. The
+agent is told as much, and told that "does this deployment use that path" is a
+question for the stack parameters rather than for a byte count.
 
 **Discovery is scoped to this deployment, and says so when it cannot be.** The
 agent resolves your stack's own nested stacks by name before looking for log

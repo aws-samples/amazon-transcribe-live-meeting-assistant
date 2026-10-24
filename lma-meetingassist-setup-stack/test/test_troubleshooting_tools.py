@@ -138,6 +138,21 @@ def test_discovery_counts_the_groups_that_hold_nothing() -> None:
     assert "hasData=false" in result["guidance"]
 
 
+def test_the_guidance_does_not_tell_the_agent_to_skip_an_empty_group() -> None:
+    """storedBytes counts what is stored now, so a group reports zero once
+    everything in it has aged past retention. A participant idle for a
+    fortnight and failing today reports zero on the very group holding the
+    failure, so "query only the groups that hold data" would send the agent
+    past its evidence."""
+    result = parsed(make_tools().discover_log_groups())
+
+    guidance = result["guidance"]
+    assert "do NOT skip a group for it" in guidance
+    assert "aged past the retention period" in guidance
+    # And it redirects the "is this path used" question to the right tool.
+    assert "get_stack_parameters" in guidance
+
+
 def test_discovery_accepts_a_comma_separated_component_filter() -> None:
     """The model serialises a list argument as a string often enough to matter."""
     result = parsed(

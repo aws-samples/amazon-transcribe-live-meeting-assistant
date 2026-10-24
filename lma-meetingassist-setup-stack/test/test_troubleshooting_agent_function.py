@@ -1308,13 +1308,12 @@ def test_a_truncated_run_still_answers_in_the_three_section_format() -> None:
 
 
 def test_the_truncated_answer_promises_only_what_exists() -> None:
-    """Two things it must not claim, each got wrong once.
+    """Neither of the two things it must not claim is guaranteed to exist.
 
-    Not the thinking-step trace: that is published only when the caller
-    supplied a callId and a messageId, and the one way to invoke this function
-    today supplies neither. And not what a successful tool returned: nothing
-    logs that. Sending a reader to something absent is worse than sending them
-    nowhere.
+    The thinking-step trace is published only when the caller supplies both a
+    callId and a messageId, which a caller need not do. And a successful
+    tool's result is never logged at all. Sending a reader to something absent
+    is worse than sending them nowhere.
     """
     answer = agent_function._TRUNCATED_ANSWER.format(reason="a limit", usage="{}")
 

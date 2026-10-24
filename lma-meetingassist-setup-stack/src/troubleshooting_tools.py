@@ -392,10 +392,17 @@ class TroubleshootingTools:
         present = [g for g in groups if g.has_data]
         empty = [g for g in groups if not g.has_data]
         guidance = [
-            f"{len(present)} of {len(groups)} groups hold data. A group with "
-            "hasData=false has never been written to, which means this "
-            "deployment does not use that path — it is not evidence that the "
-            "component failed. Query only the groups that hold data."
+            f"{len(present)} of {len(groups)} groups report stored data. "
+            "hasData=false means CloudWatch stores no bytes for that group "
+            "RIGHT NOW. That is a hint, not a fact about whether the path is "
+            "used: a group also reports false when every event in it has aged "
+            "past the retention period, and briefly when its first events are "
+            "very recent. So do NOT skip a group for it — a participant idle "
+            "for a fortnight and failing today reports false on the very group "
+            "holding the failure. Use it to rank where to look, and read "
+            "get_stack_parameters to find the groups this deployment genuinely "
+            "does not use, which is a question about configuration rather than "
+            "about bytes."
         ]
         # Caveats come after the reading advice and before anything else the
         # model does: each one names a way this list is incomplete or wider
