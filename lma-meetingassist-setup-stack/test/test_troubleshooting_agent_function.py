@@ -1119,7 +1119,8 @@ class FakeTools:
 def build_tools(tools: Any, budget: agent_function.RunBudget) -> Dict[str, Any]:
     """Call build_tools with `strands.tool` stubbed out, keyed by tool name."""
     strands = mock.MagicMock()
-    strands.tool = lambda fn: fn
+    # Accepts both `@tool` and `@tool(context=True)`.
+    strands.tool = lambda fn=None, **_: fn if fn else (lambda f: f)
     with mock.patch.dict("sys.modules", {"strands": strands}):
         return {fn.__name__: fn for fn in agent_function.build_tools(tools, budget)}
 
@@ -1225,93 +1226,232 @@ def test_a_stopped_run_is_reported_as_truncated() -> None:
 # ── a reached limit ends the loop, it does not just ask ─────────────────────
 
 
-def test_a_second_refused_call_ends_the_run_instead_of_asking_again() -> None:
+class Context:
+    """A stand-in for the ToolContext Strands injects: only invocation_state
+    is read, and the two keys that matter are the turn id and request_state."""
+
+    def __init__(self, turn: Any):
+        self.invocation_state: Dict[str, Any] = {
+            "event_loop_cycle_id": turn,
+            "request_state": {},
+        }
+
+    @property
+    def loop_stop_requested(self) -> bool:
+        return bool(self.invocation_state["request_state"].get("stop_event_loop"))
+
+
+def test_every_call_in_the_crossing_turn_gets_the_stop_instruction() -> None:
+    """Parallel calls in one turn were issued together, before the model saw
+    any result, so none of them can have ignored the instruction."""
+    budget = budget_with(max_iterations="1")
+
+    assert budget.admit("turn-1") == (agent_function.PROCEED, None)
+    first = budget.admit("turn-2")
+    second = budget.admit("turn-2")
+    third = budget.admit("turn-2")
+
+    for decision, reason in (first, second, third):
+        assert decision == agent_function.STOP_INSTRUCTION
+        assert "1-tool-call limit" in (reason or "")
+    assert budget.ended_because is None
+    assert budget.stopped_in_turn == "turn-2"
+
+
+def test_a_call_in_a_later_turn_ends_the_run() -> None:
     """The stop instruction is a request to a model, and a request is not a
     limit: a model that calls another tool anyway buys a full turn, which
-    re-sends the whole system prompt. The second refusal unwinds the loop."""
+    re-sends the whole system prompt."""
+    budget = budget_with(max_iterations="1")
+    budget.admit("turn-1")
+    budget.admit("turn-2")
+
+    decision, reason = budget.admit("turn-3")
+
+    assert decision == agent_function.END_RUN
+    assert "1-tool-call limit" in (reason or "")
+    assert budget.ended_because == reason
+
+
+def test_every_call_in_the_later_turn_ends_the_run() -> None:
+    budget = budget_with(max_iterations="1")
+    budget.admit("turn-1")
+    budget.admit("turn-2")
+
+    decisions = [budget.admit("turn-3")[0] for _ in range(3)]
+
+    assert decisions == [agent_function.END_RUN] * 3
+
+
+def test_an_unknown_turn_ends_the_run_on_the_second_refusal() -> None:
+    """Without a turn id the strict reading applies: it can end a run one turn
+    early, never let one run on."""
+    budget = budget_with(max_iterations="1")
+    budget.admit(None)
+
+    assert budget.admit(None)[0] == agent_function.STOP_INSTRUCTION
+    assert budget.admit(None)[0] == agent_function.END_RUN
+
+
+def test_the_first_limit_reached_is_the_one_reported_as_ending_the_run() -> None:
+    clock = Clock()
+    budget = budget_with(clock, max_iterations="1", wall_clock_seconds="10")
+    budget.admit("t1")
+    budget.admit("t2")
+    budget.admit("t3")
+    clock.advance(60)
+
+    budget.admit("t4")
+
+    assert "1-tool-call limit" in (budget.ended_because or "")
+
+
+def test_concurrent_calls_are_each_counted_once() -> None:
+    """Strands runs a turn's sync tools on worker threads, so the count and
+    the decision have to be taken together."""
+    import threading
+    import time
+
+    budget = budget_with(max_iterations="20")
+
+    def slow_increment() -> None:
+        # Widens the read-modify-write window so that, without the lock, two
+        # threads reliably read the same value and one count is lost.
+        seen = budget.tool_calls
+        time.sleep(0.001)
+        budget.tool_calls = seen + 1
+
+    barrier = threading.Barrier(8)
+
+    def call() -> None:
+        barrier.wait()
+        for _ in range(5):
+            budget.admit("t")
+
+    with mock.patch.object(budget, "note_tool_call", slow_increment):
+        threads = [threading.Thread(target=call) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+    assert budget.tool_calls == 40
+
+
+def test_parallel_wrapped_calls_in_the_crossing_turn_do_not_stop_the_loop() -> None:
     budget = budget_with(max_iterations="1")
     impl = FakeTools()
     tools = build_tools(impl, budget)
+    tools["get_stack_parameters"](tool_context=Context("t1"))
 
-    tools["get_stack_parameters"]()
-    first_refusal = json.loads(tools["discover_log_groups"]())
-    assert "STOP GATHERING EVIDENCE" in first_refusal["instruction"]
+    contexts = [Context("t2"), Context("t2")]
+    refusals = [json.loads(tools["search_logs"]("g", tool_context=c)) for c in contexts]
 
-    with pytest.raises(agent_function.RunBudgetExhausted):
-        tools["search_logs"]("whatever")
-
-    # No tool did any work after the first call.
+    for refusal in refusals:
+        assert "STOP GATHERING EVIDENCE" in refusal["instruction"]
+    assert not any(c.loop_stop_requested for c in contexts)
     assert impl.calls == ["get_stack_parameters"]
 
 
-def test_the_loop_ending_signal_passes_through_an_sdk_s_error_handling() -> None:
-    """An agent SDK catches `Exception` around a tool call and turns it into a
-    tool error the model can react to, which is the right default and exactly
-    the wrong behaviour for a reached limit. Deriving from BaseException is
-    what makes this signal pass through untouched."""
-    assert issubclass(agent_function.RunBudgetExhausted, BaseException)
-    assert not issubclass(agent_function.RunBudgetExhausted, Exception)
-
-
-def test_a_tool_executor_that_catches_exception_does_not_absorb_the_stop() -> None:
-    """The behaviour the class hierarchy is chosen for, asserted directly.
-
-    This drives the wrappers through a stand-in for an SDK's tool executor —
-    a loop that calls tools and converts any `Exception` into a tool result,
-    which is what the real one does. The signal has to survive that and reach
-    the caller.
-
-    What this does NOT establish: that strands-agents 1.61.1 propagates it the
-    same way through its own async and threading plumbing. That needs the
-    layer, which is not installed for these tests, so it is unverified here.
-    The wall-clock budget is the backstop that does not depend on it: it is
-    checked inside every tool, so a run whose stop signal were swallowed still
-    ends at the deadline rather than at the Lambda timeout.
-    """
+def test_a_wrapped_call_in_a_later_turn_returns_a_result_and_requests_the_stop() -> None:
+    """Returned, not raised: Bedrock rejects a history holding a toolUse with
+    no toolResult, and an exception raised inside a tool loses that call's
+    result. The loop is ended through Strands' request_state instead."""
     budget = budget_with(max_iterations="1")
     impl = FakeTools()
     tools = build_tools(impl, budget)
-    results: List[str] = []
+    tools["get_stack_parameters"](tool_context=Context("t1"))
+    tools["discover_log_groups"](tool_context=Context("t2"))
 
-    def executor_loop() -> None:
-        # A model that ignores every instruction and keeps calling tools.
-        for _ in range(10):
-            try:
-                results.append(tools["search_logs"]("whatever"))
-            except Exception as exc:  # noqa: BLE001 - what an SDK executor does
-                results.append(f"tool error: {exc}")
+    later = Context("t3")
+    result = json.loads(tools["search_logs"]("g", tool_context=later))
 
-    with pytest.raises(agent_function.RunBudgetExhausted):
-        executor_loop()
+    assert "1-tool-call limit" in result["stopped"]
+    assert "This diagnosis has ended" in result["instruction"]
+    assert later.loop_stop_requested
+    assert impl.calls == ["get_stack_parameters"]
 
-    # One refusal reached the model, then the loop was cut off.
-    assert len(results) == 2
-    assert "STOP GATHERING EVIDENCE" in json.loads(results[1])["instruction"]
+
+def test_the_stop_request_creates_request_state_when_it_is_absent() -> None:
+    context = Context("t")
+    del context.invocation_state["request_state"]
+
+    assert agent_function._request_loop_stop(context) is True
+    assert context.loop_stop_requested
+
+
+@pytest.mark.parametrize("context", [None, object(), mock.Mock(invocation_state="nope")])
+def test_the_stop_request_reports_when_it_cannot_be_made(context: Any) -> None:
+    assert agent_function._request_loop_stop(context) is False
+
+
+def test_the_turn_is_read_from_the_event_loop_cycle_id() -> None:
+    assert agent_function._turn_of(Context("cycle-7")) == "cycle-7"
+    assert agent_function._turn_of(None) is None
+    assert agent_function._turn_of(mock.Mock(invocation_state=None)) is None
+
+
+def test_no_wrapped_call_raises_however_often_the_model_ignores_the_stop() -> None:
+    """A model that ignores every instruction and keeps calling tools, one
+    turn after another. Every call gets a result."""
+    budget = budget_with(max_iterations="1")
+    impl = FakeTools()
+    tools = build_tools(impl, budget)
+
+    results = [
+        json.loads(tools["search_logs"]("g", tool_context=Context(f"t{i}"))) for i in range(10)
+    ]
+
     assert impl.calls == ["search_logs"]
+    assert all("stopped" in r for r in results[1:])
+    assert budget.ended_because is not None
+
+
+def test_a_run_whose_loop_was_ended_answers_with_the_truncated_sections() -> None:
+    """The agent's last message after an ended loop is the turn that asked for
+    tools, not an answer, so run_diagnosis replaces it."""
+    budgets: List[Any] = []
+    real_budget = agent_function.RunBudget
+
+    def make_budget(limits: Any, remaining_seconds: Any = None) -> Any:
+        budget = real_budget(limits, remaining_seconds=remaining_seconds)
+        budgets.append(budget)
+        return budget
+
+    def agent_call(_: str) -> str:
+        budgets[0].stopped_because = "the 8-tool-call limit for one diagnosis has been reached"
+        budgets[0].ended_because = budgets[0].stopped_because
+        return "Let me search one more log group."
+
+    strands = mock.MagicMock()
+    strands.tool = lambda fn=None, **_: fn if fn else (lambda f: f)
+    strands.Agent.return_value = mock.Mock(side_effect=agent_call)
+    with (
+        mock.patch.dict(
+            "sys.modules", {"strands": strands, "strands.models": strands.models}
+        ),
+        mock.patch.object(agent_function, "RunBudget", side_effect=make_budget),
+        mock.patch.object(agent_function, "TroubleshootingTools", return_value=FakeTools()),
+        mock.patch.object(
+            agent_function.troubleshooting_prompt, "get_system_prompt", return_value="p"
+        ),
+    ):
+        result = agent_function.run_diagnosis({"query": "why?"})
+
+    assert result["answer"].startswith("## Root Cause")
+    assert "8-tool-call limit" in result["answer"]
+    assert "one more log group" not in result["answer"]
+    assert result["truncated"] is True
 
 
 def test_the_wall_clock_is_checked_inside_the_tools_not_only_the_loop() -> None:
-    """The guarantee that holds whatever the SDK does with an exception.
-
-    Asserted against the tools module rather than restated: every tool calls
-    _check_deadline before doing work, so a run ends at its deadline even if
-    nothing else stops it.
+    """Asserted against the tools module rather than restated: every tool calls
+    _check_deadline before doing work, so a single slow tool cannot carry a run
+    past its deadline even when the wrapper admitted it in time.
     """
     source = (SOURCE_DIR / "troubleshooting_tools.py").read_text(encoding="utf-8")
 
     assert source.count("self._check_deadline(") == 4
-
-
-def test_the_loop_ending_signal_carries_the_reason() -> None:
-    budget = budget_with(max_iterations="1")
-    tools = build_tools(FakeTools(), budget)
-    tools["get_stack_parameters"]()
-    tools["discover_log_groups"]()
-
-    with pytest.raises(agent_function.RunBudgetExhausted) as raised:
-        tools["search_logs"]("whatever")
-
-    assert "1-tool-call limit" in raised.value.reason
 
 
 def test_a_truncated_run_still_answers_in_the_three_section_format() -> None:

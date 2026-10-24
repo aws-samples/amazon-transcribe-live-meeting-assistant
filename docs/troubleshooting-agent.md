@@ -200,26 +200,24 @@ original question re-pays for every tool call it already made.
 
 When a limit is reached, the agent is first asked to write its answer from the
 evidence it has — the cooperative path, and the one that produces a real
-diagnosis. If it calls another tool anyway, the run is ended rather than paying
-for a further model turn, and you get a diagnosis in the usual three sections
-whose Root Cause is "Not determined" and which names the limit that was
-reached.
+diagnosis. Every tool call the model made in that same turn gets the same
+request, because a model can ask for several tools at once and none of them
+can have ignored an instruction it had not yet seen. If the model calls a tool
+in a later turn anyway, the run is ended rather than paying for a further model
+turn, and you get a diagnosis in the usual three sections whose Root Cause is
+"Not determined" and which names the limit that was reached.
 
-> **Known limitation.** That forced ending works by raising out of the agent's
-> event loop, and whether the Strands Agents SDK passes the signal through its
-> own asynchronous and threaded code unchanged has not been verified against a
-> deployed stack — only against a stand-in for an SDK's tool executor. If it
-> did not get through, every subsequent tool call would refuse (the deadline is
-> checked inside each tool), and the invocation would finally be ended by the
-> Lambda `Timeout` rather than by the agent. Tracked in
-> [issue #814](https://github.com/aws-samples/amazon-transcribe-live-meeting-assistant/issues/814),
-> to be closed by an integration test before the UI entry points land.
+The run is ended through the Strands Agents SDK's own stop request, which takes
+effect after every tool call in the turn has been given a result, so the
+conversation the model would see stays complete. This behaviour is tested
+against the real Strands event loop with a scripted model in place of Bedrock
+(`lma-meetingassist-setup-stack/test/test_troubleshooting_real_strands.py`).
 
-The response reports this in a `truncated` field, inside the JSON-encoded
-`body`. It is `true` whenever a limit was reached at all, on the cooperative
-path as well as the forced one. So read it as "this diagnosis did not get to
-search as widely as it wanted" rather than "the agent was cut off
-mid-sentence".
+The response's JSON-encoded `body` reports both outcomes. `truncated` is `true`
+whenever a limit was reached at all, on the cooperative path as well as the
+forced one, so read it as "this diagnosis did not get to search as widely as it
+wanted" rather than "the agent was cut off mid-sentence". `usage.endedBecause`
+is set only on the forced path, and names the limit that ended the run.
 
 | Environment variable | Default | Maximum | Bounds |
 |---|---|---|---|

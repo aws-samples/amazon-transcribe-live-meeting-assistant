@@ -40,9 +40,10 @@ nine:
 
 * ``max_iterations`` — tool calls, counted in the wrapper that every tool goes
   through. Past the limit a tool returns a stop instruction instead of doing
-  work, which lets the model write its answer; a second call past the limit
-  ends the loop instead of asking again, and ``RunBudgetExhausted`` explains
-  why that second step is not optional.
+  work, which lets the model write its answer. A tool call in a *later* model
+  turn means the model did not take that instruction, and it ends the loop
+  instead of asking again — see ``RunBudget.admit`` for what counts as a turn
+  and ``build_tools`` for how the loop is ended.
 * ``token_budget`` — cumulative input + output tokens, read from the agent's
   own accumulated usage between tool calls and checked at the same point.
 * ``wall_clock_seconds`` — a deadline computed at the start of the run and
@@ -68,10 +69,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import boto3
 import troubleshooting_prompt
@@ -185,7 +187,17 @@ class RunBudget:
         self.tool_calls = 0
         self.input_tokens = 0
         self.output_tokens = 0
+        #: Why the model was first told to stop gathering evidence, if it was.
         self.stopped_because: Optional[str] = None
+        #: The model turn that stop instruction was given in. See ``admit``.
+        self.stopped_in_turn: Any = None
+        #: Why the loop itself was ended, if it was: set only when the model
+        #: called a tool in a turn after the one it was told to stop in.
+        self.ended_because: Optional[str] = None
+        # Strands runs a turn's parallel tool calls concurrently, each sync tool
+        # on a worker thread (asyncio.to_thread in its @tool decorator), so the
+        # count-then-decide step in ``admit`` has to be atomic.
+        self._lock = threading.Lock()
 
     @property
     def total_tokens(self) -> int:
@@ -196,10 +208,7 @@ class RunBudget:
         return self._monotonic() - self.started_at
 
     def note_tool_call(self) -> None:
-        # Not locked. Tools run one at a time in the agent's loop, and if that
-        # ever changes the worst case is an undercount by one on a turn with
-        # parallel calls -- which costs one extra tool call against the cap,
-        # not a run that does not stop.
+        """Count one tool call. ``admit`` is the caller that takes the lock."""
         self.tool_calls += 1
 
     def note_usage(self, input_tokens: int, output_tokens: int) -> None:
@@ -235,7 +244,48 @@ class RunBudget:
             "wallClockSeconds": round(self.wall_clock_seconds, 1),
             "wallClockCappedByInvocation": self.capped_by_invocation,
             "stoppedBecause": self.stopped_because,
+            "endedBecause": self.ended_because,
         }
+
+    def admit(self, turn: Any) -> Tuple[str, Optional[str]]:
+        """Count one tool call and decide what it may do.
+
+        Returns ``(decision, reason)`` where decision is one of ``PROCEED``,
+        ``STOP_INSTRUCTION`` (refuse, and tell the model to write its answer)
+        or ``END_RUN`` (refuse, and end the loop).
+
+        ``turn`` identifies the model turn that issued the call. The
+        distinction it makes is the whole point of this method: a model can
+        issue several tool calls in one turn, and those calls are made before
+        the model has seen any of their results. So every call in the turn
+        that first crosses a limit gets the stop instruction — none of them
+        can have ignored it — and only a call from a later turn, which the
+        model issued after reading the instruction, ends the run.
+
+        An unknown turn (``None``) never matches, so without a turn identifier
+        the second refusal ends the run. That is the strict reading, and the
+        safe one: it can end a run one turn early, never let one run on.
+        """
+        with self._lock:
+            self.note_tool_call()
+            reason = self.exhausted_reason()
+            if reason is None:
+                return PROCEED, None
+            if self.stopped_because is None:
+                self.stopped_because = reason
+                self.stopped_in_turn = turn
+                return STOP_INSTRUCTION, reason
+            if turn is not None and turn == self.stopped_in_turn:
+                return STOP_INSTRUCTION, reason
+            if self.ended_because is None:
+                self.ended_because = reason
+            return END_RUN, reason
+
+
+#: The three outcomes of ``RunBudget.admit``.
+PROCEED = "proceed"
+STOP_INSTRUCTION = "stop_instruction"
+END_RUN = "end_run"
 
 
 _STOP_INSTRUCTION = (
@@ -246,58 +296,8 @@ _STOP_INSTRUCTION = (
 )
 
 
-class RunBudgetExhausted(BaseException):
-    """Unwinds the agent loop when a limit has been reached twice.
-
-    Derived from BaseException, not Exception, deliberately. The first time a
-    limit is hit the wrapper returns ``_STOP_INSTRUCTION``, which asks the
-    model to write its answer — the cooperative path, and the one that produces
-    a real diagnosis from the evidence already gathered. But a request to a
-    model is not a limit: a model that calls another tool anyway gets another
-    full turn, and a turn re-sends the whole system prompt. Asking politely
-    cannot be the only thing standing between a reached limit and the Lambda
-    timeout.
-
-    So the second refusal stops the loop instead of asking again. One caveat
-    on "second": refusals are counted, not turns. If the model issues several
-    tool calls in parallel in the turn that crosses a limit, the first is
-    refused and the second ends the run in that same turn, so it never gets
-    the cooperative answer turn. That is the right trade — a limit has been
-    reached either way, and the caller still gets a written answer — but it
-    means a parallel-calling model sees the forced path more often than a
-    serial one.
-
-    An agent SDK catches ``Exception`` around a tool call and turns it into a
-    tool error the model can react to, which is the right default and exactly
-    the wrong behaviour here. So this inherits from BaseException, to pass
-    through that handling untouched; ``run_diagnosis`` catches it and writes
-    the answer itself.
-
-    **What is and is not verified.** That a catch-``Exception`` tool executor
-    does not absorb this is asserted directly, against a stand-in for one. That
-    strands-agents propagates it unchanged through its own async and threading
-    plumbing is *not*: the Strands layer is not installed for the unit tests,
-    so nothing here exercises the real event loop.
-
-    Be clear about what the fallback is, because it is easy to overstate. Past
-    the deadline every tool raises instead of working, so the model's next turn
-    gets an error from whatever it calls — which in practice ends a run quickly,
-    but it is *not* a bound: nothing in this file stops the model taking
-    further turns. If this exception were absorbed, the thing that would
-    actually end the invocation is the Lambda ``Timeout``. So: this class makes
-    a reached limit end promptly and cleanly, the deadline makes every further
-    tool call useless, and ``Timeout`` is the final backstop. Turning that last
-    one into a checked property needs an integration run against a deployed
-    stack; that is tracked as issue #814 rather than claimed here.
-    """
-
-    def __init__(self, reason: str):
-        super().__init__(reason)
-        self.reason = reason
-
-
-#: Written by run_diagnosis when the loop had to be unwound, so the caller
-#: still gets the contract's three sections rather than an error page.
+#: Written by run_diagnosis when the loop was ended, so the caller still gets
+#: the contract's three sections rather than an error page.
 #:
 #: Names only what this function's log actually holds: the resolved limits,
 #: how much of each was spent, and any tool call that was refused or failed.
@@ -727,6 +727,55 @@ class ThinkingStepHookProvider:
 # ── Tool registration ───────────────────────────────────────────────────────
 
 
+def _turn_of(tool_context: Any) -> Any:
+    """The model turn a tool call belongs to, or None if it cannot be read.
+
+    Strands assigns ``invocation_state["event_loop_cycle_id"]`` a fresh UUID at
+    the start of every event-loop cycle (``strands/event_loop/event_loop.py``,
+    ``event_loop_cycle``, in strands-agents 1.61.1), and a cycle is exactly one
+    model response plus the execution of the tool calls in it. So every call a
+    model issued in one response sees the same id, and the next response gets a
+    new one. Read through the ``ToolContext`` the SDK injects, which carries
+    the same ``invocation_state`` dict the event loop writes to.
+    """
+    state = getattr(tool_context, "invocation_state", None)
+    if isinstance(state, Mapping):
+        return state.get("event_loop_cycle_id")
+    return None
+
+
+def _request_loop_stop(tool_context: Any) -> bool:
+    """Ask the Strands event loop to stop once this turn's results are recorded.
+
+    Sets ``request_state["stop_event_loop"]``, which the event loop checks in
+    ``_handle_tool_execution`` (``strands/event_loop/event_loop.py`` in
+    strands-agents 1.61.1) *after* it has appended every tool result of the
+    turn to the conversation and before it would call the model again. That
+    ordering is why this, and not an exception, is how the loop is ended: an
+    exception raised inside a tool is dropped by the concurrent executor along
+    with that call's result, and the next model request then carries a
+    ``toolUse`` with no ``toolResult``, which Bedrock rejects.
+
+    Returns whether the request could be made. It cannot without a tool
+    context, which only a direct call (not one from the agent) lacks.
+    """
+    state = getattr(tool_context, "invocation_state", None)
+    if not isinstance(state, dict):
+        return False
+    request_state = state.setdefault("request_state", {})
+    if not isinstance(request_state, dict):
+        return False
+    request_state["stop_event_loop"] = True
+    return True
+
+
+_END_RUN_RESULT = (
+    "This diagnosis has ended: {reason}, and a tool was called after the "
+    "instruction to stop. No further tools will run and no further turns will "
+    "be taken."
+)
+
+
 def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
     """Wrap the four evidence tools as Strands tools, behind the budget.
 
@@ -736,28 +785,46 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
     agent loop gives the model an opaque failure, while a sentence saying which
     log group was not found gives it a next action.
 
+    **Every call returns a result, including a refused one.** Bedrock rejects a
+    request whose history holds a ``toolUse`` without a matching
+    ``toolResult``, so a wrapper that raised instead of returning would fail
+    the run rather than end it. Ending the loop is requested from Strands
+    instead, through ``_request_loop_stop``, which takes effect only after
+    every result of the turn has been recorded.
+
+    Each tool takes ``tool_context`` (``@tool(context=True)``), which Strands
+    injects and leaves out of the tool spec the model sees. It is annotated
+    ``Any`` rather than ``ToolContext`` because the decorator resolves
+    annotations with ``get_type_hints``, and ``ToolContext`` would be imported
+    in this function's scope, not the module's.
+
     The ``strands`` import is local, matching the house pattern: the layer is
     absent in the unit-test environment, and the tools themselves are plain
     methods that the tests exercise directly.
     """
     from strands import tool
 
-    def guarded(name: str, call: Callable[..., str], **kwargs: Any) -> str:
-        budget.note_tool_call()
-        reason = budget.exhausted_reason()
-        if reason:
-            already_refused = budget.stopped_because is not None
-            budget.stopped_because = reason
-            if already_refused:
-                # The model was already told to stop and called a tool anyway.
-                # Asking a second time would buy another full turn, so the loop
-                # ends here and run_diagnosis writes the answer.
-                logger.warning(
-                    "ending the run: %s was called after the stop instruction (%s)",
-                    name,
-                    reason,
-                )
-                raise RunBudgetExhausted(reason)
+    def guarded(
+        name: str, call: Callable[..., str], tool_context: Any, **kwargs: Any
+    ) -> str:
+        decision, reason = budget.admit(_turn_of(tool_context))
+        if decision == END_RUN:
+            # The model was told to stop in an earlier turn and called a tool
+            # anyway. Asking again would buy another full turn, so the loop is
+            # ended once this turn's results are in and run_diagnosis writes
+            # the answer.
+            requested = _request_loop_stop(tool_context)
+            logger.warning(
+                "ending the run: %s was called in a turn after the stop "
+                "instruction (%s); loop stop requested=%s",
+                name,
+                reason,
+                requested,
+            )
+            return json.dumps(
+                {"stopped": reason, "instruction": _END_RUN_RESULT.format(reason=reason)}
+            )
+        if decision == STOP_INSTRUCTION:
             logger.info("refusing %s: %s", name, reason)
             # JSON rather than bare text so the thinking-step stream can tell
             # a refusal from a successful call: a plain string summarises as
@@ -797,8 +864,8 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
                 }
             )
 
-    @tool
-    def discover_log_groups(components: str = "") -> str:
+    @tool(context=True)
+    def discover_log_groups(components: str = "", tool_context: Any = None) -> str:
         """List this LMA deployment's CloudWatch log groups and what each holds.
 
         Call this before any log search. Log group names in this solution are
@@ -821,16 +888,20 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
             does not run.
         """
         return guarded(
-            "discover_log_groups", tools.discover_log_groups, components=components or None
+            "discover_log_groups",
+            tools.discover_log_groups,
+            tool_context,
+            components=components or None,
         )
 
-    @tool
+    @tool(context=True)
     def search_logs(
         log_group_names: str,
         search_terms: str = "",
         query_string: str = "",
         lookback_hours: int = 0,
         limit: int = 0,
+        tool_context: Any = None,
     ) -> str:
         """Run one CloudWatch Logs Insights query over one or more log groups.
 
@@ -857,6 +928,7 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
         return guarded(
             "search_logs",
             tools.search_logs,
+            tool_context,
             log_group_names=log_group_names,
             search_terms=search_terms or None,
             query_string=query_string or None,
@@ -864,8 +936,8 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
             limit=limit or None,
         )
 
-    @tool
-    def get_vp_record(vp_id: str) -> str:
+    @tool(context=True)
+    def get_vp_record(vp_id: str, tool_context: Any = None) -> str:
         """Read one virtual participant's current record.
 
         Gives the current status, the prose status detail and the structured
@@ -878,10 +950,10 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
         Returns:
             The record, plus the field-level notes needed to read it correctly.
         """
-        return guarded("get_vp_record", tools.get_vp_record, vp_id=vp_id)
+        return guarded("get_vp_record", tools.get_vp_record, tool_context, vp_id=vp_id)
 
-    @tool
-    def get_stack_parameters() -> str:
+    @tool(context=True)
+    def get_stack_parameters(tool_context: Any = None) -> str:
         """Read this deployment's CloudFormation parameters.
 
         Call this first. It says which components are deployed and therefore
@@ -893,7 +965,7 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
             The parameters that determine the architecture, annotated, then the
             rest.
         """
-        return guarded("get_stack_parameters", tools.get_stack_parameters)
+        return guarded("get_stack_parameters", tools.get_stack_parameters, tool_context)
 
     return [get_stack_parameters, discover_log_groups, get_vp_record, search_logs]
 
@@ -993,16 +1065,19 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     )
 
     try:
-        try:
-            answer = str(agent(build_question(event)))
-        except RunBudgetExhausted as exhausted:
-            # Not an error: the run reached a limit and the loop was unwound
-            # rather than paying for another turn. The caller still gets the
-            # output contract's three sections, saying plainly that nothing was
-            # concluded.
+        result = agent(build_question(event))
+        if budget.ended_because is not None:
+            # Not an error: the run reached a limit, the model kept calling
+            # tools, and the loop was ended rather than paying for another
+            # turn. The agent's final message is then the turn that asked for
+            # those tools, not an answer, so it is replaced: the caller still
+            # gets the output contract's three sections, saying plainly that
+            # nothing was concluded.
             answer = _TRUNCATED_ANSWER.format(
-                reason=exhausted.reason, usage=json.dumps(budget.as_dict(), indent=2)
+                reason=budget.ended_because, usage=json.dumps(budget.as_dict(), indent=2)
             )
+        else:
+            answer = str(result)
     finally:
         # In a `finally` so a run that raised still records what it spent. A
         # failed diagnosis has usually made several Bedrock calls, and that is
