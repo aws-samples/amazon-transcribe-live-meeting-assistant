@@ -577,10 +577,13 @@ class ThinkingStepHookProvider:
             # virtual-participant" rather than a path.
             names = [n.strip() for n in str(groups).split(",") if n.strip()]
             plural = "" if len(names) == 1 else "s"
-            parts.append(f"{len(names)} log group{plural}")
+            described = f"{len(names)} log group{plural}"
             components = sorted({classify_log_group(n) for n in names})
             if components:
-                parts.append(f"in {', '.join(components)}")
+                # One part, so the line reads "3 log groups in x, y" rather
+                # than "3 log groups, in x, y".
+                described += f" in {', '.join(components)}"
+            parts.append(described)
         for field in ("query_string", "search_terms", "components"):
             value = tool_input.get(field)
             if value:

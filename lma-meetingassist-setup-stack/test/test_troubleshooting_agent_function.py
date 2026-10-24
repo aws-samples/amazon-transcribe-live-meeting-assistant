@@ -745,8 +745,12 @@ def test_an_unknown_status_counts_as_success() -> None:
     assert published_steps(event)[0]["success"] is True
 
 
-def test_an_older_attribute_shaped_result_still_works() -> None:
-    """Belt and braces: the reader tries both, so neither shape is a cliff."""
+def test_an_attribute_shaped_result_as_the_meeting_assistant_reads_it_works() -> None:
+    """Belt and braces: the reader tries both, so neither shape is a cliff.
+
+    The attribute shape is the one the meeting assistant's own hook provider
+    reads, which is why it is supported — not an older SDK.
+    """
     event = mock.Mock()
     event.selected_tool = mock.Mock(tool_name="search_logs")
     event.result = mock.Mock(

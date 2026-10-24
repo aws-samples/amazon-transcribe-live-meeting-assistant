@@ -21,9 +21,9 @@ object is passed and not merely defined).
 
 The same sharing applies to the agent's own modules, which do go into
 ``src/``: they ship in all three functions' packages and change all three code
-hashes. That is four small files rather than a test suite, so it is left as it
-is — but giving the troubleshooting function a ``Code:`` directory of its own
-is the change that would fix both halves.
+hashes. They are a handful of small files rather than a test suite, so that is
+left as it is — but giving the troubleshooting function a ``Code:`` directory
+of its own is the change that would fix both halves.
 """
 
 from __future__ import annotations
