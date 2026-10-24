@@ -39,6 +39,10 @@ LOG_GROUP = "TroubleshootingAgentFunctionLogGroup"
 
 #: Actions whose IAM authorization uses no resource, so a scoped grant denies
 #: every call. Each is paired with the reason, for whoever reads a failure.
+RESOURCELESS_ACTIONS = {
+    "xray:PutTraceSegments": "names no resource; required by active tracing",
+    "xray:PutTelemetryRecords": "names no resource; required by active tracing",
+}
 RESOURCELESS_LOG_ACTIONS = {
     "logs:DescribeLogGroups": (
         "lists the account's log groups and takes no log group as input; the "
@@ -48,6 +52,7 @@ RESOURCELESS_LOG_ACTIONS = {
     "logs:GetQueryResults": "takes a query id, not a log group",
     "logs:StopQuery": "takes a query id, not a log group",
 }
+RESOURCELESS_ACTIONS.update(RESOURCELESS_LOG_ACTIONS)
 
 #: Actions that do take a log group, and so must stay scoped.
 SCOPED_LOG_ACTIONS = {"logs:StartQuery"}
@@ -143,9 +148,7 @@ def statements_granting(role: Dict[str, Any], action: str) -> List[Dict[str, Any
 # ── wide enough to work ─────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    ("action", "why"), sorted(RESOURCELESS_LOG_ACTIONS.items())
-)
+@pytest.mark.parametrize(("action", "why"), sorted(RESOURCELESS_ACTIONS.items()))
 def test_an_action_with_no_resource_type_is_granted_on_all_resources(
     role: Dict[str, Any], action: str, why: str
 ) -> None:
@@ -170,9 +173,9 @@ def test_the_resourceless_actions_are_the_only_wildcards_on_the_role(
     for statement in statements(role):
         if resources_of(statement) != ["*"]:
             continue
-        assert set(actions_of(statement)) <= set(RESOURCELESS_LOG_ACTIONS), (
+        assert set(actions_of(statement)) <= set(RESOURCELESS_ACTIONS), (
             "a new wildcard grant appeared on this role: "
-            f"{sorted(set(actions_of(statement)) - set(RESOURCELESS_LOG_ACTIONS))}"
+            f"{sorted(set(actions_of(statement)) - set(RESOURCELESS_ACTIONS))}"
         )
 
 
@@ -286,6 +289,20 @@ def test_the_microvm_log_groups_are_named_in_full(role: Dict[str, Any]) -> None:
     assert any("lambda-microvms/${LMAStackName}-asr-logs" in r for r in rendered)
 
 
+def test_active_tracing_is_matched_by_the_permission_it_needs(
+    role: Dict[str, Any], template: Dict[str, Any]
+) -> None:
+    """`TracingConfig: Mode: Active` with no X-Ray grant records nothing, and
+    fails silently — the function looks traced and produces no segments."""
+    assert (
+        template["Resources"][FUNCTION]["Properties"]["TracingConfig"]["Mode"]
+        == "Active"
+    )
+
+    for action in ("xray:PutTraceSegments", "xray:PutTelemetryRecords"):
+        assert statements_granting(role, action), f"{action} is not granted"
+
+
 def test_the_role_can_read_records_from_two_named_tables_only(
     role: Dict[str, Any],
 ) -> None:
@@ -342,6 +359,10 @@ PERMITTED_ACTIONS = {
     # grants the same three actions account-wide — see the role's comment.
     "logs:CreateLogStream",
     "logs:PutLogEvents",
+    # What TracingConfig Mode: Active needs to record anything. The function
+    # sets it, and without these the traces would be silently empty.
+    "xray:PutTraceSegments",
+    "xray:PutTelemetryRecords",
     "dynamodb:GetItem",
     "cloudformation:DescribeStacks",
     "cloudformation:ListStackResources",
@@ -362,6 +383,10 @@ PERMITTED_NON_READS = {
     "logs:StopQuery",
     "logs:CreateLogStream",
     "logs:PutLogEvents",
+    # What TracingConfig Mode: Active needs to record anything. The function
+    # sets it, and without these the traces would be silently empty.
+    "xray:PutTraceSegments",
+    "xray:PutTelemetryRecords",
 }
 
 
@@ -449,6 +474,7 @@ def test_the_non_read_actions_are_only_the_three_grants_the_docs_describe(
         "cloudformation:Delete",
         "cloudformation:Execute",
         "appsync:",
+        "xray:",
         "iam:",
         "lambda:",
         "s3:Put",
@@ -465,7 +491,8 @@ def test_the_non_read_actions_are_only_the_three_grants_the_docs_describe(
         f"the role's non-read surface changed: {sorted(non_reads)}. The role's "
         "own comment, docs/troubleshooting-agent.md and the CHANGELOG all list "
         "three non-read grants -- narrating progress, cancelling its own query, "
-        "and writing its own log stream. Update all three if this is intended."
+        "and writing its own log stream -- plus the two tracing writes active "
+        "tracing requires. Update all three descriptions if this is intended."
     )
 
 

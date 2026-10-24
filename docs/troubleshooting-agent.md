@@ -19,10 +19,10 @@ it rests on. It is built on the Strands Agents SDK and Amazon Bedrock, the same
 stack the Meeting Assistant uses.
 
 It reads and does not change anything it diagnoses: no permission to restart,
-delete or redeploy, and no ability to write to any table or bucket. Three
-grants are not reads, and none of them touches the deployment: publishing a
-progress step to the UI through a single GraphQL mutation, cancelling a log
-query it started, and writing its own log stream.
+delete or redeploy, and no ability to write to any table or bucket. The grants
+that are not reads do not touch the deployment either: publishing a progress
+step to the UI through a single GraphQL mutation, cancelling a log query it
+started, writing its own log stream, and sending its own X-Ray traces.
 
 ## Why it exists
 

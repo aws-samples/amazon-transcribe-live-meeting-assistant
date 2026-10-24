@@ -597,6 +597,31 @@ def test_an_oversize_result_sheds_rows_and_stays_valid_json() -> None:
     assert result["rows"]
 
 
+def test_a_result_barely_over_the_cap_keeps_nearly_all_its_rows() -> None:
+    """Shedding searches for the longest prefix that fits rather than halving.
+
+    Both cost about log2(N) serialisations; this one keeps as much evidence as
+    the cap allows, where halving would drop fifty of a hundred rows for a
+    result one character too long.
+    """
+    limits = AgentLimits()
+    rows = [row(message="y" * 100) for _ in range(100)]
+    client = FakeInsightsClient(rows=rows)
+    full = len(
+        make_tools(
+            FakeInsightsClient(rows=rows),
+            limits=AgentLimits(),
+        ).search_logs(VP_GROUP)
+    )
+    # A cap a hair under what the full result needs.
+    object.__setattr__(limits, "max_tool_result_chars", full - 200)
+
+    result = parsed(make_tools(client, limits=limits).search_logs(VP_GROUP))
+
+    assert result["rowsOmittedForSize"] <= 5, result["rowsOmittedForSize"]
+    assert len(result["rows"]) >= 95
+
+
 def test_an_oversize_result_says_how_many_rows_it_dropped() -> None:
     limits = AgentLimits()
     result = parsed(oversize_search(limits))

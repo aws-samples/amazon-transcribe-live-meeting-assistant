@@ -348,7 +348,7 @@ test-cli: ## Run LMA CLI unit tests
 # a test placed beside the layer would have been collected by nothing.
 #
 # MEETINGASSIST_TEST_DIR is searched for the same reason: it holds the tests
-# for this solution's two Strands agents, which nothing else would collect.
+# for the troubleshooting agent, which nothing else would collect.
 # Unusually for this repository those tests are NOT beside their source, and
 # that is deliberate — three functions in that stack share one `Code: ./src`,
 # so a test file there would ship in all three deployment packages and editing

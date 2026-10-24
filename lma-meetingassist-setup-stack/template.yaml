@@ -497,13 +497,16 @@ Resources:
         rules_to_suppress:
           - id: W11
             reason: >-
-              Three read actions support no resource-level permissions, so the
+              Five actions support no resource-level permissions, so the
               statements that carry them cannot be narrowed.
               logs:DescribeLogGroups lists the account's log groups and takes
               no log group as input; logs:GetQueryResults and logs:StopQuery
-              take a query id. What the agent can read is bounded by
-              logs:StartQuery, which is scoped to this deployment's own log
-              groups, and by the role holding no write action at all.
+              take a query id; xray:PutTraceSegments and
+              xray:PutTelemetryRecords are what active tracing requires and
+              name no resource. Which log groups the agent can read is bounded
+              by logs:StartQuery, scoped to this deployment's own log groups,
+              and the role's only non-read grants are the three named in the
+              role comment above plus those two tracing writes.
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
@@ -538,6 +541,21 @@ Resources:
                   - "logs:PutLogEvents"
                 Resource:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/lambda/TroubleshootingAgentFunction:*"
+        # What TracingConfig Mode: Active needs in order to record anything.
+        # Neither action names a resource, so neither can be scoped. Granted
+        # inline rather than through AWSXRayDaemonWriteAccess for the same
+        # reason this role attaches no managed policy at all: a managed
+        # policy's contents are not in this template, and every action this
+        # role holds has to be visible to the tests that enumerate them.
+        - PolicyName: XRayWritePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "xray:PutTraceSegments"
+                  - "xray:PutTelemetryRecords"
+                Resource: "*"
         # Reading this deployment's logs.
         #
         # Named per nested stack rather than by the bare "/${LMAStackName}-*"

@@ -226,35 +226,45 @@ class TroubleshootingTools:
                 return {k: items[k] for k in order[:n]}
             return order[:n]
 
-        remaining = len(order)
-        while remaining:
-            # Halving rather than one-at-a-time: a result can be far over the
-            # cap, and each attempt re-serialises the whole payload.
-            remaining = max(1, remaining // 2) if remaining > 1 else 0
-            kept = take(remaining)
+        def attempt(n: int) -> str:
             trial = dict(payload)
-            trial[bulk_key] = kept
-            trial[shed_count_key] = len(order) - remaining
+            trial[bulk_key] = take(n)
+            trial[shed_count_key] = len(order) - n
             trial["guidance"] = " ".join(
                 part
                 for part in (
                     payload.get("guidance"),
-                    f"{len(order) - remaining} of {len(order)} items were "
-                    "removed from this result because it was too large to "
-                    "return in full. What remains is accurate; ask a narrower "
-                    "question for the rest.",
+                    f"{len(order) - n} of {len(order)} items were removed from "
+                    "this result because it was too large to return in full. "
+                    "What remains is accurate; ask a narrower question for the "
+                    "rest.",
                 )
                 if part
             )
-            rendered = serialise(trial)
+            return serialise(trial)
+
+        # Binary search for the longest prefix that fits, rather than halving
+        # until it does. Both cost about log2(N) serialisations, and this one
+        # keeps as much evidence as the cap allows: halving would drop 50 of
+        # 100 rows for a result one character over.
+        low, high, best = 0, len(order), None
+        while low <= high:
+            middle = (low + high) // 2
+            rendered = attempt(middle)
             if len(rendered) <= cap:
-                return rendered
+                best = rendered
+                low = middle + 1
+            else:
+                high = middle - 1
+
+        if best is not None:
+            return best
 
         # Even the small fields alone are over the cap, which means a caller
         # configured an unusably small limit. Say so rather than return a
-        # fragment.
+        # fragment of the array.
         minimal = {k: v for k, v in payload.items() if k != bulk_key}
-        minimal[shed_count_key] = len(items)
+        minimal[shed_count_key] = len(order)
         return truncate(serialise(minimal), cap)
 
     def _known_log_group_names(self) -> set[str]:
