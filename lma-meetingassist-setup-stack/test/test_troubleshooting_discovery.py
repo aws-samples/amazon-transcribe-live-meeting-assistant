@@ -467,6 +467,12 @@ def test_an_upgraded_deployment_reports_both_generations_labelled() -> None:
     legacy_note = found[LEGACY_VP].to_dict()["note"]
     assert "launched before" in legacy_note
     assert "microvmId" in legacy_note
+    # The current group's runtime stream naming is inferred, not observed, and a
+    # fresh deployment gets this note with no legacy caveat beside it, so the
+    # message-text fallback has to be in the note itself.
+    current_note = found[CURRENT_VP].to_dict()["note"]
+    assert "microvmId" in current_note
+    assert "search the group's message text" in current_note
     # The caveat names the legacy groups so the agent cannot miss them, and
     # tells it how to find a participant's stream in one.
     [caveat] = legacy_caveat(result)

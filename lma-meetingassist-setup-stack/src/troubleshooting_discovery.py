@@ -24,9 +24,9 @@ operator typed. Four independent reasons, all of them live in the current tree:
   ``<stack>-vp`` or ``<stack>-asr``, which the service created after the
   image's name and the stack does not own. Where a MicroVM's output went is
   fixed when it is launched, not when its image was built: an upgraded stack
-  keeps both groups, and a MicroVM launched before the upgrade finished —
-  including one on a release whose image already logged its build to the
-  current group — wrote to the older one. Either name searched alone reports
+  keeps both groups, and a MicroVM launched before the deployment was updated
+  to v0.3.11 — including one launched while the update was in progress —
+  wrote to the older one. Either name searched alone reports
   "no logs" for some participants, and would be believed. See
   ``MICROVM_LOG_GENERATIONS``.
 * AppSync's group is created by the service, named after the API id rather
@@ -202,8 +202,7 @@ LEGACY_GENERATION = "legacy"
 #: (suffix, generation) for each MicroVM log group name a deployment can hold,
 #: appended to ``/aws/lambda-microvms/<stack>``. Discovery looks each one up and
 #: reports only those CloudWatch returns: a deployment created at v0.3.11 or
-#: later normally never had the legacy groups, and one upgraded from earlier
-#: has both.
+#: later never had the legacy groups, and one upgraded from earlier has both.
 MICROVM_LOG_GENERATIONS: Sequence[tuple[str, str]] = (
     ("-vp-logs", CURRENT_GENERATION),
     ("-asr-logs", CURRENT_GENERATION),
@@ -219,8 +218,10 @@ MICROVM_LOG_GENERATIONS: Sequence[tuple[str, str]] = (
 # "<image version>/<uuid>" and carry no MicroVM id. The runtime form was
 # observed in the service-created (legacy) group; that the service names
 # runtime streams the same way in the declared group is expected but was not
-# observed when this was written, which is why the notes below tell the agent
-# to fall back to message text rather than trust the stream name.
+# observed when this was written, which is why the current note below tells
+# the agent to fall back to message text rather than trust the stream name.
+# (For the legacy group the same fallback is in caveats(), which is emitted
+# whenever a legacy group is listed.)
 _GENERATION_NOTES: Dict[str, str] = {
     CURRENT_GENERATION: (
         "Current MicroVM log group, declared by the stack. Holds the image "
@@ -228,7 +229,10 @@ _GENERATION_NOTES: Dict[str, str] = {
         "deployment was updated to this release. A MicroVM launched before "
         "that update finished logged to the legacy group instead, if one is "
         "listed. A running MicroVM's stream name should contain the MicroVM "
-        "id the launch state machine logs as microvmId; build streams do not."
+        "id the launch state machine logs as microvmId; build streams do not. "
+        "That naming is observed rather than documented, so if no stream "
+        "matches, search the group's message text for the participant's id "
+        "before treating the miss as an absence."
     ),
     LEGACY_GENERATION: (
         "Legacy MicroVM log group, created by the service rather than the "
