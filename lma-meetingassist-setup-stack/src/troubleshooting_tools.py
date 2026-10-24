@@ -74,6 +74,27 @@ class ToolError(RuntimeError):
     """
 
 
+#: Error codes CloudWatch Logs returns for a query it would not accept. Read
+#: from the error's own code rather than matched against its message, which is
+#: not a stable interface.
+_QUERY_SYNTAX_ERROR_CODES = frozenset(
+    {
+        "MalformedQueryException",
+        "InvalidParameterException",
+        "ValidationException",
+    }
+)
+
+
+def _is_query_syntax_error(exc: BaseException) -> bool:
+    """Whether `exc` means the query itself was rejected."""
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return False
+    code = (response.get("Error") or {}).get("Code")
+    return code in _QUERY_SYNTAX_ERROR_CODES
+
+
 def _escape_insights_string(text: str) -> str:
     """Escape a literal for use inside a Logs Insights double-quoted string."""
     return text.replace("\\", "\\\\").replace('"', '\\"')
@@ -501,7 +522,8 @@ class TroubleshootingTools:
             return maximum
         try:
             value = int(float(limit))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError is int(float("inf")); see resolve_lookback_hours.
             return maximum
         if value < 1:
             return maximum
@@ -529,13 +551,30 @@ class TroubleshootingTools:
         cannot finish in the time the run has left is cancelled at that point
         instead.
         """
-        started = self._logs.start_query(
-            logGroupNames=list(log_group_names),
-            startTime=start_time,
-            endTime=end_time,
-            queryString=query_string,
-            limit=row_limit,
-        )
+        try:
+            started = self._logs.start_query(
+                logGroupNames=list(log_group_names),
+                startTime=start_time,
+                endTime=end_time,
+                queryString=query_string,
+                limit=row_limit,
+            )
+        except Exception as exc:  # noqa: BLE001 - classified, then re-raised
+            # A query the model wrote can be rejected outright, and that is
+            # the model's problem to fix rather than a fault in this tool.
+            # Letting it reach the generic handler would label it "a fault in
+            # the tool, not evidence about LMA" and leave the agent with no
+            # next step, when the next step is to correct the query.
+            if _is_query_syntax_error(exc):
+                raise ToolError(
+                    "CloudWatch Logs rejected this query as malformed: "
+                    f"{exc}. The query is yours to fix — check the pipe "
+                    "syntax, the field names and the quoting, then try again. "
+                    "Omit queryString and pass search_terms instead if you "
+                    "only need matching lines."
+                ) from exc
+            raise
+
         query_id = started.get("queryId")
         if not query_id:
             raise ToolError("CloudWatch Logs did not return a query id")

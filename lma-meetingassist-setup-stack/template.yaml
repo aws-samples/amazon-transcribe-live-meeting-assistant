@@ -248,7 +248,7 @@ Resources:
     Condition: ShouldDeployStrandsLayer
     Properties:
       LayerName: !Sub "${LMAStackName}-strands-layer"
-      Description: "Strands Agents SDK for meeting assistance"
+      Description: "Strands Agents SDK, shared by the meeting assistant and the troubleshooting agent"
       Content: ./strands_layer
       CompatibleRuntimes:
         - python3.12

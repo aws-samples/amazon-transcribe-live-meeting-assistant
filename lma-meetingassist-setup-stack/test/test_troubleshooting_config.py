@@ -152,7 +152,9 @@ def test_a_maximum_below_the_default_wins() -> None:
     assert limits.resolve_lookback_hours("nonsense") == 6
 
 
-@pytest.mark.parametrize("requested", ["", "lots", None, 0, -3, [], {}])
+@pytest.mark.parametrize(
+    "requested", ["", "lots", None, 0, -3, [], {}, "inf", "-inf", "nan", float("inf")]
+)
 def test_an_unusable_lookback_falls_back_rather_than_raising(requested: object) -> None:
     limits = limits_with()
 

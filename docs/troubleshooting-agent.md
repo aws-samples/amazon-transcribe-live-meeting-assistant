@@ -52,12 +52,16 @@ aws lambda invoke \
   --function-name "$FUNCTION" \
   --cli-binary-format raw-in-base64-out \
   --payload '{"query": "why did virtual participant vp-abc123 fail to join?", "vpId": "vp-abc123"}' \
-  /dev/stdout | jq -r '.body' | jq -r '.answer'
+  diagnosis.json >/dev/null
+
+jq -r '.body | fromjson | .answer' diagnosis.json
 ```
 
 The function returns `{"statusCode": ..., "body": "<json>"}`, so the diagnosis
-itself is inside the encoded `body` — hence the two `jq` steps. Drop the second
-one to see the run's token usage and the `truncated` flag alongside the answer.
+is inside the encoded `body`. Writing to a file rather than `/dev/stdout`
+keeps the CLI's own response metadata out of the way. Read the whole body —
+the token usage and the `truncated` flag as well as the answer — with
+`jq -r '.body | fromjson' diagnosis.json`.
 
 Accepted fields, all optional except that a `query` is strongly advised:
 
@@ -195,11 +199,13 @@ evidence it has — the cooperative path, and the one that produces a real
 diagnosis. If it calls another tool anyway, the run ends there rather than
 paying for a further model turn, and you get a diagnosis in the usual three
 sections whose Root Cause is "Not determined" and which names the limit that
-was reached. The `truncated` field — inside the response's JSON-encoded
-`body`, so pipe the invocation through `jq -r .body | jq` to read it — is
-`true` whenever a limit was reached at all — on the cooperative path as well as the forced one — so treat
-it as "this diagnosis did not get to search as widely as it wanted", not as
-"the agent was cut off mid-sentence".
+was reached.
+
+The response reports this in a `truncated` field, inside the JSON-encoded
+`body`. It is `true` whenever a limit was reached at all, on the cooperative
+path as well as the forced one. So read it as "this diagnosis did not get to
+search as widely as it wanted" rather than "the agent was cut off
+mid-sentence".
 
 | Environment variable | Default | Maximum | Bounds |
 |---|---|---|---|

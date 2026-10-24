@@ -202,7 +202,10 @@ class AgentLimits:
             return fallback
         try:
             hours = int(float(requested))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
+            # OverflowError is int(float("inf")). Unlikely through a typed
+            # tool argument, but the documented behaviour is "fall back to the
+            # default for anything unusable", and that has to mean anything.
             return fallback
         if hours < 1:
             return fallback

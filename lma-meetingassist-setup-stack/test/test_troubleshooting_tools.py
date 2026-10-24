@@ -512,6 +512,17 @@ def test_the_row_limit_is_capped_at_the_configured_maximum() -> None:
     assert client.start_query_calls[0]["limit"] == AgentLimits().max_log_events
 
 
+@pytest.mark.parametrize("limit", ["inf", float("inf"), "nan", "lots", [], {}])
+def test_an_unusable_row_limit_falls_back_to_the_maximum(limit: Any) -> None:
+    """int(float("inf")) raises OverflowError rather than ValueError, so the
+    documented "anything unusable falls back" has to cover it too."""
+    client = FakeInsightsClient()
+
+    make_tools(client).search_logs(VP_GROUP, limit=limit)
+
+    assert client.start_query_calls[0]["limit"] == AgentLimits().max_log_events
+
+
 def test_a_smaller_row_limit_is_honoured() -> None:
     client = FakeInsightsClient()
 
@@ -766,6 +777,54 @@ def test_a_complete_query_with_no_rows_is_an_ordinary_empty_result() -> None:
     assert result["status"] == "Complete"
     assert result["rowCount"] == 0
     assert "not a cause" in result["guidance"]
+
+
+def client_error(code: str) -> Exception:
+    """A botocore-shaped ClientError carrying `code`."""
+
+    class FakeClientError(Exception):
+        response = {"Error": {"Code": code, "Message": f"{code} happened"}}
+
+    return FakeClientError(f"{code} happened")
+
+
+@pytest.mark.parametrize(
+    "code", ["MalformedQueryException", "InvalidParameterException", "ValidationException"]
+)
+def test_a_query_the_model_wrote_badly_is_its_problem_to_fix(code: str) -> None:
+    """Reaching the generic handler would label this "a fault in the tool, not
+    evidence about LMA" and leave the agent with no next step — when the next
+    step is to correct the query it wrote."""
+
+    class Rejecting(FakeInsightsClient):
+        def start_query(self, **kwargs: Any):
+            raise client_error(code)
+
+    with pytest.raises(ToolError, match="rejected this query as malformed"):
+        make_tools(Rejecting()).search_logs(VP_GROUP, query_string="fields @@@")
+
+
+def test_a_rejected_query_tells_the_agent_what_to_do_instead() -> None:
+    class Rejecting(FakeInsightsClient):
+        def start_query(self, **kwargs: Any):
+            raise client_error("MalformedQueryException")
+
+    with pytest.raises(ToolError, match="pass search_terms instead"):
+        make_tools(Rejecting()).search_logs(VP_GROUP, query_string="fields @@@")
+
+
+def test_an_unrelated_client_error_is_not_blamed_on_the_query() -> None:
+    """A throttle or a denial is not the model's query being wrong, and saying
+    so would send it rewriting a perfectly good query."""
+
+    class Throttled(FakeInsightsClient):
+        def start_query(self, **kwargs: Any):
+            raise client_error("ThrottlingException")
+
+    with pytest.raises(Exception) as raised:
+        make_tools(Throttled()).search_logs(VP_GROUP)
+
+    assert not isinstance(raised.value, ToolError)
 
 
 def test_a_query_with_no_id_is_an_error_not_an_empty_result() -> None:

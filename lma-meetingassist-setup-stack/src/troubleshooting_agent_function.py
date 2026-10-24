@@ -40,7 +40,9 @@ nine:
 
 * ``max_iterations`` — tool calls, counted in the wrapper that every tool goes
   through. Past the limit a tool returns a stop instruction instead of doing
-  work, which ends the run with an answer rather than an exception.
+  work, which lets the model write its answer; a second call past the limit
+  ends the loop instead of asking again, and ``RunBudgetExhausted`` explains
+  why that second step is not optional.
 * ``token_budget`` — cumulative input + output tokens, read from the agent's
   own accumulated usage between tool calls and checked at the same point.
 * ``wall_clock_seconds`` — a deadline computed at the start of the run and
