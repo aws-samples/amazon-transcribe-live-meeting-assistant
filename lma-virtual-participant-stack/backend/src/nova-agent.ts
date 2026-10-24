@@ -2499,6 +2499,10 @@ export class NovaAgent implements VoiceAssistantProvider {
   /**
    * Mute the agent — drops all outgoing audio until unmuted. Idempotent.
    * Flushes any buffered playback so the agent stops mid-utterance.
+   *
+   * Has a sibling: muteDrainingPlayback does the same thing but lets the
+   * playback buffer empty first. Anything added here that is about entering the
+   * muted state, rather than about cutting playback off, belongs there too.
    */
   mute(reason?: string): void {
     if (this._isMuted) {
