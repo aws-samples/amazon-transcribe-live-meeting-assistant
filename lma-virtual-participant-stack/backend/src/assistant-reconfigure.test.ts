@@ -210,6 +210,27 @@ test('a mode change does not close an activation window somebody opened', async 
     assert.equal(agent.isActivated(), true);
 });
 
+test('only the wake phrase mode gives up the session it is holding', async () => {
+    // The no-session-between-activations contract belongs to `wake_phrase`
+    // specifically, not to "anything that is not always_active". `start()`
+    // opens a session immediately for every other value, so tearing one down
+    // for a mode that expects to keep it would leave the assistant worse off
+    // than it started.
+    // The request changes only the meeting mode, so the activation mode under
+    // test is still in place when the rebuild runs. Asking for an activation
+    // mode as well would replace it first and never reach the branch.
+    const { agent, calls } = novaAgent({ meetingMode: 'group' });
+    withLiveSession(agent);
+    (agent as any).activationMode = 'strands_tool';
+    (agent as any)._isActivated = false;
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'normal' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal((agent as any).activationMode, 'strands_tool', 'the activation mode must be untouched');
+    assert.deepEqual(calls, ['refreshSession'], 'a mode that holds a session keeps holding one');
+});
+
 test('a mode change with no activation window closes the session it finds', async () => {
     // The wake-phrase cost contract: nothing is held open between activations,
     // so a session left over from an activation that has lapsed is torn down
@@ -389,9 +410,12 @@ test('a mode change does not replay the old mode conversation into the new promp
     assert.deepEqual((agent as any).conversationHistory, []);
 });
 
-test('an activation-only change keeps the conversation it was having', async () => {
+test('an activation-only change does not discard the conversation it was having', async () => {
     // Same assistant, same prompt, same mode — only when it is listening
-    // changed, so the conversation so far is still its own.
+    // changed, so the conversation so far is still its own. It is kept, and
+    // replayed into the next session the agent refreshes; a session opened from
+    // nothing starts without the replay, which is `setupInitialEvents`'
+    // behaviour and not something this change alters.
     const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
     withLiveSession(agent);
     (agent as any).addToConversationHistory('USER', 'what did we decide about hiring?');
@@ -708,7 +732,7 @@ test('a first session that fails to open is retried, not handed to the refresh p
     assert.equal((agent as any).session?.isActive, true);
 });
 
-test('a first session that fails on the wake-phrase path promises nothing, because nothing is owed', async () => {
+test('a teardown that fails on the wake-phrase path promises nothing, because nothing is owed', async () => {
     // Nothing is meant to be open between activations, so there is no recovery
     // to schedule and no caveat to put in the reply: the session the next wake
     // phrase builds carries the new mode.

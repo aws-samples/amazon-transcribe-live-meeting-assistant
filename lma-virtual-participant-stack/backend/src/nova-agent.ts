@@ -3150,7 +3150,12 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     const hasLiveSession = !!(this.session && this.session.isActive);
 
-    if (this.activationMode !== 'always_active') {
+    // Keyed on `wake_phrase` specifically rather than on "not always_active":
+    // that is the one mode whose contract is to hold no session between
+    // activations. `start()` opens a session immediately for every other value,
+    // so tearing one down here for a mode that expects to keep it would leave
+    // the assistant worse off than it started.
+    if (this.activationMode === 'wake_phrase') {
       if (!hasLiveSession) {
         return 'not-needed';
       }
