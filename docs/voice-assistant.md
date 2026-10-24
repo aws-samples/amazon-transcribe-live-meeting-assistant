@@ -220,7 +220,7 @@ The meeting mode decides the assistant's system prompt and the set of tools it i
 
 What that means in a live meeting:
 
-- **The assistant pauses briefly.** It cannot hear or answer for the length of a rebuild, the same gap the periodic refresh already produces.
+- **The assistant pauses briefly.** It cannot hear or answer for the length of a rebuild, the same gap the periodic refresh already produces. Unlike that refresh, which waits for a quiet moment, a command is acted on when it arrives — so an utterance the assistant was in the middle of hearing is lost, and whoever was speaking may need to repeat their question. The transcript still has it.
 - **The transcript is not affected.** Transcription reads a separate PulseAudio sink that the Virtual Participant feeds itself, and that the assistant's voice reaches through a loopback inside the sound server. Nothing on the mode-change path starts or stops an audio process.
 - **The conversation so far is not carried into a new mode.** The next session is built for the mode it is now in, so replaying earlier turns would prime it with a conversation that mode never had. An activation-mode change on its own keeps the conversation, since the mode and the prompt are unchanged.
 - **Group mode starts quiet.** Switching to `group` leaves the assistant muted until a wake phrase, exactly as deploying in group mode would.

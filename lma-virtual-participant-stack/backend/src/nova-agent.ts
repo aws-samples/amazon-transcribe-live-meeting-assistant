@@ -2975,8 +2975,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     // Asking for the configuration it is already in costs the meeting nothing.
-    // Without this, a participant retyping a command — or a button pressed
-    // twice — would tear down a working session each time.
+    // Without this, a participant retyping a command — or a chat observer
+    // delivering one twice — would tear down a working session each time.
     if (changed.length === 0) {
       return notApplied('unchanged', 'already in the requested configuration');
     }
@@ -3159,8 +3159,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         // activation window they opened is still running. Replace it rather than
         // close it: closing would leave the window counting down against no
         // session, so the assistant would be deaf for the rest of it.
-        await this.refreshSession();
-        return 'rebuilt';
+        return await this.refreshIntoNewMode();
       }
       // Otherwise the wake-phrase contract applies — no session is held open
       // between activations, so the rebuild is a teardown and the next wake
@@ -3176,8 +3175,27 @@ export class NovaAgent implements VoiceAssistantProvider {
       return 'rebuilt';
     }
 
+    return await this.refreshIntoNewMode();
+  }
+
+  /**
+   * Replace the live session with one built for the mode the agent is now in,
+   * and report what actually happened.
+   *
+   * `refreshSession` catches its own failures: it schedules a retry a second
+   * later and returns normally rather than throwing, so the `catch` in
+   * `reconfigure` never sees them. The only way to tell a refresh that produced
+   * a session from one that did not is to look at what it left behind —
+   * otherwise a failed refresh would be logged as `session=rebuilt` and
+   * confirmed to the participant with no caveat.
+   */
+  private async refreshIntoNewMode(): Promise<'rebuilt' | 'deferred'> {
     await this.refreshSession();
-    return 'rebuilt';
+    if (this.session && this.session.isActive) {
+      return 'rebuilt';
+    }
+    console.warn('⚠️  Session refresh for a mode change produced no session — its own retry will build one');
+    return 'deferred';
   }
 
   /**

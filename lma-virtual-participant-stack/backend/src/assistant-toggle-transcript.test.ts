@@ -76,6 +76,8 @@ const RECONFIGURE_PATH = [
     'private applyMeetingMode(mode: MeetingMode)',
     'private applyActivationMode(mode: ActivationMode)',
     'private async rebuildSessionForNewMode()',
+    'private async refreshIntoNewMode()',
+    'private scheduleSessionRecovery()',
     'private async waitWhileRefreshing()',
 ];
 
@@ -95,7 +97,8 @@ test('the reconfiguration path reaches the model session and the agent own state
     const rebuild = methodBody(novaAgent, 'private async rebuildSessionForNewMode()');
     assert.match(rebuild, /this\.closeSession\(\)/);
     assert.match(rebuild, /this\.createSession\(\)/);
-    assert.match(rebuild, /this\.refreshSession\(\)/);
+    assert.match(rebuild, /this\.refreshIntoNewMode\(\)/);
+    assert.match(methodBody(novaAgent, 'private async refreshIntoNewMode()'), /this\.refreshSession\(\)/);
 
     // And `refreshSession` itself, which predates this feature, is Bedrock
     // protocol events plus a session swap.

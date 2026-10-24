@@ -626,6 +626,55 @@ test('a rebuild that fails still answers the participant and leaves one log line
     ]);
 });
 
+test('a refresh that produced no session is reported as still switching, not as rebuilt', async () => {
+    // `refreshSession` catches its own failures: it schedules a retry a second
+    // later and returns normally rather than throwing, so the catch in
+    // `reconfigure` never sees them. Reporting from the return alone would log
+    // `session=rebuilt` and confirm the switch with no caveat for a mode change
+    // that left the agent with nothing.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    (agent as any).refreshSession = async () => {
+        // What the real method leaves behind when its own rebuild fails.
+        (agent as any).session = null;
+        (agent as any)._isActive = false;
+    };
+
+    const originalLog = console.log;
+    const lines: string[] = [];
+    console.log = (...args: unknown[]) => {
+        const line = args.map(String).join(' ');
+        if (line.includes(ASSISTANT_TOGGLE_LOG_TAG)) lines.push(line);
+    };
+    let outcome;
+    try {
+        outcome = await agent.reconfigure(chat({ meetingMode: 'group' }));
+    } finally {
+        console.log = originalLog;
+    }
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, false, 'a refresh that produced nothing is not a rebuild');
+    assert.equal(outcome.detail, 'the assistant will finish switching shortly');
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /session=kept/);
+    assert.deepEqual(assistantToggleChatReply(outcome), [
+        'Live Meeting Assistant: switched to group mode, the assistant will finish switching shortly.',
+    ]);
+});
+
+test('a refresh that produced a session is reported as rebuilt', async () => {
+    // The guard must not report every refresh as incomplete.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'group' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, true);
+    assert.equal(outcome.detail, undefined);
+});
+
 test('a first session that fails to open is retried, not handed to the refresh path', async () => {
     // The headline case: `LMA translate` on a wake-phrase deployment, where
     // there is no session yet, so the rebuild calls createSession directly.
