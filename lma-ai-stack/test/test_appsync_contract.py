@@ -573,31 +573,84 @@ def test_clearing_a_prompt_is_conditional_on_the_row_the_caller_read() -> None:
         resolver.block,
         re.S,
     )
-    bodies = [gate for gate in gates if '"condition"' in gate]
+    bodies = [gate for gate in gates if "$conditions.add" in gate]
     assert len(bodies) == 1, "expected exactly one clearManualAction-gated condition block"
     body = bodies[0]
-    assert '"condition"' in body, "the gated branch emits no condition block"
     assert "MANUAL_ACTION_REQUIRED" in body, "the condition does not name the prompting status"
     # The condition's expression names are a separate block from the update's, so
     # a name shared between them would be undeclared in one of the two.
-    assert '"#conditionStatus": "status"' in body
+    assert '$conditionNames.put("#conditionStatus", "status")' in body
 
     resume, opportunistic = (
         re.search(
             r"#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) \)\s*\n\s*"
-            r"#set\( \$conditionExpression = \"([^\"]+)\" \)",
+            r"\$util\.qr\( \$conditions\.add\(\"([^\"]+)\"\) \)",
             body,
         ),
         re.search(
-            r"#else\s*\n\s*#set\( \$conditionExpression = \"([^\"]+)\" \)",
+            r"#else\s*\n\s*\$util\.qr\( \$conditions\.add\(\"([^\"]+)\"\) \)",
             body,
         ),
     )
     assert resume and opportunistic, "the two condition expressions are not both set"
     assert resume.group(1) == "#conditionStatus = :promptingStatus"
+    # Parenthesised, because it is ANDed with any other condition on the write.
     assert opportunistic.group(1) == (
-        "attribute_not_exists(#conditionStatus) OR #conditionStatus <> :promptingStatus"
+        "(attribute_not_exists(#conditionStatus) OR #conditionStatus <> :promptingStatus)"
     )
+
+
+def test_progress_status_is_conditional_on_the_row_not_having_been_ended() -> None:
+    """A progress status does not land on a row whose end has been recorded.
+
+    The end request writes `endReason` and stops the task, so a non-terminal
+    status arriving afterwards (a write already in flight when the stop came)
+    would otherwise leave an ended participant showing as in progress. Terminal
+    statuses stay unconditioned, so the participant can still record how it
+    ended, and the condition keys on `endReason` rather than on a terminal
+    status, so a FAILED written by the launcher or the task reaper — which do
+    not write `endReason` — does not stop a running participant reporting.
+    """
+    resolver = _resolver("Mutation", "updateVirtualParticipant")
+    guard = re.search(
+        r"#set\( \$terminalStatuses = \[([^\]]*)\] \)\s*\n\s*"
+        r"#if\( !\$util\.isNullOrBlank\(\$ctx\.args\.input\.status\) && "
+        r"!\$terminalStatuses\.contains\(\$ctx\.args\.input\.status\) \)(.*?)#end",
+        resolver.block,
+        re.S,
+    )
+    assert guard, "the progress-status condition is not gated on a non-terminal status"
+    terminal = set(re.findall(r'"(\w+)"', guard.group(1)))
+    assert terminal == {"COMPLETED", "FAILED", "ENDED", "CANCELLED"}
+    assert '$conditionNames.put("#conditionEndReason", "endReason")' in guard.group(2)
+    assert '$conditions.add("attribute_not_exists(#conditionEndReason)")' in guard.group(2)
+
+    # The end request is the one writer of endReason. The launcher state
+    # machine's and the task reaper's FAILED writes, in the VP stack template,
+    # do not carry it: none of that template's update expressions names it,
+    # either directly or through an expression attribute name.
+    manager = (
+        TEMPLATE.parent.parent / "source/lambda_functions/virtual_participant_manager/index.py"
+    ).read_text()
+    assert "endReason = :end_reason" in manager
+    vp_template = (
+        TEMPLATE.parent.parent.parent / "lma-virtual-participant-stack/template.yaml"
+    ).read_text()
+    update_expressions = re.findall(r"UpdateExpression[\"']?\s*[:=]\s*\(?\s*([^\n]+)", vp_template)
+    assert len(update_expressions) >= 3, "the VP stack's status writes were not found"
+    for expression in update_expressions:
+        assert "endReason" not in expression, expression
+    assert not re.search(r"[\"']endReason[\"']", vp_template), (
+        "the VP stack template maps an expression attribute name to endReason"
+    )
+
+    # Every condition is emitted, ANDed, in the one condition block.
+    assert "${conditionExpression} AND " in resolver.block
+    assert re.search(
+        r"#if\( !\$conditions\.isEmpty\(\) \)\s*\n\s*,\"condition\": \{\s*\n\s*"
+        r"\"expression\": \"\$conditionExpression\"",
+        resolver.block,
+    ), "the condition block does not carry the combined expression"
 
 
 def test_the_prompt_template_resolvers_both_name_the_field_they_serve() -> None:

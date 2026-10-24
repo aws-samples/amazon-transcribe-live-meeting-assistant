@@ -105,7 +105,12 @@ export const HEALTHY_VP_STATUSES: readonly VpStatus[] = [
   VP_STATUS.COMPLETED,
 ];
 
-/** Statuses from which a VP never moves on. */
+/**
+ * Statuses from which a VP never moves on. The updateVirtualParticipant
+ * resolver in `lma-ai-stack/deployment/lma-ai-stack.yaml` keeps the same set
+ * (`$terminalStatuses`) to decide which writes it conditions on the row's end;
+ * `vp-status-updates.test.ts` checks that the two agree.
+ */
 export const TERMINAL_VP_STATUSES: readonly VpStatus[] = [
   VP_STATUS.COMPLETED,
   VP_STATUS.FAILED,
@@ -206,6 +211,36 @@ const SUBSCRIBED_FIELDS = `
             errorMessage
             updatedAt`;
 
+/**
+ * Whether this process has begun to shut down. Module state rather than a
+ * field, because it describes the process: the platform handlers create a
+ * manager of their own for each write, and every one of them has to see it.
+ */
+let processShuttingDown = false;
+
+/**
+ * Record that this process has begun to shut down, so it stops reporting
+ * progress.
+ *
+ * Called from the signal handler and the emergency cleanup. From then on no
+ * manager in this process writes a progress status, a join sub-step, a
+ * manual-action prompt or the clearing of one; only a terminal status goes
+ * through. Whatever the setup or join code was in the middle of carries on
+ * running until the process exits, and each progress write it would otherwise
+ * make describes a participant that is no longer going to get there. A
+ * terminal status is still written, because recording how the participant
+ * ended is what the shutdown path is for.
+ *
+ * This covers writes that start after the signal, and those whose row read
+ * was still in flight when it came. One whose mutation was already on its way
+ * to AppSync is the resolver's to decline: a progress status does not land on
+ * a row whose end has been recorded (see the updateVirtualParticipant
+ * resolver).
+ */
+export const beginShutdown = (): void => {
+  processShuttingDown = true;
+};
+
 export class VirtualParticipantStatusManager {
   private participantId: string;
   private graphqlEndpoint: string;
@@ -287,6 +322,13 @@ export class VirtualParticipantStatusManager {
     }
   }
 
+  /** Whether a progress write should be skipped because shutdown has begun. */
+  private skipProgressWrite(what: string): boolean {
+    if (!processShuttingDown) return false;
+    console.log(`VP ${this.participantId} is shutting down — not writing ${what}`);
+    return true;
+  }
+
   /**
    * Write a lifecycle status, and with it the detail line the UI shows.
    *
@@ -300,6 +342,9 @@ export class VirtualParticipantStatusManager {
     errorMessage?: string,
     endTrigger?: string,
   ): Promise<boolean> {
+    if (!isTerminalVpStatus(status) && this.skipProgressWrite(`status ${status}`)) {
+      return false;
+    }
     try {
       // First, get the current VP to preserve existing CallId and VNC fields
       const getQuery = `
@@ -339,6 +384,12 @@ export class VirtualParticipantStatusManager {
         console.warn(
           `VP ${this.participantId} is ${current.status} and is being set to ${status}`,
         );
+      }
+
+      // Checked again after the read, which is where a write started before a
+      // shutdown spends most of its time.
+      if (!isTerminalVpStatus(status) && this.skipProgressWrite(`status ${status}`)) {
+        return false;
       }
 
       // Update with new status while preserving CallId and VNC fields.
@@ -403,8 +454,22 @@ export class VirtualParticipantStatusManager {
         console.error(`VP ${this.participantId} failed: ${errorMessage}`);
       }
 
-      const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      
+      let result;
+      try {
+        result = await this.signAndSendGraphQLRequest(mutation, variables);
+      } catch (error) {
+        if (!isTerminalVpStatus(status) && isConditionalCheckFailure(error)) {
+          // The resolver declines a progress status on a row whose end has
+          // been recorded: the user asked for this participant to end, and
+          // that outcome stands over any progress it reports afterwards.
+          console.log(
+            `VP ${this.participantId} has been ended — not setting its status to ${status}`,
+          );
+          return false;
+        }
+        throw error;
+      }
+
       if (result) {
         console.log(`Successfully updated VP ${this.participantId} status to ${status} with preserved fields`);
         return true;
@@ -675,6 +740,7 @@ export class VirtualParticipantStatusManager {
    * the user is still needed to clear it.
    */
   async setJoiningSubstep(message: string): Promise<void> {
+    if (this.skipProgressWrite('a join sub-step')) return;
     try {
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
@@ -731,6 +797,7 @@ export class VirtualParticipantStatusManager {
     message: string,
     timeoutSeconds: number
   ): Promise<boolean> {
+    if (this.skipProgressWrite(`a ${actionType} prompt`)) return false;
     try {
       // First, get the current VP to preserve existing CallId and VNC fields,
       // and to record the status this prompt is interrupting.
@@ -758,6 +825,7 @@ export class VirtualParticipantStatusManager {
       }
 
       const current = currentVP.getVirtualParticipant;
+      if (this.skipProgressWrite(`a ${actionType} prompt`)) return false;
       console.log(`Setting manual action required: ${actionType} - ${message}`);
 
       // Update with MANUAL_ACTION_REQUIRED status and metadata.
@@ -804,8 +872,19 @@ export class VirtualParticipantStatusManager {
         variables.input.vncReady = current.vncReady;
       }
 
-      const result = await this.signAndSendGraphQLRequest(mutation, variables);
-      
+      let result;
+      try {
+        result = await this.signAndSendGraphQLRequest(mutation, variables);
+      } catch (error) {
+        if (isConditionalCheckFailure(error)) {
+          // MANUAL_ACTION_REQUIRED is a progress status, so the resolver
+          // declines it on a row whose end has been recorded.
+          console.log(`VP ${this.participantId} has been ended — not raising a ${actionType} prompt`);
+          return false;
+        }
+        throw error;
+      }
+
       if (result) {
         console.log(`Successfully set manual action required for VP ${this.participantId}`);
         return true;
@@ -848,6 +927,10 @@ export class VirtualParticipantStatusManager {
    * drops out, which it reports rather than retries.
    */
   async clearManualAction(): Promise<boolean> {
+    // Clearing a prompt resumes a progress status, and after shutdown has
+    // begun the terminal status being written supersedes the prompt anyway:
+    // the UI shows a prompt only while the status is MANUAL_ACTION_REQUIRED.
+    if (this.skipProgressWrite('the clearing of a prompt')) return false;
     try {
       console.log(`Clearing manual action for VP ${this.participantId}`);
 
@@ -871,6 +954,7 @@ export class VirtualParticipantStatusManager {
       }
 
       const current = currentVP.getVirtualParticipant;
+      if (this.skipProgressWrite('the clearing of a prompt')) return false;
 
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {
