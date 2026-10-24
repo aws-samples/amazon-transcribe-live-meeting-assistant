@@ -328,6 +328,32 @@ test('the ElevenLabs provider declines stop requests in translator mode', () => 
     assert.equal(agent.isMuted(), false);
 });
 
+test('the ElevenLabs provider reports both outcomes in the shared log family', () => {
+    // One CloudWatch filter is meant to cover both providers, which only holds
+    // if this one writes a line for the outcomes where nothing is muted too.
+    const captured: string[] = [];
+    const realLog = console.log;
+    console.log = (...args: unknown[]) => {
+        captured.push(args.map((arg) => String(arg)).join(' '));
+    };
+    try {
+        new ElevenLabsAgent({ apiKey: 'test-key', meetingMode: 'normal' }).requestStopTalking('test');
+        new ElevenLabsAgent({ apiKey: 'test-key', meetingMode: 'translator' }).requestStopTalking('test');
+    } finally {
+        console.log = realLog;
+    }
+
+    const lines = captured.filter((line) => line.startsWith('[stop-request]'));
+    assert.equal(lines.length, 2, `both outcomes must be reported, saw: ${lines.join(' | ')}`);
+    assert.match(lines[0], /route=transcript action=muted-immediately provider=elevenlabs mode=normal/);
+    assert.match(lines[0], /speaking=\w+ muted=\w+/);
+    assert.match(lines[1], /route=transcript action=declined-translator provider=elevenlabs mode=translator/);
+    // The utterance is participant speech and must not reach the log.
+    for (const line of lines) {
+        assert.doesNotMatch(line, /stop talking|Hey Alex/i, `instrumentation leaked speech: ${line}`);
+    }
+});
+
 test('the ElevenLabs provider comes back when addressed again', async () => {
     const agent = new ElevenLabsAgent({ apiKey: 'test-key', meetingMode: 'normal', activationMode: 'always_active' });
     agent.requestStopTalking('test');

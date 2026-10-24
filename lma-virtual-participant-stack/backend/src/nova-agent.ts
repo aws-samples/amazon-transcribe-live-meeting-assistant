@@ -2287,10 +2287,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     // a segment down one path or the other, never both, so the utterance that
     // asked for silence cannot be the one that activates.
     this.cancelStopRequest('activated');
-    // The assistant was never silenced here, so the unmute() that normally
-    // clears this returns early. Clearing it anyway keeps a later tool call
-    // from being timed against a request that was called off — the same reason
-    // the group-mode branch of handleUserTurnWakePhrase clears it by hand.
+    // The assistant may not have been silenced here, in which case the
+    // unmute() below returns early without clearing this. Clearing it either
+    // way keeps a later tool call from being timed against a request that was
+    // called off — the same reason the group-mode branch of
+    // handleUserTurnWakePhrase clears it by hand.
     this.lastTranscriptStopAt = null;
 
     // Being addressed by wake phrase is how the agent becomes audible again
