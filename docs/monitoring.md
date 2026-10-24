@@ -190,7 +190,7 @@ instead, where its distribution is informative and a single value is not.
 
 ## Metrics LMA publishes
 
-Two of the alarms above, and the bottom band of the dashboard, read metrics the
+Two of the alarms above, and one band of the dashboard, read metrics the
 application emits rather than metrics an AWS service emits. There are seven of
 them, and they answer one question end to end: a meeting was asked for — did a
 transcript come out of it, how long did that take, and was anything dropped on
@@ -382,7 +382,7 @@ mislead. Reading top to bottom:
 | Transcriber target health | `HealthyHostCount` and `UnHealthyHostCount` | Whether new meetings can connect at all. Zero healthy targets refuses every new connection. |
 | Transcriber load balancer | `TargetResponseTime` p99 and `HTTPCode_Target_5XX_Count` | Errors at the edge. Response time is of limited use here: a meeting is one long-lived WebSocket, so what is being timed is the upgrade handshake, not the meeting. |
 | GraphQL API | `4XXError`, `5XXError` and `Latency` p99 | What the web UI is experiencing. 4XX is usually an expired client token and is not alarmed; 5XX is a failing resolver and is. |
-| Application metrics (band header) | A note naming the namespace these widgets read | Everything below this line comes from LMA rather than from an AWS service. If a series below is empty while meetings are running, the component is not publishing rather than nothing having happened — check that `METRIC_NAMESPACE` is set on it. |
+| Application metrics (band header) | A note naming the namespace these widgets read | The four widgets in this band come from LMA rather than from an AWS service; the error tables further down are Logs Insights queries, not metrics. If a series in the band is empty while meetings are running, the component is not publishing rather than nothing having happened — check that `METRIC_NAMESPACE` is set on it. |
 | Meetings | `MeetingsStarted`, `MeetingsEnded` and `StreamingSessionsStarted` | Whether meetings are happening, and whether they are finishing. Started and ended will not match over a short window, because a live meeting has started and not ended; a persistent gap over hours is meetings that never closed, which is what the stale-meeting reaper exists for. Live audio sessions are lower than meetings started on a deployment that also transcribes uploaded recordings. |
 | Time to first transcript segment | `TimeToFirstTranscriptSegmentMs` at minimum, average, p90 and p99 | How long a meeting waits for its transcript to begin. Read the shape, not a value: the interval is dominated by when somebody first speaks, so the minimum is the closest thing here to a measure of the pipeline itself, and a rising p90 with a flat minimum usually means meetings are starting earlier rather than the pipeline slowing. |
 | Transcript segment writes | `TranscriptSegmentsWritten` and `TranscriptSegmentWriteFailed`, annotated at the alarm threshold | Whether the transcript is reaching the meeting page. Any value on the failure series is a line that is simply missing, with no error on the meeting page and nothing on the discarded-records queue. |

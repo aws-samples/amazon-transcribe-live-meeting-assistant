@@ -1583,8 +1583,11 @@ async def execute_process_event_api_mutation(
             return_value["successes"].append(response)
             # Counted once per meeting, on the write that closed it, so that a
             # redelivered END does not produce a second ending. A failed write
-            # is not counted at all: the record is redelivered and the meeting
-            # has not actually ended yet.
+            # is not counted at all -- it raises rather than reaching here, and
+            # the meeting has not actually ended yet. Whether the record then
+            # comes back depends on the batch processor finding a sequence
+            # number to attribute it to; where it cannot, the invocation fails
+            # and the whole batch is retried.
             if not was_already_ended:
                 METRICS.count(metric_names.MEETINGS_ENDED)
 

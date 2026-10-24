@@ -4389,7 +4389,7 @@ Resources:
               {
                 "type": "text", "x": 0, "y": 38, "width": 24, "height": 2,
                 "properties": {
-                  "markdown": "## Application metrics\n\nEverything below this line is published by LMA itself, in the namespace **${AWS::StackName}**, as Embedded Metric Format records in the emitting component's own log group. A series that is empty here when meetings are running means the component is not publishing rather than that nothing happened — check that `METRIC_NAMESPACE` is set on it. Virtual Participant, MicroVM ASR and Meeting Assistant metrics are not published yet."
+                  "markdown": "## Application metrics\n\nThe four widgets in this band are published by LMA itself, in the namespace **${AWS::StackName}**, as Embedded Metric Format records in the emitting component's own log group. (The error tables below them are Logs Insights queries, not metrics.) A series that is empty here when meetings are running means the component is not publishing rather than that nothing happened — check that `METRIC_NAMESPACE` is set on it. Virtual Participant, MicroVM ASR and Meeting Assistant metrics are not published yet."
                 }
               },
               {
