@@ -544,7 +544,13 @@ def test_a_refused_call_is_published_as_a_refusal_not_a_success() -> None:
 
     assert "refused" in provider.summarise_result(refusal)
     assert "8-tool-call limit" in provider.summarise_result(refusal)
-    assert provider._result_succeeded({"content": [{"text": refusal}]}) is False
+    # With `status` present, as the SDK always sets it on a tool that returned.
+    assert (
+        provider._result_succeeded(
+            {"status": "success", "content": [{"text": refusal}]}
+        )
+        is False
+    )
 
 
 def test_a_tool_fault_publishes_its_type_and_not_its_message() -> None:
@@ -564,7 +570,10 @@ def test_a_tool_fault_publishes_its_type_and_not_its_message() -> None:
     summary = provider.summarise_result(fault)
     assert summary == "failed: ClientError"
     assert "111122223333" not in summary
-    assert provider._result_succeeded({"content": [{"text": fault}]}) is False
+    assert (
+        provider._result_succeeded({"status": "success", "content": [{"text": fault}]})
+        is False
+    )
 
 
 def test_a_tool_error_is_reported_as_an_unsuccessful_call() -> None:
@@ -577,7 +586,12 @@ def test_a_tool_error_is_reported_as_an_unsuccessful_call() -> None:
     )
     provider = agent_function.ThinkingStepHookProvider
 
-    assert provider._result_succeeded({"content": [{"text": failure}]}) is False
+    assert (
+        provider._result_succeeded(
+            {"status": "success", "content": [{"text": failure}]}
+        )
+        is False
+    )
 
 
 def test_a_successful_result_is_still_reported_as_a_success() -> None:
@@ -585,10 +599,41 @@ def test_a_successful_result_is_still_reported_as_a_success() -> None:
 
     assert (
         agent_function.ThinkingStepHookProvider._result_succeeded(
-            {"content": [{"text": body}]}
+            {"status": "success", "content": [{"text": body}]}
         )
         is True
     )
+
+
+def test_the_payload_is_read_before_the_sdk_s_own_status() -> None:
+    """The ordering this method lives or dies by.
+
+    A tool that refused or faulted still *returns*, so the @tool decorator
+    sets status "success" on it like any other result. Reading the status
+    first short-circuits every refusal into a success — and a test that omits
+    status will not notice, which is how this got through once already.
+    """
+    provider = agent_function.ThinkingStepHookProvider
+    refusal = json.dumps({"stopped": "a limit was reached"})
+
+    assert (
+        provider._result_succeeded(
+            {"status": "success", "content": [{"text": refusal}]}
+        )
+        is False
+    )
+
+
+def test_an_sdk_reported_error_is_a_failure_whatever_the_payload_says() -> None:
+    """The fallback still has to work: a result this function did not produce,
+    failed by the SDK's own error path."""
+    provider = agent_function.ThinkingStepHookProvider
+
+    assert (
+        provider._result_succeeded({"status": "error", "content": [{"text": "{}"}]})
+        is False
+    )
+    assert provider._result_succeeded({"is_error": True, "content": []}) is False
 
 
 @pytest.mark.parametrize(

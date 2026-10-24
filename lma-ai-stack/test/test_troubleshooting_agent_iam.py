@@ -153,9 +153,8 @@ def test_an_action_with_no_resource_type_is_granted_on_all_resources(
     role: Dict[str, Any], action: str, why: str
 ) -> None:
     """Scoping one of these denies every call, and the tools' own unit tests
-    stub the Logs client, so nothing else here would notice.
-
-    If this fails, the grant was narrowed: `{action}` {why}.
+    stub the Logs client, so nothing else here would notice. The assertions
+    below name the action and the reason.
     """
     granting = statements_granting(role, action)
 

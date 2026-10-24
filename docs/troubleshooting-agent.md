@@ -70,7 +70,7 @@ Accepted fields, all optional except that a `query` is strongly advised:
 | `query` | The question. Defaults to "diagnose the most recent failure". |
 | `vpId` | A Virtual Participant id to scope the investigation to. |
 | `callId` | A meeting id to scope to. Also the channel thinking steps stream on. |
-| `messageId` | When present, each tool call is streamed to the UI's thinking-step panel over the existing `onAddChatToken` subscription. |
+| `messageId` | When present together with `callId`, each tool call is streamed to the UI's thinking-step panel over the existing `onAddChatToken` subscription. |
 
 Because there is no UI entry point, the only way to invoke it is with an IAM
 principal that holds `lambda:InvokeFunction` on the function. **The stack grants

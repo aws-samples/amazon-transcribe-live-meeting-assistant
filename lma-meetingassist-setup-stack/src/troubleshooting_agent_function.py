@@ -496,26 +496,32 @@ class ThinkingStepHookProvider:
     def _result_succeeded(cls, result: Any) -> bool:
         """Whether a tool reported success.
 
-        ``ToolResult.status`` is the SDK's own signal and is checked first.
-        ``is_error`` is the attribute the meeting assistant's own hook provider
-        reads, kept as a fallback so this reader works against either. Unknown
-        counts as success, because a narration that reported every call as
-        failed would be worse than one that reported none.
+        **The payload is checked before the SDK's own status, and the order
+        matters.** A tool that refused or faulted still *returns* — it does not
+        raise — so the ``@tool`` decorator sets ``status: "success"`` on it like
+        any other result. Reading the status first therefore short-circuits
+        every refusal and every ToolError into a success, which is the whole
+        thing this method exists to prevent. Only the payload knows.
+
+        ``status`` and ``is_error`` are then the fallbacks, for a result this
+        function did not produce — the SDK's own error path, or the shape the
+        meeting assistant's hook provider reads. Unknown counts as success,
+        because a narration that reported every call as failed would be worse
+        than one that reported none.
         """
-        status = cls._field(result, "status")
-        if isinstance(status, str):
-            return status.lower() != "error"
-        if cls._field(result, "is_error"):
-            return False
-        # A tool that refused or faulted returns normally, so the SDK reports
-        # it as a success. The payload is the only thing that knows otherwise.
         try:
             payload = json.loads(cls._result_text(result) or "{}")
         except (TypeError, ValueError):
-            return True
-        if not isinstance(payload, dict):
-            return True
-        return not ("stopped" in payload or "error" in payload)
+            payload = None
+        if isinstance(payload, dict) and (
+            "stopped" in payload or "error" in payload
+        ):
+            return False
+
+        status = cls._field(result, "status")
+        if isinstance(status, str):
+            return status.lower() != "error"
+        return not cls._field(result, "is_error")
 
     def on_before_tool_call(self, event: Any) -> None:
         try:
