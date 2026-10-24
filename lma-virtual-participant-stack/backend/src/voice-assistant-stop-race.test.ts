@@ -10,8 +10,8 @@
  *
  * Both routes recognise "Hey Alex, stop talking" and only one of them can
  * speak. The tool route is the model noticing, so it is the only route that can
- * produce the spoken "Okay"; the transcript route is the faster one and the one
- * that guarantees silence. These tests pin the handover between them: the
+ * produce the spoken "Okay"; the transcript route is expected to be the faster
+ * one, and is the one that guarantees silence either way. These tests pin the handover between them: the
  * transcript route holds its mute for STOP_REQUEST_TOOL_GRACE_MS, stands down
  * if the tool call lands inside that window, and acts if it does not. They also
  * pin the `[stop-request]` log lines, because those lines are the only account
@@ -402,6 +402,27 @@ test('group mode asked back inside the window keeps the assistant audible', asyn
         assert.equal(agent.isMuted(), false, 'the backstop must not re-silence it');
         assert.match(stopLines().join('\n'), /action=cancelled why=addressed-again/);
         (agent as any).clearConversationTimeout();
+    } finally {
+        release();
+    }
+});
+
+test('unmuting an assistant that is already audible calls off nothing', async () => {
+    // unmute() calls a request off, which is right once the assistant is
+    // actually silent: it has been asked back. An assistant that is still
+    // audible has not been asked back by anything, and calling the request off
+    // there would reopen the route by which a misread stop utterance disarms
+    // its own fallback.
+    capture();
+    try {
+        const agent = novaAgent();
+        agent.requestStopTalking('test');
+        assert.equal(agent.isMuted(), false, 'still inside the window');
+
+        agent.unmute('already audible');
+        await delay(PAST_GRACE_MS);
+        assert.equal(agent.isMuted(), true, 'the request must still be honoured');
+        assert.doesNotMatch(stopLines().join('\n'), /action=cancelled/);
     } finally {
         release();
     }
@@ -809,7 +830,39 @@ test('an acknowledgement lost to the barge-in gate is reported once, by gate', a
     }
 });
 
-test('an acknowledgement lost to the mute gate names that gate instead', async () => {
+test('an acknowledgement lost to the mute gate names that gate', async () => {
+    // Group mode's auto-mute can shut the gate while a request is still
+    // resolving, which is the mute-gate way of losing the word outright — as
+    // opposed to losing audio that came after a drained one, below.
+    capture();
+    try {
+        const agent = novaAgent({ meetingMode: 'group', activationMode: 'always_active' });
+        (agent as any)._isMuted = false;
+        agent.requestStopTalking('test');
+        (agent as any).noteMuteToolRequested();
+        (agent as any).executeAutoMute();
+        assert.equal(agent.isMuted(), true, 'the gate shut without draining anything');
+
+        await (agent as any).playAudio(Buffer.alloc(320));
+
+        const drops = stopLines().filter((line) => line.includes('-dropped'));
+        assert.equal(drops.length, 1);
+        assert.match(drops[0], /action=ack-dropped/);
+        assert.match(drops[0], /gate=muted/);
+        assert.match(drops[0], /route=transcript/);
+
+        await delay(PAST_BACKSTOP_MS);
+        (agent as any).clearConversationTimeout();
+    } finally {
+        release();
+    }
+});
+
+test('audio after a drained acknowledgement is not called a lost one', async () => {
+    // Once the tool route has shut the gate behind a drained acknowledgement,
+    // the word was allowed out. Anything after it is something else the model
+    // went on saying, and reporting that as a lost acknowledgement would claim
+    // a failure in a meeting that heard the word perfectly well.
     capture();
     try {
         const agent = novaAgent();
@@ -817,14 +870,14 @@ test('an acknowledgement lost to the mute gate names that gate instead', async (
         (agent as any).noteMuteToolRequested();
         await (agent as any).handleMuteTool('tool-use-id');
         assert.equal(agent.isMuted(), true);
+        assert.match(stopLines().join('\n'), /action=acknowledged[^\n]*gate=draining/);
 
-        // Nova emitting the word after the gate shut: generated, never heard.
         await (agent as any).playAudio(Buffer.alloc(320));
 
-        const drops = stopLines().filter((line) => line.includes('action=ack-dropped'));
+        const drops = stopLines().filter((line) => line.includes('-dropped'));
         assert.equal(drops.length, 1);
-        assert.match(drops[0], /gate=muted/);
-        assert.match(drops[0], /route=transcript/);
+        assert.match(drops[0], /action=post-gate-dropped/);
+        assert.doesNotMatch(drops[0], /action=ack-dropped/);
 
         await delay(PAST_BACKSTOP_MS);
     } finally {
@@ -847,9 +900,10 @@ test('a request the model raised on its own is reported as the tool route', asyn
         assert.equal(agent.isMuted(), true);
         await (agent as any).playAudio(Buffer.alloc(320));
 
-        const drops = stopLines().filter((line) => line.includes('action=ack-dropped'));
+        const drops = stopLines().filter((line) => line.includes('-dropped'));
         assert.equal(drops.length, 1);
         assert.match(drops[0], /route=tool/);
+        assert.match(drops[0], /action=post-gate-dropped/);
 
         await delay(PAST_BACKSTOP_MS);
         assert.equal(agent.isMuted(), true);

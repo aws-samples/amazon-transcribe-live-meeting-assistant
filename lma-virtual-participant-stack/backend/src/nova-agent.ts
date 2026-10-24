@@ -44,11 +44,12 @@ export function hasStopTalkingTool(meetingMode: MeetingMode): boolean {
  *
  * Two routes recognise the same request and only one of them can speak. The
  * tool route is the model noticing, so it is the only route that can produce
- * the spoken "Okay" the prompt asks for — and it is also the slower of the two,
- * because Nova has to hear the audio, decide, and emit a tool-use event where
- * Amazon Transcribe only has to finalise a segment. Left to race, the
- * transcript route wins: it shuts the gate before the word exists, and the
- * meeting is left with silence and no acknowledgement at all.
+ * the spoken "Okay" the prompt asks for — and it is expected to be the slower
+ * of the two, because Nova has to hear the audio, decide, and emit a tool-use
+ * event where Amazon Transcribe only has to finalise a segment. Left to race,
+ * the transcript route is then the one that wins: it shuts the gate before the
+ * word exists, and the meeting is left with silence and no acknowledgement at
+ * all. Which route actually arrives first is what `tool_latency_ms` records.
  *
  * 500 ms is a starting value and not a measured one: long enough for a tool-use
  * event to arrive on an established bidirectional stream, short enough that
@@ -225,6 +226,10 @@ export class NovaAgent implements VoiceAssistantProvider {
     /** Whether a dropped acknowledgement has already been reported, so a
      *  chunk-rate audio gate cannot flood the log. */
     ackDropLogged: boolean;
+    /** Whether the tool route shut the gate behind a drained acknowledgement.
+     *  Audio dropped after that is not a lost acknowledgement — the word was
+     *  allowed out before the gate closed — so it is reported differently. */
+    gateShutByDrain: boolean;
     timer: NodeJS.Timeout | null;
   } | null = null;
 
@@ -2547,6 +2552,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log(`🔇 Nova agent muted (${reason}, draining playback)`);
     this._isMuted = true;
     this.conversationActive = false;
+    // Whatever was buffered has been let out, so audio dropped from here on is
+    // not the acknowledgement going missing — see noteStopAckDropped.
+    if (this.stopRequest) {
+      this.stopRequest.gateShutByDrain = true;
+    }
     try {
       this.stopPacatStream('drain');
     } catch (err) {
@@ -2558,25 +2568,29 @@ export class NovaAgent implements VoiceAssistantProvider {
    * Unmute the agent — resumes outgoing audio. Idempotent.
    */
   unmute(reason?: string): void {
-    // Being asked back supersedes a stop request that is still resolving.
-    // Without this, a fallback or backstop armed moments ago would silence the
-    // assistant again immediately after a wake phrase made it audible.
-    //
-    // The utterance that asked for silence is not expected to reach here: both
-    // wake-phrase routes treat a strict stop as a stop and leave the mute state
-    // alone. A misreading of it that arrives after the gate has engaged does
-    // reach here, and is accepted as being asked back — see
-    // handleUserTurnWakePhrase for why that trade is made in that direction.
-    this.cancelStopRequest(reason ? `unmuted:${reason.replace(/\s+/g, '-')}` : 'unmuted');
-    // The stretch of silence that request caused is over, so a tool call from
-    // here on belongs to something else and must not be timed against it.
-    this.lastTranscriptStopAt = null;
     if (!this._isMuted) {
       return;
     }
     console.log(`🔓 Nova agent unmuted${reason ? ` (${reason})` : ''}`);
     this._isMuted = false;
     this.conversationActive = true;
+
+    // Having actually made the assistant audible again supersedes a stop
+    // request that is still resolving. Without this, a fallback or backstop
+    // armed moments ago would silence it again immediately.
+    //
+    // Below the guard, not above it: only a real transition means the assistant
+    // is wanted, which is the condition handleUserTurnWakePhrase relies on and
+    // the one that keeps this from being reachable while a request is merely
+    // deferred and the assistant still audible. The utterance that asked for
+    // silence therefore cannot call its own request off here — though a
+    // misreading of it arriving after the gate has engaged can, which is the
+    // trade handleUserTurnWakePhrase explains.
+    this.cancelStopRequest(reason ? `unmuted:${reason.replace(/\s+/g, '-')}` : 'unmuted');
+
+    // The stretch of silence that request caused is over, so a tool call from
+    // here on belongs to something else and must not be timed against it.
+    this.lastTranscriptStopAt = null;
   }
 
   isMuted(): boolean {
@@ -2642,6 +2656,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       fromTranscript: true,
       toolSeen: false,
       ackDropLogged: false,
+      gateShutByDrain: false,
       timer: null,
     };
     this.lastTranscriptStopAt = seenAt;
@@ -2722,6 +2737,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       fromTranscript: false,
       toolSeen: true,
       ackDropLogged: false,
+      gateShutByDrain: false,
       timer: setTimeout(
         () => this.resolveStopRequest('stop requested (tool backstop)'),
         STOP_REQUEST_TOOL_BACKSTOP_MS,
@@ -2782,12 +2798,22 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   /**
-   * Note that assistant audio was dropped while a stop request was resolving —
-   * that audio is the acknowledgement the meeting was supposed to hear, and
-   * `gate` says which of the two gates discarded it.
+   * Note that assistant audio was dropped while a stop request was resolving,
+   * and say which of the two gates discarded it.
+   *
+   * `ack-dropped` means the acknowledgement itself was lost: the gate shut
+   * before the word could reach the meeting. Once the tool route has shut the
+   * gate behind a drained acknowledgement the word was already allowed out, so
+   * audio after that is something else the model went on saying — reported as
+   * `post-gate-dropped`, because calling it a lost acknowledgement would report
+   * a failure in a meeting that heard the word perfectly well.
    *
    * Reported once per request, and only while a request is in flight, so
-   * ordinary barge-in and ordinary muting are unaffected.
+   * ordinary barge-in and ordinary muting are unaffected. That also means audio
+   * dropped after the transcript fallback has closed the request out is not
+   * reported here — a tool call arriving that late reports itself, with
+   * `late=true` and the latency that says by how much, which is the same
+   * finding stated as a measurement.
    */
   private noteStopAckDropped(gate: 'interrupted' | 'muted'): void {
     const request = this.stopRequest;
@@ -2799,7 +2825,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     // other line in the family, so that one CloudWatch filter reads coherently.
     console.log(
       `[stop-request] route=${request.fromTranscript ? 'transcript' : 'tool'}`
-      + ` action=ack-dropped gate=${gate}`
+      + ` action=${request.gateShutByDrain ? 'post-gate-dropped' : 'ack-dropped'}`
+      + ` gate=${gate}`
       + ` elapsed_ms=${Date.now() - request.seenAt} tool_seen=${request.toolSeen}`,
     );
   }

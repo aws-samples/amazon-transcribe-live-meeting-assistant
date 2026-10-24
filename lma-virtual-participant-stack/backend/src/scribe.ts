@@ -946,12 +946,13 @@ export class TranscriptionService {
             // is already activated — so recognise the stop intent and hand it to
             // the provider.
             //
-            // This route is the guarantee, not the mechanism. It gets there
-            // first, because a tool call needs the model to hear the audio and
-            // decide where this needs only a finalized segment — so the
-            // provider holds it briefly to let the model answer out loud, and
-            // acts if the model does not. Which route ended up silencing the
-            // assistant is in the provider's `[stop-request]` log lines.
+            // This route is the guarantee, not the mechanism. It is expected to
+            // get there first, because a tool call needs the model to hear the
+            // audio and decide where this needs only a finalized segment — so
+            // the provider holds it briefly to let the model answer out loud,
+            // and acts if the model does not. Which route actually arrived
+            // first, and which silenced the assistant, is in the provider's
+            // `[stop-request]` log lines.
             const stopRequested =
                 voiceAssistant.isEnabled() &&
                 voiceAssistant.isActivated() &&
