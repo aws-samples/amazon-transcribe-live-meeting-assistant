@@ -332,22 +332,22 @@ def test_a_log_group_is_attributed_to_the_right_component(name: str, expected: s
     assert discovery.classify_log_group(name) == expected
 
 
-def test_the_microvm_suffixes_are_matched_as_they_are_spelled_today() -> None:
-    """The MicroVM groups were renamed from -vp/-asr to -vp-logs/-asr-logs.
-
-    An agent carrying either spelling as a literal would report "no logs" on a
-    deployment using the other, which is why these names are discovered rather
-    than built. This test pins only the classifier's reading of the current
-    spelling; nothing in the tools constructs it.
-    """
-    assert (
-        discovery.classify_log_group(f"/aws/lambda-microvms/{STACK}-vp-logs")
-        == discovery.VIRTUAL_PARTICIPANT
-    )
-    assert (
-        discovery.classify_log_group(f"/aws/lambda-microvms/{STACK}-asr-logs")
-        == discovery.ASR_MICROVM
-    )
+@pytest.mark.parametrize(
+    ("suffix", "expected"),
+    [
+        ("-vp-logs", discovery.VIRTUAL_PARTICIPANT),
+        ("-asr-logs", discovery.ASR_MICROVM),
+        ("-vp", discovery.VIRTUAL_PARTICIPANT),
+        ("-asr", discovery.ASR_MICROVM),
+    ],
+)
+def test_both_generations_of_microvm_group_land_on_the_same_component(
+    suffix: str, expected: str
+) -> None:
+    """Images built before v0.3.11 log to -vp/-asr, later ones to -vp-logs and
+    -asr-logs. Filtering discovery by component has to return both, or the
+    agent asking for "the virtual participant's logs" is handed only one."""
+    assert discovery.classify_log_group(f"/aws/lambda-microvms/{STACK}{suffix}") == expected
 
 
 def test_every_component_the_classifier_can_return_has_a_note() -> None:
@@ -410,7 +410,154 @@ def test_the_reported_shape_carries_what_the_agent_needs_to_route() -> None:
         "storedBytes": 88888,
         "hasData": True,
         "retentionDays": 90,
+        "microvmLogGeneration": discovery.CURRENT_GENERATION,
+        "note": discovery._GENERATION_NOTES[discovery.CURRENT_GENERATION],
     }
+
+
+def test_a_group_that_has_only_ever_had_one_name_carries_no_generation() -> None:
+    """The label is read by the model; a null on every other group is noise."""
+    reported = by_name(discover())[f"/{AISTACK}/lambda/CallEventProcessorFunction"].to_dict()
+
+    assert "microvmLogGeneration" not in reported
+    assert "note" not in reported
+
+
+# ── MicroVM log group generations ───────────────────────────────────────────
+#
+# A stack upgraded from before v0.3.11 keeps the -vp/-asr groups its earlier
+# images logged to, alongside the -vp-logs/-asr-logs groups it now declares. A
+# participant that ran on the pre-upgrade image logged only to the former.
+
+CURRENT_VP = f"/aws/lambda-microvms/{STACK}-vp-logs"
+CURRENT_ASR = f"/aws/lambda-microvms/{STACK}-asr-logs"
+LEGACY_VP = f"/aws/lambda-microvms/{STACK}-vp"
+LEGACY_ASR = f"/aws/lambda-microvms/{STACK}-asr"
+NOT_MICROVM = [(n, s) for n, s in REAL_GROUPS if "/aws/lambda-microvms/" not in n]
+
+
+def generations(result: discovery.DiscoveryResult) -> Dict[str, Optional[str]]:
+    return {g.name: g.generation for g in result.groups if g.generation}
+
+
+def legacy_caveat(result: discovery.DiscoveryResult) -> List[str]:
+    return [c for c in result.caveats() if "legacy MicroVM log groups" in c]
+
+
+def test_an_upgraded_deployment_reports_both_generations_labelled() -> None:
+    groups = NOT_MICROVM + [
+        (CURRENT_VP, 500),
+        (CURRENT_ASR, 0),
+        (LEGACY_VP, 9000),
+        (LEGACY_ASR, 40),
+    ]
+
+    result = discover_result(FakeLogsClient(groups))
+
+    assert generations(result) == {
+        CURRENT_VP: discovery.CURRENT_GENERATION,
+        CURRENT_ASR: discovery.CURRENT_GENERATION,
+        LEGACY_VP: discovery.LEGACY_GENERATION,
+        LEGACY_ASR: discovery.LEGACY_GENERATION,
+    }
+    found = by_name(result.groups)
+    assert found[LEGACY_VP].component == discovery.VIRTUAL_PARTICIPANT
+    assert found[LEGACY_ASR].component == discovery.ASR_MICROVM
+    legacy_note = found[LEGACY_VP].to_dict()["note"]
+    assert "before v0.3.11" in legacy_note
+    assert "microvmId" in legacy_note
+    # The caveat names the legacy groups so the agent cannot miss them, and
+    # tells it how to find a participant's stream in one.
+    [caveat] = legacy_caveat(result)
+    assert LEGACY_VP in caveat and LEGACY_ASR in caveat
+    assert CURRENT_VP not in caveat
+    assert "@logStream" in caveat
+
+
+def test_a_fresh_deployment_reports_only_the_current_generation() -> None:
+    """It never had the legacy groups, so none is listed and nothing warns."""
+    result = discover_result()
+
+    assert generations(result) == {
+        CURRENT_VP: discovery.CURRENT_GENERATION,
+        CURRENT_ASR: discovery.CURRENT_GENERATION,
+    }
+    assert LEGACY_VP not in by_name(result.groups)
+    assert legacy_caveat(result) == []
+
+
+def test_a_deployment_with_only_the_legacy_generation_reports_it() -> None:
+    """E.g. the ASR engine, whose current group appears only once its rebuilt
+    image runs; whatever exists is reported, and nothing is assumed."""
+    groups = NOT_MICROVM + [(LEGACY_VP, 9000), (LEGACY_ASR, 40)]
+
+    result = discover_result(FakeLogsClient(groups))
+
+    assert generations(result) == {
+        LEGACY_VP: discovery.LEGACY_GENERATION,
+        LEGACY_ASR: discovery.LEGACY_GENERATION,
+    }
+    assert CURRENT_VP not in by_name(result.groups)
+    assert len(legacy_caveat(result)) == 1
+
+
+def test_the_legacy_names_are_looked_up_not_assumed() -> None:
+    client = FakeLogsClient()
+
+    discover(client)
+
+    assert LEGACY_VP in client.prefixes_requested
+    assert LEGACY_ASR in client.prefixes_requested
+
+
+def test_the_legacy_lookup_matches_its_name_exactly() -> None:
+    """"-vp" is a prefix of a neighbouring "-vpn" stack's groups, and of
+    anything else beginning with it; only the exact name is this deployment's."""
+    neighbours = [
+        f"/aws/lambda-microvms/{STACK}-vpn-vp-logs",
+        f"/aws/lambda-microvms/{STACK}-vpc",
+        f"/aws/lambda-microvms/{STACK}-asr2-asr-logs",
+    ]
+    groups = NOT_MICROVM + [(LEGACY_VP, 1), (LEGACY_ASR, 1)] + [(n, 5) for n in neighbours]
+
+    found = by_name(discover(FakeLogsClient(groups)))
+
+    assert LEGACY_VP in found and LEGACY_ASR in found
+    for name in neighbours:
+        assert name not in found
+
+
+def test_the_current_group_is_labelled_current_whichever_prefix_finds_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The legacy name is also a prefix of the current one, so paging can reach
+    the current group from either lookup; its label follows its name, not the
+    lookup that returned it."""
+    real = discovery.stack_log_group_prefixes
+    monkeypatch.setattr(
+        discovery,
+        "stack_log_group_prefixes",
+        lambda *args, **kwargs: list(reversed(real(*args, **kwargs))),
+    )
+    client = FakeLogsClient(NOT_MICROVM + [(CURRENT_VP, 5), (LEGACY_VP, 5)])
+
+    result = discover_result(client)
+
+    assert client.prefixes_requested.index(LEGACY_VP) < client.prefixes_requested.index(
+        CURRENT_VP
+    )
+    assert generations(result)[CURRENT_VP] == discovery.CURRENT_GENERATION
+    assert generations(result)[LEGACY_VP] == discovery.LEGACY_GENERATION
+
+
+def test_the_legacy_groups_are_paged_before_the_broad_prefixes() -> None:
+    """When the cap is reached, whatever is paged last is dropped; in the
+    window after an upgrade the legacy group holds the evidence most asked for."""
+    prefixes = discovery.stack_log_group_prefixes(STACK, NESTED_STACKS)
+
+    first_broad = prefixes.index(f"/aws/vendedlogs/states/{AISTACK}")
+    assert prefixes.index(LEGACY_VP) < first_broad
+    assert prefixes.index(LEGACY_ASR) < first_broad
 
 
 # ── caps and ordering ───────────────────────────────────────────────────────
