@@ -615,6 +615,30 @@ def test_an_asynchronous_invocation_is_not_retried(
     assert configs[0]["Condition"] == "ShouldDeployTroubleshootingAgent"
 
 
+def test_the_published_tool_input_is_valid_awsjson() -> None:
+    """ThinkingStepData.ToolInput is declared AWSJSON in schema.graphql, which
+    rejects a value that is not JSON — so the mutation would fail and the
+    progress panel would stay empty, with nothing but an AppSync error to say
+    why. The summary is short free text, so it has to be encoded.
+    """
+    sdl = (
+        REPO / "lma-ai-stack" / "source" / "appsync" / "schema.graphql"
+    ).read_text(encoding="utf-8")
+    assert "ToolInput: AWSJSON" in sdl, "the field's type changed; re-check the encoding"
+
+    source = (
+        REPO
+        / "lma-meetingassist-setup-stack"
+        / "src"
+        / "troubleshooting_agent_function.py"
+    ).read_text(encoding="utf-8")
+
+    assert '"ToolInput": json.dumps(' in source, (
+        "the troubleshooting agent must JSON-encode what it sends as ToolInput; "
+        "AppSync rejects a bare string for an AWSJSON field"
+    )
+
+
 def test_the_function_timeout_leaves_room_for_the_agents_own_budget(
     template: Dict[str, Any],
 ) -> None:

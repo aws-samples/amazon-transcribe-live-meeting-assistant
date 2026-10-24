@@ -87,6 +87,10 @@ LMA_STACK_NAME = os.environ.get("LMA_STACK_NAME", "")
 VP_TABLE_NAME = os.environ.get("VIRTUAL_PARTICIPANT_TABLE_NAME", "")
 PROMPT_TABLE_NAME = os.environ.get("LLM_PROMPT_TEMPLATE_TABLE_NAME", "")
 APPSYNC_GRAPHQL_URL = os.environ.get("APPSYNC_GRAPHQL_URL", "")
+#: This deployment's AppSync API id. Names the service-managed log
+#: group /aws/appsync/apis/<apiId>, and is the same value the IAM grant
+#: for that group is scoped to.
+APPSYNC_API_ID = os.environ.get("APPSYNC_API_ID", "")
 MODEL_ID = os.environ.get(
     "TROUBLESHOOTING_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 )
@@ -387,8 +391,15 @@ def send_thinking_step(
                         "Type": step.get("type", "tool_use"),
                         "Content": step.get("content"),
                         "ToolName": step.get("tool_name"),
-                        # A summary, not the arguments. See summarise_input.
-                        "ToolInput": step.get("tool_input_summary"),
+                        # A summary, not the arguments -- see
+                        # summarise_input -- and JSON-encoded because
+                        # ThinkingStepData.ToolInput is declared AWSJSON in
+                        # schema.graphql, which rejects a bare string.
+                        "ToolInput": json.dumps(
+                            {"summary": step["tool_input_summary"]}
+                        )
+                        if step.get("tool_input_summary")
+                        else None,
                         "ToolResult": step.get("result"),
                         "Success": step.get("success", True),
                     },
@@ -927,7 +938,7 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         stack_name=LMA_STACK_NAME,
         vp_table_name=VP_TABLE_NAME,
         limits=limits,
-        graphql_url=APPSYNC_GRAPHQL_URL,
+        appsync_api_id=APPSYNC_API_ID,
         deadline=budget.deadline,
     )
 

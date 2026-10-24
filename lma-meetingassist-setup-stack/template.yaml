@@ -759,6 +759,10 @@ Resources:
           VIRTUAL_PARTICIPANT_TABLE_NAME: !Ref VirtualParticipantTableName
           LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
           APPSYNC_GRAPHQL_URL: !Ref AppSyncGraphQLUrl
+          # Names the service-managed AppSync log group, and is the same
+          # value the IAM grant for that group is scoped to, so the two
+          # cannot disagree.
+          APPSYNC_API_ID: !Ref AppSyncApiId
           # Tracks the meeting assistant's model so a deployment that selected a
           # stronger model gets a stronger diagnosis, without adding a
           # parameter of its own.

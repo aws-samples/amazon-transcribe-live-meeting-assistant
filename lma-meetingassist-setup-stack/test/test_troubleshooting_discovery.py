@@ -22,7 +22,7 @@ STACK = "LMA-Test"
 AISTACK = f"{STACK}-AISTACK-1A2B3C4D5E6F"
 VPSTACK = f"{STACK}-VIRTUALPARTICIPANTSTACK-9Z8Y7X"
 TRANSCRIBERSTACK = f"{STACK}-WEBSOCKETTRANSCRIBERSTACK-Q1W2E3"
-APPSYNC_URL = "https://abcdefghijklmnopqrstuvwxyz.appsync-api.us-east-1.amazonaws.com/graphql"
+APPSYNC_API_ID = "abcdefghijklmnopqrstuvwxyz"
 APPSYNC_GROUP = "/aws/appsync/apis/abcdefghijklmnopqrstuvwxyz"
 
 # (name, storedBytes). Mirrors what describe_log_groups returns.
@@ -89,7 +89,7 @@ NESTED_STACKS = [AISTACK, VPSTACK, TRANSCRIBERSTACK]
 def discover_result(client: Any = None, **kwargs: Any) -> discovery.DiscoveryResult:
     options: Dict[str, Any] = {
         "max_log_groups": 500,
-        "graphql_url": APPSYNC_URL,
+        "appsync_api_id": APPSYNC_API_ID,
         "nested_stack_names": NESTED_STACKS,
     }
     options.update(kwargs)
@@ -237,14 +237,16 @@ def test_an_unresolved_discovery_says_a_neighbour_may_be_included() -> None:
 # ── the AppSync group ───────────────────────────────────────────────────────
 
 
-def test_the_appsync_group_is_derived_from_the_endpoint_and_then_verified() -> None:
+def test_the_appsync_group_is_named_from_the_stacks_api_id_and_verified() -> None:
     """Deriving a candidate and confirming it is not the same as guessing.
 
-    AppSync's group is named after the API id, which is in the endpoint the
-    function already holds; it is then looked up, so a deployment with AppSync
-    logging off reports no group rather than an unqueryable name.
+    AppSync's group is named after the API id, which the deployment passes in
+    as a parameter -- the same value the IAM grant for that group is scoped
+    to, so the two cannot disagree. The name is then looked up, so a
+    deployment with AppSync logging off reports no group rather than a name
+    the agent will fail to search.
     """
-    assert discovery.appsync_log_group_candidate(APPSYNC_URL) == APPSYNC_GROUP
+    assert discovery.appsync_log_group_candidate(APPSYNC_API_ID) == APPSYNC_GROUP
     assert APPSYNC_GROUP in by_name(discover())
 
 
@@ -255,39 +257,33 @@ def test_the_appsync_group_is_not_reported_when_it_does_not_exist() -> None:
 
 
 @pytest.mark.parametrize(
-    "url",
+    "api_id",
     [
         "",
-        "not a url",
-        "https://example.com/graphql",
-        "https://short.appsync-api.us-east-1.amazonaws.com/graphql",
-        # A hyphen cannot appear in an AppSync api id, so a host whose first
-        # label carries one is some other service's endpoint.
-        "https://my-own-gateway-endpoint.example.com/graphql",
-        # Too long to be an api id.
-        "https://" + "a" * 40 + ".appsync-api.us-east-1.amazonaws.com/graphql",
+        "   ",
+        # Not an api id: these would be interpolated into a log group name.
+        "short",
+        "has-a-hyphen-in-it",
+        "has/a/slash",
+        "HasUpperCase",
+        "a" * 100,
+        "../../etc/passwd",
     ],
 )
-def test_a_url_that_is_not_an_appsync_endpoint_yields_no_candidate(url: str) -> None:
-    assert discovery.appsync_log_group_candidate(url) is None
+def test_a_value_that_is_not_an_api_id_yields_no_candidate(api_id: str) -> None:
+    """A parameter value interpolated into a log group name is worth checking,
+    and an absent id means no AppSync group rather than a guessed one."""
+    assert discovery.appsync_log_group_candidate(api_id) is None
 
 
-def test_the_api_id_is_read_case_insensitively_as_dns_requires() -> None:
-    """Hostnames are case-insensitive, so the endpoint's case must not matter.
-
-    AppSync api ids are lowercase, but an operator who typed the endpoint with
-    different case into a parameter should still get the right log group.
-    """
+def test_surrounding_whitespace_on_the_api_id_is_tolerated() -> None:
     assert (
-        discovery.appsync_log_group_candidate(
-            "https://ABCDEFGHIJKLMNOPQRSTUVWXYZ.appsync-api.us-east-1.amazonaws.com/graphql"
-        )
-        == APPSYNC_GROUP
+        discovery.appsync_log_group_candidate(f"  {APPSYNC_API_ID}  ") == APPSYNC_GROUP
     )
 
 
-def test_discovery_works_without_an_appsync_endpoint() -> None:
-    found = by_name(discover(graphql_url=""))
+def test_discovery_works_without_an_appsync_api_id() -> None:
+    found = by_name(discover(appsync_api_id=""))
 
     assert APPSYNC_GROUP not in found
     assert f"/{AISTACK}/lambda/CallEventProcessorFunction" in found

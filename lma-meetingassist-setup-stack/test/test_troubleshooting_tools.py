@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 import pytest
 from test_troubleshooting_discovery import (
     AISTACK,
-    APPSYNC_URL,
+    APPSYNC_API_ID,
     REAL_GROUPS,
     STACK,
     VPSTACK,
@@ -106,7 +106,7 @@ def make_tools(
         stack_name=stack_name,
         vp_table_name=vp_table_name,
         limits=limits or AgentLimits(),
-        graphql_url=APPSYNC_URL,
+        appsync_api_id=APPSYNC_API_ID,
         deadline=deadline,
         sleep=lambda seconds: ticks.__setitem__(0, ticks[0] + seconds),
         monotonic=lambda: ticks[0],

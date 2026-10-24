@@ -165,7 +165,8 @@ class TroubleshootingTools:
         stack_name: The LMA parent stack name.
         vp_table_name: The VirtualParticipant DynamoDB table name.
         limits: Resolved caps for this run.
-        graphql_url: AppSync endpoint, used to find the AppSync log group.
+        appsync_api_id: This deployment's AppSync API id, used to find the
+            service-managed AppSync log group.
         deadline: ``time.monotonic()`` value past which tools refuse to start
             new work. The agent's wall-clock budget, enforced here as well as
             in the agent loop, because one slow Insights query can outlast the
@@ -181,7 +182,7 @@ class TroubleshootingTools:
         stack_name: str,
         vp_table_name: str,
         limits: AgentLimits,
-        graphql_url: str = "",
+        appsync_api_id: str = "",
         deadline: Optional[float] = None,
         sleep: Any = time.sleep,
         monotonic: Any = time.monotonic,
@@ -192,7 +193,7 @@ class TroubleshootingTools:
         self._stack_name = stack_name
         self._vp_table_name = vp_table_name
         self._limits = limits
-        self._graphql_url = graphql_url
+        self._appsync_api_id = appsync_api_id
         self._deadline = deadline
         self._sleep = sleep
         self._monotonic = monotonic
@@ -359,7 +360,7 @@ class TroubleshootingTools:
                 self._logs,
                 self._stack_name,
                 max_log_groups=self._limits.max_log_groups,
-                graphql_url=self._graphql_url,
+                appsync_api_id=self._appsync_api_id,
                 nested_stack_names=self._nested_stack_names() or None,
             )
         return self._discovered

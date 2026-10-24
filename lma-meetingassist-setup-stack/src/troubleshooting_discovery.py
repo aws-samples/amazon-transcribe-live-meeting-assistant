@@ -47,7 +47,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional, Sequence
-from urllib.parse import urlparse
 
 # ── Component taxonomy ──────────────────────────────────────────────────────
 #
@@ -206,29 +205,33 @@ class LogGroupInfo:
         }
 
 
-def appsync_log_group_candidate(graphql_url: str) -> Optional[str]:
-    """Derive the AppSync log group name from the GraphQL endpoint URL.
+def appsync_log_group_candidate(api_id: str) -> Optional[str]:
+    """The AppSync log group name for `api_id`, as a candidate to verify.
 
-    AppSync's log group is service-managed and named ``/aws/appsync/apis/
-    <apiId>``, which is not derivable from the stack name — but the API id is
-    the first label of the endpoint host, and the function already has that
-    endpoint in its environment for streaming.
+    AppSync's log group is service-managed and named
+    ``/aws/appsync/apis/<apiId>``, which is not derivable from the stack name.
+    The id therefore has to come from the deployment: it is passed to this
+    function as an environment variable, set from the ``AppSyncApiId``
+    CloudFormation parameter — the same value the IAM grant for this group is
+    scoped to, so the two cannot disagree.
+
+    An earlier version read the first label of the GraphQL endpoint host
+    instead. That happens to be the api id today, but "happens to be" is not
+    something to build on when the stack already knows the answer, and the
+    cost of being wrong is a log group name that cannot be queried.
 
     This returns a *candidate*. The caller confirms it against
     ``describe_log_groups`` before reporting it, so a deployment with AppSync
-    logging switched off does not get a group name that cannot be queried.
-    Deriving a candidate and then verifying it is not the same thing as
+    logging switched off does not get a group name the agent will then fail to
+    search. Deriving a candidate and verifying it is not the same thing as
     constructing a name and trusting it.
     """
-    if not graphql_url:
+    api_id = (api_id or "").strip()
+    # AppSync api ids are lowercase base32. Anything else is not one, and a
+    # value interpolated into a log group name is worth checking.
+    if not re.fullmatch(r"[a-z0-9]{10,64}", api_id):
         return None
-    host = urlparse(graphql_url).hostname or ""
-    label = host.split(".")[0]
-    # AppSync api ids are 26 lowercase base32 characters. Anything else means
-    # the URL is not an AppSync endpoint and there is nothing to derive.
-    if not re.fullmatch(r"[a-z0-9]{20,32}", label):
-        return None
-    return f"/aws/appsync/apis/{label}"
+    return f"/aws/appsync/apis/{api_id}"
 
 
 def stack_log_group_prefixes(
@@ -315,7 +318,7 @@ def discover_log_groups(
     stack_name: str,
     *,
     max_log_groups: int,
-    graphql_url: str = "",
+    appsync_api_id: str = "",
     nested_stack_names: Optional[Sequence[str]] = None,
 ) -> DiscoveryResult:
     """Page `describe_log_groups` over every namespace this deployment uses.
@@ -328,8 +331,8 @@ def discover_log_groups(
         logs_client: A CloudWatch Logs client.
         stack_name: The LMA parent stack name.
         max_log_groups: Hard cap on the number returned.
-        graphql_url: AppSync endpoint, used to look for the service-managed
-            AppSync group. Optional.
+        appsync_api_id: This deployment's AppSync API id, used to look for
+            the service-managed AppSync group. Optional.
         nested_stack_names: This deployment's nested stacks' physical names.
             Supplying them is what makes the match exact rather than by prefix.
 
@@ -343,7 +346,7 @@ def discover_log_groups(
     truncated = False
 
     prefixes = stack_log_group_prefixes(stack_name, nested_stack_names)
-    candidate = appsync_log_group_candidate(graphql_url)
+    candidate = appsync_log_group_candidate(appsync_api_id)
     if candidate:
         # A full group name is also a valid prefix, which is how the candidate
         # gets verified rather than assumed. Inserted at the front with the
