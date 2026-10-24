@@ -377,8 +377,9 @@ export function assistantToggleChatReply(outcome: AssistantReconfigureOutcome): 
  * The caller awaits the whole change, rebuild included. On the platforms whose
  * chat arrives on a poll loop that is worth knowing: the loop handles messages
  * one at a time, so a message sent immediately after a mode command waits for
- * the rebuild — a few hundred milliseconds normally, and at most the provider's
- * own bound on a session refresh it has to wait behind.
+ * the rebuild. Reckon on about a second — the teardown alone holds half of that
+ * in fixed delays — and on several if it has to wait behind a session refresh
+ * already in flight, which the provider bounds at five seconds.
  */
 export async function applyAssistantChatCommand(
     assistant: Pick<VoiceAssistantProvider, 'reconfigure'>,

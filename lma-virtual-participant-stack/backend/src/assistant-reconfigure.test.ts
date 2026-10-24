@@ -699,6 +699,30 @@ test('a refresh that produced a session is reported as rebuilt', async () => {
     assert.equal(outcome.detail, undefined);
 });
 
+test('a session creation that opened nothing is reported as still switching', async () => {
+    // `createSession` returns early without doing anything when a stream is
+    // already marked active, so it can resolve having opened nothing. Reporting
+    // from the call alone would log `session=rebuilt` for a mode change that
+    // left the agent with no session, which is the same mistake the refresh path
+    // made before `refreshIntoNewMode`.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'wake_phrase' });
+    (agent as any).createSession = async () => {
+        /* as if streamingActive were already true */
+    };
+    const recoveries: string[] = [];
+    (agent as any).scheduleSessionRecovery = () => {
+        recoveries.push('scheduleSessionRecovery');
+        return true;
+    };
+
+    const outcome = await agent.reconfigure(chat({ meetingMode: 'translator', activationMode: 'always_active' }));
+
+    assert.equal(outcome.result, 'applied');
+    assert.equal(outcome.sessionRebuilt, false);
+    assert.equal(outcome.detail, 'the assistant will finish switching shortly');
+    assert.deepEqual(recoveries, ['scheduleSessionRecovery']);
+});
+
 test('a first session that fails to open is retried, not handed to the refresh path', async () => {
     // The headline case: `LMA translate` on a wake-phrase deployment, where
     // there is no session yet, so the rebuild calls createSession directly.

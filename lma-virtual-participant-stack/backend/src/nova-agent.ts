@@ -2939,9 +2939,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       });
 
     // A request is taken whole or not at all. Applying the half that parsed
-    // would leave the assistant in a configuration nobody asked for, and the
-    // routes that will arrive next — a GraphQL mutation, a voice phrase — carry
-    // strings from further away than this module can see.
+    // would leave the assistant in a configuration nobody asked for, and a
+    // request can carry strings from further away than this method can see —
+    // the chat vocabulary is a closed set, but nothing about this signature
+    // requires its caller to be.
     if (request.meetingMode !== undefined && !isMeetingMode(request.meetingMode)) {
       return notApplied('declined', `unrecognised meeting mode "${request.meetingMode}"`);
     }
@@ -3174,10 +3175,18 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
 
     if (!hasLiveSession) {
-      // Switching to always_active from a mode that was holding no session: the
-      // assistant has to start listening now, not at the next wake phrase.
+      // Switching to a mode that holds a session open, from one that was not:
+      // the assistant has to start listening now, not at the next wake phrase.
       await this.createSession();
-      return 'rebuilt';
+      if (this.session && this.session.isActive) {
+        return 'rebuilt';
+      }
+      // `createSession` returns early when a stream is already marked active, so
+      // it can resolve without having opened anything. Report from what is
+      // there, the same way `refreshIntoNewMode` does.
+      console.warn('⚠️  No session opened for the new mode — scheduling a recovery');
+      this.scheduleSessionRecovery();
+      return 'deferred';
     }
 
     return await this.refreshIntoNewMode();

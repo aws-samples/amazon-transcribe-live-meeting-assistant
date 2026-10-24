@@ -304,11 +304,10 @@ test('a command that changed nothing says so rather than staying silent', () => 
 // ---------------------------------------------------------------------------
 
 /** A provider that records what it was asked for, with no session behind it. */
-function fakeAssistant(enabled: boolean, result: Partial<AssistantReconfigureOutcome> = {}) {
+function fakeAssistant(result: Partial<AssistantReconfigureOutcome> = {}) {
     const requests: AssistantReconfigureRequest[] = [];
     return {
         requests,
-        isEnabled: () => enabled,
         reconfigure: async (request: AssistantReconfigureRequest) => {
             requests.push(request);
             return outcome(result);
@@ -319,7 +318,7 @@ function fakeAssistant(enabled: boolean, result: Partial<AssistantReconfigureOut
 test('a chat command reaches the provider tagged with the chat route and the sender', () => {
     // The route and the requester are what make the log line diagnostic, and
     // chat is the only route that can supply a name today.
-    const assistant = fakeAssistant(true);
+    const assistant = fakeAssistant();
     return applyAssistantChatCommand(assistant, parseAssistantChatCommand('LMA translate')!, 'Alice').then((reply) => {
         assert.deepEqual(assistant.requests, [
             {
@@ -352,9 +351,9 @@ test('a chat message delivered twice in quick succession is answered once', () =
 
 test('every provider is asked, so one attempt is always one log line', async () => {
     // Including the one standing in for a meeting with no voice assistant: it
-    // declines with its own reason, and asking it is what keeps the
-    // one-line-per-attempt record true whatever the deployment is running. An
-    // early return here would have skipped the log line the docs promise.
+    // declines with its own reason, and asking every provider rather than
+    // deciding here is what makes one attempt one log line whatever the
+    // deployment is running.
     const reply = await applyAssistantChatCommand(
         new NoOpAgent(),
         parseAssistantChatCommand('LMA translate')!,
