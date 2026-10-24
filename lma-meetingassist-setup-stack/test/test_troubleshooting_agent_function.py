@@ -1307,6 +1307,19 @@ def test_a_truncated_run_still_answers_in_the_three_section_format() -> None:
     assert "<summary><strong>Evidence</strong></summary>" in answer
 
 
+def test_the_truncated_answer_points_at_something_that_exists() -> None:
+    """It sends the reader to this function's log, not to the thinking-step
+    trace: that trace is published only when the caller supplied a callId and
+    a messageId, and the one way to invoke this function today supplies
+    neither. Pointing at something absent is worse than pointing nowhere.
+    """
+    answer = agent_function._TRUNCATED_ANSWER.format(reason="a limit", usage="{}")
+
+    assert "log" in answer
+    assert "tool-call trace" not in answer
+    assert "thinking" not in answer
+
+
 def test_a_tool_error_becomes_readable_text_rather_than_an_exception() -> None:
     """A raise into the agent loop gives the model an opaque failure; a
     sentence naming the log group that was not found gives it a next action."""
