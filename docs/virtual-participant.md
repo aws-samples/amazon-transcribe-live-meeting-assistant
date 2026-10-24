@@ -558,15 +558,15 @@ Anyone in the meeting can control the VP by typing one of these commands in the 
 | --- | --- |
 | `LMA end`, `LMA leave`, `LMA stop`, `LMA quit`, `LMA exit` | The VP says goodbye and leaves the meeting. |
 | `Goodbye LMA`, `bye LMA` | Same as above. |
-| `PAUSE` | Stops transcription and recording without leaving the meeting. |
-| `START` | Resumes a paused session. |
+| `PAUSE` (or `LMA pause`) | Stops transcription and recording without leaving the meeting. |
+| `START` (or `LMA start`) | Resumes a paused session. |
 
 Notes:
 
 - Dismissal commands always require the literal token `LMA` somewhere in the message — bare words like `END` or `LEAVE` are ignored so that prose like *"the meeting will end at 3pm"* or *"I'll leave at 3"* never trips a false dismissal. The `LMA` and verb tokens are matched case-insensitively and word-bounded (so `endless` or `ENDPOINT` don't match either).
 - When the chat platform exposes the sender name (Zoom, Chime, Webex), the goodbye message acknowledges who asked the VP to leave: *"Thanks Alice — I'll head out now."*
 - The default introduction message advertises the `LMA leave` / `LMA end` commands so participants always have a way to dismiss the bot. Customize via the `IntroMessage` CloudFormation parameter or the `INTRO_MESSAGE` env var.
-- `PAUSE` and `START` are still keyword-matched on the literal token (case-sensitive) for backwards compatibility.
+- `PAUSE` and `START` must be the whole chat message, optionally addressed to `LMA` (`LMA pause`, `@LMA start`), and are matched case-insensitively with punctuation ignored, so a one-word reply such as *"Pause?"* counts as the command. A message that merely contains the word — *"PAUSED"*, *"please don't PAUSE"*, or an introduction message that explains the commands — is ordinary chat.
 
 ## Troubleshooting
 

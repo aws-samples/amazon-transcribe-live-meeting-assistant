@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Page } from 'playwright-core';
 
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
+import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, ExitReasonCode, MeetingInitOptions } from "./details.js";
 import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
@@ -813,19 +813,11 @@ export default class Teams {
             // toggle is recorded without a requester — same limitation as the
             // generic farewell above.
             await this.sendMessages(page, await applyAssistantChatCommand(voiceAssistant, assistantToggle, null));
-        } else if (
-            details.start &&
-            message.includes(details.pauseCommand) &&
-            !message.includes(`"${details.pauseCommand}"`)
-        ) {
+        } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
             details.start = false;
             console.log(details.pauseMessages[0]);
             await this.sendMessages(page, details.pauseMessages);
-        } else if (
-            !details.start &&
-            message.includes(details.startCommand) &&
-            !message.includes(`"${details.startCommand}"`)
-        ) {
+        } else if (!details.start && matchesChatCommand(message, details.startCommand)) {
             details.start = true;
             console.log(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);

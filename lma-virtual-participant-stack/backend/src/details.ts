@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
+import { normalizeChatText } from './chat-text.js';
 
 export interface MeetingInvite {
   meetingId: string;
@@ -173,7 +174,9 @@ class DetailsManager {
       // ("LMA END", "LMA LEAVE", "LMA STOP", "LMA QUIT", "Goodbye LMA",
       // etc., case-insensitive, word-bounded) so that prose like
       // "the meeting will end at 3pm" or "I'll leave at 3" never trips
-      // a false dismissal.
+      // a false dismissal. The pause and resume commands are matched by
+      // matchesChatCommand: the whole message, case-insensitive, with or
+      // without the "LMA" addressee.
       startCommand: 'START',
       pauseCommand: 'PAUSE',
       endCommand: 'END',
@@ -279,6 +282,38 @@ export function matchesEndCommand(message: string): boolean {
   const addresseeFirst = new RegExp(`^${addressee}${sep}${verb}${trail}$`, 'i');
   const verbFirst = new RegExp(`^${verb}${sep}${addressee}${trail}$`, 'i');
   return addresseeFirst.test(trimmed) || verbFirst.test(trimmed);
+}
+
+/**
+ * Returns true when a chat message is exactly `command` — the pause
+ * (`details.pauseCommand`) or resume (`details.startCommand`) command — and
+ * nothing else, optionally addressed to LMA.
+ *
+ * Pass the message body only, with any sender or recipient prefix the platform
+ * adds already removed: the same string each platform hands to
+ * matchesEndCommand.
+ *
+ * Matched case-insensitively and as the whole message, like the dismissal and
+ * assistant-mode commands, so a message that merely contains the word — "PAUSED",
+ * "please don't PAUSE", an introduction message that explains the command —
+ * is ordinary chat. Punctuation is ignored, through the same normalisation as
+ * the assistant-mode commands (normalizeChatText), so a one-word reply such as
+ * "Pause?" or "start..." counts as the command, as "LMA translate?" does.
+ *
+ * Examples that match (for "PAUSE"):
+ *   "PAUSE", "pause", "Pause.", "Pause?", "LMA pause", "@LMA, PAUSE!", "pause LMA"
+ *
+ * Examples that do NOT match:
+ *   "PAUSED", "please PAUSE", "Type PAUSE to stop the transcript", "LMA", ""
+ */
+export function matchesChatCommand(message: string, command: string): boolean {
+  if (!message || !command) return false;
+  const expected = normalizeChatText(command);
+  if (!expected) return false;
+  const tokens = normalizeChatText(message).split(' ').filter((token) => token.length > 0);
+  const addressee = tokens.indexOf('lma');
+  const remainder = addressee === -1 ? tokens : [...tokens.slice(0, addressee), ...tokens.slice(addressee + 1)];
+  return remainder.join(' ') === expected;
 }
 
 /**

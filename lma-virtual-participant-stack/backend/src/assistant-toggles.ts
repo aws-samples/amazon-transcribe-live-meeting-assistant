@@ -35,6 +35,8 @@
 import type { ActivationMode, VoiceAssistantProvider } from './voice-assistant-interface.js';
 import type { MeetingMode } from './nova-sonic-config-loader.js';
 import { details } from './details.js';
+// So "@LMA, translate!" and "lma translate" arrive at the matcher the same.
+import { normalizeChatText as normalize } from './chat-text.js';
 
 /**
  * Which surface asked for the change, recorded on every toggle so one log line
@@ -215,17 +217,6 @@ const CHAT_COMMANDS: ReadonlyArray<readonly [string, AssistantChatCommand]> = [
 ];
 
 const CHAT_COMMAND_INDEX: ReadonlyMap<string, AssistantChatCommand> = new Map(CHAT_COMMANDS);
-
-/** Lowercases and reduces everything that is not a letter or digit to a single
- *  space, so "@LMA, translate!" and "lma translate" arrive here the same.
- *  Matches the normalisation in stop-request.ts. */
-function normalize(text: string): string {
-    return text
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
 
 /**
  * Whether `message` is a participant asking the assistant to change mode, and

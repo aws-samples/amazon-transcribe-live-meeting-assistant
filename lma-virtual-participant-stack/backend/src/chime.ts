@@ -1,6 +1,6 @@
 import { Page } from 'playwright-core';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
@@ -243,11 +243,11 @@ export default class Chime {
                         page,
                         await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender),
                     );
-                } else if (details.start && text === details.pauseCommand) {
+                } else if (details.start && text && matchesChatCommand(text, details.pauseCommand)) {
                     details.start = false;
                     console.log(details.pauseMessages[0]);
                     await this.sendMessages(page, details.pauseMessages);
-                } else if (!details.start && text === details.startCommand) {
+                } else if (!details.start && text && matchesChatCommand(text, details.startCommand)) {
                     details.start = true;
                     console.log(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);

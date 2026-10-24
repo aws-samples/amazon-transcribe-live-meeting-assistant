@@ -1,5 +1,5 @@
 import { Page, ConsoleMessage, ElementHandle } from 'playwright-core';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
@@ -59,6 +59,28 @@ async function safeEvaluate<T>(
     } finally {
         if (to) clearTimeout(to);
     }
+}
+
+/**
+ * Split a Zoom chat row's aria-label into its sender and the message text.
+ *
+ * Zoom's chat aria-label has two observed shapes:
+ *   colon form:     "<sender> to <recipient>: <text>"
+ *   timestamp form: "<sender> to <recipient>, HH:MM AM, <text>"
+ * (Zoom shipped the timestamp form during 2026; older clients still produce the
+ * colon form.) Match either, but always anchor on the literal
+ * "<sender> to <recipient>" prefix so punctuation inside the message is not
+ * mistaken for the boundary. A label in neither shape is returned whole as the
+ * body, with no sender.
+ */
+export function splitZoomChatLabel(label: string): { sender: string | null; body: string } {
+    const senderMatch = label.match(
+        /^([^,:]+?)\s+to\s+[^,:]+?(?:\s*:\s*|,\s*\d{1,2}:\d{2}(?:\s*[AP]M)?\s*,\s*)/i,
+    );
+    return {
+        sender: senderMatch?.[1]?.trim() || null,
+        body: senderMatch ? label.slice(senderMatch[0].length) : label,
+    };
 }
 
 export default class Zoom {
@@ -1688,18 +1710,9 @@ export default class Zoom {
 
         // Set up message monitoring with LMA features
         await page.exposeFunction('messageChange', async (message: string) => {
-            // Zoom's chat aria-label has two observed shapes:
-            //   colon form:     "<sender> to <recipient>: <text>"
-            //   timestamp form: "<sender> to <recipient>, HH:MM AM, <text>"
-            // (Zoom shipped the timestamp form during 2026; older clients
-            // still produce the colon form.) Match either, but always anchor
-            // on the literal "<sender> to <recipient>" prefix so we don't
-            // mistake punctuation inside the message for the boundary.
-            const senderMatch = message.match(
-                /^([^,:]+?)\s+to\s+[^,:]+?(?:\s*:\s*|,\s*\d{1,2}:\d{2}(?:\s*[AP]M)?\s*,\s*)/i,
-            );
-            const sender = senderMatch?.[1]?.trim() || null;
-            const body = senderMatch ? message.slice(senderMatch[0].length) : message;
+            // `message` is the row's aria-label, sender and recipient included.
+            // Every command below is matched against the body alone.
+            const { sender, body } = splitZoomChatLabel(message);
             // Checked ahead of pause/resume so an assistant-mode toggle lands
             // whether or not transcription is paused; the two vocabularies are
             // disjoint. Parsed from the body rather than the raw row, so the
@@ -1717,11 +1730,11 @@ export default class Zoom {
                 });
             } else if (assistantToggle) {
                 await this.sendMessages(page, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
-            } else if (details.start && message.includes(details.pauseCommand)) {
+            } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                 details.start = false;
                 console.log(details.pauseMessages[0]);
                 await this.sendMessages(page, details.pauseMessages);
-            } else if (!details.start && message.includes(details.startCommand)) {
+            } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                 details.start = true;
                 console.log(details.startMessages[0]);
                 await this.sendMessages(page, details.startMessages);

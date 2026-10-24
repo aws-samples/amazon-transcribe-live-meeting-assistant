@@ -35,7 +35,7 @@ import {
 } from './assistant-toggles.js';
 import { createDuplicateToggleFilter } from './assistant-toggles.js';
 import { NoOpAgent } from './noop-agent.js';
-import { details, matchesEndCommand } from './details.js';
+import { details, matchesChatCommand, matchesEndCommand } from './details.js';
 
 // ---------------------------------------------------------------------------
 // The vocabulary
@@ -188,19 +188,18 @@ test('the dismissal vocabulary and the toggle vocabulary do not overlap', () => 
 });
 
 test('the toggle vocabulary does not collide with the pause and resume commands', () => {
-    // Most platforms match pause/resume with a case-sensitive substring test on
-    // the raw message, so a toggle phrase containing either word would both
-    // toggle and pause depending on branch order. Asserted against the
-    // configured commands rather than the literals, so the two stay aligned if
-    // the commands change.
+    // A toggle phrase that also matched pause or resume would do one or the
+    // other depending on branch order. Asserted against the configured
+    // commands rather than the literals, so the two stay aligned if the
+    // commands change; the reverse direction is asserted in chat-commands.test.ts.
     for (const message of ['LMA translate', 'LMA assist', 'LMA group', 'LMA always', 'LMA wake', 'LMA open mic']) {
         assert.equal(
-            message.includes(details.pauseCommand),
+            matchesChatCommand(message, details.pauseCommand),
             false,
             `"${message}" would also match the pause command "${details.pauseCommand}"`,
         );
         assert.equal(
-            message.includes(details.startCommand),
+            matchesChatCommand(message, details.startCommand),
             false,
             `"${message}" would also match the resume command "${details.startCommand}"`,
         );
