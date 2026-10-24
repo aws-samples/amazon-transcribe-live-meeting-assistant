@@ -2629,13 +2629,13 @@ export class NovaAgent implements VoiceAssistantProvider {
     // would have no tool to call and the translator would never speak again.
     if (this.meetingMode === 'translator') {
       console.log('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
-      this.logStopRequest('transcript', 'declined-translator');
+      this.logStopRequest('declined-translator');
       return false;
     }
 
     if (this._isMuted) {
       // Already silent, most likely because the tool route got there first.
-      this.logStopRequest('transcript', 'already-silent');
+      this.logStopRequest('already-silent');
       return true;
     }
 
@@ -2643,7 +2643,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // the tool call is what produces the spoken acknowledgement. Translator —
     // the only mode without one — has already declined above.
     if (!hasStopTalkingTool(this.meetingMode)) {
-      this.logStopRequest('transcript', 'muted-immediately');
+      this.logStopRequest('muted-immediately');
       this.mute(reason || 'stop requested');
       return true;
     }
@@ -2655,7 +2655,6 @@ export class NovaAgent implements VoiceAssistantProvider {
       // matters to the account — nothing was deferred on this route if the
       // model asked to mute itself first and the transcript only caught up.
       this.logStopRequest(
-        'transcript',
         this.stopRequest.fromTranscript ? 'already-deferred' : 'already-claimed-by-tool',
       );
       return true;
@@ -2671,7 +2670,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       timer: null,
     };
     this.lastTranscriptStopAt = seenAt;
-    this.logStopRequest('transcript', 'deferred');
+    this.logStopRequest('deferred');
     this.stopRequest.timer = setTimeout(
       () => this.resolveStopRequest(reason || 'stop requested'),
       STOP_REQUEST_TOOL_GRACE_MS,
@@ -2842,12 +2841,13 @@ export class NovaAgent implements VoiceAssistantProvider {
     );
   }
 
-  /** One line per stop-request decision on the transcript route. Carries the
-   *  route, the flags and the timings — never the utterance, which is
+  /** One line per stop-request decision on the transcript route — the only
+   *  route that decides anything here, which is why `route` is not a parameter.
+   *  Carries the flags and the timings, never the utterance, which is
    *  participant speech. */
-  private logStopRequest(route: 'transcript' | 'tool', action: string): void {
+  private logStopRequest(action: string): void {
     console.log(
-      `[stop-request] route=${route} action=${action} mode=${this.meetingMode}`
+      `[stop-request] route=transcript action=${action} mode=${this.meetingMode}`
       + ` window_ms=${STOP_REQUEST_TOOL_GRACE_MS} speaking=${this._isSpeaking}`
       + ` interrupted=${this._isInterrupted} muted=${this._isMuted}`,
     );
