@@ -4,6 +4,7 @@
 
 #
 import boto3
+import botocore.exceptions
 import cfnresponse
 import json
 import os
@@ -13,9 +14,44 @@ CUSTOM_PROMPT_TEMPLATES_PK = "CustomSummaryPromptTemplates"
 DEFAULT_PROMPT_TEMPLATES_INFO = f"""LMA default summary prompt templates. Do not edit - changes may be overridden by updates.
 To override default prompts, use same keys in item: {CUSTOM_PROMPT_TEMPLATES_PK}. Prompt keys must be in the form 'N#Title' where N is a sequence number.
 """
-CUSTOM_PROMPT_TEMPLATES_INFO = f"""LMA custom summary prompt templates. Any key values defined here override defaults with same key defined in item: {DEFAULT_PROMPT_TEMPLATES_PK}. 
+CUSTOM_PROMPT_TEMPLATES_INFO = f"""LMA custom summary prompt templates. Any key values defined here override defaults with same key defined in item: {DEFAULT_PROMPT_TEMPLATES_PK}.
 To disable a default value, override it here with the same key, and value either emplty or 'NONE'. Prompt keys must be in the form 'N#Title' where N is a sequence number.
 """
+
+# The troubleshooting agent's system prompt. Stored here rather than in the
+# agent's source because its wording is the whole feature: it carries LMA's
+# error-pattern catalogue and the handful of facts a reader gets wrong about
+# what the virtual participant persists, and both need correcting in the field
+# without waiting on a 35-minute stack deployment.
+#
+# Flat named attributes rather than the 'N#Title' sequence used above: there is
+# one prompt, it is read by key, and no ordering applies to it.
+DEFAULT_TROUBLESHOOTING_PROMPT_PK = "DefaultTroubleshootingAgentPrompt"
+CUSTOM_TROUBLESHOOTING_PROMPT_PK = "CustomTroubleshootingAgentPrompt"
+TROUBLESHOOTING_PROMPT_FILE = "TroubleshootingAgentSystemPrompt.md"
+DEFAULT_TROUBLESHOOTING_PROMPT_INFO = f"""LMA default troubleshooting agent system prompt. Do not edit - this item is rewritten whenever a stack update ships a changed prompt.
+To override it, set a 'systemPrompt' attribute on item: {CUSTOM_TROUBLESHOOTING_PROMPT_PK}. That item is created if it is absent, on stack create and on stack update, and is never rewritten once it exists - so an override you set there survives every later update.
+"""
+CUSTOM_TROUBLESHOOTING_PROMPT_INFO = f"""LMA custom troubleshooting agent system prompt. Set a 'systemPrompt' attribute here to replace the default in item: {DEFAULT_TROUBLESHOOTING_PROMPT_PK}.
+The replacement takes effect on the next diagnosis - no redeployment is needed. Leave it empty, absent, or set to 'NONE' to use the default. Use <br> for a line break when editing in the DynamoDB console.
+"""
+
+
+def get_troubleshooting_prompt_item(pk, info, system_prompt=None):
+    """Build a troubleshooting-prompt item.
+
+    Omitting system_prompt builds the empty custom item, whose only job is to
+    document the override in its own '*Information*' attribute so an operator
+    finding the table knows where to put one.
+    """
+    item = {
+        'LLMPromptTemplateId': pk,
+        '*Information*': info
+    }
+    if system_prompt is not None:
+        item['systemPrompt'] = system_prompt
+    return item
+
 
 def get_new_item(pk, info, prompt_templates):
     item = {
@@ -67,6 +103,47 @@ def lambda_handler(event, context):
                 print("Writing initial custom item to DDB:", json.dumps(item))
                 response = promptTable.put_item(Item=item)
                 print("DDB response", response)
+
+            # The troubleshooting agent's prompt. Written from a text file with
+            # its newlines intact, not the '<br>' encoding the summary
+            # templates use: it is 200+ lines and has to stay reviewable in a
+            # pull request diff.
+            troubleshooting_prompt_file = (
+                os.environ['LAMBDA_TASK_ROOT'] + "/" + TROUBLESHOOTING_PROMPT_FILE
+            )
+            with open(troubleshooting_prompt_file) as f:
+                troubleshooting_prompt = f.read()
+
+            print("Populating / updating default troubleshooting prompt item:", promptTemplateTableName)
+            item = get_troubleshooting_prompt_item(
+                DEFAULT_TROUBLESHOOTING_PROMPT_PK,
+                DEFAULT_TROUBLESHOOTING_PROMPT_INFO,
+                troubleshooting_prompt,
+            )
+            response = promptTable.put_item(Item=item)
+            print("DDB response", response)
+
+            # Seeded on Update as well as Create, guarded so it can only ever
+            # create. A stack that existed before this release has no custom
+            # item, and the deployment's console link for editing the prompt
+            # would open an item that is not there; seeding only on Create
+            # would leave every upgraded stack in that state. The condition is
+            # what makes the Update pass safe: it writes only when the item is
+            # absent, so an operator's tuned prompt is never overwritten.
+            print("Seeding empty custom troubleshooting prompt item if absent:", promptTemplateTableName)
+            item = get_troubleshooting_prompt_item(
+                CUSTOM_TROUBLESHOOTING_PROMPT_PK, CUSTOM_TROUBLESHOOTING_PROMPT_INFO
+            )
+            try:
+                response = promptTable.put_item(
+                    Item=item,
+                    ConditionExpression='attribute_not_exists(LLMPromptTemplateId)',
+                )
+                print("DDB response", response)
+            except botocore.exceptions.ClientError as condition_error:
+                if condition_error.response['Error']['Code'] != 'ConditionalCheckFailedException':
+                    raise
+                print("Custom troubleshooting prompt item already exists, leaving it alone")
 
     except Exception as e:
         print("Operation failed...")

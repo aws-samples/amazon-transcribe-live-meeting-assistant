@@ -81,6 +81,7 @@ title: "LMA Documentation"
 - [Well-Architected Framework Assessment](well-architected.md) — Assessment of LMA against the six pillars of the AWS Well-Architected Framework
 - [Monitoring & Alerting](monitoring.md) — The operational alerts SNS topic and its alarms, the CloudWatch dashboard, how to subscribe a team rather than one person, and why an unconfirmed email subscription delivers nothing
 - [Troubleshooting](troubleshooting.md) — Monitoring, CloudWatch logs, common issues, cost assessment
+- [AI Troubleshooting Agent](troubleshooting-agent.md) — The read-only diagnostic agent: how to invoke it, the four log and record tools it uses, where its system prompt lives and how to tune it without redeploying, and the spend limits that bound a run
 - [Cleanup](cleanup.md) — Deleting stacks and retained resources
 
 ### Development

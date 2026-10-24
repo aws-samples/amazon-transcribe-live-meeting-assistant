@@ -1,0 +1,213 @@
+#!/usr/bin/env python3.12
+# Copyright (c) 2025 Amazon.com
+# This file is licensed under the MIT License.
+# See the LICENSE file in the project root for full license information.
+
+"""Unit tests for the troubleshooting agent's limits (no AWS)."""
+
+from __future__ import annotations
+
+from unittest import mock
+
+import pytest
+from troubleshooting_config import _LIMITS, AgentLimits, truncate
+
+
+def limits_with(**env: str) -> AgentLimits:
+    """Build AgentLimits with these TROUBLESHOOTING_* variables set."""
+    environ = {f"TROUBLESHOOTING_{k.upper()}": v for k, v in env.items()}
+    with mock.patch.dict("os.environ", environ, clear=False):
+        return AgentLimits()
+
+
+def test_the_defaults_are_the_values_this_module_declares() -> None:
+    """The dataclass must not drift from the table the ceilings live in."""
+    limits = limits_with()
+
+    for name, (default, _maximum) in _LIMITS.items():
+        assert getattr(limits, name) == default, name
+
+
+def test_every_declared_limit_has_a_field() -> None:
+    """A limit in the table with no field would be silently unreachable."""
+    limits = limits_with()
+
+    assert set(limits.as_dict()) == set(_LIMITS)
+
+
+def test_an_operator_can_lower_a_limit() -> None:
+    assert limits_with(max_iterations="3").max_iterations == 3
+
+
+def test_a_limit_above_its_ceiling_is_clamped_rather_than_refused() -> None:
+    """A mistyped value should cost money, not stop a diagnosis from starting."""
+    _default, maximum = _LIMITS["max_lookback_hours"]
+
+    assert limits_with(max_lookback_hours="100000").max_lookback_hours == maximum
+
+
+@pytest.mark.parametrize("value", ["", "   ", "not-a-number", "0", "-5", "1.5.2"])
+def test_an_unusable_value_falls_back_to_the_default(value: str) -> None:
+    default, _maximum = _LIMITS["max_log_events"]
+
+    assert limits_with(max_log_events=value).max_log_events == default
+
+
+def test_a_clamped_limit_says_so_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A limit that silently became something else is an hour of debugging:
+    the agent stops earlier than the configured value says, and nothing
+    anywhere explains why."""
+    _default, maximum = _LIMITS["max_lookback_hours"]
+
+    with caplog.at_level("WARNING"):
+        limits_with(max_lookback_hours="100000")
+
+    assert "TROUBLESHOOTING_MAX_LOOKBACK_HOURS" in caplog.text
+    assert "above the maximum" in caplog.text
+    assert str(maximum) in caplog.text
+
+
+@pytest.mark.parametrize("value", ["not-a-number", "0", "-5"])
+def test_an_unusable_value_says_so_in_the_log(
+    value: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level("WARNING"):
+        limits_with(max_log_events=value)
+
+    assert "TROUBLESHOOTING_MAX_LOG_EVENTS" in caplog.text
+    assert "using the default" in caplog.text
+
+
+def test_an_unset_limit_is_not_warned_about(caplog: pytest.LogCaptureFixture) -> None:
+    """Every default being warned about would make the real warnings invisible."""
+    with caplog.at_level("WARNING"):
+        limits_with()
+
+    assert caplog.text == ""
+
+
+def test_a_limit_inside_its_ceiling_is_not_warned_about(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"):
+        limits_with(max_iterations="4")
+
+    assert caplog.text == ""
+
+
+def test_limits_are_read_per_run_not_per_cold_start() -> None:
+    """A change to the function's environment applies to the next invocation.
+
+    The fields use default_factory for exactly this; a module-level constant
+    would hold the value from whenever the container started.
+    """
+    first = limits_with(max_iterations="4")
+    second = limits_with(max_iterations="6")
+
+    assert (first.max_iterations, second.max_iterations) == (4, 6)
+
+
+def test_the_wall_clock_budget_stays_inside_the_lambda_timeout() -> None:
+    """The ceiling has to leave the agent room to say it ran out of time.
+
+    The function's timeout is 300s by default and the template allows raising
+    it; 870 keeps the ceiling inside the 900s Lambda maximum either way.
+    """
+    _default, maximum = _LIMITS["wall_clock_seconds"]
+
+    assert maximum < 900
+
+
+# ── lookback resolution ─────────────────────────────────────────────────────
+#
+# This value comes from the model, so it gets the same treatment as any other
+# untrusted number.
+
+
+def test_an_absent_lookback_uses_the_default_window() -> None:
+    limits = limits_with()
+
+    assert limits.resolve_lookback_hours(None) == limits.default_lookback_hours
+
+
+def test_a_requested_lookback_is_honoured_when_it_is_inside_the_window() -> None:
+    assert limits_with().resolve_lookback_hours(12) == 12
+
+
+def test_a_lookback_beyond_the_window_is_clamped() -> None:
+    limits = limits_with(max_lookback_hours="48")
+
+    assert limits.resolve_lookback_hours(500) == 48
+
+
+def test_a_maximum_below_the_default_wins() -> None:
+    """Returning the default anyway would quietly ignore the setting the
+    operator just lowered."""
+    limits = limits_with(default_lookback_hours="24", max_lookback_hours="6")
+
+    assert limits.resolve_lookback_hours(None) == 6
+    assert limits.resolve_lookback_hours(12) == 6
+    assert limits.resolve_lookback_hours("nonsense") == 6
+
+
+@pytest.mark.parametrize(
+    "requested", ["", "lots", None, 0, -3, [], {}, "inf", "-inf", "nan", float("inf")]
+)
+def test_an_unusable_lookback_falls_back_rather_than_raising(requested: object) -> None:
+    limits = limits_with()
+
+    assert limits.resolve_lookback_hours(requested) == limits.default_lookback_hours
+
+
+def test_a_lookback_sent_as_a_string_is_parsed() -> None:
+    """Tool arguments arrive as whatever the model serialised them to."""
+    assert limits_with().resolve_lookback_hours("6") == 6
+
+
+def test_a_fractional_lookback_is_truncated_not_rejected() -> None:
+    assert limits_with().resolve_lookback_hours(2.9) == 2
+
+
+# ── truncation ──────────────────────────────────────────────────────────────
+
+
+def test_text_within_the_limit_is_returned_unchanged() -> None:
+    assert truncate("short", 100) == "short"
+
+
+def test_text_at_exactly_the_limit_is_not_truncated() -> None:
+    assert truncate("abcde", 5) == "abcde"
+
+
+def test_truncated_text_says_that_it_was_truncated() -> None:
+    """A silent cut makes the model reason about a line that is past the cut.
+
+    Reporting the cut leaves "ask a narrower question" available to it.
+    """
+    result = truncate("abcdefghij" * 20, 120)
+
+    assert result.startswith("abcdefghij")
+    assert "truncated" in result
+    assert "more characters" in result
+
+
+def test_a_truncated_string_stays_within_the_limit() -> None:
+    """The marker counts against the limit, so the cap is really a cap: a
+    tool result assembled from several truncated values would otherwise creep
+    past max_tool_result_chars by a marker's length each time.
+    """
+    for limit in (40, 60, 120, 500, 2000):
+        assert len(truncate("x" * 10_000, limit)) <= limit, limit
+
+
+def test_a_truncated_string_keeps_as_much_text_as_the_limit_allows() -> None:
+    """Paying for the marker must not cost much more than the marker."""
+    result = truncate("x" * 10_000, 500)
+
+    assert result.count("x") > 400
+
+
+def test_a_nonsensical_limit_returns_the_text_rather_than_nothing() -> None:
+    assert truncate("abc", 0) == "abc"
