@@ -143,9 +143,11 @@ discarded-records-queue-depth alarm picks it up. This one reaches neither on its
 own account, so that queue stays empty. It is redelivered only if some other
 record in the same batch raises, which redelivers everything after it.
 
-`AWS/Lambda Errors` does not move either way: a raised record failure still
-leaves the invocation returning a partial-batch response normally, so that
-metric cannot be used to tell the two apart. The transcript simply has a line
+`AWS/Lambda Errors` does not move for either, so it cannot be used to tell
+them apart: a raised failure that the batch processor can attribute to a record
+still leaves the invocation returning a partial-batch response normally. It
+moves only where a failure carries no sequence number at all, which is the one
+case the handler fails the whole invocation for. The transcript simply has a line
 missing, on a meeting page with no error on it.
 
 If this alarm fires, read the Call Event Processor's log group for `max retries
