@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { Page, ConsoleMessage } from 'playwright-core';
 import jwt from 'jsonwebtoken';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
@@ -363,11 +363,11 @@ export default class ZoomSdk {
                         page,
                         await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender),
                     );
-                } else if (details.start && body.includes(details.pauseCommand)) {
+                } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                     details.start = false;
                     console.log(details.pauseMessages[0]);
                     await this.sendMessages(page, details.pauseMessages);
-                } else if (!details.start && body.includes(details.startCommand)) {
+                } else if (!details.start && matchesChatCommand(body, details.startCommand)) {
                     details.start = true;
                     console.log(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);

@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import { Page, Frame } from 'playwright-core';
-import { details, matchesEndCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
+import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitInfo, MeetingInitOptions } from './details.js';
 import { transcriptionService } from './scribe.js';
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
@@ -889,17 +889,11 @@ export default class Webex {
             } else if (assistantToggle) {
                 if (!this.freshToggle(message, sender)) return;
                 await this.sendMessages(frame, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
-            } else if (
-                details.start &&
-                message.includes(details.pauseCommand)
-            ) {
+            } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
                 details.start = false;
                 console.log(details.pauseMessages[0]);
                 await this.sendMessages(frame, details.pauseMessages);
-            } else if (
-                !details.start &&
-                message.includes(details.startCommand)
-            ) {
+            } else if (!details.start && matchesChatCommand(message, details.startCommand)) {
                 details.start = true;
                 console.log(details.startMessages[0]);
                 await this.sendMessages(frame, details.startMessages);
