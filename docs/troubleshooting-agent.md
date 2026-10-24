@@ -128,7 +128,7 @@ deliberately.
 The record also comes with an `endAssessment`: a reading of the row the way the
 code that writes it does. A Virtual Participant ends in one of four ways, and
 each leaves a different shape. Ended through the end operation (by a user, the
-SDK or CLI, or a delete), it has `endedAt` and `endReason` on its row, and its
+SDK or CLI), it has `endedAt` and `endReason` on its row, and its
 log has `Received SIGTERM` (and, on a MicroVM,
 `[terminate] signalling app to exit`) rather than a `VP exit:` line; the
 assessment presents that recorded reason as the answer to why it ended. Marked

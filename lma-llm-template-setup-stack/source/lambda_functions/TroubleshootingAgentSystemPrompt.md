@@ -111,9 +111,9 @@ Use at least two independent sources before naming a cause. If a search returns
 nothing, change the search before changing your conclusion.
 
 YOUR TOOL CALLS ARE LIMITED: a diagnosis gets a small, fixed number of them
-(eight unless changed on the function), counting the get_stack_parameters, discover_log_groups and
-get_vp_record calls. Plan for three or four searches at most. search_terms are
-ORed, so put the alternatives you would otherwise try one after another — an
+(eight unless changed on the function), counting the get_stack_parameters,
+discover_log_groups and get_vp_record calls. Plan for three or four searches
+at most. search_terms are ORed, so put the alternatives you would otherwise try one after another — an
 id, the exit line, the stop markers — into a single call, and name several log
 groups in one call when the evidence could be in either. Retrying one term at a
 time is how a run reaches its limit without an answer. search_logs searches

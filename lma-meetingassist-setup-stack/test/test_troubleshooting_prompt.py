@@ -349,10 +349,12 @@ def test_the_shipped_prompt_names_a_log_marker_the_code_actually_emits(
 def test_the_tool_call_limit_the_prompt_states_is_the_default() -> None:
     """The prompt names the default limit in words, so a change to the
     default in troubleshooting_config has to change the prompt with it."""
-    from troubleshooting_config import AgentLimits
+    # The shipped default, not AgentLimits(), which an environment variable
+    # in the shell running the tests would change.
+    from troubleshooting_config import _LIMITS
 
     words = {6: "six", 8: "eight", 10: "ten", 12: "twelve"}
-    default = AgentLimits().max_iterations
+    default = _LIMITS["max_iterations"][0]
 
     assert default in words, "add the new default to this table and to the prompt"
     assert f"({words[default]} unless changed on the function)" in prompt_text()

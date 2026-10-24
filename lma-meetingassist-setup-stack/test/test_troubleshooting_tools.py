@@ -1375,6 +1375,20 @@ def test_the_suggested_lookback_is_capped_at_the_maximum() -> None:
     assert "lookback_hours 72 (the most allowed" in assessment
 
 
+def test_a_participant_just_inside_the_maximum_is_not_called_out_of_reach() -> None:
+    """71.5 hours rounds up to 72, which the maximum window reaches; the hour
+    of margin must not turn that into a warning."""
+    item = dict(EXTERNALLY_ENDED_VP_ITEM, createdAt={"S": "2026-10-24T12:32:50.299Z"})
+    record = record_for(item)["record"]
+
+    assessment = assess_vp_end(
+        "vp-abc", record, now=CREATED_EPOCH + 71.5 * 3600, max_lookback_hours=72
+    )
+
+    assert "lookback_hours 72, which reaches back" in assessment
+    assert "out of reach" not in assessment
+
+
 @pytest.mark.parametrize("created", [None, "", "yesterday", "2099-01-01T00:00:00Z"])
 def test_no_lookback_is_suggested_without_a_usable_created_time(created: Any) -> None:
     record = {"status": "ENDED", "endReason": "x", "createdAt": created}

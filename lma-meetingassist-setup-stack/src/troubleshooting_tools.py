@@ -209,10 +209,11 @@ def assess_vp_end(
     leaves a different shape:
 
     * The end operation (``endVirtualParticipant`` from the UI, the SDK or
-      CLI, or a delete) sets ``endedAt``, ``endReason`` and status ENDED or
-      CANCELLED, plus ``ecsTerminated``/``kinesisEndSent`` or
-      ``scheduleCancelled``, then stops the host. The participant is
-      signalled and logs the stop markers, never a ``VP exit:`` line.
+      CLI; a delete ends the VP the same way, then removes the row) sets
+      ``endedAt``, ``endReason`` and status ENDED or CANCELLED, plus
+      ``ecsTerminated``/``kinesisEndSent`` or ``scheduleCancelled``, then
+      stops the host. The participant is signalled and logs the stop
+      markers, never a ``VP exit:`` line.
     * The VP task reaper (ECS launch types only, on a task-stopped event)
       sets FAILED, ``endedAt`` and an ``errorMessage`` carrying the ECS stop
       code and reason, and no ``endReason``. The container may have been
@@ -245,8 +246,9 @@ def assess_vp_end(
     window = ""
     hours = _hours_since(record.get("createdAt"), time.time() if now is None else now)
     if hours is not None:
-        # One hour of margin either side of a clock or rounding edge.
-        hours += 1
+        # The out-of-reach warning compares the real age with the cap; the
+        # hour of margin for a clock or rounding edge is added afterwards,
+        # and clamped, so it never produces the warning on its own.
         if max_lookback_hours is not None and hours > max_lookback_hours:
             window = (
                 f" and lookback_hours {max_lookback_hours} (the most allowed; "
@@ -254,6 +256,9 @@ def assess_vp_end(
                 "earliest lines may be out of reach)"
             )
         else:
+            hours += 1
+            if max_lookback_hours is not None:
+                hours = min(hours, max_lookback_hours)
             window = (
                 f" and lookback_hours {hours}, which reaches back to its "
                 "createdAt (the default window may not)"
@@ -1007,7 +1012,7 @@ class TroubleshootingTools:
         ),
         "endReason": (
             "Why the virtual participant was ended from outside, through the "
-            "end operation (a user, the SDK or CLI, or a delete), not why it "
+            "end operation (a user, or the SDK or CLI), not why it "
             "exited on its own. When present it is the recorded answer to why "
             "the participant ended, written by the operation that ended it."
         ),
