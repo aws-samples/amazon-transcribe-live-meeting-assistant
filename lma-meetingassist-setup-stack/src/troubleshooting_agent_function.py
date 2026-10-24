@@ -387,9 +387,8 @@ def send_thinking_step(
                         "Type": step.get("type", "tool_use"),
                         "Content": step.get("content"),
                         "ToolName": step.get("tool_name"),
-                        "ToolInput": json.dumps(step["tool_input"])
-                        if step.get("tool_input")
-                        else None,
+                        # A summary, not the arguments. See summarise_input.
+                        "ToolInput": step.get("tool_input_summary"),
                         "ToolResult": step.get("result"),
                         "Success": step.get("success", True),
                     },
@@ -519,13 +518,55 @@ class ThinkingStepHookProvider:
                 {
                     "type": "tool_use",
                     "tool_name": self._tool_name(event),
-                    "tool_input": tool_input or {},
+                    "tool_input_summary": self.summarise_input(tool_input),
                 },
                 self._sequence,
             )
             self._sequence += 1
         except Exception as exc:  # noqa: BLE001
             logger.warning("before-tool hook failed: %s", exc)
+
+    #: Tool arguments whose values are safe to publish: identifiers and
+    #: numbers the agent chose, none of which can carry log content.
+    _PUBLISHABLE_INPUT_FIELDS = frozenset(
+        {"vp_id", "components", "lookback_hours", "limit"}
+    )
+
+    @classmethod
+    def summarise_input(cls, tool_input: Any) -> Optional[str]:
+        """Describe a tool call's arguments without reproducing free text.
+
+        The same rule as ``summarise_result``, and for the same reason: this
+        stream reaches the UI without the model in the loop. ``query_string``
+        and ``search_terms`` are written *by* the model, often from text it
+        has just read out of a log line, so publishing them verbatim would put
+        log content on the stream by a side door — which is exactly what
+        summarising the result was meant to prevent.
+
+        Log group names are published: they are infrastructure names the agent
+        got from discovery, they are what a reader of a progress panel most
+        wants to see, and they cannot carry anything but themselves.
+        """
+        if not isinstance(tool_input, Mapping):
+            return None
+        parts: List[str] = []
+        groups = tool_input.get("log_group_names")
+        if groups:
+            names = [n.strip() for n in str(groups).split(",") if n.strip()]
+            parts.append(
+                names[0] if len(names) == 1 else f"{len(names)} log groups"
+            )
+        for field in ("query_string", "search_terms"):
+            value = tool_input.get(field)
+            if value:
+                # Length only. The content is the model's words, and may echo
+                # a log line it has just read.
+                parts.append(f"{field} ({len(str(value))} chars)")
+        for field in sorted(cls._PUBLISHABLE_INPUT_FIELDS):
+            value = tool_input.get(field)
+            if value:
+                parts.append(f"{field}={value}")
+        return ", ".join(parts) if parts else None
 
     @staticmethod
     def summarise_result(content: Any) -> str:

@@ -186,11 +186,27 @@ def test_truncated_text_says_that_it_was_truncated() -> None:
 
     Reporting the cut leaves "ask a narrower question" available to it.
     """
-    result = truncate("abcdefghij", 4)
+    result = truncate("abcdefghij" * 20, 120)
 
-    assert result.startswith("abcd")
+    assert result.startswith("abcdefghij")
     assert "truncated" in result
-    assert "6 more characters" in result
+    assert "more characters" in result
+
+
+def test_a_truncated_string_stays_within_the_limit() -> None:
+    """The marker counts against the limit, so the cap is really a cap: a
+    tool result assembled from several truncated values would otherwise creep
+    past max_tool_result_chars by a marker's length each time.
+    """
+    for limit in (40, 60, 120, 500, 2000):
+        assert len(truncate("x" * 10_000, limit)) <= limit, limit
+
+
+def test_a_truncated_string_keeps_as_much_text_as_the_limit_allows() -> None:
+    """Paying for the marker must not cost much more than the marker."""
+    result = truncate("x" * 10_000, 500)
+
+    assert result.count("x") > 400
 
 
 def test_a_nonsensical_limit_returns_the_text_rather_than_nothing() -> None:

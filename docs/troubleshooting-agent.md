@@ -281,12 +281,17 @@ security channel, it is told to say so and stop rather than write it up.
 
 Those are instructions to a model, so the controls that do not depend on it
 sit in the tools: `get_vp_record`'s field allowlist, the parameter redaction
-described above, and the fact that the thinking-step stream publishes only a
-tool result's **shape** — "2 log groups, 42 rows, 90000 bytes scanned" —
-never its content. That
-last one matters most, because that stream reaches the UI without the model in
-the loop, and a log line can contain whatever the component that wrote it put
-there.
+described above, and the thinking-step stream's summaries.
+
+That stream matters most, because it reaches the UI without the model in the
+loop, so nothing the prompt says about what to quote applies to it. It
+publishes a tool result's **shape** and never its content — "2 log groups, 42
+rows, 90000 bytes scanned" — and the same for a tool call's arguments: log
+group names are published, because they come from discovery and cannot carry
+anything but themselves, while a `query_string` or `search_terms` the agent
+wrote appears only as a length. Those are the agent's own words, and it writes
+them from text it has just read out of a log line, which can contain whatever
+the component that wrote it put there.
 
 ## Related
 

@@ -226,6 +226,17 @@ def truncate(text: str, limit: int) -> str:
     """
     if limit < 1 or len(text) <= limit:
         return text
-    kept = text[:limit]
-    dropped = len(text) - limit
-    return f"{kept}\n… [truncated: {dropped} more characters not shown]"
+    # The marker counts against the limit, so the returned string really is
+    # within it. Written as a two-pass measure because the marker's own length
+    # depends on the number of characters dropped, which depends on where the
+    # cut lands.
+    def rendered(cut: int) -> str:
+        return f"{text[:cut]}\n… [truncated: {len(text) - cut} more characters not shown]"
+
+    cut = limit
+    for _ in range(3):
+        overshoot = len(rendered(cut)) - limit
+        if overshoot <= 0:
+            break
+        cut = max(0, cut - overshoot)
+    return rendered(cut) if cut > 0 else f"… [truncated: {len(text)} characters]"[:limit]

@@ -413,6 +413,43 @@ def test_the_known_names_are_queried_and_the_unknown_ones_reported() -> None:
     assert client.start_query_calls[0]["logGroupNames"] == [VP_GROUP]
 
 
+def test_an_unsearched_name_is_called_out_in_the_guidance() -> None:
+    """Listing it in a field among many leaves the agent to infer that a group
+    it asked about was not searched. This module exists to stop exactly that."""
+    client = FakeInsightsClient(rows=[row(m="x")])
+
+    result = parsed(
+        make_tools(client).search_logs(f"{VP_GROUP},/aws/lambda/invented")
+    )
+
+    assert result["unknownLogGroupNames"] == ["/aws/lambda/invented"]
+    assert "not log groups in this deployment" in result["guidance"]
+    assert "NOT searched" in result["guidance"]
+
+
+def test_a_denied_log_group_is_a_scope_problem_not_a_tool_fault() -> None:
+    """Discovery can list a group the role cannot query — under the
+    prefix-matching fallback, or an AppSync group found from the endpoint with
+    no API id supplied. The generic handler would call that a fault in the
+    tool and leave the agent stuck."""
+
+    class Denied(FakeInsightsClient):
+        def start_query(self, **kwargs: Any):
+            raise client_error("AccessDeniedException")
+
+    with pytest.raises(ToolError, match="not permitted to query"):
+        make_tools(Denied()).search_logs(VP_GROUP)
+
+
+def test_a_denied_log_group_tells_the_agent_how_to_proceed() -> None:
+    class Denied(FakeInsightsClient):
+        def start_query(self, **kwargs: Any):
+            raise client_error("AccessDeniedException")
+
+    with pytest.raises(ToolError, match="Retry with fewer groups"):
+        make_tools(Denied()).search_logs(VP_GROUP)
+
+
 def test_several_groups_are_correlated_in_one_query() -> None:
     """One query across two components is the other reason this is Insights."""
     client = FakeInsightsClient()
@@ -547,9 +584,12 @@ def test_a_long_log_message_is_truncated_with_a_marker() -> None:
 
     result = parsed(make_tools(client, limits=limits).search_logs(VP_GROUP))
 
-    assert "truncated" in result["rows"][0]["message"]
-    assert len(result["rows"][0]["message"]) < 50000
-    assert result["rows"][0]["message"].startswith("x" * limits.max_log_message_length)
+    message = result["rows"][0]["message"]
+    assert "truncated" in message
+    # Within the per-message limit, marker included.
+    assert len(message) <= limits.max_log_message_length
+    # And it is the beginning of the line that was kept, not a sample of it.
+    assert message.startswith("x" * 1900)
 
 
 def test_the_opaque_record_pointer_is_dropped_from_results() -> None:

@@ -86,13 +86,17 @@ _QUERY_SYNTAX_ERROR_CODES = frozenset(
 )
 
 
-def _is_query_syntax_error(exc: BaseException) -> bool:
-    """Whether `exc` means the query itself was rejected."""
+def _error_code(exc: BaseException) -> Optional[str]:
+    """The AWS error code on `exc`, or None if it carries none."""
     response = getattr(exc, "response", None)
     if not isinstance(response, dict):
-        return False
-    code = (response.get("Error") or {}).get("Code")
-    return code in _QUERY_SYNTAX_ERROR_CODES
+        return None
+    return (response.get("Error") or {}).get("Code")
+
+
+def _is_query_syntax_error(exc: BaseException) -> bool:
+    """Whether `exc` means the query itself was rejected."""
+    return _error_code(exc) in _QUERY_SYNTAX_ERROR_CODES
 
 
 def _escape_insights_string(text: str) -> str:
@@ -488,6 +492,13 @@ class TroubleshootingTools:
                 "lookbackHours, drop a term, or query a different component "
                 "before concluding anything from it."
             )
+        if unknown:
+            guidance.append(
+                f"{len(unknown)} name(s) you gave are not log groups in this "
+                "deployment and were NOT searched: see unknownLogGroupNames. "
+                "Nothing here says anything about them. Call "
+                "discover_log_groups and use the names it returns verbatim."
+            )
         if omitted:
             guidance.append(
                 f"{len(omitted)} log group(s) you named were NOT searched, "
@@ -565,6 +576,19 @@ class TroubleshootingTools:
             # Letting it reach the generic handler would label it "a fault in
             # the tool, not evidence about LMA" and leave the agent with no
             # next step, when the next step is to correct the query.
+            if _error_code(exc) == "AccessDeniedException":
+                # Discovery can list a group this role cannot query — under
+                # the prefix-matching fallback, or an AppSync group found from
+                # the endpoint on a deployment that supplied no API id. The
+                # generic handler would call that "a fault in the tool, not
+                # evidence about LMA" and leave the agent stuck; it is a scope
+                # problem it can work around.
+                raise ToolError(
+                    "this deployment's diagnostic role is not permitted to "
+                    f"query at least one of these log groups: {exc}. Retry "
+                    "with fewer groups, dropping any that discovery reported "
+                    "but that may belong outside this deployment."
+                ) from exc
             if _is_query_syntax_error(exc):
                 raise ToolError(
                     "CloudWatch Logs rejected this query as malformed: "

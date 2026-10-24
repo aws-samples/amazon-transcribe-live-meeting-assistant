@@ -696,7 +696,7 @@ def test_an_older_attribute_shaped_result_still_works() -> None:
     assert steps[0]["success"] is True
 
 
-def test_a_dict_shaped_tool_use_publishes_its_input() -> None:
+def test_a_dict_shaped_tool_use_is_read_and_summarised() -> None:
     """A ToolUse is a TypedDict too, so the arguments have to be read by key
     for the progress panel to show what the agent asked for."""
     event = mock.Mock()
@@ -704,15 +704,76 @@ def test_a_dict_shaped_tool_use_publishes_its_input() -> None:
     event.tool_use = {
         "toolUseId": "tu-1",
         "name": "search_logs",
-        "input": {"log_group_names": "/a/b", "search_terms": "VP exit:"},
+        "input": {"log_group_names": "/a/b", "lookback_hours": 6},
     }
 
     steps = published_steps(event, after=False)
 
-    assert steps[0]["tool_input"] == {
-        "log_group_names": "/a/b",
-        "search_terms": "VP exit:",
-    }
+    assert "/a/b" in steps[0]["tool_input_summary"]
+    assert "lookback_hours=6" in steps[0]["tool_input_summary"]
+
+
+def test_a_model_authored_query_is_not_published_verbatim() -> None:
+    """The input is written *by* the model, often from text it has just read
+    out of a log line, so publishing it would put log content on this stream
+    by a side door — which is what summarising the result prevents."""
+    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+        {
+            "log_group_names": "/a/b",
+            "query_string": 'fields @message | filter @message like "sk_live_SECRET"',
+        }
+    )
+
+    assert "sk_live_SECRET" not in summary
+    assert "query_string (" in summary
+    assert "chars)" in summary
+
+
+def test_search_terms_are_not_published_verbatim_either() -> None:
+    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+        {"log_group_names": "/a/b", "search_terms": "Bearer abc.def.ghi"}
+    )
+
+    assert "Bearer" not in summary
+    assert "search_terms (" in summary
+
+
+def test_log_group_names_are_published_because_they_are_what_a_reader_wants() -> None:
+    """They are infrastructure names the agent got from discovery, they cannot
+    carry anything but themselves, and they are the useful part of a progress
+    line."""
+    provider = agent_function.ThinkingStepHookProvider
+
+    assert "/a/b" in provider.summarise_input({"log_group_names": "/a/b"})
+    assert "3 log groups" in provider.summarise_input(
+        {"log_group_names": "/a/b,/c/d,/e/f"}
+    )
+
+
+def test_identifiers_and_numbers_the_agent_chose_are_published() -> None:
+    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+        {"vp_id": "vp-abc", "lookback_hours": 12, "limit": 50}
+    )
+
+    assert "vp_id=vp-abc" in summary
+    assert "lookback_hours=12" in summary
+    assert "limit=50" in summary
+
+
+@pytest.mark.parametrize("tool_input", [None, {}, "not a mapping", 7, []])
+def test_an_input_with_nothing_to_say_publishes_nothing(tool_input: Any) -> None:
+    assert agent_function.ThinkingStepHookProvider.summarise_input(tool_input) is None
+
+
+def test_an_unrecognised_argument_is_not_published() -> None:
+    """The allowlist's failure direction: a tool argument added later is left
+    off the stream until somebody decides it is safe to publish."""
+    summary = agent_function.ThinkingStepHookProvider.summarise_input(
+        {"log_group_names": "/a/b", "some_future_argument": "sensitive"}
+    )
+
+    assert "sensitive" not in summary
+    assert "some_future_argument" not in summary
 
 
 def test_the_tool_name_is_found_on_the_tool_use_when_there_is_no_selected_tool() -> None:
