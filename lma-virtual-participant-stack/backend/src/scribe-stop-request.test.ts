@@ -7,17 +7,26 @@
 /**
  * The transcript route from "Hey Alex, stop talking" to a silent assistant.
  *
- * This is the supplementary path. A repeated wake phrase on its own has nothing
- * to tell an assistant that is already listening, so it used to be dropped;
- * recognising the stop intent here silences the assistant without depending on
- * the model noticing. The primary path remains the `mute` tool, because a
- * transcript segment is only finalized after the speaker pauses.
+ * A repeated wake phrase on its own has nothing to tell an assistant that is
+ * already listening, so it used to be dropped; recognising the stop intent here
+ * silences the assistant without depending on the model noticing. What is
+ * asserted below is that the scribe recognises the request and hands it to the
+ * provider, and that the assistant ends up silent. The provider holds the
+ * request briefly first so the model can answer out loud — that handover is
+ * covered in voice-assistant-stop-race.test.ts, and is only something to wait
+ * for here.
  *
- * The provider is selected from the environment at import time, so the imports
- * below are deliberately dynamic.
+ * The scribe and the provider are both selected from the environment at import
+ * time, so those two imports are deliberately dynamic and come after the
+ * assignments below. The constant is a plain static import: nothing this test
+ * sets is read at module load, so hoisting it above the assignments changes
+ * nothing. (Loading it is not inert — nova-agent.ts pulls in simli-avatar.ts,
+ * which builds its singleton from the `SIMLI_*` variables — but this test sets
+ * none of those.)
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
+import { STOP_REQUEST_TOOL_GRACE_MS } from './nova-agent.js';
 
 process.env.VOICE_ASSISTANT_PROVIDER = 'amazon_nova_sonic';
 process.env.VOICE_ASSISTANT_ACTIVATION_MODE = 'wake_phrase';
@@ -46,17 +55,26 @@ function assistantAnswering(): void {
     (voiceAssistant as any)._isMuted = false;
 }
 
-test('a stop request in a completed segment silences the answering assistant', () => {
+/** Wait out the window the provider gives Nova to answer the request out loud. */
+function afterStopWindow(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, STOP_REQUEST_TOOL_GRACE_MS + 150));
+}
+
+test('a stop request in a completed segment silences the answering assistant', async () => {
     assistantAnswering();
     finalSegment('Hey Alex, stop talking');
+    await afterStopWindow();
     assert.equal(voiceAssistant.isMuted(), true);
 });
 
-test('a follow-up question leaves the assistant talking', () => {
+test('a follow-up question leaves the assistant talking', async () => {
     // The wake phrase is there and the assistant is already activated, so this
     // segment reaches exactly the same code path as the stop request above.
     assistantAnswering();
     finalSegment('Hey Alex, can you stop the recording and summarise the last hour?');
+    // Past the window too: a segment that is not a stop request must not
+    // silence the assistant late either.
+    await afterStopWindow();
     assert.equal(voiceAssistant.isMuted(), false);
 });
 

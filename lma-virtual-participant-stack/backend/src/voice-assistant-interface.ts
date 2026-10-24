@@ -139,12 +139,21 @@ export interface VoiceAssistantProvider {
    *
    * The provider decides, because only it knows which meeting mode it is in —
    * translator mode is driven by its own pause/resume trigger phrases and
-   * declines.
+   * declines — and because only it knows whether it has another way of
+   * recognising the request. Where it does, it may hold the request for a short
+   * window so that route can answer out loud first; it silences the assistant
+   * itself if that does not happen, so an accepted request ends in silence.
+   *
+   * A provider may still call a request off before it resolves, if something
+   * unambiguously asks the assistant back inside the window. Whether it can
+   * tell that apart from the request itself depends on what it can observe, so
+   * that is the provider's judgement and callers should not count on it.
    *
    * @param reason Optional log tag identifying the source of the call.
-   * @returns true when the assistant is now silent and will stay silent until
-   *   addressed again; false when the current mode does not take stop requests
-   *   from this route.
+   * @returns true when the request has been accepted and the assistant will be
+   *   silent, immediately or within the provider's own window, and will stay
+   *   silent until addressed again; false when the current mode does not take
+   *   stop requests from this route.
    */
   requestStopTalking(reason?: string): boolean;
 }

@@ -943,17 +943,29 @@ export class TranscriptionService {
             // "Hey Alex, stop talking" while the assistant is already answering.
             // The wake phrase on its own would be dropped here, because
             // handleWakePhraseDetected has nothing to do for an assistant that
-            // is already activated — so recognise the stop intent and silence it
-            // directly. This is a supplementary path: the `mute` tool the model
-            // calls itself remains the primary mechanism, because a transcript
-            // segment is only finalized after the speaker pauses.
+            // is already activated — so recognise the stop intent and hand it to
+            // the provider.
+            //
+            // This route is the guarantee, not the mechanism. It is expected to
+            // get there first, because a tool call needs the model to hear the
+            // audio and decide where this needs only a finalized segment — so
+            // the provider holds it briefly to let the model answer out loud,
+            // and acts if the model does not. Which route actually arrived
+            // first, and which silenced the assistant, is in the provider's
+            // `[stop-request]` log lines.
             const stopRequested =
                 voiceAssistant.isEnabled() &&
                 voiceAssistant.isActivated() &&
                 isStopTalkingRequest(transcript, this.wakePhrases);
 
             if (stopRequested) {
-                console.log(`🔇 Stop request detected in transcript: "${transcript}"`);
+                // No log line of its own. The provider reports the route, the
+                // flags and the timings, which is what a stop request has to be
+                // diagnosed from, and a second copy of the utterance here would
+                // add nothing but another copy of participant speech. (It is
+                // not kept out of the log stream altogether — every completed
+                // segment is logged above.)
+                //
                 // A stop request never starts a conversation, so drop any
                 // pre-connect armed by the wake phrase in this utterance. The
                 // reset keys off recognising the request, not off the provider

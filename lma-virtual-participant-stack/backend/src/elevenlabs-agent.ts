@@ -901,10 +901,28 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     // to the trigger-phrase state machine, not to this route.
     if (this.meetingMode === 'translator') {
       console.log('🌐 Translator mode - stop requests are only taken from the configured pause phrase');
+      this.logStopRequest('declined-translator');
       return false;
     }
 
+    // There is nothing to defer for. LMA cannot give this provider a `mute`
+    // tool or amend its prompt — both live in the ElevenLabs dashboard — so
+    // there is no tool call to wait for, and the transcript route is the whole
+    // mechanism and acts at once. The agent may well still be speaking at that
+    // moment; what it says is just not something LMA can ask for.
+    this.logStopRequest('muted-immediately');
     this.mute(reason || 'stop requested');
     return true;
+  }
+
+  /** One line per stop-request decision, in the same family Nova Sonic writes,
+   *  so that one CloudWatch filter covers both providers — including the
+   *  outcomes where nothing is muted. Carries the flags, never the utterance,
+   *  which is participant speech. */
+  private logStopRequest(action: string): void {
+    console.log(
+      `[stop-request] route=transcript action=${action} provider=elevenlabs`
+      + ` mode=${this.meetingMode} speaking=${this.isSpeaking()} muted=${this._isMuted}`,
+    );
   }
 }
