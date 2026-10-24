@@ -994,18 +994,3 @@ def test_a_failed_segment_write_is_counted_as_a_failure(schema, emitted, gathere
     assert gathered["total"] > 1, "see test_written_segments_are_counted_and_no_failure_is"
     assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENT_WRITE_FAILED) == 1
     assert metric_names.TRANSCRIPT_SEGMENTS_WRITTEN not in emitted.counts
-
-
-def test_every_name_the_processor_emits_is_in_the_catalogue():
-    """The emitter refuses an unlisted name, so a typo at a call site publishes
-    nothing at all rather than a second series. This fails the build instead."""
-    emitted_names = {
-        metric_names.MEETINGS_STARTED,
-        metric_names.MEETINGS_ENDED,
-        metric_names.TRANSCRIPT_SEGMENTS_WRITTEN,
-        metric_names.TRANSCRIPT_SEGMENT_WRITE_FAILED,
-    }
-    assert emitted_names <= set(metric_names.BY_NAME)
-    assert emitted_names == set(
-        metric_names.names_for(metric_names.Component.CALL_EVENT_PROCESSOR)
-    ), "the catalogue and this function disagree about what it publishes"

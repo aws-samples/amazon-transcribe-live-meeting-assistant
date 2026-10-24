@@ -145,15 +145,16 @@ record in the same batch raises, which redelivers everything after it.
 
 `AWS/Lambda Errors` does not move either way: a raised record failure still
 leaves the invocation returning a partial-batch response normally, so that
-metric is no help in distinguishing the two. The transcript simply has a line
-missing, on a meeting page with no error on it. If this alarm fires, read the Call Event Processor's log group for
-`max retries on query` over the same window; each of those lines carries the
-exception type and the GraphQL `errorType`. Search for that string rather than
-the handler's `event processor error`, which reports only failures that were
-raised — and the point of this metric is that these were not, so an operator
-grepping for it finds nothing in the window that fired. Segments already lost
-cannot be replayed once
-their Kinesis records pass the stream's 24-hour retention, so a sustained rate
+metric cannot be used to tell the two apart. The transcript simply has a line
+missing, on a meeting page with no error on it.
+
+If this alarm fires, read the Call Event Processor's log group for `max retries
+on query` over the same window; each of those lines carries the exception type
+and the GraphQL `errorType`. Search for that string rather than the handler's
+`event processor error`, which reports only failures that were raised — and the
+point of this metric is that these were not, so grepping for it finds nothing
+in the window that fired. Segments already lost cannot be replayed once their
+Kinesis records pass the stream's 24-hour retention, so a sustained rate
 is urgent in a way a single occurrence is not.
 
 **`meetings-without-transcript` deliberately ignores short sessions.** The

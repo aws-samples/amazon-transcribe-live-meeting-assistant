@@ -38,6 +38,7 @@ Run via `make test-ai-stack` or pytest directly.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import sys
@@ -382,14 +383,77 @@ def _walk_statements(node) -> list[dict]:
 # ── the call sites, where deleting one line stops everything silently ──────
 
 
-CALL_EVENT_PROCESSOR_HANDLER = (
-    REPO_ROOT
-    / "lma-ai-stack"
-    / "source"
-    / "lambda_functions"
-    / "call_event_processor"
-    / "lambda_function.py"
+CALL_EVENT_PROCESSOR_DIR = (
+    REPO_ROOT / "lma-ai-stack" / "source" / "lambda_functions" / "call_event_processor"
 )
+CALL_EVENT_PROCESSOR_HANDLER = CALL_EVENT_PROCESSOR_DIR / "lambda_function.py"
+CALL_EVENT_PROCESSOR_DISPATCH = (
+    CALL_EVENT_PROCESSOR_DIR / "event_processor" / "call_event_processor.py"
+)
+
+
+def _emitted_metric_names(source_path: Path) -> set[str]:
+    """Metric names this module emits, read out of its `METRICS.*` call sites.
+
+    Read from the source rather than by importing it: the dispatch module needs
+    `aiohttp`, `gql` and the Lambda layer, and this suite installs none of them.
+
+    Only `metrics_utils.catalogue` constants are resolved, which is the one way
+    a call site is written here; a literal string would be reported rather than
+    quietly ignored, so this cannot be satisfied by stepping around it.
+    """
+    tree = ast.parse(source_path.read_text())
+    names: set[str] = set()
+    unresolved: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (
+            isinstance(func, ast.Attribute)
+            and func.attr in {"count", "measure"}
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "METRICS"
+        ):
+            continue
+        if not node.args:
+            unresolved.append(ast.dump(node))
+            continue
+        first = node.args[0]
+        # `metric_names.MEETINGS_STARTED`, the only form used here.
+        if isinstance(first, ast.Attribute) and hasattr(catalogue, first.attr):
+            names.add(getattr(catalogue, first.attr))
+        else:
+            unresolved.append(ast.unparse(first))
+    assert not unresolved, (
+        f"{source_path.name} emits a metric under a name this gate cannot resolve back to "
+        f"the catalogue, so it cannot be checked against the dashboard or the alarms: "
+        f"{unresolved}. Name it with a catalogue constant."
+    )
+    return names
+
+
+def test_the_call_event_processor_emits_exactly_what_the_catalogue_says_it_does():
+    """Read from the call sites, not from a list written out beside them.
+
+    The emitter refuses a name that is not in the catalogue, so a typo at a call
+    site publishes nothing at all -- no error, no series, and no widget to
+    notice was missing. Comparing the names actually passed to `METRICS.count`
+    against the catalogue's entry for this component catches that, and catches
+    the reverse too: a metric the catalogue claims this component publishes,
+    which has a widget and possibly an alarm, and which nothing emits.
+    """
+    emitted = _emitted_metric_names(CALL_EVENT_PROCESSOR_DISPATCH)
+    expected = set(catalogue.names_for(catalogue.Component.CALL_EVENT_PROCESSOR))
+
+    assert emitted - expected == set(), (
+        f"the Call Event Processor emits metrics the catalogue does not attribute to it, so "
+        f"the emitter refuses them at runtime: {sorted(emitted - expected)}"
+    )
+    assert expected - emitted == set(), (
+        f"the catalogue says the Call Event Processor publishes these, and nothing in it "
+        f"does -- their widgets are permanently empty: {sorted(expected - emitted)}"
+    )
 
 
 def test_the_call_event_processor_flushes_its_metrics_on_every_exit_path():
@@ -407,8 +471,6 @@ def test_the_call_event_processor_flushes_its_metrics_on_every_exit_path():
     write failures the whole metric exists for -- are the ones that would be
     lost to a trailing call.
     """
-    import ast
-
     tree = ast.parse(CALL_EVENT_PROCESSOR_HANDLER.read_text())
     handlers = [
         node
