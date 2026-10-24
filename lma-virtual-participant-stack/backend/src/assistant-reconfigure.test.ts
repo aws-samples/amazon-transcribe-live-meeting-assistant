@@ -37,10 +37,10 @@ import { details } from './details.js';
 
 // Building an agent and changing its mode both log a great deal, and this file
 // builds a few dozen agents. Node's test runner multiplexes a child's stdout
-// with its own report stream, and that much output from one file is enough to
-// corrupt the report when files run in parallel — this suite passed file by
-// file and failed as a whole until the output stopped. So the file keeps its
-// stdout to itself, and the tests that assert on log lines read them from here.
+// with its own report stream, so a file that logs this much can corrupt the
+// report when files run in parallel, losing the rest of the file's results with
+// it. This file therefore keeps its stdout to itself, and the tests that assert
+// on log lines read them from here.
 const captured: string[] = [];
 console.log = (...args: unknown[]) => {
     captured.push(args.map(String).join(' '));
