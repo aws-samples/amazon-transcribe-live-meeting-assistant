@@ -325,3 +325,37 @@ def test_acquire_does_not_retry_without_a_minute_left_before_the_deadline() -> N
     assert result["ok"] is False
     assert "Internal service error" in result["reason"]
     assert client.run_microvm.call_count == 1
+
+
+ASR_LOG_GROUP = "/aws/lambda-microvms/LMA-Test-asr-logs"
+
+
+def test_every_acquire_attempt_names_the_stacks_log_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The image's Logging setting covers only its build. A running MicroVM logs
+    to the group its RunMicrovm call names, or to a service-created one if the
+    call names none -- so the retry has to name it too."""
+    monkeypatch.setenv("MICROVM_LOG_GROUP_NAME", ASR_LOG_GROUP)
+    client = fake_microvms()
+    client.run_microvm.side_effect = [
+        {"microvmId": "mvm-1", "endpoint": "e1", "state": "PENDING"},
+        {"microvmId": "mvm-2", "endpoint": "e2", "state": "RUNNING"},
+    ]
+    client.get_microvm.side_effect = [{"state": "TERMINATED"}]
+    with mock.patch.object(index, "microvms", client):
+        assert index.lambda_handler({"action": "acquire", "callId": "c"}, None)["ok"] is True
+
+    assert client.run_microvm.call_count == 2
+    for call in client.run_microvm.call_args_list:
+        assert call.kwargs["logging"] == {"cloudWatch": {"logGroup": ASR_LOG_GROUP}}
+
+
+def test_an_unset_log_group_still_acquires(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing variable costs log placement, not the meeting: the member is
+    omitted (the client drops None values) and the service default applies."""
+    monkeypatch.delenv("MICROVM_LOG_GROUP_NAME", raising=False)
+    client = fake_microvms()
+    with mock.patch.object(index, "microvms", client):
+        result = index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+
+    assert result["ok"] is True
+    assert client.run_microvm.call_args.kwargs["logging"] is None

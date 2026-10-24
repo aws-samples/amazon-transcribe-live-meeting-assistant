@@ -2148,6 +2148,16 @@ Resources:
   # stack's retention setting and the customer-managed key rather than being
   # created by the service with no expiry and the AWS-owned key.
   #
+  # Two settings route output here, and both are needed. The image's
+  # Logging.CloudWatch.LogGroup covers only the build, snapshot and /validate
+  # output. Each running MicroVM's output goes to the group named in that
+  # RunMicrovm call's own `logging` member, which VPMicrovmLauncherFunction
+  # passes from MICROVM_LOG_GROUP_NAME; a RunMicrovm that names no group logs
+  # to a service-created `/aws/lambda-microvms/<image name>` group instead.
+  # The MicroVM execution role (TaskRole) writes the runtime streams, through
+  # LogsPolicy; the customer-managed key's policy already admits CloudWatch
+  # Logs for this account.
+  #
   # The name deliberately differs from the group earlier releases logged to
   # (`/aws/lambda-microvms/${LMAStackName}-vp`). That group is already present
   # in any stack that has built the image, and CloudFormation cannot adopt an
@@ -2583,6 +2593,10 @@ Resources:
           # is one source of truth (see _static_config in the launcher).
           TASK_DEFINITION_ARN: !Ref TaskDefinition
           EXECUTION_ROLE_ARN: !GetAtt TaskRole.Arn
+          # Passed as RunMicrovm's `logging` member. The image's Logging setting
+          # covers only its build output; without this, each meeting's MicroVM
+          # output goes to a service-created group with no expiry.
+          MICROVM_LOG_GROUP_NAME: !Ref VPMicrovmLogGroup
           # The ARN embeds a service-generated id, so it cannot be constructed
           # from the connector's Name.
           EGRESS_CONNECTOR_ARN: !GetAtt VPMicrovmEgressConnector.Arn

@@ -247,6 +247,24 @@ EGRESS_CONNECTOR = os.environ.get("EGRESS_CONNECTOR_ARN") or _CONNECTOR.format(
 )
 
 
+def _logging_config() -> dict | None:
+    """The RunMicrovm `logging` member naming the stack's MicroVM log group.
+
+    The image's Logging setting governs only its build, snapshot and validate
+    output. A running MicroVM's own output goes wherever RunMicrovm says, and
+    when RunMicrovm says nothing the service writes it to a group it creates
+    itself, named after the image, with no expiry and no customer-managed key.
+
+    None (the member omitted, the service default) only when the variable is
+    unset, so a mis-set environment loses log placement rather than the meeting.
+    """
+    log_group = os.environ.get("MICROVM_LOG_GROUP_NAME")
+    if not log_group:
+        logger.warning("MICROVM_LOG_GROUP_NAME is not set; the service will pick the log group")
+        return None
+    return {"cloudWatch": {"logGroup": log_group}}
+
+
 def _redact(config):
     return {
         k: (f"<redacted:{len(v)}>" if k in SECRET_KEYS else v)
@@ -359,6 +377,7 @@ def lambda_handler(event, context):
                 "suspendedDurationSeconds": 0,
             },
             maximumDurationInSeconds=MAX_DURATION_SECONDS,
+            logging=_logging_config(),
             runHookPayload=run_hook_payload,
             clientToken=vp_id,
         )

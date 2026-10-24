@@ -310,7 +310,7 @@ ALLOWED_MICROVM_RESOURCES = {
 def test_the_legacy_microvm_log_groups_can_be_queried(
     role: Dict[str, Any], suffix: str
 ) -> None:
-    """A stack upgraded from before v0.3.11 keeps the groups its earlier images
+    """A stack upgraded from before v0.3.11 keeps the groups its earlier MicroVMs
     logged to, and discovery lists them; a listed group the role cannot query
     fails the whole Logs Insights query it is named in."""
     rendered = set(rendered_resources(statements_granting(role, "logs:StartQuery")[0]))

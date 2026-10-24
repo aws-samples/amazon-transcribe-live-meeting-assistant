@@ -165,9 +165,10 @@ agent refuses to query a name that `discover_log_groups` did not return, because
 a guessed name produces an empty result that reads exactly like an absence of
 evidence. On a stack upgraded from a release before v0.3.11 it also finds the
 MicroVM log groups that release used, `/aws/lambda-microvms/<stack>-vp` and
-`-asr`, which the upgrade leaves in place: a Virtual Participant that ran on the
-pre-upgrade image — including one launched before the image rebuild finished —
-logged only there. Each MicroVM group is labelled `current` or `legacy`, and
+`-asr`, which the upgrade leaves in place. Where a MicroVM's output goes is
+fixed when the MicroVM is launched, so a Virtual Participant launched before the
+upgrade finished — whichever image it ran on — logged only there. Each MicroVM
+group is labelled `current` or `legacy`, and
 when a legacy group exists the agent is told to search it before concluding
 there is no evidence (see the [v0.3.11 migration
 notes](stack-updates-and-upgrades.md#v0311)).

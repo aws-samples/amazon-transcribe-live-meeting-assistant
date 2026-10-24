@@ -10,7 +10,9 @@ whose `Logging.CloudWatch.LogGroup` names no declared group is the same story
 with a different service. So is a declared log group that nothing points at —
 that one sits empty while the logs it was declared for go elsewhere. All three
 are invisible until somebody goes looking for a log, or reads a bill, so this
-file asserts the wiring instead.
+file asserts the wiring instead. The image's setting covers only its build: a
+running MicroVM logs to the group its RunMicrovm call names, so the last section
+checks that each launcher function is handed the image's group by name.
 
 `EMITTER_LOG_GROUP_PATHS` is the set of resource types that name their own log
 group, and where each names it. The five rules, each as its own test so a
@@ -378,3 +380,65 @@ def test_every_declared_log_group_is_referenced(template: str):
         f"{template}: log groups nothing points at, so they stay empty while the "
         f"logs they were declared for go to a group this template does not own: {orphans}"
     )
+
+
+# ── MicroVM runtime output ──────────────────────────────────────────────────
+
+MICROVM_IMAGE_TYPE = "AWS::Lambda::MicrovmImage"
+
+
+def _image_launchers(resources: dict) -> dict:
+    """{function logical id: image logical id} for every function that runs MicroVMs.
+
+    A launcher is recognised by the image ARN it is handed, `MICROVM_IMAGE_ARN:
+    !GetAtt <image>.ImageArn`, which is the value it passes to RunMicrovm.
+    """
+    images = _of_type(resources, MICROVM_IMAGE_TYPE)
+    launchers = {}
+    for name, function in _of_type(
+        resources, "AWS::Lambda::Function", "AWS::Serverless::Function"
+    ).items():
+        env = function.get("Properties", {}).get("Environment", {}).get("Variables", {}) or {}
+        targets = [t for t, _ in _references(env.get("MICROVM_IMAGE_ARN")) if t in images]
+        if targets:
+            launchers[name] = targets[0]
+    return launchers
+
+
+def test_microvm_launchers_are_found():
+    """Guards the test below against passing because it collected nothing."""
+    found = {}
+    for path in DEPLOYED_TEMPLATES:
+        launchers = _image_launchers(_resources(path))
+        if launchers:
+            found[path] = sorted(launchers)
+    assert found == {
+        "lma-virtual-participant-stack/template.yaml": ["VPMicrovmLauncherFunction"],
+        "lma-asr-microvm-stack/template.yaml": ["AsrLauncherFunction"],
+    }
+
+
+@pytest.mark.parametrize("template", DEPLOYED_TEMPLATES)
+def test_every_microvm_launcher_names_its_images_log_group(template: str):
+    """A running MicroVM logs to the group its RunMicrovm call names.
+
+    The image's `Logging.CloudWatch.LogGroup` covers only the build, snapshot and
+    validate output. A RunMicrovm call that names no group sends the MicroVM's
+    own output to a group the service creates after the image, with no expiry
+    and the AWS-owned key. The launcher reads the name from
+    `MICROVM_LOG_GROUP_NAME`, so that variable has to be a `Ref` to the same
+    declared group the image logs to.
+    """
+    resources = _resources(template)
+    log_groups = _of_type(resources, LOG_GROUP_TYPE)
+    broken = []
+    for function_name, image_name in _image_launchers(resources).items():
+        expected = _destination(resources[image_name], log_groups)
+        env = resources[function_name]["Properties"]["Environment"]["Variables"]
+        actual = env.get("MICROVM_LOG_GROUP_NAME")
+        if expected is None or actual != {"Ref": expected}:
+            broken.append(
+                f"{function_name}: MICROVM_LOG_GROUP_NAME is {actual!r}, expected "
+                f"a Ref to {expected} (the group {image_name} logs to)"
+            )
+    assert not broken, f"{template}: {broken}"

@@ -102,11 +102,13 @@ fails with `Unrecognized resource types: [AWS::Lambda::MicrovmImage]`.
 
 **First deployment builds the image**, which downloads the models (~150 MB for the
 default bundle) and warms them. Expect several extra minutes on the first create and
-on any later change of bundle. Build logs land in
-`/aws/lambda-microvms/<stack-name>-asr-logs`, which the stack declares with the
-retention you set in `CloudWatchLogsExpirationInDays` and the deployment's
-customer-managed key. Stacks created before v0.3.11 logged to
-`/aws/lambda-microvms/<stack-name>-asr`; that group keeps the logs it already
+on any later change of bundle. Build logs, and the logs of every ASR session's
+MicroVM, land in `/aws/lambda-microvms/<stack-name>-asr-logs`, which the stack
+declares with the retention you set in `CloudWatchLogsExpirationInDays` and the
+deployment's customer-managed key. The launcher names that group on each
+`RunMicrovm` call, because the image's logging setting covers only the build.
+Releases before v0.3.11 logged to `/aws/lambda-microvms/<stack-name>-asr`; that
+group keeps the logs it already
 holds and is not removed on upgrade, so delete it yourself once you no longer
 need them.
 
