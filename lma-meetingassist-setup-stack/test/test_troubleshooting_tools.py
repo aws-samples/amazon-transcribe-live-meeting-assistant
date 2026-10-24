@@ -409,10 +409,41 @@ def test_a_guessed_log_group_name_is_refused_rather_than_queried() -> None:
     assert client.start_query_calls == []
 
 
-def test_a_search_naming_the_pre_rename_microvm_group_is_refused() -> None:
-    """The MicroVM groups were -vp/-asr before they were -vp-logs/-asr-logs."""
+LEGACY_VP_GROUP = f"/aws/lambda-microvms/{STACK}-vp"
+
+
+def test_the_legacy_microvm_group_is_refused_where_it_does_not_exist() -> None:
+    """A deployment created at v0.3.11 or later never had the -vp group, so a
+    name the model carries from elsewhere is not queried."""
     with pytest.raises(ToolError, match="none of the named log groups exist"):
-        make_tools().search_logs(f"/aws/lambda-microvms/{STACK}-vp")
+        make_tools().search_logs(LEGACY_VP_GROUP)
+
+
+def test_the_legacy_microvm_group_is_searchable_where_it_exists() -> None:
+    """On an upgraded stack, a participant that ran on the pre-upgrade image
+    logged only to the legacy group, so discovery has to make it queryable."""
+    client = FakeInsightsClient(groups=REAL_GROUPS + [(LEGACY_VP_GROUP, 9000)])
+
+    make_tools(client).search_logs(LEGACY_VP_GROUP, search_terms="VP exit:")
+
+    assert client.start_query_calls[0]["logGroupNames"] == [LEGACY_VP_GROUP]
+
+
+def test_discovery_on_an_upgraded_stack_points_the_agent_at_the_legacy_group() -> None:
+    client = FakeInsightsClient(groups=REAL_GROUPS + [(LEGACY_VP_GROUP, 9000)])
+
+    result = parsed(make_tools(client).discover_log_groups("virtual-participant"))
+
+    by_name = {g["logGroupName"]: g for g in result["logGroups"]}
+    assert by_name[LEGACY_VP_GROUP]["microvmLogGeneration"] == "legacy"
+    assert by_name[VP_GROUP]["microvmLogGeneration"] == "current"
+    assert LEGACY_VP_GROUP in result["guidance"]
+
+
+def test_discovery_on_a_fresh_stack_says_nothing_about_legacy_groups() -> None:
+    result = parsed(make_tools().discover_log_groups())
+
+    assert "legacy" not in result["guidance"]
 
 
 def test_the_known_names_are_queried_and_the_unknown_ones_reported() -> None:

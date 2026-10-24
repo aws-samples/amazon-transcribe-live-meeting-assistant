@@ -17,10 +17,15 @@ operator typed. Four independent reasons, all of them live in the current tree:
   groups for the same component can sit under different prefixes. The virtual
   participant manager has one of each.
 * The MicroVM groups live outside the stack-name namespace altogether, under
-  ``/aws/lambda-microvms/``, and their suffixes were ``-vp`` and ``-asr``
-  before they became ``-vp-logs`` and ``-asr-logs``. Any agent carrying the
-  older spelling would have reported "no logs" on a current deployment and
-  been believed.
+  ``/aws/lambda-microvms/``, and come in two generations. Images built from
+  v0.3.11 log to ``<stack>-vp-logs`` and ``<stack>-asr-logs``, which the stack
+  declares; images built before it logged to ``<stack>-vp`` and
+  ``<stack>-asr``, which the service created and the stack does not own. An
+  upgraded stack keeps both, and a MicroVM launched on the pre-upgrade image —
+  including one launched after the upgrade began but before the image rebuild
+  finished — writes to the older one. Either name searched alone reports "no
+  logs" for some participants, and would be believed. See
+  ``MICROVM_LOG_GENERATIONS``.
 * AppSync's group is created by the service, named after the API id rather
   than the stack.
 
@@ -74,9 +79,10 @@ OTHER = "other"
 
 _COMPONENT_PATTERNS: Sequence[tuple[str, str]] = (
     # The VP container's own stdout. Under MICROVM this is the only place the
-    # join attempt is recorded at all.
-    (r"/aws/lambda-microvms/.*-vp-logs$", VIRTUAL_PARTICIPANT),
-    (r"/aws/lambda-microvms/.*-asr-logs$", ASR_MICROVM),
+    # join attempt is recorded at all. Both generations of name land on the
+    # same component, so filtering by component returns both.
+    (r"/aws/lambda-microvms/.*-vp(-logs)?$", VIRTUAL_PARTICIPANT),
+    (r"/aws/lambda-microvms/.*-asr(-logs)?$", ASR_MICROVM),
     # EXPRESS state machine: its vended log group is the ONLY record that a
     # launch attempt happened, because an EXPRESS execution has no
     # execution-history API to query afterwards.
@@ -182,6 +188,61 @@ def classify_log_group(name: str) -> str:
     return OTHER
 
 
+# ── MicroVM log group generations ───────────────────────────────────────────
+
+CURRENT_GENERATION = "current"
+LEGACY_GENERATION = "legacy"
+
+#: (suffix, generation) for each MicroVM log group name a deployment can hold,
+#: appended to ``/aws/lambda-microvms/<stack>``. Discovery looks each one up and
+#: reports only those CloudWatch returns: a deployment created at v0.3.11 or
+#: later never had the legacy groups, and one upgraded from earlier has both.
+MICROVM_LOG_GENERATIONS: Sequence[tuple[str, str]] = (
+    ("-vp-logs", CURRENT_GENERATION),
+    ("-asr-logs", CURRENT_GENERATION),
+    ("-vp", LEGACY_GENERATION),
+    ("-asr", LEGACY_GENERATION),
+)
+
+# The stream-name hint is given for the legacy group only, because only there
+# does it hold. The Lambda MicroVM service names a legacy group's streams
+# "<YYYY/MM/DD>[<image version>]<microvmId>" — e.g.
+# "2026/10/24[55.0]microvm-6ac75d14-…", the same "microvm-…" id the launch
+# state machine logs — while a current group's streams are named
+# "<image version>/<uuid>" and carry no MicroVM id. Both forms were read from
+# a deployed stack's groups; the service does not document either.
+_GENERATION_NOTES: Dict[str, str] = {
+    CURRENT_GENERATION: (
+        "Current MicroVM log group: written by MicroVM images built from "
+        "v0.3.11 on. A MicroVM that ran on an image built before this stack "
+        "was upgraded logged to the legacy group instead, if one is listed."
+    ),
+    LEGACY_GENERATION: (
+        "Legacy MicroVM log group: written by MicroVM images built before "
+        "v0.3.11, and kept with its contents when the stack was upgraded. A "
+        "participant that ran on the pre-upgrade image — including one "
+        "launched after the upgrade began but before the image rebuild "
+        "finished — logged here and not to the current group. Its stream "
+        "names contain the MicroVM id the launch state machine logs as "
+        "microvmId."
+    ),
+}
+
+
+def microvm_log_group_names(stack_name: str) -> Dict[str, str]:
+    """Every MicroVM log group name this deployment can hold, to its generation.
+
+    These are names to look up, not names to trust: discovery verifies each
+    one against ``describe_log_groups`` and reports only those that exist.
+    """
+    if not stack_name:
+        return {}
+    return {
+        f"/aws/lambda-microvms/{stack_name}{suffix}": generation
+        for suffix, generation in MICROVM_LOG_GENERATIONS
+    }
+
+
 @dataclass(frozen=True)
 class LogGroupInfo:
     """One discovered log group."""
@@ -190,6 +251,9 @@ class LogGroupInfo:
     component: str
     stored_bytes: int
     retention_days: Optional[int]
+    #: CURRENT_GENERATION or LEGACY_GENERATION for a MicroVM group; None for
+    #: every other group, which has only ever had one name.
+    generation: Optional[str] = None
 
     @property
     def has_data(self) -> bool:
@@ -209,13 +273,19 @@ class LogGroupInfo:
         return self.stored_bytes > 0
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        out: Dict[str, Any] = {
             "logGroupName": self.name,
             "component": self.component,
             "storedBytes": self.stored_bytes,
             "hasData": self.has_data,
             "retentionDays": self.retention_days,
         }
+        # Only on the groups it applies to: the label is read by the model, and
+        # a null on every other group is noise it would have to discount.
+        if self.generation:
+            out["microvmLogGeneration"] = self.generation
+            out["note"] = _GENERATION_NOTES[self.generation]
+        return out
 
 
 def appsync_log_group_candidate(api_id: str) -> Optional[str]:
@@ -274,9 +344,17 @@ def stack_log_group_prefixes(
     prefixes: List[str] = []
 
     # Named exactly rather than by prefix: "/aws/lambda-microvms/LMA-" would
-    # also match "LMA-dev-vp-logs".
-    prefixes.append(f"/aws/lambda-microvms/{stack_name}-vp-logs")
-    prefixes.append(f"/aws/lambda-microvms/{stack_name}-asr-logs")
+    # also match "LMA-dev-vp-logs". Both generations, current first, ahead of
+    # every broad prefix: in the window after an upgrade the legacy group holds
+    # the evidence for the participants most likely to be asked about.
+    # discover_log_groups keeps only exact matches for these, because the
+    # legacy "-vp" is also a prefix of "-vp-logs" and of a neighbouring
+    # "LMA-vpn-vp-logs". The current names are matched exactly too, on purpose,
+    # which is narrower than the IAM grant for them: that grant ends in "*",
+    # which also covers the ":*" stream form of each group's ARN. Narrowing the
+    # grant to match would need that form listed explicitly, as the legacy
+    # entries do.
+    prefixes.extend(microvm_log_group_names(stack_name))
 
     if nested_stack_names:
         # Every vended-states prefix before any nested-stack prefix. Within one
@@ -309,6 +387,26 @@ class DiscoveryResult:
     def caveats(self) -> List[str]:
         """Statements the agent must not reason past. Empty when there are none."""
         notes: List[str] = []
+        legacy = [g.name for g in self.groups if g.generation == LEGACY_GENERATION]
+        if legacy:
+            # Carried in the tool result as well as in the shipped system
+            # prompt: an operator's custom prompt replaces the shipped one
+            # wholesale, so the prompt alone would not reach that deployment.
+            notes.append(
+                "This deployment was upgraded from a release that logged "
+                "MicroVM output under older names, so it has legacy MicroVM "
+                f"log groups ({', '.join(sorted(legacy))}) as well as, or "
+                "instead of, the current ones. A participant that ran on an "
+                "image built before the upgrade logged ONLY to the legacy "
+                "group. If a current MicroVM group has no entries for the "
+                "participant or meeting you are investigating, search the "
+                "legacy group before concluding there is no evidence. The "
+                "launch state machine's microvmId appears in the legacy "
+                "group's stream names, so filter on @logStream with "
+                "query_string to find it; if no stream matches, search the "
+                "legacy group's message text for the participant's id before "
+                "treating the miss as an absence."
+            )
         if self.truncated:
             notes.append(
                 "This list was cut short at the configured log group cap, so "
@@ -360,6 +458,7 @@ def discover_log_groups(
     truncated = False
 
     prefixes = stack_log_group_prefixes(stack_name, nested_stack_names)
+    microvm_names = microvm_log_group_names(stack_name)
     candidate = appsync_log_group_candidate(appsync_api_id)
     if candidate:
         # A full group name is also a valid prefix, which is how the candidate
@@ -373,10 +472,19 @@ def discover_log_groups(
     for prefix in prefixes:
         if truncated:
             break
+        # A MicroVM prefix is a full group name and is matched exactly; see
+        # stack_log_group_prefixes. The longer names it also returns are
+        # skipped without counting toward the cap, so paging for it stops as
+        # soon as the exact name has been seen rather than running on through
+        # them. When the exact name does not exist, paging is bounded by how
+        # many other groups share the prefix, which is few.
+        exact = prefix in microvm_names
         for page in paginator.paginate(logGroupNamePrefix=prefix):
             for group in page.get("logGroups", []):
                 name = group.get("logGroupName")
                 if not name or name in found:
+                    continue
+                if exact and name != prefix:
                     continue
                 if len(found) >= max_log_groups:
                     # Stop paginating rather than collecting and slicing: the
@@ -389,8 +497,9 @@ def discover_log_groups(
                     component=classify_log_group(name),
                     stored_bytes=int(group.get("storedBytes") or 0),
                     retention_days=group.get("retentionInDays"),
+                    generation=microvm_names.get(name),
                 )
-            if truncated:
+            if truncated or (exact and prefix in found):
                 break
 
     return DiscoveryResult(

@@ -126,6 +126,16 @@ Where the virtual participant's evidence lives depends entirely on VPLaunchType:
   permanently EMPTY, no ECS task-stopped event is ever emitted, and there is no
   network-registration phase. "The ECS task has no stopped reason" is not a
   finding on this deployment; it is a property of it.
+  After an upgrade from a release before v0.3.11, MicroVM output may be in
+  either the current group or the legacy one (/aws/lambda-microvms/<stack>-vp,
+  labelled microvmLogGeneration "legacy" by discover_log_groups): a VP that
+  ran on the pre-upgrade image logged only to the legacy group, so when the
+  current group has no entries for a VP, search the legacy group too before
+  concluding anything. The legacy group's stream names contain the microvmId
+  that the launch state machine's log records for that VP, so filter on
+  @logStream with query_string; that naming is observed rather than
+  documented, so if no stream matches, search the group's message text for the
+  VP id before treating the miss as an absence.
 - FARGATE or EC2: the container's output is in the Fargate log group, and ECS
   task state changes do occur.
 If you find an empty log group, check VPLaunchType before you report anything

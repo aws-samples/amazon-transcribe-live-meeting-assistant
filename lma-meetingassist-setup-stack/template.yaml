@@ -628,6 +628,15 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${LMAStackName}-VPCSTACK-*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-vp-logs*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-asr-logs*"
+                  # The MicroVM groups images built before v0.3.11 log to,
+                  # which a stack upgraded from that release keeps. Named
+                  # exactly, as the group and as its streams, with no trailing
+                  # wildcard on the name: "-vp*" would also cover a
+                  # neighbouring "${LMAStackName}-vpn" deployment's groups.
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-vp"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-vp:*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-asr"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda-microvms/${LMAStackName}-asr:*"
                   - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/vendedlogs/states/${LMAStackName}-VIRTUALPARTICIPANTSTACK-*"
                   - !If
                     - HasAppSyncApiId
