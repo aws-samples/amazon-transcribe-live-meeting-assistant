@@ -318,11 +318,20 @@ def test_a_put_metric_data_grant_is_scoped_and_accompanied_by_the_variable(templ
     on a component that was never told which namespace to use, denies every
     emission at runtime -- and the denial is not an error anybody sees, because
     the caller is a metric emitter that must not fail the work it measures.
-    """
-    text = template_path.read_text()
-    if "cloudwatch:PutMetricData" not in text:
-        return
 
+    The environment half is only applied to a resource that has an environment
+    of its own: a SAM function with inline `Policies`, or a task definition. A
+    grant written as a standalone `AWS::IAM::Role` -- which is how the
+    transcriber would have to do it -- carries no environment, and failing it
+    for that would reject a perfectly correct change. Those are covered instead
+    by the per-emitter gates above, which require the variable on every
+    component in the catalogue whether or not it holds any grant.
+
+    No early return on the template text: the explanatory comments beside the
+    `METRIC_NAMESPACE` variables name `cloudwatch:PutMetricData`, so a search
+    for the string matches templates that grant nothing. The walk below finds
+    nothing in that case anyway.
+    """
     document = _load(template_path)
     offenders: list[str] = []
     for logical_id, resource in document.get("Resources", {}).items():
@@ -336,8 +345,8 @@ def test_a_put_metric_data_grant_is_scoped_and_accompanied_by_the_variable(templ
                     f"{logical_id}: PutMetricData is not conditioned on "
                     f"cloudwatch:namespace = {EXPECTED_NAMESPACE_VALUE!r}"
                 )
-        environment = _lambda_environment(resource) or _ecs_environment_or_empty(resource)
-        if catalogue.NAMESPACE_ENV_VAR not in environment:
+        environment = _own_environment(resource)
+        if environment is not None and catalogue.NAMESPACE_ENV_VAR not in environment:
             offenders.append(
                 f"{logical_id}: holds a PutMetricData grant but has no "
                 f"{catalogue.NAMESPACE_ENV_VAR}, so every emission would be denied"
@@ -345,10 +354,19 @@ def test_a_put_metric_data_grant_is_scoped_and_accompanied_by_the_variable(templ
     assert not offenders, "\n".join(offenders)
 
 
-def _ecs_environment_or_empty(resource: dict) -> dict:
-    if resource.get("Type") != "AWS::ECS::TaskDefinition":
-        return {}
-    return _container_environment(resource)
+def _own_environment(resource: dict):
+    """This resource's own environment, or None when it cannot have one.
+
+    None and an empty mapping mean different things here: a role has no
+    environment to check, while a function whose `Environment` is absent has
+    one and it is empty.
+    """
+    kind = resource.get("Type")
+    if kind == "AWS::ECS::TaskDefinition":
+        return _container_environment(resource)
+    if kind in {"AWS::Serverless::Function", "AWS::Lambda::Function"}:
+        return _lambda_environment(resource)
+    return None
 
 
 def _put_metric_data_statements(resource: dict) -> list[dict]:
