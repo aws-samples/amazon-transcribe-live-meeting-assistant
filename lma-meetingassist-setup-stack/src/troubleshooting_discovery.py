@@ -35,10 +35,11 @@ ON ``stored_bytes``
 Every group is reported with the bytes CloudWatch holds for it, because an
 empty group is the single most misleading piece of evidence in this solution.
 Under the default ``VPLaunchType=MICROVM`` the Fargate group
-``/<aistack>/fargate/VirtualParticipant`` exists and is permanently empty, so
-an agent that queries it finds nothing and concludes the virtual participant
-never ran. Handing it ``stored_bytes: 0`` up front turns that into "this
-deployment does not use this group" instead.
+``/<vpstack>/fargate/VirtualParticipant`` — declared in the Virtual
+Participant stack — exists and is permanently empty, so an agent that queries
+it finds nothing and concludes the virtual participant never ran. Handing it
+``stored_bytes: 0`` up front turns that into "this deployment does not use this
+group" instead.
 """
 
 from __future__ import annotations
@@ -341,8 +342,11 @@ def discover_log_groups(
     candidate = appsync_log_group_candidate(graphql_url)
     if candidate:
         # A full group name is also a valid prefix, which is how the candidate
-        # gets verified rather than assumed.
-        prefixes.append(candidate)
+        # gets verified rather than assumed. Inserted at the front with the
+        # other narrow prefixes rather than appended: appending would make it
+        # the first group a cap drops, which is the ordering rule
+        # stack_log_group_prefixes exists to state.
+        prefixes.insert(0, candidate)
 
     paginator = logs_client.get_paginator("describe_log_groups")
     for prefix in prefixes:

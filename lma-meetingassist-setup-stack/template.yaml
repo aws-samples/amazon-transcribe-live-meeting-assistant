@@ -723,6 +723,20 @@ Resources:
     DependsOn:
       - TroubleshootingAgentFunctionLogGroup
 
+  # "A failed run is reported, never retried" is a property of the agent, and
+  # this is what makes it true for every way the function can be invoked.
+  # Lambda retries an asynchronous invocation twice by default, so a run that
+  # timed out or was killed for memory would otherwise be re-run from the
+  # original question -- paying again for every tool call it already made, for
+  # a question whose answer has not changed.
+  TroubleshootingAgentFunctionInvokeConfig:
+    Type: AWS::Lambda::EventInvokeConfig
+    Condition: ShouldDeployTroubleshootingAgent
+    Properties:
+      FunctionName: !Ref TroubleshootingAgentFunction
+      Qualifier: "$LATEST"
+      MaximumRetryAttempts: 0
+
   TroubleshootingAgentFunctionLogGroup:
     Type: AWS::Logs::LogGroup
     Condition: ShouldDeployTroubleshootingAgent

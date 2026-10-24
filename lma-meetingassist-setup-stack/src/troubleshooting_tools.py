@@ -51,8 +51,11 @@ LOGGER = logging.getLogger(__name__)
 # Logs Insights accepts at most 50 log groups in one query.
 _INSIGHTS_MAX_GROUPS = 50
 
-# Terminal states of a Logs Insights query.
+# States that mean a Logs Insights query has stopped running. Only "Complete"
+# means it produced an answer: "Timeout" and "Unknown" are failures that happen
+# to return an empty result set, so they must not be read as "nothing matched".
 _QUERY_DONE = frozenset({"Complete", "Failed", "Cancelled", "Timeout", "Unknown"})
+_QUERY_SUCCEEDED = "Complete"
 
 # Fields a default (non-expert) query selects. @logStream is included because
 # the VP and transcriber groups carry one stream per meeting, so the stream
@@ -535,8 +538,17 @@ class TroubleshootingTools:
             self._sleep(self._limits.query_poll_seconds)
             waited += self._limits.query_poll_seconds
 
-        if status in ("Failed", "Cancelled"):
-            raise ToolError(f"the Logs Insights query ended as {status}")
+        if status != _QUERY_SUCCEEDED:
+            # Anything other than Complete, not just Failed and Cancelled. A
+            # query that ended as Timeout or Unknown returns an empty result
+            # set, and returning that as rowCount 0 would hand the agent "no
+            # line matched" for what is actually "the query did not run" —
+            # the exact conflation this module's ToolError exists to prevent.
+            raise ToolError(
+                f"the Logs Insights query ended as {status} rather than "
+                "Complete, so it produced no result. This is not evidence that "
+                "nothing matched. Retry it, or narrow it first if it was large."
+            )
 
         statistics = response.get("statistics") or {}
         rows = [

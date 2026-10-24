@@ -97,8 +97,8 @@ Four tools, each read-only:
 
 | Tool | Reads | Why |
 |---|---|---|
-| `get_stack_parameters` | `cloudformation:DescribeStacks` and `ListStackResources` on your LMA stack | Which components this deployment actually runs, and therefore where evidence can exist at all. |
-| `discover_log_groups` | `logs:DescribeLogGroups` | The log group names, their owning component, and how many bytes each holds. |
+| `get_stack_parameters` | `cloudformation:DescribeStacks` on your LMA stack | Which components this deployment actually runs, and therefore where evidence can exist at all. |
+| `discover_log_groups` | `logs:DescribeLogGroups`, plus `cloudformation:ListStackResources` to resolve this deployment's own nested stacks | The log group names, their owning component, and how many bytes each holds. |
 | `search_logs` | CloudWatch Logs Insights (`logs:StartQuery`) | Every "why", timeline, count and cross-component correlation. |
 | `get_vp_record` | `dynamodb:GetItem` on the VirtualParticipant table | One Virtual Participant's current status and its structured exit code. |
 

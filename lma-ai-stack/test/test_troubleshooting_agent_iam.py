@@ -515,6 +515,31 @@ def test_the_log_group_is_encrypted_and_expires(template: Dict[str, Any]) -> Non
     assert properties["RetentionInDays"] == {"Ref": "CloudWatchLogsExpirationInDays"}
 
 
+def test_an_asynchronous_invocation_is_not_retried(
+    template: Dict[str, Any],
+) -> None:
+    """"A failed run is reported, never retried" has to hold for every way the
+    function can be invoked, not only the synchronous one.
+
+    Lambda retries an asynchronous invocation twice by default, which would
+    re-run a timed-out diagnosis from the original question — paying again for
+    every tool call it already made, for a question whose answer has not
+    changed. The checkov reason on the function, the module docstring and the
+    docs all state the no-retry property; this is what makes it true.
+    """
+    configs = [
+        resource
+        for resource in template["Resources"].values()
+        if resource.get("Type") == "AWS::Lambda::EventInvokeConfig"
+        and resource.get("Properties", {}).get("FunctionName")
+        == {"Ref": FUNCTION}
+    ]
+
+    assert len(configs) == 1, "the troubleshooting function has no EventInvokeConfig"
+    assert configs[0]["Properties"]["MaximumRetryAttempts"] == 0
+    assert configs[0]["Condition"] == "ShouldDeployTroubleshootingAgent"
+
+
 def test_the_function_timeout_leaves_room_for_the_agents_own_budget(
     template: Dict[str, Any],
 ) -> None:

@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
 import pytest
+from conftest import SOURCE_DIR
 
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 os.environ.setdefault("LMA_STACK_NAME", "LMA-Test")
@@ -452,7 +452,9 @@ def test_bedrock_gets_the_projects_aggressive_retry_profile() -> None:
 def test_the_retry_profile_actually_reaches_the_model() -> None:
     """The assertion the previous test cannot make on its own: the config has
     to be passed, not merely defined."""
-    source = Path("troubleshooting_agent_function.py").read_text(encoding="utf-8")
+    source = (SOURCE_DIR / "troubleshooting_agent_function.py").read_text(
+        encoding="utf-8"
+    )
 
     assert '"boto_client_config": BEDROCK_CONFIG' in source
 
@@ -955,7 +957,7 @@ def test_the_wall_clock_is_checked_inside_the_tools_not_only_the_loop() -> None:
     _check_deadline before doing work, so a run ends at its deadline even if
     nothing else stops it.
     """
-    source = Path("troubleshooting_tools.py").read_text(encoding="utf-8")
+    source = (SOURCE_DIR / "troubleshooting_tools.py").read_text(encoding="utf-8")
 
     assert source.count("self._check_deadline(") == 4
 

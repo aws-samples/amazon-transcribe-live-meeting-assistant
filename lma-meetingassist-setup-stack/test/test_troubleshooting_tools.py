@@ -705,12 +705,41 @@ def test_a_cancelled_query_tells_the_agent_how_to_narrow_it() -> None:
         make_tools(client).search_logs(VP_GROUP)
 
 
-def test_a_failed_query_is_reported_rather_than_read_as_empty() -> None:
-    """"The query failed" and "nothing matched" lead to opposite conclusions."""
-    client = FakeInsightsClient(statuses=["Failed"])
+@pytest.mark.parametrize("status", ["Failed", "Cancelled", "Timeout", "Unknown"])
+def test_any_end_state_but_complete_is_reported_rather_than_read_as_empty(
+    status: str,
+) -> None:
+    """"The query failed" and "nothing matched" lead to opposite conclusions.
 
-    with pytest.raises(ToolError, match="ended as Failed"):
+    Timeout and Unknown matter as much as Failed and arrive more quietly: the
+    API returns an empty result set with them, so returning rowCount 0 would
+    hand the agent "no line matched" for a query that never ran.
+    """
+    client = FakeInsightsClient(statuses=[status])
+
+    with pytest.raises(ToolError, match=f"ended as {status} rather than Complete"):
         make_tools(client).search_logs(VP_GROUP)
+
+
+def test_a_failed_query_says_it_is_not_evidence_of_absence() -> None:
+    client = FakeInsightsClient(statuses=["Timeout"])
+
+    with pytest.raises(ToolError, match="not evidence that nothing matched"):
+        make_tools(client).search_logs(VP_GROUP)
+
+
+def test_a_complete_query_with_no_rows_is_an_ordinary_empty_result() -> None:
+    """The other side of it: Complete and empty really does mean nothing
+    matched, and must not be raised as a failure."""
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[], statuses=["Complete"])).search_logs(
+            VP_GROUP
+        )
+    )
+
+    assert result["status"] == "Complete"
+    assert result["rowCount"] == 0
+    assert "not a cause" in result["guidance"]
 
 
 def test_a_query_with_no_id_is_an_error_not_an_empty_result() -> None:
