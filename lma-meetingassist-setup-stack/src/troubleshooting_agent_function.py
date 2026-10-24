@@ -296,25 +296,31 @@ class RunBudgetExhausted(BaseException):
 #: Written by run_diagnosis when the loop had to be unwound, so the caller
 #: still gets the contract's three sections rather than an error page.
 #:
-#: It points at the function's own log for what was read, not at the
-#: thinking-step trace: that trace is published only when the caller supplied
-#: both a callId and a messageId, and the only way to invoke this function
-#: today supplies neither. An answer that sent a reader to something that does
-#: not exist would be worse than one that sent them nowhere.
+#: Deliberately promises nothing about where the evidence went. Two things it
+#: must not say, both of which have been got wrong once:
+#:
+#: * not the thinking-step trace — that is published only when the caller
+#:   supplied both a callId and a messageId, and the one way to invoke this
+#:   function today supplies neither;
+#: * not "what each tool returned" from the log — successful tool results are
+#:   never logged. What the log does carry is the resolved limits, the budget
+#:   spent, and any tool call that was refused or failed.
+#:
+#: Sending a reader to something that is not there is worse than sending them
+#: nowhere, so this names only what exists.
 _TRUNCATED_ANSWER = """## Root Cause
 **Confidence:** LOW
 Not determined. The investigation was stopped before it reached a conclusion: \
-{reason}. Which tools ran, and what each of them returned, is in this \
-function's CloudWatch log for this request; what was missing is whatever the \
-next step would have read.
+{reason}. What was missing is whatever the next step would have read.
 
 ## Recommendations
 1. Ask again with a narrower question, naming the component or the virtual \
 participant id, so the available tool calls are spent on one thing.
 2. If the question genuinely needs a wider search, raise the limit that was \
 reached on the troubleshooting function before asking again.
-3. Read this function's log for the request to see how the budget was spent \
-before raising anything.
+3. This function's CloudWatch log for this request records the limits it ran \
+under, how much of each was spent, and any tool call that was refused or \
+failed. It does not record what a successful tool returned.
 
 <details>
 <summary><strong>Evidence</strong></summary>

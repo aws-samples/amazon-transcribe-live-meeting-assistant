@@ -1307,17 +1307,36 @@ def test_a_truncated_run_still_answers_in_the_three_section_format() -> None:
     assert "<summary><strong>Evidence</strong></summary>" in answer
 
 
-def test_the_truncated_answer_points_at_something_that_exists() -> None:
-    """It sends the reader to this function's log, not to the thinking-step
-    trace: that trace is published only when the caller supplied a callId and
-    a messageId, and the one way to invoke this function today supplies
-    neither. Pointing at something absent is worse than pointing nowhere.
+def test_the_truncated_answer_promises_only_what_exists() -> None:
+    """Two things it must not claim, each got wrong once.
+
+    Not the thinking-step trace: that is published only when the caller
+    supplied a callId and a messageId, and the one way to invoke this function
+    today supplies neither. And not what a successful tool returned: nothing
+    logs that. Sending a reader to something absent is worse than sending them
+    nowhere.
     """
     answer = agent_function._TRUNCATED_ANSWER.format(reason="a limit", usage="{}")
 
-    assert "log" in answer
     assert "tool-call trace" not in answer
     assert "thinking" not in answer
+    assert "what each of them returned" not in answer
+    # And it says plainly what the log does not have.
+    assert "does not record what a successful tool returned" in answer
+
+
+def test_the_truncated_answer_describes_what_the_log_actually_carries() -> None:
+    """Asserted against the logging calls rather than trusted: the run lines
+    carry the resolved limits and the budget, and a refused or failed tool
+    call is logged. A successful one is not."""
+    source = (SOURCE_DIR / "troubleshooting_agent_function.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'logger.info(\n        "troubleshooting run starting: limits=%s budget=%s"' in source
+    assert 'logger.info("refusing %s: %s", name, reason)' in source
+    assert 'logger.info("%s could not gather evidence: %s", name, exc)' in source
+    assert 'logger.exception("%s failed", name)' in source
 
 
 def test_a_tool_error_becomes_readable_text_rather_than_an_exception() -> None:
