@@ -47,6 +47,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+_LOGGER = logging.getLogger(__name__)
+
 DEFAULT_PROMPT_PK = "DefaultTroubleshootingAgentPrompt"
 CUSTOM_PROMPT_PK = "CustomTroubleshootingAgentPrompt"
 
@@ -67,7 +69,9 @@ class PromptUnavailableError(RuntimeError):
     """The system prompt could not be read, so the agent must not run."""
 
 
-def _read_prompt_attribute(item: Optional[Dict[str, Any]]) -> Optional[str]:
+def _read_prompt_attribute(
+    item: Optional[Dict[str, Any]], source: str = ""
+) -> Optional[str]:
     """Pull the prompt text out of one DynamoDB item, or return None.
 
     ``<br>`` is translated to a newline. The stored default never contains one
@@ -76,19 +80,45 @@ def _read_prompt_attribute(item: Optional[Dict[str, Any]]) -> Optional[str]:
     the summarization templates in the same table already use this convention.
     Supporting it here means the override mechanism works from the console
     without a second tool.
+
+    Every reason for rejecting a value is logged when ``source`` names one, for
+    the same reason the limits reader logs a clamp: an operator whose override
+    is being ignored has no other way to find out, and the symptom — an agent
+    behaving as if the override were not there — is indistinguishable from the
+    override not having been saved.
     """
     if not item:
         return None
     attribute = item.get(PROMPT_ATTRIBUTE)
     if not isinstance(attribute, dict):
+        if source and PROMPT_ATTRIBUTE in item:
+            _LOGGER.warning(
+                "%s has a '%s' attribute that is not a string; ignoring it",
+                source,
+                PROMPT_ATTRIBUTE,
+            )
         return None
     text = attribute.get("S")
     if not isinstance(text, str):
         return None
     text = text.replace("<br>", "\n").strip()
-    if not text or text == DISABLED_SENTINEL:
+    if not text:
+        return None
+    if text == DISABLED_SENTINEL:
+        if source:
+            _LOGGER.info("%s is set to %s; using the default", source, DISABLED_SENTINEL)
         return None
     if len(text) < _MINIMUM_USEFUL_LENGTH:
+        if source:
+            _LOGGER.warning(
+                "%s has a '%s' of only %d characters, which is too short to be a "
+                "system prompt; ignoring it and using the default. Set at least "
+                "%d characters, or clear it to use the default deliberately.",
+                source,
+                PROMPT_ATTRIBUTE,
+                len(text),
+                _MINIMUM_USEFUL_LENGTH,
+            )
         return None
     return text
 
@@ -131,12 +161,12 @@ def get_system_prompt(dynamodb_client: Any, table_name: str) -> str:
         # is a reason to fall back to the shipped default, not a reason to
         # refuse to diagnose. The default read below is the one that must
         # succeed.
-        logging.getLogger(__name__).warning(
+        _LOGGER.warning(
             "could not read %s; falling back to %s", CUSTOM_PROMPT_PK, DEFAULT_PROMPT_PK
         )
         custom = None
 
-    override = _read_prompt_attribute(custom)
+    override = _read_prompt_attribute(custom, source=CUSTOM_PROMPT_PK)
     if override:
         return override
 
@@ -150,13 +180,14 @@ def get_system_prompt(dynamodb_client: Any, table_name: str) -> str:
             f"could not read {DEFAULT_PROMPT_PK} from {table_name}: {exc}"
         ) from exc
 
-    shipped = _read_prompt_attribute(default)
+    shipped = _read_prompt_attribute(default, source=DEFAULT_PROMPT_PK)
     if shipped:
         return shipped
 
     raise PromptUnavailableError(
         f"neither {CUSTOM_PROMPT_PK} nor {DEFAULT_PROMPT_PK} in {table_name} "
         f"holds a usable '{PROMPT_ATTRIBUTE}' attribute. The default is written "
-        "by the stack's prompt-seeding custom resource; a stack update will "
-        "restore it."
+        "by the LLM template stack's prompt-seeding custom resource, which runs "
+        "when that stack's source hash changes — so republishing it, or any "
+        "update that changes its source, restores the default."
     )

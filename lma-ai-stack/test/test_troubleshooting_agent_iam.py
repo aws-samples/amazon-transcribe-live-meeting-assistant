@@ -335,6 +335,11 @@ PERMITTED_ACTIONS = {
     "logs:StartQuery",
     "logs:GetQueryResults",
     "logs:StopQuery",
+    # The function writing its own log stream. Granted inline and scoped to
+    # one log group rather than through AWSLambdaBasicExecutionRole, which
+    # grants the same three actions account-wide — see the role's comment.
+    "logs:CreateLogStream",
+    "logs:PutLogEvents",
     "dynamodb:GetItem",
     "cloudformation:DescribeStacks",
     "cloudformation:ListStackResources",
@@ -349,7 +354,12 @@ PERMITTED_ACTIONS = {
 
 #: The permitted actions that are not reads, named so the claim "it reads and
 #: does not change anything it diagnoses" can be checked rather than trusted.
-PERMITTED_NON_READS = {"appsync:GraphQL", "logs:StopQuery"}
+PERMITTED_NON_READS = {
+    "appsync:GraphQL",
+    "logs:StopQuery",
+    "logs:CreateLogStream",
+    "logs:PutLogEvents",
+}
 
 
 def test_the_role_holds_only_the_actions_it_is_meant_to(
@@ -376,14 +386,47 @@ def test_every_permitted_action_is_actually_granted(role: Dict[str, Any]) -> Non
     assert PERMITTED_ACTIONS <= held, f"never granted: {sorted(PERMITTED_ACTIONS - held)}"
 
 
-def test_the_only_non_read_actions_are_the_two_that_report_progress(
+def test_the_role_attaches_no_managed_policy(role: Dict[str, Any]) -> None:
+    """Every action this role holds has to be visible in this file.
+
+    A managed policy's contents are not in the template, so attaching one puts
+    permissions outside the reach of the assertions here.
+    AWSLambdaBasicExecutionRole — the obvious one to reach for — grants
+    logs:CreateLogGroup, CreateLogStream and PutLogEvents across the whole
+    account, which are writes and are unscoped. The function's own log writes
+    are granted inline and scoped instead.
+    """
+    assert "ManagedPolicyArns" not in role
+
+
+def test_the_function_can_write_only_its_own_log_stream(
+    role: Dict[str, Any],
+) -> None:
+    for action in ("logs:CreateLogStream", "logs:PutLogEvents"):
+        granting = statements_granting(role, action)
+        assert granting, f"{action} is not granted; the function cannot log"
+        for statement in granting:
+            for rendered in rendered_resources(statement):
+                assert rendered.endswith(
+                    "log-group:/${AWS::StackName}/lambda/TroubleshootingAgentFunction:*"
+                ), rendered
+
+
+def test_the_role_cannot_create_a_log_group(role: Dict[str, Any]) -> None:
+    """Not needed, so not granted: the log group is a resource in this
+    template and the function reaches it through LoggingConfig."""
+    assert not statements_granting(role, "logs:CreateLogGroup")
+
+
+def test_the_non_read_actions_are_only_the_ones_that_report_progress(
     role: Dict[str, Any],
 ) -> None:
     """Pins the claim the template comment, the docs and the CHANGELOG all make.
 
-    A denylist of write prefixes used to stand in for this, and it did not
-    mention `appsync:` at all — so the prose said "no permission to change
-    anything" while the role could call a mutation, and nothing caught it.
+    The write-prefix list below has to stay broad enough to catch an action
+    that is not a read even when it is not called "Put" or "Create" —
+    `appsync:GraphQL` is the example that matters, since a GraphQL mutation is
+    a write by any reasonable reading and looks like neither.
     """
     write_prefixes = (
         "logs:Put",

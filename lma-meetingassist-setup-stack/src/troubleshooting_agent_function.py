@@ -268,12 +268,18 @@ class RunBudgetExhausted(BaseException):
     does not absorb this is asserted directly, against a stand-in for one. That
     strands-agents propagates it unchanged through its own async and threading
     plumbing is *not*: the Strands layer is not installed for the unit tests,
-    so nothing here exercises the real event loop. The bound that does not
-    depend on it is the wall clock, which every tool checks before doing any
-    work — so a run whose stop signal were somehow swallowed still ends at its
-    deadline rather than at the Lambda timeout. Treat this class as the thing
-    that makes a reached limit end *promptly*, and the deadline as the thing
-    that makes it end *at all*.
+    so nothing here exercises the real event loop.
+
+    Be clear about what the fallback is, because it is easy to overstate. Past
+    the deadline every tool raises instead of working, so the model's next turn
+    gets an error from whatever it calls — which in practice ends a run quickly,
+    but it is *not* a bound: nothing in this file stops the model taking
+    further turns. If this exception were absorbed, the thing that would
+    actually end the invocation is the Lambda ``Timeout``. So: this class makes
+    a reached limit end promptly and cleanly, the deadline makes every further
+    tool call useless, and ``Timeout`` is the final backstop. Turning that last
+    one into a checked property needs an integration run against a deployed
+    stack, which is noted as a follow-up rather than claimed here.
     """
 
     def __init__(self, reason: str):
@@ -478,10 +484,11 @@ class ThinkingStepHookProvider:
     def _result_succeeded(cls, result: Any) -> bool:
         """Whether a tool reported success.
 
-        ``ToolResult.status`` is the SDK's own signal and is checked first;
-        ``is_error`` is the shape an older provider used. Unknown counts as
-        success, because a narration that reported every call as failed would
-        be worse than one that reported none.
+        ``ToolResult.status`` is the SDK's own signal and is checked first.
+        ``is_error`` is the attribute the meeting assistant's own hook provider
+        reads, kept as a fallback so this reader works against either. Unknown
+        counts as success, because a narration that reported every call as
+        failed would be worse than one that reported none.
         """
         status = cls._field(result, "status")
         if isinstance(status, str):

@@ -476,10 +476,11 @@ Resources:
   # change of posture, not a refactor.
   #
   # Every grant below is scoped to this deployment's own resources. The role
-  # reads and does not change anything it diagnoses; the only two grants that
-  # are not reads are appsync:GraphQL on the single addChatToken mutation, so
-  # the investigation can narrate itself to the UI, and logs:StopQuery, so a
-  # query this role started can be cancelled. Neither touches the deployment.
+  # reads and does not change anything it diagnoses. Three grants are not
+  # reads, and none of them touches the deployment: appsync:GraphQL on the
+  # single addChatToken mutation, so the investigation can narrate itself to
+  # the UI; logs:StopQuery, so a query this role started can be cancelled; and
+  # writing this function's own log stream.
   #
   # Two deliberate omissions:
   #
@@ -511,13 +512,31 @@ Resources:
             Principal:
               Service: lambda.amazonaws.com
             Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      # No AWSLambdaBasicExecutionRole. That managed policy grants
+      # logs:CreateLogGroup, CreateLogStream and PutLogEvents across the whole
+      # account, which are writes — so attaching it would make the claim this
+      # role's comment, the docs and the CHANGELOG all make ("it reads, and the
+      # only exceptions are the two that report progress") untrue. The function
+      # still needs to write its own logs, so that is granted inline below and
+      # scoped to the one log group it writes to.
       PermissionsBoundary: !If
         - HasPermissionsBoundary
         - !Ref PermissionsBoundaryArn
         - !Ref AWS::NoValue
       Policies:
+        # Writing this function's own logs, and nothing else's. CreateLogGroup
+        # is not needed: the log group is a resource in this template and the
+        # function names it through LoggingConfig.
+        - PolicyName: OwnLogWritePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/${AWS::StackName}/lambda/TroubleshootingAgentFunction:*"
         # Reading this deployment's logs.
         #
         # Named per nested stack rather than by the bare "/${LMAStackName}-*"

@@ -112,6 +112,47 @@ def test_a_fragment_of_a_prompt_is_not_used_as_one() -> None:
     assert get_system_prompt(both(custom="be helpful"), TABLE) == DEFAULT_TEXT.strip()
 
 
+def test_an_ignored_override_says_so_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An operator whose override is being ignored has no other way to find
+    out: the symptom is an agent behaving as though the override were absent,
+    which looks exactly like the override not having saved."""
+    with caplog.at_level("WARNING"):
+        get_system_prompt(both(custom="too short"), TABLE)
+
+    assert prompts.CUSTOM_PROMPT_PK in caplog.text
+    assert "too short to be a system prompt" in caplog.text
+
+
+def test_a_deliberately_disabled_override_is_noted_without_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """NONE is the documented way to go back to the default, so it is a choice
+    rather than a mistake."""
+    with caplog.at_level("INFO"):
+        get_system_prompt(both(custom="NONE"), TABLE)
+
+    assert "using the default" in caplog.text
+    assert "WARNING" not in caplog.text
+
+
+def test_an_override_that_is_used_is_not_warned_about(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level("WARNING"):
+        get_system_prompt(both(custom=CUSTOM_TEXT), TABLE)
+
+    assert caplog.text == ""
+
+
+def test_the_refusal_names_what_restores_the_default() -> None:
+    """The seeding resource runs on a source-hash change, so "a stack update"
+    overstated what brings the item back."""
+    with pytest.raises(PromptUnavailableError, match="source hash changes"):
+        get_system_prompt(FakeDynamoDBClient({}), TABLE)
+
+
 def test_a_br_encoded_override_is_turned_back_into_lines() -> None:
     """An operator editing this item in the DynamoDB console has no good way to
     enter a newline, and the sibling templates in the same table already use
@@ -136,11 +177,6 @@ def test_a_table_with_neither_item_refuses_to_produce_a_prompt() -> None:
     no diagnosis.
     """
     with pytest.raises(PromptUnavailableError, match="usable 'systemPrompt'"):
-        get_system_prompt(FakeDynamoDBClient({}), TABLE)
-
-
-def test_the_refusal_says_how_to_restore_the_default() -> None:
-    with pytest.raises(PromptUnavailableError, match="stack update will restore it"):
         get_system_prompt(FakeDynamoDBClient({}), TABLE)
 
 

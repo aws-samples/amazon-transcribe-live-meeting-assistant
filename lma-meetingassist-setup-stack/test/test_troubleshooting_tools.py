@@ -616,9 +616,10 @@ def test_the_row_count_still_reports_what_the_query_matched() -> None:
 
 
 def test_a_caveat_survives_a_result_too_large_to_return_in_full() -> None:
-    """The fields the agent is told to read are small and used to be
-    serialised after the rows, so a size cut removed the warning saying some
-    log groups had not been searched — in exactly the case that produces it.
+    """The fields the agent is told to read are small, and they must outlive
+    the bulk array when a result does not fit. Shedding rows is what makes
+    that possible; a cut of the serialised string would take the caveats
+    first, since they are smaller and come last.
     """
     many = [(f"/{STACK}/lambda/F{i}", 10) for i in range(60)]
     client = FakeInsightsClient(

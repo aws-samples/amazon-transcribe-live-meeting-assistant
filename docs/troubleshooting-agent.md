@@ -19,10 +19,10 @@ it rests on. It is built on the Strands Agents SDK and Amazon Bedrock, the same
 stack the Meeting Assistant uses.
 
 It reads and does not change anything it diagnoses: no permission to restart,
-delete or redeploy, and no ability to write to any table, log group or bucket.
-Two grants are not reads, and both exist so the investigation can report
-itself: publishing a progress step to the UI through a single GraphQL mutation,
-and cancelling a log query it started.
+delete or redeploy, and no ability to write to any table or bucket. Three
+grants are not reads, and none of them touches the deployment: publishing a
+progress step to the UI through a single GraphQL mutation, cancelling a log
+query it started, and writing its own log stream.
 
 ## Why it exists
 
@@ -52,8 +52,12 @@ aws lambda invoke \
   --function-name "$FUNCTION" \
   --cli-binary-format raw-in-base64-out \
   --payload '{"query": "why did virtual participant vp-abc123 fail to join?", "vpId": "vp-abc123"}' \
-  /dev/stdout
+  /dev/stdout | jq -r '.body' | jq -r '.answer'
 ```
+
+The function returns `{"statusCode": ..., "body": "<json>"}`, so the diagnosis
+itself is inside the encoded `body` — hence the two `jq` steps. Drop the second
+one to see the run's token usage and the `truncated` flag alongside the answer.
 
 Accepted fields, all optional except that a `query` is strongly advised:
 
@@ -191,8 +195,9 @@ evidence it has — the cooperative path, and the one that produces a real
 diagnosis. If it calls another tool anyway, the run ends there rather than
 paying for a further model turn, and you get a diagnosis in the usual three
 sections whose Root Cause is "Not determined" and which names the limit that
-was reached. The response's `truncated` field is `true` whenever a limit was
-reached at all — on the cooperative path as well as the forced one — so treat
+was reached. The `truncated` field — inside the response's JSON-encoded
+`body`, so pipe the invocation through `jq -r .body | jq` to read it — is
+`true` whenever a limit was reached at all — on the cooperative path as well as the forced one — so treat
 it as "this diagnosis did not get to search as widely as it wanted", not as
 "the agent was cut off mid-sentence".
 

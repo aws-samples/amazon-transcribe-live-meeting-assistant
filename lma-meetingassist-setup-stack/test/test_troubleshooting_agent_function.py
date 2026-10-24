@@ -577,8 +577,9 @@ def tool_result_event(payload: Dict[str, Any], status: str = "success") -> Any:
 
 
 def test_a_dict_shaped_tool_result_is_read_and_summarised() -> None:
-    """The bug this guards: with attribute access the summary was always
-    "completed", so the progress panel never showed any shape at all."""
+    """A ToolResult is a TypedDict, so the text has to be read out of the
+    dict's `content` blocks. Reading it as an attribute yields None, and the
+    summary then describes nothing."""
     steps = published_steps(tool_result_event({"rowCount": 42, "logGroupCount": 2}))
 
     assert len(steps) == 1
@@ -603,8 +604,8 @@ def test_a_json_content_block_is_read_too() -> None:
 
 
 def test_an_error_status_is_reported_as_a_failed_call() -> None:
-    """With attribute access `success` was always True, so a failed tool call
-    rendered as a successful one."""
+    """Success comes from ToolResult's `status` key. Read as an attribute it is
+    always absent, which would make every call look successful."""
     steps = published_steps(tool_result_event({"rowCount": 0}, status="error"))
 
     assert steps[0]["success"] is False
@@ -639,7 +640,8 @@ def test_an_older_attribute_shaped_result_still_works() -> None:
 
 
 def test_a_dict_shaped_tool_use_publishes_its_input() -> None:
-    """ToolUse is a TypedDict too, so the arguments were never published."""
+    """A ToolUse is a TypedDict too, so the arguments have to be read by key
+    for the progress panel to show what the agent asked for."""
     event = mock.Mock()
     event.selected_tool = mock.Mock(tool_name="search_logs")
     event.tool_use = {
