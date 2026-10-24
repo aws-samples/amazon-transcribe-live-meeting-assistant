@@ -4139,10 +4139,11 @@ Resources:
         reports it. The Call Event Processor gathers these writes with
         return_exceptions set, so a failed one is collected into the
         invocation's result rather than raised -- and is therefore never
-        redelivered. A raised failure would be attributed to its Kinesis record,
-        retried, and finally described to the on-failure destination another
-        alarm watches; this one is retried by nobody and the discarded-records
-        queue stays empty. The transcript simply has a gap. Read the Call Event
+        redelivered on its own account. A raised failure is attributed to its
+        Kinesis record, retried, and finally described to the on-failure
+        destination another alarm watches; this one reaches neither unless
+        another record in the same batch happens to raise. The transcript simply
+        has a gap. Read the Call Event
         Processor's log group for 'max retries on query' over the same period:
         that line carries the exception type and the GraphQL errorType, and is
         the one these failures produce. The handler's 'event processor error'
