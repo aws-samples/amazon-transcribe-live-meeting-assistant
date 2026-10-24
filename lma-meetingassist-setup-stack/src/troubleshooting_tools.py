@@ -309,6 +309,16 @@ def assess_vp_end(
         ]
         if status not in _VP_TERMINAL_STATUSES:
             parts.append(stale)
+        if record.get("errorMessage") and status == "FAILED":
+            # A stale status leaves the reaper's non-terminal condition true,
+            # so when the stopped task's event arrives it writes FAILED and
+            # its own errorMessage beside the endReason.
+            parts.append(
+                "An errorMessage beside endReason on a FAILED row is most "
+                "likely the VP task reaper recording that the task stopped "
+                "after the end, not a second cause: report endReason as why it "
+                "ended."
+            )
         parts.append(
             "A participant stopped from outside does not write a "
             f"'{_VP_EXIT_MARKER}' line, so do not look for one; it writes "

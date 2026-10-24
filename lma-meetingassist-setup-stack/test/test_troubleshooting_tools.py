@@ -732,6 +732,18 @@ def test_an_empty_single_term_search_suggests_adding_the_id() -> None:
     assert "single term" in result["guidance"]
 
 
+def test_an_empty_custom_query_for_the_exit_line_also_names_the_stop_lines() -> None:
+    """The hint keys on the resolved query, so a hand-written query looking
+    for the exit line gets it as well as a search_terms one."""
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[])).search_logs(
+            VP_GROUP, query_string='fields @message | filter @message like "VP exit:"'
+        )
+    )
+
+    assert "Received SIGTERM" in result["guidance"]
+
+
 def test_an_empty_custom_query_gets_only_the_general_advice() -> None:
     result = parsed(
         make_tools(FakeInsightsClient(rows=[])).search_logs(
@@ -1309,6 +1321,21 @@ def test_a_reaped_row_does_not_promise_shutdown_lines() -> None:
 
     assert "may have been killed without logging a shutdown" in assessment
     assert "do not look for one" not in assessment
+
+
+def test_a_reaper_error_beside_an_end_reason_is_not_presented_as_a_second_cause() -> None:
+    """The reaper can write FAILED and its errorMessage after the end
+    operation, when a stale status left its condition true."""
+    item = dict(
+        EXTERNALLY_ENDED_VP_ITEM,
+        status={"S": "FAILED"},
+        errorMessage={"S": "(stopCode=UserInitiated: Task stopped)"},
+    )
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "by the end operation" in assessment
+    assert "not a second cause" in assessment
 
 
 def test_an_empty_end_reason_still_identifies_the_end_operation() -> None:

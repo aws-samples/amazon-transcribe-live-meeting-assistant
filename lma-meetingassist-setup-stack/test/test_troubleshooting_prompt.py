@@ -317,6 +317,10 @@ def test_the_trigger_example_stops_at_the_next_field() -> None:
         # lma-virtual-participant-stack/backend/src/index.ts
         "VP exit:",
         "trigger=",
+        "Received SIGTERM",
+        "due to external termination",
+        # lma-virtual-participant-stack/backend/src/microvm-supervisor.ts
+        "[terminate] signalling app to exit",
         # lma-websocket-transcriber-stack/source/app/src/
         "[TRANSCRIBING]",
         "[AUTH]",
@@ -340,3 +344,15 @@ def test_the_shipped_prompt_names_a_log_marker_the_code_actually_emits(
     above name the file it comes from.
     """
     assert marker in prompt_text()
+
+
+def test_the_tool_call_limit_the_prompt_states_is_the_default() -> None:
+    """The prompt names the default limit in words, so a change to the
+    default in troubleshooting_config has to change the prompt with it."""
+    from troubleshooting_config import AgentLimits
+
+    words = {6: "six", 8: "eight", 10: "ten", 12: "twelve"}
+    default = AgentLimits().max_iterations
+
+    assert default in words, "add the new default to this table and to the prompt"
+    assert f"({words[default]} unless changed on the function)" in prompt_text()
