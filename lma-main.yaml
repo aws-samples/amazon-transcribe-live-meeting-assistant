@@ -4206,9 +4206,11 @@ Resources:
   # from each nested stack: every identifier the widgets need is already a
   # nested stack Output, so the variable map of the list form of Fn::Sub is
   # enough. The widgets above the "Application metrics" band read metrics AWS
-  # services publish; the ones below it read metrics LMA publishes itself, in
-  # the namespace ${AWS::StackName} -- which needs no variable in the map
-  # below, since Fn::Sub resolves the pseudo-parameter directly.
+  # services publish; the four metric widgets in that band read metrics LMA
+  # publishes itself, in the namespace ${AWS::StackName} -- which needs no
+  # variable in the map below, since Fn::Sub resolves the pseudo-parameter
+  # directly. The log tables after the band are Logs Insights queries, not
+  # metrics.
   ##########################################################################
   OperationalDashboard:
     Type: AWS::CloudWatch::Dashboard

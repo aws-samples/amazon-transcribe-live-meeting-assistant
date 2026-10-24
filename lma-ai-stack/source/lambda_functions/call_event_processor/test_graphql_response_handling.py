@@ -930,7 +930,7 @@ SEGMENT_EVENT = {
 
 
 @pytest.fixture
-def gathered(monkeypatch) -> Dict[str, int]:
+def gathered(monkeypatch) -> Dict[str, Any]:
     """Records how many tasks the segment path hands to `asyncio.gather`.
 
     The segment counts are taken from a *slice* of the gathered results, because
@@ -939,12 +939,19 @@ def gathered(monkeypatch) -> Dict[str, int]:
     only segment tasks cannot tell that slice from the whole list, so the tests
     below assert the gather holds more than the slice does before believing
     their own counts.
+
+    Every call is recorded, and `total` is the largest. The dispatch gathers
+    once today, so the distinction does not bite -- but `asyncio.gather` is
+    replaced process-wide for the test (`cep.asyncio` *is* the module), so a
+    nested gather added anywhere under this call would otherwise leave the
+    guard reading whichever happened to run last.
     """
-    seen: Dict[str, int] = {}
+    seen: Dict[str, Any] = {"calls": []}
     real_gather = asyncio.gather
 
     async def counting_gather(*awaitables, **kwargs):
-        seen["total"] = len(awaitables)
+        seen["calls"].append(len(awaitables))
+        seen["total"] = max(seen["calls"])
         return await real_gather(*awaitables, **kwargs)
 
     monkeypatch.setattr(cep.asyncio, "gather", counting_gather)

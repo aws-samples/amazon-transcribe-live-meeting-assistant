@@ -89,6 +89,11 @@ class MetricEmitter:
         self,
         namespace: str,
         *,
+        # `print`, not this layer's Logger, and deliberately: an EMF record has
+        # to reach CloudWatch Logs as a bare JSON line. A Powertools log line
+        # wraps it in its own JSON envelope, which CloudWatch does not read as
+        # EMF, so routing this through the logger would stop every metric
+        # without failing anything. Please do not "fix" it.
         sink: Callable[[str], None] = print,
         clock: Callable[[], float] = time.time,
     ) -> None:
