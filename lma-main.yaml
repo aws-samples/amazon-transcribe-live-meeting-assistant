@@ -4181,13 +4181,11 @@ Resources:
         reports this: the session closes normally, the meeting reaches ENDED,
         and the meeting page shows an empty transcript with no error on it. Read
         the transcriber's container log group for '[TRANSCRIBING]' lines over
-        the same period. The usual causes are the Amazon Transcribe
-        concurrent-stream quota being exhausted, which the near-quota alarm
-        should have notified first; a language code or custom vocabulary the
-        account does not have; and, where the MicroVM ASR engine is selected, an
-        engine that could not start with fallback switched off. Sessions under
-        thirty seconds are deliberately not counted, so somebody starting a
-        stream and changing their mind does not appear here.
+        the same period. The usual causes are the Amazon Transcribe concurrent-
+        stream quota being exhausted, which the near-quota alarm should have
+        notified first; a language code or custom vocabulary the account does
+        not have; and, where the MicroVM ASR engine is selected, an engine that
+        could not start with fallback switched off.
       Namespace: !Ref AWS::StackName
       MetricName: StreamingSessionsWithoutTranscript
       Statistic: Sum

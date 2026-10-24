@@ -268,10 +268,12 @@ falls back to Amazon Transcribe, or for assistant and Bedrock latency and
 failure rates. The Virtual Participant is the significant one: it transcribes
 in its own container rather than through the transcriber, so none of the three
 session metrics above covers a Virtual Participant meeting, and the equivalent
-of `StreamingSessionsWithoutTranscript` for it does not exist. Those remain diagnosable only from the log groups
-[Troubleshooting](troubleshooting.md) names. They are a separate piece of work,
-deliberately: the Virtual Participant's exit-reason taxonomy wants a metric
-dimension, and whether its value space is closed enough to be one needs
+of `StreamingSessionsWithoutTranscript` for it does not exist.
+
+All of it remains diagnosable only from the log groups
+[Troubleshooting](troubleshooting.md) names. It is a separate piece of work,
+deliberately: the Virtual Participant's exit-reason taxonomy wants to be a
+metric dimension, and whether its value space is closed enough to be one needs
 checking before it becomes a billed dimension on a custom metric.
 
 ## Subscribing to the alerts topic
