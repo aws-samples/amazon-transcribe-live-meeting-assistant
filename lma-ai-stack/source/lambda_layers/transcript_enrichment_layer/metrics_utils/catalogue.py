@@ -99,8 +99,14 @@ class MetricDefinition:
     #: alarm and not merely a widget, because the number is the only notice
     #: anybody gets. The gate enforces it.
     records_swallowed_failure: bool
-    #: What the number means, in a sentence an operator can act on. Used in the
-    #: docs and worth keeping next to the name so the two cannot drift.
+    #: What the number means, in a sentence an operator can act on.
+    #:
+    #: A reference note for whoever is looking at this file, and nothing reads
+    #: it at runtime. `docs/monitoring.md` and the dashboard widget titles are
+    #: written by hand and gated separately -- the metric table against the
+    #: catalogue's names and units, the widget titles not at all -- so this
+    #: field is not where either comes from and cannot be relied on to keep
+    #: them honest. Keep it in line with the docs by reading both.
     meaning: str
 
 
@@ -130,9 +136,11 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
         component=Component.CALL_EVENT_PROCESSOR,
         records_swallowed_failure=False,
         meaning=(
-            "A meeting record was created. Counted once per meeting: a "
+            "A meeting record was created. At most once per meeting: a "
             "redelivered start event finds the record already there and is not "
-            "counted again."
+            "counted again -- which also means a first delivery whose own "
+            "earlier attempt stored the meeting and then failed in transit is "
+            "not counted at all, so this can read slightly low."
         ),
     ),
     MetricDefinition(
@@ -141,9 +149,10 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
         component=Component.CALL_EVENT_PROCESSOR,
         records_swallowed_failure=False,
         meaning=(
-            "A meeting was marked ended. Counted once per meeting. Read against "
-            "MeetingsStarted over a long window rather than a short one: a live "
-            "meeting is legitimately started and not yet ended."
+            "A meeting was marked ended, on the write that closed it. At most "
+            "once per meeting: a redelivered END finds it already ENDED. Read "
+            "against MeetingsStarted over a long window rather than a short "
+            "one, since a live meeting is legitimately started and not ended."
         ),
     ),
     MetricDefinition(
@@ -165,9 +174,11 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
         meaning=(
             "Transcript segment writes that failed. These are gathered with "
             "return_exceptions=True and collected into the invocation's result, "
-            "so the invocation succeeds, the Kinesis record is not retried and "
-            "AWS/Lambda Errors stays flat. This metric is the only notice that "
-            "a transcript line was lost, which is why it is alarmed."
+            "so the invocation succeeds and AWS/Lambda Errors stays flat. "
+            "Nothing retries the record on this failure's account either, "
+            "though another record in the same batch raising would redeliver "
+            "it along with the rest of the tail. This metric is the only notice "
+            "that a transcript line was lost, which is why it is alarmed."
         ),
     ),
     MetricDefinition(

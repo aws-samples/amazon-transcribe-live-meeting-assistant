@@ -1727,9 +1727,12 @@ async def execute_process_event_api_mutation(
         # visible to anything else. `return_exceptions=True` turns a failed
         # mutation into an ordinary result, which is collected into
         # return_value["errors"] below and never raised -- so the batch
-        # processor does not attribute the record, the event source mapping does
-        # not redeliver it, and AWS/Lambda Errors stays flat. These two numbers
-        # are the only notice that a segment did not reach the meeting page.
+        # processor does not attribute the record, nothing redelivers it on its
+        # own account, and AWS/Lambda Errors stays flat. (Another record in the
+        # same batch raising would redeliver this one along with the rest of the
+        # tail, but nothing makes that happen for this failure's sake.) These
+        # two numbers are the only notice that a segment did not reach the
+        # meeting page.
         #
         # gather preserves the order it was given, so the transcript-segment
         # results are exactly the leading slice. Sentiment, category and

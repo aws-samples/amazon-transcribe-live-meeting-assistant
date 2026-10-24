@@ -977,9 +977,11 @@ def test_a_failed_segment_write_is_counted_as_a_failure(schema, emitted, gathere
 
     The segment mutations are gathered with ``return_exceptions=True``, so this
     failure is collected into the invocation's result and never raised: the
-    batch processor does not attribute the record, the event source mapping does
-    not redeliver it, and AWS/Lambda Errors stays flat. Nothing but this count
-    reports that a transcript line was lost.
+    batch processor does not attribute the record, nothing redelivers it on its
+    own account, and AWS/Lambda Errors stays flat. Another record in the same
+    batch raising would redeliver this one with the rest of the tail, but
+    nothing makes that happen for this failure's sake. So this count is the only
+    notice that a transcript line was lost.
     """
     session = QueuedSession(
         schema,

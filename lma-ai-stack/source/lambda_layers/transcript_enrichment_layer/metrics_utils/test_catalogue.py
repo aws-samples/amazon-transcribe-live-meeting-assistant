@@ -61,8 +61,12 @@ def test_every_metric_name_is_one_cloudwatch_accepts(metric):
 
 @pytest.mark.parametrize("metric", catalogue.CATALOGUE, ids=lambda m: m.name)
 def test_every_metric_says_what_it_means(metric):
-    """The catalogue entry is where the docs and the dashboard titles come
-    from, so an entry with no explanation produces a widget nobody can read."""
+    """An entry with no explanation is a metric name and nothing else.
+
+    This is the only thing that reads `meaning`, and it checks that something
+    was written rather than that it is correct -- the field is a reference note
+    for a reader of this file, not the source the docs are generated from.
+    """
     assert len(metric.meaning.split()) >= 10, f"{metric.name} has no usable description"
 
 
