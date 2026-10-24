@@ -348,9 +348,15 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
   }
 
+  /** Set by stop(), so a recovery timer that fires afterwards does nothing. */
+  private stopped: boolean = false;
+  /** The pending session-recovery attempt, if any (see scheduleSessionCreateRetry). */
+  private sessionRecoveryTimer: NodeJS.Timeout | null = null;
+
   async start(): Promise<void> {
     console.log('Starting AWS Nova Sonic 2 agent...');
-    
+    this.stopped = false;
+
     try {
       // Load configuration from DynamoDB if table name is provided
       const tableName = process.env.NOVA_SONIC_CONFIG_TABLE_NAME;
@@ -1271,13 +1277,37 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.streamingActive = false;
       
       // Try to recover by creating a new session
-      setTimeout(() => {
+      this.scheduleSessionCreateRetry(() => {
         console.log('🔄 Attempting recovery - creating new session');
         this.createSession().catch(err => {
           console.error('Error in recovery session creation:', err);
         });
-      }, 1000);
+      });
     }
+  }
+
+  /**
+   * Run a session-recovery attempt a second from now, unless the agent has
+   * been stopped by then.
+   *
+   * Both recoveries — refreshSession's own and the one a failed mode change
+   * schedules — go through here, so that stop() can reach them. A bare timer
+   * could not be cleared, and would open a fresh Bedrock session for an agent
+   * whose meeting has already ended. Only one is held: a later recovery
+   * supersedes an earlier one, since both would build the same session.
+   */
+  private scheduleSessionCreateRetry(attempt: () => void): void {
+    if (this.sessionRecoveryTimer) {
+      clearTimeout(this.sessionRecoveryTimer);
+    }
+    this.sessionRecoveryTimer = setTimeout(() => {
+      this.sessionRecoveryTimer = null;
+      if (this.stopped) {
+        console.log('⏹️  Agent stopped - skipping session recovery');
+        return;
+      }
+      attempt();
+    }, 1000);
   }
 
   private addEventToQueue(event: any): void {
@@ -2523,6 +2553,14 @@ export class NovaAgent implements VoiceAssistantProvider {
   async stop(): Promise<void> {
     console.log('Stopping Nova agent...');
 
+    // Before anything awaits, so a recovery timer firing during the teardown
+    // below already sees it.
+    this.stopped = true;
+    if (this.sessionRecoveryTimer) {
+      clearTimeout(this.sessionRecoveryTimer);
+      this.sessionRecoveryTimer = null;
+    }
+
     // Stop persistent audio playback stream
     this.stopPacatStream();
 
@@ -2928,8 +2966,8 @@ export class NovaAgent implements VoiceAssistantProvider {
   /** How long to wait for a session refresh already in flight before giving up
    *  on rebuilding on top of it. The refresh itself is a teardown, a 300ms
    *  flush and a fresh session, so this is several times the expected wait.
-   *  Not `readonly`: the tests shorten it to exercise the bound without
-   *  waiting five seconds, and should not need a cast to do so. */
+   *  Not `readonly`, because the tests shorten it to exercise the bound
+   *  without waiting five seconds. */
   private RECONFIGURE_REFRESH_WAIT_MS = 5000;
 
   /**
@@ -2992,6 +3030,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       changed.push('activationMode');
     }
 
+    // Ahead of the no-change check: the new values are on the agent as soon as
+    // a change starts applying, so a repeat of the same command mid-rebuild
+    // would otherwise be told the assistant is already there while it is still
+    // switching.
+    if (this._reconfiguring) {
+      return notApplied('declined', 'a mode change is already in progress');
+    }
+
     // Asking for the configuration it is already in costs the meeting nothing.
     // Without this, a participant retyping a command — or a chat observer
     // delivering one twice — would tear down a working session each time.
@@ -3029,9 +3075,6 @@ export class NovaAgent implements VoiceAssistantProvider {
       );
     }
 
-    if (this._reconfiguring) {
-      return notApplied('declined', 'a mode change is already in progress');
-    }
 
     this._reconfiguring = true;
     try {
@@ -3324,7 +3367,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     // Build it directly — the same recovery `refreshSession` makes for itself
     // when its own rebuild fails.
-    setTimeout(() => {
+    this.scheduleSessionCreateRetry(() => {
       if (this.session && this.session.isActive) {
         return;
       }
@@ -3343,7 +3386,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.createSession().catch(error => {
         console.error('Error recovering the Nova session after a mode change:', error);
       });
-    }, 1000);
+    });
     return true;
   }
 

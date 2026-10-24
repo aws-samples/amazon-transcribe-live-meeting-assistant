@@ -791,6 +791,77 @@ test('the recovery builds a session for every mode that holds one, not only alwa
     assert.equal((wake as any).scheduleSessionRecovery(), false, 'nothing is owed on the wake-phrase path');
 });
 
+test('a recovery still pending when the agent stops opens nothing', async () => {
+    // A mode change whose rebuild fails just before the Virtual Participant
+    // leaves would otherwise open a fresh Bedrock session for an agent whose
+    // meeting has ended.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    let opened = 0;
+    (agent as any).createSession = async () => {
+        opened += 1;
+    };
+    assert.equal((agent as any).scheduleSessionRecovery(), true);
+
+    await agent.stop();
+    await wait(1100);
+    assert.equal(opened, 0, 'a stopped agent must not open a session');
+    assert.equal((agent as any).sessionRecoveryTimer, null);
+});
+
+test('a recovery scheduled while the agent is stopping opens nothing either', async () => {
+    // stop() clears a recovery already pending, but it awaits the session's
+    // teardown, and a refresh failing during that await schedules a new one.
+    // Clearing the handle cannot reach a timer that does not exist yet; the
+    // stopped flag, set before the first await, is what turns it away.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    let opened = 0;
+    (agent as any).createSession = async () => {
+        opened += 1;
+    };
+
+    const stopping = agent.stop();
+    assert.equal((agent as any).scheduleSessionRecovery(), true, 'scheduled mid-stop');
+    await stopping;
+    await wait(1100);
+    assert.equal(opened, 0, 'a recovery scheduled after stop() began must not run');
+});
+
+test('the refresh path recovery is stopped the same way', async () => {
+    // refreshSession schedules a recovery of its own when its rebuild fails,
+    // and that one was equally out of stop()'s reach. Both share one timer now.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    let opened = 0;
+    (agent as any).createSession = async () => {
+        opened += 1;
+        throw new Error('bidirectional stream refused');
+    };
+    // The real refreshSession, rather than the recorder novaAgent installs.
+    (agent as any).refreshSession = NovaAgent.prototype['refreshSession' as keyof NovaAgent];
+
+    await (agent as any).refreshSession();
+    assert.equal(opened, 1, 'the refresh made its own attempt');
+    await agent.stop();
+    await wait(1100);
+    assert.equal(opened, 1, 'and its recovery must not run after stop()');
+});
+
+test('the same command repeated mid-rebuild is told the switch is still in progress', async () => {
+    // The new values are on the agent as soon as the change starts applying, so
+    // without the in-progress check coming first the repeat would be told the
+    // assistant was already there while it was still switching.
+    const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
+    withLiveSession(agent);
+    let repeat: Awaited<ReturnType<NovaAgent['reconfigure']>> | null = null;
+    (agent as any).refreshSession = async () => {
+        repeat = await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    };
+
+    await agent.reconfigure(chat({ meetingMode: 'translator' }));
+    assert.equal(repeat!.result, 'declined');
+    assert.match(repeat!.detail || '', /already in progress/);
+});
+
 test('a first session that fails to open is retried, not handed to the refresh path', async () => {
     // The headline case: `LMA translate` on a wake-phrase deployment, where
     // there is no session yet, so the rebuild calls createSession directly.
@@ -1049,7 +1120,9 @@ test('a mute tool call that outlives an activation-only refresh still mutes, but
 });
 
 test('a mute tool call with no change under it is unaffected', async () => {
-    // The guards must not touch the ordinary case 809 is built around.
+    // The guards must not touch the ordinary case: the mute tool answering a
+    // stop request in the mode it was called in, and its result reaching the
+    // session that issued it.
     const { agent } = novaAgent({ meetingMode: 'normal', activationMode: 'always_active' });
     withLiveSession(agent);
     const sent: string[] = [];
