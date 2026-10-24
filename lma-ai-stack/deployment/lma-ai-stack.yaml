@@ -375,9 +375,34 @@ Parameters:
 
   LLMPromptTemplateTableName:
     Type: String
-    Description:
-      The DynamoDB table name where the default and custom summary prompt
-      templates are stored.
+    Description: >
+      The DynamoDB table holding the summary prompt templates before the shared
+      configuration table. Read once, by the configuration seeder, so that an
+      existing deployment's edited prompts are carried into the shared table
+      rather than reset by the upgrade.
+
+  Domain:
+    Type: String
+    Default: "Default"
+    AllowedValues:
+      - "Default"
+      - "Healthcare"
+    Description: >-
+      Which set of summary prompt templates this deployment ships. Must be the
+      same value the llm-template-setup stack is given: that stack still seeds
+      the table a rollback reads, and the two disagreeing would leave one
+      holding the general prompts and the other the healthcare ones.
+
+  ConfigurationSeedHash:
+    Type: String
+    Default: ""
+    Description: >
+      A digest of the configuration content this release ships and of the code
+      that processes it, substituted by the publish step. CloudFormation
+      re-invokes a custom resource only when one of its properties changes, so
+      this is what makes a new release's configuration reach the table; a
+      constant here would mean the seeder never ran again after the first
+      deployment.
 
   ChatButtonConfigTableName:
     Type: String
@@ -730,6 +755,23 @@ Outputs:
   CloudfrontEndpoint:
     Description: Endpoint for Cloudfront distribution
     Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/"
+  ConfigurationTableName:
+    Description: >-
+      The DynamoDB table holding runtime configuration: the deployment
+      baseline, the operator's profiles and the pointer naming the active one
+    Value: !Ref ConfigurationTable
+  ConfigurationProfileOrigin:
+    Description: >-
+      How this stack's configuration profile came to exist, whenever that was:
+      'created' (a new, empty profile), 'created-from-previous-table' (the
+      summary prompt templates were carried across from the table they used to
+      live in), 'created-previous-table-unreadable', or 'unknown' (a profile
+      written by something other than the seeder). Stamped on the record when it
+      is created and reported by every later deployment, so the one value to act
+      on does not vanish: 'created-previous-table-unreadable' means prompt
+      templates customized before the upgrade were not carried across and have
+      to be applied again from the Transcript Summary page.
+    Value: !GetAtt SeedConfiguration.ProfileOrigin
   EventSourcingTableName:
     Description:
       The Name for the DynamoDB that is used to store transcriptions and
@@ -2318,13 +2360,15 @@ Resources:
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           FETCH_TRANSCRIPT_LAMBDA_ARN: !GetAtt FetchTranscript.Arn
           PROCESS_TRANSCRIPT: "True"
-          LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           S3_BUCKET_NAME: !Ref S3BucketName
           S3_PREFIX: !Ref TranscriptFilePrefix
       Timeout: 900
       MemorySize: 512
       Handler: index.handler
       CodeUri: ../source/lambda_functions/bedrock_summary_lambda
+      Layers:
+        - !Ref ConfigurationPythonLayer
       Description:
         This AWS Lambda Function runs a transcript summary inference on
         the call transcript using Bedrock API
@@ -2344,6 +2388,10 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - BedrockSummaryLambdaLogGroup
+      # Ordered behind the seeding custom resource so that a stack update cannot
+      # put this code live before the configuration baseline it reads exists. A
+      # summary run in that window would have no prompts to work from.
+      - SeedConfiguration
 
   BedrockSummaryLambdaLogGroup:
     Type: AWS::Logs::LogGroup
@@ -2384,11 +2432,14 @@ Resources:
               - Effect: "Allow"
                 Action: "lambda:InvokeFunction"
                 Resource: !GetAtt FetchTranscript.Arn
+              # Read-only, and only on the shared configuration table: the
+              # summariser reads the prompt templates and has never written
+              # them.
               - Effect: Allow
                 Action:
                   - "dynamodb:GetItem"
                 Resource:
-                  - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
+                  - !GetAtt ConfigurationTable.Arn
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -2396,7 +2447,7 @@ Resources:
                 Resource: !Ref CustomerManagedEncryptionKeyArn
                 Condition:
                   StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
         - PolicyName: !Sub ${AWS::StackName}-BedrockSummary
           PolicyDocument:
             Version: 2012-10-17
@@ -2953,6 +3004,172 @@ Resources:
       CompatibleRuntimes:
         - python3.12
       RetentionPolicy: Delete
+
+  ##########################################################################
+  # Unified configuration store
+  #
+  # One table for runtime configuration, one accessor in a layer, and a
+  # deploy-time seeder. See docs/configuration-store.md for the key layout and
+  # the caching tiers.
+  ##########################################################################
+
+  ConfigurationTable:
+    Type: AWS::DynamoDB::Table
+    # Holds configuration edited from the web UI, which no redeployment can
+    # reproduce once a deployment has customized it.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        # One HASH key and no sort key: every record is distinguished by a
+        # prefix on this attribute (Config#default, Config#<profile>,
+        # Config#__active, Schema), so a profile can be fetched by key alone
+        # and no secondary index is needed.
+        - AttributeName: Configuration
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Configuration
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      # So a configuration change can be undone to any moment in the window.
+      # Nothing here records revisions yet, which makes recovery the only route
+      # back from a bad save until the revision log lands.
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+        SSEType: KMS
+        KMSMasterKeyId: !Ref CustomerManagedEncryptionKeyArn
+      # Deliberately no TimeToLiveSpecification: configuration is current until
+      # an operator changes it, and a record that expired on its own would take
+      # a deployment's behaviour with it.
+
+  # The shared accessor. Pure Python over the runtime's own boto3, so it carries
+  # no compiled dependency and is declared compatible with both architectures --
+  # which is what lets it be attached to every function that reads
+  # configuration, whichever architecture that function runs on.
+  ConfigurationPythonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Metadata:
+      BuildMethod: python3.12
+    Properties:
+      Description: !Sub "Shared configuration accessor for stack: ${AWS::StackName}"
+      ContentUri: ../source/lambda_layers/configuration_layer
+      CompatibleArchitectures:
+        - arm64
+        - x86_64
+      CompatibleRuntimes:
+        - python3.12
+      RetentionPolicy: Delete
+
+  ConfigurationSeederFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/ConfigurationSeederFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  ConfigurationSeederFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-ConfigurationSeeder"
+      Handler: lambda_function.handler
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/configuration_seeder
+      Description: Writes the deployment's configuration baseline when the stack is deployed
+      Role: !GetAtt ConfigurationSeederRole.Arn
+      MemorySize: 256
+      Timeout: 120
+      Tracing: Active
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup: !Ref ConfigurationSeederFunctionLogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: >-
+              Function does not require VPC access — only interacts with
+              DynamoDB and the CloudFormation response endpoint
+          - id: W92
+            reason: >-
+              Function does not require reserved concurrency; it runs once when
+              the stack is created, and on an update only when the shipped
+              configuration or the code that processes it has changed
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency; it runs at deploy time only"
+    # checkov:skip=CKV_AWS_116: "DLQ not applicable to a synchronous CloudFormation custom resource"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment holds only the stack-wide log level; table names arrive as custom resource properties"
+    DependsOn:
+      - ConfigurationSeederFunctionLogGroup
+
+  ConfigurationSeederRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: Configuration seeder Lambda role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        # The function sets Tracing: Active, and the role is declared here
+        # rather than generated, so SAM adds nothing: without this the traces
+        # the function is configured to emit have nowhere to go. Same policy and
+        # same reason as GetEventApiDnsRole and GetCloudFrontPrefixListRole, the
+        # other custom resources in this template that trace.
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-ConfigurationSeeder
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt ConfigurationTable.Arn
+              # Read-only on the table the prompt templates used to live in:
+              # the seeder carries an existing deployment's edits across once
+              # and never writes there.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !Sub
+                  - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Table}"
+                  - Table: !Ref LLMPromptTemplateTableName
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  SeedConfiguration:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt ConfigurationSeederFunction.Arn
+      ConfigurationTableName: !Ref ConfigurationTable
+      Domain: !Ref Domain
+      LegacyPromptTemplateTableName: !Ref LLMPromptTemplateTableName
+      # Changes when the shipped configuration content or the code that
+      # processes it changes, and is the only reason CloudFormation re-invokes
+      # this resource on a stack update.
+      SeedContentHash: !Ref ConfigurationSeedHash
 
   ##########################################################################
   # AppSync
@@ -4649,12 +4866,16 @@ Resources:
       Role: !GetAtt UpdateLLMPromptTemplateResolverFunctionExecutionRole.Arn
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/update_llm_prompt_template_resolver
-      Description: Lambda resolver for updateLLMPromptTemplate with input validation
+      Description: >-
+        Lambda resolver for the summary prompt templates: reads the stored
+        record and saves an edit, with input validation
       MemorySize: 256
       Timeout: 30
+      Layers:
+        - !Ref ConfigurationPythonLayer
       Environment:
         Variables:
-          LLM_PROMPT_TEMPLATE_TABLE_NAME: !Ref LLMPromptTemplateTableName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
@@ -4672,6 +4893,9 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UpdateLLMPromptTemplateResolverFunctionLogGroup
+      # As for the summariser: the Transcript Summary page should not open on an
+      # unseeded table and show an administrator an empty set of prompts.
+      - SeedConfiguration
 
   UpdateLLMPromptTemplateResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4691,20 +4915,29 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
             Action:
               - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-UpdateLLMPromptTemplate
           PolicyDocument:
             Version: 2012-10-17
             Statement:
+              # GetItem as well as PutItem: a save reads the record's current
+              # version so a write that another session has superseded can be
+              # refused, and the editor's own read is served from here too.
+              # Deliberately no DeleteItem.
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem
                   - dynamodb:PutItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
+                Resource: !GetAtt ConfigurationTable.Arn
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -4712,7 +4945,7 @@ Resources:
                 Resource: !Ref CustomerManagedEncryptionKeyArn
                 Condition:
                   StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   AppSyncUpdateLLMPromptTemplateLambdaRole:
     Type: AWS::IAM::Role
@@ -4746,46 +4979,6 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncUpdateLLMPromptTemplateLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt UpdateLLMPromptTemplateResolverFunction.Arn
-
-  LLMPromptTemplateDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: LLMPromptTemplateTable
-      Description: LLM Prompt Summary Template Configuration DynamoDB Table
-      Type: AMAZON_DYNAMODB
-      ServiceRoleArn: !GetAtt LLMPromptTemplateDataSourceRole.Arn
-      DynamoDBConfig:
-        TableName: !Ref LLMPromptTemplateTableName
-        AwsRegion: !Ref AWS::Region
-
-  LLMPromptTemplateDataSourceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: appsync.amazonaws.com
-      Policies:
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   # AppSync Event API for MCP command delivery (separate from GraphQL API)
   AppSyncEventApi:
@@ -5862,12 +6055,18 @@ Resources:
       CodeS3Location: ../source/appsync/updateNovaSonicConfigLambda.js
 
   # LLM Prompt Template Resolvers
+  # Served by the same Lambda as the mutation rather than by a DynamoDB data
+  # source: the shared configuration table stores a record's body compressed,
+  # and an AppSync JavaScript resolver has no way to decompress one. The field
+  # still answers with a JSON string; what is in it is now the record's prompts
+  # plus Version, UpdatedBy and UpdatedAt. See the comment on LLMPromptTemplate
+  # in schema.graphql for what that means for a client.
   GetLLMPromptTemplateResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt LLMPromptTemplateDataSource.Name
+      DataSourceName: !GetAtt UpdateLLMPromptTemplateLambdaDataSource.Name
       TypeName: Query
       FieldName: getLLMPromptTemplate
       Runtime:
@@ -5878,10 +6077,12 @@ Resources:
 
         export function request(ctx) {
           return {
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({
-              LLMPromptTemplateId: ctx.args.LLMPromptTemplateId
-            })
+            operation: 'Invoke',
+            payload: {
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              info: { fieldName: ctx.info.fieldName }
+            }
           };
         }
 
@@ -5889,9 +6090,7 @@ Resources:
           if (ctx.error) {
             util.error(ctx.error.message, ctx.error.type);
           }
-          return {
-            LLMPromptTemplateId: JSON.stringify(ctx.result)
-          };
+          return ctx.result;
         }
 
   UpdateLLMPromptTemplateResolver:

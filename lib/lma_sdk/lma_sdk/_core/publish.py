@@ -253,7 +253,21 @@ def _calculate_dir_hash(directory: str | Path) -> str:
     """Calculate a SHA256 hash of directory contents (excluding node_modules, build)."""
     directory = Path(directory)
     hasher = hashlib.sha256()
-    skip_dirs = {"node_modules", "build", "dist", ".aws-sam", "__pycache__", ".git"}
+    # .pytest_cache and .ruff_cache are here because a hash of a source tree is
+    # also what decides whether a deploy-time custom resource re-runs: a local
+    # `make test-lambdas` leaving a cache directory inside a hashed tree would
+    # otherwise change the digest, and the stack events would show an update
+    # nobody made.
+    skip_dirs = {
+        "node_modules",
+        "build",
+        "dist",
+        ".aws-sam",
+        "__pycache__",
+        ".git",
+        ".pytest_cache",
+        ".ruff_cache",
+    }
 
     files = []
     for root, dirs, filenames in os.walk(directory):
@@ -273,6 +287,42 @@ def _calculate_dir_hash(directory: str | Path) -> str:
         except OSError:
             pass
 
+    return hasher.hexdigest()[:16]
+
+
+#: Everything whose contents decide what the configuration seeder writes: the
+#: shipped baseline content and the handler that reads it, plus the accessor
+#: that encodes it. Relative to the project root.
+CONFIGURATION_SEED_PATHS = (
+    "lma-ai-stack/source/lambda_functions/configuration_seeder",
+    "lma-ai-stack/source/lambda_layers/configuration_layer",
+)
+
+
+def calculate_configuration_seed_hash(project_dir: str | Path) -> str:
+    """A digest of the shipped configuration content and the code processing it.
+
+    Substituted into ``<CONFIGURATION_SEED_HASH_TOKEN>`` in lma-main.yaml and
+    carried through to a property of the seeding custom resource. CloudFormation
+    re-invokes a custom resource only when one of its properties changes, so
+    without this a release whose prompts or whose encoding changed would never
+    reach an existing deployment's table.
+
+    Both the content and the processing code are covered, which is the point:
+    hashing the content alone would miss a change to how it is written, and that
+    is just as much a reason to re-run the seeder.
+    """
+    project_dir = Path(project_dir)
+    hasher = hashlib.sha256()
+    for relative in CONFIGURATION_SEED_PATHS:
+        path = project_dir / relative
+        # The path is named so a digest covers a known set rather than whatever
+        # happens to exist; a missing one is recorded as missing rather than
+        # silently skipped, so a move shows up as a changed hash.
+        hasher.update(relative.encode())
+        hasher.update(
+            _calculate_dir_hash(path).encode() if path.is_dir() else b"missing"
+        )
     return hasher.hexdigest()[:16]
 
 
@@ -1187,6 +1237,7 @@ class Publisher:
             "<ASR_MICROVM_IMAGE_SOURCE_S3_KEY_TOKEN>": asr_image_source_s3_key,
             "<ARTIFACT_BUCKET_NAME_TOKEN>": artifact_bucket,
             "<BUILD_DATE_TIME_TOKEN>": build_date_time,
+            "<CONFIGURATION_SEED_HASH_TOKEN>": calculate_configuration_seed_hash(project_dir),
         }
         for token, value in replacements.items():
             content = content.replace(token, value)

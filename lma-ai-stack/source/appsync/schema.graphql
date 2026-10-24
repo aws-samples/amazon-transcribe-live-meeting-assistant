@@ -286,7 +286,11 @@ type Query @aws_cognito_user_pools
 	# engine is selected -- so every signed-in user reads it. The Virtual Participant
 	# task role reads it with SigV4, which is what @aws_iam is here for.
 	getAsrConfig(AsrConfigId: ID!): AsrConfig @aws_cognito_user_pools @aws_iam
-	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools(cognito_groups: ["Admin"]) @aws_iam
+	# Cognito user pools only, unlike its siblings above: the resolver behind
+	# this field decides from the caller's group membership, which a request
+	# signed with IAM credentials does not carry, so the declaration here
+	# names the one mode that can be answered.
+	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
@@ -941,6 +945,14 @@ type UpdateAsrConfigOutput @aws_cognito_user_pools @aws_iam {
 }
 
 # LLM Prompt Summary Templates
+#
+# The read returns a JSON string in LLMPromptTemplateId, which is how this field
+# has always answered. What is in that string is the record's prompts plus its
+# Version, UpdatedBy and UpdatedAt -- no longer the whole DynamoDB item, which
+# also carried the partition key and the seeded guidance text. Version is what
+# the editor sends back as ExpectedVersion when it saves, so a save made against
+# a record another administrator has since changed is refused rather than
+# replacing their edit.
 type LLMPromptTemplate @aws_cognito_user_pools @aws_iam {
 	LLMPromptTemplateId: ID!
 }
@@ -948,11 +960,18 @@ type LLMPromptTemplate @aws_cognito_user_pools @aws_iam {
 input UpdateLLMPromptTemplateInput {
 	LLMPromptTemplateId: ID!
 	TemplateConfig: String!
+	# The version the editor loaded. Optional, so a client that does not send
+	# it keeps working: its save is still conditional on the record as the
+	# resolver reads it, and supplying this adds the check against what the
+	# editor was actually looking at.
+	ExpectedVersion: Int
 }
 
 type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
 	LLMPromptTemplateId: ID!
 	Success: Boolean!
+	# The version now stored, so the editor can save again without reloading.
+	Version: Int
 }
 
 # Short-lived auth token for reaching a Virtual Participant's noVNC port when

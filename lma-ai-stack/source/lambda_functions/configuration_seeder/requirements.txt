@@ -1,0 +1,3 @@
+# boto3/botocore ship with the python3.12 Lambda runtime, urllib3 comes with
+# them (cfnresponse.py is the only thing that needs it), and the accessor comes
+# from the configuration Lambda layer. Nothing to pin.

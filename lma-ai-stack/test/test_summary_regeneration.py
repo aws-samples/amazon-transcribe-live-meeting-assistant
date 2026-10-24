@@ -405,15 +405,34 @@ def test_the_summary_state_vocabulary_matches_on_both_sides(regenerator: str) ->
 # ── the Knowledge Base snapshot ─────────────────────────────────────────────
 
 
-def test_the_run_sends_only_a_call_id_to_the_summariser(regenerator: str) -> None:
+def test_the_run_sends_no_prompt_override_to_the_summariser(regenerator: str) -> None:
     """A `Prompt` override would bypass the stored prompt templates and, in the
     Bedrock summariser, skip the snapshot of the transcript and summary written
     to S3 for the Bedrock Knowledge Base -- which regenerating is partly there
     to refresh."""
     invoke = regenerator[regenerator.index("def invoke_summary_function(") :]
     invoke = invoke[: invoke.index("\ndef ")]
-    assert 'json.dumps({"CallId": call_id})' in invoke
+    assert '"CallId": call_id' in invoke
     assert "Prompt" not in invoke
+
+
+def test_the_run_asks_the_summariser_to_re_read_its_configuration(regenerator: str) -> None:
+    """The panel promises the prompt templates as they are now.
+
+    The summariser caches them for a few minutes, which is right for the
+    end-of-meeting runs it does unattended and wrong for a button somebody
+    pressed straight after saving a prompt. Asserted on both sides, because the
+    field only works if the sender and the reader spell it the same way.
+    """
+    invoke = regenerator[regenerator.index("def invoke_summary_function(") :]
+    invoke = invoke[: invoke.index("\ndef ")]
+    assert '"RefreshConfiguration": True' in invoke
+
+    summariser = (
+        AI_STACK / "source" / "lambda_functions" / "bedrock_summary_lambda" / "index.py"
+    ).read_text(encoding="utf-8")
+    assert 'event.get("RefreshConfiguration")' in summariser
+    assert "CONFIG_STORE.invalidate()" in summariser
 
 
 def test_the_summariser_still_only_writes_the_snapshot_without_an_override() -> None:

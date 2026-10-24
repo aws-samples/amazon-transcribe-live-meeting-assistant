@@ -600,6 +600,30 @@ def test_clearing_a_prompt_is_conditional_on_the_row_the_caller_read() -> None:
     )
 
 
+def test_the_prompt_template_resolvers_both_name_the_field_they_serve() -> None:
+    """One Lambda answers both the read and the write, and dispatches on this.
+
+    The read moved off a DynamoDB data source because the shared configuration
+    table stores a record's body compressed and an AppSync JavaScript resolver
+    cannot decompress one. The function refuses a request that names no field
+    rather than inferring one from the argument shape, so a resolver that
+    stopped forwarding `ctx.info.fieldName` would fail every call -- which is
+    better than a read being treated as a write, and is what this pins.
+    """
+    for type_name, field_name in (
+        ("Query", "getLLMPromptTemplate"),
+        ("Mutation", "updateLLMPromptTemplate"),
+    ):
+        resolver = _resolver(type_name, field_name)
+        assert "ctx.info.fieldName" in resolver.mapping_source, (
+            f"{resolver.logical_id} does not forward ctx.info.fieldName, which the "
+            "function it invokes requires"
+        )
+        assert "operation: 'Invoke'" in resolver.mapping_source, (
+            f"{resolver.logical_id} is no longer a Lambda invocation"
+        )
+
+
 def test_every_appsync_source_file_is_referenced_by_the_template() -> None:
     """An unreferenced resolver file is never uploaded, so it silently does nothing."""
     referenced = set(re.findall(r"\.\./source/appsync/([\w.\-]+)", TEMPLATE.read_text()))

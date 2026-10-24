@@ -211,6 +211,23 @@ def main_template() -> dict:
     return yaml.load(MAIN_TEMPLATE.read_text(), Loader=_CfnLoader)
 
 
+def test_both_prompt_template_stacks_are_given_the_same_domain(main_template: dict):
+    """One domain, or the two tables hold different prompts.
+
+    The llm-template-setup stack still seeds the table a rollback reads, and the
+    AI stack seeds the shared configuration table. Each is told which set of
+    summary prompts this deployment ships. If the two values drifted, one table
+    would hold the general prompts and the other the healthcare ones, and which
+    a deployment used would depend on whether it had been rolled back.
+    """
+    resources = main_template["Resources"]
+    domains = {
+        name: resources[name]["Properties"]["Parameters"]["Domain"]
+        for name in ("AISTACK", "LLMTEMPLATESTACK")
+    }
+    assert len(set(domains.values())) == 1, f"the two stacks are given different domains: {domains}"
+
+
 def test_the_bedrock_model_choices_match_the_main_templates(template: dict, main_template: dict):
     """The other cross-template contract: both templates list the selectable models.
 
@@ -433,6 +450,84 @@ def test_functions_depend_on_the_log_group_they_name(resources: dict):
     )
 
 
+# Functions that ask for active tracing with a role that cannot write traces.
+# Both predate this check. They deploy, which is the point worth knowing: Lambda
+# does not refuse the function, the traces simply go nowhere, so the gap is
+# invisible until somebody looks for a trace that was never recorded.
+TRACED_FUNCTIONS_WHOSE_ROLE_CANNOT_WRITE_TRACES = {
+    "BucketDeleteLambda",
+    "UploadManifestLambda",
+}
+
+
+def test_a_function_that_traces_has_a_role_that_can_write_traces(resources: dict):
+    """`Tracing: Active` on a declared role gets no permissions from SAM.
+
+    SAM adds the X-Ray policy to a role it generates itself. A role declared in
+    the template gets exactly what the template gives it, so a function that
+    asks for tracing and a role that cannot write traces is a configuration that
+    costs something and delivers nothing -- and reports nothing either.
+    """
+    roles = _of_type(resources, "AWS::IAM::Role")
+    without = set()
+    for name, resource in _functions(resources).items():
+        properties = resource.get("Properties", {})
+        active = (
+            properties.get("Tracing") == "Active"
+            or (properties.get("TracingConfig") or {}).get("Mode") == "Active"
+        )
+        role = properties.get("Role")
+        if not active or not isinstance(role, dict) or "Fn::GetAtt" not in role:
+            continue
+        target = role["Fn::GetAtt"]
+        target = target[0] if isinstance(target, list) else str(target).split(".")[0]
+        attached = str(roles.get(target, {}).get("Properties", {}).get("ManagedPolicyArns", ""))
+        if "XRay" not in attached and "Xray" not in attached:
+            without.add(name)
+    assert without == TRACED_FUNCTIONS_WHOSE_ROLE_CANNOT_WRITE_TRACES, (
+        f"newly tracing without the permission to: "
+        f"{sorted(without - TRACED_FUNCTIONS_WHOSE_ROLE_CANNOT_WRITE_TRACES)} -- give the "
+        f"role AWSXRayDaemonWriteAccess or drop Tracing; now compliant: "
+        f"{sorted(TRACED_FUNCTIONS_WHOSE_ROLE_CANNOT_WRITE_TRACES - without)}"
+    )
+
+
+def test_configuration_readers_are_ordered_behind_the_seeder(resources: dict):
+    """A function must not go live before the configuration it reads exists.
+
+    CloudFormation is free to update a Lambda before the seeding custom resource
+    runs, and a reader that lands in that window has no baseline to read: a
+    meeting summary with no prompts, or a configuration page showing none. The
+    ordering is the fix, and it is invisible until a real upgrade hits the
+    window, so it is asserted here rather than left to a deploy to discover.
+
+    Keyed on the environment variable, so a function that starts reading
+    configuration later is caught by this without anyone remembering to add it.
+    """
+    without = set()
+    for name, resource in _functions(resources).items():
+        variables = resource.get("Properties", {}).get("Environment", {}).get("Variables") or {}
+        if "CONFIGURATION_TABLE_NAME" not in variables:
+            continue
+        declared = resource.get("DependsOn")
+        declared = [declared] if isinstance(declared, str) else (declared or [])
+        if "SeedConfiguration" not in declared:
+            without.add(name)
+    assert not without, (
+        f"these functions read the configuration table but are not ordered behind "
+        f"the seeder; add `SeedConfiguration` to their DependsOn: {sorted(without)}"
+    )
+    # Guards the selector itself: a renamed environment variable would make the
+    # loop above iterate over nothing and leave this test green.
+    readers = {
+        name
+        for name, resource in _functions(resources).items()
+        if "CONFIGURATION_TABLE_NAME"
+        in ((resource.get("Properties", {}).get("Environment", {}).get("Variables")) or {})
+    }
+    assert len(readers) >= 2, f"only found {len(readers)} functions reading the config table"
+
+
 def test_stateful_resources_set_a_deletion_policy(resources: dict):
     """Otherwise the default applies and the data goes with the stack."""
     without = {
@@ -461,9 +556,9 @@ def test_iam_roles_carry_the_permissions_boundary_conditional(resources: dict):
         for name, resource in roles.items()
         if "PermissionsBoundary" not in resource.get("Properties", {})
     }
-    assert len(without) == 35, (
+    assert len(without) == 33, (
         f"{len(without)} of {len(roles)} IAM roles do not reference "
-        f"PermissionsBoundaryArn, expected 35. If a role was added, give it the "
+        f"PermissionsBoundaryArn, expected 33. If a role was added, give it the "
         f"`!If [HasPermissionsBoundary, ...]` block; if one was fixed, lower this "
         f"number and update docs/cloudformation-service-role.md. Roles: "
         f"{sorted(without)}"
@@ -487,11 +582,11 @@ def test_partition_and_endpoint_literals_do_not_increase(raw: str):
             arn_literals += 1
         if "amazonaws.com" in line and "URLSuffix" not in line:
             endpoint_literals += 1
-    assert arn_literals <= 92, (
-        f"{arn_literals} lines hardcode 'arn:aws:' (was 92). Use "
+    assert arn_literals <= 88, (
+        f"{arn_literals} lines hardcode 'arn:aws:' (was 88). Use "
         f'!Sub "arn:${{AWS::Partition}}:..." instead.'
     )
-    assert endpoint_literals <= 89, (
-        f"{endpoint_literals} lines hardcode 'amazonaws.com' (was 89). Use "
+    assert endpoint_literals <= 84, (
+        f"{endpoint_literals} lines hardcode 'amazonaws.com' (was 84). Use "
         f'!Sub "service.${{AWS::URLSuffix}}" instead.'
     )

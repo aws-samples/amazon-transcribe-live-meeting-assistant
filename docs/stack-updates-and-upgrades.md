@@ -113,7 +113,8 @@ after the table.
 | `CustomerManagedEncryptionKey` | Main stack | The KMS key every other retained resource is encrypted with |
 | `UserPool` | Cognito stack | User accounts and group memberships |
 | `IdentityPool` | Cognito stack | Identity pool and the identity ids issued from it |
-| `LLMPromptTemplateTable` | LLM template stack | Prompt templates edited from the web UI |
+| `ConfigurationTable` | AI stack | Runtime configuration edited from the web UI: the deployment baseline, the profiles holding an administrator's edits, and the pointer naming the active one. See [Unified Configuration Store](configuration-store.md) |
+| `LLMPromptTemplateTable` | LLM template stack | Prompt templates as they were stored before `ConfigurationTable`. Still written by its own stack so a deployment can be rolled back, and read by the configuration seeder when `Config#custom` is absent. Note that a prompt edit saved after the upgrade lives only in `ConfigurationTable`, so a rollback reverts to the prompts as they were before it |
 | `ChatButtonConfigTable` | Chat button stack | Chat button definitions edited from the web UI |
 | `NovaSonicConfigTable` | Nova Sonic stack | Voice assistant prompt and model settings |
 | `AsrConfigTable` | ASR MicroVM stack | Diarization operating point tuned from the ASR Config page |

@@ -3079,6 +3079,9 @@ Resources:
     Properties:
       TemplateURL: https://s3.<REGION_TOKEN>.amazonaws.com/<ARTIFACT_BUCKET_TOKEN>/<ARTIFACT_PREFIX_TOKEN>/lma-llm-template-setup-stack/llm-template-setup.yaml
       Parameters:
+        # Keep in step with the Domain passed to AISTACK: this stack still seeds
+        # the table a rollback reads, and the two disagreeing would leave one
+        # holding the general summary prompts and the other the healthcare ones.
         Domain: "Default"
         CloudWatchLogsExpirationInDays: !Ref CloudWatchLogsExpirationInDays
         CustomerManagedEncryptionKeyArn: !GetAtt CustomerManagedEncryptionKey.Arn
@@ -3175,6 +3178,15 @@ Resources:
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
+        # Substituted by the publish step with a digest of the shipped
+        # configuration content and of the code that processes it. It is what
+        # makes CloudFormation re-run the configuration seeder when either
+        # changes; a property that never changes is a custom resource that is
+        # never invoked again after the first deployment.
+        # Keep in step with the Domain passed to LLMTEMPLATESTACK above; see the
+        # comment there.
+        Domain: "Default"
+        ConfigurationSeedHash: "<CONFIGURATION_SEED_HASH_TOKEN>"
         ChatButtonConfigTableName: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.ChatButtonConfigTableName
         NovaSonicConfigTableName: !GetAtt NOVASONICONFIGSTACK.Outputs.NovaSonicConfigTableName
         AsrConfigTableName: !If
@@ -4572,17 +4584,40 @@ Outputs:
       transcript as a string.
     Value: !GetAtt AISTACK.Outputs.FetchTranscriptArn
 
+  ConfigurationProfileOrigin:
+    Description: >-
+      How this stack's configuration profile came to exist. Stamped when the
+      profile is created and unchanged by later deployments or saves.
+      'created-previous-table-unreadable' is the value to act on: summary prompt
+      templates customized before the upgrade were not carried across and have
+      to be applied again from the Transcript Summary page. The table they used
+      to live in is retained, so the old values can be read from it.
+    Value: !GetAtt AISTACK.Outputs.ConfigurationProfileOrigin
+
+  # Both links below point at the shared configuration table. The record's body
+  # is a compressed attribute there, so these are for inspecting provenance --
+  # who saved a record and when -- rather than for editing: prompts are edited
+  # on the Transcript Summary page in the web UI, which is also the only path
+  # that refuses a save another administrator has superseded.
   LLMDefaultPromptSummaryTemplate:
     Description:
-      View the *default* summary prompts. Do not edit. To override default
-      prompts, add or edit attributes in the custom summary prompts item.
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=DefaultSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+      View the *default* summary prompts record. Rewritten whenever a release
+      changes the prompts it ships, so edit the custom profile instead -- from
+      the Transcript Summary page in the web UI.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23default&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   LLMCustomPromptSummaryTemplate:
     Description:
-      Edit the *custom* summary prompts. Attribute values here override
-      the default summary prompts, and are preserved during stack updates.
-    Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomSummaryPromptTemplates&route=ROUTE_ITEM_EXPLORER&sk=&table=${LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName}"
+      View the *custom* summary prompts record, which overrides the default one
+      and is preserved during stack updates. Edit it from the Transcript
+      Summary page in the web UI.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23custom&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   TroubleshootingAgentCustomPrompt:
     Description:
