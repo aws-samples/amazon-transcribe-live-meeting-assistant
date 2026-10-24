@@ -190,7 +190,11 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
             "A live audio session opened for a meeting, and the denominator for "
             "StreamingSessionsWithoutTranscript. One per audio session, not per "
             "meeting: a client that reconnects for the same meeting opens a "
-            "second session and is counted again, where MeetingsStarted is not."
+            "second session and is counted again, where MeetingsStarted is not. "
+            "Counts only meetings streamed through the transcriber -- a Virtual "
+            "Participant transcribes in its own container and writes to Kinesis "
+            "itself, and an uploaded recording opens no live session, so "
+            "neither is counted here though both reach MeetingsStarted."
         ),
     ),
     MetricDefinition(
@@ -219,7 +223,9 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
             "rather than somebody changing their mind. Nothing else reports "
             "this: the session closes normally, the meeting record reaches "
             "ENDED, and the meeting page shows an empty transcript with no "
-            "error anywhere. Alarmed for that reason."
+            "error anywhere. Alarmed for that reason. Covers only meetings "
+            "streamed through the transcriber, so a Virtual Participant that "
+            "transcribes nothing is not counted -- it has no equivalent yet."
         ),
     ),
 )

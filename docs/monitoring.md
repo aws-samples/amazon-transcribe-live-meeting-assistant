@@ -171,6 +171,16 @@ language code or custom vocabulary the account does not have; and, where the
 MicroVM ASR engine is selected on the Transcription Engine page, an engine that
 could not start with fallback to Amazon Transcribe switched off.
 
+What it cannot see: meetings that do not go through the transcriber. A Virtual
+Participant runs Amazon Transcribe, or the MicroVM ASR engine, inside its own
+container and writes transcript segments straight to Kinesis, so a Virtual
+Participant that joins a meeting and transcribes nothing is not counted here
+and this alarm will not fire for it. The same goes for an uploaded recording.
+For a deployment whose meetings are mostly Virtual Participant ones, this alarm
+covers very little — the Virtual Participant publishes no metrics of its own
+yet, which is the first gap named under
+[What is not published yet](#what-is-not-published-yet).
+
 One case to expect noise from: a transcriber task replaced mid-meeting, by a
 deployment or by scale-in. Its shutdown closes the server, which closes each
 connected socket, which runs the same per-meeting teardown a client
@@ -213,7 +223,7 @@ name without being edited.
 | `MeetingsEnded` | Count | Call Event Processor | A meeting was marked ended, counted on the write that closed it. Read against `MeetingsStarted` over a long window rather than a short one — a live meeting is legitimately started and not yet ended. |
 | `TranscriptSegmentsWritten` | Count | Call Event Processor | Transcript segment writes that AppSync accepted. Counts partial segments as well as final ones, so it tracks pipeline throughput rather than the number of things said. |
 | `TranscriptSegmentWriteFailed` | Count | Call Event Processor | Transcript segment writes that failed. Alarmed; see the note above for why nothing else reports these. |
-| `StreamingSessionsStarted` | Count | WebSocket transcriber | A live audio session opened for a meeting, and the denominator for the metric below. One per audio session, not per meeting: a client that drops its socket and reconnects for the same meeting opens a second session and is counted again, where `MeetingsStarted` is not. Video sockets are separate and are not counted. Lower than `MeetingsStarted` on a deployment that also transcribes uploaded recordings, which never open a live session. |
+| `StreamingSessionsStarted` | Count | WebSocket transcriber | A live audio session opened for a meeting, and the denominator for the metric below. One per audio session, not per meeting: a client that drops its socket and reconnects for the same meeting opens a second session and is counted again, where `MeetingsStarted` is not. Video sockets are separate and are not counted. **Counts only meetings streamed through the transcriber** — Stream Audio, the browser extension and the desktop app. A Virtual Participant transcribes in its own container and writes to Kinesis itself, and an uploaded recording never opens a live session, so neither appears here even though both are counted by `MeetingsStarted`. |
 | `TimeToFirstTranscriptSegmentMs` | Milliseconds | WebSocket transcriber | Milliseconds from a meeting's audio session opening to its first transcript segment reaching Kinesis, emitted once per audio session, so a client that reconnects produces a second value measured from the reconnect. Graphed, not alarmed; see the note above. |
 | `StreamingSessionsWithoutTranscript` | Count | WebSocket transcriber | A session closed having produced no transcript segment at all, after running long enough that silence is a fault. Alarmed. |
 
@@ -255,7 +265,10 @@ The Virtual Participant, the MicroVM ASR engine and the Meeting Assistant
 publish nothing. That means there is still no metric for the fraction of
 Virtual Participant joins that fail and on which trigger, for how often ASR
 falls back to Amazon Transcribe, or for assistant and Bedrock latency and
-failure rates. Those remain diagnosable only from the log groups
+failure rates. The Virtual Participant is the significant one: it transcribes
+in its own container rather than through the transcriber, so none of the three
+session metrics above covers a Virtual Participant meeting, and the equivalent
+of `StreamingSessionsWithoutTranscript` for it does not exist. Those remain diagnosable only from the log groups
 [Troubleshooting](troubleshooting.md) names. They are a separate piece of work,
 deliberately: the Virtual Participant's exit-reason taxonomy wants a metric
 dimension, and whether its value space is closed enough to be one needs
@@ -388,7 +401,7 @@ mislead. Reading top to bottom:
 | Transcriber load balancer | `TargetResponseTime` p99 and `HTTPCode_Target_5XX_Count` | Errors at the edge. Response time is of limited use here: a meeting is one long-lived WebSocket, so what is being timed is the upgrade handshake, not the meeting. |
 | GraphQL API | `4XXError`, `5XXError` and `Latency` p99 | What the web UI is experiencing. 4XX is usually an expired client token and is not alarmed; 5XX is a failing resolver and is. |
 | Application metrics (band header) | A note naming the namespace these widgets read | The four widgets in this band come from LMA rather than from an AWS service; the error tables further down are Logs Insights queries, not metrics. If a series in the band is empty while meetings are running, the component is not publishing rather than nothing having happened — check that `METRIC_NAMESPACE` is set on it. |
-| Meetings | `MeetingsStarted`, `MeetingsEnded` and `StreamingSessionsStarted` | Whether meetings are happening, and whether they are finishing. Started and ended will not match over a short window, because a live meeting has started and not ended; a persistent gap over hours is meetings that never closed, which is what the stale-meeting reaper exists for. Live audio sessions are lower than meetings started on a deployment that also transcribes uploaded recordings. |
+| Meetings | `MeetingsStarted`, `MeetingsEnded` and `StreamingSessionsStarted` | Whether meetings are happening, and whether they are finishing. Started and ended will not match over a short window, because a live meeting has started and not ended; a persistent gap over hours is meetings that never closed, which is what the stale-meeting reaper exists for. Live audio sessions count only the meetings streamed through the transcriber, so they are lower than meetings started by however many Virtual Participant and uploaded-recording meetings the deployment has — not a fault. |
 | Time to first transcript segment | `TimeToFirstTranscriptSegmentMs` at minimum, average, p90 and p99 | How long a meeting waits for its transcript to begin. Read the shape, not a value: the interval is dominated by when somebody first speaks, so the minimum is the closest thing here to a measure of the pipeline itself, and a rising p90 with a flat minimum usually means meetings are starting earlier rather than the pipeline slowing. |
 | Transcript segment writes | `TranscriptSegmentsWritten` and `TranscriptSegmentWriteFailed`, annotated at the alarm threshold | Whether the transcript is reaching the meeting page. Any value on the failure series is a line that is simply missing, with no error on the meeting page and nothing on the discarded-records queue. |
 | Audio sessions that produced no transcript | `StreamingSessionsWithoutTranscript` against `StreamingSessionsStarted`, annotated at the alarm threshold | Sessions that streamed audio and got nothing back. Sessions under thirty seconds are not counted, so a value here is a session that ran long enough for silence to be a fault rather than a user who changed their mind — though a muted room or a meeting abandoned at minute two still lands here, which is why the alarm needs three in a window. Read against sessions opened: one in fifty is a different problem from one in two. |
