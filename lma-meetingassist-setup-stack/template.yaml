@@ -476,11 +476,21 @@ Resources:
   # change of posture, not a refactor.
   #
   # Every grant below is scoped to this deployment's own resources. The role
-  # reads and does not change anything it diagnoses. Three grants are not
-  # reads, and none of them touches the deployment: appsync:GraphQL on the
-  # single addChatToken mutation, so the investigation can narrate itself to
-  # the UI; logs:StopQuery, so a query this role started can be cancelled; and
-  # writing this function's own log stream.
+  # reads and does not change anything it diagnoses. The grants that are not
+  # reads do not touch the deployment either, and they are of exactly these
+  # kinds — stated as kinds rather than as a count, because a count in a
+  # comment goes stale the moment one is added:
+  #
+  #   * narration — appsync:GraphQL on the single addChatToken mutation, so
+  #     the investigation can report its progress to the UI;
+  #   * cleanup — logs:StopQuery, so a query this role itself started can be
+  #     cancelled;
+  #   * its own telemetry — writing its own log stream, and its own X-Ray
+  #     trace segments.
+  #
+  # lma-ai-stack/test/test_troubleshooting_agent_iam.py enumerates the role's
+  # entire action surface, so that is the authoritative list; this comment is
+  # the explanation of why each kind is here.
   #
   # Two deliberate omissions:
   #
@@ -497,16 +507,17 @@ Resources:
         rules_to_suppress:
           - id: W11
             reason: >-
-              Five actions support no resource-level permissions, so the
-              statements that carry them cannot be narrowed.
+              These actions support no resource-level permissions, so the
+              statements that carry them cannot be narrowed:
               logs:DescribeLogGroups lists the account's log groups and takes
               no log group as input; logs:GetQueryResults and logs:StopQuery
               take a query id; xray:PutTraceSegments and
               xray:PutTelemetryRecords are what active tracing requires and
               name no resource. Which log groups the agent can read is bounded
-              by logs:StartQuery, scoped to this deployment's own log groups,
-              and the role's only non-read grants are the three named in the
-              role comment above plus those two tracing writes.
+              by logs:StartQuery, which is scoped to this deployment's own log
+              groups, and the role carries no action that changes anything it
+              diagnoses — see the role comment above for the kinds of non-read
+              grant it does hold.
     Properties:
       AssumeRolePolicyDocument:
         Version: "2012-10-17"

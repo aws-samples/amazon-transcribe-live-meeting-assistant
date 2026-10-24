@@ -7,14 +7,14 @@
 Two kinds of assertion here, and they pull in opposite directions, which is
 why they are tested together:
 
-* **Narrow enough.** The role is read-only and scoped to one deployment, and
-  the grants that could widen it are named individually so a later edit has to
-  change a test to loosen one.
-* **Wide enough to actually work.** Three CloudWatch Logs read actions support
-  no resource-level permissions, and scoping those denies every call. The unit
-  tests for the tools stub the Logs client, so nothing else in this repository
-  would catch that — a diagnosis would simply fail on a deployed stack with
-  every log group reported as unknown.
+* **Narrow enough.** The role is scoped to one deployment and changes nothing
+  it diagnoses, and the grants that could widen it are named individually so a
+  later edit has to change a test to loosen one.
+* **Wide enough to actually work.** Several actions support no resource-level
+  permissions, and scoping those denies every call. The unit tests for the
+  tools stub the Logs client, so nothing else in this repository would catch
+  that — a diagnosis would simply fail on a deployed stack with every log group
+  reported as unknown.
 
 The resource-type facts are from the IAM service authorization reference for
 Amazon CloudWatch Logs: ``StartQuery`` and ``DescribeLogStreams`` take a
@@ -343,12 +343,13 @@ def test_resolving_nested_stack_names_is_granted_on_the_parent_only(
 #: is that its surface is enumerable. Adding to this list is the deliberate act
 #: that a reviewer should see.
 #:
-#: Four of these are not reads, making up the three grants the role's comment,
-#: docs/troubleshooting-agent.md and the CHANGELOG all list. None touches the
-#: deployment: `appsync:GraphQL` publishes a progress step through one mutation
-#: field, `logs:StopQuery` cancels a query this role started, and
-#: `logs:CreateLogStream` with `logs:PutLogEvents` writes this function's own
-#: log group.
+#: Some of these are not reads — see PERMITTED_NON_READS, which is the list
+#: that says which. None of them touches the deployment: `appsync:GraphQL`
+#: publishes a progress step through one mutation field, `logs:StopQuery`
+#: cancels a query this role itself started, and the log and X-Ray writes are
+#: this function's own telemetry. Counts are deliberately absent from these
+#: comments: a count goes stale the moment an action is added, and the sets
+#: below are the authoritative statement either way.
 PERMITTED_ACTIONS = {
     "logs:DescribeLogGroups",
     "logs:StartQuery",
@@ -377,7 +378,7 @@ PERMITTED_ACTIONS = {
 
 #: The permitted actions that are not reads, named so the claim "it reads and
 #: does not change anything it diagnoses" can be checked rather than trusted.
-#: Four actions, three grants: the two log-write actions are one grant.
+#: Narration, cancelling its own query, and its own logs and traces.
 PERMITTED_NON_READS = {
     "appsync:GraphQL",
     "logs:StopQuery",
@@ -446,12 +447,12 @@ def test_the_role_cannot_create_a_log_group(role: Dict[str, Any]) -> None:
     assert not statements_granting(role, "logs:CreateLogGroup")
 
 
-def test_the_non_read_actions_are_only_the_three_grants_the_docs_describe(
+def test_the_non_read_actions_are_only_the_kinds_the_docs_describe(
     role: Dict[str, Any],
 ) -> None:
     """Pins the claim the template comment, the docs and the CHANGELOG all make:
     the role reads, and the exceptions are narrating progress, cancelling its
-    own query, and writing its own log stream.
+    own query, and writing its own logs and traces.
 
     The write-prefix list below has to stay broad enough to catch an action
     that is not a read even when it is not called "Put" or "Create" —
@@ -490,9 +491,9 @@ def test_the_non_read_actions_are_only_the_three_grants_the_docs_describe(
     assert non_reads == PERMITTED_NON_READS, (
         f"the role's non-read surface changed: {sorted(non_reads)}. The role's "
         "own comment, docs/troubleshooting-agent.md and the CHANGELOG all list "
-        "three non-read grants -- narrating progress, cancelling its own query, "
-        "and writing its own log stream -- plus the two tracing writes active "
-        "tracing requires. Update all three descriptions if this is intended."
+        "the kinds of non-read grant this role holds -- narrating progress, "
+        "cancelling its own query, and writing its own logs and traces. Update "
+        "all three descriptions if this is intended."
     )
 
 

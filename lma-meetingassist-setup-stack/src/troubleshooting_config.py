@@ -69,6 +69,12 @@ _LIMITS: Dict[str, Tuple[int, int]] = {
     # Cumulative input + output tokens for the whole run, counted from the
     # usage figures Bedrock returns. The system prompt is large and resent on
     # every turn, which is what makes a per-turn cap insufficient.
+    #
+    # Checked between tool calls, from the usage the SDK has accumulated by
+    # then — so it lags the turn that requested the current tool and a run can
+    # cross it by roughly one turn before stopping. That is the cost of reading
+    # Bedrock's own figures instead of estimating; treat this as a budget with
+    # a turn's tolerance, not a hard ceiling.
     "token_budget": (250_000, 1_000_000),
     # Wall clock for the whole run. This is a *requested* budget: the effective
     # one is the smaller of this and the time the Lambda invocation actually
