@@ -32,6 +32,7 @@ export function createVoiceAssistant(config: ProviderConfig): VoiceAssistantProv
         systemPrompt: config.systemPrompt,
         knowledgeBaseId: config.knowledgeBaseId,
         activationMode: config.activationMode,
+        activationDuration: config.activationDuration,
         region: config.region,
         strandsLambdaArn: config.strandsLambdaArn,
       });
