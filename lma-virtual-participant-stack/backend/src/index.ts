@@ -8,7 +8,7 @@ import TeamsSdk from './teams-sdk.js';
 import Webex from './webex.js';
 import { details, ExitInfo, formatExitMessage, didJoinMeeting, normalizeExitTrigger } from './details.js';
 import { transcriptionService } from './scribe.js';
-import { VirtualParticipantStatusManager } from './status-manager.js';
+import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { videoRecorder } from './video-recorder.js';
 import {
@@ -904,7 +904,7 @@ const signalHandler = async (signal: string) => {
     shutdownRequested = true;
     // From here on the setup or join code still running reports no further
     // progress; only the terminal status below is written.
-    statusManager?.beginShutdown();
+    beginShutdown();
     
     // Deregister from ALB target group
     if (statusManager) {
@@ -992,7 +992,7 @@ process.on('SIGTERM', () => signalHandler('SIGTERM'));
 const emergencyCleanup = async (errorMessage: string): Promise<void> => {
     // Set flag to prevent recursive cleanup if another exception fires during this
     cleanupInProgress = true;
-    statusManager?.beginShutdown();
+    beginShutdown();
     console.log('Performing emergency cleanup before exit...');
 
     // Send END event to Kinesis so the meeting is marked as ended

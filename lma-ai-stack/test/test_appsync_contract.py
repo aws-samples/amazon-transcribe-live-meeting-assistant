@@ -625,15 +625,24 @@ def test_progress_status_is_conditional_on_the_row_not_having_been_ended() -> No
     assert '$conditionNames.put("#conditionEndReason", "endReason")' in guard.group(2)
     assert '$conditions.add("attribute_not_exists(#conditionEndReason)")' in guard.group(2)
 
-    # The end request is the one writer of endReason; the reaper's FAILED
-    # does not carry it.
+    # The end request is the one writer of endReason. The launcher state
+    # machine's and the task reaper's FAILED writes, in the VP stack template,
+    # do not carry it: none of that template's update expressions names it,
+    # either directly or through an expression attribute name.
     manager = (
-        TEMPLATE.parent.parent
-        / "source/lambda_functions/virtual_participant_manager/index.py"
+        TEMPLATE.parent.parent / "source/lambda_functions/virtual_participant_manager/index.py"
     ).read_text()
     assert "endReason = :end_reason" in manager
-    reaper = (TEMPLATE.parent.parent.parent / "lma-virtual-participant-stack/template.yaml")
-    assert "endReason" not in reaper.read_text()
+    vp_template = (
+        TEMPLATE.parent.parent.parent / "lma-virtual-participant-stack/template.yaml"
+    ).read_text()
+    update_expressions = re.findall(r"UpdateExpression[\"']?\s*[:=]\s*\(?\s*([^\n]+)", vp_template)
+    assert len(update_expressions) >= 3, "the VP stack's status writes were not found"
+    for expression in update_expressions:
+        assert "endReason" not in expression, expression
+    assert not re.search(r"[\"']endReason[\"']", vp_template), (
+        "the VP stack template maps an expression attribute name to endReason"
+    )
 
     # Every condition is emitted, ANDed, in the one condition block.
     assert "${conditionExpression} AND " in resolver.block

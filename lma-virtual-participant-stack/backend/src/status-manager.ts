@@ -210,9 +210,31 @@ const SUBSCRIBED_FIELDS = `
  * Whether this process has begun to shut down. Module state rather than a
  * field, because it describes the process: the platform handlers create a
  * manager of their own for each write, and every one of them has to see it.
- * Set through `VirtualParticipantStatusManager.beginShutdown`.
  */
 let processShuttingDown = false;
+
+/**
+ * Record that this process has begun to shut down, so it stops reporting
+ * progress.
+ *
+ * Called from the signal handler and the emergency cleanup. From then on no
+ * manager in this process writes a progress status, a join sub-step, a
+ * manual-action prompt or the clearing of one; only a terminal status goes
+ * through. Whatever the setup or join code was in the middle of carries on
+ * running until the process exits, and each progress write it would otherwise
+ * make describes a participant that is no longer going to get there. A
+ * terminal status is still written, because recording how the participant
+ * ended is what the shutdown path is for.
+ *
+ * This covers writes that start after the signal, and those whose row read
+ * was still in flight when it came. One whose mutation was already on its way
+ * to AppSync is the resolver's to decline: a progress status does not land on
+ * a row whose end has been recorded (see the updateVirtualParticipant
+ * resolver).
+ */
+export const beginShutdown = (): void => {
+  processShuttingDown = true;
+};
 
 export class VirtualParticipantStatusManager {
   private participantId: string;
@@ -293,27 +315,6 @@ export class VirtualParticipantStatusManager {
       console.error('Failed to send GraphQL request:', error);
       throw error;
     }
-  }
-
-  /**
-   * Record that this process has begun to shut down, so it stops reporting
-   * progress.
-   *
-   * Called from the signal handler and the emergency cleanup. From then on the
-   * only status any manager in this process writes is a terminal one: whatever
-   * the setup or join code was in the middle of carries on running until the
-   * process exits, and each progress status it would otherwise write describes
-   * a participant that is no longer going to get there. A terminal status still goes through,
-   * because recording how the participant ended is what the shutdown path is
-   * for.
-   *
-   * This covers writes that start after the signal. One that was already on
-   * its way to AppSync is the resolver's to decline: a progress status does not
-   * land on a row whose end has been recorded (see the updateVirtualParticipant
-   * resolver).
-   */
-  beginShutdown(): void {
-    processShuttingDown = true;
   }
 
   /** Whether a progress write should be skipped because shutdown has begun. */
@@ -819,6 +820,7 @@ export class VirtualParticipantStatusManager {
       }
 
       const current = currentVP.getVirtualParticipant;
+      if (this.skipProgressWrite(`a ${actionType} prompt`)) return false;
       console.log(`Setting manual action required: ${actionType} - ${message}`);
 
       // Update with MANUAL_ACTION_REQUIRED status and metadata.
@@ -909,6 +911,10 @@ export class VirtualParticipantStatusManager {
    * drops out, which it reports rather than retries.
    */
   async clearManualAction(): Promise<boolean> {
+    // Clearing a prompt resumes a progress status, and after shutdown has
+    // begun the terminal status being written supersedes the prompt anyway:
+    // the UI shows a prompt only while the status is MANUAL_ACTION_REQUIRED.
+    if (this.skipProgressWrite('the clearing of a prompt')) return false;
     try {
       console.log(`Clearing manual action for VP ${this.participantId}`);
 
@@ -932,6 +938,7 @@ export class VirtualParticipantStatusManager {
       }
 
       const current = currentVP.getVirtualParticipant;
+      if (this.skipProgressWrite('the clearing of a prompt')) return false;
 
       const mutation = `
         mutation UpdateVirtualParticipant($input: UpdateVirtualParticipantInput!) {

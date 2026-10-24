@@ -7251,7 +7251,9 @@ Resources:
         ## statuses are not conditioned, so the participant can still record how **
         ## it ended. A FAILED written by the launcher state machine or the task **
         ## reaper carries no endReason, so a participant that is in fact still **
-        ## running can carry on reporting progress after one. **
+        ## running can carry on reporting progress after one. A write that **
+        ## supplies no status -- a join sub-step's detail line, a CallId -- is **
+        ## not conditioned: it cannot move an ended row's status. **
         #set( $terminalStatuses = ["COMPLETED", "FAILED", "ENDED", "CANCELLED"] )
         #if( !$util.isNullOrBlank($ctx.args.input.status) && !$terminalStatuses.contains($ctx.args.input.status) )
           $util.qr( $conditionNames.put("#conditionEndReason", "endReason") )
