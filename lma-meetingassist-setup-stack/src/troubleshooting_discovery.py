@@ -349,7 +349,11 @@ def stack_log_group_prefixes(
     # the evidence for the participants most likely to be asked about.
     # discover_log_groups keeps only exact matches for these, because the
     # legacy "-vp" is also a prefix of "-vp-logs" and of a neighbouring
-    # "LMA-vpn-vp-logs".
+    # "LMA-vpn-vp-logs". The current names are matched exactly too, on purpose,
+    # which is narrower than the IAM grant for them: that grant ends in "*",
+    # which also covers the ":*" stream form of each group's ARN. Narrowing the
+    # grant to match would need that form listed explicitly, as the legacy
+    # entries do.
     prefixes.extend(microvm_log_group_names(stack_name))
 
     if nested_stack_names:
@@ -466,14 +470,19 @@ def discover_log_groups(
     for prefix in prefixes:
         if truncated:
             break
+        # A MicroVM prefix is a full group name and is matched exactly; see
+        # stack_log_group_prefixes. The longer names it also returns are
+        # skipped without counting toward the cap, so paging for it stops as
+        # soon as the exact name has been seen rather than running on through
+        # them. When the exact name does not exist, paging is bounded by how
+        # many other groups share the prefix, which is few.
+        exact = prefix in microvm_names
         for page in paginator.paginate(logGroupNamePrefix=prefix):
             for group in page.get("logGroups", []):
                 name = group.get("logGroupName")
                 if not name or name in found:
                     continue
-                if prefix in microvm_names and name != prefix:
-                    # A MicroVM prefix is a full group name and is matched
-                    # exactly; see stack_log_group_prefixes.
+                if exact and name != prefix:
                     continue
                 if len(found) >= max_log_groups:
                     # Stop paginating rather than collecting and slicing: the
@@ -488,7 +497,7 @@ def discover_log_groups(
                     retention_days=group.get("retentionInDays"),
                     generation=microvm_names.get(name),
                 )
-            if truncated:
+            if truncated or (exact and prefix in found):
                 break
 
     return DiscoveryResult(

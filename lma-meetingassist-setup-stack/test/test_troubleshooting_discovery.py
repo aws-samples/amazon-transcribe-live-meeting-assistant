@@ -528,6 +528,42 @@ def test_the_legacy_lookup_matches_its_name_exactly() -> None:
     for name in neighbours:
         assert name not in found
 
+    # And where this deployment has no legacy group at all, which is when
+    # paging for it runs through every near-match.
+    found = by_name(discover(FakeLogsClient(NOT_MICROVM + [(n, 5) for n in neighbours])))
+
+    assert LEGACY_VP not in found
+    for name in neighbours:
+        assert name not in found
+
+
+def test_paging_for_a_microvm_name_stops_once_the_name_is_found() -> None:
+    """Near-matches are skipped without counting toward the cap, so the cap
+    cannot bound paging for these lookups; finding the exact name does."""
+
+    class CountingPages(FakeLogsClient):
+        def __init__(self, groups: List[tuple[str, int]]):
+            super().__init__(groups)
+            self.pages_served: Dict[str, int] = {}
+
+        def paginate(self, logGroupNamePrefix: str):  # noqa: N803
+            pages = super().paginate(logGroupNamePrefix)
+            for page in pages:
+                self.pages_served[logGroupNamePrefix] = (
+                    self.pages_served.get(logGroupNamePrefix, 0) + 1
+                )
+                yield page
+
+    # The exact name first, then names that share its prefix: two pages.
+    client = CountingPages(
+        NOT_MICROVM + [(LEGACY_VP, 1), (CURRENT_VP, 1), (f"/aws/lambda-microvms/{STACK}-vpn", 1)]
+    )
+
+    found = by_name(discover(client))
+
+    assert client.pages_served[LEGACY_VP] == 1
+    assert LEGACY_VP in found and CURRENT_VP in found
+
 
 def test_the_current_group_is_labelled_current_whichever_prefix_finds_it(
     monkeypatch: pytest.MonkeyPatch,
