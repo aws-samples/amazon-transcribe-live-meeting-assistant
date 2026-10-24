@@ -2159,18 +2159,24 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     
+    // Write audio directly to persistent pacat stream (non-blocking).
+    //
+    // Before the avatar, not after: ensurePacatStream makes way for this
+    // utterance by ending a stream that was still draining, and ending one
+    // clears the avatar's buffer. Sending this chunk first would hand the
+    // avatar the opening of the new utterance and then discard it along with
+    // the audio it was making way for.
+    const pacat = this.ensurePacatStream();
+    if (pacat?.stdin && !pacat.stdin.destroyed) {
+      pacat.stdin.write(audioBuffer);
+    }
+
     // Forward audio to Simli avatar for lip-sync animation
     // This runs in parallel with PulseAudio playback - Simli only uses it for video
     if (simliAvatar.isConnected()) {
       simliAvatar.sendAudioData(audioBuffer).catch(err => {
         // Non-critical - avatar lip-sync failure shouldn't affect audio
       });
-    }
-    
-    // Write audio directly to persistent pacat stream (non-blocking)
-    const pacat = this.ensurePacatStream();
-    if (pacat?.stdin && !pacat.stdin.destroyed) {
-      pacat.stdin.write(audioBuffer);
     }
     
     // Track speaking state with timeout-based detection
@@ -2616,8 +2622,13 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.stopRequest) {
       // Someone repeating themselves inside the window must not stack a second
       // timer or push the deadline out: the request already in flight is
-      // guaranteed to silence the assistant.
-      this.logStopRequest('transcript', 'already-deferred');
+      // guaranteed to silence the assistant. Which kind of request that is
+      // matters to the account — nothing was deferred on this route if the
+      // model asked to mute itself first and the transcript only caught up.
+      this.logStopRequest(
+        'transcript',
+        this.stopRequest.fromTranscript ? 'already-deferred' : 'already-claimed-by-tool',
+      );
       return true;
     }
 

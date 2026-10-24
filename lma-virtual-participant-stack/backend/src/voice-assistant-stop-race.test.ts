@@ -703,14 +703,48 @@ test('cutting a drain short stops the lips with the sound', async () => {
         (agent as any).killDrainingPacatStream();
         assert.equal(cleared, 1, 'the avatar must stop with the audio');
 
-        // A stream that already finished on its own leaves nothing to clear:
-        // its audio was played in full and the lips kept up with it.
-        (agent as any).drainingPacatProcess = { killed: true, kill: () => {} };
+        // A stream that ran out on its own, by the route production takes: a
+        // self-exiting process keeps `killed === false`, and it is its `close`
+        // handler calling forgetPacatStream that drops the reference, so there
+        // is nothing left here to end. Its audio was played in full and the
+        // lips kept up with it, so clearing the buffer would truncate them.
+        const ranOut = { killed: false, kill: () => {} };
+        (agent as any).drainingPacatProcess = ranOut;
+        (agent as any).forgetPacatStream(ranOut);
         (agent as any).killDrainingPacatStream();
         assert.equal(cleared, 1, 'a drain that ran out needs no intervention');
     } finally {
         (simliAvatar as any).isConnected = realIsConnected;
         (simliAvatar as any).clearAudioBuffer = realClear;
+    }
+});
+
+test('speaking again clears the way before handing the avatar new audio', async () => {
+    // ensurePacatStream makes way for an utterance by ending a stream that is
+    // still draining, and ending one clears the avatar's buffer. The chunk
+    // therefore has to reach playback first: offered to the avatar before that,
+    // the opening of the new utterance is discarded with the audio it was
+    // making way for.
+    const agent = novaAgent();
+    const order: string[] = [];
+    (agent as any).ensurePacatStream = () => {
+        order.push('playback');
+        return null;
+    };
+
+    const realIsConnected = simliAvatar.isConnected;
+    const realSend = simliAvatar.sendAudioData;
+    try {
+        (simliAvatar as any).isConnected = () => true;
+        (simliAvatar as any).sendAudioData = async () => {
+            order.push('avatar');
+        };
+        await (agent as any).playAudio(Buffer.alloc(320));
+        assert.deepEqual(order, ['playback', 'avatar']);
+    } finally {
+        (simliAvatar as any).isConnected = realIsConnected;
+        (simliAvatar as any).sendAudioData = realSend;
+        (agent as any).stopPacatStream();
     }
 });
 
@@ -823,6 +857,25 @@ test('a request the model raised on its own is reported as the tool route', asyn
         // the request was recognised, on every line in the family.
         assert.match(stopLines().join('\n'), /route=tool action=stood-down/);
         assert.doesNotMatch(stopLines().join('\n'), /route=transcript/);
+    } finally {
+        release();
+    }
+});
+
+test('a transcript stop catching up with the model is not called a deferral', async () => {
+    // The model asked to mute itself and the transcript only then matched the
+    // same utterance. Nothing was deferred on the transcript route, and the
+    // account must not say it was.
+    capture();
+    try {
+        const agent = novaAgent();
+        (agent as any).noteMuteToolRequested();
+        assert.equal(agent.requestStopTalking('test'), true);
+        assert.match(stopLines().join('\n'), /action=already-claimed-by-tool/);
+        assert.doesNotMatch(stopLines().join('\n'), /action=already-deferred/);
+
+        await delay(PAST_BACKSTOP_MS);
+        assert.equal(agent.isMuted(), true, 'either way it ends in silence');
     } finally {
         release();
     }
