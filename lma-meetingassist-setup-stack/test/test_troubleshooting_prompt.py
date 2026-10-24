@@ -268,6 +268,17 @@ def prompt_text() -> str:
         # older one; the stream name is how its microvmId finds it.
         "search the legacy group too",
         "stream names contain the microvmId",
+        # A VP ended from outside has its reason on the row and no exit line
+        # in its log; one whose status is still non-terminal beside a recorded
+        # end has ended, and its status is stale.
+        "That recorded endReason IS the stored answer to why it ended",
+        "Received SIGTERM",
+        "[terminate] signalling app to exit",
+        "The status is stale",
+        # The tool-call limit, and the habit that spends it: one search per
+        # term when the terms are ORed and could have been one call.
+        "YOUR TOOL CALLS ARE LIMITED",
+        "search_terms are ORed",
         # The disclosure restriction. This output may be pasted into a public
         # issue tracker, so the agent is told to describe a defect as observed
         # behaviour rather than characterising it in security terms.
@@ -306,6 +317,10 @@ def test_the_trigger_example_stops_at_the_next_field() -> None:
         # lma-virtual-participant-stack/backend/src/index.ts
         "VP exit:",
         "trigger=",
+        "Received SIGTERM",
+        "due to external termination",
+        # lma-virtual-participant-stack/backend/src/microvm-supervisor.ts
+        "[terminate] signalling app to exit",
         # lma-websocket-transcriber-stack/source/app/src/
         "[TRANSCRIBING]",
         "[AUTH]",
@@ -329,3 +344,17 @@ def test_the_shipped_prompt_names_a_log_marker_the_code_actually_emits(
     above name the file it comes from.
     """
     assert marker in prompt_text()
+
+
+def test_the_tool_call_limit_the_prompt_states_is_the_default() -> None:
+    """The prompt names the default limit in words, so a change to the
+    default in troubleshooting_config has to change the prompt with it."""
+    # The shipped default, not AgentLimits(), which an environment variable
+    # in the shell running the tests would change.
+    from troubleshooting_config import _LIMITS
+
+    words = {6: "six", 8: "eight", 10: "ten", 12: "twelve"}
+    default = _LIMITS["max_iterations"][0]
+
+    assert default in words, "add the new default to this table and to the prompt"
+    assert f"({words[default]} unless changed on the function)" in prompt_text()

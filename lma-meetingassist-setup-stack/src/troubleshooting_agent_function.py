@@ -913,7 +913,9 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
             log_group_names: Comma-separated log group names, exactly as
                 discover_log_groups returned them.
             search_terms: Comma-separated literal substrings. A line matching
-                any of them is returned. Ignored if query_string is given.
+                any of them is returned, so put alternatives (an id and the
+                markers you expect) in one call rather than one call each.
+                Ignored if query_string is given.
             query_string: A complete Logs Insights query, for example
                 'fields @message | filter @message like "VP exit:"
                 | parse @message /trigger=(?<t>\\S+)/ | stats count() by t'.
@@ -940,15 +942,19 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
     def get_vp_record(vp_id: str, tool_context: Any = None) -> str:
         """Read one virtual participant's current record.
 
-        Gives the current status, the prose status detail and the structured
-        exit code. It does NOT give a timeline, and most of the exit taxonomy is
-        not stored here — search the virtual-participant log group for that.
+        Gives the current status, the prose status detail, the structured
+        exit code, and, when it was ended from outside, when and why
+        (endedAt, endReason). It does NOT give a timeline, and most of the exit
+        taxonomy is not stored here — search the virtual-participant log group
+        for that.
 
         Args:
             vp_id: The virtual participant id.
 
         Returns:
-            The record, plus the field-level notes needed to read it correctly.
+            The record, an endAssessment saying what the record shows about how
+            the participant ended and the one search that corroborates it, and
+            the field-level notes needed to read the record correctly.
         """
         return guarded("get_vp_record", tools.get_vp_record, tool_context, vp_id=vp_id)
 

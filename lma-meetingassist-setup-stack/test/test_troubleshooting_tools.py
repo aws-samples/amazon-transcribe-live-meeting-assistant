@@ -31,6 +31,7 @@ from troubleshooting_tools import (
     ToolError,
     TroubleshootingTools,
     _plain_value,
+    assess_vp_end,
     build_search_query,
 )
 
@@ -662,6 +663,98 @@ def test_an_empty_result_is_labelled_as_not_being_a_cause() -> None:
     assert "not a cause" in result["guidance"]
 
 
+def test_an_empty_result_advises_broadening_within_one_call() -> None:
+    """Terms are ORed, so dropping one can only narrow a search; the advice
+    has to be to add alternatives to the same call, not to spend one each."""
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[])).search_logs(VP_GROUP, search_terms="a, b")
+    )
+
+    assert "search_terms are ORed" in result["guidance"]
+    assert "do not retry one term at a time" in result["guidance"]
+    assert "drop a term" not in result["guidance"]
+
+
+def test_an_empty_result_names_the_window_it_searched() -> None:
+    """The default window is a few hours; an empty result has to say so, or a
+    miss for this morning's participant reads as an absence."""
+    limits = AgentLimits()
+
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[]), limits=limits).search_logs(VP_GROUP)
+    )
+
+    assert f"covered only the last {limits.default_lookback_hours} hour(s)" in result[
+        "guidance"
+    ]
+    assert f"up to {limits.max_lookback_hours}" in result["guidance"]
+
+
+def test_an_empty_result_at_the_maximum_window_does_not_suggest_widening() -> None:
+    limits = AgentLimits()
+
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[]), limits=limits).search_logs(
+            VP_GROUP, lookback_hours=limits.max_lookback_hours
+        )
+    )
+
+    assert "the most allowed" in result["guidance"]
+
+
+def test_an_empty_exit_line_search_names_the_lines_an_external_stop_writes() -> None:
+    """A participant ended from outside never writes "VP exit:", so a model
+    that only knows that marker retries it until it runs out of calls."""
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[])).search_logs(VP_GROUP, search_terms="VP exit:")
+    )
+
+    assert "Received SIGTERM" in result["guidance"]
+    assert "[terminate] signalling app to exit" in result["guidance"]
+    assert "endReason" in result["guidance"]
+
+
+def test_an_exit_line_search_that_included_the_stop_markers_is_not_told_about_them() -> None:
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[])).search_logs(
+            VP_GROUP, search_terms="VP exit:, Received SIGTERM"
+        )
+    )
+
+    assert "is not the same as no ending" not in result["guidance"]
+
+
+def test_an_empty_single_term_search_suggests_adding_the_id() -> None:
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[])).search_logs(VP_GROUP, search_terms="[ASR]")
+    )
+
+    assert "single term" in result["guidance"]
+
+
+def test_an_empty_custom_query_for_the_exit_line_also_names_the_stop_lines() -> None:
+    """The hint keys on the resolved query, so a hand-written query looking
+    for the exit line gets it as well as a search_terms one."""
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[])).search_logs(
+            VP_GROUP, query_string='fields @message | filter @message like "VP exit:"'
+        )
+    )
+
+    assert "Received SIGTERM" in result["guidance"]
+
+
+def test_an_empty_custom_query_gets_only_the_general_advice() -> None:
+    result = parsed(
+        make_tools(FakeInsightsClient(rows=[])).search_logs(
+            VP_GROUP, query_string="fields @message | filter @message like /x/"
+        )
+    )
+
+    assert "not a cause" in result["guidance"]
+    assert "single term" not in result["guidance"]
+
+
 def test_a_non_empty_result_carries_no_guidance() -> None:
     client = FakeInsightsClient(rows=[row(m="VP exit: reason=completed")])
 
@@ -758,10 +851,10 @@ def test_a_caveat_survives_a_result_too_large_to_return_in_full() -> None:
 
 
 def test_an_oversize_discovery_sheds_groups_and_keeps_its_flags() -> None:
-    # Above the small fields and the component notes (~1.9k), below the full
+    # Above the small fields and the component notes (~2.5k), below the full
     # group list (~170 characters each), so groups are what has to give.
     limits = AgentLimits()
-    object.__setattr__(limits, "max_tool_result_chars", 2600)
+    object.__setattr__(limits, "max_tool_result_chars", 3000)
     client = FakeInsightsClient()
 
     result = parsed(
@@ -1129,6 +1222,249 @@ def test_a_note_is_only_attached_for_a_field_the_row_actually_has() -> None:
     result = parsed(make_tools(dynamodb_client=client).get_vp_record("vp-abc"))
 
     assert set(result["fieldNotes"]) == {"status"}
+
+
+# The shape the end operation leaves when the participant's own progress
+# update lands after it: a non-terminal status beside a recorded end.
+EXTERNALLY_ENDED_VP_ITEM = {
+    "id": {"S": "vp-abc"},
+    "status": {"S": "LAUNCHING_BROWSER"},
+    "meetingPlatform": {"S": "ZOOM"},
+    "endReason": {"S": "integ-test live cleanup"},
+    "endedAt": {"S": "2026-10-24T12:33:07.895575+00:00"},
+    "updatedAt": {"S": "2026-10-24T12:33:08.362Z"},
+    "ecsTerminated": {"BOOL": True},
+    "kinesisEndSent": {"BOOL": True},
+    "albCleanedUp": {"BOOL": False},
+}
+
+
+def test_the_fields_the_end_operation_writes_are_returned() -> None:
+    record = record_for(EXTERNALLY_ENDED_VP_ITEM)["record"]
+
+    assert record["endReason"] == "integ-test live cleanup"
+    assert record["endedAt"] == "2026-10-24T12:33:07.895575+00:00"
+    assert record["ecsTerminated"] is True
+    assert record["kinesisEndSent"] is True
+    assert record["albCleanedUp"] is False
+    assert record_for(EXTERNALLY_ENDED_VP_ITEM)["withheldFields"] == []
+
+
+def test_a_recorded_end_is_presented_as_the_reason_it_ended() -> None:
+    assessment = record_for(EXTERNALLY_ENDED_VP_ITEM)["endAssessment"]
+
+    assert "ended from outside" in assessment
+    assert "primary evidence" in assessment
+    assert "do not look for one" in assessment
+
+
+def test_a_non_terminal_status_beside_a_recorded_end_is_called_stale() -> None:
+    assessment = record_for(EXTERNALLY_ENDED_VP_ITEM)["endAssessment"]
+
+    assert "status field is stale" in assessment
+    # status is a free-form string on the row; it is read from the record,
+    # not repeated in the tool's own sentences.
+    assert "LAUNCHING_BROWSER" not in assessment
+
+
+def test_a_terminal_status_beside_a_recorded_end_is_not_called_stale() -> None:
+    item = dict(EXTERNALLY_ENDED_VP_ITEM, status={"S": "ENDED"})
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "primary evidence" in assessment
+    assert "stale" not in assessment
+
+
+def test_a_recorded_end_comes_with_one_search_for_the_id_and_every_ending() -> None:
+    """One call that answers both halves of "did it join, and why did it
+    end", in place of one call per marker."""
+    assessment = record_for(EXTERNALLY_ENDED_VP_ITEM)["endAssessment"]
+
+    assert (
+        '"vp-abc, Received SIGTERM, [terminate] signalling app to exit, '
+        'due to external termination, VP exit:"'
+    ) in assessment
+    assert "ONE search_logs" in assessment
+
+
+# The epoch of the createdAt the lookback tests add (2026-10-24T12:32:50Z).
+CREATED_EPOCH = 1792845170.0
+
+
+# What the VP task reaper writes when ECS reports the task stopped: FAILED,
+# endedAt and the ECS stop reason in errorMessage, and no endReason.
+REAPED_VP_ITEM = {
+    "id": {"S": "vp-abc"},
+    "status": {"S": "FAILED"},
+    "endedAt": {"S": "2026-10-24T12:40:00+00:00"},
+    "errorMessage": {"S": "(stopCode=EssentialContainerExited: Essential container exited)"},
+}
+
+
+def test_a_reaped_row_points_at_its_error_message_not_an_end_reason() -> None:
+    """endedAt alone is not the end operation: the reaper writes it too, and
+    it records its reason in errorMessage."""
+    assessment = record_for(REAPED_VP_ITEM)["endAssessment"]
+
+    assert "VP task reaper" in assessment
+    assert "errorMessage is the recorded reason" in assessment
+    assert "by the end operation" not in assessment
+    assert "quoting endReason" not in assessment
+    # Its own text stays out of the tool's sentences, like endReason's.
+    assert "Essential container exited" not in assessment
+
+
+def test_a_reaped_row_does_not_promise_shutdown_lines() -> None:
+    """A task killed outright may log nothing at the end."""
+    assessment = record_for(REAPED_VP_ITEM)["endAssessment"]
+
+    assert "may have been killed without logging a shutdown" in assessment
+    assert "do not look for one" not in assessment
+
+
+def test_a_reaper_error_beside_an_end_reason_is_not_presented_as_a_second_cause() -> None:
+    """The reaper can write FAILED and its errorMessage after the end
+    operation, when a stale status left its condition true."""
+    item = dict(
+        EXTERNALLY_ENDED_VP_ITEM,
+        status={"S": "FAILED"},
+        errorMessage={"S": "(stopCode=UserInitiated: Task stopped)"},
+    )
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "by the end operation" in assessment
+    assert "not a second cause" in assessment
+
+
+def test_a_schedule_cancelled_before_launch_is_not_sent_looking_for_shutdown_lines() -> None:
+    """A participant cancelled while still scheduled never ran, so it has no
+    log of its own; the stream-matching search would only come back empty."""
+    item = {
+        "id": {"S": "vp-abc"},
+        "status": {"S": "CANCELLED"},
+        "endReason": {"S": "cancelled by user"},
+        "endedAt": {"S": "2026-10-24T12:00:00+00:00"},
+        "scheduleCancelled": {"BOOL": True},
+    }
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "before it launched" in assessment
+    assert "no participant log to search" in assessment
+    assert "run ONE search_logs" not in assessment
+    assert "Received SIGTERM" not in assessment
+
+
+def test_an_empty_end_reason_still_identifies_the_end_operation() -> None:
+    """The end operation writes endReason even when the caller passed an
+    empty one; presence, not truthiness, is what tells it from the reaper."""
+    item = dict(EXTERNALLY_ENDED_VP_ITEM, endReason={"S": ""}, status={"S": "ENDED"})
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "by the end operation" in assessment
+    assert "VP task reaper" not in assessment
+
+
+def test_the_suggested_search_reaches_back_to_when_the_participant_was_created() -> None:
+    """search_logs searches back from now over a default of a few hours, so
+    the same search for this morning's participant finds nothing unless it is
+    told how far back to look."""
+    item = dict(EXTERNALLY_ENDED_VP_ITEM, createdAt={"S": "2026-10-24T12:32:50.299Z"})
+    record = record_for(item)["record"]
+
+    assessment = assess_vp_end(
+        "vp-abc", record, now=CREATED_EPOCH + 4.2 * 3600, max_lookback_hours=72
+    )
+
+    # 4.2 hours rounds up to 5, plus an hour of margin.
+    assert "lookback_hours 6," in assessment
+
+
+def test_the_suggested_lookback_is_capped_at_the_maximum() -> None:
+    item = dict(EXTERNALLY_ENDED_VP_ITEM, createdAt={"S": "2026-10-24T12:32:50.299Z"})
+    record = record_for(item)["record"]
+
+    assessment = assess_vp_end(
+        "vp-abc", record, now=CREATED_EPOCH + 100 * 3600, max_lookback_hours=72
+    )
+
+    assert "lookback_hours 72 (the most allowed" in assessment
+
+
+def test_a_participant_just_inside_the_maximum_is_not_called_out_of_reach() -> None:
+    """71.5 hours rounds up to 72, which the maximum window reaches; the hour
+    of margin must not turn that into a warning."""
+    item = dict(EXTERNALLY_ENDED_VP_ITEM, createdAt={"S": "2026-10-24T12:32:50.299Z"})
+    record = record_for(item)["record"]
+
+    assessment = assess_vp_end(
+        "vp-abc", record, now=CREATED_EPOCH + 71.5 * 3600, max_lookback_hours=72
+    )
+
+    assert "lookback_hours 72, which reaches back" in assessment
+    assert "out of reach" not in assessment
+
+
+@pytest.mark.parametrize("created", [None, "", "yesterday", "2099-01-01T00:00:00Z"])
+def test_no_lookback_is_suggested_without_a_usable_created_time(created: Any) -> None:
+    record = {"status": "ENDED", "endReason": "x", "createdAt": created}
+
+    assessment = assess_vp_end("vp-abc", record, now=CREATED_EPOCH, max_lookback_hours=72)
+
+    assert "lookback_hours" not in assessment
+    assert "vp-abc" in assessment
+
+
+def test_the_assessment_does_not_repeat_the_caller_supplied_end_reason() -> None:
+    """endReason is text somebody typed. It is evidence in the record, not
+    part of the tool's own sentences."""
+    assert "integ-test live cleanup" not in record_for(EXTERNALLY_ENDED_VP_ITEM)["endAssessment"]
+
+
+def test_an_own_exit_points_at_the_exit_line() -> None:
+    assessment = record_for()["endAssessment"]
+
+    assert "own exit path" in assessment
+    assert "VP exit:" in assessment
+    assert "pre-join:no-name-input" not in assessment
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        FAILED_VP_ITEM,
+        {"id": {"S": "vp-abc"}, "status": {"S": "COMPLETED"}},
+        {"id": {"S": "vp-abc"}, "status": {"S": "JOINING"}},
+        {"id": {"S": "vp-abc"}, "status": {"S": "FAILED"}},
+        REAPED_VP_ITEM,
+        EXTERNALLY_ENDED_VP_ITEM,
+    ],
+)
+def test_every_assessment_ends_with_the_one_search(item: Dict[str, Any]) -> None:
+    """The prompt and the docs promise a corroborating search on every
+    branch, so every branch has to carry one."""
+    assert "run ONE search_logs" in record_for(item)["endAssessment"]
+
+
+def test_completed_without_a_trigger_or_end_is_read_as_a_signal_stop() -> None:
+    item = {"id": {"S": "vp-abc"}, "status": {"S": "COMPLETED"}}
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "signal handler" in assessment
+    assert "Received SIGTERM" in assessment
+
+
+def test_a_row_with_no_recorded_end_says_so() -> None:
+    item = {"id": {"S": "vp-abc"}, "status": {"S": "JOINING"}}
+
+    assessment = record_for(item)["endAssessment"]
+
+    assert "No end is recorded" in assessment
+    assert "vp-abc" in assessment
 
 
 def test_a_missing_row_is_not_reported_as_the_vp_never_having_run() -> None:
