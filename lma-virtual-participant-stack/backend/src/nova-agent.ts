@@ -904,23 +904,34 @@ export class NovaAgent implements VoiceAssistantProvider {
         + 'is ordinary meeting conversation: stay as you are and do NOT call the `mute` tool.\n';
     }
 
-    // Add Strands agent tool instructions
+    // Add Strands agent tool instructions.
+    //
+    // Nova Sonic is speech-to-speech: it has no private scratchpad, so any
+    // reasoning it produces is synthesized and played into the meeting. A
+    // numbered "first / then / after" procedure here was observed being recited
+    // back as a spoken plan ("I should first acknowledge their request... Then,
+    // I'll call the strands_agent..."), so the guidance is a single instruction
+    // plus an explicit rule that planning is never spoken. A filter cannot do
+    // this job: the SPECULATIVE text block arrives before its audio, but the
+    // audio is already being generated, and Nova's own FINAL text confirms what
+    // was voiced only after the fact.
     if (this.strandsLambdaArn) {
-      systemPromptContent += '\n\nIMPORTANT: You have access to the strands_agent tool for handling information requests.\n\n' +
-        'CRITICAL WORKFLOW: When a user asks a question that requires the strands_agent tool:\n' +
-        '1. FIRST, speak to the user: "Let me search for that information. This may take a moment."\n' +
-        '2. WAIT for the user to acknowledge (e.g., "okay", "sure", "go ahead") OR proceed after 2 seconds if no response\n' +
-        '3. THEN call the strands_agent tool with the user\'s query\n' +
-        '4. After receiving the result, provide a natural response with the information\n\n' +
+      systemPromptContent += '\n\nINFORMATION REQUESTS:\n' +
+        'You have the strands_agent tool, a sub-agent that looks up information and takes 5-10 seconds to respond.\n' +
         'Use strands_agent when users ask about:\n' +
         '- Meeting summaries or transcripts\n' +
         '- Past meetings or meeting history\n' +
         '- Documents or knowledge base content\n' +
         '- Web search or current information\n' +
         '- Any query requiring specialized knowledge or data access\n\n' +
-        'IMPORTANT: The strands_agent is a sub-agent that may take 5-10 seconds to respond. ' +
-        'Always let the user know it may take a moment before calling the tool. ' +
-        'This sets proper expectations and prevents awkward silence.';
+        'When a request needs strands_agent, say one short sentence to the person first, such as '
+        + '"Let me search for that information. This may take a moment.", then call the tool. '
+        + 'When the result arrives, answer naturally with the information.\n\n' +
+        'SPOKEN OUTPUT ONLY:\n' +
+        'Everything you say is played aloud in the meeting. Speak only words meant for the people '
+        + 'listening. Never say your reasoning or your plan out loud: do not describe the request in the '
+        + 'third person (for example "the user asked..."), do not narrate the steps you are about to take, '
+        + 'and never mention strands_agent or any other tool by name.';
     }
     
     return systemPromptContent;
