@@ -42122,7 +42122,7 @@
   {
     "source": "Semgrep",
     "path": "lma-desktop-capture-app-stack/source/macos/Sources/LMACaptureClient/Config.swift",
-    "line": 246,
+    "line": 258,
     "issue": "Insecure WebSocket Detected. WebSocket Secure (wss) should be used for all WebSocket connections.",
     "check_id": "javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket",
     "priority": "MEDIUM",
@@ -42135,7 +42135,7 @@
   {
     "source": "Semgrep",
     "path": "lma-desktop-capture-app-stack/source/windows/Engine/Config.cs",
-    "line": 232,
+    "line": 244,
     "issue": "Insecure WebSocket Detected. WebSocket Secure (wss) should be used for all WebSocket connections.",
     "check_id": "javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket",
     "priority": "MEDIUM",
