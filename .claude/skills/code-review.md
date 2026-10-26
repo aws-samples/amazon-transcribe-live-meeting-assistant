@@ -5,6 +5,13 @@ companion to `pr-review.md` (which reviews someone else's PR/MR).
 
 ## Pre-Submit Commands
 
+If the change is going to a PR, the `Lint and unit tests` CI check runs every
+suite below on each push (see "Testing: let CI run the full suites" in
+`CLAUDE.md`). Before pushing, run only the tests for the code you changed, plus
+anything CI does not cover; do not run the full suites locally as well. The
+commands below are the reference for what each stack runs, and for work that
+will not go through a PR.
+
 LMA does not have a single root `make lint` / `make test`. Run the targets in
 the stack(s) you touched.
 
@@ -247,11 +254,13 @@ buries your own changes and is the same confusion that produced the defect.
       pattern in existing tests (e.g. `mcp_analytics/test_jsonrpc.py`)
 - [ ] AWS calls mocked with `unittest.mock` / `MagicMock` (or `moto` if AWS
       service-level mocking is needed)
-- [ ] `make test` (in the appropriate stack) passes locally with
-      `AWS_PROFILE=default`
-- [ ] UI tests via vitest (`cd lma-ai-stack/source/ui && npm test`)
-- [ ] WebSocket transcriber: `cd lma-websocket-transcriber-stack/source/app
-      && npm test`
+- [ ] The tests for the code you changed pass locally (run that file or
+      directory, not the whole suite)
+- [ ] The full suites are left to the `Lint and unit tests` CI check; read its
+      result on the PR rather than re-running them locally
+- [ ] Anything CI does not cover was run locally where the change needs it:
+      `make docker-build-check*`, integration tests on a live stack, mypy,
+      bandit, `pip install -r` for a changed requirements file
 
 ## Git Workflow
 - [ ] Branch from `develop` using prefix: `feature/`, `fix/`, `docs/`,

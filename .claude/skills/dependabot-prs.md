@@ -196,16 +196,16 @@ all need the same deploy-and-test cycle from the runbook.
 
 ## Step 6 — Post-merge validation (mandatory)
 
-Merged ≠ done. Pull `develop` and run what the merged set touched:
+Merged ≠ done. Each merge to `develop` starts the `Lint and unit tests` check
+on the `develop` push, so read that run's result instead of re-running the lint
+and unit suites locally. Locally, run only what CI does not cover:
 
 ```bash
 git checkout develop && git pull
-make lint test                  # cfn + python + UI lint, then all no-AWS suites
-make test-vp test-vp-template   # if VP deps moved
-make docker-build-check-all     # if transcriber or VP deps moved
+make docker-build-check-all     # if transcriber or VP deps moved (needs Docker)
 ```
 
-One run at the end covers several merges. If validation fails, identify the
+One check at the end covers several merges. If validation fails, identify the
 offending bump, `git revert -m 1 <sha>` (or plain revert for a squash),
 push, and report the failure with the test output — then add an `ignore` entry
 if the bump cannot be taken at all.
