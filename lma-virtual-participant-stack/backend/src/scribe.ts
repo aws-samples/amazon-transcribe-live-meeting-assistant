@@ -732,7 +732,7 @@ export class TranscriptionService {
                     break;
                 }
                 if (agent?.hasGivenUp && !agentGaveUpLogged) {
-                    console.error("[ASR AGENT] session gave up; the assistant's replies are no longer transcribed");
+                    console.error("[ASR AGENT] session gave up; the assistant's audio is no longer transcribed (Nova Sonic replies are written from its own text)");
                     agentGaveUpLogged = true;
                 }
             }
@@ -1422,8 +1422,6 @@ export class TranscriptionService {
             // (GitHub #292). Mirrors the WebSocket transcriber's clean-close
             // reconnect.
             if (this.isTranscribing && details.start) {
-                // The closed session will never finalise a row it left open.
-                await closeOpenPartial();
                 console.log('Transcribe result stream closed server-side while meeting is live - requesting reconnect');
                 this.reconnectRequested = true;
             }
@@ -1456,6 +1454,11 @@ export class TranscriptionService {
                 throw error;
             }
         } finally {
+            // An ended session will never finalise a row it left open, whether
+            // it closed cleanly or failed. Before the offset below moves on.
+            if (this.isTranscribing) {
+                await closeOpenPartial();
+            }
             // Advance the cumulative offset exactly ONCE, as this session ends,
             // so the next session's timestamps continue the meeting timeline
             // instead of restarting at 0. Runs on both clean close and (re)throw.

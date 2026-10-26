@@ -1519,7 +1519,8 @@ export class NovaAgent implements VoiceAssistantProvider {
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
                 if (currentTurn.role === 'ASSISTANT') {
                   // What the assistant actually said, for the transcript path
-                  // when no ASR source is transcribing its voice.
+                  // when no ASR source is transcribing its voice. Not published
+                  // while a translator is paused, like the history above.
                   publishAssistantTurn(currentTurn.content);
                 }
                 

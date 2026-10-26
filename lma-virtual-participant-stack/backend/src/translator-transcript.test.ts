@@ -166,6 +166,15 @@ test('a held-back result first closes the participant row it continues', () => {
     assert.match(events, /else if \(this\.openPartials\.isClosed\(result\)\)/);
 });
 
+test('a session that ends, cleanly or not, closes its open row before the timeline moves on', () => {
+    const events = methodBody(scribe, 'private async handleTranscriptEvents');
+    const fin = events.lastIndexOf('} finally {');
+    assert.notEqual(fin, -1);
+    const closeAt = events.indexOf('await closeOpenPartial()', fin);
+    const offsetAt = events.indexOf('this.transcribeTimeOffsetSeconds = observedMaxEndTime', fin);
+    assert.ok(closeAt > fin && closeAt < offsetAt);
+});
+
 test('assistant turns are written as the assistant only when nothing else transcribes its voice', () => {
     const needs = methodBody(scribe, 'private assistantTurnsNeedTranscript');
     assert.match(needs, /details\.meetingMode === 'translator'/);
@@ -179,5 +188,5 @@ test('assistant turns are written as the assistant only when nothing else transc
 });
 
 test('Nova publishes each finished assistant turn', () => {
-    assert.match(nova, /currentTurn\.role === 'ASSISTANT'\) \{[\s\S]{0,200}publishAssistantTurn\(currentTurn\.content\)/);
+    assert.match(nova, /currentTurn\.role === 'ASSISTANT'\) \{[\s\S]{0,400}publishAssistantTurn\(currentTurn\.content\)/);
 });
