@@ -291,6 +291,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     blockOpenedAt: number | null;
     /** Acknowledgement audio counted so far, in bytes of playback PCM. */
     bytes: number;
+    /** Ends the acknowledgement at its deadline if its block never reports
+     *  an end — a stream that errors mid-block, say. */
+    timer: NodeJS.Timeout | null;
   } | null = null;
 
   /**
@@ -2681,8 +2684,20 @@ export class NovaAgent implements VoiceAssistantProvider {
     // An ordinary mute is absolute, so nothing more of an acknowledgement is
     // let through after it — including when the tool route had already shut
     // the gate and this call changes nothing else.
-    this.clearStopAck(reason ? `muted:${reason.replace(/\s+/g, '-')}` : 'muted');
+    const cutAck = this.clearStopAck(reason ? `muted:${reason.replace(/\s+/g, '-')}` : 'muted');
     if (this._isMuted) {
+      if (cutAck) {
+        // The gate was already shut by the tool route with the
+        // acknowledgement's stream held live; cut that audio off too.
+        try {
+          this.stopPacatStream();
+        } catch (err) {
+          console.warn('stopPacatStream during mute() failed (non-fatal):', err);
+        }
+        if (simliAvatar.isConnected()) {
+          simliAvatar.clearAudioBuffer().catch(() => {});
+        }
+      }
       return;
     }
     console.log(`🔇 Nova agent muted${reason ? ` (${reason})` : ''}`);
@@ -2903,7 +2918,13 @@ export class NovaAgent implements VoiceAssistantProvider {
     // there is no acknowledgement of its to let through.
     this.stopAck = this._isMuted
       ? null
-      : { toolAt: now, route: existing?.fromTranscript ? 'transcript' : 'tool', blockOpenedAt: null, bytes: 0 };
+      : {
+        toolAt: now,
+        route: existing?.fromTranscript ? 'transcript' : 'tool',
+        blockOpenedAt: null,
+        bytes: 0,
+        timer: null,
+      };
 
     if (existing) {
       existing.toolSeen = true;
@@ -2971,8 +2992,16 @@ export class NovaAgent implements VoiceAssistantProvider {
   /** Drop a stop request that is still resolving. */
   private cancelStopRequest(why: string): void {
     // Whatever calls the request off — being asked back, a mode change, the
-    // agent stopping — ends the acknowledgement's exemption with it.
-    this.clearStopAck(why);
+    // agent stopping — ends the acknowledgement's exemption with it. Behind a
+    // shut gate, a stream held live for the acknowledgement is handed off to
+    // drain, as finishStopAck would have done; nothing more is written to it.
+    if (this.clearStopAck(why) && this._isMuted) {
+      try {
+        this.stopPacatStream('drain');
+      } catch (err) {
+        console.warn('draining acknowledgement playback failed (non-fatal):', err);
+      }
+    }
     const request = this.stopRequest;
     if (!request) {
       return;
@@ -3031,6 +3060,15 @@ export class NovaAgent implements VoiceAssistantProvider {
       `[stop-request] route=${ack.route} action=ack-started delay_ms=${delayMs}`
       + ` gate=${this._isMuted ? 'shut' : 'open'}`,
     );
+    // The same deadline takeStopAckAudio applies, enforced without waiting for
+    // a chunk that may never come.
+    const deadline = ack.toolAt + STOP_ACK_START_WINDOW_MS + STOP_ACK_MAX_AUDIO_MS;
+    ack.timer = setTimeout(() => {
+      if (this.stopAck === ack) {
+        this.finishStopAck('ack-timed-out');
+      }
+    }, Math.max(0, deadline - Date.now()));
+    ack.timer.unref?.();
   }
 
   /** The acknowledgement block, if one is playing, has ended. */
@@ -3067,12 +3105,15 @@ export class NovaAgent implements VoiceAssistantProvider {
    * off — bounded by PLAYBACK_DRAIN_CAP_MS, as for an acknowledgement spoken
    * before the tool call.
    */
-  private finishStopAck(action: 'ack-played' | 'ack-capped'): void {
+  private finishStopAck(action: 'ack-played' | 'ack-capped' | 'ack-timed-out'): void {
     const ack = this.stopAck;
     if (!ack) {
       return;
     }
     this.stopAck = null;
+    if (ack.timer) {
+      clearTimeout(ack.timer);
+    }
     const audioMs = Math.round(ack.bytes / this.playbackBytesPerMs());
     console.log(
       `[stop-request] route=${ack.route} action=${action} audio_ms=${audioMs}`
@@ -3088,14 +3129,23 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
   }
 
-  /** Withdraw the acknowledgement's exemption from the gate, without playing
-   *  out anything more of it. Idempotent. */
-  private clearStopAck(why: string): void {
+  /**
+   * Withdraw the acknowledgement's exemption from the gate. Idempotent.
+   *
+   * Returns whether an acknowledgement had started. If it had and the gate is
+   * shut, its playback stream may have been held live for it rather than
+   * handed off (see muteDrainingPlayback), so the caller has to decide what
+   * becomes of the audio already written: cut it off, or let it drain.
+   */
+  private clearStopAck(why: string): boolean {
     const ack = this.stopAck;
     if (!ack) {
-      return;
+      return false;
     }
     this.stopAck = null;
+    if (ack.timer) {
+      clearTimeout(ack.timer);
+    }
     // Only worth a line once an acknowledgement had started: an unused window
     // closing is the ordinary case and says nothing.
     if (ack.blockOpenedAt !== null) {
@@ -3104,6 +3154,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         + ` audio_ms=${Math.round(ack.bytes / this.playbackBytesPerMs())}`,
       );
     }
+    return ack.blockOpenedAt !== null;
   }
 
   /**

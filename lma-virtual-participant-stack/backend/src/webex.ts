@@ -893,7 +893,9 @@ export default class Webex {
                 await this.sendMessages(frame, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
             } else if (matchesChatCommand(message, details.helpCommand)) {
                 // The same duplicate filter as the toggles: this observer can emit
-                // one message twice, and the reply would then be posted twice.
+                // one message twice, and the reply would then be posted twice. A
+                // genuine repeat from the same sender inside the filter's few
+                // seconds is ignored too, on purpose — the list was just posted.
                 if (!this.freshToggle(message, sender)) return;
                 // Answered whether or not transcription is paused: the list is how
                 // someone finds out how to resume it.

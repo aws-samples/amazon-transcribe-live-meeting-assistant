@@ -1198,6 +1198,71 @@ test('a barge-in, being asked back or an absolute mute ends the acknowledgement'
     }
 });
 
+test('an absolute mute cuts off an acknowledgement whose stream was held for it', async () => {
+    // The gate shut mid-acknowledgement, so the stream was kept live rather than
+    // handed off. An absolute mute then has to cut it off, not leave it playing.
+    capture();
+    try {
+        const agent = novaAgent();
+        recordPlayback(agent);
+        (agent as any).noteMuteToolRequested();
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+        await (agent as any).handleMuteTool('tool-use-id');
+        assert.deepEqual(playbackTeardowns, [], 'held for the acknowledgement');
+
+        agent.mute('auto-mute');
+        assert.deepEqual(playbackTeardowns, ['immediate']);
+        assert.equal((agent as any).stopAck, null);
+
+        await delay(PAST_BACKSTOP_MS);
+    } finally {
+        release();
+    }
+});
+
+test('calling the request off behind a shut gate drains a held acknowledgement', async () => {
+    capture();
+    try {
+        const agent = novaAgent();
+        recordPlayback(agent);
+        (agent as any).noteMuteToolRequested();
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+        await (agent as any).handleMuteTool('tool-use-id');
+
+        (agent as any).cancelStopRequest('mode-changed');
+        assert.deepEqual(playbackTeardowns, ['drain']);
+        assert.equal((agent as any).stopAck, null);
+    } finally {
+        release();
+    }
+});
+
+test('an acknowledgement whose block never ends is closed at its deadline', async () => {
+    // A stream that errors mid-block delivers no contentEnd, and no further
+    // chunk to check the deadline against.
+    capture();
+    try {
+        const agent = novaAgent();
+        recordPlayback(agent);
+        (agent as any).noteMuteToolRequested();
+        await (agent as any).handleMuteTool('tool-use-id');
+        // Opened at the very end of the start window, so the deadline is one
+        // budget away rather than two.
+        (agent as any).stopAck.toolAt = Date.now() - STOP_ACK_START_WINDOW_MS + 20;
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+
+        await delay(STOP_ACK_MAX_AUDIO_MS + 150);
+        assert.equal((agent as any).stopAck, null);
+        assert.match(stopLines().join('\n'), /action=ack-timed-out audio_ms=100 gate=shut/);
+        assert.deepEqual(playbackTeardowns, ['drain', 'drain']);
+    } finally {
+        release();
+    }
+});
+
 test('a tool call after the fallback has already silenced the assistant opens no acknowledgement', async () => {
     capture();
     try {
