@@ -2913,6 +2913,17 @@ export class NovaAgent implements VoiceAssistantProvider {
       + ` muted=${this._isMuted} mode=${this.meetingMode}`,
     );
 
+    // A second `mute` call ends the acknowledgement of the first, the same way
+    // calling the request off does: a stream held live for it behind the shut
+    // gate is handed off to drain, and the ending is logged.
+    if (this.clearStopAck('superseded-by-tool-call') && this._isMuted) {
+      try {
+        this.stopPacatStream('drain');
+      } catch (err) {
+        console.warn('draining acknowledgement playback failed (non-fatal):', err);
+      }
+    }
+
     // Only for an assistant that is still audible: if the transcript fallback
     // has already silenced it, this tool call is not the one silencing it, and
     // there is no acknowledgement of its to let through.

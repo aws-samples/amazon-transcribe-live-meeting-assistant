@@ -1263,6 +1263,28 @@ test('an acknowledgement whose block never ends is closed at its deadline', asyn
     }
 });
 
+test('a second mute tool call ends a held acknowledgement and drains it', async () => {
+    capture();
+    try {
+        const agent = novaAgent();
+        recordPlayback(agent);
+        (agent as any).noteMuteToolRequested();
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+        await (agent as any).handleMuteTool('tool-use-id');
+        assert.deepEqual(playbackTeardowns, [], 'held for the acknowledgement');
+
+        (agent as any).noteMuteToolRequested();
+        assert.deepEqual(playbackTeardowns, ['drain']);
+        assert.equal((agent as any).stopAck, null, 'no new window behind a shut gate');
+        assert.match(stopLines().join('\n'), /action=ack-cut why=superseded-by-tool-call audio_ms=100/);
+
+        await delay(PAST_BACKSTOP_MS);
+    } finally {
+        release();
+    }
+});
+
 test('a tool call after the fallback has already silenced the assistant opens no acknowledgement', async () => {
     capture();
     try {

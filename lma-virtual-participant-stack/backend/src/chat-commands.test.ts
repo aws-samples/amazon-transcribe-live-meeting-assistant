@@ -158,7 +158,8 @@ test('every command the help reply lists is accepted by its matcher', () => {
         .join(' ')
         .match(/"LMA [^"]+"/g)!
         .map((quoted) => quoted.slice(1, -1));
-    assert.ok(listed.length >= 4 + ASSISTANT_CHAT_COMMANDS.length);
+    // leave, pause, start and help, plus one canonical form per mode command.
+    assert.equal(listed.length, 4 + ASSISTANT_CHAT_COMMANDS.length);
     for (const command of listed) {
         assert.ok(
             commandsTriggeredBy(command).length === 1,
