@@ -5,48 +5,82 @@
  */
 
 /**
- * The pause and resume chat commands (`details.pauseCommand`,
- * `details.startCommand`) act only on a message that is the command and
- * nothing else — the same whole-message rule the dismissal and assistant-mode
- * commands follow — on every platform.
+ * The pause, resume and help chat commands (`details.pauseCommand`,
+ * `details.startCommand`, `details.helpCommand`) act only on a message that is
+ * the "LMA" addressee plus the command and nothing else — the same rule the
+ * dismissal and assistant-mode commands follow — on every platform. Also the
+ * `LMA help` reply itself, and the default introduction message.
  *
  * What is NOT covered here: what each platform's DOM scraper actually hands the
- * node side in a live meeting. Zoom's aria-label split is tested below because
- * it is node-side; the Teams, Webex and Chime scrapers run in the page, and are
+ * node side in a live meeting, and whether each platform's chat renders the
+ * help reply as sent. Zoom's aria-label split is tested below because it is
+ * node-side; the Teams, Webex and Chime scrapers run in the page, and are
  * relied on here only to deliver the same string matchesEndCommand already
  * matches against.
  */
 import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { details, matchesChatCommand, matchesEndCommand } from './details.js';
-import { parseAssistantChatCommand } from './assistant-toggles.js';
+import {
+    DEFAULT_INTRO_MESSAGE,
+    END_COMMAND_VERBS,
+    details,
+    matchesChatCommand,
+    matchesEndCommand,
+} from './details.js';
+import { ASSISTANT_CHAT_COMMANDS, parseAssistantChatCommand } from './assistant-toggles.js';
+import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
 import { splitZoomChatLabel } from './zoom.js';
+
+const NOVA_LIKE = { isEnabled: () => true, supportsModeChanges: () => true };
+const ELEVENLABS_LIKE = { isEnabled: () => true, supportsModeChanges: () => false };
+const NO_ASSISTANT = { isEnabled: () => false, supportsModeChanges: () => false };
 
 // ---------------------------------------------------------------------------
 // The matcher
 // ---------------------------------------------------------------------------
 
-test('the pause command matches as the whole message, in any case, with or without the LMA addressee', () => {
-    for (const message of ['PAUSE', 'pause', 'Pause', '  PAUSE  ', 'PAUSE.', 'pause!', 'Pause?', 'LMA pause', '@LMA, PAUSE!', 'pause LMA', 'lma: Pause']) {
+test('the pause command matches as the whole message addressed to LMA, in any case', () => {
+    for (const message of ['LMA pause', 'lma PAUSE', '@LMA, PAUSE!', 'pause LMA', 'lma: Pause', '  LMA pause  ', 'LMA pause?']) {
         assert.equal(matchesChatCommand(message, details.pauseCommand), true, `no longer pauses: "${message}"`);
     }
 });
 
-test('the resume command matches as the whole message, in any case, with or without the LMA addressee', () => {
-    for (const message of ['START', 'start', 'Start.', 'LMA start', '@LMA START', 'start LMA']) {
+test('the resume command matches as the whole message addressed to LMA, in any case', () => {
+    for (const message of ['LMA start', 'LMA Start.', '@LMA START', 'start LMA', 'lma start...']) {
         assert.equal(matchesChatCommand(message, details.startCommand), true, `no longer resumes: "${message}"`);
+    }
+});
+
+test('the help command matches as the whole message addressed to LMA, in any case', () => {
+    for (const message of ['LMA help', '@LMA help', 'help LMA', 'LMA, HELP?', 'lma Help!']) {
+        assert.equal(matchesChatCommand(message, details.helpCommand), true, `no longer answers help: "${message}"`);
+    }
+});
+
+test('a command without the LMA addressee is ordinary chat', () => {
+    for (const [message, command] of [
+        ['PAUSE', details.pauseCommand],
+        ['pause', details.pauseCommand],
+        ['Pause.', details.pauseCommand],
+        ['START', details.startCommand],
+        ['start', details.startCommand],
+        ['HELP', details.helpCommand],
+        ['help?', details.helpCommand],
+        ['can someone help', details.helpCommand],
+    ] as const) {
+        assert.equal(matchesChatCommand(message, command), false, `acts without the addressee: "${message}"`);
     }
 });
 
 test('a message that only contains the pause command is ordinary chat', () => {
     for (const message of [
         'PAUSED',
-        'UNPAUSE',
-        "please don't PAUSE",
-        'PAUSE the recording',
-        'Type PAUSE to stop the transcript',
-        'type "PAUSE" in chat',
+        'LMA PAUSED',
+        'LMA UNPAUSE',
+        "please don't PAUSE LMA",
+        'LMA PAUSE the recording',
+        'Type "LMA pause" to stop the transcript',
         'LMA PAUSE now',
         'LMA',
         '',
@@ -58,52 +92,158 @@ test('a message that only contains the pause command is ordinary chat', () => {
 });
 
 test('a message that only contains the resume command is ordinary chat', () => {
-    for (const message of ['STARTED', 'RESTART', "let's START now", 'START over', 'START time is 3pm', 'LMA START please']) {
+    for (const message of ['LMA STARTED', 'LMA RESTART', "let's START LMA now", 'LMA START over', 'LMA START please']) {
         assert.equal(matchesChatCommand(message, details.startCommand), false, `resumes on prose: "${message}"`);
     }
 });
 
+test('a message that only contains the help command is ordinary chat', () => {
+    for (const message of ['LMA helped a lot', 'can LMA help us', 'LMA help me with this', 'LMA helpful']) {
+        assert.equal(matchesChatCommand(message, details.helpCommand), false, `answers help on prose: "${message}"`);
+    }
+});
+
 test('an empty command never matches', () => {
-    assert.equal(matchesChatCommand('PAUSE', ''), false);
+    assert.equal(matchesChatCommand('LMA pause', ''), false);
     assert.equal(matchesChatCommand('', ''), false);
     assert.equal(matchesChatCommand('LMA', ''), false);
 });
 
 // ---------------------------------------------------------------------------
-// The VP's own chat messages cannot trigger the commands
+// The VP's own chat messages cannot trigger any command
 // ---------------------------------------------------------------------------
 
-test("the VP's own introduction and status messages are neither a pause nor a resume command", () => {
+/** Every chat command a message could trigger, by name, for the assertion message. */
+function commandsTriggeredBy(message: string): string[] {
+    const triggered: string[] = [];
+    if (matchesEndCommand(message)) triggered.push('end');
+    if (parseAssistantChatCommand(message)) triggered.push('assistant-mode');
+    if (matchesChatCommand(message, details.pauseCommand)) triggered.push('pause');
+    if (matchesChatCommand(message, details.startCommand)) triggered.push('start');
+    if (matchesChatCommand(message, details.helpCommand)) triggered.push('help');
+    return triggered;
+}
+
+test("the VP's own introduction, status and help messages trigger no command", () => {
     // Several scrapers read the VP's own outgoing chat back (Teams polls every
-    // rendered row), so a default message that matched would toggle the VP.
-    const own = [...details.introMessages, ...details.startMessages, ...details.pauseMessages, ...details.exitMessages];
-    assert.ok(own.length >= 4);
+    // rendered row), so a default message that matched would act on the VP.
+    const own = [
+        ...details.introMessages,
+        ...details.startMessages,
+        ...details.pauseMessages,
+        ...details.exitMessages,
+        ...allChatHelpMessages(),
+    ];
+    assert.ok(own.length >= 6);
     for (const message of own) {
-        assert.equal(matchesChatCommand(message, details.pauseCommand), false, `own message pauses: "${message}"`);
-        assert.equal(matchesChatCommand(message, details.startCommand), false, `own message resumes: "${message}"`);
+        assert.deepEqual(commandsTriggeredBy(message), [], `own message triggers a command: "${message}"`);
     }
 });
 
 test('an introduction message that explains the commands does not trigger them', () => {
     const explained =
-        'Hello. I am an AI Live Meeting Assistant (LMA). Type "PAUSE" to pause the transcript, ' +
-        '"START" to resume it, or "LMA leave" to dismiss me.';
-    assert.equal(matchesChatCommand(explained, details.pauseCommand), false);
-    assert.equal(matchesChatCommand(explained, details.startCommand), false);
-    assert.equal(matchesEndCommand(explained), false);
+        'Hello. I am an AI Live Meeting Assistant (LMA). Type "LMA pause" to pause the transcript, ' +
+        '"LMA start" to resume it, "LMA help" for the list, or "LMA leave" to dismiss me.';
+    assert.deepEqual(commandsTriggeredBy(explained), []);
+});
+
+// ---------------------------------------------------------------------------
+// The help reply
+// ---------------------------------------------------------------------------
+
+test('every command the help reply lists is accepted by its matcher', () => {
+    // Pulled back out of the reply text, so a reply that drifts from the
+    // matchers fails here rather than in a meeting.
+    const listed = allChatHelpMessages()
+        .join(' ')
+        .match(/"LMA [^"]+"/g)!
+        .map((quoted) => quoted.slice(1, -1));
+    assert.ok(listed.length >= 4 + ASSISTANT_CHAT_COMMANDS.length);
+    for (const command of listed) {
+        assert.ok(
+            commandsTriggeredBy(command).length === 1,
+            `the help reply lists "${command}", which ${commandsTriggeredBy(command).length ? 'triggers more than one command' : 'no matcher accepts'}`,
+        );
+    }
+});
+
+test('the help reply lists one canonical form of every command', () => {
+    const text = chatHelpMessages(NOVA_LIKE).join(' ');
+    for (const command of [
+        END_COMMAND_VERBS[0],
+        details.pauseCommand,
+        details.startCommand,
+        details.helpCommand,
+        ...ASSISTANT_CHAT_COMMANDS.map((entry) => entry.phrases[0]),
+    ]) {
+        assert.ok(text.includes(`"LMA ${command.toLowerCase()}"`), `the help reply leaves out "LMA ${command}"`);
+    }
+    // Canonical forms only: no aliases of the mode commands.
+    for (const entry of ASSISTANT_CHAT_COMMANDS) {
+        for (const alias of entry.phrases.slice(1)) {
+            assert.ok(!text.includes(`"LMA ${alias}"`), `the help reply lists the alias "LMA ${alias}"`);
+        }
+    }
+    assert.ok(!text.includes('"LMA end"'), 'the help reply lists an alias of "LMA leave"');
+});
+
+test('the help reply leaves out the mode commands when no assistant can change mode', () => {
+    for (const assistant of [NO_ASSISTANT, ELEVENLABS_LIKE]) {
+        const text = chatHelpMessages(assistant).join(' ');
+        for (const entry of ASSISTANT_CHAT_COMMANDS) {
+            assert.ok(!text.includes(`"LMA ${entry.phrases[0]}"`), `"LMA ${entry.phrases[0]}" listed with no assistant to act on it`);
+        }
+        assert.ok(text.includes('"LMA leave"'));
+        assert.ok(text.includes('"LMA help"'));
+    }
+    assert.equal(chatHelpMessages(NO_ASSISTANT).length, 1);
+    assert.equal(chatHelpMessages(NOVA_LIKE).length, 2);
+});
+
+test('every help message is one short line', () => {
+    // Chime and Webex post by typing, where a newline is an Enter key and would
+    // send the reply in pieces. Kept to about the length of the introduction
+    // message, which every platform already posts.
+    for (const message of allChatHelpMessages()) {
+        assert.doesNotMatch(message, /[\r\n]/, `help message spans lines: "${message}"`);
+        assert.ok(message.length <= 250, `help message is ${message.length} characters: "${message}"`);
+    }
+});
+
+// ---------------------------------------------------------------------------
+// The default introduction message
+// ---------------------------------------------------------------------------
+
+test('the default introduction message points at LMA leave and LMA help', () => {
+    assert.match(DEFAULT_INTRO_MESSAGE, /"LMA leave"/);
+    assert.match(DEFAULT_INTRO_MESSAGE, /"LMA help"/);
+    assert.match(DEFAULT_INTRO_MESSAGE, /\{LMA_USER\}/);
+});
+
+test('the default introduction message matches the IntroMessage stack parameter default', () => {
+    // The stack parameter is what a deployed VP receives as INTRO_MESSAGE, so it
+    // is the default that matters; the one in details.ts covers a VP run without
+    // it. The parameter is a folded block scalar (`>-`), whose lines join with
+    // single spaces.
+    const template = readSource('../../template.yaml');
+    const block = template.match(/\n {2}IntroMessage:\n {4}Type: String\n {4}Default: >-\n((?: {6}.*\n)+)/);
+    assert.ok(block, 'could not find the IntroMessage parameter in template.yaml — this test needs updating');
+    const folded = block![1]
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .join(' ');
+    assert.equal(folded, DEFAULT_INTRO_MESSAGE);
 });
 
 // ---------------------------------------------------------------------------
 // The vocabularies stay disjoint
 // ---------------------------------------------------------------------------
 
-test('the pause and resume commands are neither a dismissal nor an assistant-mode toggle', () => {
-    for (const message of ['PAUSE', 'LMA pause', 'START', 'LMA start']) {
-        assert.equal(matchesEndCommand(message), false, `"${message}" claimed as a dismissal`);
-        assert.equal(parseAssistantChatCommand(message), null, `"${message}" claimed as a toggle`);
-    }
-    assert.equal(matchesChatCommand('PAUSE', details.startCommand), false);
-    assert.equal(matchesChatCommand('START', details.pauseCommand), false);
+test('the pause, resume and help commands each trigger exactly one command', () => {
+    assert.deepEqual(commandsTriggeredBy('LMA pause'), ['pause']);
+    assert.deepEqual(commandsTriggeredBy('LMA start'), ['start']);
+    assert.deepEqual(commandsTriggeredBy('LMA help'), ['help']);
 });
 
 // ---------------------------------------------------------------------------
@@ -135,11 +275,12 @@ test('a Zoom label in neither shape is returned whole with no sender', () => {
 
 test('a Zoom pause command matches through the label split, and prose around it does not', () => {
     const matches = (label: string) => matchesChatCommand(splitZoomChatLabel(label).body, details.pauseCommand);
-    assert.equal(matches('Alice to Everyone: PAUSE'), true);
-    assert.equal(matches('Alice to Everyone, 10:42 AM, pause'), true);
-    assert.equal(matches('Alice to Everyone: PAUSED for lunch'), false);
+    assert.equal(matches('Alice to Everyone: LMA PAUSE'), true);
+    assert.equal(matches('Alice to Everyone, 10:42 AM, lma pause'), true);
+    assert.equal(matches('Alice to Everyone: PAUSE'), false);
+    assert.equal(matches('Alice to Everyone: LMA PAUSED for lunch'), false);
     // A sender whose name is the command word does not make their message one.
-    assert.equal(matches('PAUSE to Everyone: see you after the break'), false);
+    assert.equal(matches('LMA PAUSE to Everyone: see you after the break'), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -160,10 +301,15 @@ function readSource(file: string): string {
     assert.fail(`could not read ${file} — the path in this test needs updating`);
 }
 
-test('every platform handler matches pause and resume with matchesChatCommand', () => {
+test('every platform handler matches pause, resume and help with matchesChatCommand', () => {
     for (const file of ['zoom.ts', 'zoom-sdk.ts', 'teams.ts', 'teams-sdk.ts', 'webex.ts', 'chime.ts']) {
         const src = readSource(file);
-        for (const command of ['pauseCommand', 'startCommand']) {
+        assert.match(
+            src,
+            /chatHelpMessages\(voiceAssistant\)/,
+            `${file} does not answer the help command with chatHelpMessages(voiceAssistant)`,
+        );
+        for (const command of ['pauseCommand', 'startCommand', 'helpCommand']) {
             assert.match(
                 src,
                 new RegExp(`matchesChatCommand\\(\\w+, details\\.${command}\\)`),

@@ -62,6 +62,11 @@ export class NoOpAgent implements VoiceAssistantProvider {
     // No-op
   }
 
+  /** There is no assistant to reconfigure. */
+  supportsModeChanges(): boolean {
+    return false;
+  }
+
   isEnabled(): boolean {
     return false;
   }

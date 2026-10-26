@@ -6,6 +6,7 @@ import { transcriptionService } from "./scribe.js";
 import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
+import { chatHelpMessages } from './chat-help.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
@@ -813,6 +814,11 @@ export default class Teams {
             // toggle is recorded without a requester — same limitation as the
             // generic farewell above.
             await this.sendMessages(page, await applyAssistantChatCommand(voiceAssistant, assistantToggle, null));
+        } else if (matchesChatCommand(message, details.helpCommand)) {
+            // Answered whether or not transcription is paused: the list is how
+            // someone finds out how to resume it.
+            console.log('[chat-help] posting the chat command list');
+            await this.sendMessages(page, chatHelpMessages(voiceAssistant));
         } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
             details.start = false;
             console.log(details.pauseMessages[0]);

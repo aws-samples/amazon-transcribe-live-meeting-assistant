@@ -30,6 +30,8 @@ import {
     NovaAgent,
     STOP_REQUEST_TOOL_GRACE_MS,
     STOP_REQUEST_TOOL_BACKSTOP_MS,
+    STOP_ACK_START_WINDOW_MS,
+    STOP_ACK_MAX_AUDIO_MS,
 } from './nova-agent.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
 import { simliAvatar } from './simli-avatar.js';
@@ -987,6 +989,256 @@ test('ordinary barge-in with no stop request in flight reports nothing', async (
         (agent as any)._isInterrupted = true;
         await (agent as any).playAudio(Buffer.alloc(320));
         assert.deepEqual(stopLines(), []);
+    } finally {
+        release();
+    }
+});
+
+// ---------------------------------------------------------------------------
+// An acknowledgement spoken after the tool call
+// ---------------------------------------------------------------------------
+
+/** Bytes of 16 kHz, 16-bit mono playback PCM per millisecond. */
+const BYTES_PER_MS = 32;
+
+/** Record what reaches playback instead of spawning pacat. */
+function recordPlayback(agent: NovaAgent): number[] {
+    const written: number[] = [];
+    (agent as any).ensurePacatStream = () => ({
+        stdin: { destroyed: false, write: (chunk: Buffer) => written.push(chunk.length) },
+    });
+    return written;
+}
+
+/** A chunk of `ms` milliseconds of playback audio. */
+function chunk(ms: number): Buffer {
+    return Buffer.alloc(ms * BYTES_PER_MS);
+}
+
+function playedMs(written: number[]): number {
+    return written.reduce((sum, bytes) => sum + bytes, 0) / BYTES_PER_MS;
+}
+
+test('the acknowledgement windows are the values the constants name', () => {
+    // As with the grace window above: retuning these from live measurements is a
+    // deliberate act, and everything else below derives from the constants.
+    assert.equal(STOP_ACK_START_WINDOW_MS, 1500);
+    assert.equal(STOP_ACK_MAX_AUDIO_MS, 1500);
+});
+
+test('an acknowledgement spoken after the mute tool call is played through the shut gate', async () => {
+    // Measured live: Nova calls `mute` first and says "Okay" in its response to
+    // the tool result, after the gate has shut. That word is the answer to the
+    // request, so it is let through, and the gate holds for everything after it.
+    capture();
+    try {
+        const agent = novaAgent();
+        const written = recordPlayback(agent);
+        agent.requestStopTalking('test');
+        (agent as any).noteMuteToolRequested();
+        await (agent as any).handleMuteTool('tool-use-id');
+        assert.equal(agent.isMuted(), true);
+        assert.deepEqual(playbackTeardowns, ['drain']);
+
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+        await (agent as any).playAudio(chunk(100));
+        assert.equal(playedMs(written), 200, 'the acknowledgement must be played');
+        (agent as any).noteAudioBlockEnded();
+        assert.deepEqual(playbackTeardowns, ['drain', 'drain'], 'what was written must be left to drain');
+
+        await (agent as any).playAudio(chunk(100));
+        assert.equal(playedMs(written), 200, 'audio after the acknowledgement must stay dropped');
+        assert.equal(agent.isMuted(), true);
+
+        const lines = stopLines().join('\n');
+        assert.match(lines, /action=ack-started delay_ms=\d+ gate=shut/);
+        assert.match(lines, /action=ack-played audio_ms=200 gate=shut/);
+        assert.match(lines, /action=post-gate-dropped/);
+        assert.doesNotMatch(lines, /action=ack-dropped/);
+
+        await delay(PAST_BACKSTOP_MS);
+        assert.equal(agent.isMuted(), true, 'the request still ends in silence');
+    } finally {
+        release();
+    }
+});
+
+test('an acknowledgement that runs on is cut at the budget', async () => {
+    // A model that ignored the prompt and went on with its answer after the tool
+    // call is heard for no longer than the budget.
+    capture();
+    try {
+        const agent = novaAgent();
+        const written = recordPlayback(agent);
+        (agent as any).noteMuteToolRequested();
+        await (agent as any).handleMuteTool('tool-use-id');
+
+        (agent as any).noteAudioBlockStarted();
+        for (let i = 0; i < STOP_ACK_MAX_AUDIO_MS / 100 + 5; i++) {
+            await (agent as any).playAudio(chunk(100));
+        }
+        assert.equal(playedMs(written), STOP_ACK_MAX_AUDIO_MS, 'no more than the budget may be played');
+        assert.match(
+            stopLines().join('\n'),
+            new RegExp(`action=ack-capped audio_ms=${STOP_ACK_MAX_AUDIO_MS} gate=shut`),
+        );
+
+        // A second block after the cap is not a second acknowledgement.
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+        assert.equal(playedMs(written), STOP_ACK_MAX_AUDIO_MS);
+
+        await delay(PAST_BACKSTOP_MS);
+    } finally {
+        release();
+    }
+});
+
+test('audio that starts after the acknowledgement window stays dropped', async () => {
+    capture();
+    try {
+        const agent = novaAgent();
+        const written = recordPlayback(agent);
+        (agent as any).noteMuteToolRequested();
+        await (agent as any).handleMuteTool('tool-use-id');
+        (agent as any).stopAck.toolAt = Date.now() - STOP_ACK_START_WINDOW_MS - 1;
+
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+        assert.deepEqual(written, []);
+        assert.doesNotMatch(stopLines().join('\n'), /action=ack-started/);
+
+        await delay(PAST_BACKSTOP_MS);
+    } finally {
+        release();
+    }
+});
+
+test('the answer already being spoken at the tool call is not taken for the acknowledgement', async () => {
+    // Only a block that starts after the tool call can be the acknowledgement.
+    // The rest of the answer the participant asked to stop is still cut.
+    capture();
+    try {
+        const agent = novaAgent();
+        const written = recordPlayback(agent);
+        (agent as any).noteAudioBlockStarted(); // the answer, under way
+        await (agent as any).playAudio(chunk(100));
+        (agent as any).noteMuteToolRequested();
+        await (agent as any).handleMuteTool('tool-use-id');
+
+        await (agent as any).playAudio(chunk(100));
+        await (agent as any).playAudio(chunk(100));
+        assert.equal(playedMs(written), 100, 'only the audio before the gate may be played');
+        assert.match(stopLines().join('\n'), /action=post-gate-dropped/);
+
+        await delay(PAST_BACKSTOP_MS);
+    } finally {
+        release();
+    }
+});
+
+test('an acknowledgement already playing when the gate shuts keeps its playback stream', async () => {
+    // Handing the stream off to drain mid-word would make the next chunk spawn a
+    // new stream, and spawning one kills the stream holding the start of the word.
+    capture();
+    try {
+        const agent = novaAgent();
+        const written = recordPlayback(agent);
+        (agent as any).noteMuteToolRequested();
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+
+        await (agent as any).handleMuteTool('tool-use-id');
+        assert.equal(agent.isMuted(), true);
+        assert.deepEqual(playbackTeardowns, [], 'the stream must not be handed off mid-acknowledgement');
+        assert.ok(gateEngagements().some((line) => line.includes('holding playback for the acknowledgement')));
+
+        await (agent as any).playAudio(chunk(100));
+        assert.equal(playedMs(written), 200);
+        (agent as any).noteAudioBlockEnded();
+        assert.deepEqual(playbackTeardowns, ['drain']);
+        assert.match(stopLines().join('\n'), /action=ack-played audio_ms=200 gate=shut/);
+
+        await delay(PAST_BACKSTOP_MS);
+    } finally {
+        release();
+    }
+});
+
+test('a barge-in, being asked back or an absolute mute ends the acknowledgement', async () => {
+    capture();
+    try {
+        for (const end of ['interrupted', 'unmute', 'mute'] as const) {
+            const agent = novaAgent();
+            const written = recordPlayback(agent);
+            (agent as any).noteMuteToolRequested();
+            await (agent as any).handleMuteTool('tool-use-id');
+            (agent as any).noteAudioBlockStarted();
+            await (agent as any).playAudio(chunk(100));
+            assert.equal(playedMs(written), 100, `${end}: the acknowledgement started`);
+
+            if (end === 'interrupted') {
+                (agent as any).handleInterruption();
+            } else if (end === 'unmute') {
+                agent.unmute('wake phrase activation');
+            } else {
+                agent.mute('auto-mute');
+            }
+            assert.equal((agent as any).stopAck, null, `${end}: the exemption must be withdrawn`);
+            if (end !== 'unmute') {
+                await (agent as any).playAudio(chunk(100));
+                assert.equal(playedMs(written), 100, `${end}: nothing more may be let through`);
+            }
+            assert.match(stopLines().join('\n'), new RegExp(`action=ack-cut why=${end === 'interrupted' ? 'interrupted' : end === 'unmute' ? 'unmuted' : 'muted'}`));
+            (agent as any).cancelStopRequest('test-cleanup');
+        }
+    } finally {
+        release();
+    }
+});
+
+test('a tool call after the fallback has already silenced the assistant opens no acknowledgement', async () => {
+    capture();
+    try {
+        const agent = novaAgent();
+        const written = recordPlayback(agent);
+        agent.requestStopTalking('test');
+        await delay(PAST_GRACE_MS);
+        assert.equal(agent.isMuted(), true);
+
+        (agent as any).noteMuteToolRequested();
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+        assert.deepEqual(written, []);
+        assert.equal((agent as any).stopAck, null);
+    } finally {
+        release();
+    }
+});
+
+test('a barge-in marker before the acknowledgement starts leaves its window open', async () => {
+    // The marker for the utterance that asked for silence can arrive after the
+    // tool call. Closing the window on it would drop the very word this exists
+    // to let through.
+    capture();
+    try {
+        const agent = novaAgent();
+        const written = recordPlayback(agent);
+        (agent as any).noteMuteToolRequested();
+        await (agent as any).handleMuteTool('tool-use-id');
+        (agent as any).handleInterruption();
+        assert.notEqual((agent as any).stopAck, null);
+
+        // The acknowledgement block clears the barge-in gate as it opens, as
+        // processResponseStream does for every new audio block.
+        (agent as any)._isInterrupted = false;
+        (agent as any).noteAudioBlockStarted();
+        await (agent as any).playAudio(chunk(100));
+        assert.equal(playedMs(written), 100);
+        (agent as any).noteAudioBlockEnded();
+
+        await delay(PAST_BACKSTOP_MS);
     } finally {
         release();
     }

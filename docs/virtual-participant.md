@@ -552,21 +552,25 @@ The VP posts a customizable introduction message in the meeting chat when it joi
 
 ## In-meeting Chat Commands
 
-Anyone in the meeting can control the VP by typing one of these commands in the meeting chat. Commands work across Zoom, Microsoft Teams, Webex, and Chime.
+Anyone in the meeting can control the VP by typing one of these commands in the meeting chat. Commands work across Zoom, Microsoft Teams, Webex, and Chime. Every command is addressed to `LMA` by name.
 
 | Command (typed in chat) | What it does |
 | --- | --- |
-| `LMA end`, `LMA leave`, `LMA stop`, `LMA quit`, `LMA exit` | The VP says goodbye and leaves the meeting. |
+| `LMA leave`, `LMA end`, `LMA stop`, `LMA quit`, `LMA exit` | The VP says goodbye and leaves the meeting. |
 | `Goodbye LMA`, `bye LMA` | Same as above. |
-| `PAUSE` (or `LMA pause`) | Stops transcription and recording without leaving the meeting. |
-| `START` (or `LMA start`) | Resumes a paused session. |
+| `LMA pause` | Stops transcription and recording without leaving the meeting. |
+| `LMA start` | Resumes a paused session. |
+| `LMA help` | The VP posts the list of chat commands in the meeting chat. |
+
+When a Nova Sonic voice assistant is configured, the assistant-mode commands (`LMA translate`, `LMA assist`, `LMA group`, `LMA always`, `LMA wake`) also work, and `LMA help` lists them; see [Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting). With no voice assistant, or with ElevenLabs, which cannot change mode during a meeting, `LMA help` leaves them out.
 
 Notes:
 
 - Dismissal commands always require the literal token `LMA` somewhere in the message — bare words like `END` or `LEAVE` are ignored so that prose like *"the meeting will end at 3pm"* or *"I'll leave at 3"* never trips a false dismissal. The `LMA` and verb tokens are matched case-insensitively and word-bounded (so `endless` or `ENDPOINT` don't match either).
 - When the chat platform exposes the sender name (Zoom, Chime, Webex), the goodbye message acknowledges who asked the VP to leave: *"Thanks Alice — I'll head out now."*
-- The default introduction message advertises the `LMA leave` / `LMA end` commands so participants always have a way to dismiss the bot. Customize via the `IntroMessage` CloudFormation parameter or the `INTRO_MESSAGE` env var.
-- `PAUSE` and `START` must be the whole chat message, optionally addressed to `LMA` (`LMA pause`, `@LMA start`), and are matched case-insensitively with punctuation ignored, so a one-word reply such as *"Pause?"* counts as the command. A message that merely contains the word — *"PAUSED"*, *"please don't PAUSE"*, or an introduction message that explains the commands — is ordinary chat.
+- The default introduction message tells participants to type `LMA leave` to dismiss the bot and `LMA help` to see the other commands. Customize via the `IntroMessage` CloudFormation parameter of the Virtual Participant stack or the `INTRO_MESSAGE` env var; a customized message is used as it is.
+- `LMA pause`, `LMA start` and `LMA help` must be the whole chat message: the `LMA` addressee (or `@LMA`, before or after the command) plus the command word, matched case-insensitively with punctuation ignored, so *"@LMA, pause!"* and *"start LMA"* count as the command. A bare `PAUSE` or `START` without the addressee is ordinary chat, as is a message that merely contains the command — *"LMA PAUSED"*, *"please LMA pause now"*, or an introduction message that explains the commands.
+- The help reply is posted as one or two single-line chat messages, listing each command in one canonical form. It is answered whether or not transcription is paused.
 
 ## Troubleshooting
 

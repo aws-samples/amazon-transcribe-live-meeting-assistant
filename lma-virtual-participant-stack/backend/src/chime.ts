@@ -4,6 +4,7 @@ import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitIn
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
+import { chatHelpMessages } from './chat-help.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 
@@ -243,6 +244,11 @@ export default class Chime {
                         page,
                         await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender),
                     );
+                } else if (text && matchesChatCommand(text, details.helpCommand)) {
+                    // Answered whether or not transcription is paused: the list is how
+                    // someone finds out how to resume it.
+                    console.log('[chat-help] posting the chat command list');
+                    await this.sendMessages(page, chatHelpMessages(voiceAssistant));
                 } else if (details.start && text && matchesChatCommand(text, details.pauseCommand)) {
                     details.start = false;
                     console.log(details.pauseMessages[0]);

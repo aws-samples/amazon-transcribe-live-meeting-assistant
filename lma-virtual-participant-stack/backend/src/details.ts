@@ -58,6 +58,7 @@ export interface MeetingDetails {
   // Commands
   startCommand: string;
   pauseCommand: string;
+  helpCommand: string;
   endCommand: string;
   
   // Timeouts
@@ -92,6 +93,27 @@ export interface MeetingDetails {
   meetingMode?: string;
 }
 
+/**
+ * The introduction message posted when the VP joins, unless INTRO_MESSAGE
+ * (the `IntroMessage` stack parameter) replaces it. `{LMA_USER}` is replaced
+ * with the name of the user who invited the VP.
+ *
+ * Kept identical to the `IntroMessage` parameter default in
+ * lma-virtual-participant-stack/template.yaml, which is what a deployed VP
+ * actually receives; chat-commands.test.ts checks the two stay the same.
+ */
+export const DEFAULT_INTRO_MESSAGE =
+  'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by {LMA_USER} to join this call. ' +
+  'Type "LMA leave" in chat to remove me, or "LMA help" to see the other commands. ' +
+  'To learn more please visit: https://amazon.com/live-meeting-assistant.';
+
+/**
+ * The dismissal verbs matchesEndCommand accepts beside the "LMA" addressee.
+ * The first is the canonical form: the one the introduction and the help
+ * message tell people to type.
+ */
+export const END_COMMAND_VERBS: readonly string[] = ['leave', 'end', 'stop', 'quit', 'exit', 'goodbye', 'bye'];
+
 class DetailsManager {
   private _details: MeetingDetails;
 
@@ -117,9 +139,7 @@ class DetailsManager {
     // Messages Configuration
     const introMessage = replacePlaceholders(
       process.env.INTRO_MESSAGE ||
-      'Hello. I am an AI Live Meeting Assistant (LMA). I was invited by {LMA_USER} to join this call. ' +
-      'Anyone here can ask me to leave at any time by typing "LMA leave" (or "LMA end") in chat. ' +
-      'To learn more please visit: https://amazon.com/live-meeting-assistant.'
+      DEFAULT_INTRO_MESSAGE
     );
     const startRecordingMessage = replacePlaceholders(
       process.env.START_RECORDING_MESSAGE || 'Live Meeting Assistant started.'
@@ -169,16 +189,17 @@ class DetailsManager {
       pauseMessages: [stopRecordingMessage],
       exitMessages: [exitMessage],
 
-      // Commands. The end-command matcher (matchesEndCommand below)
-      // requires an explicit "LMA" prefix on every dismissal phrase
-      // ("LMA END", "LMA LEAVE", "LMA STOP", "LMA QUIT", "Goodbye LMA",
-      // etc., case-insensitive, word-bounded) so that prose like
-      // "the meeting will end at 3pm" or "I'll leave at 3" never trips
-      // a false dismissal. The pause and resume commands are matched by
-      // matchesChatCommand: the whole message, case-insensitive, with or
-      // without the "LMA" addressee.
+      // Commands. Every chat command has to address LMA by name. The
+      // end-command matcher (matchesEndCommand below) accepts the addressee
+      // plus one dismissal verb ("LMA END", "LMA LEAVE", "Goodbye LMA",
+      // etc., case-insensitive, word-bounded) so that prose like "the
+      // meeting will end at 3pm" or "I'll leave at 3" never trips a false
+      // dismissal. The pause, resume and help commands are matched by
+      // matchesChatCommand: the whole message is the "LMA" addressee plus
+      // the command, case-insensitive, punctuation ignored.
       startCommand: 'START',
       pauseCommand: 'PAUSE',
+      helpCommand: 'HELP',
       endCommand: 'END',
 
       // Timeouts
@@ -250,7 +271,7 @@ export function resolveJoinMethod(override: string | undefined, credentialsPrese
  * lightweight punctuation. This prevents false positives from prose that
  * happens to contain both "LMA" and a dismissal verb — most importantly
  * the bot's own intro message (which itself reads
- *   '...typing "LMA leave" (or "LMA end") in chat.'
+ *   '...Type "LMA leave" in chat to remove me, or "LMA help"...'
  * ), so a second LMA bot in the same meeting can no longer end the first
  * one with its join announcement.
  *
@@ -273,7 +294,7 @@ export function matchesEndCommand(message: string): boolean {
   // Cheap belt-and-braces guard — every legitimate command fits comfortably
   // under this. Real prose virtually never does.
   if (trimmed.length > 40) return false;
-  const verb = '(?:end|leave|stop|quit|exit|goodbye|bye)';
+  const verb = `(?:${END_COMMAND_VERBS.join('|')})`;
   const addressee = '@?lma';
   // Allow optional inline punctuation between the two tokens (",", ":", "-",
   // "!", "?", ".") and trailing terminators.
@@ -286,25 +307,29 @@ export function matchesEndCommand(message: string): boolean {
 
 /**
  * Returns true when a chat message is exactly `command` — the pause
- * (`details.pauseCommand`) or resume (`details.startCommand`) command — and
- * nothing else, optionally addressed to LMA.
+ * (`details.pauseCommand`), resume (`details.startCommand`) or help
+ * (`details.helpCommand`) command — addressed to LMA, and nothing else.
  *
  * Pass the message body only, with any sender or recipient prefix the platform
  * adds already removed: the same string each platform hands to
  * matchesEndCommand.
  *
- * Matched case-insensitively and as the whole message, like the dismissal and
- * assistant-mode commands, so a message that merely contains the word — "PAUSED",
- * "please don't PAUSE", an introduction message that explains the command —
- * is ordinary chat. Punctuation is ignored, through the same normalisation as
- * the assistant-mode commands (normalizeChatText), so a one-word reply such as
- * "Pause?" or "start..." counts as the command, as "LMA translate?" does.
+ * The "LMA" addressee is required, as it is for the dismissal and
+ * assistant-mode commands, so a bare "pause" typed to the rest of the meeting
+ * is ordinary chat. The addressee may come before or after the command.
+ * Matched case-insensitively and as the whole message, so a message that
+ * merely contains the word — "LMA PAUSED", "please LMA pause now", an
+ * introduction message that explains the command — is ordinary chat.
+ * Punctuation is ignored, through the same normalisation as the
+ * assistant-mode commands (normalizeChatText), so "@LMA, pause!" and
+ * "LMA start..." count as the command.
  *
  * Examples that match (for "PAUSE"):
- *   "PAUSE", "pause", "Pause.", "Pause?", "LMA pause", "@LMA, PAUSE!", "pause LMA"
+ *   "LMA pause", "lma PAUSE", "@LMA, Pause!", "pause LMA", "LMA: pause?"
  *
  * Examples that do NOT match:
- *   "PAUSED", "please PAUSE", "Type PAUSE to stop the transcript", "LMA", ""
+ *   "PAUSE", "pause", "LMA PAUSED", "please LMA pause",
+ *   'Type "LMA pause" to stop the transcript', "LMA", ""
  */
 export function matchesChatCommand(message: string, command: string): boolean {
   if (!message || !command) return false;
@@ -312,7 +337,8 @@ export function matchesChatCommand(message: string, command: string): boolean {
   if (!expected) return false;
   const tokens = normalizeChatText(message).split(' ').filter((token) => token.length > 0);
   const addressee = tokens.indexOf('lma');
-  const remainder = addressee === -1 ? tokens : [...tokens.slice(0, addressee), ...tokens.slice(addressee + 1)];
+  if (addressee === -1) return false;
+  const remainder = [...tokens.slice(0, addressee), ...tokens.slice(addressee + 1)];
   return remainder.join(' ') === expected;
 }
 
