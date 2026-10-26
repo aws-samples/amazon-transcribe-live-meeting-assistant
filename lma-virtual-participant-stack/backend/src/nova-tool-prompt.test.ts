@@ -55,7 +55,9 @@ test('the tool section is not a numbered procedure the model can recite', () => 
     const prompt = systemPrompt('normal', STRANDS_ARN);
     assert.doesNotMatch(prompt, /CRITICAL WORKFLOW/);
     assert.doesNotMatch(prompt, /WAIT for the user to acknowledge/);
-    assert.doesNotMatch(prompt, /^\s*\d\.\s+(FIRST|THEN)\b/m);
+    const toolSection = prompt.slice(prompt.indexOf('INFORMATION REQUESTS:'));
+    assert.ok(toolSection.startsWith('INFORMATION REQUESTS:'));
+    assert.doesNotMatch(toolSection, /^\s*\d\.\s/m);
 });
 
 test('the tool section is absent when no meeting-assistant tool is configured', () => {
