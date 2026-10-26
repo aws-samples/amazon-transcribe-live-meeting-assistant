@@ -90,6 +90,15 @@ export interface VoiceAssistantProvider {
   reconfigure(request: AssistantReconfigureRequest): Promise<AssistantReconfigureOutcome>;
 
   /**
+   * Whether this provider can change mode during a meeting at all — that is,
+   * whether `reconfigure` is ever able to apply a request rather than decline
+   * every one. The `LMA help` chat reply lists the assistant-mode commands only
+   * when this is true, so participants are not told about commands that are
+   * always answered with a refusal.
+   */
+  supportsModeChanges(): boolean;
+
+  /**
    * Send audio chunk to the voice assistant
    * @param chunk PCM audio buffer (16kHz, 16-bit, mono)
    */

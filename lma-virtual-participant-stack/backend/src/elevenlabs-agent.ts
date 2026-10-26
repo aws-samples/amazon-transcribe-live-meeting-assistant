@@ -833,6 +833,11 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     }
   }
 
+  /** The agent's prompt and tools live in the ElevenLabs dashboard, so reconfigure declines every request. */
+  supportsModeChanges(): boolean {
+    return false;
+  }
+
   isEnabled(): boolean {
     return this.enabled;
   }

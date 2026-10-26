@@ -28,7 +28,7 @@ Parameters:
     Default: >-
       Hello. I am an AI Live Meeting Assistant (LMA).
       I was invited by {LMA_USER} to join this call.
-      Anyone here can ask me to leave at any time by typing "LMA leave" (or "LMA end") in chat.
+      Type "LMA leave" in chat to remove me, or "LMA help" to see the other commands.
       To learn more please visit: https://amazon.com/live-meeting-assistant.
 
   StartRecordingMessage:

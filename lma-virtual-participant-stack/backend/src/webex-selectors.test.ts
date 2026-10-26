@@ -371,7 +371,7 @@ test("the VP's own messages are recognized by text when no label resolves", () =
     // The sender check cannot fire on a continuation row or in the fallback where
     // the row selector misses, so our own outgoing text is a second line of
     // defence — the start and stop messages are operator-settable and could
-    // otherwise contain the literal START or PAUSE and toggle the VP.
+    // otherwise be a chat command such as "LMA start" and toggle the VP.
     assert.equal(isOwnWebexMessage(details.startMessages[0]), true);
     assert.equal(isOwnWebexMessage(details.exitMessages[0]), true);
     assert.equal(isOwnWebexMessage(`  ${details.startMessages[0]}  `), true);

@@ -5,6 +5,7 @@ import { details, matchesEndCommand, matchesChatCommand, exitMessagesFor, ExitIn
 import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
+import { chatHelpMessages } from './chat-help.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
@@ -431,6 +432,11 @@ export default class TeamsSdk {
                             page,
                             await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender),
                         );
+                    } else if (matchesChatCommand(body, details.helpCommand)) {
+                        // Answered whether or not transcription is paused: the list is how
+                        // someone finds out how to resume it.
+                        console.log('[chat-help] posting the chat command list');
+                        await this.sendMessages(page, chatHelpMessages(voiceAssistant));
                     } else if (details.start && matchesChatCommand(body, details.pauseCommand)) {
                         details.start = false;
                         console.log(details.pauseMessages[0]);

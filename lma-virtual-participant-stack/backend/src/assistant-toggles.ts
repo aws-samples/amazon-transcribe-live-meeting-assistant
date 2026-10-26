@@ -188,33 +188,53 @@ export interface AssistantChatCommand {
  * activation mode, and the command has no record of what activation was before
  * `translate` or `group` changed it — `LMA wake` is how you get the wake phrase
  * back.
+ *
+ * Grouped by the change each set of phrases asks for, with the first phrase of
+ * each group as its canonical form, so the `LMA help` reply (chat-help.ts) is
+ * generated from this table rather than kept beside it.
  */
-const CHAT_COMMANDS: ReadonlyArray<readonly [string, AssistantChatCommand]> = [
+export interface AssistantChatCommandEntry {
+    /** Every phrase that asks for this change. The first is the canonical
+     *  form — the one the help message lists. */
+    readonly phrases: readonly string[];
+    readonly command: AssistantChatCommand;
+    /** What the command does, as the help message describes it. */
+    readonly summary: string;
+}
+
+export const ASSISTANT_CHAT_COMMANDS: ReadonlyArray<AssistantChatCommandEntry> = [
     // Meeting mode — what job the assistant is doing.
-    ['translate', { meetingMode: 'translator', activationMode: 'always_active' }],
-    ['translator', { meetingMode: 'translator', activationMode: 'always_active' }],
-    ['translate mode', { meetingMode: 'translator', activationMode: 'always_active' }],
-    ['translator mode', { meetingMode: 'translator', activationMode: 'always_active' }],
-    ['interpret', { meetingMode: 'translator', activationMode: 'always_active' }],
-    ['assist', { meetingMode: 'normal' }],
-    ['assistant', { meetingMode: 'normal' }],
-    ['assist mode', { meetingMode: 'normal' }],
-    ['assistant mode', { meetingMode: 'normal' }],
-    ['normal', { meetingMode: 'normal' }],
-    ['normal mode', { meetingMode: 'normal' }],
-    ['group', { meetingMode: 'group', activationMode: 'always_active' }],
-    ['group mode', { meetingMode: 'group', activationMode: 'always_active' }],
+    {
+        phrases: ['translate', 'translator', 'translate mode', 'translator mode', 'interpret'],
+        command: { meetingMode: 'translator', activationMode: 'always_active' },
+        summary: 'translator mode',
+    },
+    {
+        phrases: ['assist', 'assistant', 'assist mode', 'assistant mode', 'normal', 'normal mode'],
+        command: { meetingMode: 'normal' },
+        summary: 'assistant mode',
+    },
+    {
+        phrases: ['group', 'group mode'],
+        command: { meetingMode: 'group', activationMode: 'always_active' },
+        summary: 'group mode',
+    },
     // Activation mode — when the assistant is listening.
-    ['always', { activationMode: 'always_active' }],
-    ['always on', { activationMode: 'always_active' }],
-    ['always active', { activationMode: 'always_active' }],
-    ['always listen', { activationMode: 'always_active' }],
-    ['open mic', { activationMode: 'always_active' }],
-    ['wake', { activationMode: 'wake_phrase' }],
-    ['wake word', { activationMode: 'wake_phrase' }],
-    ['wake phrase', { activationMode: 'wake_phrase' }],
-    ['on request', { activationMode: 'wake_phrase' }],
+    {
+        phrases: ['always', 'always on', 'always active', 'always listen', 'open mic'],
+        command: { activationMode: 'always_active' },
+        summary: 'always listening',
+    },
+    {
+        phrases: ['wake', 'wake word', 'wake phrase', 'on request'],
+        command: { activationMode: 'wake_phrase' },
+        summary: 'wake phrase only',
+    },
 ];
+
+const CHAT_COMMANDS: ReadonlyArray<readonly [string, AssistantChatCommand]> = ASSISTANT_CHAT_COMMANDS.flatMap(
+    (entry) => entry.phrases.map((phrase) => [phrase, entry.command] as const),
+);
 
 const CHAT_COMMAND_INDEX: ReadonlyMap<string, AssistantChatCommand> = new Map(CHAT_COMMANDS);
 

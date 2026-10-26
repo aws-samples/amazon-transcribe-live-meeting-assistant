@@ -9,6 +9,7 @@ import {
     createDuplicateToggleFilter,
     parseAssistantChatCommand,
 } from './assistant-toggles.js';
+import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
@@ -88,7 +89,7 @@ export function normalizeWebexSender(raw: string | null | undefined): string | n
  * serves both this check and the goodbye. Doing it in the page against the raw label
  * let anything decorative through — a trailing colon, a leading '@', an appended
  * timestamp — and the VP would then ingest its own intro message, or toggle itself
- * on an operator-customised start or stop message containing START or PAUSE.
+ * on an operator-customised start or stop message that is a command such as "LMA pause".
  *
  * Matched whole rather than as a substring: `scribeName` is the bare string "LMA",
  * and a substring test silences any participant whose display name contains it
@@ -119,6 +120,7 @@ export function isOwnWebexMessage(message: string): boolean {
         ...details.startMessages,
         ...details.pauseMessages,
         ...details.exitMessages,
+        ...allChatHelpMessages(),
     ].some((own) => own && own.trim() === text);
 }
 
@@ -848,7 +850,7 @@ export default class Webex {
             // continuation row, or the fallback where the row selector misses — so
             // our own outgoing text is recognised as well. That matters because the
             // start and stop messages are operator-settable and could otherwise
-            // contain the literal START or PAUSE and toggle the VP.
+            // be a chat command such as "LMA start" and toggle the VP.
             if (
                 isOwnWebexSender(sender, [details.scribeIdentity, details.scribeName]) ||
                 isOwnWebexMessage(message)
@@ -889,6 +891,16 @@ export default class Webex {
             } else if (assistantToggle) {
                 if (!this.freshToggle(message, sender)) return;
                 await this.sendMessages(frame, await applyAssistantChatCommand(voiceAssistant, assistantToggle, sender));
+            } else if (matchesChatCommand(message, details.helpCommand)) {
+                // The same duplicate filter as the toggles: this observer can emit
+                // one message twice, and the reply would then be posted twice. A
+                // genuine repeat from the same sender inside the filter's few
+                // seconds is ignored too, on purpose — the list was just posted.
+                if (!this.freshToggle(message, sender)) return;
+                // Answered whether or not transcription is paused: the list is how
+                // someone finds out how to resume it.
+                console.log('[chat-help] posting the chat command list');
+                await this.sendMessages(frame, chatHelpMessages(voiceAssistant));
             } else if (details.start && matchesChatCommand(message, details.pauseCommand)) {
                 details.start = false;
                 console.log(details.pauseMessages[0]);
