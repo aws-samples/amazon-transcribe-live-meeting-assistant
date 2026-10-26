@@ -600,7 +600,7 @@ VoiceAssistantActivationDuration=60  # 60 seconds
 ### Pre-Tool Acknowledgment
 - Nova announces: "Let me search for that information. This may take a moment."
 - Sets proper user expectations
-- Confirmation-based prompting strategy
+- One short preamble sentence, then the tool call; Nova is told never to speak its reasoning, plans or tool names
 
 ## Comparison: AWS Nova Sonic 2 vs ElevenLabs
 
