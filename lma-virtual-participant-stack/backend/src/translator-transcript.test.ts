@@ -97,7 +97,7 @@ test('the words after a point are split off as a row of their own', () => {
     // Words start at 0, 0.4, ... 2.8; keep from the one at 2.4 ("Thanks").
     const rest = resultAfter(full, 2.3);
     assert.ok(rest);
-    assert.equal(rest.ResultId, 'r1-after');
+    assert.equal(rest.ResultId, 'r1-after-2.300');
     assert.equal(rest.IsPartial, false);
     assert.equal(rest.Alternatives[0].Transcript, 'Thanks everyone');
     assert.equal(rest.Alternatives[0].Items.length, 2);
@@ -106,6 +106,31 @@ test('the words after a point are split off as a row of their own', () => {
     assert.equal(full.ResultId, 'r1');
     assert.equal(full.Alternatives[0].Items.length, 8);
     assert.equal(resultAfter(full, 10), null);
+});
+
+test('each time the assistant speaks within one result, the speech after it gets a new row', () => {
+    const tracker = new OpenPartialTracker();
+    // Participant, assistant, participant, assistant, participant — one ResultId throughout.
+    const words = 'p1 p2 a1 a2 q1 q2 b1 b2 s1 s2';
+    tracker.noteSent(result('r1', 'p1 p2', true), 'Bob', 0);
+    tracker.close(); // first assistant turn
+    const closedEnd = tracker.closedRowEnd(result('r1', words, true));
+    assert.ok(closedEnd !== null);
+
+    // Assistant stopped at 1.6 (before q1): q1 q2 go out as a row of their own.
+    const first = resultAfter(result('r1', 'p1 p2 a1 a2 q1 q2', true), Math.max(1.6, closedEnd));
+    assert.ok(first);
+    assert.equal(first.Alternatives[0].Transcript, 'q1 q2');
+    assert.equal(tracker.isClosed(first), false);
+    tracker.noteSent(first, 'Bob', 0);
+    tracker.close(); // second assistant turn closes that row
+
+    // Assistant stopped again at 3.2 (before s1): s1 s2 must not be dropped.
+    const second = resultAfter(result('r1', words, false), Math.max(3.2, closedEnd));
+    assert.ok(second);
+    assert.notEqual(second.ResultId, first.ResultId);
+    assert.equal(second.Alternatives[0].Transcript, 's1 s2');
+    assert.equal(tracker.isClosed(second), false);
 });
 
 test('punctuation stays attached when words are split off', () => {

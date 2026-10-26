@@ -112,8 +112,10 @@ export class OpenPartialTracker {
 /**
  * The words of `result` that start at or after `sessionSeconds` (on the
  * result's own session timeline), as a separate result, or null if there are
- * none. Its id is derived from the original, so its partials and final update
- * one row of their own.
+ * none. Its id is derived from the original and the split point, so the
+ * partials and final split at the same point update one row of their own, and
+ * a later split of the same result (after the assistant spoke again) gets a
+ * new row rather than one that was already closed.
  */
 export function resultAfter(result: any, sessionSeconds: number): any | null {
     const items: any[] = result?.Alternatives?.[0]?.Items ?? [];
@@ -133,7 +135,7 @@ export function resultAfter(result: any, sessionSeconds: number): any | null {
     }
     return {
         ...result,
-        ResultId: result.ResultId ? `${result.ResultId}-after` : result.ResultId,
+        ResultId: result.ResultId ? `${result.ResultId}-after-${sessionSeconds.toFixed(3)}` : result.ResultId,
         StartTime: kept[0].StartTime,
         Alternatives: [{ ...result.Alternatives[0], Transcript: transcript, Items: kept }],
     };

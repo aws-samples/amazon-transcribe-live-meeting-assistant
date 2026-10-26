@@ -1309,7 +1309,12 @@ export class TranscriptionService {
         this.assistantTurnSubscription = onAssistantTurn((text) => this.handleAssistantTurn(text));
     }
 
-    /** One finished assistant turn, written as the assistant's row when no ASR source covers it. */
+    /**
+     * One finished assistant turn, written as the assistant's row when no ASR
+     * source covers it. Its start and end are approximate: Nova's text can
+     * finish before its audio has finished playing, so the row is placed by
+     * the speaking detector's last start and the time the text arrived.
+     */
     private handleAssistantTurn(text: string): void {
         if (!this.isTranscribing || !details.start || !this.assistantTurnsNeedTranscript()) {
             return;
