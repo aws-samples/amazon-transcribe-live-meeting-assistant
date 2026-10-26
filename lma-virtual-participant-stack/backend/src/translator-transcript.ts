@@ -50,7 +50,8 @@ export interface OpenPartial {
  */
 export class OpenPartialTracker {
     private open: OpenPartial | null = null;
-    private readonly closedIds = new Set<string>();
+    // Closed result id -> session time at which its written row ends.
+    private readonly closedIds = new Map<string, number>();
 
     /** Record a result that was written to the transcript. */
     noteSent(result: any, speaker: string, timeOffsetSeconds: number): void {
@@ -72,24 +73,33 @@ export class OpenPartialTracker {
             return null;
         }
         if (open.result.ResultId) {
-            this.closedIds.add(open.result.ResultId);
+            const items: any[] = open.result.Alternatives?.[0]?.Items ?? [];
+            const ends = items.map((item) => item?.EndTime).filter((t) => typeof t === 'number');
+            this.closedIds.set(open.result.ResultId, ends.length ? Math.max(...ends) : 0);
         }
         return { ...open, result: { ...open.result, IsPartial: false } };
     }
 
     /**
-     * Whether `result` belongs to a row {@link close} already finalised. Its own
-     * final ends the result, so the id is forgotten once that has been seen.
+     * Session time at which the row {@link close} wrote for `result` ends, or
+     * null if `result` does not belong to a closed row. Its own final ends the
+     * result, so the id is forgotten once that has been seen.
      */
-    isClosed(result: any): boolean {
+    closedRowEnd(result: any): number | null {
         const id = result?.ResultId;
-        if (!id || !this.closedIds.has(id)) {
-            return false;
+        const end = id ? this.closedIds.get(id) : undefined;
+        if (end === undefined) {
+            return null;
         }
         if (!result.IsPartial) {
             this.closedIds.delete(id);
         }
-        return true;
+        return end;
+    }
+
+    /** Whether `result` belongs to a closed row; forgets it on its final, like {@link closedRowEnd}. */
+    isClosed(result: any): boolean {
+        return this.closedRowEnd(result) !== null;
     }
 
     /** A new Transcribe session: nothing from the previous one can be continued. */
@@ -97,6 +107,36 @@ export class OpenPartialTracker {
         this.open = null;
         this.closedIds.clear();
     }
+}
+
+/**
+ * The words of `result` that start at or after `sessionSeconds` (on the
+ * result's own session timeline), as a separate result, or null if there are
+ * none. Its id is derived from the original, so its partials and final update
+ * one row of their own.
+ */
+export function resultAfter(result: any, sessionSeconds: number): any | null {
+    const items: any[] = result?.Alternatives?.[0]?.Items ?? [];
+    const first = items.findIndex(
+        (item) => item?.Type === 'pronunciation' && (item.StartTime ?? -Infinity) >= sessionSeconds,
+    );
+    if (first === -1) {
+        return null;
+    }
+    const kept = items.slice(first);
+    let transcript = '';
+    for (const item of kept) {
+        if (item.Type === 'pronunciation' && transcript) {
+            transcript += ' ';
+        }
+        transcript += item.Content ?? '';
+    }
+    return {
+        ...result,
+        ResultId: result.ResultId ? `${result.ResultId}-after` : result.ResultId,
+        StartTime: kept[0].StartTime,
+        Alternatives: [{ ...result.Alternatives[0], Transcript: transcript, Items: kept }],
+    };
 }
 
 // ---------------------------------------------------------------------------

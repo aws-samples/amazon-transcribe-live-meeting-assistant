@@ -15,6 +15,7 @@ import { readFileSync } from 'node:fs';
 import {
     OpenPartialTracker,
     assistantRowSpan,
+    resultAfter,
     assistantTurnText,
     onAssistantTurn,
     publishAssistantTurn,
@@ -79,6 +80,53 @@ test('later deliveries for a closed row are recognised until its own final', () 
     // Its final ended the result; the id is not held for ever.
     assert.equal(tracker.isClosed(result('r1', 'anything', true)), false);
     assert.equal(tracker.isClosed(result('r2', 'Next utterance', true)), false);
+});
+
+test('a closed row reports where it ends, and is forgotten on its final', () => {
+    const tracker = new OpenPartialTracker();
+    tracker.noteSent(result('r1', 'one two three', true), 'Bob', 0);
+    tracker.close();
+    // Three words at 0, 0.4, 0.8 (each 0.3 long): the row ends at 1.1.
+    assert.equal(tracker.closedRowEnd(result('r1', 'one two three four', true)), 1.1);
+    assert.equal(tracker.closedRowEnd(result('r1', 'one two three four five', false)), 1.1);
+    assert.equal(tracker.closedRowEnd(result('r1', 'anything', false)), null);
+});
+
+test('the words after a point are split off as a row of their own', () => {
+    const full = result('r1', 'The weather is dry El clima Thanks everyone', false);
+    // Words start at 0, 0.4, ... 2.8; keep from the one at 2.4 ("Thanks").
+    const rest = resultAfter(full, 2.3);
+    assert.ok(rest);
+    assert.equal(rest.ResultId, 'r1-after');
+    assert.equal(rest.IsPartial, false);
+    assert.equal(rest.Alternatives[0].Transcript, 'Thanks everyone');
+    assert.equal(rest.Alternatives[0].Items.length, 2);
+    assert.ok(Math.abs(rest.StartTime - 2.4) < 1e-9);
+    // The original is untouched.
+    assert.equal(full.ResultId, 'r1');
+    assert.equal(full.Alternatives[0].Items.length, 8);
+    assert.equal(resultAfter(full, 10), null);
+});
+
+test('punctuation stays attached when words are split off', () => {
+    const r = {
+        ResultId: 'r1',
+        IsPartial: false,
+        Alternatives: [
+            {
+                Transcript: 'Hola. Thanks, all.',
+                Items: [
+                    { Type: 'pronunciation', Content: 'Hola', StartTime: 0, EndTime: 0.3 },
+                    { Type: 'punctuation', Content: '.' },
+                    { Type: 'pronunciation', Content: 'Thanks', StartTime: 1, EndTime: 1.3 },
+                    { Type: 'punctuation', Content: ',' },
+                    { Type: 'pronunciation', Content: 'all', StartTime: 1.4, EndTime: 1.6 },
+                    { Type: 'punctuation', Content: '.' },
+                ],
+            },
+        ],
+    };
+    assert.equal(resultAfter(r, 0.9)?.Alternatives[0].Transcript, 'Thanks, all.');
 });
 
 test('a new session forgets the previous one', () => {
@@ -162,8 +210,13 @@ test('a held-back result first closes the participant row it continues', () => {
     const syncAt = events.indexOf('syncTranscriptSegmentState', held);
     assert.ok(closeAt > held && closeAt < syncAt, 'the row is closed before segment state moves on');
     assert.match(events, /this\.openPartials\.reset\(\)/);
-    assert.match(events, /this\.openPartials\.noteSent\(result, currentSpeaker, sessionOffsetSeconds\)/);
-    assert.match(events, /else if \(this\.openPartials\.isClosed\(result\)\)/);
+    assert.match(events, /this\.openPartials\.noteSent\(forward, currentSpeaker, sessionOffsetSeconds\)/);
+    assert.match(events, /this\.openPartials\.closedRowEnd\(result\)/);
+    assert.match(events, /this\.speechAfterAssistant\(result, sessionOffsetSeconds, closedEnd\)/);
+    const after = methodBody(scribe, 'private speechAfterAssistant');
+    assert.match(after, /Math\.max\(this\.agentSpeechEndedAt - sessionOffsetSeconds, closedEnd\)/);
+    const subscribe = methodBody(scribe, 'private subscribeToAssistantTurns');
+    assert.match(subscribe, /on\('stopped'[\s\S]*silenceMs/);
 });
 
 test('a session that ends, cleanly or not, closes its open row before the timeline moves on', () => {

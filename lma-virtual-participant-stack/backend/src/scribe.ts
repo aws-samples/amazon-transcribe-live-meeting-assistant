@@ -26,7 +26,7 @@ import { voiceAssistant } from './voice-assistant.js';
 import { RosterTimeline } from './roster-timeline.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
-import { OpenPartialTracker, assistantRowSpan, onAssistantTurn } from './translator-transcript.js';
+import { OpenPartialTracker, assistantRowSpan, onAssistantTurn, resultAfter } from './translator-transcript.js';
 
 const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
 
@@ -175,6 +175,8 @@ export class TranscriptionService {
     private transcribeClockStartMs: number | null = null;
     // Transcript-timeline position at which the assistant's audio last started.
     private agentSpeechStartedAt: number | null = null;
+    // Transcript-timeline position at which the assistant's audio last ended.
+    private agentSpeechEndedAt: number | null = null;
     private lastAssistantRowEnd = 0;
     private assistantRows = 0;
     private assistantTurnSubscription: (() => void) | null = null;
@@ -1252,6 +1254,23 @@ export class TranscriptionService {
         }
     }
 
+    /**
+     * The part of a closed row's later delivery spoken after the assistant
+     * stopped, as a row of its own, or null if there is none (or the assistant
+     * has not stopped since).
+     */
+    private speechAfterAssistant(result: any, sessionOffsetSeconds: number, closedEnd: number): any | null {
+        if (this.agentSpeechEndedAt === null) {
+            return null;
+        }
+        // Never before the end of the row already written, whatever the clock says.
+        const rest = resultAfter(result, Math.max(this.agentSpeechEndedAt - sessionOffsetSeconds, closedEnd));
+        if (!rest || this.openPartials.isClosed(rest)) {
+            return null;
+        }
+        return rest;
+    }
+
     /** Current position on the transcript timeline, in seconds, for whichever engine is running. */
     private transcriptClockSeconds(): number {
         if (this.meetingSession) {
@@ -1282,6 +1301,10 @@ export class TranscriptionService {
         }
         agentSpeakingDetector.on('started', () => {
             this.agentSpeechStartedAt = this.transcriptClockSeconds();
+        });
+        agentSpeakingDetector.on('stopped', () => {
+            // 'stopped' fires after the detector's silence hangover.
+            this.agentSpeechEndedAt = this.transcriptClockSeconds() - agentSpeakingDetector.silenceMs / 1000;
         });
         this.assistantTurnSubscription = onAssistantTurn((text) => this.handleAssistantTurn(text));
     }
@@ -1376,40 +1399,47 @@ export class TranscriptionService {
                         } catch (error) {
                             console.error('Failed to sync transcript segment state during suppression:', error);
                         }
-                    } else if (this.openPartials.isClosed(result)) {
-                        // A later delivery for a row closed above. It repeats the
-                        // participant's words and adds the assistant's, so it must
-                        // neither reopen that row nor add a second copy of it.
-                        if (!result.IsPartial) {
-                            console.log('🌐 Translator mode: dropping the final of a segment already closed when the assistant spoke');
-                        }
-                        try {
-                            kinesisStreamManager.syncTranscriptSegmentState(
-                                currentSpeaker,
-                                result,
-                                sessionOffsetSeconds,
-                            );
-                        } catch (error) {
-                            console.error('Failed to sync transcript segment state:', error);
-                        }
                     } else {
+                        // A later delivery for a row closed above repeats the
+                        // participant's words and adds the assistant's. Only
+                        // speech after the assistant stopped is new; it goes out
+                        // as a row of its own, and the rest is not written again.
+                        const closedEnd = this.openPartials.closedRowEnd(result);
+                        const forward = closedEnd === null
+                            ? result
+                            : this.speechAfterAssistant(result, sessionOffsetSeconds, closedEnd);
+                        if (!forward) {
+                            if (!result.IsPartial) {
+                                console.log('🌐 Translator mode: dropping the final of a segment already closed when the assistant spoke');
+                            }
+                            try {
+                                kinesisStreamManager.syncTranscriptSegmentState(
+                                    currentSpeaker,
+                                    result,
+                                    sessionOffsetSeconds,
+                                );
+                            } catch (error) {
+                                console.error('Failed to sync transcript segment state:', error);
+                            }
+                            continue;
+                        }
                         // Send all results to Kinesis
                         try {
                             const segMaxEndTime = await sendAddTranscriptSegment(
                                 currentSpeaker,
-                                result,
+                                forward,
                                 sessionOffsetSeconds,
                             );
                             if (segMaxEndTime > observedMaxEndTime) {
                                 observedMaxEndTime = segMaxEndTime;
                             }
-                            this.openPartials.noteSent(result, currentSpeaker, sessionOffsetSeconds);
+                            this.openPartials.noteSent(forward, currentSpeaker, sessionOffsetSeconds);
                         } catch (error) {
                             console.error('Failed to send transcript to Kinesis:', error);
                         }
 
                         // Process all results (partial + final) for wake phrase pre-connect and activation
-                        this.processTranscriptResult(result);
+                        this.processTranscriptResult(forward);
                     }
                 }
             }
