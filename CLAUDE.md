@@ -70,6 +70,36 @@ JavaScript/TypeScript uses ESLint (airbnb-base) + Prettier (120 char lines, sing
 
 Python uses Black (formatter), Flake8, Pylint (100 char lines). Config in `lma-ai-stack/.pylintrc` and `.flake8`.
 
+## Testing: let CI run the full suites
+
+The `Lint and unit tests` check (`.github/workflows/code-checks.yml`, mirrored by
+the `code_checks` job in `.gitlab-ci.yml`) runs on every pull request and on every
+push to `develop` and `main`. It is the authoritative full run. The workflow file
+is the source of truth for what it covers; today that is cfn-lint, ruff, the UI
+lint and vitest, `tsc`/eslint, and the SDK, CLI, Lambda, VP, VP-template,
+AI-stack, ASR, integ-plumbing, advisory-review, transcriber and browser-extension
+suites.
+
+When a change is going to a PR anyway:
+
+- **Do not run those suites locally in full** before pushing, and do not re-run
+  them on `develop` after a merge. Both repeat work CI is about to do.
+- **Do run the specific tests for the code you changed** (one test file, or
+  `pytest <path>`, after a build if the suite needs one). Seconds of local
+  checking avoids a failed CI round of several minutes, and each push after a
+  PR is reviewed triggers another paid advisory review.
+- **Batch fixes into one push** rather than pushing after each small change.
+
+Still verify locally whatever CI does not cover: `make docker-build-check*`
+(needs Docker), the integration suite (`integ-tests/`, needs a live stack),
+mypy and bandit, `pip install -r` for requirements files CI never installs, and
+`npm ci` for the browser extension (CI's build path uses `npm install`, which
+hides a missing lockfile entry). See `.claude/skills/dependabot-prs.md` for the
+dependency-specific gaps.
+
+`make lint-python` runs `ruff --fix` and `ruff format` in place. Check
+`git status` afterwards so unrelated reformatting does not ride along in a PR.
+
 ## Architecture
 
 **Nested CloudFormation stacks** orchestrated by `lma-main.yaml`:

@@ -134,6 +134,11 @@ export class AgentSpeakingDetector extends EventEmitter {
     console.log('🎙️  AgentSpeakingDetector stopped');
   }
 
+  /** Silence required before 'stopped' is emitted, so 'stopped' trails the speech by this much. */
+  get silenceMs(): number {
+    return this.offMs;
+  }
+
   isSpeaking(): boolean {
     return this._isSpeaking;
   }
