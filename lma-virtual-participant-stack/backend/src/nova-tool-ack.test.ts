@@ -280,3 +280,26 @@ test('a session replaced before the delay plays nothing into the new one', () =>
     assert.equal(h.clipWrites(), 0);
     assert.match(ackLines()[0], /source=none reason=session-changed/);
 });
+
+test('something said after the tool call means the clip is not played into the reply', () => {
+    const h = harness();
+    userText(h);
+    toolUse(h);
+    mock.timers.tick(400);
+    userText(h);
+    mock.timers.tick(TOOL_ACK_FALLBACK_MS);
+    assert.equal(h.clipWrites(), 0);
+    assert.match(ackLines()[0], /source=none reason=user-turn/);
+});
+
+test('a dropped block whose end never arrived does not take the next block with it', () => {
+    const h = harness();
+    userText(h);
+    toolUse(h);
+    mock.timers.tick(TOOL_ACK_FALLBACK_MS + 500);
+    audioBlock(h); // late preamble, dropped; its contentEnd never arrives
+    h.a.noteToolResultReady('tool-1');
+    const before = h.writes.length;
+    audioBlock(h, 5000); // the answer
+    assert.equal(h.writes.length, before + 1, 'the answer must be heard');
+});

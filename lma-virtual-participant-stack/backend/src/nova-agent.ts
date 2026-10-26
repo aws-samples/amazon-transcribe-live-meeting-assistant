@@ -124,6 +124,12 @@ export const STOP_ACK_MAX_AUDIO_MS = 1500;
 export const ACTIVATION_RECHECK_MS = 1000;
 
 /**
+ * How far past the estimated end of playback the output detector may still
+ * hold an activation window open (see activationHoldFor).
+ */
+export const ACTIVATION_AUDIBLE_HOLD_MAX_MS = 10000;
+
+/**
  * How long a participant's turn holds a lapsing activation window open, so that
  * a question asked just before it lapses is not cut off before the model has
  * had the moment it needs to start answering or call a tool.
@@ -2692,7 +2698,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this._isProcessingTool) return 'tool';
     if (this._isSpeaking) return 'audio-arriving';
     if (this.playbackEndsAt > now) return 'playback';
-    if (this.audibleOutput()) return 'audible';
+    // The detector covers what the estimate cannot see — PulseAudio's own
+    // latency, a stream that took a moment to connect — so it is believed only
+    // shortly past the estimate. A detector that never reports silence must
+    // not keep a wake-phrase session open for the rest of the meeting.
+    if (this.audibleOutput() && now - this.playbackEndsAt < ACTIVATION_AUDIBLE_HOLD_MAX_MS) return 'audible';
     const idleSince = Math.max(this.lastEngagementAt, this.playbackEndsAt);
     if (
       now - this.lastUserTextAt < ACTIVATION_USER_TURN_GRACE_MS
@@ -2812,6 +2822,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     console.log('Closing Nova session...');
     this.cancelToolAck('session-closed');
+    this.dropCurrentAudioBlock = false;
 
     // Stop keep-alive timer
     this.stopKeepAliveTimer();
@@ -3356,6 +3367,9 @@ export class NovaAgent implements VoiceAssistantProvider {
   private noteAssistantAudioBlockStarted(): void {
     const now = Date.now();
     this.lastAssistantAudioStartAt = now;
+    // Each block decides for itself, so a dropped block whose end never
+    // arrived cannot take the next one with it.
+    this.dropCurrentAudioBlock = false;
     const pending = this.pendingToolAck;
     if (!pending) {
       return;
@@ -3395,6 +3409,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this._isMuted) return 'muted';
     if (this.stopRequest || this.stopAck) return 'stop-request';
     if (this.lastInterruptionAt > pending.toolAt) return 'interrupted';
+    // Somebody has said something since the call, which the model is about to
+    // answer; a clip now would collide with that answer.
+    if (this.lastUserTextAt > pending.toolAt) return 'user-turn';
     // The room is not silent: the assistant is still saying something, and a
     // clip queued behind it would be heard late and out of place.
     if (this._isSpeaking) return 'speaking';

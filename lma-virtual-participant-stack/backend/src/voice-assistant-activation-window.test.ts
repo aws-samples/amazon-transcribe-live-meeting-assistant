@@ -172,17 +172,28 @@ test('the window does not lapse while the answer is still playing', async () => 
     assert.equal(h.kills(), 0, 'nothing was left to cut by the time it lapsed');
 });
 
-test('the window does not lapse while the output detector hears the assistant', async () => {
+test('the window does not lapse while the output detector still hears the assistant', async () => {
+    // Playback running later than the estimate says, as PulseAudio latency can.
     const h = harness();
     await h.agent.activate(WINDOW_S);
+    tick(20_000);
+    speak(h.agent, 12_000);
     h.audible.value = true;
-    tick(WINDOW_MS + 10_000);
+    tick(17_000); // 37 s: 5 s past the estimated end of playback
     assert.equal(h.agent.isActivated(), true);
     assert.ok(captured.some((l) => l === '⏳ Activation window held open (audible)'));
     h.audible.value = false;
     tick(WINDOW_MS - 2000);
     assert.equal(h.agent.isActivated(), true, 'counted from when it went quiet');
     tick(3000);
+    assert.equal(h.agent.isActivated(), false);
+});
+
+test('a detector that never reports silence cannot hold the session open', async () => {
+    const h = harness();
+    await h.agent.activate(WINDOW_S);
+    h.audible.value = true;
+    tick(WINDOW_MS + ACTIVATION_RECHECK_MS);
     assert.equal(h.agent.isActivated(), false);
 });
 
