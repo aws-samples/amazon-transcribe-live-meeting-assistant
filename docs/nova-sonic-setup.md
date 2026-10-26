@@ -78,7 +78,7 @@ That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `VoiceAssistantActivationDuration` | `30` | Seconds to stay active after wake phrase |
+| `VoiceAssistantActivationDuration` | `30` | Seconds the assistant stays active once idle after a wake phrase; a lookup or an answer still playing does not count against it |
 | `VoiceAssistantWakePhrases` | `hey alex` | Comma-separated wake phrases |
 
 ## Step 3: Verify Installation
@@ -601,6 +601,9 @@ VoiceAssistantActivationDuration=60  # 60 seconds
 - Nova announces: "Let me search for that information. This may take a moment."
 - Sets proper user expectations
 - One short preamble sentence, then the tool call; Nova is told never to speak its reasoning, plans or tool names
+- Required before every lookup, including follow-up questions in the same conversation
+- If Nova has not started speaking within one second of a lookup starting, the Virtual Participant plays a short acknowledgement of its own ("One moment, let me look that up."), spoken by Nova Sonic in the configured voice and rendered once when the Virtual Participant starts. Rendering it opens one short Nova Sonic session each time a Virtual Participant starts. It is not played while the assistant is muted or still talking, while a stop request is being handled, or once someone has spoken over the assistant or said something new since the lookup started, and a stop request or barge-in cuts it off like any other assistant speech. A preamble from Nova that arrives after it is dropped, so the room does not hear two.
+- Each lookup writes one `[tool-ack]` line to the Virtual Participant's log stream: `source=model` or `source=fallback` with `latency_ms` from the start of the lookup, or `source=none` with the reason nothing was played
 
 ## Comparison: AWS Nova Sonic 2 vs ElevenLabs
 

@@ -62,7 +62,9 @@ The voice agent is always listening and leads the conversation. Sessions auto-re
 
 ### wake_phrase
 
-The voice agent activates only when a configured wake phrase is detected in the meeting audio. Once activated, the agent stays active for a configurable duration (5-300 seconds, default 30 seconds) before returning to listening mode. This mode is best for normal meetings where the assistant should mostly listen and only respond when directly addressed.
+The voice agent activates only when a configured wake phrase is detected in the meeting audio. Once activated, the agent stays active until it has been idle for the configured duration (`VoiceAssistantActivationDuration`, 5-300 seconds, default 30 seconds), and then closes its session and returns to listening mode. This mode is best for normal meetings where the assistant should mostly listen and only respond when directly addressed.
+
+The duration is idle time, not a deadline from the wake phrase. The countdown starts again whenever the assistant is busy and whenever someone engages with it: it does not run while a lookup is in progress or while the meeting can still hear the assistant's answer (Nova Sonic delivers speech several times faster than it is played, so the answer is still playing well after the last of it has arrived), and it restarts when the assistant is addressed by wake phrase again or spoken over. Any wake phrase heard while the window is running restarts it, including "Hey Alex, stop", so a participant who has just silenced the assistant can still follow up. A question asked just as the window is about to lapse is given about three seconds for the assistant to start answering; conversation among the other participants is not engagement and can delay closing only that way, by a few seconds at a time and never beyond twice the configured duration. Because the session stays open for as long as the assistant is audible, asking it to stop while it is still talking always reaches a session that can hear the request.
 
 ## Wake Phrase Configuration
 
@@ -298,7 +300,7 @@ The following CloudFormation parameters control voice assistant behavior:
 | **VoiceAssistantProvider** | `none` (default), `elevenlabs`, `amazon_nova_sonic` | Selects the voice provider or disables the voice assistant |
 | **VoiceAssistantActivationMode** | `always_active`, `wake_phrase` | Controls whether the assistant is always listening or wake-phrase activated |
 | **VoiceAssistantWakePhrase** | Comma-separated phrases | Wake phrases that activate the assistant (used with `wake_phrase` mode) |
-| **VoiceAssistantActivationDuration** | `5`-`300` seconds | How long the assistant stays active after wake phrase detection |
+| **VoiceAssistantActivationDuration** | `5`-`300` seconds | How long the assistant stays active once it is idle after a wake phrase (see [wake_phrase](#wake_phrase)) |
 
 ## See Also
 

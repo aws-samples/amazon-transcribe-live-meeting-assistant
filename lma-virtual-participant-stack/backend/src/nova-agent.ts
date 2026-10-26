@@ -21,6 +21,8 @@ import { randomUUID } from 'crypto';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
+import { agentSpeakingDetector } from './agent-speaking-detector.js';
+import { pcmDurationMs, renderToolAckClip } from './tool-ack-clip.js';
 import { ActivationMode } from './voice-assistant-interface.js';
 import {
   AssistantReconfigureOutcome,
@@ -116,6 +118,56 @@ export const STOP_ACK_START_WINDOW_MS = 1500;
 export const STOP_ACK_MAX_AUDIO_MS = 1500;
 
 /**
+ * How often a held-open activation window looks again at whether the assistant
+ * has gone idle (see checkActivationWindow).
+ */
+export const ACTIVATION_RECHECK_MS = 1000;
+
+/**
+ * How far past the estimated end of playback the output detector may still
+ * hold an activation window open (see activationHoldFor).
+ */
+export const ACTIVATION_AUDIBLE_HOLD_MAX_MS = 10000;
+
+/**
+ * How long a participant's turn holds a lapsing activation window open, so that
+ * a question asked just before it lapses is not cut off before the model has
+ * had the moment it needs to start answering or call a tool.
+ *
+ * Deliberately short and deliberately not a re-arm: the session hears the
+ * whole meeting, so treating every turn as engagement would keep a wake-phrase
+ * session open for as long as anyone in the meeting is talking. Being addressed
+ * by wake phrase is what re-arms the full window.
+ */
+export const ACTIVATION_USER_TURN_GRACE_MS = 3000;
+
+/**
+ * How long after a `strands_agent` tool call the agent waits for the model's own
+ * spoken acknowledgement before playing its pre-rendered one.
+ *
+ * Measured on a live meeting: when Nova does speak a preamble, its audio block
+ * starts within about 150 ms of the tool-use event, so a second is ample for a
+ * model that is going to speak and short enough that the room is not left in
+ * silence wondering whether it was heard.
+ */
+export const TOOL_ACK_FALLBACK_MS = 1000;
+
+/**
+ * How long before the tool-use event an assistant audio block may have started
+ * and still count as the acknowledgement for it — the prompt asks for the
+ * sentence before the call, and the model sometimes emits it in that order.
+ */
+export const TOOL_ACK_LOOKBACK_MS = 2000;
+
+/**
+ * After the fallback acknowledgement has played, how long a model preamble that
+ * arrives late is dropped rather than played, so the room does not hear two
+ * acknowledgements back to back. Audio after this, or after the tool result has
+ * gone back to the model, is the answer and is always played.
+ */
+export const TOOL_ACK_LATE_PREAMBLE_MS = 4000;
+
+/**
  * Which region to reach Amazon Nova Sonic in.
  *
  * Nova Sonic is available in fewer regions than LMA itself, so a deployment
@@ -209,6 +261,10 @@ export class NovaAgent implements VoiceAssistantProvider {
   private _isActive: boolean = false;
   private _isSpeaking: boolean = false;
   private _isProcessingTool: boolean = false;
+  /** Lookups still running. Nova calls tools asynchronously, so a follow-up
+   *  can start before the previous one has finished, and the first to finish
+   *  must not clear `_isProcessingTool` for the other. */
+  private toolCallsInFlight: number = 0;
   private _isMuted: boolean = false;
   // Translator-mode state. Drives the prompt and tool set used on the
   // Nova session; transitions trigger a session refresh.
@@ -244,6 +300,63 @@ export class NovaAgent implements VoiceAssistantProvider {
   private readonly MUTE_TOOL_AUDIO_FLUSH_MS = 280;
   private speakingTimeout: NodeJS.Timeout | null = null;
   private readonly SPEAKING_TIMEOUT_MS = 500; // Mark as not speaking after 500ms of silence
+
+  /**
+   * When the audio already written to the playback stream will have finished
+   * playing, estimated from its length.
+   *
+   * `_isSpeaking` says whether audio is still *arriving*, which is not the same
+   * thing: Nova delivers speech several times faster than real time, so a
+   * 25-second answer can finish arriving 20 seconds before the meeting has
+   * heard it (measured: audio for one answer arrived over 5 s and was audible
+   * for 26 s). Anything that must not happen while the meeting is still
+   * hearing the assistant has to ask this, or the output detector, instead.
+   * Reset when the stream is cut off; bounded by the drain cap when it drains.
+   */
+  private playbackEndsAt: number = 0;
+
+  /** Whether the agent's output sink is carrying speech right now — the RMS
+   *  detector on `agent_output.monitor`, which is what the meeting hears. A
+   *  field so that tests can stand in for PulseAudio. */
+  private audibleOutput: () => boolean = () => agentSpeakingDetector.isSpeaking();
+
+  /** Length of the current activation window, set by activate(). */
+  private activationWindowMs: number = 0;
+  /** When the activation window's idle countdown last restarted: activation,
+   *  being addressed again, a barge-in, a tool finishing, or the end of a
+   *  stretch in which the assistant was busy (see checkActivationWindow). */
+  private lastEngagementAt: number = 0;
+  /** What the window is being held open for, so it is logged once per change
+   *  rather than once a second. */
+  private activationHoldReason: string | null = null;
+
+  /** The pre-rendered "looking that up" acknowledgement, in the configured
+   *  voice (see tool-ack-clip.ts), or null until it has been rendered. */
+  private toolAckClip: Buffer | null = null;
+  /** A `strands_agent` call still waiting to find out whether the model will
+   *  acknowledge it out loud. */
+  private pendingToolAck: {
+    toolUseId: string;
+    toolAt: number;
+    session: SessionData | null;
+    timer: NodeJS.Timeout | null;
+    /** When the fallback clip was played, or null if it has not been. */
+    fallbackAt: number | null;
+    /** Whether the tool result has gone back to the model. */
+    resultSent: boolean;
+  } | null = null;
+  /** When the current fallback clip finishes playing (0 if none is). */
+  private toolAckPlayingUntil: number = 0;
+  /** Set while an assistant audio block is being discarded as a late,
+   *  duplicate acknowledgement; cleared when that block ends. */
+  private dropCurrentAudioBlock: boolean = false;
+  /** When the most recent assistant audio block started. */
+  private lastAssistantAudioStartAt: number = 0;
+  /** When the most recent user text block (Nova's transcript of the meeting)
+   *  started. */
+  private lastUserTextAt: number = 0;
+  /** When the most recent barge-in was seen. */
+  private lastInterruptionAt: number = 0;
 
   /**
    * The stop request currently being resolved, if any.
@@ -509,6 +622,18 @@ export class NovaAgent implements VoiceAssistantProvider {
           credentials: defaultProvider(),
         });
         console.log('✓ Lambda client initialized for Strands agent tool');
+
+        // In the background: the clip is only needed once somebody asks the
+        // assistant something, and a render that fails costs the fallback
+        // acknowledgement and nothing else.
+        const client = this.bedrockClient;
+        renderToolAckClip(client, this.modelId, this.voiceId)
+          .then((clip) => {
+            this.toolAckClip = clip;
+          })
+          .catch((error) => {
+            console.warn('[tool-ack] action=render-failed', error);
+          });
       }
 
       // In wake_phrase mode, defer session creation until activation
@@ -979,6 +1104,10 @@ export class NovaAgent implements VoiceAssistantProvider {
         '- Any query requiring specialized knowledge or data access\n\n' +
         'When a request needs strands_agent, say one short sentence to the person first, such as '
         + '"Let me search for that information. This may take a moment.", then call the tool. '
+        + 'This sentence is required every time you call strands_agent, including for follow-up '
+        + 'questions and corrections later in the same conversation, and however many times you have '
+        + 'said it before: never call strands_agent without saying it first, because the people '
+        + 'listening hear nothing while the tool runs. '
         + 'When the result arrives, answer naturally with the information.\n\n' +
         'SPOKEN OUTPUT ONLY:\n' +
         'Everything you say is played aloud in the meeting. Speak only words meant for the people '
@@ -1495,6 +1624,12 @@ export class NovaAgent implements VoiceAssistantProvider {
               }
               if (jsonResponse.event.contentStart.type === 'AUDIO') {
                 this.noteAudioBlockStarted();
+                this.noteAssistantAudioBlockStarted();
+              } else if (
+                jsonResponse.event.contentStart.type === 'TEXT'
+                && jsonResponse.event.contentStart.role === 'USER'
+              ) {
+                this.lastUserTextAt = Date.now();
               }
               
               // Check if this is a FINAL transcript (for conversation history)
@@ -1539,7 +1674,11 @@ export class NovaAgent implements VoiceAssistantProvider {
               toolUseContent = jsonResponse.event.toolUse;
               toolUseId = jsonResponse.event.toolUse.toolUseId;
               toolName = jsonResponse.event.toolUse.toolName;
-              if (toolName === 'mute') {
+              if (toolName === 'strands_agent') {
+                // Also the earliest point: the acknowledgement fallback is timed
+                // from the tool-use event, not from the end of its content block.
+                this.noteStrandsToolRequested(toolUseId);
+              } else if (toolName === 'mute') {
                 // Earliest point the transcript route can be told to stand
                 // down: the handler below is a step later, and every
                 // millisecond of this window belongs to the acknowledgement.
@@ -1567,6 +1706,7 @@ export class NovaAgent implements VoiceAssistantProvider {
               console.log('Content end:', jsonResponse.event.contentEnd.type);
               if (jsonResponse.event.contentEnd.type === 'AUDIO') {
                 this.noteAudioBlockEnded();
+                this.dropCurrentAudioBlock = false;
               }
               
               // Skip appending while paused in translator mode — replaying
@@ -1644,6 +1784,14 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
 
+    // Being addressed again re-arms an activation window that is running. The
+    // scribe does not activate an assistant that is already activated, so for
+    // a follow-up inside the window this is the only place it is noticed.
+    if (this.activationMode !== 'always_active' && this._isActivated) {
+      console.log('🔁 Activation window re-armed (addressed again)');
+      this.noteEngagement();
+    }
+
     const askedToStop = isStopTalkingRequest(content, configuredWakePhrases());
 
     // Note what this deliberately does NOT do: call off a stop request that is
@@ -1705,6 +1853,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     try {
       // Set flag to prevent deactivation while tool is processing
+      this.toolCallsInFlight++;
       this._isProcessingTool = true;
       console.log(`🔧 Starting async tool processing: ${toolName}`);
       
@@ -1714,6 +1863,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       
       // Invoke Strands Lambda
       const toolResult = await this.invokeStrandsAgent(toolUseContent);
+      // Whatever the model says from here on is the answer, not a preamble.
+      this.noteToolResultReady(toolUseId);
       
       // Send tool result back to Nova immediately (only to the session that
       // issued the tool use, and only while it is still active)
@@ -1725,6 +1876,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
     } catch (error) {
       console.error('Error processing tool use:', error);
+      this.noteToolResultReady(toolUseId);
       // Send error result back to Nova, under the same condition
       if (sessionStillOurs()) {
         await this.sendToolResult(toolUseId, {
@@ -1736,7 +1888,12 @@ export class NovaAgent implements VoiceAssistantProvider {
       // Clear flag after tool processing completes
       // The _isSpeaking flag will keep the session open while Nova generates and plays audio
       setTimeout(() => {
-        this._isProcessingTool = false;
+        this.toolCallsInFlight = Math.max(0, this.toolCallsInFlight - 1);
+        this._isProcessingTool = this.toolCallsInFlight > 0;
+        // The activation window counts its idle time from here at the
+        // earliest, so a lookup that took most of the window still leaves the
+        // whole of it for the answer and whatever is asked next.
+        this.noteEngagement();
         
         // Add 2-second padding before restarting conversation timeout
         // This gives Nova time to start speaking before the countdown begins
@@ -2130,9 +2287,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       const b = this.generateTonePcm(880, 150, sampleRate);
       pcm = Buffer.concat([a, gap, b]);
     }
-    const pacat = this.ensurePacatStream();
-    if (pacat?.stdin && !pacat.stdin.destroyed) {
-      pacat.stdin.write(pcm);
+    if (this.writePlayback(pcm, false)) {
       console.log(`🔔 Played ${kind} confirmation tone (${pcm.length} bytes)`);
     } else {
       console.warn(`⚠️  Could not play ${kind} confirmation tone — pacat stream unavailable`);
@@ -2217,6 +2372,14 @@ export class NovaAgent implements VoiceAssistantProvider {
   private stopPacatStream(mode: 'immediate' | 'drain' = 'immediate'): void {
     if (mode === 'immediate') {
       this.killDrainingPacatStream();
+      // Nothing written so far will be heard.
+      this.playbackEndsAt = 0;
+      this.toolAckPlayingUntil = 0;
+    } else {
+      // At most the drain cap of it will be.
+      const cap = Date.now() + this.PLAYBACK_DRAIN_CAP_MS;
+      this.playbackEndsAt = Math.min(this.playbackEndsAt, cap);
+      this.toolAckPlayingUntil = Math.min(this.toolAckPlayingUntil, cap);
     }
 
     const process_ = this.pacatProcess;
@@ -2321,6 +2484,12 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
 
+    // A model preamble that arrived after the fallback acknowledgement already
+    // said the same thing (see noteAssistantAudioBlockStarted).
+    if (this.dropCurrentAudioBlock) {
+      return;
+    }
+
     // Counted whether or not the gate has shut yet, so the budget covers the
     // whole acknowledgement rather than only the part after the gate.
     const isStopAck = this.takeStopAckAudio(audioBuffer.length);
@@ -2341,20 +2510,34 @@ export class NovaAgent implements VoiceAssistantProvider {
     // clears the avatar's buffer. Sending this chunk first would hand the
     // avatar the opening of the new utterance and then discard it along with
     // the audio it was making way for.
+    this.writePlayback(audioBuffer);
+    this.markSpeaking();
+  }
+
+  /** Write PCM to the playback stream and the avatar, and advance the estimate
+   *  of when the meeting will have heard it. Every gate is the caller's job. */
+  private writePlayback(pcm: Buffer, toAvatar: boolean = true): boolean {
     const pacat = this.ensurePacatStream();
-    if (pacat?.stdin && !pacat.stdin.destroyed) {
-      pacat.stdin.write(audioBuffer);
+    const written = !!pacat?.stdin && !pacat.stdin.destroyed;
+    if (written) {
+      pacat!.stdin!.write(pcm);
+      const now = Date.now();
+      this.playbackEndsAt = Math.max(now, this.playbackEndsAt) + pcm.length / this.playbackBytesPerMs();
     }
 
     // Forward audio to Simli avatar for lip-sync animation
     // This runs in parallel with PulseAudio playback - Simli only uses it for video
-    if (simliAvatar.isConnected()) {
-      simliAvatar.sendAudioData(audioBuffer).catch(err => {
+    if (toAvatar && simliAvatar.isConnected()) {
+      simliAvatar.sendAudioData(pcm).catch(err => {
         // Non-critical - avatar lip-sync failure shouldn't affect audio
       });
     }
-    
-    // Track speaking state with timeout-based detection
+    return written;
+  }
+
+  /** Audio is arriving: hold `_isSpeaking` until SPEAKING_TIMEOUT_MS after the
+   *  last of it, then run whatever was queued behind the agent going idle. */
+  private markSpeaking(): void {
     this._isSpeaking = true;
     if (this.speakingTimeout) {
       clearTimeout(this.speakingTimeout);
@@ -2362,7 +2545,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.speakingTimeout = setTimeout(() => {
       this._isSpeaking = false;
       this.speakingTimeout = null;
-      console.log('✅ Audio playback idle - speaking state cleared');
+      console.log('✅ Assistant audio stopped arriving - speaking state cleared');
       
       // Check if there's a queued refresh waiting for agent to be idle
       if (this.refreshQueued) {
@@ -2479,15 +2662,100 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
     }
 
-    // Clear any existing timeout
+    // The window is an idle timeout, not a deadline: see checkActivationWindow.
+    this.activationWindowMs = activationDuration * 1000;
+    this.activationHoldReason = null;
+    this.noteEngagement();
+    this.scheduleActivationCheck(this.activationWindowMs);
+  }
+
+  private scheduleActivationCheck(delayMs: number): void {
     if (this.activationTimeout) {
       clearTimeout(this.activationTimeout);
     }
-
-    // Set timeout to deactivate (with speaking check)
     this.activationTimeout = setTimeout(() => {
-      this.deactivateWithSpeakingCheck();
-    }, activationDuration * 1000);
+      this.activationTimeout = null;
+      this.checkActivationWindow();
+    }, Math.max(0, delayMs));
+  }
+
+  /** Restart the activation window's idle countdown. */
+  private noteEngagement(): void {
+    this.lastEngagementAt = Date.now();
+  }
+
+  /**
+   * Why the activation window must not lapse yet, or null if nothing holds it.
+   *
+   * A session closed while the meeting is still hearing the assistant cannot
+   * hear the participant who asks it to stop, and a session closed while a
+   * lookup is running throws its answer away — so all of these hold it, however
+   * long they take. A participant's turn holds it only briefly (see
+   * ACTIVATION_USER_TURN_GRACE_MS), and only within twice the window, so that a
+   * busy meeting cannot keep a wake-phrase session open indefinitely.
+   */
+  private activationHoldFor(now: number): string | null {
+    if (this._isProcessingTool) return 'tool';
+    if (this._isSpeaking) return 'audio-arriving';
+    if (this.playbackEndsAt > now) return 'playback';
+    // The detector covers what the estimate cannot see — PulseAudio's own
+    // latency, a stream that took a moment to connect — so it is believed only
+    // shortly past the estimate. A detector that never reports silence must
+    // not keep a wake-phrase session open for the rest of the meeting.
+    if (this.audibleOutput() && now - this.playbackEndsAt < ACTIVATION_AUDIBLE_HOLD_MAX_MS) return 'audible';
+    const idleSince = Math.max(this.lastEngagementAt, this.playbackEndsAt);
+    if (
+      now - this.lastUserTextAt < ACTIVATION_USER_TURN_GRACE_MS
+      && now - idleSince < 2 * this.activationWindowMs
+    ) {
+      return 'user-turn';
+    }
+    return null;
+  }
+
+  /**
+   * Close the activation window once the assistant has been idle for the whole
+   * of it.
+   *
+   * Idle time is counted from the latest of: the activation itself, being
+   * addressed again, a barge-in, a lookup finishing, and the end of any stretch
+   * in which the assistant was busy — so the configured duration is the quiet
+   * time after the assistant last spoke, not a deadline from the wake phrase
+   * that a slow lookup and a long answer could use up between them. Recorded
+   * on a live meeting with a 30-second window: a wake phrase at 22:08:49, two
+   * lookups, and an answer that started at 22:09:11 and was audible for 26
+   * seconds, which the session closed 8 seconds into — leaving the participant
+   * who then said "stop" talking to a session that could no longer hear it.
+   */
+  private checkActivationWindow(): void {
+    if (this.activationMode === 'always_active' || !this._isActivated) {
+      return;
+    }
+    const now = Date.now();
+    const hold = this.activationHoldFor(now);
+    if (hold) {
+      if (hold !== this.activationHoldReason) {
+        console.log(`⏳ Activation window held open (${hold})`);
+      }
+      this.activationHoldReason = hold;
+      // A participant's turn is not engagement (see ACTIVATION_USER_TURN_GRACE_MS);
+      // everything else is the assistant being busy, and the idle countdown
+      // starts again when it stops.
+      if (hold !== 'user-turn') {
+        this.noteEngagement();
+      }
+      this.scheduleActivationCheck(ACTIVATION_RECHECK_MS);
+      return;
+    }
+    this.activationHoldReason = null;
+    const idleSince = Math.max(this.lastEngagementAt, this.playbackEndsAt);
+    const remaining = this.activationWindowMs - (now - idleSince);
+    if (remaining > 0) {
+      this.scheduleActivationCheck(remaining);
+      return;
+    }
+    console.log(`⏰ Activation window elapsed (idle ${now - idleSince} ms of ${this.activationWindowMs} ms)`);
+    this.deactivate();
   }
 
   private extractQuestion(context: string): string {
@@ -2508,27 +2776,6 @@ export class NovaAgent implements VoiceAssistantProvider {
     return cleaned;
   }
 
-  private deactivateWithSpeakingCheck(): void {
-    // If agent is speaking or processing a tool, wait for it to finish
-    if (this._isSpeaking) {
-      console.log('🔊 Nova is speaking, delaying deactivation...');
-      setTimeout(() => {
-        this.deactivateWithSpeakingCheck();
-      }, 1000);
-      return;
-    }
-    
-    if (this._isProcessingTool) {
-      console.log('🔧 Nova is processing a tool, delaying deactivation...');
-      setTimeout(() => {
-        this.deactivateWithSpeakingCheck();
-      }, 1000);
-      return;
-    }
-    
-    this.deactivate();
-  }
-
   deactivate(): void {
     if (this.activationMode === 'always_active') {
       // Can't deactivate always_active mode
@@ -2537,12 +2784,31 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     console.log('🔇 Nova agent deactivated');
     this._isActivated = false;
+    this.activationHoldReason = null;
 
     // Clear timeout
     if (this.activationTimeout) {
       clearTimeout(this.activationTimeout);
       this.activationTimeout = null;
     }
+
+    // A closed session cannot hear a participant ask it to stop, so no
+    // assistant audio is left playing after it. The window does not lapse
+    // while audio is still to be heard, so this only acts on a direct
+    // deactivate(); it is here so that the guarantee holds for every caller.
+    const unplayedMs = Math.round(this.playbackEndsAt - Date.now());
+    if (this.activationMode === 'wake_phrase' && unplayedMs > 0) {
+      console.log(`🔇 Cutting ${unplayedMs} ms of unplayed assistant audio as the session closes`);
+      try {
+        this.stopPacatStream();
+      } catch (err) {
+        console.warn('stopPacatStream during deactivate() failed (non-fatal):', err);
+      }
+      if (simliAvatar.isConnected()) {
+        simliAvatar.clearAudioBuffer().catch(() => {});
+      }
+    }
+    this.cancelToolAck('deactivated');
 
     // In wake_phrase mode, close session to save costs
     if (this.activationMode === 'wake_phrase' && this.session) {
@@ -2555,6 +2821,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (!this.session) return;
 
     console.log('Closing Nova session...');
+    this.cancelToolAck('session-closed');
+    this.dropCurrentAudioBlock = false;
 
     // Stop keep-alive timer
     this.stopKeepAliveTimer();
@@ -2659,6 +2927,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     // Nothing left to silence once the agent is going away.
     this.cancelStopRequest('agent-stopped');
+    this.cancelToolAck('agent-stopped');
 
     // Close session if active
     if (this.session) {
@@ -2837,6 +3106,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       return false;
     }
 
+    // The fallback acknowledgement is not something anyone should have to sit
+    // through after asking for quiet, and must not start after it either.
+    this.silenceToolAck('stop-request');
+
     if (this._isMuted) {
       // Already silent, most likely because the tool route got there first.
       this.logStopRequest('already-silent');
@@ -2897,6 +3170,10 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (!hasStopTalkingTool(this.meetingMode)) {
       return;
     }
+
+    // Before the acknowledgement window opens: the clip's remaining audio
+    // would otherwise be drained ahead of the model's "Okay".
+    this.silenceToolAck('stop-request');
 
     const existing = this.stopRequest;
 
@@ -3046,10 +3323,173 @@ export class NovaAgent implements VoiceAssistantProvider {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // Acknowledging a lookup (`[tool-ack]`)
+  // -------------------------------------------------------------------------
+  //
+  // A `strands_agent` lookup takes 5-10 seconds, and the prompt asks the model
+  // to say one sentence before it calls the tool. On a live meeting the model
+  // did so for each first question after a wake phrase and for none of the
+  // follow-ups inside the same session, which left the room in silence for the
+  // whole lookup. So the agent checks: if no assistant audio has started within
+  // TOOL_ACK_FALLBACK_MS of the tool-use event, it plays a short clip rendered
+  // in the same voice at startup (see tool-ack-clip.ts). Every decision writes
+  // one `[tool-ack]` line: `source=model` or `source=fallback` with the latency
+  // from the tool-use event, or `source=none` with the reason nothing played.
+  //
+  // The clip goes through the same playback stream as Nova's own speech, so
+  // barge-in and every mute cut it off; it is not started while the assistant
+  // is muted or a stop request is being resolved; and a stop request arriving
+  // while it plays cuts it rather than letting it drain.
+
+  /** A `strands_agent` tool-use event has been seen. */
+  private noteStrandsToolRequested(toolUseId: string): void {
+    const now = Date.now();
+    this.cancelToolAck('superseded');
+    const preambleAt = this.lastAssistantAudioStartAt;
+    if (preambleAt > 0 && preambleAt >= now - TOOL_ACK_LOOKBACK_MS && preambleAt > this.lastUserTextAt) {
+      console.log(`[tool-ack] source=model latency_ms=${preambleAt - now}`);
+      return;
+    }
+    const pending: NonNullable<NovaAgent['pendingToolAck']> = {
+      toolUseId,
+      toolAt: now,
+      session: this.session,
+      timer: null,
+      fallbackAt: null,
+      resultSent: false,
+    };
+    pending.timer = setTimeout(() => this.fireToolAckFallback(pending), TOOL_ACK_FALLBACK_MS);
+    this.pendingToolAck = pending;
+  }
+
+  /** An assistant AUDIO block has started. */
+  private noteAssistantAudioBlockStarted(): void {
+    const now = Date.now();
+    this.lastAssistantAudioStartAt = now;
+    // Each block decides for itself, so a dropped block whose end never
+    // arrived cannot take the next one with it.
+    this.dropCurrentAudioBlock = false;
+    const pending = this.pendingToolAck;
+    if (!pending) {
+      return;
+    }
+    if (pending.fallbackAt === null) {
+      console.log(`[tool-ack] source=model latency_ms=${now - pending.toolAt}`);
+      this.clearToolAck();
+      return;
+    }
+    if (!pending.resultSent && now - pending.toolAt < TOOL_ACK_LATE_PREAMBLE_MS) {
+      // The model's own preamble, arriving after the clip already said it.
+      this.dropCurrentAudioBlock = true;
+      console.log(`[tool-ack] action=late-preamble-dropped latency_ms=${now - pending.toolAt}`);
+      return;
+    }
+    // Past the window this is the answer, or a reply to something new.
+    this.clearToolAck();
+  }
+
+  /** The lookup has finished, so what the model says next is the answer. */
+  private noteToolResultReady(toolUseId: string): void {
+    const pending = this.pendingToolAck;
+    if (!pending || pending.toolUseId !== toolUseId) {
+      return;
+    }
+    if (pending.fallbackAt === null) {
+      console.log(`[tool-ack] source=none reason=result-first latency_ms=${Date.now() - pending.toolAt}`);
+    }
+    pending.resultSent = true;
+    this.clearToolAck();
+  }
+
+  /** Why the fallback must not play now, or null if it may. */
+  private toolAckSkipReason(pending: NonNullable<NovaAgent['pendingToolAck']>): string | null {
+    if (this.session !== pending.session || !this.session?.isActive) return 'session-changed';
+    if (this.activationMode !== 'always_active' && !this._isActivated) return 'not-activated';
+    if (this._isMuted) return 'muted';
+    if (this.stopRequest || this.stopAck) return 'stop-request';
+    if (this.lastInterruptionAt > pending.toolAt) return 'interrupted';
+    // Somebody has said something since the call, which the model is about to
+    // answer; a clip now would collide with that answer.
+    if (this.lastUserTextAt > pending.toolAt) return 'user-turn';
+    // The room is not silent: the assistant is still saying something, and a
+    // clip queued behind it would be heard late and out of place.
+    if (this._isSpeaking) return 'speaking';
+    if (this.playbackEndsAt > Date.now()) return 'playing';
+    if (!this.toolAckClip) return 'no-clip';
+    return null;
+  }
+
+  private fireToolAckFallback(pending: NonNullable<NovaAgent['pendingToolAck']>): void {
+    if (this.pendingToolAck !== pending) {
+      return;
+    }
+    pending.timer = null;
+    const now = Date.now();
+    const skip = this.toolAckSkipReason(pending);
+    if (skip) {
+      console.log(`[tool-ack] source=none reason=${skip} latency_ms=${now - pending.toolAt}`);
+      this.clearToolAck();
+      return;
+    }
+    const clip = this.toolAckClip as Buffer;
+    // Deliberately not through playAudio's barge-in gate: an interruption that
+    // predates the tool call has already cut off the utterance it interrupted,
+    // and the gate only stays shut because Nova has not opened a block since.
+    if (!this.writePlayback(clip)) {
+      console.log(`[tool-ack] source=none reason=no-playback latency_ms=${now - pending.toolAt}`);
+      this.clearToolAck();
+      return;
+    }
+    this.markSpeaking();
+    pending.fallbackAt = now;
+    this.toolAckPlayingUntil = this.playbackEndsAt;
+    console.log(
+      `[tool-ack] source=fallback latency_ms=${now - pending.toolAt} audio_ms=${pcmDurationMs(clip)}`,
+    );
+  }
+
+  private clearToolAck(): void {
+    const pending = this.pendingToolAck;
+    if (pending?.timer) {
+      clearTimeout(pending.timer);
+    }
+    this.pendingToolAck = null;
+  }
+
+  /** Abandon a pending acknowledgement decision, saying why if nothing had played. */
+  private cancelToolAck(why: string): void {
+    const pending = this.pendingToolAck;
+    if (pending && pending.fallbackAt === null) {
+      console.log(`[tool-ack] source=none reason=${why} latency_ms=${Date.now() - pending.toolAt}`);
+    }
+    this.clearToolAck();
+  }
+
+  /** Cancel a pending acknowledgement and cut off one still playing. */
+  private silenceToolAck(why: string): void {
+    this.cancelToolAck(why);
+    if (this.toolAckPlayingUntil > Date.now()) {
+      console.log(`[tool-ack] action=cut why=${why}`);
+      try {
+        this.stopPacatStream();
+      } catch (err) {
+        console.warn('stopPacatStream while cutting the acknowledgement failed (non-fatal):', err);
+      }
+      if (simliAvatar.isConnected()) {
+        simliAvatar.clearAudioBuffer().catch(() => {});
+      }
+    }
+  }
+
   /** Barge-in: drop all assistant audio until Nova opens its next audio block. */
   private handleInterruption(): void {
     console.log('⚠️  Interruption detected - dropping all audio until next turn');
     this._isInterrupted = true;
+    this.lastInterruptionAt = Date.now();
+    // Somebody talking over the assistant is talking to it: the window's idle
+    // countdown restarts, so a correction is not cut off by the window lapsing.
+    this.noteEngagement();
     // Someone talking over an acknowledgement that is already playing wants it
     // to stop too. One that has not started yet is left alone: the barge-in
     // marker for the very utterance that asked for silence can arrive after
@@ -3501,6 +3941,7 @@ export class NovaAgent implements VoiceAssistantProvider {
   private applyActivationMode(mode: ActivationMode): void {
     this.activationMode = mode;
     this._isActivated = (mode === 'always_active');
+    this.activationHoldReason = null;
 
     if (this.activationTimeout) {
       // The window the old mode was counting down belongs to that mode, whatever
