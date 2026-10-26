@@ -20,6 +20,7 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { publishAssistantTurn } from './translator-transcript.js';
 import { ActivationMode } from './voice-assistant-interface.js';
 import {
   AssistantReconfigureOutcome,
@@ -1516,6 +1517,12 @@ export class NovaAgent implements VoiceAssistantProvider {
               if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim() && !skipForTranslatorMuted) {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
+                if (currentTurn.role === 'ASSISTANT') {
+                  // What the assistant actually said, for the transcript path
+                  // when no ASR source is transcribing its voice. Not published
+                  // while a translator is paused, like the history above.
+                  publishAssistantTurn(currentTurn.content);
+                }
                 
                 // GROUP MEETING MODE: Transcript-based wake phrase detection
                 // This is the PRIMARY mechanism for unmuting in group meeting mode.

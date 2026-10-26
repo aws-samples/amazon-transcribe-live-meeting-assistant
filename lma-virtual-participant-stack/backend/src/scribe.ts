@@ -26,6 +26,7 @@ import { voiceAssistant } from './voice-assistant.js';
 import { RosterTimeline } from './roster-timeline.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { OpenPartialTracker, assistantRowSpan, onAssistantTurn, resultAfter } from './translator-transcript.js';
 
 const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
 
@@ -165,6 +166,21 @@ export class TranscriptionService {
     private preConnectTriggered = false;
     private wakeDetectionTimestamp: number | null = null;
 
+    // Translator-mode continuity (see translator-transcript.ts). Results that
+    // arrive while the assistant speaks are kept out of the transcript; this
+    // closes the participant row they would otherwise have finalised.
+    private readonly openPartials = new OpenPartialTracker();
+    // Wall clock of the first audio frame of the current Transcribe session,
+    // which is where that session's Item times start from.
+    private transcribeClockStartMs: number | null = null;
+    // Transcript-timeline position at which the assistant's audio last started.
+    private agentSpeechStartedAt: number | null = null;
+    // Transcript-timeline position at which the assistant's audio last ended.
+    private agentSpeechEndedAt: number | null = null;
+    private lastAssistantRowEnd = 0;
+    private assistantRows = 0;
+    private assistantTurnSubscription: (() => void) | null = null;
+
     constructor() {
         // In local test mode, explicitly use default provider which checks credentials file first
         // Otherwise use default credential chain (EC2 instance role in production)
@@ -257,6 +273,9 @@ export class TranscriptionService {
                 if (!this.startTime) {
                     this.startTime = Date.now();
                 }
+                if (this.transcribeClockStartMs === null) {
+                    this.transcribeClockStartMs = Date.now();
+                }
             }
         } catch (error: any) {
             const msg = `Audio stream error: ${error.message}`;
@@ -290,6 +309,7 @@ export class TranscriptionService {
 
         console.log('Starting transcription service');
         this.isTranscribing = true;
+        this.subscribeToAssistantTurns();
         
         // Start voice assistant if enabled
         if (voiceAssistant.isEnabled()) {
@@ -365,6 +385,7 @@ export class TranscriptionService {
                 break;
             }
             this.reconnectRequested = false;
+            this.transcribeClockStartMs = null;
             const sessionStartMs = Date.now();
             try {
                 const transcriptionParams: any = {
@@ -713,7 +734,7 @@ export class TranscriptionService {
                     break;
                 }
                 if (agent?.hasGivenUp && !agentGaveUpLogged) {
-                    console.error("[ASR AGENT] session gave up; the assistant's replies are no longer transcribed");
+                    console.error("[ASR AGENT] session gave up; the assistant's audio is no longer transcribed (Nova Sonic replies are written from its own text)");
                     agentGaveUpLogged = true;
                 }
             }
@@ -1212,6 +1233,115 @@ export class TranscriptionService {
         }
     }
 
+    /**
+     * Write the open participant partial (if any) as final. Returns its highest
+     * EndTime on the transcript timeline, or 0 when nothing was open.
+     */
+    private async closeOpenPartial(): Promise<number> {
+        const open = this.openPartials.close();
+        if (!open) {
+            return 0;
+        }
+        const text = open.result.Alternatives?.[0]?.Transcript || '';
+        console.log(`🌐 Closing in-progress segment before its final arrives: "${text}"`);
+        try {
+            const end = await sendAddTranscriptSegment(open.speaker, open.result, open.timeOffsetSeconds);
+            this.processTranscriptResult(open.result);
+            return end;
+        } catch (error) {
+            console.error('Failed to close in-progress transcript segment:', error);
+            return 0;
+        }
+    }
+
+    /**
+     * The part of a closed row's later delivery spoken after the assistant
+     * stopped, as a row of its own, or null if there is none (or the assistant
+     * has not stopped since).
+     */
+    private speechAfterAssistant(result: any, sessionOffsetSeconds: number, closedEnd: number): any | null {
+        if (this.agentSpeechEndedAt === null) {
+            return null;
+        }
+        // Never before the end of the row already written, whatever the clock says.
+        const rest = resultAfter(result, Math.max(this.agentSpeechEndedAt - sessionOffsetSeconds, closedEnd));
+        if (!rest || this.openPartials.isClosed(rest)) {
+            return null;
+        }
+        return rest;
+    }
+
+    /** Current position on the transcript timeline, in seconds, for whichever engine is running. */
+    private transcriptClockSeconds(): number {
+        if (this.meetingSession) {
+            return this.meetingSession.audioSeconds;
+        }
+        if (this.transcribeClockStartMs === null) {
+            return this.transcribeTimeOffsetSeconds;
+        }
+        return this.transcribeTimeOffsetSeconds + (Date.now() - this.transcribeClockStartMs) / 1000;
+    }
+
+    /**
+     * Whether the assistant's spoken turns reach the transcript only through the
+     * assistant's own text. On the MicroVM engine that is whenever no assistant
+     * session is transcribing its voice; on Amazon Transcribe it is translator
+     * mode, where results heard while the assistant speaks are held back.
+     */
+    private assistantTurnsNeedTranscript(): boolean {
+        if (this.meetingSession) {
+            return !this.agentSession || this.agentSession.hasGivenUp;
+        }
+        return details.meetingMode === 'translator';
+    }
+
+    private subscribeToAssistantTurns(): void {
+        if (this.assistantTurnSubscription) {
+            return;
+        }
+        agentSpeakingDetector.on('started', () => {
+            this.agentSpeechStartedAt = this.transcriptClockSeconds();
+        });
+        agentSpeakingDetector.on('stopped', () => {
+            // 'stopped' fires after the detector's silence hangover.
+            this.agentSpeechEndedAt = this.transcriptClockSeconds() - agentSpeakingDetector.silenceMs / 1000;
+        });
+        this.assistantTurnSubscription = onAssistantTurn((text) => this.handleAssistantTurn(text));
+    }
+
+    /**
+     * One finished assistant turn, written as the assistant's row when no ASR
+     * source covers it. Its start and end are approximate: Nova's text can
+     * finish before its audio has finished playing, so the row is placed by
+     * the speaking detector's last start and the time the text arrived.
+     */
+    private handleAssistantTurn(text: string): void {
+        if (!this.isTranscribing || !details.start || !this.assistantTurnsNeedTranscript()) {
+            return;
+        }
+        const { start, end } = assistantRowSpan(
+            this.transcriptClockSeconds(),
+            this.agentSpeechStartedAt,
+            this.lastAssistantRowEnd,
+        );
+        this.lastAssistantRowEnd = end;
+        this.agentSpeechStartedAt = null;
+        this.assistantRows += 1;
+        const speaker = (details.lmaIdentity || details.scribeIdentity || 'LMA').trim();
+        console.log(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s): "${text}"`);
+        sendAsrTranscriptSegment({
+            channel: 'AGENT',
+            segmentId: `assistant-${this.assistantRows}-${start.toFixed(3)}`,
+            startTime: start,
+            endTime: end,
+            transcript: text,
+            isPartial: false,
+            speaker,
+        }).catch((error) => {
+            console.error('Failed to send assistant turn to Kinesis:', error);
+        });
+    }
+
     // Handle transcript events
     private async handleTranscriptEvents(transcribeResponse: any): Promise<void> {
         // The reconnect offset must stay CONSTANT for the whole session and only
@@ -1226,6 +1356,14 @@ export class TranscriptionService {
         // seeds the next reconnect's offset. Starts at the session offset so a
         // session that produces nothing still carries the timeline forward.
         let observedMaxEndTime = sessionOffsetSeconds;
+        // Result ids are per session, so nothing tracked from the last one applies.
+        this.openPartials.reset();
+        const closeOpenPartial = async (): Promise<void> => {
+            const end = await this.closeOpenPartial();
+            if (end > observedMaxEndTime) {
+                observedMaxEndTime = end;
+            }
+        };
         try {
             // Process transcript results
             for await (const event of transcribeResponse.TranscriptResultStream ?? []) {
@@ -1246,6 +1384,11 @@ export class TranscriptionService {
                         (agentSpeakingDetector.isSpeaking() || speakerIsVp);
 
                     if (suppressAgentTranscript) {
+                        // The participant row this result continues will not get
+                        // its final from Transcribe: the final also carries the
+                        // assistant's speech and is held back below. Close it now
+                        // from the last partial that was written.
+                        await closeOpenPartial();
                         if (!result.IsPartial) {
                             const text = result.Alternatives?.[0]?.Transcript || '';
                             if (text) {
@@ -1262,22 +1405,46 @@ export class TranscriptionService {
                             console.error('Failed to sync transcript segment state during suppression:', error);
                         }
                     } else {
+                        // A later delivery for a row closed above repeats the
+                        // participant's words and adds the assistant's. Only
+                        // speech after the assistant stopped is new; it goes out
+                        // as a row of its own, and the rest is not written again.
+                        const closedEnd = this.openPartials.closedRowEnd(result);
+                        const forward = closedEnd === null
+                            ? result
+                            : this.speechAfterAssistant(result, sessionOffsetSeconds, closedEnd);
+                        if (!forward) {
+                            if (!result.IsPartial) {
+                                console.log('🌐 Translator mode: dropping the final of a segment already closed when the assistant spoke');
+                            }
+                            try {
+                                kinesisStreamManager.syncTranscriptSegmentState(
+                                    currentSpeaker,
+                                    result,
+                                    sessionOffsetSeconds,
+                                );
+                            } catch (error) {
+                                console.error('Failed to sync transcript segment state:', error);
+                            }
+                            continue;
+                        }
                         // Send all results to Kinesis
                         try {
                             const segMaxEndTime = await sendAddTranscriptSegment(
                                 currentSpeaker,
-                                result,
+                                forward,
                                 sessionOffsetSeconds,
                             );
                             if (segMaxEndTime > observedMaxEndTime) {
                                 observedMaxEndTime = segMaxEndTime;
                             }
+                            this.openPartials.noteSent(forward, currentSpeaker, sessionOffsetSeconds);
                         } catch (error) {
                             console.error('Failed to send transcript to Kinesis:', error);
                         }
 
                         // Process all results (partial + final) for wake phrase pre-connect and activation
-                        this.processTranscriptResult(result);
+                        this.processTranscriptResult(forward);
                     }
                 }
             }
@@ -1322,6 +1489,11 @@ export class TranscriptionService {
                 throw error;
             }
         } finally {
+            // An ended session will never finalise a row it left open, whether
+            // it closed cleanly or failed. Before the offset below moves on.
+            if (this.isTranscribing) {
+                await closeOpenPartial();
+            }
             // Advance the cumulative offset exactly ONCE, as this session ends,
             // so the next session's timestamps continue the meeting timeline
             // instead of restarting at 0. Runs on both clean close and (re)throw.
