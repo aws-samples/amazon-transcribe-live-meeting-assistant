@@ -1164,8 +1164,10 @@ export class TranscriptionService {
         
         console.log('🎤 Wake phrase detected — activating immediately with context:', contextTranscript);
         
-        // Activate voice assistant with context (connection already pre-warmed)
-        voiceAssistant.activate(30, contextTranscript);
+        // Activate voice assistant with context (connection already pre-warmed).
+        // No duration: the provider applies the deployment's configured
+        // VoiceAssistantActivationDuration, which a literal here would override.
+        voiceAssistant.activate(undefined, contextTranscript);
     }
 
     // Utility methods for status

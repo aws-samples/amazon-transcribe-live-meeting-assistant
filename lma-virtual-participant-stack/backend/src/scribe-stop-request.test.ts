@@ -106,3 +106,22 @@ test('a partial transcript never triggers a stop', async () => {
     assert.equal(voiceAssistant.isMuted(), false);
     voiceAssistant.deactivate();
 });
+
+test('a wake phrase activates the assistant for the configured duration', async () => {
+    // The scribe passes no duration of its own, so the provider applies
+    // VoiceAssistantActivationDuration rather than a fixed 30 seconds.
+    (voiceAssistant as any)._isActivated = false;
+    (voiceAssistant as any)._isActive = false;
+    const calls: Array<number | undefined> = [];
+    const realActivate = voiceAssistant.activate;
+    (voiceAssistant as any).activate = async (duration?: number) => {
+        calls.push(duration);
+    };
+    try {
+        finalSegment('Hey Alex, what is on the agenda today?');
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.deepEqual(calls, [undefined]);
+    } finally {
+        (voiceAssistant as any).activate = realActivate;
+    }
+});

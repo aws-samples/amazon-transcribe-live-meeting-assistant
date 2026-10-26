@@ -48,6 +48,15 @@ test('the tool section asks for a single preamble sentence before the call', () 
     assert.match(prompt, /Use strands_agent when users ask about:/);
 });
 
+test('the preamble is required before every lookup, follow-ups included', () => {
+    // Recorded on a live meeting: the model said its sentence for each first
+    // question after a wake phrase and skipped it for every follow-up in the
+    // same session.
+    const prompt = systemPrompt('normal', STRANDS_ARN);
+    assert.match(prompt, /required every time you call strands_agent, including for follow-up/);
+    assert.match(prompt, /never call strands_agent without saying it first/);
+});
+
 test('the tool section is not a numbered procedure the model can recite', () => {
     // The step-by-step FIRST / WAIT / THEN workflow was recited back as a spoken
     // plan, and its wait-for-acknowledgement step has no meaning for a model
