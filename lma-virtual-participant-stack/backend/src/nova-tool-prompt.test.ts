@@ -59,9 +59,16 @@ test('the tool section is not a numbered procedure the model can recite', () => 
 });
 
 test('the tool section is absent when no meeting-assistant tool is configured', () => {
-    const prompt = systemPrompt('normal');
-    assert.doesNotMatch(prompt, /INFORMATION REQUESTS:/);
-    assert.doesNotMatch(prompt, /strands_agent/);
+    // The constructor falls back to STRANDS_LAMBDA_ARN, so clear it for this case.
+    const saved = process.env.STRANDS_LAMBDA_ARN;
+    delete process.env.STRANDS_LAMBDA_ARN;
+    try {
+        const prompt = systemPrompt('normal');
+        assert.doesNotMatch(prompt, /INFORMATION REQUESTS:/);
+        assert.doesNotMatch(prompt, /strands_agent/);
+    } finally {
+        if (saved !== undefined) process.env.STRANDS_LAMBDA_ARN = saved;
+    }
 });
 
 test('the translator prompt carries no tool section', () => {
