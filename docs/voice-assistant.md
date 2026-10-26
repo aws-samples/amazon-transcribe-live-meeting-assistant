@@ -160,6 +160,8 @@ Example:
 - French speaker: "Très bien, merci, et toi ?"
 - Assistant (in English): "Very well, thank you, and you?"
 
+**How translations appear in the transcript.** The meeting transcript is produced in the meeting's configured transcription language, which can only render one side of a bilingual conversation. So in translator mode the transcription path does not transcribe the assistant's audio: what Amazon Transcribe hears while the assistant is speaking is left out, and each translation is written instead as the assistant's line, from the exact text Nova Sonic spoke. A participant's sentence that the assistant starts translating before Transcribe has finished it is completed from what had been transcribed by then, so the last second or so of that sentence can be missing from its line. Changing mode does not restart transcription. On ElevenLabs the translation is not written to the transcript.
+
 #### ElevenLabs
 
 The ElevenLabs agent's persona is configured in the ElevenLabs dashboard — LMA does not override it. To use translator mode with ElevenLabs:
