@@ -23,6 +23,12 @@ import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { pcmDurationMs, renderToolAckClip } from './tool-ack-clip.js';
+import {
+  LookupSkipReason,
+  mutedLookupSkipReason,
+  SKIPPED_LOOKUP_RESULT,
+  skippedLookupLogLine,
+} from './muted-lookup.js';
 import { ActivationMode } from './voice-assistant-interface.js';
 import {
   AssistantReconfigureOutcome,
@@ -357,6 +363,9 @@ export class NovaAgent implements VoiceAssistantProvider {
   private lastUserTextAt: number = 0;
   /** When the most recent barge-in was seen. */
   private lastInterruptionAt: number = 0;
+  /** The most recent completed participant turn in Nova's transcript, which is
+   *  the turn a tool call that follows it is answering. */
+  private lastUserTurnText: string = '';
 
   /**
    * The stop request currently being resolved, if any.
@@ -1037,7 +1046,17 @@ export class NovaAgent implements VoiceAssistantProvider {
         'You are in a group meeting where multiple people are talking. ' +
         'You will hear all conversation, but your audio output is managed externally - ' +
         'you will only be heard when someone addresses you by name.\n' +
-        'Just respond naturally to whatever you hear. Keep responses concise.\n\n';
+        'Just respond naturally to whatever you hear. Keep responses concise.\n' +
+        // A spoken reply to talk not aimed at the assistant is only dropped
+        // audio, but a lookup is a Strands invocation whether or not anyone
+        // hears the answer. The agent declines one requested while muted
+        // (muted-lookup.ts); this keeps the model from asking for it.
+        (this.strandsLambdaArn
+          ? 'Only use strands_agent when someone asks YOU for information - by name, or as a '
+            + 'follow-up to something you just said. Do NOT look anything up in response to '
+            + 'participants talking to each other.\n'
+          : '') +
+        '\n';
     }
 
     // Add base system prompt
@@ -1596,6 +1615,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     let toolUseContent: any = null;
     let toolUseId: string = '';
     let toolName: string = '';
+    /** Set at a `strands_agent` tool-use event when the lookup is not to be run. */
+    let lookupSkip: LookupSkipReason | null = null;
     
     // Track current conversation turn for history
     let currentTurn: { role: 'USER' | 'ASSISTANT' | null; content: string; isFinal: boolean } = {
@@ -1675,9 +1696,14 @@ export class NovaAgent implements VoiceAssistantProvider {
               toolUseId = jsonResponse.event.toolUse.toolUseId;
               toolName = jsonResponse.event.toolUse.toolName;
               if (toolName === 'strands_agent') {
-                // Also the earliest point: the acknowledgement fallback is timed
-                // from the tool-use event, not from the end of its content block.
-                this.noteStrandsToolRequested(toolUseId);
+                // Decided here, at the tool-use event, so that a lookup that will
+                // not be run never arms the acknowledgement either.
+                lookupSkip = this.strandsLookupSkipReason();
+                if (!lookupSkip) {
+                  // Also the earliest point: the acknowledgement fallback is timed
+                  // from the tool-use event, not from the end of its content block.
+                  this.noteStrandsToolRequested(toolUseId);
+                }
               } else if (toolName === 'mute') {
                 // Earliest point the transcript route can be told to stand
                 // down: the handler below is a step later, and every
@@ -1688,9 +1714,16 @@ export class NovaAgent implements VoiceAssistantProvider {
               // Process tool use asynchronously when content ends
               console.log(`Processing tool use: ${toolName}`);
               if (toolName === 'strands_agent' && toolUseContent) {
-                this.processToolUseAsync(toolUseId, toolName, toolUseContent).catch(error => {
-                  console.error('Error in async tool processing:', error);
-                });
+                if (lookupSkip) {
+                  this.skipStrandsLookup(toolUseId, lookupSkip).catch(error => {
+                    console.error('Error answering a skipped lookup:', error);
+                  });
+                } else {
+                  this.processToolUseAsync(toolUseId, toolName, toolUseContent).catch(error => {
+                    console.error('Error in async tool processing:', error);
+                  });
+                }
+                lookupSkip = null;
               } else if (toolName === 'mute') {
                 // Handle mute tool call
                 this.handleMuteTool(toolUseId).catch(error => {
@@ -1732,6 +1765,7 @@ export class NovaAgent implements VoiceAssistantProvider {
                 // We watch Nova's FINAL USER transcripts for wake phrases and unmute/mute
                 // entirely from our code - no tool calls needed (eliminates infinite loops).
                 if (currentTurn.role === 'USER') {
+                  this.lastUserTurnText = currentTurn.content.trim();
                   this.handleUserTurnWakePhrase(currentTurn.content);
                 }
               }
@@ -1835,6 +1869,33 @@ export class NovaAgent implements VoiceAssistantProvider {
     // No conversation timeout to re-arm: the auto-mute timer belongs to group
     // mode, which returned above, and is the only mode that goes back to muted
     // on its own.
+  }
+
+  /**
+   * Why a `strands_agent` lookup requested now must not be run, or null if it
+   * may. See muted-lookup.ts: a muted assistant that was not addressed by the
+   * turn it is responding to was not asked for anything, and its answer would
+   * be dropped by the mute anyway.
+   */
+  private strandsLookupSkipReason(): LookupSkipReason | null {
+    return mutedLookupSkipReason(this._isMuted, this.lastUserTurnText);
+  }
+
+  /**
+   * Answer a lookup that is not being run, without invoking the Strands Lambda.
+   * The model is still owed a result for its tool use, and the result tells it
+   * why, so that it stays silent rather than retrying.
+   */
+  private async skipStrandsLookup(toolUseId: string, reason: LookupSkipReason): Promise<void> {
+    console.log(skippedLookupLogLine(reason, this.meetingMode, this.activationMode));
+    if (!this.session || !this.session.isActive) {
+      return;
+    }
+    try {
+      await this.sendToolResult(toolUseId, SKIPPED_LOOKUP_RESULT);
+    } catch (err) {
+      console.warn('Failed to send the skipped-lookup tool result (non-fatal):', err);
+    }
   }
 
   private async processToolUseAsync(toolUseId: string, toolName: string, toolUseContent: any): Promise<void> {
@@ -2103,7 +2164,10 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.session && this.session.isActive && this.session === issuingSession) {
       const muteInstruction = (this.meetingMode === 'translator')
         ? 'You are now paused. The session is being refreshed.'
-        : 'You are now muted.';
+        // Muted, the model still hears the meeting and keeps answering it; the
+        // answers are dropped, but a lookup it starts is not (muted-lookup.ts).
+        : 'You are now muted. Stay silent and do not look anything up until someone '
+          + 'addresses you by name again.';
       try {
         await this.sendToolResult(toolUseId, {
           status: 'muted',
