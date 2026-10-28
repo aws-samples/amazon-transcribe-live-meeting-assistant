@@ -345,6 +345,16 @@ def test_a_run_within_its_limits_returns_the_model_s_answer() -> None:
     assert outcome["result"]["truncated"] is False
 
 
+def test_an_opening_line_before_the_first_section_is_not_returned() -> None:
+    """The contract is three sections and nothing else; a model that opens
+    with a sentence of its own still returns an answer that starts with them."""
+    model = ScriptedModel([[PARAMS], "Perfect! I now have all the evidence I need.\n\n" + ANSWER])
+
+    outcome = run(model, FakeTools())
+
+    assert outcome["result"]["answer"] == ANSWER
+
+
 def test_the_tool_context_is_not_offered_to_the_model_as_an_argument() -> None:
     """``tool_context`` is injected by Strands; if it appeared in the tool spec
     the model would be invited to supply it."""

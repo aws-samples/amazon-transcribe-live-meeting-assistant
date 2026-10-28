@@ -14,6 +14,7 @@ not the risky one; the frequently-called one is.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +40,7 @@ VP_TABLE = "LMA-Test-AISTACK-1A2B3C4D5E6F-VirtualParticipant"
 VP_GROUP = f"/aws/lambda-microvms/{STACK}-vp-logs"
 CEP_GROUP = f"/{AISTACK}/lambda/CallEventProcessorFunction"
 STATE_MACHINE_GROUP = f"/aws/vendedlogs/states/{VPSTACK}"
+LEGACY_VP_GROUP = f"/aws/lambda-microvms/{STACK}-vp"
 
 
 class FakeInsightsClient(FakeLogsClient):
@@ -355,6 +357,97 @@ def test_the_query_returns_the_stream_name_as_well_as_the_message() -> None:
     assert "@timestamp" in query
 
 
+def test_the_default_query_selects_the_group_each_line_came_from() -> None:
+    """One search can cover several groups, and the Evidence section cites
+    the group a line came from, so the row has to say which it was."""
+    assert "@log," in build_search_query(["x"], 10)
+
+
+ACCOUNT = "123456789012"
+
+
+def test_each_row_names_its_log_group_without_the_account_prefix() -> None:
+    """Insights reports @log as "<account>:<group>"; the row carries the bare
+    group name, which is what discovery returns and the answer quotes."""
+    client = FakeInsightsClient(
+        rows=[
+            row(**{"@timestamp": "t1", "@log": f"{ACCOUNT}:{VP_GROUP}",
+                   "@logStream": "s1", "@message": "a"}),
+            row(**{"@timestamp": "t2", "@log": f"{ACCOUNT}:{LEGACY_VP_GROUP}",
+                   "@logStream": "s2", "@message": "b"}),
+        ],
+        groups=REAL_GROUPS + [(LEGACY_VP_GROUP, 9000)],
+    )
+
+    result = parsed(
+        make_tools(client).search_logs(f"{VP_GROUP},{LEGACY_VP_GROUP}", search_terms="x")
+    )
+
+    assert [r["logGroup"] for r in result["rows"]] == [VP_GROUP, LEGACY_VP_GROUP]
+    assert all("@log" not in r for r in result["rows"])
+    assert result["guidance"] is None
+
+
+def test_a_log_group_name_is_never_truncated() -> None:
+    """A shortened group name is a different group."""
+    client = FakeInsightsClient(
+        rows=[row(**{"@log": f"{ACCOUNT}:{VP_GROUP}", "@logStream": "s", "@message": "m"})]
+    )
+    limits = dataclasses.replace(AgentLimits(), max_log_message_length=5)
+
+    result = parsed(make_tools(client, limits=limits).search_logs(VP_GROUP))
+
+    assert result["rows"][0]["logGroup"] == VP_GROUP
+
+
+def test_a_line_from_a_single_group_query_is_given_that_group() -> None:
+    """A model-written query may not select @log; with one group searched,
+    that group is the only one the line can have come from."""
+    client = FakeInsightsClient(rows=[row(**{"@logStream": "s1", "@message": "a"})])
+
+    result = parsed(
+        make_tools(client).search_logs(VP_GROUP, query_string="fields @logStream, @message")
+    )
+
+    assert result["rows"][0]["logGroup"] == VP_GROUP
+    assert result["guidance"] is None
+
+
+def test_a_line_from_several_groups_without_its_group_is_flagged_not_guessed() -> None:
+    client = FakeInsightsClient(
+        rows=[row(**{"@logStream": "s1", "@message": "a"})],
+        groups=REAL_GROUPS + [(LEGACY_VP_GROUP, 9000)],
+    )
+
+    result = parsed(
+        make_tools(client).search_logs(
+            f"{VP_GROUP},{LEGACY_VP_GROUP}", query_string="fields @logStream, @message"
+        )
+    )
+
+    assert "logGroup" not in result["rows"][0]
+    assert "did not select @log" in result["guidance"]
+
+
+def test_a_per_stream_count_over_several_groups_is_not_flagged() -> None:
+    """A ``stats ... by @logStream`` row carries a stream and no message. It
+    is not a line to cite, and "add @log to fields" would not change it."""
+    client = FakeInsightsClient(
+        rows=[row(**{"@logStream": "s1", "count()": "4"})],
+        groups=REAL_GROUPS + [(LEGACY_VP_GROUP, 9000)],
+    )
+
+    result = parsed(
+        make_tools(client).search_logs(
+            f"{VP_GROUP},{LEGACY_VP_GROUP}",
+            query_string="stats count() by @logStream",
+        )
+    )
+
+    assert result["rows"] == [{"@logStream": "s1", "count()": "4"}]
+    assert result["guidance"] is None
+
+
 def test_a_model_supplied_query_is_used_verbatim() -> None:
     """Aggregation is the reason this tool is Insights and not FilterLogEvents."""
     stats = 'fields @message | parse @message "trigger=*" as t | stats count() by t'
@@ -408,9 +501,6 @@ def test_a_guessed_log_group_name_is_refused_rather_than_queried() -> None:
         make_tools(client).search_logs(f"/aws/lambda/{STACK}-VirtualParticipant")
 
     assert client.start_query_calls == []
-
-
-LEGACY_VP_GROUP = f"/aws/lambda-microvms/{STACK}-vp"
 
 
 def test_the_legacy_microvm_group_is_refused_where_it_does_not_exist() -> None:
