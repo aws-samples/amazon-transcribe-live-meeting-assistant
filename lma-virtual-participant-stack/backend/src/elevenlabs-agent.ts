@@ -7,6 +7,7 @@ import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { simliAvatar } from './simli-avatar.js';
 import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
+import { mutedLookupSkipReason, SKIPPED_LOOKUP_RESULT, skippedLookupLogLine } from './muted-lookup.js';
 import { ActivationMode } from './voice-assistant-interface.js';
 import {
   AssistantReconfigureOutcome,
@@ -40,6 +41,9 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   private activationMode: string;
   private _isActivated: boolean = false;
   private _isMuted: boolean = false;
+  /** The most recent participant turn the agent heard, which is the turn a
+   *  tool call that follows it is answering. */
+  private lastUserTranscript: string = '';
   private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
   private region: string;
@@ -192,6 +196,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         this.ws.on('open', () => {
           console.log('✓ Connected to ElevenLabs Conversational AI');
           this.isConnected = true;
+          // A turn heard on an earlier connection must not let a lookup through on this one.
+          this.lastUserTranscript = '';
 
           // Send initial configuration. The ElevenLabs agent's persona (system
           // prompt, first message, tools, language, voice) is configured in the
@@ -278,6 +284,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       case 'user_transcript': {
         const userText: string = message.user_transcription_event?.user_transcript || '';
         console.log('👤 Agent heard:', userText);
+        if (userText) this.lastUserTranscript = userText;
         // Group-meeting wake-phrase handling for ElevenLabs (parity with Nova).
         // In translator mode we don't gate on wake phrases — every utterance
         // triggers a translation.
@@ -339,6 +346,21 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     console.log(`Processing client tool: ${toolName}`);
     console.log(`Tool call ID: ${toolCallId}`);
     console.log(`Parameters:`, JSON.stringify(parameters));
+
+    // A muted agent that was not addressed was not asked for anything, and its
+    // answer would be dropped; see muted-lookup.ts.
+    if (toolName === 'strands_agent') {
+      const skip = mutedLookupSkipReason(this._isMuted, this.lastUserTranscript);
+      if (skip) {
+        console.log(skippedLookupLogLine(skip, this.meetingMode, this.activationMode));
+        try {
+          await this.sendClientToolResult(toolCallId, SKIPPED_LOOKUP_RESULT);
+        } catch (err) {
+          console.warn('Failed to send the skipped-lookup tool result (non-fatal):', err);
+        }
+        return;
+      }
+    }
 
     try {
       // Set flag to prevent deactivation while tool is processing
