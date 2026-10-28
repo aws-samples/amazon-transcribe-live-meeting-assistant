@@ -407,8 +407,10 @@ Parameters:
   ChatButtonConfigTableName:
     Type: String
     Description:
-      The DynamoDB table name where the default and custom STRANDS agent chat button
-      configurations are stored.
+      The DynamoDB table the default and custom STRANDS agent chat button
+      configurations were stored in before they moved into the configuration
+      table. Read by the configuration seeder only, to carry custom buttons
+      across on upgrade.
 
   AsrConfigTableName:
     Type: String
@@ -3151,9 +3153,10 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                 Resource: !GetAtt ConfigurationTable.Arn
-              # Read-only on the tables the prompt templates and the Nova Sonic
-              # settings used to live in: the seeder carries an existing
-              # deployment's edits across once and never writes there.
+              # Read-only on the tables the prompt templates, the Nova Sonic
+              # settings and the chat buttons used to live in: the seeder
+              # carries an existing deployment's edits across once and never
+              # writes there.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -3164,6 +3167,9 @@ Resources:
                   - !Sub
                     - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Table}"
                     - Table: !Ref NovaSonicConfigTableName
+                  - !Sub
+                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Table}"
+                    - Table: !Ref ChatButtonConfigTableName
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -3184,6 +3190,8 @@ Resources:
       # Read once, while the operator's profile holds no Nova Sonic section, to
       # carry the settings saved before the upgrade across.
       LegacyNovaSonicConfigTableName: !Ref NovaSonicConfigTableName
+      # Likewise for the chat buttons.
+      LegacyChatButtonConfigTableName: !Ref ChatButtonConfigTableName
       # Changes when the shipped configuration content or the code that
       # processes it changes, and is the only reason CloudFormation re-invokes
       # this resource on a stack update.
@@ -4097,12 +4105,16 @@ Resources:
       Role: !GetAtt UpdateChatButtonConfigResolverFunctionExecutionRole.Arn
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/update_chat_button_config_resolver
-      Description: Lambda resolver that applies updateChatButtonConfig against an allowed field list
+      Description: >-
+        Lambda resolver for the Meeting Assist chat buttons: reads a stored
+        record and saves an edit against an allowed field list
       MemorySize: 256
       Timeout: 30
+      Layers:
+        - !Ref ConfigurationPythonLayer
       Environment:
         Variables:
-          CHAT_BUTTON_CONFIG_TABLE_NAME: !Ref ChatButtonConfigTableName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
@@ -4120,6 +4132,9 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UpdateChatButtonConfigResolverFunctionLogGroup
+      # The chat panel should not load its buttons from an unseeded table and
+      # show nobody any shipped buttons.
+      - SeedConfiguration
 
   UpdateChatButtonConfigResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4139,20 +4154,29 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
             Action:
               - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-UpdateChatButtonConfig
           PolicyDocument:
             Version: 2012-10-17
             Statement:
+              # GetItem as well as PutItem: the chat panel's read is served from
+              # here, and a save reads the profile's current version so a write
+              # that another session has superseded can be refused.
+              # Deliberately no DeleteItem.
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem
                   - dynamodb:PutItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatButtonConfigTableName}"
+                Resource: !GetAtt ConfigurationTable.Arn
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -4160,7 +4184,7 @@ Resources:
                 Resource: !Ref CustomerManagedEncryptionKeyArn
                 Condition:
                   StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   AppSyncUpdateChatButtonConfigLambdaRole:
     Type: AWS::IAM::Role
@@ -5212,46 +5236,6 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt MeetingInvitationParserFunction.Arn
 
-  ChatButtonConfigDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: ChatButtonConfigTable
-      Description: STRANDS Agent Chat Button Configuration DynamoDB Table
-      Type: AMAZON_DYNAMODB
-      ServiceRoleArn: !GetAtt ChatButtonConfigDataSourceRole.Arn
-      DynamoDBConfig:
-        TableName: !Ref ChatButtonConfigTableName
-        AwsRegion: !Ref AWS::Region
-
-  ChatButtonConfigDataSourceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: appsync.amazonaws.com
-      Policies:
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                  - dynamodb:PutItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ChatButtonConfigTableName}"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   AppSyncStrandsChatLambdaRole:
     Type: AWS::IAM::Role
@@ -5913,12 +5897,17 @@ Resources:
         #end
         $util.toJson($ctx.result)
 
+  # Served by the same Lambda as the mutation rather than by a DynamoDB data
+  # source, for the reason given at the LLM prompt template resolvers below: the
+  # buttons live compressed in the shared configuration table. The function
+  # answers with one record's "N#Label" buttons and its version, never the
+  # attributes recording who saved it, because every signed-in user reads this.
   GetChatButtonConfigResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt ChatButtonConfigDataSource.Name
+      DataSourceName: !GetAtt UpdateChatButtonConfigLambdaDataSource.Name
       TypeName: Query
       FieldName: getChatButtonConfig
       Runtime:
@@ -5927,36 +5916,14 @@ Resources:
       Code: |
         import { util } from '@aws-appsync/utils';
 
-        const DIGITS = '0123456789';
-
-        // Whether `key` names a chat button, which is stored under a key of the
-        // form "N#LABEL" where N orders the buttons -- "1#Action Items".
-        //
-        // Spelled out character by character because the APPSYNC_JS runtime has
-        // no regular expressions: String.replace takes a Java-style pattern, but
-        // there is no regex literal, no test and no match. Equivalent to the
-        // /^\d+#/ that the updateChatButtonConfig resolver applies on write and
-        // that both readers apply to what they receive.
-        function isButtonField(key) {
-          const separator = key.indexOf('#');
-          if (separator < 1) {
-            // No '#', or nothing ahead of it, so there is no sequence number.
-            return false;
-          }
-          for (const character of key.slice(0, separator).split('')) {
-            if (DIGITS.indexOf(character) < 0) {
-              return false;
-            }
-          }
-          return true;
-        }
-
         export function request(ctx) {
           return {
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({
-              ChatButtonConfigId: ctx.args.ChatButtonConfigId
-            })
+            operation: 'Invoke',
+            payload: {
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              info: { fieldName: ctx.info.fieldName }
+            }
           };
         }
 
@@ -5964,29 +5931,7 @@ Resources:
           if (ctx.error) {
             util.error(ctx.error.message, ctx.error.type);
           }
-
-          // The buttons, as a JSON string in the ChatButtonConfigId field. A
-          // string because the stored keys carry a sequence number and a label
-          // chosen by an administrator, so they cannot be declared as fields of
-          // the ChatButtonConfig type.
-          //
-          // The buttons and nothing else. Every signed-in user reads this record,
-          // because the Meeting Assist chat panel renders its quick-action buttons
-          // from it for whoever is viewing a meeting, so the response carries what
-          // a reader of the chat buttons asked for and not the remainder of the
-          // item: the partition key, the attributes recording who saved it last,
-          // and whatever is added to the record later. Both readers already keep
-          // exactly these keys, so what the UI sees does not change.
-          const item = ctx.result ?? {};
-          const buttons = {};
-          for (const key of Object.keys(item)) {
-            if (isButtonField(key)) {
-              buttons[key] = item[key];
-            }
-          }
-          return {
-            ChatButtonConfigId: JSON.stringify(buttons)
-          };
+          return ctx.result;
         }
 
   UpdateChatButtonConfigResolver:

@@ -44,6 +44,7 @@ from .keys import (
     validate_profile_name,
 )
 from .sections import (
+    CHAT_BUTTONS,
     NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
     TIER_CONSISTENT_READ,
@@ -66,6 +67,7 @@ from .store import (
 __all__ = [
     "ACTIVE_POINTER_KEY",
     "BODY_ATTRIBUTE",
+    "CHAT_BUTTONS",
     "CONFIG_PREFIX",
     "DEFAULT_KEY",
     "DEFAULT_PROFILE_NAME",

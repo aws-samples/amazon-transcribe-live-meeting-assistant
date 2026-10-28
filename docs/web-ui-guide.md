@@ -281,6 +281,13 @@ Customize the chat shortcut buttons that appear in the meeting chat panel:
 - Add new shortcut buttons with custom labels and prompts
 - Edit existing button labels and prompts
 - Delete buttons you no longer need
+- **Reset to Defaults** brings back the shipped buttons
+
+Once any custom button is saved, the custom list replaces the shipped one
+entirely; it does not add to it. The buttons are stored in the shared
+[configuration store](configuration-store.md), and a save is refused, with a
+message to reopen the dialog, if someone else saved the configuration while it
+was open.
 
 ## Deployment Info
 

@@ -892,6 +892,13 @@ type ThinkingStepData @aws_cognito_user_pools @aws_iam {
 	Success: Boolean
 }
 
+# Meeting Assist chat buttons
+#
+# The read returns a JSON string in ChatButtonConfigId, which is how this field
+# has always answered: one record's "N#Label" buttons, plus its Version -- the
+# only key that is not a button, and the one the Edit Chat Buttons dialog sends
+# back as ExpectedVersion when it saves. Nothing recording who saved the record
+# is in it, because every signed-in user reads this field.
 type ChatButtonConfig @aws_cognito_user_pools @aws_iam {
 	ChatButtonConfigId: ID!
 }
@@ -899,11 +906,18 @@ type ChatButtonConfig @aws_cognito_user_pools @aws_iam {
 input UpdateChatButtonConfigInput {
 	ChatButtonConfigId: ID!
 	ButtonConfig: String!
+	# The version the dialog loaded. Optional, so a client that does not send it
+	# keeps working: its save is still conditional on the record as the
+	# resolver reads it, and supplying this adds the check against what the
+	# dialog was actually looking at.
+	ExpectedVersion: Int
 }
 
 type UpdateChatButtonConfigOutput @aws_cognito_user_pools @aws_iam {
 	ChatButtonConfigId: ID!
 	Success: Boolean!
+	# The version now stored, so the dialog can save again without reloading.
+	Version: Int
 }
 
 # Nova Sonic Voice Assistant Configuration

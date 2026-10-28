@@ -55,14 +55,16 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
-from typing import Any, Dict, FrozenSet, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, NamedTuple, Optional, Tuple
 
 import boto3
 import cfnresponse  # vendored beside this handler; see cfnresponse.py
 
 # pylint: disable=import-error
 from lma_config import (  # from the configuration layer
+    CHAT_BUTTONS,
     NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
     ConcurrentModification,
@@ -106,6 +108,13 @@ PROMPT_TEMPLATE_FILES = {
 #: fails if the two drift.
 NOVA_SONIC_DEFAULTS_FILE = "NovaSonicConfig.json"
 
+#: The shipped Meeting Assist chat buttons, label -> prompt, numbered into
+#: "N#Label" in the order they appear, exactly as the chat-button-config stack
+#: numbers its own copy -- which it still ships, for the same reason as above;
+#: `test_the_shipped_chat_buttons_match_the_copy_the_other_stack_still_ships`
+#: fails if the two drift.
+CHAT_BUTTONS_DEFAULTS_FILE = "ChatButtonConfig.json"
+
 #: The profile an operator's edits land in. One profile in this stage; the key
 #: layout holds as many as wanted.
 OPERATOR_PROFILE = "custom"
@@ -145,9 +154,11 @@ def shipped_default_body(domain: str) -> Dict[str, Any]:
     filename = PROMPT_TEMPLATE_FILES.get(domain.lower(), PROMPT_TEMPLATE_FILES["default"])
     prompts = json.loads((DEFAULTS_DIR / filename).read_text(encoding="utf-8"))
     nova_sonic = json.loads((DEFAULTS_DIR / NOVA_SONIC_DEFAULTS_FILE).read_text(encoding="utf-8"))
+    buttons = json.loads((DEFAULTS_DIR / CHAT_BUTTONS_DEFAULTS_FILE).read_text(encoding="utf-8"))
     return {
         SUMMARY_PROMPT_TEMPLATES.name: numbered_prompts(prompts),
         NOVA_SONIC_CONFIG.name: nova_sonic,
+        CHAT_BUTTONS.name: numbered_prompts(buttons),
     }
 
 
@@ -293,16 +304,17 @@ class LegacySection(NamedTuple):
         property_name: The custom resource property naming the previous table.
         key_attribute: That table's partition-key attribute.
         key: The item holding the operator's edits.
-        fields: The attributes carried across. Everything else on the item --
-            its key, the seeded guidance text, the audit attributes -- is
-            bookkeeping of the previous table rather than configuration.
+        carries: Whether an attribute of that item is carried across. Everything
+            else on the item -- its key, the seeded guidance text, the audit
+            attributes -- is bookkeeping of the previous table rather than
+            configuration.
     """
 
     section: SectionSpec
     property_name: str
     key_attribute: str
     key: str
-    fields: FrozenSet[str]
+    carries: Callable[[str], bool]
 
 
 #: The fields the Nova Sonic Configuration page saves, which are the ones the
@@ -326,6 +338,9 @@ NOVA_SONIC_FIELDS = frozenset(
     }
 )
 
+#: A key in "N#Label" form, where N orders the entries. ASCII digits only.
+SEQUENCED_KEY = re.compile(r"^[0-9]+#")
+
 #: Stores moved in after the profile already existed, so their edits are carried
 #: across one section at a time rather than by creating the profile.
 LEGACY_SECTIONS = (
@@ -334,7 +349,18 @@ LEGACY_SECTIONS = (
         property_name="LegacyNovaSonicConfigTableName",
         key_attribute="NovaSonicConfigId",
         key="CustomNovaSonicConfig",
-        fields=NOVA_SONIC_FIELDS,
+        carries=NOVA_SONIC_FIELDS.__contains__,
+    ),
+    LegacySection(
+        section=CHAT_BUTTONS,
+        property_name="LegacyChatButtonConfigTableName",
+        key_attribute="ChatButtonConfigId",
+        key="CustomChatButtonConfig",
+        # Every "N#Label" attribute, which is what the Edit Chat Buttons dialog
+        # saves. Carried as the whole list it is: a non-empty custom list
+        # replaces the shipped buttons rather than adding to them, so nothing
+        # in it can be pruned against the baseline.
+        carries=lambda name: bool(SEQUENCED_KEY.match(name)),
     ),
 )
 
@@ -374,7 +400,7 @@ def read_legacy_section(
         )
         return "previous-table-unreadable", None
     item = codec.unmarshal_item(response.get("Item") or {})
-    values = {name: value for name, value in item.items() if name in legacy.fields}
+    values = {name: value for name, value in item.items() if legacy.carries(name)}
     if not values:
         return "nothing-to-adopt", {}
     LOGGER.info(

@@ -4647,13 +4647,29 @@ Outputs:
       point in this release; invoke it with the AWS CLI or SDK.
     Value: !GetAtt MEETINGASSISTSETUP.Outputs.TroubleshootingAgentFunctionArn
 
+  # The chat buttons live in the shared configuration table too, as a
+  # compressed attribute, so these links are for inspecting who saved a record
+  # and when. Buttons are edited from the Edit Chat Buttons dialog on a meeting
+  # page, which is open to members of the Admin group.
   DefaultChatButtonConfig:
-    Description: View the *default* STRANDS agent chat button configuration. Do not edit. To override default buttons, add or edit attributes in the custom button config item.
-    Value: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.DefaultChatButtonConfig
+    Description:
+      View the *default* configuration record, which holds the shipped STRANDS
+      agent chat buttons. Rewritten whenever a release changes what it ships,
+      so edit the custom buttons instead -- from the Edit Chat Buttons dialog.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23default&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   CustomChatButtonConfig:
-    Description: Edit the *custom* STRANDS agent chat button configuration. Attribute values here override the default button config, and are preserved during stack updates.
-    Value: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.CustomChatButtonConfig
+    Description:
+      View the *custom* configuration profile, which holds the chat buttons
+      that replace the shipped ones when any are set and is preserved during
+      stack updates. Edit them from the Edit Chat Buttons dialog.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23custom&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   # Like the summary prompt links above, these point at the shared
   # configuration table, where the settings are a compressed attribute: they
