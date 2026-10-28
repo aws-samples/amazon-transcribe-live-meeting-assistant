@@ -663,9 +663,7 @@ def test_the_portal_asks_again_when_a_consent_has_aged_out(
     """
     install(
         monkeypatch,
-        enrollment=consented(
-            status="active", ConsentExpiresAt={"S": "2000-01-01T00:00:00Z"}
-        ),
+        enrollment=consented(status="active", ConsentExpiresAt={"S": "2000-01-01T00:00:00Z"}),
     )
     result = index.handler(event("voiceEnrollmentTerms"), None)
     assert result["NeedsReconsent"] is True
@@ -701,9 +699,7 @@ def test_destroying_a_voiceprint_records_the_terms_it_was_created_under(
 ) -> None:
     ddb = install(
         monkeypatch,
-        enrollment=consented(
-            status="active", terms="0", TermsSha256={"S": "the-older-words"}
-        ),
+        enrollment=consented(status="active", terms="0", TermsSha256={"S": "the-older-words"}),
     )
     index.handler(event("grantVoiceConsent"), None)
     deleted = [r for r in ddb.consent_rows() if r["Action"]["S"] == "DELETED"]

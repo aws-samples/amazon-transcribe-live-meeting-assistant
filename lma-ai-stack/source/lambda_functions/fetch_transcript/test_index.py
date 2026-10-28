@@ -119,7 +119,7 @@ class FakeTable:
         if "ExclusiveStartKey" in kwargs:
             resume = kwargs["ExclusiveStartKey"]["SK"]
             start = next(i for i, r in enumerate(rows) if r["SK"] == resume) + 1
-        page = rows[start:start + self.page_size]
+        page = rows[start : start + self.page_size]
         response = {"Items": page}
         if start + self.page_size < len(rows):
             response["LastEvaluatedKey"] = {"PK": page[-1]["PK"], "SK": page[-1]["SK"]}
@@ -430,9 +430,10 @@ def test_processing_leaves_spoken_words_alone() -> None:
 def test_processing_does_not_truncate_words_that_begin_with_a_filler() -> None:
     """The specific corruption the removed pass caused, pinned so it cannot return."""
     for word in ("umbrella", "Likewise", "umbrage", "uhlan", "likelihood"):
-        assert word in index.preprocess_transcripts(
-            [segment(f"the {word} matters", 1)], True, False
-        )[0]
+        assert (
+            word
+            in index.preprocess_transcripts([segment(f"the {word} matters", 1)], True, False)[0]
+        )
 
 
 def test_segment_text_is_left_exactly_as_stored_when_processing_is_not_requested() -> None:

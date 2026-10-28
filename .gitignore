@@ -97,3 +97,6 @@ integ-tests-report.xml
 .coverage.*
 coverage/
 coverage-summary.json
+# Output of scripts/pr_review/ai_pr_review.py (its --artifact-dir default). Review
+# text is published, or withheld, by the script itself and never by a commit.
+ai-reviews/

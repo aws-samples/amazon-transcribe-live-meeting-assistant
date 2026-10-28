@@ -25,8 +25,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from graphql import build_ast_schema, parse
 from gql.dsl import DSLSchema
+from graphql import build_ast_schema, parse
 
 from graphql_helpers.call_fields import call_fields
 from graphql_helpers.transcript_segment_fields import transcript_segment_fields
@@ -72,9 +72,7 @@ SELECTORS = {
 def dsl_schema() -> DSLSchema:
     """gql's DSL wrapper around the schema the stack actually deploys."""
     assert SCHEMA.is_file(), f"schema not found at {SCHEMA}"
-    schema = build_ast_schema(
-        parse(APPSYNC_PRELUDE + SCHEMA.read_text()), assume_valid_sdl=True
-    )
+    schema = build_ast_schema(parse(APPSYNC_PRELUDE + SCHEMA.read_text()), assume_valid_sdl=True)
     return DSLSchema(schema)
 
 
@@ -96,8 +94,11 @@ def test_selector_resolves_every_field_against_the_schema(name: str, dsl_schema:
 
 @pytest.mark.parametrize(
     ("name", "minimum"),
-    [("call_fields", 15), ("transcript_segment_fields", 12),
-     ("transcript_segment_sentiment_fields", 3)],
+    [
+        ("call_fields", 15),
+        ("transcript_segment_fields", 12),
+        ("transcript_segment_sentiment_fields", 3),
+    ],
 )
 def test_selector_returns_the_expected_number_of_fields(
     name: str, minimum: int, dsl_schema: DSLSchema
@@ -118,9 +119,17 @@ def test_call_selector_covers_the_fields_the_ui_reads(dsl_schema: DSLSchema):
     """
     selected = {str(field.name) for field in call_fields(dsl_schema)}
     for expected in (
-        "CallId", "Status", "CreatedAt", "UpdatedAt", "AgentId",
-        "RecordingUrl", "VideoRecordingUrl", "PcaUrl",
-        "Owner", "SharedWith", "CallSummaryText",
+        "CallId",
+        "Status",
+        "CreatedAt",
+        "UpdatedAt",
+        "AgentId",
+        "RecordingUrl",
+        "VideoRecordingUrl",
+        "PcaUrl",
+        "Owner",
+        "SharedWith",
+        "CallSummaryText",
         "TotalConversationDurationMillis",
     ):
         assert expected in selected, f"call_fields no longer selects {expected}"
@@ -129,8 +138,16 @@ def test_call_selector_covers_the_fields_the_ui_reads(dsl_schema: DSLSchema):
 def test_transcript_segment_selector_covers_the_fields_the_ui_reads(dsl_schema: DSLSchema):
     selected = {str(field.name) for field in transcript_segment_fields(dsl_schema)}
     for expected in (
-        "CallId", "SegmentId", "StartTime", "EndTime", "Transcript",
-        "IsPartial", "Channel", "Speaker", "Owner", "SharedWith",
+        "CallId",
+        "SegmentId",
+        "StartTime",
+        "EndTime",
+        "Transcript",
+        "IsPartial",
+        "Channel",
+        "Speaker",
+        "Owner",
+        "SharedWith",
     ):
         assert expected in selected, f"transcript_segment_fields no longer selects {expected}"
 

@@ -992,3 +992,39 @@ def test_the_handler_reports_an_error_string_rather_than_raising(
 
     monkeypatch.setattr(index, "get_transcripts", unavailable)
     assert index.handler({"CallId": CALL_ID}, None) == {"summary": "An error occurred."}
+
+
+def _root_level_after_import(monkeypatch: pytest.MonkeyPatch, log_level: str | None) -> int:
+    """Import a fresh copy of index.py and return the root logger level it set.
+
+    The root logger is process-wide, so its level is put back afterwards for the
+    tests that follow.
+    """
+    import logging
+
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "level", root.level)
+    if log_level is None:
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+    else:
+        monkeypatch.setenv("LOG_LEVEL", log_level)
+    spec = importlib.util.spec_from_file_location("bedrock_summary_index_level", HERE / "index.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return root.level
+
+
+@pytest.mark.parametrize(
+    ("log_level", "expected"),
+    [("DEBUG", 10), ("INFO", 20), ("WARN", 30), ("ERROR", 40)],
+)
+def test_root_logger_level_follows_the_stack_log_level(
+    monkeypatch: pytest.MonkeyPatch, log_level: str, expected: int
+) -> None:
+    """Every value the stack's LogLevel parameter allows is honoured as given."""
+    assert _root_level_after_import(monkeypatch, log_level) == expected
+
+
+def test_root_logger_level_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without LOG_LEVEL, configuration-layer warnings are still emitted."""
+    assert _root_level_after_import(monkeypatch, None) == 20

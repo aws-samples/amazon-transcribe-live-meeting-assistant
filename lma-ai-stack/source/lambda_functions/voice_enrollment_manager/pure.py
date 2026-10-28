@@ -273,9 +273,7 @@ def revoke(enrollment):
     return revoked
 
 
-def is_usable_for_matching(
-    enrollment, current_terms_version, now_iso, current_terms_sha256=None
-):
+def is_usable_for_matching(enrollment, current_terms_version, now_iso, current_terms_sha256=None):
     """May this enrollment be used to label a meeting?
 
     Five things must all hold, and each of them is a promise made to the person
@@ -317,9 +315,7 @@ def is_usable_for_matching(
     return True
 
 
-def may_store_voiceprint(
-    enrollment, current_terms_version, now_iso, current_terms_sha256=None
-):
+def may_store_voiceprint(enrollment, current_terms_version, now_iso, current_terms_sha256=None):
     """Is there a standing consent that permits storing a voiceprint?
 
     Separate from ``is_usable_for_matching`` because the two ask different
@@ -355,9 +351,7 @@ def may_store_voiceprint(
     return True
 
 
-def needs_reconsent(
-    enrollment, current_terms_version, current_terms_sha256=None, now_iso=None
-):
+def needs_reconsent(enrollment, current_terms_version, current_terms_sha256=None, now_iso=None):
     """An enrollment whose consent no longer stands, and whose owner must agree again.
 
     Superseded by either a version bump or an edit to the words, for the reason
@@ -432,9 +426,7 @@ def session_seeds(enrollments, current_terms_version, now_iso, limit, current_te
     usable = [
         enrollment
         for enrollment in enrollments or []
-        if is_usable_for_matching(
-            enrollment, current_terms_version, now_iso, current_terms_sha256
-        )
+        if is_usable_for_matching(enrollment, current_terms_version, now_iso, current_terms_sha256)
     ]
     usable.sort(
         key=lambda e: (

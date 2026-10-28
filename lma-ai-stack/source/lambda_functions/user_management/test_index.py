@@ -351,12 +351,11 @@ def test_the_caller_username_is_read_from_whichever_field_is_populated() -> None
     """
     identify = index._get_caller_identity
 
-    assert identify({"identity": {"claims": {"cognito:username": "c@x", "sub": "s"}}})[
-        "username"
-    ] == "c@x"
-    assert identify(
-        {"identity": {"claims": {"sub": "s"}, "username": "u@x"}}
-    )["username"] == "u@x"
+    assert (
+        identify({"identity": {"claims": {"cognito:username": "c@x", "sub": "s"}}})["username"]
+        == "c@x"
+    )
+    assert identify({"identity": {"claims": {"sub": "s"}, "username": "u@x"}})["username"] == "u@x"
     assert identify({"identity": {"claims": {"sub": "s"}}})["username"] == "s"
     assert identify({})["username"] == ""
 
@@ -530,9 +529,7 @@ def test_a_subdomain_of_an_allowed_domain_is_not_itself_allowed(
     monkeypatch.setattr(index, "ALLOWED_SIGNUP_EMAIL_DOMAINS", "example.com")
 
     with pytest.raises(Exception, match="not allowed"):
-        index.handler(
-            admin_event("createUser", create_input("user@notexample.com", "User")), None
-        )
+        index.handler(admin_event("createUser", create_input("user@notexample.com", "User")), None)
 
 
 @pytest.mark.parametrize("configured", ["", "   ", " , "], ids=["unset", "spaces", "only-commas"])

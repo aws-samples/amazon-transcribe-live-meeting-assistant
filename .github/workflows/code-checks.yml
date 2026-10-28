@@ -96,6 +96,11 @@ jobs:
       - name: Lint CloudFormation templates
         run: make lint-cfn
 
+      # ruff check + format check over the Lambda functions, the Lambda layers
+      # and scripts/pr_review (read-only; `make lint-python` is the fixing form).
+      - name: Lint Python (ruff)
+        run: make lint-python-check
+
       # Python unit suites (all mock boto3 / use dummy env — no AWS).
       - name: LMA SDK unit tests
         run: make test-sdk

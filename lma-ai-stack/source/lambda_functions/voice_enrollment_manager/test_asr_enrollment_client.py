@@ -67,12 +67,16 @@ class FakeLambda:
 
     def __init__(self, *, acquire=None, acquire_error=False):
         self.calls = []
-        self.acquire = acquire if acquire is not None else {
-            "ok": True,
-            "microvmId": "mvm-1",
-            "endpoint": "example.invalid/session",
-            "authToken": "token-abc",
-        }
+        self.acquire = (
+            acquire
+            if acquire is not None
+            else {
+                "ok": True,
+                "microvmId": "mvm-1",
+                "endpoint": "example.invalid/session",
+                "authToken": "token-abc",
+            }
+        )
         self.acquire_error = acquire_error
 
     def invoke(self, **kwargs):

@@ -74,9 +74,9 @@ def test_a_full_confidence_negative_reaches_the_bottom_of_the_scale(scorer):
 
 
 def test_a_positive_score_is_the_confidence_times_the_scale(scorer):
-    assert scorer.get_weighted_sentiment_score(
-        response("POSITIVE", positive=0.6)
-    ) == pytest.approx(3.0)
+    assert scorer.get_weighted_sentiment_score(response("POSITIVE", positive=0.6)) == pytest.approx(
+        3.0
+    )
 
 
 def test_a_negative_score_is_signed(scorer):
@@ -104,9 +104,9 @@ def test_a_positive_below_the_threshold_is_discarded(scorer):
 
 def test_a_positive_at_the_threshold_is_kept(scorer):
     """The boundary is inclusive; an off-by-one here silently drops a whole band."""
-    assert scorer.get_weighted_sentiment_score(
-        response("POSITIVE", positive=0.4)
-    ) == pytest.approx(2.0)
+    assert scorer.get_weighted_sentiment_score(response("POSITIVE", positive=0.4)) == pytest.approx(
+        2.0
+    )
 
 
 def test_a_strong_negative_overrides_a_positive_label(scorer):
@@ -115,9 +115,7 @@ def test_a_strong_negative_overrides_a_positive_label(scorer):
     An utterance it calls POSITIVE while scoring negative heavily is plotted
     negative — the case this override exists for.
     """
-    score = scorer.get_weighted_sentiment_score(
-        response("POSITIVE", positive=0.45, negative=0.55)
-    )
+    score = scorer.get_weighted_sentiment_score(response("POSITIVE", positive=0.45, negative=0.55))
     assert score == pytest.approx(-2.75)
     assert score < 0
 
@@ -125,9 +123,7 @@ def test_a_strong_negative_overrides_a_positive_label(scorer):
 def test_a_weak_negative_does_not_override_a_positive_label(scorer):
     """Below the threshold the override must not fire, or every mildly mixed
     utterance would be plotted negative."""
-    score = scorer.get_weighted_sentiment_score(
-        response("POSITIVE", positive=0.7, negative=0.2)
-    )
+    score = scorer.get_weighted_sentiment_score(response("POSITIVE", positive=0.7, negative=0.2))
     assert score == pytest.approx(3.5)
     assert score > 0
 

@@ -791,11 +791,10 @@ Resources:
                   - s3:PutObject
                   - s3:ListBucket
               - Resource:
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WebsocketTranscriberCodeBuildProjectLogGroup}"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WebsocketTranscriberCodeBuildProjectLogGroup}:*"
                 Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
               - Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${TranscriberECRRepository}"
@@ -825,12 +824,28 @@ Resources:
               and therefore
               cannot be specificed directly.
 
+  # The project's build output. Without LogsConfig, CodeBuild writes to
+  # /aws/codebuild/<project>, a group it creates with no expiry and the AWS-owned
+  # key. Named outside /aws/codebuild/ because that group already exists in any
+  # stack that has run a build, and CloudFormation cannot take ownership of an
+  # existing log group.
+  WebsocketTranscriberCodeBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/codebuild/WebsocketTranscriberCodeBuildProject"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   WebsocketTranscriberCodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Description: !Sub >-
         Builds docker images : ${AWS::StackName}
       ServiceRole: !Ref TranscriberCodeBuildServiceRole
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref WebsocketTranscriberCodeBuildProjectLogGroup
       EncryptionKey: alias/aws/s3
       Artifacts:
         Type: NO_ARTIFACTS

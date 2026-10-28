@@ -5,8 +5,8 @@
 """Call type field selector"""
 
 from typing import Tuple
-from gql.dsl import DSLField, DSLSchema
 
+from gql.dsl import DSLField, DSLSchema
 
 CHANNELS = ("AGENT", "CALLER")
 

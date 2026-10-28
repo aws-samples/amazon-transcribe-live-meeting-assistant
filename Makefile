@@ -28,6 +28,12 @@ ifeq ($(wildcard $(VENV_DIR)/bin/cfn-lint),)
 else
   CFN_LINT := $(CURDIR)/$(VENV_DIR)/bin/cfn-lint
 endif
+# Likewise ruff.
+ifeq ($(wildcard $(VENV_DIR)/bin/ruff),)
+  RUFF := ruff
+else
+  RUFF := $(CURDIR)/$(VENV_DIR)/bin/ruff
+endif
 
 # Project paths
 AI_STACK_DIR := lma-ai-stack
@@ -44,6 +50,18 @@ MEETINGASSIST_TEST_DIR := lma-meetingassist-setup-stack/test
 STRANDS_LAYER_REQUIREMENTS := lma-meetingassist-setup-stack/strands_layer/requirements.txt
 VERSION_FILE := VERSION
 PYTHON_LINE_LENGTH := 100
+# The ruff version comes from the ASR runtime's pin, so the AI-stack lint and the
+# ASR lint (`test-asr`) run the same ruff release. Each uses its own tree's
+# configuration. Dependabot keeps that pin current.
+RUFF_VERSION := $(shell sed -n 's/^ruff==//p' $(ASR_SOURCE_DIR)/requirements-dev.txt)
+# Everything `lint-python` fixes and `lint-python-check` checks. The Lambda
+# layers are included because their code is imported by most of the functions.
+# Nothing else under scripts/ is included: those files predate this and
+# reformatting them here would make an unrelated diff.
+PYTHON_LINT_PATHS := \
+	$(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) \
+	$(CURDIR)/$(LAMBDA_LAYERS_DIR) \
+	$(CURDIR)/scripts/pr_review
 
 # CloudFormation templates to validate
 CFN_TEMPLATES := \
@@ -158,6 +176,7 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 	@echo "Upgrading pip..."
 	$(VENV_DIR)/bin/pip install --upgrade pip
 	@echo "Installing Python lint/dev tools..."
+	@test -n "$(RUFF_VERSION)" || { echo -e "$(RED)ERROR: no ruff==<version> pin in $(ASR_SOURCE_DIR)/requirements-dev.txt, which is where RUFF_VERSION is read from.$(NC)"; exit 1; }
 	$(VENV_DIR)/bin/pip install \
 		bandit \
 		black \
@@ -165,6 +184,7 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 		flake8 \
 		mypy \
 		pylint \
+		ruff==$(RUFF_VERSION) \
 		virtualenv \
 		yamllint \
 		boto3-stubs[comprehend,codebuild,dynamodb,lambda,lexv2-runtime,s3,sqs,sns]
@@ -240,15 +260,28 @@ lint-cfn: ## Validate CloudFormation templates with cfn-lint
 		exit 1; \
 	fi
 
-# scripts/pr_review is linted alongside the Lambda tree so that the fix command
-# this target provides covers everything lint-cicd checks. Nothing else under
-# scripts/ is included: those files predate this and reformatting them here would
-# make an unrelated diff.
-lint-python: ## Lint Python Lambda functions with ruff
-	@echo "Running ruff on Lambda functions..."
-	cd $(AI_STACK_DIR) && ruff check --fix $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) $(CURDIR)/scripts/pr_review
-	cd $(AI_STACK_DIR) && ruff format $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) $(CURDIR)/scripts/pr_review
+# Runs from AI_STACK_DIR so that lma-ai-stack/pyproject.toml supplies the ruff
+# configuration. lint-python rewrites files in place; lint-python-check is the
+# read-only form that CI runs, and covers exactly the same paths.
+lint-python: ## Lint and format Python Lambda functions and layers with ruff (fixes in place)
+	@echo "Running ruff on Lambda functions and layers..."
+	cd $(AI_STACK_DIR) && $(RUFF) check --fix $(PYTHON_LINT_PATHS)
+	cd $(AI_STACK_DIR) && $(RUFF) format $(PYTHON_LINT_PATHS)
 	@echo -e "$(GREEN)✅ All Python linting passed!$(NC)"
+
+lint-python-check: ## Check Python Lambda functions and layers with ruff (no modifications)
+	@echo "Checking Lambda functions and layers with ruff..."
+	@if ! (cd $(AI_STACK_DIR) && $(RUFF) check $(PYTHON_LINT_PATHS)); then \
+		echo -e "$(RED)ERROR: Ruff linting failed!$(NC)"; \
+		echo -e "$(YELLOW)Run 'make lint-python' locally to fix these issues.$(NC)"; \
+		exit 1; \
+	fi
+	@if ! (cd $(AI_STACK_DIR) && $(RUFF) format --check $(PYTHON_LINT_PATHS)); then \
+		echo -e "$(RED)ERROR: Code formatting check failed!$(NC)"; \
+		echo -e "$(YELLOW)Run 'make lint-python' locally to fix these issues.$(NC)"; \
+		exit 1; \
+	fi
+	@echo -e "$(GREEN)✅ Ruff checks passed!$(NC)"
 
 lint-bandit: ## Run bandit security scan on Python Lambda functions
 	@echo "Running bandit security scan..."
@@ -286,8 +319,8 @@ lint-typescript: ## TypeScript build check on WebSocket and Virtual Participant 
 	@echo -e "$(GREEN)✅ All TypeScript builds succeeded!$(NC)"
 
 format: ## Format Python code with ruff
-	@echo "Formatting Python Lambda functions with ruff..."
-	cd $(AI_STACK_DIR) && ruff format $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR)
+	@echo "Formatting Python Lambda functions and layers with ruff..."
+	cd $(AI_STACK_DIR) && $(RUFF) format $(PYTHON_LINT_PATHS)
 	@echo -e "$(GREEN)✅ Python code formatted!$(NC)"
 
 lint-cicd: ## CI/CD lint — checks only, no modifications
@@ -296,16 +329,7 @@ lint-cicd: ## CI/CD lint — checks only, no modifications
 		echo -e "$(RED)ERROR: cfn-lint failed!$(NC)"; \
 		exit 1; \
 	fi
-	@if ! (cd $(AI_STACK_DIR) && ruff check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) $(CURDIR)/scripts/pr_review); then \
-		echo -e "$(RED)ERROR: Ruff linting failed!$(NC)"; \
-		echo -e "$(YELLOW)Run 'make lint-python' locally to fix these issues.$(NC)"; \
-		exit 1; \
-	fi
-	@if ! (cd $(AI_STACK_DIR) && ruff format --check $(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) $(CURDIR)/scripts/pr_review); then \
-		echo -e "$(RED)ERROR: Code formatting check failed!$(NC)"; \
-		echo -e "$(YELLOW)Run 'make format' locally to fix these issues.$(NC)"; \
-		exit 1; \
-	fi
+	@$(MAKE) --no-print-directory lint-python-check
 	@if ! make lint-ui; then \
 		echo -e "$(RED)ERROR: UI lint failed$(NC)"; \
 		exit 1; \

@@ -787,6 +787,18 @@ Resources:
                 Resource:
                   - "*"
 
+  # The project's build output. Without LogsConfig, CodeBuild writes to
+  # /aws/codebuild/<project>, a group it creates with no expiry and the AWS-owned
+  # key. Named outside /aws/codebuild/ because that group already exists in any
+  # stack that has run a build, and CloudFormation cannot take ownership of an
+  # existing log group.
+  VirtualParticipantBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/codebuild/VirtualParticipantBuildProject"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   VirtualParticipantBuildProject:
     Type: AWS::CodeBuild::Project
     Metadata:
@@ -962,6 +974,10 @@ Resources:
           - Name: VP_LAUNCH_TYPE
             Value: !Ref VPLaunchType
       ServiceRole: !GetAtt BuildRole.Arn
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref VirtualParticipantBuildProjectLogGroup
       Artifacts:
         Type: NO_ARTIFACTS
 

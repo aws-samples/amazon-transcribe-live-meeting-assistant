@@ -3,6 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 
 """AppSync Async IO Gql Client"""
+
 from urllib.parse import urlparse
 
 from gql.client import Client

@@ -75,8 +75,9 @@ Python uses Black (formatter), Flake8, Pylint (100 char lines). Config in `lma-a
 The `Lint and unit tests` check (`.github/workflows/code-checks.yml`, mirrored by
 the `code_checks` job in `.gitlab-ci.yml`) runs on every pull request and on every
 push to `develop` and `main`. It is the authoritative full run. The workflow file
-is the source of truth for what it covers; today that is cfn-lint, ruff, the UI
-lint and vitest, `tsc`/eslint, and the SDK, CLI, Lambda, VP, VP-template,
+is the source of truth for what it covers; today that is cfn-lint, ruff (over the
+Lambda functions, the Lambda layers, `scripts/pr_review` and the ASR runtime), the
+UI lint and vitest, `tsc`/eslint, and the SDK, CLI, Lambda, VP, VP-template,
 AI-stack, ASR, integ-plumbing, advisory-review, transcriber and browser-extension
 suites.
 
