@@ -23,7 +23,7 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
 - **Secure:** All data stays within your AWS environment
 - **Async Tool Processing:** Tools execute in background without blocking conversation
 - **Pre-Tool Acknowledgment:** Announces tool execution to set user expectations
-- **Customizable Config:** Edit system prompts and voice ID via DynamoDB
+- **Customizable Config:** Edit system prompts and voice ID on the Nova Sonic Configuration page
 
 ## Step 1: Enable AWS Nova Sonic 2 Model Access
 
@@ -91,8 +91,8 @@ That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 4. Verify these outputs exist:
    - `VoiceAssistantProvider`: Should show `amazon_nova_sonic`
    - `StrandsLambdaArn`: Should show the Lambda ARN
-   - `DefaultNovaSonicConfig`: Link to view default configuration
-   - `CustomNovaSonicConfig`: Link to edit custom configuration
+   - `DefaultNovaSonicConfig`: Link to view the record holding the shipped configuration
+   - `CustomNovaSonicConfig`: Link to view the record holding your custom configuration
 
 ### 3.2 Test Voice Assistant
 
@@ -110,16 +110,13 @@ That's it! AWS Nova Sonic 2 requires no API keys or external configuration.
 
 ### 4.1 Access Configuration
 
-After stack deployment, you'll find two console links in the CloudFormation outputs:
+Open the LMA web UI as a member of the **Admin** group and go to **Configuration ▸ Nova Sonic Config**. Each field shows the shipped default; a value you enter overrides it, and a field left empty keeps the default. **Reset to Defaults** clears every override. Your settings are preserved during stack updates.
 
-1. **DefaultNovaSonicConfig** - View the default configuration (read-only, do not edit)
-2. **CustomNovaSonicConfig** - Edit your custom configuration (preserved during stack updates)
-
-Click the **CustomNovaSonicConfig** link to open the DynamoDB console.
+The settings are stored in the stack's shared configuration table — the shipped ones in its `Config#default` record and yours in the `Config#custom` profile, as the `nova_sonic_config` section — compressed, so they are edited on the page rather than in the DynamoDB console. The `DefaultNovaSonicConfig` and `CustomNovaSonicConfig` stack outputs link to those two records, which show who last saved each one and when. See [Unified Configuration Store](configuration-store.md).
 
 ### 4.2 Customizable Settings
 
-You can customize these settings in the `CustomNovaSonicConfig` item:
+These are the settings the page edits, under the names the configuration stores them by:
 
 | Attribute | Type | Description | Example |
 |-----------|------|-------------|---------|
@@ -285,10 +282,11 @@ Amazon Nova Sonic supports 16 different voices:
 
 ### 4.7 Example Customizations
 
+Each example lists the fields to set on the Nova Sonic Configuration page, by their stored names; anything not listed keeps its default.
+
 **Example 1: Professional Assistant (Fast Response)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a professional executive assistant. Provide concise, actionable responses. Always confirm understanding before taking action.",
   "promptMode": "replace",
   "voiceId": "matthew",
@@ -299,7 +297,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 2: Friendly Team Assistant**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "Always end responses with 'Anything else I can help with?' to encourage engagement.",
   "promptMode": "inject",
   "voiceId": "olivia",
@@ -310,7 +307,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 3: Technical Support (Patient Listening)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a technical support specialist for AWS services. Provide detailed, accurate information. Use technical terminology when appropriate.",
   "promptMode": "replace",
   "voiceId": "tiffany",
@@ -321,7 +317,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 4: Group Meeting Assistant (Passive Mode)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a helpful meeting assistant. Provide concise, relevant information when asked.",
   "promptMode": "base",
   "voiceId": "tiffany",
@@ -333,7 +328,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 5: Live Translator (English ↔ Spanish)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "meetingMode": "translator",
   "translatorLanguageA": "English",
   "translatorLanguageB": "Spanish",
@@ -344,7 +338,6 @@ Amazon Nova Sonic supports 16 different voices:
 **Example 6: Accessibility-Focused (Maximum Patience)**
 ```json
 {
-  "NovaSonicConfigId": "CustomNovaSonicConfig",
   "systemPrompt": "You are a patient, supportive assistant. Speak slowly and clearly. Wait for users to finish their thoughts completely.",
   "promptMode": "replace",
   "voiceId": "amy",
@@ -354,10 +347,12 @@ Amazon Nova Sonic supports 16 different voices:
 
 ### 4.8 Apply Configuration Changes
 
-1. Edit the `CustomNovaSonicConfig` item in DynamoDB
-2. Save your changes
-3. **No redeployment needed** - changes take effect immediately
+1. Change the settings on the **Nova Sonic Config** page
+2. Press **Save Changes**
+3. **No redeployment needed** - the next virtual participant to start uses them; one already in a meeting keeps the settings it started with
 4. Start a new virtual participant to test
+
+If someone else saved the configuration while you had the page open, the save is refused with a message asking you to reload the page and apply your changes again, rather than replacing what they saved.
 
 ## Step 5: Monitor and Troubleshoot
 
@@ -617,7 +612,7 @@ VoiceAssistantActivationDuration=60  # 60 seconds
 | **Async Processing** | Yes (v0.2.27+) | Depends on configuration |
 | **Cost Model** | AWS Bedrock pricing | ElevenLabs pricing |
 | **Voice Quality** | High quality | Very high quality |
-| **Customization** | System prompts & 16 voice IDs via DynamoDB | Extensive via API |
+| **Customization** | System prompts & 16 voice IDs on the configuration page | Extensive via API |
 
 ## Support
 
@@ -651,7 +646,7 @@ For issues specific to:
 - Cost-optimized with wake phrase mode
 - Pre-tool acknowledgment
 - Async tool execution
-- **Customizable prompts and voices via DynamoDB** (no code changes needed)
+- **Customizable prompts and voices from the web UI** (no code changes needed)
 
 ✅ **Customization:**
 - 3 prompt modes (base, inject, replace)
@@ -659,7 +654,7 @@ For issues specific to:
 - 3 turn-taking sensitivity levels (HIGH, MEDIUM, LOW)
 - **3 meeting modes**: Normal, Group Meeting (passive), Translator (live interpreter)
 - Barge-in support (interrupt Nova mid-sentence)
-- Edit via the Nova Sonic Configuration page in the LMA UI or directly in DynamoDB
-- Changes apply immediately (no redeployment)
+- Edit via the Nova Sonic Configuration page in the LMA UI
+- Changes apply to the next meeting (no redeployment)
 
 That's it! Your meetings now have an AI voice assistant powered by AWS Nova Sonic 2 — from active 1-on-1 conversations, to passive group meeting support, to real-time multilingual interpretation.

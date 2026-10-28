@@ -1,0 +1,13 @@
+{
+  "systemPrompt": "You are Alex, an AI meeting assistant. Be concise and helpful.",
+  "promptMode": "base",
+  "modelId": "amazon.nova-2-sonic-v1:0",
+  "voiceId": "tiffany",
+  "endpointingSensitivity": "MEDIUM",
+  "meetingMode": "normal",
+  "translatorLanguageA": "English",
+  "translatorLanguageB": "Spanish",
+  "translatorMutePhrases": "translator mute, alex mute",
+  "translatorUnmutePhrases": "translator unmute, alex unmute",
+  "groupMeetingMode": false
+}

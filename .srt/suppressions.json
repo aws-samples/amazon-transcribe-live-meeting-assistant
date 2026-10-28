@@ -42916,7 +42916,7 @@
     "check_id": "DDB-002",
     "status": "suppressed",
     "assessmentCount": 18,
-    "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. This table holds runtime configuration rather than meeting content. It has two writers and both record their provenance on the record itself: an AppSync resolver that requires membership of the Admin group and stores the caller's identity and the time, and the stack's own seeding custom resource, whose records are stored as written by CloudFormation. Point-in-time recovery is enabled on the table. CloudTrail data-plane logging can be enabled by operators who require it."
+    "suppressionReason": "CloudTrail data-plane logging for DynamoDB is a cost-optimization decision. This table holds runtime configuration rather than meeting content. It has two kinds of writer and both record their provenance on the record itself: AppSync resolvers that require membership of the Admin group and store the caller's identity and the time, and the stack's own seeding custom resource, whose records are stored as written by CloudFormation. Point-in-time recovery is enabled on the table. CloudTrail data-plane logging can be enabled by operators who require it."
   },
   {
     "source": "security-matrix",

@@ -366,8 +366,18 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      (Optional) DynamoDB table name for Nova Sonic configuration.
-      When provided, enables customizable prompts for Nova voice assistant.
+      (Optional) DynamoDB table the Nova Sonic voice assistant settings were
+      stored in before they moved into the shared configuration table. Read
+      only as a fallback, when ConfigurationTableName holds no shipped Nova
+      Sonic settings or cannot be read.
+
+  ConfigurationTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The shared configuration table created by the AI stack. The
+      voice assistant reads its settings -- prompt, model, voice, meeting mode
+      and translator languages -- from it when it starts.
 
   NovaModelId:
     Type: String
@@ -629,6 +639,7 @@ Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
   HasStrandsLambdaArn: !Not [!Equals [!Ref StrandsLambdaArn, ""]]
   HasAsrLauncher: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
+  HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, ""]]
   # Empty under MICROVM, where the AI stack creates no VNC load balancer and so
   # no origin-verify secret for one.
   HasVncOriginVerifySecret: !Not [!Equals [!Ref VncOriginVerifyHeaderValueSecretArn, ""]]
@@ -1453,6 +1464,27 @@ Resources:
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/anthropic.claude-haiku-4-5*"
                   - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/anthropic.claude-haiku-4-5*"
                   - !Sub "arn:${AWS::Partition}:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*claude-haiku-4-5*"
+        # GetItem only: the voice assistant's read is three of them -- the
+        # active-profile pointer, the baseline and the profile it names.
+        - !If
+          - HasConfigurationTable
+          - PolicyName: ConfigurationTableRead
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - "dynamodb:GetItem"
+                  Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
+                - Effect: Allow
+                  Action:
+                    - "kms:Decrypt"
+                    - "kms:DescribeKey"
+                  Resource: !Ref CustomerManagedEncryptionKeyArn
+                  Condition:
+                    StringEquals:
+                      "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+          - !Ref AWS::NoValue
         - PolicyName: NovaSonicConfigAccess
           PolicyDocument:
             Version: 2012-10-17
@@ -2773,6 +2805,8 @@ Resources:
               Value: !Ref NovaSystemPrompt
             - Name: NOVA_SONIC_CONFIG_TABLE_NAME
               Value: !Ref NovaSonicConfigTableName
+            - Name: CONFIGURATION_TABLE_NAME
+              Value: !Ref ConfigurationTableName
             - Name: STRANDS_LAMBDA_ARN
               Value: !Ref StrandsLambdaArn
           # Third-party credentials, named by secret ARN. The ECS agent reads

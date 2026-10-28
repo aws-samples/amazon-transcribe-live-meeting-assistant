@@ -37,6 +37,13 @@ same reason as above: a restored table or a hand-deleted record leaves the slot
 empty on an update too. The adoption is the same conditional write, so it can
 only ever fill an empty slot.
 
+Stores that move into the table after the profile exists cannot use that
+route, because the profile is already there. Each is listed in
+``LEGACY_SECTIONS`` and carried across one section at a time: while the profile
+does not hold the section, its edits are read from the previous table and added
+to the profile; once it holds the section -- an empty one included -- nothing is
+read again. The outcome of each is reported as ``SectionAdoption``.
+
 CloudFormation re-invokes this on UPDATE only when one of the custom resource's
 properties changes, so the template passes a hash of the shipped content *and*
 of this handler. A property that never changes would mean a resource that is
@@ -49,15 +56,19 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, FrozenSet, Mapping, NamedTuple, Optional, Tuple
 
 import boto3
 import cfnresponse  # vendored beside this handler; see cfnresponse.py
 
 # pylint: disable=import-error
 from lma_config import (  # from the configuration layer
+    NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
+    ConcurrentModification,
     ConfigurationStore,
+    SectionSpec,
+    codec,
 )
 
 # pylint: enable=import-error
@@ -87,6 +98,13 @@ PROMPT_TEMPLATE_FILES = {
     "default": "LLMPromptSummaryTemplate.json",
     "healthcare": "LLMPromptHealthcareSummaryTemplate.json",
 }
+
+#: The shipped Nova Sonic voice-assistant settings. Like the prompt files above,
+#: the nova-sonic-config stack still ships its own copy, because it still seeds
+#: the table a rollback would read;
+#: `test_the_shipped_nova_sonic_defaults_match_the_copy_the_other_stack_still_ships`
+#: fails if the two drift.
+NOVA_SONIC_DEFAULTS_FILE = "NovaSonicConfig.json"
 
 #: The profile an operator's edits land in. One profile in this stage; the key
 #: layout holds as many as wanted.
@@ -126,7 +144,11 @@ def shipped_default_body(domain: str) -> Dict[str, Any]:
     """The baseline document for ``domain``, read from the shipped JSON."""
     filename = PROMPT_TEMPLATE_FILES.get(domain.lower(), PROMPT_TEMPLATE_FILES["default"])
     prompts = json.loads((DEFAULTS_DIR / filename).read_text(encoding="utf-8"))
-    return {SUMMARY_PROMPT_TEMPLATES.name: numbered_prompts(prompts)}
+    nova_sonic = json.loads((DEFAULTS_DIR / NOVA_SONIC_DEFAULTS_FILE).read_text(encoding="utf-8"))
+    return {
+        SUMMARY_PROMPT_TEMPLATES.name: numbered_prompts(prompts),
+        NOVA_SONIC_CONFIG.name: nova_sonic,
+    }
 
 
 def align_with_baseline(prompts: Mapping[str, str], baseline: Mapping[str, str]) -> Dict[str, str]:
@@ -259,14 +281,154 @@ def adopt_legacy_prompts(
     return {SUMMARY_PROMPT_TEMPLATES.name: aligned}
 
 
+class LegacySection(NamedTuple):
+    """A section whose operator edits used to live in a table of their own.
+
+    A NamedTuple rather than a dataclass: tests load this module by file path
+    under a private name, and a dataclass resolves its annotations by looking
+    its module up in `sys.modules`, where such a module is not.
+
+    Attributes:
+        section: The section the edits move into.
+        property_name: The custom resource property naming the previous table.
+        key_attribute: That table's partition-key attribute.
+        key: The item holding the operator's edits.
+        fields: The attributes carried across. Everything else on the item --
+            its key, the seeded guidance text, the audit attributes -- is
+            bookkeeping of the previous table rather than configuration.
+    """
+
+    section: SectionSpec
+    property_name: str
+    key_attribute: str
+    key: str
+    fields: FrozenSet[str]
+
+
+#: The fields the Nova Sonic Configuration page saves, which are the ones the
+#: resolver behind it accepts.
+#: `test_the_seeder_adopts_exactly_the_fields_the_nova_sonic_resolver_accepts`
+#: holds the two lists equal.
+NOVA_SONIC_FIELDS = frozenset(
+    {
+        "systemPrompt",
+        "promptMode",
+        "modelId",
+        "voiceId",
+        "endpointingSensitivity",
+        "groupMeetingMode",
+        "meetingMode",
+        "translatorLanguageA",
+        "translatorLanguageB",
+        "translatorMutePhrases",
+        "translatorUnmutePhrases",
+    }
+)
+
+#: Stores moved in after the profile already existed, so their edits are carried
+#: across one section at a time rather than by creating the profile.
+LEGACY_SECTIONS = (
+    LegacySection(
+        section=NOVA_SONIC_CONFIG,
+        property_name="LegacyNovaSonicConfigTableName",
+        key_attribute="NovaSonicConfigId",
+        key="CustomNovaSonicConfig",
+        fields=NOVA_SONIC_FIELDS,
+    ),
+)
+
+#: How many times a section adoption is attempted when an administrator's save
+#: keeps landing between its read and its write. Three in a row during one
+#: deployment is not a race worth handling further.
+ADOPTION_ATTEMPTS = 3
+
+
+def read_legacy_section(
+    legacy: LegacySection, table_name: str, client: Any = None
+) -> Tuple[str, Optional[Dict[str, Any]]]:
+    """The operator's edits for one section, from the table they used to live in.
+
+    Returns ``(outcome, values)``. ``values`` is ``None`` when nothing should be
+    written: no previous table was named, or it could not be read. In the
+    second case the section stays absent from the profile, so the next run that
+    re-seeds tries again -- which is safe because the section's presence, not
+    this function, is what stops a later run replacing newer values.
+    """
+    if not table_name:
+        return "no-previous-table", None
+    dynamodb = client if client is not None else boto3.client("dynamodb")
+    try:
+        response = dynamodb.get_item(
+            TableName=table_name,
+            Key={legacy.key_attribute: {"S": legacy.key}},
+            ConsistentRead=True,
+        )
+    except Exception:  # noqa: BLE001 -- never fail the deploy for this; see the docstring
+        LOGGER.exception(
+            "could not read %s from the previous table %s; the %s section is left "
+            "unset and the next deployment that re-seeds tries again",
+            legacy.key,
+            table_name,
+            legacy.section.name,
+        )
+        return "previous-table-unreadable", None
+    item = codec.unmarshal_item(response.get("Item") or {})
+    values = {name: value for name, value in item.items() if name in legacy.fields}
+    if not values:
+        return "nothing-to-adopt", {}
+    LOGGER.info(
+        "adopting %s from %s into the %s section: %s",
+        legacy.key,
+        table_name,
+        legacy.section.name,
+        sorted(values),
+    )
+    return "adopted-from-previous-table", values
+
+
+def adopt_legacy_section(
+    store: ConfigurationStore, legacy: LegacySection, table_name: str, client: Any = None
+) -> str:
+    """Carry one section's edits into the operator's profile, once.
+
+    The profile exists by the time this runs. Nothing is read from the previous
+    table once the profile holds the section, whether this function put it there
+    or an administrator saved it; an empty section counts.
+    """
+    for _attempt in range(ADOPTION_ATTEMPTS):
+        profile = store.read_profile(OPERATOR_PROFILE, consistent_read=True)
+        if not profile.exists or legacy.section.name in profile.body:
+            return "already-present"
+        outcome, values = read_legacy_section(legacy, table_name, client=client)
+        if values is None:
+            return outcome
+        try:
+            added = store.seed_section(OPERATOR_PROFILE, legacy.section.name, values)
+        except ConcurrentModification:
+            # Something saved the profile in between -- most likely an
+            # administrator saving a different page. Read again and decide again.
+            continue
+        return outcome if added else "already-present"
+    raise ConcurrentModification(
+        f"the configuration profile {OPERATOR_PROFILE!r} changed on each of "
+        f"{ADOPTION_ATTEMPTS} attempts to add the {legacy.section.name} section"
+    )
+
+
 def seed(
     store: ConfigurationStore,
     *,
     domain: str,
     legacy_table_name: str = "",
     legacy_client: Any = None,
+    legacy_section_tables: Optional[Mapping[str, str]] = None,
 ) -> Dict[str, str]:
-    """Apply all three writes and report what each one did."""
+    """Apply the writes and report what each one did.
+
+    ``legacy_section_tables`` maps a section name in :data:`LEGACY_SECTIONS` to
+    the previous table holding its edits; ``legacy_client`` reads those as well
+    as the prompt-template table.
+    """
     baseline = shipped_default_body(domain)
     store.write_default(baseline, description=DEFAULT_DESCRIPTION)
 
@@ -312,10 +474,24 @@ def seed(
                 or UNKNOWN_ORIGIN
             )
 
+    tables = legacy_section_tables or {}
+    adoption = {
+        legacy.section.name: adopt_legacy_section(
+            store, legacy, tables.get(legacy.section.name, ""), client=legacy_client
+        )
+        for legacy in LEGACY_SECTIONS
+    }
+
     pointer_outcome = (
         "created" if store.set_active_profile(OPERATOR_PROFILE, only_if_absent=True) else "kept"
     )
     return {
+        # One "section=outcome" pair per store moved in after the profile
+        # existed, published as the ConfigurationSectionAdoption stack output.
+        # Unlike ProfileOrigin this is what *this* run found, and that is
+        # enough: an adoption that could not read the previous table leaves the
+        # section unset, so every later run reports it again until it lands.
+        "SectionAdoption": ",".join(f"{name}={outcome}" for name, outcome in adoption.items()),
         "Baseline": "written",
         # What this run did, which is almost always "kept".
         "Profile": profile_action,
@@ -354,6 +530,10 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             store,
             domain=properties.get("Domain", "default"),
             legacy_table_name=properties.get("LegacyPromptTemplateTableName", ""),
+            legacy_section_tables={
+                legacy.section.name: properties.get(legacy.property_name, "")
+                for legacy in LEGACY_SECTIONS
+            },
         )
         LOGGER.info("seeded the configuration table: %s", outcome)
         cfnresponse.send(event, context, cfnresponse.SUCCESS, outcome, physical_id)

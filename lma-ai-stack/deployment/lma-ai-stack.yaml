@@ -772,6 +772,17 @@ Outputs:
       templates customized before the upgrade were not carried across and have
       to be applied again from the Transcript Summary page.
     Value: !GetAtt SeedConfiguration.ProfileOrigin
+  ConfigurationSectionAdoption:
+    Description: >-
+      For each configuration store moved into the configuration table after
+      the profile existed, what the latest deployment that ran the seeder found,
+      as section=outcome pairs. 'adopted-from-previous-table' and
+      'nothing-to-adopt' are reported once; every later run reports
+      'already-present'. 'previous-table-unreadable' means the settings saved
+      before the upgrade were not carried across yet: the section is left unset
+      and the next deployment that runs the seeder tries again, and saving the
+      settings from their page in the meantime makes that unnecessary.
+    Value: !GetAtt SeedConfiguration.SectionAdoption
   EventSourcingTableName:
     Description:
       The Name for the DynamoDB that is used to store transcriptions and
@@ -3140,15 +3151,19 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:PutItem
                 Resource: !GetAtt ConfigurationTable.Arn
-              # Read-only on the table the prompt templates used to live in:
-              # the seeder carries an existing deployment's edits across once
-              # and never writes there.
+              # Read-only on the tables the prompt templates and the Nova Sonic
+              # settings used to live in: the seeder carries an existing
+              # deployment's edits across once and never writes there.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
-                Resource: !Sub
-                  - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Table}"
-                  - Table: !Ref LLMPromptTemplateTableName
+                Resource:
+                  - !Sub
+                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Table}"
+                    - Table: !Ref LLMPromptTemplateTableName
+                  - !Sub
+                    - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Table}"
+                    - Table: !Ref NovaSonicConfigTableName
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -3166,6 +3181,9 @@ Resources:
       ConfigurationTableName: !Ref ConfigurationTable
       Domain: !Ref Domain
       LegacyPromptTemplateTableName: !Ref LLMPromptTemplateTableName
+      # Read once, while the operator's profile holds no Nova Sonic section, to
+      # carry the settings saved before the upgrade across.
+      LegacyNovaSonicConfigTableName: !Ref NovaSonicConfigTableName
       # Changes when the shipped configuration content or the code that
       # processes it changes, and is the only reason CloudFormation re-invokes
       # this resource on a stack update.
@@ -4188,12 +4206,16 @@ Resources:
       Role: !GetAtt UpdateNovaSonicConfigResolverFunctionExecutionRole.Arn
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/update_nova_sonic_config_resolver
-      Description: Lambda resolver for updateNovaSonicConfig with input validation
+      Description: >-
+        Lambda resolver for the Nova Sonic voice assistant settings: reads the
+        stored record and saves an edit, with input validation
       MemorySize: 256
       Timeout: 30
+      Layers:
+        - !Ref ConfigurationPythonLayer
       Environment:
         Variables:
-          NOVA_SONIC_CONFIG_TABLE_NAME: !Ref NovaSonicConfigTableName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
@@ -4211,6 +4233,9 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - UpdateNovaSonicConfigResolverFunctionLogGroup
+      # The Nova Sonic Configuration page should not open on an unseeded table
+      # and show an administrator no shipped defaults.
+      - SeedConfiguration
 
   UpdateNovaSonicConfigResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4230,20 +4255,29 @@ Resources:
         Statement:
           - Effect: Allow
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
             Action:
               - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-UpdateNovaSonicConfig
           PolicyDocument:
             Version: 2012-10-17
             Statement:
+              # GetItem as well as PutItem: a save reads the profile's current
+              # version so a write that another session has superseded can be
+              # refused, and the page's own read is served from here too.
+              # Deliberately no DeleteItem.
               - Effect: Allow
                 Action:
+                  - dynamodb:GetItem
                   - dynamodb:PutItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NovaSonicConfigTableName}"
+                Resource: !GetAtt ConfigurationTable.Arn
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -4251,7 +4285,7 @@ Resources:
                 Resource: !Ref CustomerManagedEncryptionKeyArn
                 Condition:
                   StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   AppSyncUpdateNovaSonicConfigLambdaRole:
     Type: AWS::IAM::Role
@@ -4285,46 +4319,6 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncUpdateNovaSonicConfigLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt UpdateNovaSonicConfigResolverFunction.Arn
-
-  NovaSonicConfigDataSource:
-    Type: AWS::AppSync::DataSource
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: NovaSonicConfigTable
-      Description: Nova Sonic Voice Assistant Configuration DynamoDB Table
-      Type: AMAZON_DYNAMODB
-      ServiceRoleArn: !GetAtt NovaSonicConfigDataSourceRole.Arn
-      DynamoDBConfig:
-        TableName: !Ref NovaSonicConfigTableName
-        AwsRegion: !Ref AWS::Region
-
-  NovaSonicConfigDataSourceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: appsync.amazonaws.com
-      Policies:
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - dynamodb:GetItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${NovaSonicConfigTableName}"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
 
   ##########################################################################
   # ASR runtime config (MicroVM ASR engine) - Lambda, IAM, DataSources
@@ -6009,12 +6003,16 @@ Resources:
       CodeS3Location: ../source/appsync/updateChatButtonConfigLambda.js
 
   # Nova Sonic Config Resolvers
+  # Served by the same Lambda as the mutation rather than by a DynamoDB data
+  # source, for the reason given at the LLM prompt template resolvers below: the
+  # settings live compressed in the shared configuration table. See the comment
+  # on NovaSonicConfig in schema.graphql for what the JSON string now holds.
   GetNovaSonicConfigResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt NovaSonicConfigDataSource.Name
+      DataSourceName: !GetAtt UpdateNovaSonicConfigLambdaDataSource.Name
       TypeName: Query
       FieldName: getNovaSonicConfig
       Runtime:
@@ -6025,10 +6023,12 @@ Resources:
 
         export function request(ctx) {
           return {
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({
-              NovaSonicConfigId: ctx.args.NovaSonicConfigId
-            })
+            operation: 'Invoke',
+            payload: {
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              info: { fieldName: ctx.info.fieldName }
+            }
           };
         }
 
@@ -6036,9 +6036,7 @@ Resources:
           if (ctx.error) {
             util.error(ctx.error.message, ctx.error.type);
           }
-          return {
-            NovaSonicConfigId: JSON.stringify(ctx.result)
-          };
+          return ctx.result;
         }
 
   UpdateNovaSonicConfigResolver:

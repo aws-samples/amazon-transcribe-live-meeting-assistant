@@ -18,7 +18,12 @@ import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { NodeHttp2Handler } from '@smithy/node-http-handler';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { randomUUID } from 'crypto';
-import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
+import {
+  hasNovaSonicConfigTable,
+  loadNovaSonicConfig,
+  MeetingMode,
+  novaSonicConfigTablesFromEnv,
+} from './nova-sonic-config-loader.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
@@ -553,22 +558,22 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.stopped = false;
 
     try {
-      // Load configuration from DynamoDB if table name is provided
-      const tableName = process.env.NOVA_SONIC_CONFIG_TABLE_NAME;
-      if (tableName) {
+      // Load configuration from DynamoDB if a table is named
+      const configTables = novaSonicConfigTablesFromEnv();
+      if (hasNovaSonicConfigTable(configTables)) {
         try {
           const dynamoDbClient = new DynamoDBClient({
-            // The stack's region, NOT the Nova Sonic one: this table is created by
-            // lma-nova-sonic-config-stack locally and the task role's grant (and its
-            // kms:ViaService condition) is pinned to ${AWS::Region}. Following the
-            // Nova Sonic region here would hit a table that does not exist, and
+            // The stack's region, NOT the Nova Sonic one: both tables are created
+            // in the stack's region and the task role's grants (and their
+            // kms:ViaService condition) are pinned to ${AWS::Region}. Following the
+            // Nova Sonic region here would hit tables that do not exist, and
             // loadNovaSonicConfig would quietly fall back to its defaults —
             // discarding the operator's configured prompt, voice and meeting mode.
             region: stackRegion(),
             credentials: defaultProvider(),
           });
           
-          const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
+          const config = await loadNovaSonicConfig(dynamoDbClient, configTables);
           console.log('✓ Loaded Nova Sonic config from DynamoDB');
           
           // Update system prompt, model ID, voice ID, endpointing sensitivity, and meeting mode from config

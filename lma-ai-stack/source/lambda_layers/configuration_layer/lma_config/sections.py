@@ -150,3 +150,25 @@ SUMMARY_PROMPT_TEMPLATES = register(
         ),
     )
 )
+
+#: The voice assistant's settings: the Nova Sonic system prompt and how it
+#: combines with the shipped one, the model and voice, turn-taking sensitivity,
+#: the meeting mode, and the translator languages and trigger phrases. Read by
+#: the Virtual Participant when its voice assistant starts -- the ElevenLabs
+#: provider reads the meeting-mode and translator fields from it too -- and
+#: edited from the Nova Sonic Configuration page.
+#:
+#: Immediate tier. The reader runs once per meeting, so a cache would save at
+#: most a read or two per meeting, and the page says a saved change applies to
+#: the next meeting to start; a cache is a window in which it would not.
+NOVA_SONIC_CONFIG = register(
+    SectionSpec(
+        name="nova_sonic_config",
+        cache_tier=CacheTier.IMMEDIATE,
+        description=(
+            "Voice assistant settings: the Nova Sonic system prompt and prompt "
+            "mode, model, voice, endpointing sensitivity, meeting mode, and the "
+            "translator languages and trigger phrases."
+        ),
+    )
+)
