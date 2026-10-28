@@ -6,8 +6,9 @@
 A Lambda function with no `LoggingConfig` still logs: Lambda creates
 `/aws/lambda/<function-name>` on the first invocation, with no retention and the
 AWS-owned key, and CloudFormation neither owns nor deletes it. A MicroVM image
-whose `Logging.CloudWatch.LogGroup` names no declared group is the same story
-with a different service. So is a declared log group that nothing points at —
+whose `Logging.CloudWatch.LogGroup` names no declared group, and a CodeBuild
+project with no `LogsConfig.CloudWatchLogs.GroupName`, are the same story with a
+different service. So is a declared log group that nothing points at —
 that one sits empty while the logs it was declared for go elsewhere. All three
 are invisible until somebody goes looking for a log, or reads a bill, so this
 file asserts the wiring instead. The image's setting covers only its build: a
@@ -61,6 +62,9 @@ EMITTER_LOG_GROUP_PATHS = {
     "AWS::Lambda::Function": ("LoggingConfig", "LogGroup"),
     "AWS::Serverless::Function": ("LoggingConfig", "LogGroup"),
     "AWS::Lambda::MicrovmImage": ("Logging", "CloudWatch", "LogGroup"),
+    # Without LogsConfig a project writes to /aws/codebuild/<project>, which
+    # CodeBuild creates with no expiry and the AWS-owned key.
+    "AWS::CodeBuild::Project": ("LogsConfig", "CloudWatchLogs", "GroupName"),
 }
 EMITTER_TYPES = tuple(EMITTER_LOG_GROUP_PATHS)
 

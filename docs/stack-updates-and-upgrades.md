@@ -156,12 +156,12 @@ update that carries it has completed.
 
 ### v0.3.11
 
-Every Lambda function and MicroVM in the deployment now logs to a log group the
-stack declares, with the retention set by `CloudWatchLogsExpirationInDays` and
-the deployment's customer-managed key. That includes the two Bedrock Knowledge
-Base stacks, whose functions had no declared group at all and so logged to
-implicit ones. Nothing breaks on upgrade, but five things are worth knowing
-before you click **Update**.
+Every Lambda function, MicroVM and CodeBuild project in the deployment now logs
+to a log group the stack declares, with the retention set by
+`CloudWatchLogsExpirationInDays` and the deployment's customer-managed key. That
+includes the two Bedrock Knowledge Base stacks, whose functions had no declared
+group at all and so logged to implicit ones. Nothing breaks on upgrade, but six
+things are worth knowing before you click **Update**.
 
 **The MicroVM log groups are renamed, and a deployment using MicroVM compute
 rebuilds its image.** CloudFormation cannot take ownership of a log group that
@@ -192,9 +192,18 @@ unreachable host. If that leaves the nested stack in `UPDATE_ROLLBACK_FAILED`,
 run `aws cloudformation continue-update-rollback` on it and retry the upgrade
 later. Deployments not using MicroVM compute are unaffected.
 
+**CodeBuild build output moves to `/<stack>/codebuild/<project>`.** The six
+build projects (the web UI, the MCP server layer, the WebSocket transcriber and
+Virtual Participant images, and the browser extension and desktop capture app
+packages) previously wrote to `/aws/codebuild/<project>`, which CodeBuild creates
+on the first build. The new groups sit under the same `/<stack>/` prefix as the
+Lambda groups, so `lma logs` lists them, and each one is deleted with the stack
+that owns it. Builds that ran before the upgrade, including the ones the upgrade
+itself starts before each project is updated, stay in the old groups.
+
 **Nothing is migrated, and the old groups are left behind.** Logs already in the
-implicit `/aws/lambda/<function-name>` groups, and in the two MicroVM groups
-above, stay exactly where they are. CloudFormation does not own them, this
+implicit `/aws/lambda/<function-name>` groups, in the two MicroVM groups and in
+the `/aws/codebuild/<project>` groups above, stay exactly where they are. CloudFormation does not own them, this
 upgrade does not delete them, and they still have no expiry — so they are
 permanent leftovers until you delete them. See [Cleanup](cleanup.md) for the
 prefixes to sweep.

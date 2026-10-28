@@ -122,11 +122,10 @@ Resources:
             Resource:
             - !Sub "arn:aws:s3:::${WebAppBucket}/*"
           - Resource:
-            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
-            - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"
+            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${DesktopCaptureAppCodeBuildProjectLogGroup}"
+            - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${DesktopCaptureAppCodeBuildProjectLogGroup}:*"
             Effect: Allow
             Action:
-            - logs:CreateLogGroup
             - logs:CreateLogStream
             - logs:PutLogEvents
           - Effect: Allow
@@ -134,6 +133,18 @@ Resources:
             - cloudfront:CreateInvalidation
             Resource:
             - !Sub "arn:${AWS::Partition}:cloudfront::${AWS::AccountId}:distribution/${WebAppCloudFrontDistribution}"
+
+  # The project's build output. Without LogsConfig, CodeBuild writes to
+  # /aws/codebuild/<project>, a group it creates with no expiry and the AWS-owned
+  # key. Named outside /aws/codebuild/ because that group already exists in any
+  # stack that has run a build, and CloudFormation cannot take ownership of an
+  # existing log group.
+  DesktopCaptureAppCodeBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/codebuild/DesktopCaptureAppCodeBuildProject"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
 
   DesktopCaptureAppCodeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -146,6 +157,10 @@ Resources:
       Description: !Sub >-
         Packages preconfigured desktop capture app source for stack: ${AWS::StackName}
       ServiceRole: !Ref DesktopCaptureAppCodeBuildServiceRole
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref DesktopCaptureAppCodeBuildProjectLogGroup
       EncryptionKey: alias/aws/s3
       Artifacts:
         Type: NO_ARTIFACTS

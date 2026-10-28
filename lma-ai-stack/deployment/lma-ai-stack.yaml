@@ -1747,11 +1747,10 @@ Resources:
                   - s3:PutObject
                   - s3:ListBucket
               - Resource:
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
-                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LMAUICodeBuildProjectLogGroup}"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${LMAUICodeBuildProjectLogGroup}:*"
                 Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
               - Resource: "*"
@@ -1778,12 +1777,28 @@ Resources:
               and therefore
               cannot be specificed directly.
 
+  # The project's build output. Without LogsConfig, CodeBuild writes to
+  # /aws/codebuild/<project>, a group it creates with no expiry and the AWS-owned
+  # key. Named outside /aws/codebuild/ because that group already exists in any
+  # stack that has run a build, and CloudFormation cannot take ownership of an
+  # existing log group.
+  LMAUICodeBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/codebuild/LMAUICodeBuildProject"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   LMAUICodeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
       Description: !Sub >-
         Builds docker images and the website of stack: ${AWS::StackName}
       ServiceRole: !Ref LMAUICodeBuildServiceRole
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref LMAUICodeBuildProjectLogGroup
       EncryptionKey: alias/aws/s3
       Artifacts:
         Type: NO_ARTIFACTS
@@ -1929,6 +1944,18 @@ Resources:
             Value: !Sub "https://${WebAppCloudFrontDistribution.DomainName}/#/oauth/callback"
           - Name: VITE_VOICE_ASSISTANT_ACTIVATION_MODE
             Value: !Ref VoiceAssistantActivationMode
+  # The project's build output. Without LogsConfig, CodeBuild writes to
+  # /aws/codebuild/<project>, a group it creates with no expiry and the AWS-owned
+  # key. Named outside /aws/codebuild/ because that group already exists in any
+  # stack that has run a build, and CloudFormation cannot take ownership of an
+  # existing log group.
+  MCPLayerBuildProjectLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/${AWS::StackName}/codebuild/MCPLayerBuildProject"
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
   # CodeBuild project for building MCP servers Lambda layer
   MCPLayerBuildProject:
     Type: AWS::CodeBuild::Project
@@ -1936,6 +1963,10 @@ Resources:
       Name: !Sub "${AWS::StackName}-MCP-Layer-Builder"
       Description: Builds Lambda layer with installed MCP servers
       ServiceRole: !Ref MCPLayerBuildRole
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: !Ref MCPLayerBuildProjectLogGroup
       EncryptionKey: alias/aws/s3
       Artifacts:
         Type: NO_ARTIFACTS
@@ -2109,10 +2140,11 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - logs:CreateLogGroup
                   - logs:CreateLogStream
                   - logs:PutLogEvents
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${MCPLayerBuildProjectLogGroup}"
+                  - !Sub "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${MCPLayerBuildProjectLogGroup}:*"
               - Effect: Allow
                 Action:
                   - dynamodb:Query
