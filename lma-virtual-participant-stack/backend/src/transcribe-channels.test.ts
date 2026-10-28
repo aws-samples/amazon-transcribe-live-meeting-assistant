@@ -227,8 +227,8 @@ test('the channels come from the meeting-only and assistant-only sources; the re
     const stream = methodBody('private async *audioStream');
     assert.match(stream, /combined_audio\.monitor/);
     assert.match(stream, /recordingStream\.write\(chunk\)/);
-    assert.match(stream, /this\.startMeetingAudioFanout\(\(chunk\) => queue\.push\(interleaver\.pushLeft\(chunk\)\)\)/);
-    assert.match(stream, /this\.startAgentAudioCapture\(\(chunk\) => queue\.push\(interleaver\.pushRight\(chunk\)\)\)/);
+    assert.match(stream, /this\.startMeetingAudioFanout\(\(chunk\) => queue\.push\(stereoPcm\.pushLeft\(chunk\)\)\)/);
+    assert.match(stream, /this\.startAgentAudioCapture\(\(chunk\) => queue\.push\(stereoPcm\.pushRight\(chunk\)\)\)/);
     // The fan-out is started once per session: by audioStream on two channels,
     // by writeAudio on one.
     assert.match(methodBody('private async writeAudio'), /if \(!stereo\) \{\s*this\.startMeetingAudioFanout\(\);/);

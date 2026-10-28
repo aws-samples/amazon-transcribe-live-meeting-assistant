@@ -116,6 +116,12 @@ export function assistantSegmentFromResult(
  * `maxSkewMs` ahead, its excess is sent paired with silence. Nothing is ever
  * dropped: the cost of a stall is at most `maxSkewMs` of added latency, and
  * the channels stay aligned to within that bound.
+ *
+ * A lead under the bound is not given back. If one capture starts delivering
+ * 300 ms after the other, the earlier side reaches Transcribe 300 ms late for
+ * the rest of the session, and the two channels' rows are offset by that much
+ * on the meeting timeline. The padding counters below, logged when a session
+ * ends, show how much silence was inserted on each side.
  */
 export class StereoInterleaver {
     private left: Buffer = Buffer.alloc(0);

@@ -280,18 +280,20 @@ export class TranscriptionService {
         };
 
         let source: AsyncIterable<Buffer> = this.process.stdout!;
+        let interleaver: StereoInterleaver | null = null;
         if (stereo) {
             // Recorded straight from the capture; what Transcribe hears is
             // built from the two separate sources below.
             this.process.stdout?.on('data', record);
             const queue = new PcmQueue();
-            const interleaver = new StereoInterleaver();
+            const stereoPcm = new StereoInterleaver();
+            interleaver = stereoPcm;
             this.stereoQueue = queue;
             // The meeting fan-out (Nova's input and the pacat route into
             // combined_audio) is started here rather than in writeAudio, so the
             // participants' channel is the same capture Nova hears.
-            this.startMeetingAudioFanout((chunk) => queue.push(interleaver.pushLeft(chunk)));
-            this.startAgentAudioCapture((chunk) => queue.push(interleaver.pushRight(chunk)));
+            this.startMeetingAudioFanout((chunk) => queue.push(stereoPcm.pushLeft(chunk)));
+            this.startAgentAudioCapture((chunk) => queue.push(stereoPcm.pushRight(chunk)));
             source = queue;
             console.log('Transcribe input: two channels (ch_0 participants, ch_1 voice assistant)');
         }
@@ -336,6 +338,14 @@ export class TranscriptionService {
             } else {
                 console.error(msg + ' (fatal in production)');
                 throw error;
+            }
+        } finally {
+            if (interleaver) {
+                const ms = (samples: number) => Math.round((samples / this.sampleRate) * 1000);
+                console.log(
+                    `Transcribe two-channel input ended: silence inserted participants=${ms(interleaver.paddedLeftSamples)}ms ` +
+                        `assistant=${ms(interleaver.paddedRightSamples)}ms`,
+                );
             }
         }
     }
@@ -882,7 +892,7 @@ export class TranscriptionService {
             endTime: segment.endSec,
             transcript: segment.text,
             isPartial: segment.isPartial,
-            speaker: (details.lmaIdentity || details.scribeIdentity || 'LMA').trim(),
+            speaker: this.vpName(),
         }).catch((error) => {
             console.error('Failed to send transcript to Kinesis:', error);
         });

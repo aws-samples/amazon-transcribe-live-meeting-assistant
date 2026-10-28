@@ -101,7 +101,7 @@ The meeting transcript keeps the participants and the assistant apart, on both t
 - The assistant's lines are on the `AGENT` channel, under the Virtual Participant's name, and are never [voice-separated](virtual-participant.md#transcription-engine).
 - A participant who speaks over the assistant, including to interrupt it, gets a line of their own instead of having their words merged into the assistant's.
 
-In [translator mode](#translator-mode) the assistant's channel is not transcribed; its lines come from the text of each translation instead. A two-channel Amazon Transcribe stream is billed for its duration, the same as a single mono stream. The S3 audio recording and the video recording still contain both the meeting and the assistant, mixed.
+In [translator mode](#translator-mode) the assistant's channel on Amazon Transcribe is still sent but not written to the transcript; its lines come from the text of each translation instead. On the MicroVM ASR engine that holds only for a meeting that starts in translator mode — see [Translator Mode](#translator-mode) for a meeting switched into it. A two-channel Amazon Transcribe stream is billed for its duration, the same as a single mono stream. The S3 audio recording and the video recording still contain both the meeting and the assistant, mixed.
 
 ## Asking the Assistant to Stop Talking
 
