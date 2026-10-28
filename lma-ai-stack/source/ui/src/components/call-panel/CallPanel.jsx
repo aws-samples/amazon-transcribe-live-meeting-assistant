@@ -1301,6 +1301,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           updateChatButtonConfig(input: $input) {
             ChatButtonConfigId
             Success
+            Version
           }
         }
       `;
@@ -1313,7 +1314,9 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
         },
       };
 
-      await client.graphql({ query: mutation, variables });
+      const saved = await client.graphql({ query: mutation, variables });
+      // So a second save from the same dialog is checked against this one.
+      setButtonConfigVersion(saved?.data?.updateChatButtonConfig?.Version ?? null);
 
       setAlertType('success');
       setAlertMessage('Button configuration saved successfully!');
@@ -1359,6 +1362,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           updateChatButtonConfig(input: $input) {
             ChatButtonConfigId
             Success
+            Version
           }
         }
       `;
@@ -1371,7 +1375,8 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
         },
       };
 
-      await client.graphql({ query: mutation, variables });
+      const saved = await client.graphql({ query: mutation, variables });
+      setButtonConfigVersion(saved?.data?.updateChatButtonConfig?.Version ?? null);
 
       setAlertType('success');
       setAlertMessage('Reset to defaults successfully!');
@@ -2241,7 +2246,14 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         }
       }
 
-      // Handle update button configuration requests (admin only)
+      // Handle update button configuration requests (admin only).
+      //
+      // Nothing in LMA sends this message: strands-chat.html only reads its
+      // buttons (STRANDS_BUTTON_CONFIG_REQUEST), and they are edited from the Edit
+      // Chat Buttons dialog, which sends the version it loaded. This path sends
+      // none, so its save is conditional on the record as the resolver reads it
+      // at save time but not on what the sender was looking at; a sender that
+      // wants that check has to supply the version itself.
       else if (event.data && event.data.type === 'STRANDS_UPDATE_BUTTON_CONFIG_REQUEST') {
         try {
           const mutation = `
