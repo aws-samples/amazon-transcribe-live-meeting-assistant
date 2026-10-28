@@ -28,6 +28,7 @@ import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { pcmDurationMs, renderToolAckClip } from './tool-ack-clip.js';
+import { NovaSonicUsage } from './metering.js';
 import {
   LookupSkipReason,
   mutedLookupSkipReason,
@@ -249,6 +250,9 @@ export interface NovaAgentConfig {
   translatorUnmutePhrases?: string[];
 }
 
+/** How often accumulated Nova Sonic token usage is written to the meeting's metering records. */
+const USAGE_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
+
 const DEFAULT_TRANSLATOR_MUTE_PHRASES = ['translator mute', 'alex mute'];
 const DEFAULT_TRANSLATOR_UNMUTE_PHRASES = ['translator unmute', 'alex unmute'];
 
@@ -305,6 +309,10 @@ export class NovaAgent implements VoiceAssistantProvider {
   private defaultActivationDuration: number;
   /** Where the Nova Sonic model is invoked. NOT the stack's region — see stackRegion(). */
   private novaSonicRegion: string;
+  // Nova Sonic token usage for the meeting cost estimate; see meteredUsage().
+  private usage: NovaSonicUsage | null = null;
+  private usageModelId = '';
+  private usageFlushTimer: ReturnType<typeof setInterval> | null = null;
   private audioChunkCount: number = 0;
   
   // Persistent audio playback stream (replaces per-batch paplay spawning)
@@ -1609,6 +1617,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       });
 
       const response = await this.bedrockClient.send(command);
+      this.meteredUsage().noteSession();
 
       console.log('Stream established, processing responses...');
 
@@ -1666,6 +1675,13 @@ export class NovaAgent implements VoiceAssistantProvider {
 
           try {
             const jsonResponse = JSON.parse(textResponse);
+
+            // Speech and text tokens, as the model counts them, for the
+            // meeting's cost estimate. Only the delta is added, so the
+            // cumulative totals of a refreshed session are not counted twice.
+            if (jsonResponse.event?.usageEvent) {
+              this.meteredUsage().add(jsonResponse.event.usageEvent);
+            }
 
             if (jsonResponse.event?.contentStart) {
               console.log('Content start:', jsonResponse.event.contentStart.type);
@@ -3030,8 +3046,38 @@ export class NovaAgent implements VoiceAssistantProvider {
       await this.closeSession();
     }
 
+    if (this.usageFlushTimer) {
+      clearInterval(this.usageFlushTimer);
+      this.usageFlushTimer = null;
+    }
+    await this.usage?.flush();
+
     this._isActivated = false;
     console.log('✓ Nova agent stopped');
+  }
+
+  /**
+   * The token accumulator for the current model, written every few minutes so a
+   * long meeting's usage is on record before it ends, and once more on stop.
+   */
+  private meteredUsage(): NovaSonicUsage {
+    if (!this.usage || this.usageModelId !== this.modelId) {
+      // A model change mid-meeting: what the previous model used is written
+      // under its own id before counting starts for the new one.
+      void this.usage?.flush();
+      this.usage = new NovaSonicUsage(
+        this.modelId,
+        this.novaSonicRegion !== stackRegion() ? this.novaSonicRegion : undefined,
+      );
+      this.usageModelId = this.modelId;
+    }
+    if (!this.usageFlushTimer) {
+      this.usageFlushTimer = setInterval(() => {
+        void this.usage?.flush();
+      }, USAGE_FLUSH_INTERVAL_MS);
+      this.usageFlushTimer.unref?.();
+    }
+    return this.usage;
   }
 
   /** Every meeting mode and activation mode can be switched to; see reconfigure. */

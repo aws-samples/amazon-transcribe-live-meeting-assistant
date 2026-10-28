@@ -183,6 +183,14 @@ Parameters:
       agent's read of the API's service-managed log group to this deployment's
       API.
 
+  EventSourcingTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Name of the meeting table. When supplied, the meeting assistant
+      records the token usage of each answer there, under the meeting's mtr#
+      partition, for the meeting cost estimate.
+
 Conditions:
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
   ShouldUseStrandsBedrockWithKBCreate: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
@@ -226,6 +234,9 @@ Conditions:
   # is omitted rather than widened, so the agent simply does not see AppSync's
   # own log group.
   HasAppSyncApiId: !Not [!Equals [!Ref AppSyncApiId, ""]]
+  # Metering for the meeting cost estimate is written only when the meeting
+  # table is named; a standalone deployment of this template meters nothing.
+  HasEventSourcingTable: !Not [!Equals [!Ref EventSourcingTableName, ""]]
   # The Strands layer is shared by the two agents in this stack, and either one
   # alone is reason enough to build it. Without this the layer would exist only
   # when the meeting assistant is Strands-backed, and the troubleshooting agent
@@ -401,6 +412,23 @@ Resources:
               - Action: lambda:InvokeFunction
                 Effect: Allow
                 Resource: !Ref FetchTranscriptFunctionArn
+        # Metering records for the meeting cost estimate: PutItem only, and
+        # only under the mtr# partitions of the meeting table. The KMS grant
+        # the table's encryption needs is in KMSPolicy above.
+        - !If
+          - HasEventSourcingTable
+          - PolicyName: MeteringPolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action: "dynamodb:PutItem"
+                  Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTableName}"
+                  Condition:
+                    ForAllValues:StringLike:
+                      "dynamodb:LeadingKeys":
+                        - "mtr#*"
+          - !Ref AWS::NoValue
 
   StrandsMeetingAssistFunction:
     Condition: ShouldDeployStrandsFunction
@@ -451,6 +479,10 @@ Resources:
           KMS_KEY_ID: !Ref CustomerManagedEncryptionKeyArn
           BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
           BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
+          # Token usage per answer, for the meeting cost estimate. Empty
+          # disables metering (see call_metering.py).
+          METERING_TABLE_NAME: !Ref EventSourcingTableName
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
       Code: ./src
       LoggingConfig:
         LogGroup:

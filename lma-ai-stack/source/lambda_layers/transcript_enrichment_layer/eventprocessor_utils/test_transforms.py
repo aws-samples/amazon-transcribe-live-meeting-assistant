@@ -309,3 +309,48 @@ def test_every_transform_stamps_the_transcript_ttl_and_status(builder):
     assert row["ExpiresAfter"] > 0
     assert row["CallId"] == "contact-1"
     assert row["CreatedAt"]
+
+
+class _Comprehend:
+    def detect_sentiment(self, **_kwargs):
+        return {"Sentiment": "NEUTRAL", "SentimentScore": {"Neutral": 1.0}}
+
+
+def test_each_comprehend_request_is_reported_for_metering() -> None:
+    import asyncio
+
+    seen = []
+    args = {
+        "comprehend_client": _Comprehend(),
+        "on_comprehend_request": lambda call_id, text: seen.append((call_id, text)),
+    }
+    message = {"CallId": "m-1", "Transcript": "we ship on friday"}
+    result = asyncio.run(ep.transform_segment_to_add_sentiment(message, args))
+    assert result["Sentiment"] == "NEUTRAL"
+    assert seen == [("m-1", "we ship on friday")]
+
+
+def test_a_failing_metering_hook_does_not_cost_the_segment_its_sentiment() -> None:
+    import asyncio
+
+    def broken(_call_id, _text):
+        raise RuntimeError("table unavailable")
+
+    args = {"comprehend_client": _Comprehend(), "on_comprehend_request": broken}
+    result = asyncio.run(
+        ep.transform_segment_to_add_sentiment({"CallId": "m-1", "Transcript": "x"}, args)
+    )
+    assert result["Sentiment"] == "NEUTRAL"
+
+
+def test_a_supplied_sentiment_label_is_not_metered() -> None:
+    import asyncio
+
+    seen = []
+    args = {"on_comprehend_request": lambda *a: seen.append(a)}
+    asyncio.run(
+        ep.transform_segment_to_add_sentiment(
+            {"CallId": "m-1", "Transcript": "x", "Sentiment": "POSITIVE"}, args
+        )
+    )
+    assert seen == []

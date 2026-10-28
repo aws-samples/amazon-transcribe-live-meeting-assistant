@@ -1,0 +1,207 @@
+{
+  "currency": "USD",
+  "pricesAsOf": "2026-10-28",
+  "source": "AWS public on-demand list prices, read from the AWS Price List API (AmazonBedrock, AmazonBedrockFoundationModels, transcribe, AWSLambda, AmazonECS, comprehend) on 2026-10-28. Tiered prices use the first tier.",
+  "baseRegion": "us-east-1",
+  "pricedRegions": [
+    "us-east-1",
+    "us-west-2"
+  ],
+  "regions": {
+    "default": {
+      "bedrock/amazon.nova-lite-v1:0": {
+        "inputTokens": 6e-08,
+        "outputTokens": 2.4e-07
+      },
+      "bedrock/amazon.nova-micro-v1:0": {
+        "inputTokens": 3.5e-08,
+        "outputTokens": 1.4e-07
+      },
+      "bedrock/amazon.nova-pro-v1:0": {
+        "inputTokens": 8e-07,
+        "outputTokens": 3.2e-06
+      },
+      "bedrock/global.amazon.nova-2-lite-v1:0": {
+        "inputTokens": 3e-07,
+        "outputTokens": 2.5e-06,
+        "cacheReadInputTokens": 7.5e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/global.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "inputTokens": 1e-06,
+        "outputTokens": 5e-06,
+        "cacheReadInputTokens": 1e-07,
+        "cacheWriteInputTokens": 1.25e-06
+      },
+      "bedrock/global.anthropic.claude-haiku-5-5": {
+        "inputTokens": 1e-07,
+        "outputTokens": 5e-07,
+        "cacheReadInputTokens": 1e-08,
+        "cacheWriteInputTokens": 1.25e-07
+      },
+      "bedrock/global.anthropic.claude-opus-4-6-v1": {
+        "inputTokens": 5e-06,
+        "outputTokens": 2.5e-05,
+        "cacheReadInputTokens": 5e-07,
+        "cacheWriteInputTokens": 6.25e-06
+      },
+      "bedrock/global.anthropic.claude-opus-5-5": {
+        "inputTokens": 4e-06,
+        "outputTokens": 2e-05,
+        "cacheReadInputTokens": 2e-07,
+        "cacheWriteInputTokens": 5e-06
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "inputTokens": 3e-06,
+        "outputTokens": 1.5e-05,
+        "cacheReadInputTokens": 3e-07,
+        "cacheWriteInputTokens": 3.75e-06
+      },
+      "bedrock/global.anthropic.claude-sonnet-4-6": {
+        "inputTokens": 3e-06,
+        "outputTokens": 1.5e-05,
+        "cacheReadInputTokens": 3e-07,
+        "cacheWriteInputTokens": 3.75e-06
+      },
+      "bedrock/global.anthropic.claude-sonnet-5-5": {
+        "inputTokens": 2e-06,
+        "outputTokens": 1e-05,
+        "cacheReadInputTokens": 1e-07,
+        "cacheWriteInputTokens": 2.5e-06
+      },
+      "bedrock/us.amazon.nova-2-lite-v1:0": {
+        "inputTokens": 3.3e-07,
+        "outputTokens": 2.75e-06,
+        "cacheReadInputTokens": 8.25e-08,
+        "cacheWriteInputTokens": 0.0
+      },
+      "bedrock/us.amazon.nova-premier-v1:0": {
+        "inputTokens": 2.5e-06,
+        "outputTokens": 1.25e-05,
+        "cacheReadInputTokens": 6.25e-07
+      },
+      "bedrock/us.anthropic.claude-haiku-5-5": {
+        "inputTokens": 1.1e-07,
+        "outputTokens": 5.5e-07,
+        "cacheReadInputTokens": 1.1e-08,
+        "cacheWriteInputTokens": 1.375e-07
+      },
+      "bedrock/us.anthropic.claude-opus-4-1-20250805-v1:0": {
+        "inputTokens": 1.5e-05,
+        "outputTokens": 7.5e-05,
+        "cacheReadInputTokens": 1.5e-06,
+        "cacheWriteInputTokens": 1.875e-05
+      },
+      "bedrock/us.anthropic.claude-opus-4-20250514-v1:0": {
+        "inputTokens": 1.5e-05,
+        "outputTokens": 7.5e-05,
+        "cacheReadInputTokens": 1.5e-06,
+        "cacheWriteInputTokens": 1.875e-05
+      },
+      "bedrock/us.anthropic.claude-opus-4-6-v1": {
+        "inputTokens": 5.5e-06,
+        "outputTokens": 2.75e-05,
+        "cacheReadInputTokens": 5.5e-07,
+        "cacheWriteInputTokens": 6.875e-06
+      },
+      "bedrock/us.anthropic.claude-opus-5-5": {
+        "inputTokens": 4.4e-06,
+        "outputTokens": 2.2e-05,
+        "cacheReadInputTokens": 2.2e-07,
+        "cacheWriteInputTokens": 5.5e-06
+      },
+      "bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0": {
+        "inputTokens": 3.3e-06,
+        "outputTokens": 1.65e-05,
+        "cacheReadInputTokens": 3.3e-07,
+        "cacheWriteInputTokens": 4.125e-06
+      },
+      "bedrock/us.anthropic.claude-sonnet-4-6": {
+        "inputTokens": 3.3e-06,
+        "outputTokens": 1.65e-05,
+        "cacheReadInputTokens": 3.3e-07,
+        "cacheWriteInputTokens": 4.125e-06
+      },
+      "bedrock/us.anthropic.claude-sonnet-5-5": {
+        "inputTokens": 2.2e-06,
+        "outputTokens": 1.1e-05,
+        "cacheReadInputTokens": 1.1e-07,
+        "cacheWriteInputTokens": 2.75e-06
+      },
+      "bedrock/amazon.nova-2-sonic-v1:0": {
+        "speechInputTokens": 3e-06,
+        "speechOutputTokens": 1.2e-05,
+        "textInputTokens": 3.3e-07,
+        "textOutputTokens": 2.75e-06
+      },
+      "bedrock/amazon.nova-sonic-v1:0": {
+        "speechInputTokens": 3.4e-06,
+        "speechOutputTokens": 1.36e-05,
+        "textInputTokens": 6e-08,
+        "textOutputTokens": 2.4e-07
+      },
+      "transcribe/streaming": {
+        "seconds": 0.0001667
+      },
+      "transcribe/streaming-call-analytics": {
+        "seconds": 0.0005
+      },
+      "transcribe/streaming-pii-redaction": {
+        "seconds": 4e-05
+      },
+      "transcribe/streaming-custom-language-model": {
+        "seconds": 0.0001
+      },
+      "transcribe/batch": {
+        "seconds": 0.0001
+      },
+      "lambda-microvm/arm64": {
+        "vcpuSeconds": 2.76944e-05,
+        "gbSeconds": 3.6667e-06
+      },
+      "lambda-microvm/x86_64": {
+        "vcpuSeconds": 3.26557e-05,
+        "gbSeconds": 4.3235e-06
+      },
+      "fargate/x86_64": {
+        "vcpuSeconds": 1.1244444e-05,
+        "gbSeconds": 1.234722e-06
+      },
+      "fargate/arm64": {
+        "vcpuSeconds": 8.994444e-06,
+        "gbSeconds": 9.88889e-07
+      },
+      "comprehend/detect-sentiment": {
+        "units": 0.0001
+      }
+    },
+    "us-west-2": {
+      "bedrock/amazon.nova-2-sonic-v1:0": {
+        "textInputTokens": 3.19e-07,
+        "textOutputTokens": 2.651e-06
+      }
+    }
+  },
+  "nonChargeableUnits": [
+    "requests",
+    "sessions",
+    "audioSeconds",
+    "runtimeSeconds"
+  ],
+  "notes": {
+    "ec2/virtual-participant-host": "The EC2 launch type runs Virtual Participants on hosts that are billed by the hour whether or not a meeting is running, so no share of the host is attributed to one meeting. Runtime is shown for reference.",
+    "lambda-microvm/arm64": "Configured vCPU and memory multiplied by the time from launch to release. Snapshot read and storage charges are not included.",
+    "lambda-microvm/x86_64": "Configured vCPU and memory multiplied by the time from launch to release. Snapshot read and storage charges are not included.",
+    "fargate/x86_64": "Task vCPU and memory multiplied by the time the Virtual Participant process ran. Image pull and task start-up before the process starts are not included.",
+    "fargate/arm64": "Task vCPU and memory multiplied by the time the Virtual Participant process ran. Image pull and task start-up before the process starts are not included.",
+    "transcribe/streaming-custom-language-model": "Listed as a charge in addition to standard streaming."
+  },
+  "notIncluded": [
+    "Resources that run whether or not a meeting is in progress: the WebSocket transcriber's Fargate service, NAT gateways, the Application Load Balancer, CloudFront, and Virtual Participant EC2 hosts.",
+    "Per-request charges of the services LMA is built on: AppSync, DynamoDB, Kinesis Data Streams, LMA's own Lambda functions, S3 storage of recordings, and CloudWatch Logs.",
+    "Amazon Bedrock Knowledge Base queries (RetrieveAndGenerate does not report token usage) and the vector store behind them.",
+    "Amazon Bedrock Guardrails, Amazon Translate (live translation in the browser) and Amazon Transcribe Post-Call Analytics.",
+    "Third-party services: ElevenLabs, Simli and Tavily web search.",
+    "Free tier, Savings Plans, volume tiers beyond the first, and any private pricing agreement."
+  ]
+}

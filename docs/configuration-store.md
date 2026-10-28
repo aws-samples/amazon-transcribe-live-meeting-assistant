@@ -163,6 +163,7 @@ Today's sections and their tiers:
 | `summary_prompt_templates` | `standard` | Read by an end-of-meeting summary nobody is waiting on; **Regenerate** drops the cache before reading |
 | `nova_sonic_config` | `immediate` | Read once per meeting when the voice assistant starts, and the page says a save applies to the next meeting; a cache would save a read or two per meeting and add a window in which that is not true |
 | `chat_buttons` | `immediate` | Read record by record through the chat panel's resolver, which reads directly and consistently; the Edit Chat Buttons dialog shows the saved buttons straight after a save. The browser holds what it read for the life of the chat panel, as it always has |
+| `call_pricing` | `standard` | Read whenever a meeting's cost estimate is drawn; an estimate priced a few minutes after a price change at the previous price is what [Meeting Cost Estimate](meeting-cost-estimate.md) says happens |
 
 ### Resolving a read
 
@@ -513,6 +514,18 @@ The quick-action buttons in the Meeting Assist chat panel are the
 `ConfigurationSectionAdoption` output reports `chat_buttons=...`. Editing the
 `CustomChatButtonConfig` item in the DynamoDB console stops having any effect:
 edit the buttons from the dialog.
+
+### The meeting cost price table
+
+The unit prices the [meeting cost estimate](meeting-cost-estimate.md) is computed
+with are the `call_pricing` section. `Config#default` holds the shipped table, from
+`configuration_seeder/defaults/CallPricing.json`, so a release that updates a price
+reaches every deployment on its next stack update. An Admin's price changes are a
+delta in `Config#custom`, written through `updateCallPricing` and read back, with
+the shipped table and the merge of the two, through `getCallPricing`. There was no
+earlier store for prices, so nothing is adopted on upgrade, and the shared-profile
+version check above applies to an `updateCallPricing` save as it does to the
+configuration pages' saves.
 
 ## Still to come
 

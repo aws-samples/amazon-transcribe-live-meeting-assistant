@@ -23,6 +23,7 @@ import {
     speakerNameFor,
 } from './asr-microvm-client.js';
 import { voiceAssistant } from './voice-assistant.js';
+import { meterTranscribeRequest, pcmSeconds } from './metering.js';
 import { RosterTimeline } from './roster-timeline.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
@@ -160,6 +161,9 @@ export class TranscriptionService {
     // transcribe-channels.ts); null on the mono stream.
     private stereoQueue: PcmQueue | null = null;
     private readonly sampleRate = 16000; // in hertz
+    // Audio bytes the current Transcribe request has carried, silence included:
+    // the request is billed for every second it was sent. Reset per request.
+    private sessionAudioBytes = 0;
     private transcribeClient: TranscribeStreamingClient;
     // Live only while this meeting is transcribed by the on-demand MicroVM engine: one
     // session per audio source, like Stream Audio's two channels.
@@ -312,6 +316,7 @@ export class TranscriptionService {
                 // The cap is a whole number of stereo frames, so a split never
                 // separates a sample's two channels.
                 for (const frame of frameAudioChunk(chunk)) {
+                    this.sessionAudioBytes += frame.length;
                     if (!details.start) {
                         // Before the meeting starts, send silence of the same
                         // length so the stream stays open without capturing audio.
@@ -451,6 +456,24 @@ export class TranscriptionService {
             // one, agent_output is always silent and the mono stream from
             // combined_audio is the meeting audio alone.
             const stereo = voiceAssistant.isEnabled();
+            // Metered once per request, before any reconnect: Transcribe bills an
+            // accepted request for the audio it was sent (15-second minimum) and
+            // nothing for one it refused.
+            this.sessionAudioBytes = 0;
+            let requestAccepted = false;
+            let requestMetered = false;
+            const redactionApplied = Boolean(details.enableContentRedaction && details.transcribeLanguageCode === 'en-US');
+            const meterRequest = async (): Promise<void> => {
+                if (!requestAccepted || requestMetered) {
+                    return;
+                }
+                requestMetered = true;
+                await meterTranscribeRequest(
+                    kinesisStreamManager.currentCallId,
+                    pcmSeconds(this.sessionAudioBytes, this.sampleRate, stereo ? 2 : 1),
+                    { redaction: redactionApplied, channels: stereo ? 2 : 1 },
+                );
+            };
             try {
                 const transcriptionParams: any = {
                     AudioStream: this.audioStream(recordingStream, stereo),
@@ -517,6 +540,7 @@ export class TranscriptionService {
 
                 const command = new StartStreamTranscriptionCommand(transcriptionParams);
                 const response = await this.transcribeClient.send(command);
+                requestAccepted = true;
 
                 if (!sessionId) {
                     sessionId = response.SessionId;
@@ -549,6 +573,7 @@ export class TranscriptionService {
                         this.handleTranscriptEvents(response, stereo)
                     ]);
                 }
+                await meterRequest();
 
                 // The session's result stream ended WITHOUT throwing. If the
                 // meeting is still live this is an unexpected server-side close
@@ -586,6 +611,7 @@ export class TranscriptionService {
             } catch (error: any) {
                 // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
                 console.error(`Transcription error (consecutive failure ${consecutiveFailures + 1}/${maxRetries}):`, error.message);
+                await meterRequest();
 
                 // A framing/throughput complaint is transient, so it must be
                 // checked FIRST: "Your stream is too big" is a

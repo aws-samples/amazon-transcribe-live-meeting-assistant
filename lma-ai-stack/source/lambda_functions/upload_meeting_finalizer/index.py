@@ -43,12 +43,18 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from datetime import datetime, timezone
 from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
+
+# pylint: disable=import-error
+from lma_metering import MeteringWriter  # configuration layer
+
+# pylint: enable=import-error
 
 # ---------------------------------------------------------------------------
 # Environment
@@ -72,6 +78,45 @@ job_table = ddb.Table(EVENT_SOURCING_TABLE)
 kinesis_client = boto3.client("kinesis", region_name=AWS_REGION)
 transcribe_client = boto3.client("transcribe", region_name=AWS_REGION)
 s3_client = boto3.client("s3", region_name=AWS_REGION)
+
+# The batch job's seconds, for the meeting cost estimate. Inert when
+# METERING_TABLE_NAME is unset.
+METERING = MeteringWriter(source="upload-meeting-finalizer")
+
+#: Amazon Transcribe batch bills at least this many seconds per job.
+BATCH_MINIMUM_SECONDS = 15
+
+
+def transcribed_seconds(transcript_json: dict) -> float:
+    """How far into the media the transcript reaches: the last item's end time.
+
+    The job's own media duration is not in the transcript or the job record, so
+    this is the closest figure to hand. It stops at the last word, so trailing
+    silence -- which is billed -- is not counted, and the estimate says so.
+    """
+    items = (transcript_json.get("results") or {}).get("items") or []
+    end = 0.0
+    for item in items:
+        try:
+            end = max(end, float(item.get("end_time") or 0.0))
+        except (TypeError, ValueError):
+            continue
+    return end
+
+
+def meter_batch_job(call_id: str, transcript_json: dict) -> None:
+    seconds = transcribed_seconds(transcript_json)
+    METERING.record(
+        call_id,
+        "Transcription",
+        "transcribe/batch",
+        {"seconds": max(BATCH_MINIMUM_SECONDS, math.ceil(seconds)), "requests": 1},
+        details={
+            "engine": "amazon-transcribe-batch",
+            "duration": "to the last transcribed word",
+            "minimum": f"{BATCH_MINIMUM_SECONDS}s per job",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -315,6 +360,7 @@ def lambda_handler(event, context):  # noqa: ARG001
 
     segments = _build_segments(transcript_json, enable_diarization)
     logger.info("Emitting %d transcript segment(s) for %s", len(segments), call_id)
+    meter_batch_job(call_id, transcript_json)
 
     now = _now_iso()
     for seg in segments:

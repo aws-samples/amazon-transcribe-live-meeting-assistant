@@ -307,6 +307,21 @@ Parameters:
       deployment and meetings label separated voices as spk_0, spk_1 and so on
       until somebody names them.
 
+  EventSourcingTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Name of the meeting table. When supplied, the transcriber records
+      each meeting's Amazon Transcribe seconds and ASR MicroVM time there, under
+      the meeting's mtr# partition, for the meeting cost estimate.
+
+  MeetingRecordExpirationInDays:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Days a meeting record is kept. Metering records expire with the
+      meeting they belong to. Empty leaves them without a TTL.
+
   AsrConfigTableName:
     Type: String
     Default: ""
@@ -536,6 +551,7 @@ Conditions:
   ShouldEnableMicrovmAsr: !Not [!Equals [!Ref AsrLauncherFunctionArn, ""]]
   HasVoiceEnrollment: !Not [!Equals [!Ref VoiceEnrollmentSeedsFunctionArn, ""]]
   HasAsrConfigTable: !Not [!Equals [!Ref AsrConfigTableName, ""]]
+  HasEventSourcingTable: !Not [!Equals [!Ref EventSourcingTableName, ""]]
   ShouldEnableTranscriberAutoScaling:
     !Equals [!Ref TranscriberAutoScalingEnabled, "true"]
 
@@ -1294,6 +1310,19 @@ Resources:
               Effect: Allow
               Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AsrConfigTableName}"
             - !Ref AWS::NoValue
+          # Metering records for the meeting cost estimate: PutItem only, and
+          # only under the mtr# partitions of the meeting table. The table's
+          # key is covered by the kms statement above.
+          - !If
+            - HasEventSourcingTable
+            - Action: dynamodb:PutItem
+              Effect: Allow
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTableName}"
+              Condition:
+                ForAllValues:StringLike:
+                  "dynamodb:LeadingKeys":
+                    - "mtr#*"
+            - !Ref AWS::NoValue
         Version: "2012-10-17"
       PolicyName: !Sub ${AWS::StackName}-TranscriberWebsocketTaskDefTaskRoleDefaultPolicy
       Roles:
@@ -1387,6 +1416,12 @@ Resources:
               Value: !Ref CallDataStreamName
             - Name: TRANSCRIBER_CALL_EVENT_TABLE_NAME
               Value: !Ref TranscriberCallEventTable
+            # Transcribe seconds and ASR MicroVM time per meeting, for the
+            # meeting cost estimate. Empty disables metering (see metering.ts).
+            - Name: METERING_TABLE_NAME
+              Value: !Ref EventSourcingTableName
+            - Name: METERING_EXPIRATION_DAYS
+              Value: !Ref MeetingRecordExpirationInDays
             - Name: SAVE_PARTIAL_TRANSCRIPTS
               Value: "true"
             - Name: SHOW_SPEAKER_LABEL

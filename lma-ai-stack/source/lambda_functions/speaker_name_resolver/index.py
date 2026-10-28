@@ -38,6 +38,11 @@ from botocore.auth import SigV4Auth
 from botocore.awsrequest import AWSRequest
 from botocore.config import Config
 
+# pylint: disable=import-error
+from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
+
+# pylint: enable=import-error
+
 # Standard logging rather than Powertools: the layer that carries Powertools is
 # built for arm64 only, and this function has no other reason to be pinned to an
 # architecture. Same choice as FetchTranscript.
@@ -76,6 +81,11 @@ PASS_COOLDOWN_SECONDS = int(os.environ.get("SPEAKER_NAMING_COOLDOWN_SECONDS", "3
 DESERIALIZER = TypeDeserializer()
 
 dynamodb = boto3.client("dynamodb")
+# Each naming pass is a model call billed to the meeting; the automatic pass runs
+# as often as every 45 seconds while somebody has the meeting open, so this is
+# usually a meeting's most frequent Bedrock line. Inert when METERING_TABLE_NAME
+# is unset.
+METERING = MeteringWriter(source="speaker-name-resolver", client=dynamodb)
 bedrock = boto3.client(
     service_name="bedrock-runtime",
     region_name=BEDROCK_REGION,
@@ -171,8 +181,8 @@ def caller_may_edit(meeting, identity):
     return False
 
 
-def call_bedrock(prompt):
-    """One model call.
+def call_bedrock(prompt, call_id=None):
+    """One model call, metered against ``call_id``.
 
     Temperature 0 where the model accepts it: this is extraction, not writing, and
     two passes over one meeting should agree. Only the text blocks are read -- the
@@ -183,6 +193,13 @@ def call_bedrock(prompt):
         modelId=BEDROCK_MODEL_ID,
         messages=[{"role": "user", "content": [{"text": prompt}]}],
         inferenceConfig=build_inference_config(BEDROCK_MODEL_ID, SPEAKER_NAMING_MAX_TOKENS),
+    )
+    METERING.record(
+        call_id,
+        "SpeakerNaming",
+        bedrock_service(BEDROCK_MODEL_ID),
+        bedrock_usage(response.get("usage")),
+        region=BEDROCK_REGION if BEDROCK_REGION != os.environ.get("AWS_REGION") else None,
     )
     return extract_text(response)
 
@@ -275,7 +292,7 @@ def resolve(call_id, identity=None, force=False, final=False):
 
     labels = pure.unresolved_voices(turns, identities, all_turns)
     prompt = pure.build_prompt(turns, labels, identities.get("candidates") or [])
-    raw = call_bedrock(prompt)
+    raw = call_bedrock(prompt, call_id)
     proposals = pure.parse_model_response(raw)
     updated, applied = pure.apply_proposals(
         identities, proposals, turns, now_iso, all_turns=all_turns

@@ -63,6 +63,7 @@ import {
 import { normalizeErrorForLogging } from '../utils/common';
 import { stringifyCallMetaData } from '../utils/log-redaction';
 import { noteTranscriptSegment } from '../metrics/session';
+import { meterTranscribeRequest, pcmSeconds } from '../metering';
 
 const formatPath = function (path: string) {
     let pathOut = path;
@@ -95,6 +96,17 @@ const IS_CONTENT_REDACTION_ENABLED =
 const CONTENT_REDACTION_TYPE = process.env['CONTENT_REDACTION_TYPE'] || 'PII';
 const TRANSCRIBE_PII_ENTITY_TYPES =
     process.env['TRANSCRIBE_PII_ENTITY_TYPES'] || undefined;
+// Redaction is only requested for the languages streaming redaction supports, so
+// this is both what is sent and what is billed for.
+const isRedactionApplied =
+    IS_CONTENT_REDACTION_ENABLED &&
+    (TRANSCRIBE_LANGUAGE_CODE === 'en-US' ||
+        TRANSCRIBE_LANGUAGE_CODE === 'en-AU' ||
+        TRANSCRIBE_LANGUAGE_CODE === 'en-GB' ||
+        TRANSCRIBE_LANGUAGE_CODE === 'es-US');
+// Every request is a two-channel stream: channel identification on the standard
+// API, two channel definitions on Call Analytics.
+const TRANSCRIBE_CHANNELS = 2;
 const TCA_DATA_ACCESS_ROLE_ARN = process.env['TCA_DATA_ACCESS_ROLE_ARN'] || '';
 const CALL_ANALYTICS_FILE_PREFIX = formatPath(
     process.env['CALL_ANALYTICS_FILE_PREFIX'] || 'lca-call-analytics-json/'
@@ -389,6 +401,31 @@ export const startTranscribe = async (
         }
 
         const attemptStartMs = Date.now();
+        // Audio bytes this attempt's request carried, and whether the request was
+        // accepted at all: Transcribe bills an accepted request for the seconds of
+        // audio it was sent (15-second minimum), and nothing for one it refused.
+        // Metered once per attempt, before any reconnect, so a long meeting's
+        // usage is on record as it goes rather than only at the end.
+        let attemptAudioBytes = 0;
+        let attemptAccepted = false;
+        let attemptMetered = false;
+        const meterAttempt = async (): Promise<void> => {
+            if (attemptMetered || !attemptAccepted) {
+                return;
+            }
+            attemptMetered = true;
+            await meterTranscribeRequest(
+                callMetaData.callId,
+                pcmSeconds(attemptAudioBytes, callMetaData.samplingRate, TRANSCRIBE_CHANNELS),
+                {
+                    callAnalytics: isTCAEnabled,
+                    redaction: isRedactionApplied,
+                    customLanguageModel: Boolean(CUSTOM_LANGUAGE_MODEL_NAME),
+                    channels: TRANSCRIBE_CHANNELS,
+                    logger: server.log,
+                }
+            );
+        };
         // Highest absolute segment EndTime observed during this attempt; seeds
         // the next reconnect's offset. Starts at the incoming offset so an
         // attempt that produces nothing still carries the timeline forward.
@@ -474,6 +511,7 @@ export const startTranscribe = async (
                         // (see frameAudioChunk): audio queued while this consumer
                         // was starting arrives as one large buffer.
                         for (const frame of frameAudioChunk(chunk)) {
+                            attemptAudioBytes += frame.length;
                             yield { AudioEvent: { AudioChunk: frame } };
                         }
                     }
@@ -532,13 +570,7 @@ export const startTranscribe = async (
                 tsParams.LanguageCode = TRANSCRIBE_LANGUAGE_CODE as LanguageCode;
             }
 
-            if (
-                IS_CONTENT_REDACTION_ENABLED &&
-            (TRANSCRIBE_LANGUAGE_CODE === 'en-US' ||
-              TRANSCRIBE_LANGUAGE_CODE === 'en-AU' ||
-              TRANSCRIBE_LANGUAGE_CODE === 'en-GB' ||
-              TRANSCRIBE_LANGUAGE_CODE === 'es-US')
-            ) {
+            if (isRedactionApplied) {
                 tsParams.ContentRedactionType =
                     CONTENT_REDACTION_TYPE as ContentRedactionType;
                 if (TRANSCRIBE_PII_ENTITY_TYPES) {
@@ -566,6 +598,7 @@ export const startTranscribe = async (
                     )
                 );
                 sessionId = response.SessionId;
+                attemptAccepted = true;
                 server.log.debug(
                     `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from TCA. Session Id: ${sessionId} ===`
                 );
@@ -597,6 +630,7 @@ export const startTranscribe = async (
                     new StartStreamTranscriptionCommand(tsParams)
                 );
                 sessionId = response.SessionId;
+                attemptAccepted = true;
                 server.log.debug(
                     `[TRANSCRIBING]: [${callMetaData.callId}] === Received Initial response from Transcribe. Session Id: ${sessionId} ===`
                 );
@@ -630,6 +664,7 @@ export const startTranscribe = async (
             } else {
                 throw new Error('Transcribe stream is empty');
             }
+            await meterAttempt();
 
             // The results stream completed WITHOUT throwing. Amazon Transcribe
             // closes the HTTP/2 stream server-side on its own schedule (idle
@@ -652,6 +687,7 @@ export const startTranscribe = async (
                     callMetaData.callId
                 }] - Error in transcription session: ${normalizeErrorForLogging(error)}`
             );
+            await meterAttempt();
             // A reused SessionId can be rejected once Transcribe has closed the
             // session server-side (e.g. "session ... has expired" / not found).
             // Reusing a stale id then fails every retry until MAX_RETRIES aborts
