@@ -21,6 +21,28 @@ lists what is left out, and the estimate itself carries the same list.
 
 ## Where to read it
 
+### On the meeting page
+
+The **Estimated cost** section of a meeting's page — collapsed by default, below the
+Speakers panel — shows the total in its header ("$0.1234 estimated", with
+"(incomplete)" when some line has no price) and, opened, the itemised table:
+
+| Column | Shows |
+|---|---|
+| Service | The service and model or API, grouped by what the usage was for, with a subtotal row per group. Hover a service for how its usage was measured (launch type, sizes, why a figure is approximate). |
+| Unit, Quantity | What was counted and how much. |
+| Unit price | US dollars per unit from the price table, or **No price** when the table has none. |
+| Estimated cost | Quantity times unit price. Below $0.0001 is written "< $0.0001", never rounded to zero. Units that are shown for reference only read "not billed separately". |
+
+Above the table the panel says that this is an estimate, the date of its prices, and
+any line it could not price or region it priced at another region's rates. Below it
+are what the estimate does not include, the region, and when the figure was
+computed. The estimate is re-read when the meeting's status changes and with the
+refresh button, because most of a meeting's usage is recorded as it ends. A meeting
+with no metering records shows **No metering data** rather than a cost of zero.
+
+### Through the API
+
 `Query.getCallCost(CallId)` on the AppSync API returns the itemised estimate for one
 meeting. It answers the same callers `getCall` answers: an Admin, the meeting's
 owner, anyone the meeting is shared with, and a backend role signing with IAM.
@@ -222,7 +244,7 @@ same item, and that every service the TypeScript writers name has a price.
 ## Upgrading
 
 Nothing to do. Meetings held before the upgrade have no metering records, so their
-estimate reads zero with `RecordCount: 0` — which means "not metered", not "free".
+estimate reads zero with `RecordCount: 0` — which means "not metered", not "free" — and the meeting page shows **No metering data** for them.
 
 ## Reference
 
