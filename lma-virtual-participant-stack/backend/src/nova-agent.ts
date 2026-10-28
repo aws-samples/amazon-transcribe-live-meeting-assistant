@@ -124,6 +124,26 @@ export const STOP_ACK_START_WINDOW_MS = 1500;
 export const STOP_ACK_MAX_AUDIO_MS = 1500;
 
 /**
+ * The rules of the translator prompt that say which language to speak.
+ *
+ * Both directions are spelled out, because a speech-to-speech model told only
+ * to use "the OTHER language" will sometimes say the utterance back in the
+ * language it heard. The last rule asks for speech and text to agree, because
+ * the transcript is written from Nova's text: a translation spoken in the wrong
+ * language looks correct everywhere except in the meeting itself.
+ */
+export function translatorDirectionRules(a: string, b: string): string[] {
+  return [
+    `1. When you hear ${a}, say it in ${b}. When you hear ${b}, say it in ${a}.`,
+    '2. Your spoken words must always be in the OTHER language from the one you just heard. '
+      + 'Never repeat or paraphrase an utterance in the language it was spoken in: replying in '
+      + `${a} to ${a}, or in ${b} to ${b}, is always wrong.`,
+    '3. Speak only the translation, naturally, matching the speaker\'s tone. '
+      + 'Your speech and your text must be the same words in the same language.',
+  ];
+}
+
+/**
  * How often a held-open activation window looks again at whether the assistant
  * has gone idle (see checkActivationWindow).
  */
@@ -993,12 +1013,16 @@ export class NovaAgent implements VoiceAssistantProvider {
           `You are a live bidirectional interpreter between ${a} and ${b}.`,
           '',
           'Rules (follow these strictly):',
-          `1. For every utterance you hear, detect whether it is in ${a} or ${b}.`,
-          '2. Translate it into the OTHER language and speak only the translation.',
-          `3. Speak the translation naturally in ${a} or ${b}, matching the speaker\'s tone.`,
+          // Each direction is named outright. Nova 2 Sonic, given only "the
+          // OTHER language" and "speak in A or B", repeated an English
+          // utterance back in English in 4 of 17 single-utterance replays of
+          // this session setup; with these three lines, in none of 24 (18 of
+          // them with the previous "unclear or in a third language" wording
+          // of rule 6, 6 with the current one).
+          ...translatorDirectionRules(a, b),
           '4. Do NOT greet, explain, summarize, answer questions, or add any commentary.',
           '5. Preserve meaning, names, numbers, and dates. Keep output concise.',
-          `6. If an utterance is unclear or in a third language, translate it into ${a}.`,
+          `6. If an utterance is in neither ${a} nor ${b}, translate it into ${a}.`,
           '7. Never say anything on your own. Do not introduce yourself. Do not ask clarifying questions.',
           '',
           'Begin translating from the very next utterance you hear.',
