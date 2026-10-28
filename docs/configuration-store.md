@@ -15,8 +15,9 @@ cached. This page describes the single store that replaces them, and the state o
 the migration into it.
 
 **Current state:** the store, the accessor and the deploy-time seeder are in
-place, and the **summary prompt templates** are served from them. The other five
-stores still work exactly as before and are migrated in later releases.
+place, and the **summary prompt templates** and the **Nova Sonic voice assistant
+settings** are served from them. The other stores still work exactly as before
+and are migrated in later releases.
 
 ## The table
 
@@ -96,20 +97,25 @@ runtimes:
 | Language | Path | Consumers |
 |---|---|---|
 | Python | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/` | The Lambda functions, via a Lambda layer |
-| TypeScript | `lma-websocket-transcriber-stack/source/app/src/config/configuration-store.ts` | None yet — the WebSocket transcriber, and the Virtual Participant once the module is shared |
+| TypeScript | `lma-websocket-transcriber-stack/source/app/src/config/configuration-store.ts`, copied verbatim to `lma-virtual-participant-stack/backend/src/configuration-store.ts` | The Virtual Participant, for the Nova Sonic settings |
 
 Both read the table through one environment variable, `CONFIGURATION_TABLE_NAME`.
 
 The Virtual Participant is a separate npm package and cannot import the
-transcriber's module as things stand, so the stage that migrates its first
-setting has to move the module somewhere both can reach or copy it. That is a
-packaging decision worth making deliberately rather than discovering: there is no
-shared TypeScript package in LMA today, which is why there are two
-implementations of this accessor rather than one.
-`lma-ai-stack/test/test_configuration_store_contract.py` asserts, across the
-language boundary, that the two halves agree on the key layout, the metadata list
-and every cache tier — the drift between them would otherwise be silent, because
-a configuration read as empty is indistinguishable from one nobody has set.
+transcriber's module, and there is no shared TypeScript package in LMA, so the
+TypeScript half is **copied**: the transcriber's file is the one edited, and the
+Virtual Participant's is a byte-for-byte copy of it. The file imports nothing
+relative, so it compiles unchanged under the transcriber's CommonJS build and the
+Virtual Participant's ES module one. A shared package would remove the copy, at
+the cost of a build step both packages' Docker images would then depend on; at
+one file, the copy is the smaller thing to keep right.
+
+`lma-ai-stack/test/test_configuration_store_contract.py` keeps both kinds of
+duplication honest. It asserts that the two TypeScript copies are identical, and,
+across the language boundary, that the Python and TypeScript halves agree on the
+key layout, the metadata list and every cache tier — the drift between them
+would otherwise be silent, because a configuration read as empty is
+indistinguishable from one nobody has set.
 
 ### Three tiers, declared per section
 
@@ -150,6 +156,13 @@ compiled template list, a connected client) can compare fingerprints and tell a
 refetch that changed nothing from one that did. This is the policy the MCP server
 loader already uses, generalised.
 
+Today's sections and their tiers:
+
+| Section | Tier | Why |
+|---|---|---|
+| `summary_prompt_templates` | `standard` | Read by an end-of-meeting summary nobody is waiting on; **Regenerate** drops the cache before reading |
+| `nova_sonic_config` | `immediate` | Read once per meeting when the voice assistant starts, and the page says a save applies to the next meeting; a cache would save a read or two per meeting and add a window in which that is not true |
+
 ### Resolving a read
 
 `get_section` / `getSection` resolves the document before returning a section:
@@ -161,6 +174,12 @@ coming from the release.
 
 A pointer naming a profile that is not stored resolves to the baseline alone
 rather than to nothing, so deleting a profile cannot take a feature down with it.
+
+The TypeScript half also returns the two layers a section was merged from — the
+baseline's section and the active profile's — beside the merged values. That is
+for a reader whose settings do not simply override one another: in the Nova
+Sonic settings' `inject` prompt mode the administrator's prompt is *appended* to
+the shipped one, which a merged value has already lost.
 
 A document whose baseline record is **not** there is never cached, whatever tier
 is being read. A stack update can put new code live a few seconds before the
@@ -241,7 +260,8 @@ is its only author, and a new release's content has to land.
 
 A custom resource, `SeedConfiguration`, backed by
 `lma-ai-stack/source/lambda_functions/configuration_seeder/`. It makes three
-writes with different rules about what each may overwrite:
+writes with different rules about what each may overwrite, and then carries
+across the sections of stores that moved in after the profile existed:
 
 - **`Config#default`** — written on create, and rewritten on every update on
   which the custom resource runs at all, which is every update that changes the
@@ -254,6 +274,9 @@ writes with different rules about what each may overwrite:
   what happens after a table restore or a hand deletion.
 - **`Config#__active`** — also written only if absent, so an administrator who
   selects a different profile keeps their choice.
+- **One section of `Config#custom` per later store** — added only while the
+  profile does not hold that section. See
+  [Carrying a later store across](#carrying-a-later-store-across).
 
 ### Why the content hash exists
 
@@ -276,6 +299,43 @@ updating in the stack events. That is deliberate: the alternative — a filter
 that decides what counts — can exclude a real change, and that failure is the
 silent one. A re-run rewrites the baseline with identical content and leaves
 every profile untouched.
+
+### Carrying a later store across
+
+The summary prompts were adopted by *creating* the profile: when `Config#custom`
+is absent, the seeder fills it from the previous table. That route is closed to
+every store that moves in afterwards, because by then the profile exists on
+every upgraded deployment. So each later store is carried across one **section**
+at a time:
+
+- While the profile does not hold the section, the seeder reads the
+  administrator's settings from the store's previous table and adds them to the
+  profile as that section — an empty section if there was nothing to carry.
+- Once the profile holds the section, nothing is read from the previous table
+  again, whether the seeder put it there or an administrator saved it. An empty
+  section counts, which is what makes **Reset to Defaults** stick: a reset saves
+  an empty section, and a later deployment does not bring the pre-upgrade values
+  back.
+- The write is conditional on the profile as the seeder read it, so an
+  administrator saving any page during the deployment loses nothing; the
+  seeder reads again and decides again.
+- A previous table that cannot be read is not a failed deployment. The section
+  is left unset, the shipped settings apply, and the next deployment that runs
+  the seeder tries again. Unlike the profile's adoption this is not a one-shot,
+  because nothing was written.
+
+What each run found is the `SectionAdoption` attribute of the custom resource,
+published as the **`ConfigurationSectionAdoption`** stack output: one
+`section=outcome` pair per store, for example
+`nova_sonic_config=adopted-from-previous-table`.
+
+| Outcome | Meaning |
+|---|---|
+| `adopted-from-previous-table` | Settings were carried across, on this run |
+| `nothing-to-adopt` | The previous table held no settings; an empty section was recorded |
+| `already-present` | The profile already holds the section. Every run after the first reports this |
+| `previous-table-unreadable` | **Act on this one**, or wait for the next deployment that runs the seeder: the settings were not carried across, and the shipped ones apply until they are. Saving the settings from their page also settles it |
+| `no-previous-table` | The stack was given no previous table, so there is nothing to carry; nothing is recorded |
 
 ## What is served from the store today
 
@@ -314,7 +374,7 @@ Under the hood:
   carried the partition key and the seeded guidance text. The UI read neither of
   those; another client that did needs to stop.
 
-### Upgrading an existing deployment
+### Upgrading an existing deployment: the summary prompts
 
 Nothing to do, in the ordinary case. On the first deployment that includes this
 change, the seeder reads the prompt templates from the previous table and carries
@@ -377,6 +437,54 @@ prompts again. **Any prompt edit made between the upgrade and the rollback has
 to be applied again from the Transcript Summary page**; if retention was on, the
 orphaned table is where to read the old values from.
 
+### The Nova Sonic voice assistant settings
+
+The settings edited on the **Nova Sonic Configuration** page — the system prompt
+and prompt mode, model, voice, endpointing sensitivity, meeting mode, and the
+translator languages and trigger phrases — are the `nova_sonic_config` section.
+
+- `Config#default` holds the shipped settings, from
+  `configuration_seeder/defaults/NovaSonicConfig.json`. The Nova Sonic stack
+  still ships its own copy for its own table, and a test fails if the two
+  differ.
+- `Config#custom` holds the settings an administrator entered, and only those: a
+  field left empty on the page is not stored, so the shipped value applies.
+  **Reset to Defaults** stores an empty section.
+- The Virtual Participant reads the section when its voice assistant starts —
+  the ElevenLabs provider reads the meeting mode and translator settings from it
+  too — on the `immediate` tier: a consistent read and no cache, three `GetItem`
+  calls per meeting. It combines the shipped and administrator layers exactly as
+  it combined the previous table's `DefaultNovaSonicConfig` and
+  `CustomNovaSonicConfig` items.
+- It falls back to the previous table (`NovaSonicConfigTable`) only when the
+  configuration table cannot be read or holds no shipped Nova Sonic settings —
+  a deployment rolled back across the move, say. That table is still seeded by
+  its own stack, and the administrator's settings in it are the ones saved
+  before the upgrade.
+- `Query.getNovaSonicConfig` and `Mutation.updateNovaSonicConfig` are both served
+  by one Lambda resolver, for the same reason as the summary prompts. The read
+  keeps both of its authorization modes — the **Admin** group on Cognito
+  user-pool authentication, and IAM — and still answers with a JSON string; what
+  is in it is now the section's settings plus `Version`, `UpdatedBy` and
+  `UpdatedAt`, rather than the whole DynamoDB item, which also carried the
+  partition key, the seeded guidance text and a description. A save that sends
+  `ExpectedVersion` is refused if the profile has changed since, as for the
+  summary prompts.
+
+**On an upgrade** the seeder carries the settings saved on the page across into
+`Config#custom` the first time it runs, as described in
+[Carrying a later store across](#carrying-a-later-store-across); check the
+`ConfigurationSectionAdoption` output afterwards. Editing `CustomNovaSonicConfig`
+in the DynamoDB console stops having any effect, as for the summary prompts:
+edit the settings on the page.
+
+**One consequence of one shared profile.** The version a save is checked against
+is the profile's, and every configuration page saves into the same profile. So a
+save is also refused when another administrator saved a *different*
+configuration page after this one was loaded. Nothing is lost either way — the
+message says to reload and apply the change again — but it is a refusal that a
+per-page record would not have produced.
+
 ## Still to come
 
 | Stage | What it adds |
@@ -384,7 +492,7 @@ orphaned table is where to read the old values from.
 | Revisions and audit | Revision bodies in S3 with metadata in one DynamoDB index item per profile, forward-only restore, pruning that keeps the published and labelled revisions |
 | Import / export | Export as a client-side download; import that always routes into a create-new-profile flow rather than applying in place |
 | Schema-driven UI | A profile table, a form generated from the `Schema` document, a diff against the baseline and per-field "restore default" |
-| Migrating the other five stores | The chat-button config, the Nova Sonic config, the ASR switches, the MCP server list, and the SSM settings blob |
+| Migrating the other stores | The chat-button config, the ASR switches, the MCP server list, and the SSM settings blob |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired |
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
 
@@ -404,7 +512,8 @@ that belongs.
 | What | Where |
 |---|---|
 | Python accessor | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/` |
-| TypeScript accessor | `lma-websocket-transcriber-stack/source/app/src/config/configuration-store.ts` |
+| TypeScript accessor | `lma-websocket-transcriber-stack/source/app/src/config/configuration-store.ts` (edit this one) and its copy `lma-virtual-participant-stack/backend/src/configuration-store.ts` |
+| The Virtual Participant's Nova Sonic reader | `lma-virtual-participant-stack/backend/src/nova-sonic-config-loader.ts` |
 | Deploy-time seeder | `lma-ai-stack/source/lambda_functions/configuration_seeder/` |
 | Table, layer and custom resource | `lma-ai-stack/deployment/lma-ai-stack.yaml` |
 | Content-hash computation | `lib/lma_sdk/lma_sdk/_core/publish.py` |

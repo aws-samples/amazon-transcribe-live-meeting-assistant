@@ -3,17 +3,34 @@
 
 /**
  * Nova Sonic Configuration Loader
- * 
- * This module loads and merges Nova Sonic voice assistant configuration from DynamoDB.
- * It supports three prompt modes:
+ *
+ * This module loads and merges the voice assistant's configuration. It supports
+ * three prompt modes:
  * - base: Use custom prompt as-is (or default if no custom)
  * - inject: Append custom prompt to default prompt
  * - replace: Fully replace default with custom prompt
+ *
+ * Where it is read from
+ * ---------------------
+ * The shared configuration table (`CONFIGURATION_TABLE_NAME`), as the
+ * `nova_sonic_config` section: the shipped settings are the baseline's section
+ * and an administrator's overrides are the active profile's. The two layers are
+ * read separately rather than as one merged value because they do not simply
+ * override each other -- in `inject` mode the custom prompt is appended to the
+ * shipped one -- so `mergeConfigs` below combines them exactly as it combined
+ * the previous table's Default and Custom items.
+ *
+ * The previous table (`NOVA_SONIC_CONFIG_TABLE_NAME`) is still read, as a
+ * fallback, when the configuration table cannot be read or holds no shipped
+ * Nova Sonic settings: a stack rolled back across the move, or a table whose
+ * seeder has not run. That table is still seeded by its own stack, and an
+ * administrator's settings in it are the ones saved before the move.
  */
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand } from '@aws-sdk/lib-dynamodb';
 import { isMeetingMode, publishMeetingMode } from './assistant-toggles.js';
+import { ConfigurationStore, NOVA_SONIC_CONFIG } from './configuration-store.js';
 
 /**
  * Supported meeting modes.
@@ -56,7 +73,7 @@ export interface NovaSonicConfig {
  * DynamoDB configuration item interface
  */
 interface DynamoDBConfigItem {
-  NovaSonicConfigId: string;
+  NovaSonicConfigId?: string;
   systemPrompt?: string;
   promptMode?: string;
   modelId?: string;
@@ -107,35 +124,134 @@ function parseMeetingMode(value: unknown): MeetingMode | undefined {
   return isMeetingMode(value) ? value : undefined;
 }
 
+/** The two tables the configuration can come from; either may be absent. */
+export interface NovaSonicConfigTables {
+  /** The shared configuration table, `CONFIGURATION_TABLE_NAME`. */
+  configurationTableName?: string;
+  /** The previous Nova Sonic table, `NOVA_SONIC_CONFIG_TABLE_NAME`. Fallback only. */
+  legacyTableName?: string;
+}
+
+/** The tables named by this process's environment. */
+export function novaSonicConfigTablesFromEnv(
+  env: Record<string, string | undefined> = process.env
+): NovaSonicConfigTables {
+  return {
+    configurationTableName: env.CONFIGURATION_TABLE_NAME || undefined,
+    legacyTableName: env.NOVA_SONIC_CONFIG_TABLE_NAME || undefined,
+  };
+}
+
+/** Whether any table is named, so there is something to load at all. */
+export function hasNovaSonicConfigTable(tables: NovaSonicConfigTables): boolean {
+  return Boolean(tables.configurationTableName || tables.legacyTableName);
+}
+
+/** The shipped and administrator layers, as the previous table's two items. */
+interface ConfigLayers {
+  defaultConfig: DynamoDBConfigItem | null;
+  customConfig: DynamoDBConfigItem | null;
+  source: string;
+}
+
+/** Seams for the tests; production passes none. */
+export interface NovaSonicConfigDeps {
+  /** Builds the store over the given table and client. */
+  storeFor?: (tableName: string, client: DynamoDBClient) => Pick<ConfigurationStore, 'getSection'>;
+  /** Reads the previous table's Default and Custom items. */
+  readLegacy?: (
+    client: DynamoDBClient,
+    tableName: string
+  ) => Promise<{ defaultConfig: DynamoDBConfigItem | null; customConfig: DynamoDBConfigItem | null }>;
+}
+
 /**
- * Load Nova Sonic configuration from DynamoDB
- * 
- * @param dynamoDbClient - DynamoDB client instance
- * @param tableName - Name of the configuration table
+ * The two layers from the shared configuration table, or null to fall back.
+ *
+ * Null when no table is named, when the read fails, and when the baseline holds
+ * no Nova Sonic settings -- which is what an unseeded table, or one belonging to
+ * a release from before the move, looks like. In that last case the profile
+ * layer is not used either: an administrator's overrides with nothing shipped
+ * beneath them are not the configuration anybody saved.
+ */
+async function readFromConfigurationTable(
+  client: DynamoDBClient,
+  tableName: string | undefined,
+  deps: NovaSonicConfigDeps
+): Promise<ConfigLayers | null> {
+  if (!tableName) {
+    return null;
+  }
+  try {
+    const store = deps.storeFor
+      ? deps.storeFor(tableName, client)
+      : new ConfigurationStore({ tableName, client });
+    const section = await store.getSection<DynamoDBConfigItem & Record<string, unknown>>(
+      NOVA_SONIC_CONFIG
+    );
+    if (Object.keys(section.baselineValues).length === 0) {
+      console.warn(
+        `The configuration table ${tableName} holds no shipped Nova Sonic settings; ` +
+          'reading the previous Nova Sonic table instead'
+      );
+      return null;
+    }
+    return {
+      defaultConfig: section.baselineValues,
+      // An empty layer is "nothing overridden", which mergeConfigs spells null.
+      customConfig: Object.keys(section.profileValues).length > 0 ? section.profileValues : null,
+      source: `configuration table (profile: ${section.activeProfile ?? 'none'})`,
+    };
+  } catch (error) {
+    console.error(`Failed to read Nova Sonic settings from the configuration table ${tableName}:`, error);
+    return null;
+  }
+}
+
+async function readLegacyTable(
+  client: DynamoDBClient,
+  tableName: string
+): Promise<{ defaultConfig: DynamoDBConfigItem | null; customConfig: DynamoDBConfigItem | null }> {
+  const docClient = DynamoDBDocumentClient.from(client);
+  return {
+    defaultConfig: await getConfigItem(docClient, tableName, 'DefaultNovaSonicConfig'),
+    customConfig: await getConfigItem(docClient, tableName, 'CustomNovaSonicConfig'),
+  };
+}
+
+/**
+ * Load the voice assistant's configuration.
+ *
+ * @param dynamoDbClient - DynamoDB client instance, in the stack's region
+ * @param tables - The tables to read; see `novaSonicConfigTablesFromEnv`
+ * @param deps - Test seams; production passes none
  * @returns Merged configuration with prompt mode applied
  */
 export async function loadNovaSonicConfig(
   dynamoDbClient: DynamoDBClient,
-  tableName: string
+  tables: NovaSonicConfigTables,
+  deps: NovaSonicConfigDeps = {}
 ): Promise<NovaSonicConfig> {
-  if (!tableName) {
-    console.warn('Nova Sonic config table name not provided, using default configuration');
+  if (!hasNovaSonicConfigTable(tables)) {
+    console.warn('No Nova Sonic configuration table is named, using default configuration');
     return DEFAULT_CONFIG;
   }
 
-  const docClient = DynamoDBDocumentClient.from(dynamoDbClient);
-
   try {
-    // Load default configuration
-    const defaultConfig = await getConfigItem(docClient, tableName, 'DefaultNovaSonicConfig');
-    
-    // Load custom configuration
-    const customConfig = await getConfigItem(docClient, tableName, 'CustomNovaSonicConfig');
-    
+    let layers = await readFromConfigurationTable(dynamoDbClient, tables.configurationTableName, deps);
+    if (!layers && tables.legacyTableName) {
+      const read = deps.readLegacy ?? readLegacyTable;
+      layers = { ...(await read(dynamoDbClient, tables.legacyTableName)), source: 'previous Nova Sonic table' };
+    }
+    if (!layers) {
+      console.warn('Nova Sonic configuration could not be read from any table, using default configuration');
+      return DEFAULT_CONFIG;
+    }
+
     // Merge configurations
-    const mergedConfig = mergeConfigs(defaultConfig, customConfig);
-    
-    console.log('✓ Loaded Nova Sonic config from DynamoDB:', {
+    const mergedConfig = mergeConfigs(layers.defaultConfig, layers.customConfig);
+
+    console.log(`✓ Loaded Nova Sonic config from the ${layers.source}:`, {
       promptMode: mergedConfig.promptMode,
       modelId: mergedConfig.modelId,
       promptLength: mergedConfig.systemPrompt.length,
@@ -160,7 +276,7 @@ export async function loadNovaSonicConfig(
 
 /**
  * Get a configuration item from DynamoDB
- * 
+ *
  * @param docClient - DynamoDB document client
  * @param tableName - Table name
  * @param configId - Configuration ID (DefaultNovaSonicConfig or CustomNovaSonicConfig)
@@ -178,14 +294,14 @@ async function getConfigItem(
         NovaSonicConfigId: configId,
       },
     });
-    
+
     const response = await docClient.send(command);
-    
+
     if (!response.Item) {
       console.warn(`Configuration item not found: ${configId}`);
       return null;
     }
-    
+
     return response.Item as DynamoDBConfigItem;
   } catch (error) {
     // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
@@ -196,7 +312,7 @@ async function getConfigItem(
 
 /**
  * Merge default and custom configurations
- * 
+ *
  * @param defaultConfig - Default configuration from DynamoDB
  * @param customConfig - Custom configuration from DynamoDB (may be null)
  * @returns Merged configuration with prompt mode applied
@@ -207,7 +323,7 @@ function mergeConfigs(
 ): NovaSonicConfig {
   // Start with hardcoded defaults as fallback
   const baseConfig = { ...DEFAULT_CONFIG };
-  
+
   // Apply default config from DynamoDB if available
   if (defaultConfig) {
     if (defaultConfig.systemPrompt) {
@@ -247,19 +363,19 @@ function mergeConfigs(
       baseConfig.translatorUnmutePhrases = defaultUnmutePhrases;
     }
   }
-  
+
   // If no custom config, apply back-compat (groupMeetingMode → meetingMode) and return
   if (!customConfig) {
     return finalizeMeetingMode(baseConfig);
   }
-  
+
   // Determine prompt mode (custom overrides default)
   const promptMode = (customConfig.promptMode === 'base' ||
                       customConfig.promptMode === 'inject' ||
                       customConfig.promptMode === 'replace')
     ? customConfig.promptMode
     : baseConfig.promptMode;
-  
+
   // Determine endpointing sensitivity (custom overrides default)
   const endpointingSensitivity = (customConfig.endpointingSensitivity === 'HIGH' ||
                                   customConfig.endpointingSensitivity === 'MEDIUM' ||
@@ -291,25 +407,25 @@ function mergeConfigs(
     || baseConfig.translatorMutePhrases;
   const translatorUnmutePhrases = parsePhraseList(customConfig.translatorUnmutePhrases)
     || baseConfig.translatorUnmutePhrases;
-  
+
   // Apply prompt mode logic
   console.log('🔧 Applying prompt mode logic:');
   console.log(`   Prompt mode: ${promptMode}`);
   console.log(`   Default prompt length: ${baseConfig.systemPrompt.length} chars`);
   console.log(`   Custom prompt length: ${customConfig.systemPrompt?.length || 0} chars`);
-  
+
   const finalPrompt = applyPromptMode(
     baseConfig.systemPrompt,
     customConfig.systemPrompt,
     promptMode
   );
-  
+
   console.log(`   Final merged prompt length: ${finalPrompt.length} chars`);
   console.log(`   Meeting mode: ${meetingMode}`);
   if (meetingMode === 'translator') {
     console.log(`   Translator languages: ${translatorLanguageA} ↔ ${translatorLanguageB}`);
   }
-  
+
   // Return merged configuration
   return finalizeMeetingMode({
     systemPrompt: finalPrompt,
@@ -340,7 +456,7 @@ function finalizeMeetingMode(config: NovaSonicConfig): NovaSonicConfig {
 
 /**
  * Apply prompt mode logic to combine default and custom prompts
- * 
+ *
  * @param defaultPrompt - Default system prompt
  * @param customPrompt - Custom system prompt (may be undefined)
  * @param mode - Prompt mode (base, inject, or replace)
@@ -356,12 +472,12 @@ function applyPromptMode(
     console.log('   ⚠️  No custom prompt provided, using default only');
     return defaultPrompt;
   }
-  
+
   console.log('   Custom prompt content:');
   console.log('   ┌' + '─'.repeat(78));
   console.log('   │ ' + customPrompt.substring(0, 200) + (customPrompt.length > 200 ? '...' : ''));
   console.log('   └' + '─'.repeat(78));
-  
+
   let result: string;
   switch (mode) {
     case 'inject':
@@ -369,13 +485,13 @@ function applyPromptMode(
       console.log('   ✓ Mode: INJECT - Appending custom prompt to default');
       result = `${defaultPrompt}\n\n${customPrompt}`;
       break;
-    
+
     case 'replace':
       // Replace entirely with custom prompt
       console.log('   ✓ Mode: REPLACE - Using custom prompt only');
       result = customPrompt;
       break;
-    
+
     case 'base':
     default:
       // Use custom prompt as-is (replaces default)
@@ -383,6 +499,6 @@ function applyPromptMode(
       result = customPrompt;
       break;
   }
-  
+
   return result;
 }

@@ -44,6 +44,7 @@ from .keys import (
     validate_profile_name,
 )
 from .sections import (
+    NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
     TIER_CONSISTENT_READ,
     TIER_TTL_SECONDS,
@@ -71,6 +72,7 @@ __all__ = [
     "KEY_ATTRIBUTE",
     "MAX_ITEM_BYTES",
     "METADATA_ATTRIBUTES",
+    "NOVA_SONIC_CONFIG",
     "RESERVED_PROFILE_NAMES",
     "REVISION_INDEX_PREFIX",
     "SCHEMA_KEY",

@@ -3532,6 +3532,11 @@ Resources:
         VoiceAssistantWakePhrases: !Ref VoiceAssistantWakePhrases
         VoiceAssistantActivationDuration: !Ref VoiceAssistantActivationDuration
         NovaSonicConfigTableName: !GetAtt NOVASONICONFIGSTACK.Outputs.NovaSonicConfigTableName
+        # The shared configuration table, which the voice assistant's settings
+        # are read from. The Nova Sonic table above is still passed, as the
+        # fallback read when this one holds no shipped Nova Sonic settings or
+        # cannot be read.
+        ConfigurationTableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
         S3BucketName: !If
           - ShouldCreateRecordingBucket
           - !Ref RecordingsBucket
@@ -4594,6 +4599,16 @@ Outputs:
       to live in is retained, so the old values can be read from it.
     Value: !GetAtt AISTACK.Outputs.ConfigurationProfileOrigin
 
+  ConfigurationSectionAdoption:
+    Description: >-
+      For each configuration store moved into the configuration table after the
+      profile existed, what the latest deployment that ran the seeder found, as
+      section=outcome pairs. 'previous-table-unreadable' is the value to act on:
+      those settings were not carried across from the table they used to live
+      in. The next deployment that runs the seeder tries again; saving the
+      settings from their page in the web UI makes that unnecessary.
+    Value: !GetAtt AISTACK.Outputs.ConfigurationSectionAdoption
+
   # Both links below point at the shared configuration table. The record's body
   # is a compressed attribute there, so these are for inspecting provenance --
   # who saved a record and when -- rather than for editing: prompts are edited
@@ -4640,13 +4655,31 @@ Outputs:
     Description: Edit the *custom* STRANDS agent chat button configuration. Attribute values here override the default button config, and are preserved during stack updates.
     Value: !GetAtt CHATBUTTONCONFIGSTACK.Outputs.CustomChatButtonConfig
 
+  # Like the summary prompt links above, these point at the shared
+  # configuration table, where the settings are a compressed attribute: they
+  # are for inspecting who saved a record and when. The settings are edited on
+  # the Nova Sonic Configuration page in the web UI.
   DefaultNovaSonicConfig:
-    Description: View the *default* Nova Sonic voice assistant configuration. Do not edit - changes will be overwritten on stack updates. To customize, edit the custom config item.
-    Value: !GetAtt NOVASONICONFIGSTACK.Outputs.DefaultNovaSonicConfig
+    Description:
+      View the *default* configuration record, which holds the shipped Nova
+      Sonic voice assistant settings. Rewritten whenever a release changes what
+      it ships, so edit the custom profile instead -- from the Nova Sonic
+      Configuration page in the web UI.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23default&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   CustomNovaSonicConfig:
-    Description: Edit the *custom* Nova Sonic voice assistant configuration. Attribute values here override the default config and are preserved during stack updates.
-    Value: !GetAtt NOVASONICONFIGSTACK.Outputs.CustomNovaSonicConfig
+    Description:
+      View the *custom* configuration profile, which holds the Nova Sonic voice
+      assistant settings that override the shipped ones and is preserved during
+      stack updates. Edit them from the Nova Sonic Configuration page in the
+      web UI.
+    Value: !Sub
+      - "https://${Domain}/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=Config%23custom&route=ROUTE_ITEM_EXPLORER&sk=&table=${TableName}"
+      - Domain: !FindInMap [ConsoleDomain, !Ref "AWS::Partition", Domain]
+        TableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
 
   CallDataStreamName:
     Description: >-

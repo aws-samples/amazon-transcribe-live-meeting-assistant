@@ -5,10 +5,11 @@
 """The two halves of the configuration accessor must describe one store.
 
 The accessor exists twice -- Python for the Lambda functions, and TypeScript in
-the WebSocket transcriber's package, where nothing reads it yet (the Virtual
-Participant is a separate package and will need the module moved or copied).
-Twice, because those run in different runtimes and LMA has no mechanism for
-sharing code between them. That is a duplication with a specific failure mode:
+the WebSocket transcriber's package, copied verbatim into the Virtual
+Participant's package, which reads the Nova Sonic settings through it. Twice,
+because those run in different runtimes and LMA has no mechanism for sharing
+code between them; and the TypeScript half twice, for the same reason between
+two npm packages. That is a duplication with a specific failure mode:
 the halves drift, and the one that drifts reads the other's records as empty or
 as stale. Nothing at runtime notices, because an empty configuration is
 indistinguishable from a configuration nobody has set.
@@ -18,7 +19,9 @@ the TypeScript source as text:
 
 * the partition key, the body attribute and the closed metadata list,
 * the key prefixes and the two keys the store owns,
-* the three cache tiers, their TTLs and which one reads consistently.
+* the three cache tiers, their TTLs and which one reads consistently,
+
+and the two copies of the TypeScript half are held byte-identical.
 
 A TTL that matched on one side and not the other would mean a value the UI
 promises applies at once being served stale to one of the two consumers, which
@@ -45,6 +48,12 @@ TYPESCRIPT_HALF = (
     / "src"
     / "config"
     / "configuration-store.ts"
+)
+
+#: The Virtual Participant's copy. Byte-identical to TYPESCRIPT_HALF; see
+#: test_the_virtual_participant_copy_is_the_transcribers_byte_for_byte.
+TYPESCRIPT_COPY = (
+    REPO_ROOT / "lma-virtual-participant-stack" / "backend" / "src" / "configuration-store.ts"
 )
 
 if str(PYTHON_HALF) not in sys.path:
@@ -80,6 +89,34 @@ def _boolean_in_record(source: str, record: str, key: str) -> bool:
     match = re.search(rf"{key}:\s*(true|false)", body.group(1))
     assert match, f"{record} in the TypeScript half has no entry for {key}"
     return match.group(1) == "true"
+
+
+# ── one TypeScript half, in two packages ────────────────────────────────────
+
+
+def test_the_virtual_participant_copy_is_the_transcribers_byte_for_byte() -> None:
+    """Everything below reads one copy, so the other has to be that copy.
+
+    The Virtual Participant cannot import from the transcriber's package, so the
+    file is copied. A copy edited on its own would be a third accessor that no
+    other test here reads.
+    """
+    assert TYPESCRIPT_COPY.is_file(), f"{TYPESCRIPT_COPY} is not there"
+    assert TYPESCRIPT_COPY.read_bytes() == TYPESCRIPT_HALF.read_bytes(), (
+        "the Virtual Participant's configuration-store.ts differs from the "
+        "transcriber's; make the change in "
+        "lma-websocket-transcriber-stack/source/app/src/config/configuration-store.ts "
+        "and copy it across"
+    )
+
+
+def test_the_shared_typescript_half_imports_nothing_relative() -> None:
+    """A relative import would resolve differently in each package, or not at all."""
+    source = TYPESCRIPT_HALF.read_text(encoding="utf-8")
+    assert not re.search(r"from\s+['\"]\.", source), (
+        "configuration-store.ts imports a sibling module; it has to compile unchanged "
+        "in both packages"
+    )
 
 
 # ── the item layout ─────────────────────────────────────────────────────────

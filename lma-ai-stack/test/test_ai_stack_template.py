@@ -556,9 +556,9 @@ def test_iam_roles_carry_the_permissions_boundary_conditional(resources: dict):
         for name, resource in roles.items()
         if "PermissionsBoundary" not in resource.get("Properties", {})
     }
-    assert len(without) == 33, (
+    assert len(without) == 31, (
         f"{len(without)} of {len(roles)} IAM roles do not reference "
-        f"PermissionsBoundaryArn, expected 33. If a role was added, give it the "
+        f"PermissionsBoundaryArn, expected 31. If a role was added, give it the "
         f"`!If [HasPermissionsBoundary, ...]` block; if one was fixed, lower this "
         f"number and update docs/cloudformation-service-role.md. Roles: "
         f"{sorted(without)}"

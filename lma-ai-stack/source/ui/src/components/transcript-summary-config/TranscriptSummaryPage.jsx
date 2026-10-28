@@ -21,6 +21,7 @@ import {
 } from '@cloudscape-design/components';
 
 import AdminOnly from '../common/AdminOnly';
+import { isConflict } from '../common/config-conflict';
 
 const client = generateClient();
 const getLLMPromptTemplateQuery = `
@@ -48,15 +49,9 @@ const CONFLICT_MESSAGE =
   'Someone else saved these prompts while this page was open. Reload the page to see ' +
   'their version, then apply your changes again.';
 
-// Matched on the prefix the resolver raises with, not on the word anywhere in
-// the error, so an unrelated failure whose text happens to contain it does not
-// tell an administrator to reload. Exported so the match itself is tested: the
-// two outcomes are a message that says what to do and one that says to try
-// again, and getting them the wrong way round is worse than either.
-export const isConflict = (err) => {
-  const messages = (err?.errors ?? []).map((entry) => entry?.message ?? '');
-  return [...messages, err?.message ?? ''].some((message) => message.startsWith('Conflict: '));
-};
+// Shared with the other configuration pages, and re-exported so this page's
+// tests keep asserting the match itself.
+export { isConflict };
 
 // A prompt is stored under a key of this form, where the number orders the
 // sections of the summary. A stored record also carries its version and who
