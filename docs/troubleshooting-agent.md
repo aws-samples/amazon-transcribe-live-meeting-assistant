@@ -96,7 +96,8 @@ Three sections, always in this order:
 ```
 
 The answer starts at `## Root Cause`: anything the model writes before that
-first heading is removed before the answer is returned. Each log line
+heading is removed before the answer is returned (or before its first `##`
+heading, if the model left out `## Root Cause`). Each log line
 `search_logs` returns carries the log group and stream it came from, and the
 Evidence section quotes those values rather than a group name the model
 recalls, so a line is cited against the group that actually holds it.

@@ -333,10 +333,11 @@ failed. It does not record what a successful tool returned.
 """
 
 
-#: The first line of a section heading in the output contract. Matched at the
-#: start of a line and with exactly two hashes, so a "###" sub-heading or a
-#: "##" inside a sentence is not taken for one.
-_FIRST_SECTION_HEADING = re.compile(r"^## ", re.MULTILINE)
+#: The output contract's first section, and any section heading as the fallback
+#: anchor. Both are matched at the start of a line and with exactly two hashes,
+#: so a "###" sub-heading or a "##" inside a sentence is not taken for one.
+_ROOT_CAUSE_HEADING = re.compile(r"^## Root Cause\b", re.MULTILINE)
+_ANY_SECTION_HEADING = re.compile(r"^## ", re.MULTILINE)
 
 
 def strip_preamble(answer: str) -> str:
@@ -348,12 +349,17 @@ def strip_preamble(answer: str) -> str:
     the diagnosis, and the reader pasting the answer into an issue should not
     have to delete it. So it is removed here rather than left to the prompt.
 
+    The anchor is ``## Root Cause``, so a preamble with a ``##`` heading of its
+    own is dropped too. An answer without that heading is cut at its first
+    ``##`` heading instead, which still removes an opening sentence when the
+    model has renamed or skipped the first section.
+
     An answer with no section heading at all is returned whole (stripped of
     surrounding whitespace): with nothing to anchor on there is no telling
     which part is preamble, and losing the model's whole answer would be worse
     than showing it unformatted.
     """
-    match = _FIRST_SECTION_HEADING.search(answer)
+    match = _ROOT_CAUSE_HEADING.search(answer) or _ANY_SECTION_HEADING.search(answer)
     if match is None:
         return answer.strip()
     return answer[match.start():].strip()

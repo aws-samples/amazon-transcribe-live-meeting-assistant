@@ -155,20 +155,24 @@ def build_search_query(
 def _attribute_rows_to_group(rows: List[Dict[str, str]], groups: Sequence[str]) -> int:
     """Give every log-line row the group it came from; count those left without.
 
-    A row that carries ``@logStream`` is a log line the answer may cite, and
-    the Evidence section cites a stream together with its group. Where the
+    A row that carries both ``@logStream`` and ``@message`` is a log line the
+    answer may cite, and the Evidence section cites a stream together with its
+    group. Where the
     query selected ``@log`` the row already has its group. Where it did not and
     exactly one group was searched, that group is the only one the line can
     have come from, so it is filled in. Where several were searched there is
     no way to tell, and the count of such rows is returned so the caller can
     say so rather than leave the model to guess.
 
-    Aggregate rows (no ``@logStream``) are left alone: they summarise lines and
-    are not cited as coming from one stream.
+    Aggregate rows are left alone, including ``stats ... by @logStream`` rows,
+    which carry a stream but no message: they summarise lines rather than quote
+    one, and selecting ``@log`` in ``fields`` would not put a group on them
+    anyway.
     """
     unattributed = 0
     for entry in rows:
-        if "@logStream" not in entry or _ROW_LOG_GROUP_KEY in entry:
+        is_log_line = "@logStream" in entry and "@message" in entry
+        if not is_log_line or _ROW_LOG_GROUP_KEY in entry:
             continue
         if len(groups) == 1:
             entry[_ROW_LOG_GROUP_KEY] = groups[0]
@@ -840,8 +844,8 @@ class TroubleshootingTools:
         guidance: List[str] = []
         if unattributed:
             guidance.append(
-                f"{unattributed} row(s) name a log stream but not the log group "
-                "it belongs to, because this query searched several groups and "
+                f"{unattributed} log line(s) name a log stream but not the log "
+                "group it belongs to, because this query searched several groups and "
                 "did not select @log. Do not infer the group from the names you "
                 "searched. Add @log to the query's fields and run it again "
                 "before citing a group for those lines."

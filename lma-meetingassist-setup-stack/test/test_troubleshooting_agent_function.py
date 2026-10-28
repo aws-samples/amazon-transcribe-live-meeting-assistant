@@ -1592,6 +1592,18 @@ def test_a_deeper_heading_is_not_taken_for_the_first_section() -> None:
     assert agent_function.strip_preamble(answer) == SECTIONS
 
 
+def test_a_preamble_with_a_heading_of_its_own_is_dropped_too() -> None:
+    answer = "## Investigation\nI searched three groups.\n\n" + SECTIONS
+
+    assert agent_function.strip_preamble(answer) == SECTIONS
+
+
+def test_without_a_root_cause_heading_the_first_section_is_the_anchor() -> None:
+    answer = "Done.\n\n## Recommendations\n1. Y."
+
+    assert agent_function.strip_preamble(answer) == "## Recommendations\n1. Y."
+
+
 def test_an_answer_with_no_section_heading_is_returned_whole() -> None:
     """With nothing to anchor on there is no telling which part is preamble,
     and dropping the whole answer would be worse than showing it unformatted."""

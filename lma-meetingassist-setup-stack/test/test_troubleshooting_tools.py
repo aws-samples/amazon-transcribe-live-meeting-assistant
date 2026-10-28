@@ -429,6 +429,25 @@ def test_a_line_from_several_groups_without_its_group_is_flagged_not_guessed() -
     assert "did not select @log" in result["guidance"]
 
 
+def test_a_per_stream_count_over_several_groups_is_not_flagged() -> None:
+    """A ``stats ... by @logStream`` row carries a stream and no message. It
+    is not a line to cite, and "add @log to fields" would not change it."""
+    client = FakeInsightsClient(
+        rows=[row(**{"@logStream": "s1", "count()": "4"})],
+        groups=REAL_GROUPS + [(LEGACY_VP_GROUP, 9000)],
+    )
+
+    result = parsed(
+        make_tools(client).search_logs(
+            f"{VP_GROUP},{LEGACY_VP_GROUP}",
+            query_string="stats count() by @logStream",
+        )
+    )
+
+    assert result["rows"] == [{"@logStream": "s1", "count()": "4"}]
+    assert result["guidance"] is None
+
+
 def test_a_model_supplied_query_is_used_verbatim() -> None:
     """Aggregation is the reason this tool is Insights and not FilterLogEvents."""
     stats = 'fields @message | parse @message "trigger=*" as t | stats count() by t'
