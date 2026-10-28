@@ -3,7 +3,7 @@
   "version": "<VERSION_TOKEN>",
   "private": true,
   "dependencies": {
-    "@cloudscape-design/components": "^3.0.1401",
+    "@cloudscape-design/components": "^3.0.1404",
     "@cloudscape-design/global-styles": "^1.0.71",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -39,7 +39,7 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",
-    "@types/chrome": "^0.3.5",
+    "@types/chrome": "^0.3.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
@@ -48,7 +48,7 @@
     "eslint-plugin-react": "^7.37.5",
     "react-scripts": "5.0.1",
     "typescript": "^4.9.5",
-    "typescript-eslint": "^8.71.2"
+    "typescript-eslint": "^8.72.0"
   },
   "overrides": {
     "ajv@8": "^8.17.1",
