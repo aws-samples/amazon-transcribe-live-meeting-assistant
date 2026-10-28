@@ -2,23 +2,20 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-""" Transcript Batch Processor
-"""
+"""Transcript Batch Processor"""
+
 import asyncio
 import traceback
 from typing import Any, Coroutine, Dict, List, Literal, Optional, Protocol, Tuple, Union
 
-# third-party imports from Lambda layer
-from aws_lambda_powertools import Logger
-from aws_lambda_powertools.utilities.data_classes import KinesisStreamEvent
-from aws_lambda_powertools.utilities.data_classes.kinesis_stream_event import KinesisStreamRecord
-from aws_lambda_powertools.utilities.batch import BatchProcessor, EventType
-
-from gql.client import AsyncClientSession
-
-# module imports from Lambda layer
+# third-party and module imports from Lambda layer
 # pylint: disable=import-error
 from appsync_utils import AppsyncAioGqlClient
+from aws_lambda_powertools import Logger
+from aws_lambda_powertools.utilities.batch import BatchProcessor, EventType
+from aws_lambda_powertools.utilities.data_classes import KinesisStreamEvent
+from aws_lambda_powertools.utilities.data_classes.kinesis_stream_event import KinesisStreamRecord
+from gql.client import AsyncClientSession
 from graphql_helpers import describe_exception, traceback_frames
 
 # pylint: enable=import-error
@@ -43,9 +40,8 @@ class TranscriptBatchProcessor:
             appsync_session: AsyncClientSession,
             sns_client: object,
             agent_assist_args: Dict[str, object],
-            sentiment_analysis_args: Dict[str, object]
-        ) -> Coroutine[Any, Any, Any]:
-            ...
+            sentiment_analysis_args: Dict[str, object],
+        ) -> Coroutine[Any, Any, Any]: ...
 
     def __init__(
         self,
@@ -54,7 +50,7 @@ class TranscriptBatchProcessor:
         sns_client,
         settings: Dict[str, Any],
         agent_assist_args: Optional[Dict[str, Any]] = None,
-        sentiment_analysis_args: Optional[Dict[str, object]] = None
+        sentiment_analysis_args: Optional[Dict[str, object]] = None,
     ):
         self._appsync_client = appsync_client
         self._sns_client = sns_client

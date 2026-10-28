@@ -3,6 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 
 """Transcript Batch Processor"""
+
 from .transcript_batch_processor import TranscriptBatchProcessor
 
 __all__ = ["TranscriptBatchProcessor"]

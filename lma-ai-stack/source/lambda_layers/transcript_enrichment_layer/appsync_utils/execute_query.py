@@ -2,16 +2,16 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-""""Async Query Execute"""
+""" "Async Query Execute"""
+
 import asyncio
 import logging
 from random import randint
 from typing import Callable, Dict, Optional, Union
 
-
+from gql.client import AsyncClientSession, ExecutionResult
 from graphql import print_ast
 from graphql.language.ast import DocumentNode
-from gql.client import AsyncClientSession, ExecutionResult
 
 # module imports from Lambda layer
 # pylint: disable=import-error

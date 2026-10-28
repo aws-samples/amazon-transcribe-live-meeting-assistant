@@ -3,13 +3,13 @@
 # See the LICENSE file in the project root for full license information.
 
 """Weighted Comprehend Sentiment"""
-from typing import TYPE_CHECKING, Optional
-from os import environ
 
+from os import environ
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
-    from mypy_boto3_comprehend.type_defs import DetectSentimentResponseTypeDef
     from mypy_boto3_comprehend.literals import SentimentTypeType
+    from mypy_boto3_comprehend.type_defs import DetectSentimentResponseTypeDef
 else:
     DetectSentimentResponseTypeDef = object
     SentimentTypeType = object
@@ -21,15 +21,16 @@ class ComprehendWeightedSentiment:
 
     Used to produce Comprehend sentiment scores based on a weighted scaled range
     """
+
     DEFAULT_SCALE_RANGE = 5
-    DEFAULT_NEGATIVE_THRESHOLD = environ.get('SENTIMENT_NEGATIVE_THRESHOLD') or 0.4
-    DEFAULT_POSITIVE_THRESHOLD = environ.get('SENTIMENT_POSITIVE_THRESHOLD') or 0.4
+    DEFAULT_NEGATIVE_THRESHOLD = environ.get("SENTIMENT_NEGATIVE_THRESHOLD") or 0.4
+    DEFAULT_POSITIVE_THRESHOLD = environ.get("SENTIMENT_POSITIVE_THRESHOLD") or 0.4
 
     def __init__(
         self,
         scale_range: int = DEFAULT_SCALE_RANGE,
         negative_threshold: float = float(DEFAULT_NEGATIVE_THRESHOLD),
-        positive_threshold: float = float(DEFAULT_POSITIVE_THRESHOLD)
+        positive_threshold: float = float(DEFAULT_POSITIVE_THRESHOLD),
     ) -> None:
         """Initializes the Comprehend Weighted Sentiment
 

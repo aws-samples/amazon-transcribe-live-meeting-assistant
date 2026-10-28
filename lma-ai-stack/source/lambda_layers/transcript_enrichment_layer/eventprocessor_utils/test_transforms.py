@@ -131,9 +131,7 @@ def test_a_segment_that_is_neither_is_rejected():
 )
 def test_customer_is_renamed_to_caller(participant, expected):
     """Contact Lens says CUSTOMER; the LMA schema knows CALLER."""
-    segment = transform_contact_lens_segment(
-        final_segment(**{"ParticipantRole": participant})
-    )
+    segment = transform_contact_lens_segment(final_segment(**{"ParticipantRole": participant}))
     assert segment["Channel"] == expected
 
 
@@ -212,9 +210,7 @@ def test_a_category_spans_all_of_its_points_of_interest():
 def test_a_category_with_one_point_of_interest_uses_its_bounds():
     segment = transform_segment_to_categories_agent_assist(
         category="greeting",
-        category_details={
-            "PointsOfInterest": [{"BeginOffsetMillis": 0, "EndOffsetMillis": 1500}]
-        },
+        category_details={"PointsOfInterest": [{"BeginOffsetMillis": 0, "EndOffsetMillis": 1500}]},
         call_id="contact-1",
     )
     assert segment["StartTime"] == 0.0
@@ -243,8 +239,7 @@ def issue_segment(begin_char: int = 4, end_char: int = 20) -> dict:
             "BeginOffsetMillis": 2000,
             "EndOffsetMillis": 5000,
             "IssuesDetected": [
-                {"CharacterOffsets": {"BeginOffsetChar": begin_char,
-                                      "EndOffsetChar": end_char}}
+                {"CharacterOffsets": {"BeginOffsetChar": begin_char, "EndOffsetChar": end_char}}
             ],
         },
     }
@@ -300,7 +295,8 @@ def test_every_transform_stamps_the_transcript_ttl_and_status(builder):
         row = transform_contact_lens_segment(final_segment())
     elif builder == "category":
         row = transform_segment_to_categories_agent_assist(
-            "a", {"PointsOfInterest": [{"BeginOffsetMillis": 0, "EndOffsetMillis": 1}]},
+            "a",
+            {"PointsOfInterest": [{"BeginOffsetMillis": 0, "EndOffsetMillis": 1}]},
             "contact-1",
         )
     else:

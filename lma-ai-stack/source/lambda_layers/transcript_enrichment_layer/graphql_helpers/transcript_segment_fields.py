@@ -5,6 +5,7 @@
 """Transcript Segment type field selector"""
 
 from typing import Tuple
+
 from gql.dsl import DSLField, DSLSchema
 
 

@@ -137,9 +137,7 @@ def handler(event, context):  # pylint: disable=unused-argument
     # this function computes different terms from the one that stored them.
     if enrollments and not voices:
         agreed = {
-            row.get("TermsSha256")
-            for row in enrollments
-            if row.get("Status") == pure.STATUS_ACTIVE
+            row.get("TermsSha256") for row in enrollments if row.get("Status") == pure.STATUS_ACTIVE
         }
         current = pure.terms_fingerprint(terms_text())
         if agreed == {None}:
@@ -158,11 +156,7 @@ def handler(event, context):  # pylint: disable=unused-argument
             )
     # Counts only. The point of this function is to move names and voiceprints,
     # and neither belongs in a log line.
-    LOGGER.info(
-        "Seeding %s with %d of %d enrollment(s)", call_id, len(voices), len(enrollments)
-    )
+    LOGGER.info("Seeding %s with %d of %d enrollment(s)", call_id, len(voices), len(enrollments))
     return {
-        "EnrolledVoices": [
-            {"label": voice["label"], "vector": voice["vector"]} for voice in voices
-        ]
+        "EnrolledVoices": [{"label": voice["label"], "vector": voice["vector"]} for voice in voices]
     }

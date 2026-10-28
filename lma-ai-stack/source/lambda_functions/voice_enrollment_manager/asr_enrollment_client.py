@@ -123,7 +123,9 @@ def _invoke_launcher(payload):
             Payload=json.dumps(payload).encode("utf-8"),
         )
         if response.get("FunctionError"):
-            LOGGER.error("ASR launcher %s failed: %s", payload.get("action"), response["FunctionError"])
+            LOGGER.error(
+                "ASR launcher %s failed: %s", payload.get("action"), response["FunctionError"]
+            )
             return None
         body = json.loads(response["Payload"].read().decode("utf-8"))
     except Exception:  # noqa: BLE001 - reported to the caller as "no endpoint"
@@ -203,9 +205,7 @@ def embed_utterances(samples):
 
     try:
         vectors = asyncio.run(
-            asyncio.wait_for(
-                _embed(frames, endpoint, auth_token), timeout=EMBED_TIMEOUT_SECONDS
-            )
+            asyncio.wait_for(_embed(frames, endpoint, auth_token), timeout=EMBED_TIMEOUT_SECONDS)
         )
     except TimeoutError as error:
         raise RuntimeError("the embedding session did not respond in time") from error

@@ -2,11 +2,11 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-""" Async SNS Client Utilities
-"""
+"""Async SNS Client Utilities"""
+
 import asyncio
-from typing import TYPE_CHECKING
 import json
+from typing import TYPE_CHECKING
 
 # third-party imports from Lambda layer
 from aws_lambda_powertools import Logger
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 else:
     SNSClient = object
     PublishSNSResponseTypeDef = object
+
 
 async def publish_sns(
     category_name: str,
@@ -40,9 +41,15 @@ async def publish_sns(
                 None,
                 lambda: sns_client.publish(
                     TargetArn=sns_topic_arn,
-                    Message=json.dumps({'default': json.dumps({'call_id':call_id, 'category_name':category_name, 'alert': alert})}),
-                    MessageStructure='json',
-                    Subject='Call Category Match'
+                    Message=json.dumps(
+                        {
+                            "default": json.dumps(
+                                {"call_id": call_id, "category_name": category_name, "alert": alert}
+                            )
+                        }
+                    ),
+                    MessageStructure="json",
+                    Subject="Call Category Match",
                 ),
             )
             sns_published = True

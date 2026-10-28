@@ -12,7 +12,7 @@ from datetime import datetime
 from os import getenv
 from statistics import fmean
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Mapping, Optional, TypedDict
+from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Mapping, Optional
 
 # third-party imports from Lambda layer
 import boto3
@@ -44,7 +44,6 @@ from graphql_helpers import (
 )
 from metrics_utils import catalogue as metric_names
 from metrics_utils.emf import METRICS
-from sns_utils import publish_sns
 
 # The AWS-free computation, split out so it can be tested without importing this
 # module (which needs aiohttp, powertools and the layer on the path). See pure.py.
@@ -53,14 +52,13 @@ from pure import (  # noqa: E402
     Sentiment,
     SentimentByPeriodEntry,
     SentimentEntry,
-    SentimentLabelType,
-    SentimentPeriodType,
     SentimentPerChannel,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
     matches_wake_phrase,
     merge_dicts,
 )
+from sns_utils import publish_sns
 
 # pylint: enable=import-error
 if TYPE_CHECKING:
@@ -1538,14 +1536,16 @@ async def execute_process_event_api_mutation(
         # the client's own retry policy if it outran the socket timeout, running
         # the whole pass several times over. Nothing downstream waits on the
         # names, so there is nothing to order against.
-        if SPEAKER_NAME_RESOLVER_ARN and not IS_TRANSCRIPT_SUMMARY_ENABLED and not was_already_ended:
+        if (
+            SPEAKER_NAME_RESOLVER_ARN
+            and not IS_TRANSCRIPT_SUMMARY_ENABLED
+            and not was_already_ended
+        ):
             try:
                 LAMBDA_HOOK_CLIENT.invoke(
                     FunctionName=SPEAKER_NAME_RESOLVER_ARN,
                     InvocationType="Event",
-                    Payload=json.dumps(
-                        {"CallId": message.get("CallId"), "Trigger": "meeting-end"}
-                    ),
+                    Payload=json.dumps({"CallId": message.get("CallId"), "Trigger": "meeting-end"}),
                 )
                 LOGGER.debug("END Event: queued the speaker name resolver")
             except Exception:  # pylint: disable=broad-except

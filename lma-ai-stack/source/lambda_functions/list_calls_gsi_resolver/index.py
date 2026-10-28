@@ -310,9 +310,7 @@ def list_calls_date_range(event):
                 # (PK, SK), so a GSI resume key needs all three.
                 if position < len(list_items) - 1:
                     last_key = {
-                        key: list_item[key]
-                        for key in ("ItemType", "PK", "SK")
-                        if key in list_item
+                        key: list_item[key] for key in ("ItemType", "PK", "SK") if key in list_item
                     }
                 break
 

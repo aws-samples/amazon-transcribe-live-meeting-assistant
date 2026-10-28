@@ -119,8 +119,9 @@ def test_segment_expiry_is_recomputed_and_not_taken_from_the_producer():
     Asserted deliberately: a producer that sent a stale or hostile `ExpiresAfter`
     would otherwise control how long transcripts are kept.
     """
-    segment = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                            "ExpiresAfter": 12345})
+    segment = normalize_one(
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "ExpiresAfter": 12345}
+    )
     assert segment["ExpiresAfter"] != 12345
     assert segment["ExpiresAfter"] > datetime.now(timezone.utc).timestamp()
 
@@ -151,49 +152,69 @@ def test_custom_producer_keeps_zero_millisecond_offsets():
 
 def test_custom_producer_prefers_explicit_times_over_offsets():
     """Both spellings present: the explicit times win, including when they are 0."""
-    segment = normalize_one({
-        **CUSTOM_BASE,
-        "BeginOffsetMillis": 5000, "EndOffsetMillis": 9000,
-        "StartTime": 0.0, "EndTime": 1.0,
-    })
+    segment = normalize_one(
+        {
+            **CUSTOM_BASE,
+            "BeginOffsetMillis": 5000,
+            "EndOffsetMillis": 9000,
+            "StartTime": 0.0,
+            "EndTime": 1.0,
+        }
+    )
     assert segment["StartTime"] == 0.0
     assert segment["EndTime"] == 1.0
 
 
 def test_transcribe_streaming_event_keeps_zero_times():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "TranscriptEvent": {
-            "Channel": "AGENT", "ResultId": "r1", "StartTime": 0.0, "EndTime": 0.0,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "TranscriptEvent": {
+                "Channel": "AGENT",
+                "ResultId": "r1",
+                "StartTime": 0.0,
+                "EndTime": 0.0,
+                "Transcript": "hello",
+                "IsPartial": False,
+            },
+        }
+    )
     assert segment["StartTime"] == 0.0
     assert segment["EndTime"] == 0.0
 
 
 def test_call_analytics_utterance_event_keeps_zero_offsets():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "UtteranceEvent": {
-            "ParticipantRole": "AGENT", "UtteranceId": "u1",
-            "BeginOffsetMillis": 0, "EndOffsetMillis": 0,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "UtteranceEvent": {
+                "ParticipantRole": "AGENT",
+                "UtteranceId": "u1",
+                "BeginOffsetMillis": 0,
+                "EndOffsetMillis": 0,
+                "Transcript": "hello",
+                "IsPartial": False,
+            },
+        }
+    )
     assert segment["StartTime"] == 0.0
     assert segment["EndTime"] == 0.0
 
 
 def test_call_analytics_offsets_are_converted_to_seconds():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "UtteranceEvent": {
-            "ParticipantRole": "AGENT", "UtteranceId": "u1",
-            "BeginOffsetMillis": 1500, "EndOffsetMillis": 4250,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "UtteranceEvent": {
+                "ParticipantRole": "AGENT",
+                "UtteranceId": "u1",
+                "BeginOffsetMillis": 1500,
+                "EndOffsetMillis": 4250,
+                "Transcript": "hello",
+                "IsPartial": False,
+            },
+        }
+    )
     assert segment["StartTime"] == 1.5
     assert segment["EndTime"] == 4.25
 
@@ -205,44 +226,52 @@ def test_call_analytics_offsets_are_converted_to_seconds():
     ("producer_channel", "expected"),
     [("CUSTOMER", "CALLER"), ("AGENT", "AGENT"), ("CALLER", "CALLER")],
 )
-def test_transcribe_streaming_customer_channel_is_renamed_to_caller(
-    producer_channel, expected
-):
+def test_transcribe_streaming_customer_channel_is_renamed_to_caller(producer_channel, expected):
     """LMA's schema knows CALLER/AGENT; Transcribe Call Analytics says CUSTOMER."""
-    segment = normalize_one({
-        "CallId": "call-1",
-        "TranscriptEvent": {
-            "Channel": producer_channel, "ResultId": "r1",
-            "StartTime": 1.0, "EndTime": 2.0,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "TranscriptEvent": {
+                "Channel": producer_channel,
+                "ResultId": "r1",
+                "StartTime": 1.0,
+                "EndTime": 2.0,
+                "Transcript": "hello",
+                "IsPartial": False,
+            },
+        }
+    )
     assert segment["Channel"] == expected
 
 
 def test_transcribe_streaming_without_a_speaker_gets_a_placeholder():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "TranscriptEvent": {
-            "Channel": "AGENT", "ResultId": "r1", "StartTime": 1.0, "EndTime": 2.0,
-            "Transcript": "hello", "IsPartial": False,
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "TranscriptEvent": {
+                "Channel": "AGENT",
+                "ResultId": "r1",
+                "StartTime": 1.0,
+                "EndTime": 2.0,
+                "Transcript": "hello",
+                "IsPartial": False,
+            },
+        }
+    )
     assert segment["Speaker"] == "Other Participant"
 
 
 def test_custom_producer_channel_follows_is_caller():
-    caller = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                            "IsCaller": True})
-    agent = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                           "IsCaller": False})
+    caller = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "IsCaller": True})
+    agent = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "IsCaller": False})
     assert caller["Channel"] == "CALLER"
     assert agent["Channel"] == "AGENT"
 
 
 def test_custom_producer_explicit_channel_wins_over_is_caller():
-    segment = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                             "Channel": "AGENT", "IsCaller": True})
+    segment = normalize_one(
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "Channel": "AGENT", "IsCaller": True}
+    )
     assert segment["Channel"] == "AGENT"
 
 
@@ -255,8 +284,9 @@ def test_custom_producer_gets_a_generated_segment_id_when_none_is_sent():
 
 
 def test_custom_producer_keeps_the_segment_id_it_is_given():
-    segment = normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0,
-                             "SegmentId": "seg-42"})
+    segment = normalize_one(
+        {**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0, "SegmentId": "seg-42"}
+    )
     assert segment["SegmentId"] == "seg-42"
 
 
@@ -265,16 +295,22 @@ def test_custom_producer_keeps_the_segment_id_it_is_given():
 
 def test_call_analytics_partial_segment_carries_no_sentiment():
     """Sentiment on an incomplete utterance would be scored on half a sentence."""
-    segment = normalize_one({
-        "CallId": "call-1",
-        "UtteranceEvent": {
-            "ParticipantRole": "AGENT", "UtteranceId": "u1",
-            "BeginOffsetMillis": 0, "EndOffsetMillis": 500,
-            "Transcript": "hello", "IsPartial": True,
-            "Sentiment": "POSITIVE", "SentimentWeighted": 5,
-            "SentimentScore": {"Positive": 0.9},
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "UtteranceEvent": {
+                "ParticipantRole": "AGENT",
+                "UtteranceId": "u1",
+                "BeginOffsetMillis": 0,
+                "EndOffsetMillis": 500,
+                "Transcript": "hello",
+                "IsPartial": True,
+                "Sentiment": "POSITIVE",
+                "SentimentWeighted": 5,
+                "SentimentScore": {"Positive": 0.9},
+            },
+        }
+    )
     assert segment["IsPartial"] is True
     assert segment["Sentiment"] is None
     assert segment["SentimentWeighted"] is None
@@ -282,16 +318,22 @@ def test_call_analytics_partial_segment_carries_no_sentiment():
 
 
 def test_call_analytics_final_segment_keeps_its_sentiment():
-    segment = normalize_one({
-        "CallId": "call-1",
-        "UtteranceEvent": {
-            "ParticipantRole": "AGENT", "UtteranceId": "u1",
-            "BeginOffsetMillis": 0, "EndOffsetMillis": 500,
-            "Transcript": "hello", "IsPartial": False,
-            "Sentiment": "POSITIVE", "SentimentWeighted": 5,
-            "SentimentScore": {"Positive": 0.9},
-        },
-    })
+    segment = normalize_one(
+        {
+            "CallId": "call-1",
+            "UtteranceEvent": {
+                "ParticipantRole": "AGENT",
+                "UtteranceId": "u1",
+                "BeginOffsetMillis": 0,
+                "EndOffsetMillis": 500,
+                "Transcript": "hello",
+                "IsPartial": False,
+                "Sentiment": "POSITIVE",
+                "SentimentWeighted": 5,
+                "SentimentScore": {"Positive": 0.9},
+            },
+        }
+    )
     assert segment["Sentiment"] == "POSITIVE"
     assert segment["SentimentWeighted"] == 5
     assert segment["SentimentScore"] == {"Positive": 0.9}
@@ -304,8 +346,16 @@ def test_every_segment_carries_the_fields_the_mutation_requires():
     """A missing key is a mutation-time failure, so the shape is pinned here."""
     segment = normalize_one({**CUSTOM_BASE, "StartTime": 0.0, "EndTime": 1.0})
     for field in (
-        "CallId", "Channel", "SegmentId", "StartTime", "EndTime", "Transcript",
-        "IsPartial", "Status", "ExpiresAfter", "CreatedAt",
+        "CallId",
+        "Channel",
+        "SegmentId",
+        "StartTime",
+        "EndTime",
+        "Transcript",
+        "IsPartial",
+        "Status",
+        "ExpiresAfter",
+        "CreatedAt",
     ):
         assert field in segment, f"{field} missing from the normalised segment"
     assert segment["StartTime"] is not None
@@ -313,8 +363,9 @@ def test_every_segment_carries_the_fields_the_mutation_requires():
 
 
 def test_a_new_segment_starts_in_the_transcribing_status():
-    assert normalize_one({**CUSTOM_BASE, "StartTime": 1.0,
-                          "EndTime": 2.0})["Status"] == "TRANSCRIBING"
+    assert (
+        normalize_one({**CUSTOM_BASE, "StartTime": 1.0, "EndTime": 2.0})["Status"] == "TRANSCRIBING"
+    )
 
 
 def test_created_at_is_an_offset_aware_iso_timestamp():
@@ -342,15 +393,23 @@ def test_an_unset_access_token_leaves_the_owner_unset():
 
 def test_contact_lens_categories_do_not_become_transcript_segments():
     """Category segments are the agent-assist path's business, not transcript rows."""
-    segments = ep.normalize_transcript_segments({
-        "ContactId": "contact-1",
-        "Segments": [
-            {"Categories": {"MatchedCategories": ["escalation"]}},
-            {"Transcript": {"Id": "t1", "ParticipantId": "AGENT",
-                            "BeginOffsetMillis": 0, "EndOffsetMillis": 1000,
-                            "Content": "hello"}},
-        ],
-    })
+    segments = ep.normalize_transcript_segments(
+        {
+            "ContactId": "contact-1",
+            "Segments": [
+                {"Categories": {"MatchedCategories": ["escalation"]}},
+                {
+                    "Transcript": {
+                        "Id": "t1",
+                        "ParticipantId": "AGENT",
+                        "BeginOffsetMillis": 0,
+                        "EndOffsetMillis": 1000,
+                        "Content": "hello",
+                    }
+                },
+            ],
+        }
+    )
     assert len(segments) == 1
     assert segments[0]["CallId"] == "contact-1"
 

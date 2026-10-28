@@ -2,29 +2,28 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-from typing import TYPE_CHECKING, Any, Coroutine, Dict, List, Literal, Optional
+import asyncio
+import uuid
 from datetime import datetime, timedelta
 from os import getenv
-import uuid
-import asyncio
-from sentiment import ComprehendWeightedSentiment
+from typing import TYPE_CHECKING, Any, Dict, List
+
 import jwt
 from jwt import PyJWKClient
+from sentiment import ComprehendWeightedSentiment
 
 if TYPE_CHECKING:
-    from mypy_boto3_comprehend.type_defs import DetectSentimentResponseTypeDef
     from mypy_boto3_comprehend.client import ComprehendClient
+    from mypy_boto3_comprehend.type_defs import DetectSentimentResponseTypeDef
 else:
     ComprehendClient = object
     DetectSentimentResponseTypeDef = object
 
-MEETING_RECORD_EXPIRATION_IN_DAYS = getenv(
-    "MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
-TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS = getenv(
-    "TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
+MEETING_RECORD_EXPIRATION_IN_DAYS = getenv("MEETING_RECORD_EXPIRATION_IN_DAYS", "90")
+TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS = getenv("TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS", "90")
 
 region = getenv("VITE_AWS_REGION", "us-east-1")
-user_pool_id = getenv("VITE_USER_POOL_ID", '')
+user_pool_id = getenv("VITE_USER_POOL_ID", "")
 
 jwks_url = f"https://cognito-idp.{region}.amazonaws.com/{user_pool_id}/.well-known/jwks.json"
 jwks_client = PyJWKClient(jwks_url)
@@ -57,35 +56,37 @@ def get_meeting_ttl():
 def get_transcription_ttl():
     return get_ttl(TRANSCRIPTION_RECORD_EXPIRATION_IN_DAYS)
 
+
 def get_owner_from_jwt(jwt_token):
     """
     Extract owner from JWT token with proper signature verification.
-    
+
     Args:
         jwt_token: JWT access token from Cognito
-        
+
     Returns:
         username from token if valid, None if token is empty/invalid
-        
+
     Note:
         Always verifies JWT signature for security. Empty tokens return None
         so caller can fall back to AgentId (for Virtual Participant service calls).
     """
     # Handle empty tokens by using AgentId as fallback (for VP service calls)
-    if not jwt_token or jwt_token == '':
+    if not jwt_token or jwt_token == "":
         print("Empty JWT token, using AgentId as owner")
         return None  # Will be handled by caller to use AgentId
-    
+
     try:
         # ALWAYS verify the token signature for security
         decoded_jwt = verify_cognito_token(jwt_token)
-        
+
         if decoded_jwt:
-            return decoded_jwt['username']
+            return decoded_jwt["username"]
         return None
     except Exception as e:
         print(f"JWT decode failed: {e}, using AgentId as owner")
         return None  # Will be handled by caller to use AgentId
+
 
 def verify_cognito_token(token):
     try:
@@ -110,6 +111,7 @@ def verify_cognito_token(token):
     except jwt.exceptions.InvalidTokenError as e:
         print("Token verification failed:", e)
         return None
+
 
 def transform_segment_to_categories_agent_assist(
     category: str,
@@ -213,8 +215,7 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
         segment_item = segment["Utterance"]
         segment_id = segment_item["TranscriptId"]
         content = segment_item["PartialContent"]
-        UTTERANCES_MAP[segment_id] = UTTERANCES_MAP.get(
-            segment_id, "") + " " + content
+        UTTERANCES_MAP[segment_id] = UTTERANCES_MAP.get(segment_id, "") + " " + content
         transcript = UTTERANCES_MAP[segment_id]
     # final transcript
     elif "Transcript" in segment:
@@ -262,13 +263,13 @@ def transform_contact_lens_segment(segment: Dict) -> Dict[str, object]:
         **sentiment_args,
     )
 
-    if (utterance):
+    if utterance:
         transcript_segment["Utterance"] = utterance
 
-    if (categories):
+    if categories:
         transcript_segment["Categories"] = categories
 
-    if (contact_lens_transcript):
+    if contact_lens_transcript:
         transcript_segment["ContactLensTranscript"] = contact_lens_transcript
 
     return transcript_segment
@@ -300,14 +301,14 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
     transcriptEvent = message.get("TranscriptEvent", None)
     contactLensEvent = message.get("ContactId", None)
 
-    if (utteranceEvent):  # TCA streaming event in KDS
+    if utteranceEvent:  # TCA streaming event in KDS
         call_id = message["CallId"]
         channel = utteranceEvent["ParticipantRole"]
         if channel == "CUSTOMER":
             channel = "CALLER"
         segment_id = utteranceEvent["UtteranceId"]
-        start_time = utteranceEvent["BeginOffsetMillis"]/1000
-        end_time = utteranceEvent["EndOffsetMillis"]/1000
+        start_time = utteranceEvent["BeginOffsetMillis"] / 1000
+        end_time = utteranceEvent["EndOffsetMillis"] / 1000
         transcript = utteranceEvent["Transcript"]
         is_partial = utteranceEvent["IsPartial"]
         if not is_partial and utteranceEvent.get("Sentiment", None):
@@ -338,7 +339,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 CreatedAt=created_at,
             )
         )
-    elif (transcriptEvent):  # Standard Transcribe streaming event in KDS
+    elif transcriptEvent:  # Standard Transcribe streaming event in KDS
         call_id = message["CallId"]
         channel = transcriptEvent["Channel"]
         if channel == "CUSTOMER":
@@ -347,7 +348,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
         start_time = transcriptEvent["StartTime"]
         end_time = transcriptEvent["EndTime"]
         speaker = transcriptEvent.get("Speaker", None)
-        if (not speaker):
+        if not speaker:
             speaker = "Other Participant"
         transcript = transcriptEvent["Transcript"]
         is_partial = transcriptEvent["IsPartial"]
@@ -371,7 +372,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 CreatedAt=created_at,
             )
         )
-    elif (contactLensEvent):  # Contact Lens event
+    elif contactLensEvent:  # Contact Lens event
         call_id = message["ContactId"]
         for segment in message.get("Segments", []):
             # only handle utterances and transcripts - delegate categories to agent assist
@@ -382,7 +383,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             }
             segments.append(transcript_segment)
 
-    else:    # custom event message in KDS
+    else:  # custom event message in KDS
         call_id = message["CallId"]
         channel = "CALLER"
         if message.get("Channel", None):
@@ -415,7 +416,7 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
             end_time = message["EndTime"]
 
         speaker = message.get("Speaker", None)
-        if (not speaker):
+        if not speaker:
             speaker = "Other Participant"
 
         transcript = message["Transcript"]
@@ -423,10 +424,10 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
 
         if message.get("Sentiment", None):
             sentiment = message["Sentiment"]
-        
+
         if message.get("AccessToken", None):
             owner = get_owner_from_jwt(message.get("AccessToken"))
-            
+
         segments.append(
             dict(
                 CallId=call_id,
@@ -446,14 +447,16 @@ def normalize_transcript_segments(message: Dict) -> List[Dict]:
                 Owner=owner,
                 IdToken=message.get("IdToken", None),
                 AccessToken=message.get("AccessToken", None),
-                RefreshToken=message.get("RefreshToken", None)
+                RefreshToken=message.get("RefreshToken", None),
             )
         )
 
     return segments
 
 
-async def detect_sentiment(text: str, COMPREHEND_CLIENT: ComprehendClient, COMPREHEND_LANGUAGE_CODE) -> DetectSentimentResponseTypeDef:
+async def detect_sentiment(
+    text: str, COMPREHEND_CLIENT: ComprehendClient, COMPREHEND_LANGUAGE_CODE
+) -> DetectSentimentResponseTypeDef:
     loop = asyncio.get_running_loop()
     sentiment_future = loop.run_in_executor(
         None,
@@ -467,13 +470,15 @@ async def detect_sentiment(text: str, COMPREHEND_CLIENT: ComprehendClient, COMPR
     return result
 
 
-async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_args: Dict) -> Dict[str, object]:
+async def transform_segment_to_add_sentiment(
+    message: Dict, sentiment_analysis_args: Dict
+) -> Dict[str, object]:
 
     sentiment_label_in_message = message.get("Sentiment", None)
 
     sentiment = {}
     # we received sentiment label in transcript, use it.
-    if (sentiment_label_in_message):
+    if sentiment_label_in_message:
         sentiment_weighted_in_message = message.get("SentimentWeighted", None)
         sentiment_score_in_message = message.get("SentimentScore", None)
 
@@ -489,23 +494,21 @@ async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_a
             SentimentWeighted=None,
         )
 
-        if (sentiment_weighted_in_message):
+        if sentiment_weighted_in_message:
             sentiment["SentimentWeighted"] = sentiment_weighted_in_message
         elif sentimentlabel in ["POSITIVE", "NEGATIVE", "NEUTRAL"]:
-            sentiment["SentimentWeighted"] = SENTIMENT_WEIGHT.get(
-                sentimentlabel, 0)
-        if (sentiment_score_in_message):
+            sentiment["SentimentWeighted"] = SENTIMENT_WEIGHT.get(sentimentlabel, 0)
+        if sentiment_score_in_message:
             sentiment["SentimentScore"] = sentiment_score_in_message
 
     else:  # did not receive sentiment label, so call Comprehend to figure out sentiment
-
         text = message.get("OriginalTranscript", message.get("Transcript", ""))
-        comprehend_client: ComprehendClient = sentiment_analysis_args.get(
-            "comprehend_client")
-        comprehend_language_code = sentiment_analysis_args.get(
-            "comprehend_language_code", "en")
+        comprehend_client: ComprehendClient = sentiment_analysis_args.get("comprehend_client")
+        comprehend_language_code = sentiment_analysis_args.get("comprehend_language_code", "en")
 
-        sentiment_response: DetectSentimentResponseTypeDef = await detect_sentiment(text, comprehend_client, comprehend_language_code)
+        sentiment_response: DetectSentimentResponseTypeDef = await detect_sentiment(
+            text, comprehend_client, comprehend_language_code
+        )
         comprehend_weighted_sentiment = ComprehendWeightedSentiment()
 
         sentiment = {
@@ -514,11 +517,10 @@ async def transform_segment_to_add_sentiment(message: Dict, sentiment_analysis_a
 
         if sentiment:
             if sentiment.get("Sentiment") in ["POSITIVE", "NEGATIVE"]:
-                sentiment["SentimentWeighted"] = comprehend_weighted_sentiment.get_weighted_sentiment_score(
-                    sentiment_response=sentiment_response
+                sentiment["SentimentWeighted"] = (
+                    comprehend_weighted_sentiment.get_weighted_sentiment_score(
+                        sentiment_response=sentiment_response
+                    )
                 )
-    transcript_segment_with_sentiment = {
-        **message,
-        **sentiment
-    }
+    transcript_segment_with_sentiment = {**message, **sentiment}
     return transcript_segment_with_sentiment

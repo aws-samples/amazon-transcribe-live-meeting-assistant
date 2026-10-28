@@ -72,21 +72,25 @@ def test_an_empty_meeting_still_produces_four_periods():
 
 def test_four_evenly_spaced_segments_land_one_per_period():
     """The simplest case, and the one that pins the boundary arithmetic."""
-    quarters = get_sentiment_per_quarter([
-        entry(0, 1000, 1.0),
-        entry(1000, 2000, 2.0),
-        entry(2000, 3000, 3.0),
-        entry(3000, 4000, 4.0),
-    ])
+    quarters = get_sentiment_per_quarter(
+        [
+            entry(0, 1000, 1.0),
+            entry(1000, 2000, 2.0),
+            entry(2000, 3000, 3.0),
+            entry(3000, 4000, 4.0),
+        ]
+    )
     assert [q["Score"] for q in quarters] == [1.0, 2.0, 3.0, 4.0]
 
 
 def test_scores_within_a_period_are_averaged():
-    quarters = get_sentiment_per_quarter([
-        entry(0, 500, 1.0),
-        entry(500, 1000, 3.0),
-        entry(3000, 4000, 4.0),
-    ])
+    quarters = get_sentiment_per_quarter(
+        [
+            entry(0, 500, 1.0),
+            entry(500, 1000, 3.0),
+            entry(3000, 4000, 4.0),
+        ]
+    )
     assert quarters[0]["Score"] == pytest.approx(2.0)
     assert quarters[3]["Score"] == pytest.approx(4.0)
 
@@ -117,10 +121,12 @@ def test_every_segment_is_counted_exactly_once():
 
 def test_a_segment_ending_on_a_boundary_falls_in_the_earlier_period():
     """Two segments, one ending exactly at the midpoint of a 0-4000 meeting."""
-    quarters = get_sentiment_per_quarter([
-        entry(0, 2000, 7.0),   # ends exactly on the 2nd/3rd boundary
-        entry(2000, 4000, 9.0),
-    ])
+    quarters = get_sentiment_per_quarter(
+        [
+            entry(0, 2000, 7.0),  # ends exactly on the 2nd/3rd boundary
+            entry(2000, 4000, 9.0),
+        ]
+    )
     assert quarters[1]["Score"] == pytest.approx(7.0)
     assert quarters[2]["Score"] == 0
     assert quarters[3]["Score"] == pytest.approx(9.0)
@@ -131,22 +137,29 @@ def test_the_periods_are_derived_from_the_meeting_not_from_zero():
 
     Dividing from zero instead would push every segment into the last period.
     """
-    quarters = get_sentiment_per_quarter([
-        entry(10_000, 11_000, 1.0),
-        entry(11_000, 12_000, 2.0),
-        entry(12_000, 13_000, 3.0),
-        entry(13_000, 14_000, 4.0),
-    ])
+    quarters = get_sentiment_per_quarter(
+        [
+            entry(10_000, 11_000, 1.0),
+            entry(11_000, 12_000, 2.0),
+            entry(12_000, 13_000, 3.0),
+            entry(13_000, 14_000, 4.0),
+        ]
+    )
     assert [q["Score"] for q in quarters] == [1.0, 2.0, 3.0, 4.0]
     assert quarters[0]["BeginOffsetMillis"] == 10_000
 
 
 def test_input_order_does_not_matter():
     """Kinesis does not guarantee order, so the result must not depend on it."""
-    forwards = [entry(0, 1000, 1.0), entry(1000, 2000, 2.0),
-                entry(2000, 3000, 3.0), entry(3000, 4000, 4.0)]
-    assert get_sentiment_per_quarter(list(reversed(forwards))) == \
-        get_sentiment_per_quarter(forwards)
+    forwards = [
+        entry(0, 1000, 1.0),
+        entry(1000, 2000, 2.0),
+        entry(2000, 3000, 3.0),
+        entry(3000, 4000, 4.0),
+    ]
+    assert get_sentiment_per_quarter(list(reversed(forwards))) == get_sentiment_per_quarter(
+        forwards
+    )
 
 
 def test_negative_scores_are_preserved():
