@@ -1017,7 +1017,8 @@ export class NovaAgent implements VoiceAssistantProvider {
           // OTHER language" and "speak in A or B", repeated an English
           // utterance back in English in 4 of 17 single-utterance replays of
           // this session setup; with these three lines, in none of 24 (18 of
-          // them with an earlier wording of rule 6, 6 with the current one).
+          // them with the previous "unclear or in a third language" wording
+          // of rule 6, 6 with the current one).
           ...translatorDirectionRules(a, b),
           '4. Do NOT greet, explain, summarize, answer questions, or add any commentary.',
           '5. Preserve meaning, names, numbers, and dates. Keep output concise.',
