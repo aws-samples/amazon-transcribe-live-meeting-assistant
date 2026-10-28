@@ -31,7 +31,7 @@
  * These helpers are pure and import no UI, so they stay unit-testable and usable
  * from the non-React embed path.
  */
-import { DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
+import { DEFAULT_DESKTOP_SYSTEM_LABEL, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
 import { splitDiarizationLabel } from './utilities';
 
 /** Current shape of the stored JSON. Bump when a migration is needed. */
@@ -194,10 +194,11 @@ const NAMEABLE_CHANNELS = ['CALLER', 'AGENT'];
 
 /**
  * Stored base names that stand for "somebody not yet named". Mirrors
- * PLACEHOLDER_SPEAKERS in the speaker-name resolver; 'Other participants' is
- * the Desktop Capture App's default system-audio label.
+ * PLACEHOLDER_SPEAKERS in the speaker-name resolver, so a voice under any of
+ * them -- including a whole unseparated channel -- counts as unnamed here exactly
+ * when the resolver will work on it.
  */
-const PLACEHOLDER_BASES = [DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, 'Other participants', ''];
+const PLACEHOLDER_BASES = [DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_DESKTOP_SYSTEM_LABEL, ''];
 
 /**
  * Channel-wide labels the engine has split into several voices.

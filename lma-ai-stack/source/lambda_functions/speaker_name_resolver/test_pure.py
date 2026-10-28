@@ -211,6 +211,22 @@ def test_roster_names_sharing_voice_ids_are_not_treated_as_a_channel_label() -> 
     assert pure.unresolved_voices(pure.build_turns(roster), empty()) == []
 
 
+def test_a_channel_label_is_judged_on_the_whole_transcript_not_the_trimmed_one() -> None:
+    """The second voice id may be heard only in the middle a long meeting trims
+    away; the label is still the channel's, as the Speakers panel sees it."""
+    whole = pure.build_turns(
+        [
+            seg("Others (spk_0)", 0, "My name is Chris"),
+            seg("Others (spk_1)", 5, "and I'm Jeremy"),
+            seg("Others (spk_0)", 10, "let's start"),
+        ]
+    )
+    trimmed = [whole[0], whole[2]]
+    assert pure.unresolved_voices(trimmed, empty()) == []
+    assert pure.unresolved_voices(trimmed, empty(), whole) == ["CALLER#Others (spk_0)"]
+    assert pure.worth_a_model_call(trimmed, empty(), force=True, all_turns=whole)
+
+
 def test_the_desktop_app_default_label_is_a_placeholder() -> None:
     single = [seg("Other participants (spk_0)", 0, "My name is Chris")]
     assert pure.unresolved_voices(pure.build_turns(single), empty()) == [

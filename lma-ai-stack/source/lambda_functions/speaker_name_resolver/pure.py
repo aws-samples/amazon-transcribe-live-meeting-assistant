@@ -360,7 +360,7 @@ def channel_label_bases(turns):
     voice ids, it is a label the client gave the channel and the engine has
     split it into several people. A Virtual Participant meeting is untouched,
     because its CALLER channel carries a different roster name per attendee.
-    The UI's `hasMultipleVoicesOnAChannel` applies the same shape test.
+    The UI's `channelLabelBases` applies the same test, and the two must agree.
 
     Returns a set of `(channel, base)` pairs.
     """
@@ -378,7 +378,7 @@ def channel_label_bases(turns):
     return out
 
 
-def unresolved_voices(turns, identities):
+def unresolved_voices(turns, identities, all_turns=None):
     """Voices with no name yet that a pass could usefully work on.
 
     A voice whose stored base name already reads as a person -- a meeting roster
@@ -398,7 +398,11 @@ def unresolved_voices(turns, identities):
         and entry.get("status") != "proposed"
     }
     merges = identities.get("merges") or {}
-    labels = channel_label_bases(turns)
+    # Which labels are channel-wide is judged on the WHOLE transcript, not the
+    # trimmed list the model reads: a second voice heard only in the trimmed
+    # middle still makes the label a channel's, and the Speakers panel, which
+    # sees every segment, has to reach the same answer.
+    labels = channel_label_bases(turns if all_turns is None else all_turns)
     out = []
     for key in voices_in(turns):
         if merges.get(key):
@@ -469,7 +473,7 @@ def _parse_iso(value):
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def worth_a_model_call(turns, identities, force=False):
+def worth_a_model_call(turns, identities, force=False, all_turns=None):
     """Is there anything in this transcript that could name an unnamed voice?
 
     Skips the model when no turn contains so much as an introduction or a thanks.
@@ -481,7 +485,7 @@ def worth_a_model_call(turns, identities, force=False):
     the shortcut declines to judge and the pass runs -- otherwise naming is
     silently unavailable for whole languages, which is what happened before.
     """
-    if not unresolved_voices(turns, identities):
+    if not unresolved_voices(turns, identities, all_turns):
         return False
     if force:
         return True
@@ -807,7 +811,7 @@ def merge_applied_onto(latest, applied_entries):
     return merged, changed
 
 
-def apply_proposals(identities, proposals, turns, now_iso):
+def apply_proposals(identities, proposals, turns, now_iso, all_turns=None):
     """Fold verified proposals into the stored map.
 
     Returns `(updated_map, applied)` where `applied` describes what changed, for
@@ -833,7 +837,7 @@ def apply_proposals(identities, proposals, turns, now_iso):
     if isinstance(identities.get("lastPass"), dict):
         updated["lastPass"] = dict(identities["lastPass"])
     turns_by_number = {t["turn"]: t for t in turns}
-    nameable = set(unresolved_voices(turns, identities))
+    nameable = set(unresolved_voices(turns, identities, all_turns))
     protected = settled_keys(identities)
     applied = []
 

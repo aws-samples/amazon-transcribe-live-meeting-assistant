@@ -279,6 +279,11 @@ describe('buildSpeakerRoster', () => {
     expect(roster.every((r) => !r.isPlaceholder)).toBe(true);
   });
 
+  it('treats an unseparated default-labelled channel as waiting for a name', () => {
+    const roster = buildSpeakerRoster(segments, emptyIdentities(), 'Room 3');
+    expect(roster.find((r) => r.key === 'AGENT#Me').isPlaceholder).toBe(true);
+  });
+
   it('treats the desktop app default label as a placeholder', () => {
     const roster = buildSpeakerRoster(
       [{ channel: 'CALLER', speaker: 'Other participants (spk_0)', startTime: 0, endTime: 2, isPartial: false }],

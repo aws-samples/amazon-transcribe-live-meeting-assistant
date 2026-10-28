@@ -186,8 +186,15 @@ default label (`Other Participant`, the desktop app's `Other participants`, or
 the Stream Audio form, or your address on the microphone channel — is treated as
 a person's name while one voice is heard on that channel, and as a channel label
 once speaker separation has split it into two or more voices, at which point those
-voices are named like any other. A Virtual Participant meeting, where each voice
-already carries the attendee's name from the meeting roster, is left as it is.
+voices are named like any other. A Virtual Participant channel carrying more than
+one attendee's roster name is left as it is; one carrying a single roster name
+that separation has split into several voices is treated like any other label,
+since that is one meeting seat with several people behind it.
+
+The default labels count as unnamed on an unseparated channel too, so a meeting
+whose remote side is a single `Other Participant` or `Other participants` voice,
+or whose microphone is `Me`, keeps its automatic passes running until that voice
+is named.
 
 On a long meeting the opening turns and the most recent ones are used rather than
 the whole transcript — introductions cluster at the start, and keeping the recent
