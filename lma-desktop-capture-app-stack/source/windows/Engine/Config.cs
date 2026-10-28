@@ -32,6 +32,7 @@ public sealed class Config
     /// </summary>
     public string RefreshToken = "";
     public string CallId = "";
+    public string ConfiguredCallId = "";
     public string AgentId = "";
     public string FromNumber = "";
     public string ToNumber = "";
@@ -97,6 +98,16 @@ public sealed class Config
         "restrictions that apply to recording meetings and calls. Do not use this solution " +
         "to stream, record, or transcribe calls if otherwise prohibited.";
 
+    public static string DefaultCallId(DateTime utc) =>
+        "LMA native prototype - " + utc.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+
+    public static string SessionCallId(string? requested, string configured, DateTime utcNow)
+    {
+        if (!string.IsNullOrEmpty(requested)) return requested!;
+        if (!string.IsNullOrEmpty(configured)) return configured;
+        return DefaultCallId(utcNow);
+    }
+
     public static Config Parse(string[] argv)
     {
         var env = Environment.GetEnvironmentVariables();
@@ -128,7 +139,7 @@ public sealed class Config
         }
 
         int sr = int.TryParse(Value("sample-rate", "LMA_SAMPLE_RATE", "samplingRate", "48000"), out var p) ? p : 48000;
-        var defaultCallId = "LMA native prototype - " + DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        var configuredCallId = Value("call-id", "LMA_CALL_ID");
 
         return new Config
         {
@@ -136,7 +147,8 @@ public sealed class Config
             AccessToken = Value("token", "LMA_ACCESS_TOKEN"),
             IdToken = Value("id-token", "LMA_ID_TOKEN"),
             RefreshToken = Value("refresh-token", "LMA_REFRESH_TOKEN"),
-            CallId = Value("call-id", "LMA_CALL_ID", null, defaultCallId),
+            CallId = SessionCallId(null, configuredCallId, DateTime.UtcNow),
+            ConfiguredCallId = configuredCallId,
             AgentId = Value("agent-id", "LMA_AGENT_ID", null, "Me"),
             FromNumber = Value("from", "LMA_FROM", null, "Other participants"),
             ToNumber = Value("to", "LMA_TO", null, "System"),

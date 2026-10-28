@@ -404,7 +404,7 @@ bakes the deployment's real values into it; the checked-in copy is a placeholder
 | — | `--token` | `LMA_ACCESS_TOKEN` | pasted access token (alt to login) |
 | — | `--id-token` | `LMA_ID_TOKEN` | pasted id token |
 | — | `--refresh-token` | `LMA_REFRESH_TOKEN` | pasted refresh token, lets the session renew itself (prefer the env var — argv is visible to other local users) |
-| — | `--call-id` | `LMA_CALL_ID` | default `"LMA native prototype - <ISO8601 now>"` |
+| — | `--call-id` | `LMA_CALL_ID` | default `"LMA native prototype - <ISO8601 time the recording starts>"` |
 | — | `--agent-id` | `LMA_AGENT_ID` | mic-channel label, default `"Me"` |
 | — | `--from` | `LMA_FROM` | meeting-channel label, default `"Other participants"` |
 | — | `--to` | `LMA_TO` | default `"System"` |
