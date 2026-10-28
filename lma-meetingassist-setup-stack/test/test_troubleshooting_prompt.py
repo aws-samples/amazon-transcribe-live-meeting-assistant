@@ -249,6 +249,10 @@ def prompt_text() -> str:
         "## Recommendations",
         "Evidence",
         "Not determined",
+        # The answer opens with its first section, and the group it cites for
+        # a log line is the one the tool returned on that line.
+        'The first characters of your answer are "## Root Cause"',
+        "the logGroup value on the search_logs rows you are quoting",
         # The constraint that shapes every investigation in LMA.
         "log-driven, not state-driven",
         # The two anti-patterns that make this agent usable rather than

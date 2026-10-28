@@ -61,8 +61,20 @@ _QUERY_SUCCEEDED = "Complete"
 
 # Fields a default (non-expert) query selects. @logStream is included because
 # the VP and transcriber groups carry one stream per meeting, so the stream
-# name is itself the correlation key.
-_DEFAULT_FIELDS = "@timestamp, @logStream, @message"
+# name is itself the correlation key. @log is included because one query can
+# span several groups, and the group a line came from is what the answer's
+# Evidence section cites: without it on the row, the model has to remember
+# which of the groups it named held the line, and on an upgraded stack, where
+# the current and legacy MicroVM groups differ by one suffix, it gets that
+# wrong.
+_DEFAULT_FIELDS = "@timestamp, @log, @logStream, @message"
+
+# The key a row's source log group is returned under. Insights reports @log as
+# "<account-id>:<log-group-name>"; the row carries the bare name instead, the
+# form discover_log_groups returns and the Evidence section quotes.
+_ROW_LOG_GROUP_KEY = "logGroup"
+_INSIGHTS_LOG_FIELD = "@log"
+_ACCOUNT_PREFIX = re.compile(r"^\d{12}:")
 
 
 class ToolError(RuntimeError):
@@ -138,6 +150,31 @@ def build_search_query(
         f'@message like "{_escape_insights_string(term)}"' for term in search_terms
     )
     return f"{select}\n| filter {clauses}\n| sort @timestamp desc\n| limit {limit}"
+
+
+def _attribute_rows_to_group(rows: List[Dict[str, str]], groups: Sequence[str]) -> int:
+    """Give every log-line row the group it came from; count those left without.
+
+    A row that carries ``@logStream`` is a log line the answer may cite, and
+    the Evidence section cites a stream together with its group. Where the
+    query selected ``@log`` the row already has its group. Where it did not and
+    exactly one group was searched, that group is the only one the line can
+    have come from, so it is filled in. Where several were searched there is
+    no way to tell, and the count of such rows is returned so the caller can
+    say so rather than leave the model to guess.
+
+    Aggregate rows (no ``@logStream``) are left alone: they summarise lines and
+    are not cited as coming from one stream.
+    """
+    unattributed = 0
+    for entry in rows:
+        if "@logStream" not in entry or _ROW_LOG_GROUP_KEY in entry:
+            continue
+        if len(groups) == 1:
+            entry[_ROW_LOG_GROUP_KEY] = groups[0]
+        else:
+            unattributed += 1
+    return unattributed
 
 
 #: VP statuses after which the participant does not run again.
@@ -798,8 +835,17 @@ class TroubleshootingTools:
             end_time=end_time,
             row_limit=row_limit,
         )
+        unattributed = _attribute_rows_to_group(rows, groups)
 
         guidance: List[str] = []
+        if unattributed:
+            guidance.append(
+                f"{unattributed} row(s) name a log stream but not the log group "
+                "it belongs to, because this query searched several groups and "
+                "did not select @log. Do not infer the group from the names you "
+                "searched. Add @log to the query's fields and run it again "
+                "before citing a group for those lines."
+            )
         if not rows:
             guidance.extend(
                 _empty_result_guidance(
@@ -988,6 +1034,10 @@ class TroubleshootingTools:
         ``@ptr`` is dropped: it is an opaque pointer used to fetch the
         surrounding log record, which this tool cannot do, so it is pure
         context cost.
+
+        ``@log`` is returned as ``logGroup``, without its account-id prefix,
+        and is never truncated: it is the name the answer quotes, and a
+        shortened one would be a different group.
         """
         out: Dict[str, str] = {}
         for field in row:
@@ -995,6 +1045,9 @@ class TroubleshootingTools:
             if name == "@ptr":
                 continue
             value = field.get("value") or ""
+            if name == _INSIGHTS_LOG_FIELD:
+                out[_ROW_LOG_GROUP_KEY] = _ACCOUNT_PREFIX.sub("", value)
+                continue
             out[name] = truncate(value, self._limits.max_log_message_length)
         return out
 
