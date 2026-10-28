@@ -198,15 +198,16 @@ Virtual Participant images, and the browser extension and desktop capture app
 packages) previously wrote to `/aws/codebuild/<project>`, which CodeBuild creates
 on the first build. The new groups sit under the same `/<stack>/` prefix as the
 Lambda groups, so `lma logs` lists them, and each one is deleted with the stack
-that owns it. Builds that ran before the upgrade, including the ones the upgrade
-itself starts before each project is updated, stay in the old groups.
+that owns it. Output from builds that ran before the upgrade stays in the old
+groups. The builds the upgrade itself runs start only after their project has
+been updated, so they already write to the new groups.
 
 **Nothing is migrated, and the old groups are left behind.** Logs already in the
 implicit `/aws/lambda/<function-name>` groups, in the two MicroVM groups and in
-the `/aws/codebuild/<project>` groups above, stay exactly where they are. CloudFormation does not own them, this
-upgrade does not delete them, and they still have no expiry — so they are
-permanent leftovers until you delete them. See [Cleanup](cleanup.md) for the
-prefixes to sweep.
+the `/aws/codebuild/<project>` groups above, stay exactly where they are.
+CloudFormation does not own them, this upgrade does not delete them, and they
+still have no expiry — so they are permanent leftovers until you delete them.
+See [Cleanup](cleanup.md) for the prefixes to sweep.
 
 **VPC Flow Log retention now follows your setting.** The VPC stack applied its
 own 14-day default whatever `CloudWatchLogsExpirationInDays` was set to at the

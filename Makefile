@@ -175,6 +175,7 @@ setup-python: ## Create .venv and install Python dev/lint dependencies
 	@echo "Upgrading pip..."
 	$(VENV_DIR)/bin/pip install --upgrade pip
 	@echo "Installing Python lint/dev tools..."
+	@test -n "$(RUFF_VERSION)" || { echo -e "$(RED)ERROR: no ruff==<version> pin in $(ASR_SOURCE_DIR)/requirements-dev.txt, which is where RUFF_VERSION is read from.$(NC)"; exit 1; }
 	$(VENV_DIR)/bin/pip install \
 		bandit \
 		black \
