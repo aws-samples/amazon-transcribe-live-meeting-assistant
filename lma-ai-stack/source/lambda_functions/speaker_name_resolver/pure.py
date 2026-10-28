@@ -44,7 +44,15 @@ DEFAULT_OTHER_SPEAKER_NAME = "Other Participant"
 # on the microphone channel could never be named at all -- the same
 # over-rejection as every other guard in this module's history.
 DEFAULT_LOCAL_SPEAKER_NAME = "Me"
-PLACEHOLDER_SPEAKERS = (DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, "")
+# The Desktop Capture App's default label for the system-audio channel. A
+# client-chosen channel label, not a person, exactly like the two above.
+DEFAULT_DESKTOP_SYSTEM_LABEL = "Other participants"
+PLACEHOLDER_SPEAKERS = (
+    DEFAULT_OTHER_SPEAKER_NAME,
+    DEFAULT_LOCAL_SPEAKER_NAME,
+    DEFAULT_DESKTOP_SYSTEM_LABEL,
+    "",
+)
 DIARIZATION_LABEL = re.compile(r"^(.*?)(\s*\(spk_\d+\))$")
 
 # Channels that carry a nameable human voice.
@@ -338,7 +346,39 @@ def settled_keys(identities):
     return settled
 
 
-def unresolved_voices(turns, identities):
+def channel_label_bases(turns):
+    """Base names that label a whole channel rather than one person.
+
+    The participant name on the Stream Audio form and the desktop app's labels
+    are free text, so a channel can be called anything -- "Others", or the
+    user's own address on the microphone -- and comparing against the stock
+    placeholders alone treated every such voice as already named. With voice
+    separation on, that left "Identify speakers" with nothing to work on.
+
+    The structural test does not depend on the wording: when every turn on a
+    channel carries ONE base name, and that name appears with two or more
+    voice ids, it is a label the client gave the channel and the engine has
+    split it into several people. A Virtual Participant meeting is untouched,
+    because its CALLER channel carries a different roster name per attendee.
+    The UI's `channelLabelBases` applies the same test, and the two must agree.
+
+    Returns a set of `(channel, base)` pairs.
+    """
+    bases = {}
+    voice_ids = {}
+    for turn in turns:
+        base, suffix = split_diarization_label(turn["key"].split("#", 1)[1])
+        bases.setdefault(turn["channel"], set()).add(base)
+        if suffix:
+            voice_ids.setdefault(turn["channel"], set()).add(suffix.strip())
+    out = set()
+    for channel, names in bases.items():
+        if len(names) == 1 and len(voice_ids.get(channel, ())) >= 2:
+            out.add((channel, next(iter(names))))
+    return out
+
+
+def unresolved_voices(turns, identities, all_turns=None):
     """Voices with no name yet that a pass could usefully work on.
 
     A voice whose stored base name already reads as a person -- a meeting roster
@@ -358,6 +398,11 @@ def unresolved_voices(turns, identities):
         and entry.get("status") != "proposed"
     }
     merges = identities.get("merges") or {}
+    # Which labels are channel-wide is judged on the WHOLE transcript, not the
+    # trimmed list the model reads: a second voice heard only in the trimmed
+    # middle still makes the label a channel's, and the Speakers panel, which
+    # sees every segment, has to reach the same answer.
+    labels = channel_label_bases(turns if all_turns is None else all_turns)
     out = []
     for key in voices_in(turns):
         if merges.get(key):
@@ -366,14 +411,11 @@ def unresolved_voices(turns, identities):
             continue
         if key in named or key in settled_keys(identities):
             continue
-        base, suffix = split_diarization_label(key.split("#", 1)[-1])
-        if base not in PLACEHOLDER_SPEAKERS:
+        channel, speaker = key.split("#", 1)
+        base, _suffix = split_diarization_label(speaker)
+        if base not in PLACEHOLDER_SPEAKERS and (channel, base) not in labels:
             # Already reads as a person: a meeting-roster name from a Virtual
-            # Participant, or a channel name the client supplied.
-            continue
-        if not suffix and base in PLACEHOLDER_SPEAKERS:
-            # A whole channel with no separation: nameable, and worth asking about.
-            out.append(key)
+            # Participant, or a channel name the client supplied for one voice.
             continue
         out.append(key)
     return out
@@ -431,7 +473,7 @@ def _parse_iso(value):
     return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
 
 
-def worth_a_model_call(turns, identities, force=False):
+def worth_a_model_call(turns, identities, force=False, all_turns=None):
     """Is there anything in this transcript that could name an unnamed voice?
 
     Skips the model when no turn contains so much as an introduction or a thanks.
@@ -443,7 +485,7 @@ def worth_a_model_call(turns, identities, force=False):
     the shortcut declines to judge and the pass runs -- otherwise naming is
     silently unavailable for whole languages, which is what happened before.
     """
-    if not unresolved_voices(turns, identities):
+    if not unresolved_voices(turns, identities, all_turns):
         return False
     if force:
         return True
@@ -769,7 +811,7 @@ def merge_applied_onto(latest, applied_entries):
     return merged, changed
 
 
-def apply_proposals(identities, proposals, turns, now_iso):
+def apply_proposals(identities, proposals, turns, now_iso, all_turns=None):
     """Fold verified proposals into the stored map.
 
     Returns `(updated_map, applied)` where `applied` describes what changed, for
@@ -795,7 +837,7 @@ def apply_proposals(identities, proposals, turns, now_iso):
     if isinstance(identities.get("lastPass"), dict):
         updated["lastPass"] = dict(identities["lastPass"])
     turns_by_number = {t["turn"]: t for t in turns}
-    nameable = set(unresolved_voices(turns, identities))
+    nameable = set(unresolved_voices(turns, identities, all_turns))
     protected = settled_keys(identities)
     applied = []
 
