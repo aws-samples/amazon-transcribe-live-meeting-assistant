@@ -100,7 +100,7 @@ the runtime-switch table the Transcription Engine page edits, and the IAM roles 
 not available in GovCloud. Deploying with `MicrovmAsr` in an unsupported region
 fails with `Unrecognized resource types: [AWS::Lambda::MicrovmImage]`.
 
-**First deployment builds the image**, which downloads the models (~150 MB for the
+**First deployment builds the image**, which downloads the models (~1.1 GB for the
 default bundle) and warms them. Expect several extra minutes on the first create and
 on any later change of bundle. Build logs, and the logs of every ASR session's
 MicroVM, land in `/aws/lambda-microvms/<stack-name>-asr-logs`, which the stack
@@ -118,7 +118,7 @@ deployer should have to answer:
 
 | Mapping key | Value | Purpose |
 |---|---|---|
-| `ModelBundle` | `parakeet-tdt-v3-titanet-small` | Which models the image is built from, with their measured diarization operating point |
+| `ModelBundle` | `parakeet-tdt-v3-live-nemotron35-sortformer` | Which models the image is built from, with their measured diarization operating point |
 | `MaxMeetingSeconds` | `14400` | Hard lifetime ceiling per MicroVM, and the cost backstop |
 
 To change either, edit the mapping and update the stack. `scripts/sync_bundles.py
@@ -137,7 +137,7 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `fastconformer-transcription-only` | FastConformer streaming EN 480 ms | — | — | — | CC-BY-4.0 |
 | `nemotron35-titanet-small` | Nemotron 3.5 ASR streaming 0.6B, 560 ms (punctuated, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | OpenMDW-1.1 + CC-BY-4.0 + MIT |
 | `nemotron-titanet-small` | Nemotron speech streaming EN 0.6B, 560 ms | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | NVIDIA Open Model License (not redistributable) + CC-BY-4.0 + MIT |
-| `parakeet-tdt-v3-titanet-small` (default) | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
+| `parakeet-tdt-v3-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v2-titanet-small` | Parakeet TDT 0.6B v2 (offline engine, English) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `qwen3-asr-titanet-small` | Qwen3-ASR 0.6B (offline engine, LLM decoder, multilingual) | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms; labels per utterance | Apache-2.0 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `qwen3-asr-transcription-only` | Qwen3-ASR 0.6B (offline engine) | — | — | — | Apache-2.0 + MIT (VAD) |
@@ -146,12 +146,18 @@ image (`model.env`), so nothing has to be tuned and nothing can be mis-set.
 | `parakeet-tdt-v3-live-nemotron35-titanet-small` | Parakeet TDT 0.6B v3 (offline engine) with a punctuated Nemotron 3.5 live preview | TitaNet-small | pyannote segmentation 3.0 | 0.5, 2500 ms | CC-BY-4.0 + OpenMDW-1.1 + CC-BY-4.0 + MIT + MIT (VAD) |
 | `parakeet-tdt-v3-sortformer` | Parakeet TDT 0.6B v3 (offline engine) | Nemotron 3 Diarization (end to end) | built in | none to tune; up to 8 speakers per channel | CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
 | `parakeet-tdt-v3-live-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a FastConformer live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + CC-BY-4.0 + OpenMDW-1.1 + MIT (VAD) |
-| `parakeet-tdt-v3-live-nemotron35-sortformer` | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
+| `parakeet-tdt-v3-live-nemotron35-sortformer` (default) | Parakeet TDT 0.6B v3 (offline engine) with a Nemotron 3.5 live preview | Nemotron 3 Diarization | built in | none to tune; up to 8 speakers | CC-BY-4.0 + OpenMDW-1.1 + OpenMDW-1.1 + MIT (VAD) |
 
-The default is Parakeet TDT 0.6B v3 on the offline engine (CC-BY-4.0): punctuated,
-cased, 25 languages, and in the live runs of 2026-09-22 the most accurate model with the
-only per-turn speaker labels that were right throughout. FastConformer, the previous
-default, is the lightest streaming option: the same cache-aware FastConformer-RNNT
+The default is `parakeet-tdt-v3-live-nemotron35-sortformer`: Parakeet TDT 0.6B v3's finals, a punctuated Nemotron 3.5 preview
+of the utterance still being spoken, and Nemotron 3 Diarization labelling every word. Text
+appears while people speak, and short replies get their own rows and speakers with no
+threshold to tune. It is the heaviest bundle and is `experimental` until vetted; it kept
+up with two sessions in its live runs. Parakeet v3 with TitaNet-small
+(`parakeet-tdt-v3-titanet-small`), the previous default, is the `vetted` choice for
+lighter images: punctuated, cased, 25 languages, and in the live runs of 2026-09-22 the
+most accurate model with the only per-turn speaker labels that were right throughout, but
+rows appear only when an utterance closes. FastConformer, the default before that, is the
+lightest streaming option: the same cache-aware FastConformer-RNNT
 architecture as NVIDIA's Nemotron speech models, CC-BY-4.0, English only, no punctuation,
 at a real-time factor of about 0.26 on a 4-core host.
 
@@ -169,7 +175,7 @@ labels are one per utterance rather than per turn. Every alternative reuses Tita
 so the operating point carries over unchanged; each is `calibrated` until vetted live.
 The `-sortformer` bundles have no threshold to measure and are `experimental` until vetted;
 a bundle with no status in the catalog reports `uncalibrated`.
-Parakeet v3 is `vetted` and the default after the live runs of 2026-09-22: text on a par with
+Parakeet v3 with TitaNet-small is `vetted` after the live runs of 2026-09-22: text on a par with
 Qwen3-ASR, every speaker turn of 2.5 s or more labelled correctly, and rows within about 20 s
 of speech.
 

@@ -1589,7 +1589,7 @@ Mappings:
   # cost backstop if a transcriber task dies without releasing one (max 28800).
   AsrDefaults:
     Engine:
-      ModelBundle: parakeet-tdt-v3-titanet-small
+      ModelBundle: parakeet-tdt-v3-live-nemotron35-sortformer
       MaxMeetingSeconds: "14400"
 
   # Console hostname per partition, for the console links in Outputs.

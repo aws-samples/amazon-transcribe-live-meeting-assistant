@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "defaultBundleId": "parakeet-tdt-v3-titanet-small",
+  "defaultBundleId": "parakeet-tdt-v3-live-nemotron35-sortformer",
   "bundleNote": "A bundle names the ASR model, the speaker embedder and the turn-detection model TOGETHER WITH the diarization operating point that goes with them, so a deployment is never asked for a threshold. The default and every bundle marked redistributable are permissively licensed; a bundle marked redistributable: false carries weights under the NVIDIA Open Model License and is offered only for deployments that accept it. The operating point is a property of the EMBEDDER and the segmentation policy (endpointing silence and the minimum utterance floor), not of the ASR model: the embedding is computed from raw samples, and the ASR model contributes nothing to those samples or, under a fixed endpointing configuration, to where a segment starts and ends. That is why one measured embedder can be paired with a different ASR model without re-measuring - and why a different embedder always needs its own measurement (scripts/calibrate.py).",
   "bundles": [
     {
@@ -71,7 +71,7 @@
       "baselineMemoryMiB": 8192,
       "redistributable": true,
       "licenceSummary": "CC-BY-4.0 (ASR) + CC-BY-4.0 (speaker) + MIT (segmentation) + MIT (VAD)",
-      "notes": "Default. Vetted live on 2026-09-22: two voices and an advert narrator labelled correctly on every turn of 2.5 s or more, rows within about 20 s of speech, no dropped words. Offline engine: no live partial text while somebody is speaking."
+      "notes": "The previous default. Vetted live on 2026-09-22: two voices and an advert narrator labelled correctly on every turn of 2.5 s or more, rows within about 20 s of speech, no dropped words. Offline engine: no live partial text while somebody is speaking."
     },
     {
       "id": "parakeet-tdt-v2-titanet-small",
@@ -209,7 +209,7 @@
       "redistributable": true,
       "previewModelId": "nemotron-3.5-asr-streaming-0.6b-560ms-int8",
       "licenceSummary": "CC-BY-4.0 (ASR) + OpenMDW-1.1 (preview ASR) + OpenMDW-1.1 (diarization) + MIT (VAD)",
-      "notes": "Two-pass with a punctuated Nemotron 3.5 preview; Parakeet's finals labelled per word by the diarizer. Heaviest bundle: watch CPU with two sessions. Ran live on 2026-09-28 and 2026-09-30 with two sessions and kept up."
+      "notes": "Default. Two-pass with a punctuated Nemotron 3.5 preview; Parakeet's finals labelled per word by the diarizer. Heaviest bundle: watch CPU with two sessions. Ran live on 2026-09-28 and 2026-09-30 with two sessions and kept up."
     }
   ],
   "models": [
