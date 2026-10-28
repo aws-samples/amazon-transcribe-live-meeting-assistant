@@ -244,8 +244,8 @@ lma vp create --name "Weekly sync" --platform ZOOM --id 1234567890 \
 
 | Action | Resource | Used for |
 |--------|----------|----------|
-| `cognito-idp:AdminGetUser`, `cognito-idp:ListUsers` | The LMA user pool (`arn:aws:cognito-idp:<region>:<account>:userpool/<pool-id>`) | Looking up the user's Cognito user name and `sub` |
-| `secretsmanager:DescribeSecret` | `arn:aws:secretsmanager:<region>:<account>:secret:<stack-name>/zoom-credentials/*` | Zoom meetings only: checking whether the user has stored Zoom credentials. The secret value is never read by the CLI. |
+| `cognito-idp:AdminGetUser`, `cognito-idp:ListUsers` | The LMA user pool (`arn:<partition>:cognito-idp:<region>:<account>:userpool/<pool-id>`) | Looking up the user's Cognito user name and `sub` |
+| `secretsmanager:DescribeSecret` | `arn:<partition>:secretsmanager:<region>:<account>:secret:<stack-name>/zoom-credentials/*` | Zoom meetings only: checking whether the user has stored Zoom credentials. The secret value is never read by the CLI. |
 
 If the Secrets Manager check is not permitted, the CLI logs a warning and the VP joins without signing in to Zoom; with `--zoom-credentials` it fails instead. These permissions let the caller launch a VP for any user in the pool, so grant them to principals that administer LMA.
 

@@ -479,24 +479,29 @@ class VirtualParticipantOperations:
         read). When ``required`` is ``False`` a failed check is logged and
         treated as "no credentials", so the VP still joins without signing
         in; when ``True`` it raises.
+
+        The secret-name layout and the ``DeletedDate`` check match
+        ``zoom_credentials_manager`` (which writes the secret) and the MCP
+        server's ``tools/user_helper.py``; keep the three in step.
         """
         secret_name = f"{self._client._require_stack()}/zoom-credentials/{user_sub}"
         sm = self._client.session.client("secretsmanager")
         try:
             described = sm.describe_secret(SecretId=secret_name)
         except Exception as err:  # noqa: BLE001
-            if _error_code(err) in ("ResourceNotFoundException", "InvalidRequestException"):
+            code = _error_code(err)
+            if code in ("ResourceNotFoundException", "InvalidRequestException"):
                 return False
             if required:
                 raise LMAConfigurationError(
-                    f"Could not check for stored Zoom credentials "
-                    f"({secret_name}); the caller needs "
-                    f"secretsmanager:DescribeSecret on it: {err}"
+                    f"Could not check for stored Zoom credentials ({code or 'error'}); "
+                    f"the caller needs secretsmanager:DescribeSecret on "
+                    f"<stack>/zoom-credentials/*."
                 ) from err
             logger.warning(
-                "Could not check for stored Zoom credentials (%s): %s. "
-                "The VP will join without signing in to Zoom.",
-                secret_name, err,
+                "Could not check for stored Zoom credentials (%s); "
+                "the VP will join without signing in to Zoom.",
+                code or type(err).__name__,
             )
             return False
         return not described.get("DeletedDate")
