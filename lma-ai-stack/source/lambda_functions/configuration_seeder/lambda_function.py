@@ -307,7 +307,8 @@ class LegacySection(NamedTuple):
 
 #: The fields the Nova Sonic Configuration page saves, which are the ones the
 #: resolver behind it accepts.
-#: `test_the_seeder_adopts_exactly_the_fields_the_nova_sonic_resolver_accepts`
+#: `test_the_seeder_adopts_exactly_the_fields_this_resolver_accepts`, in the
+#: resolver's own test module,
 #: holds the two lists equal.
 NOVA_SONIC_FIELDS = frozenset(
     {
