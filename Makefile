@@ -51,7 +51,8 @@ STRANDS_LAYER_REQUIREMENTS := lma-meetingassist-setup-stack/strands_layer/requir
 VERSION_FILE := VERSION
 PYTHON_LINE_LENGTH := 100
 # The ruff version comes from the ASR runtime's pin, so the AI-stack lint and the
-# ASR lint cannot disagree about formatting. Dependabot keeps that pin current.
+# ASR lint (`test-asr`) run the same ruff release. Each uses its own tree's
+# configuration. Dependabot keeps that pin current.
 RUFF_VERSION := $(shell sed -n 's/^ruff==//p' $(ASR_SOURCE_DIR)/requirements-dev.txt)
 # Everything `lint-python` fixes and `lint-python-check` checks. The Lambda
 # layers are included because their code is imported by most of the functions.
