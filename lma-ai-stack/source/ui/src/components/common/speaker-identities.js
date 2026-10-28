@@ -31,7 +31,7 @@
  * These helpers are pure and import no UI, so they stay unit-testable and usable
  * from the non-React embed path.
  */
-import { DEFAULT_OTHER_SPEAKER_NAME } from './constants';
+import { DEFAULT_LOCAL_SPEAKER_NAME, DEFAULT_OTHER_SPEAKER_NAME } from './constants';
 import { splitDiarizationLabel } from './utilities';
 
 /** Current shape of the stored JSON. Bump when a migration is needed. */
@@ -193,6 +193,50 @@ export const resolveSpeakerName = (segment, identities, fallbackName) =>
 const NAMEABLE_CHANNELS = ['CALLER', 'AGENT'];
 
 /**
+ * Stored base names that stand for "somebody not yet named". Mirrors
+ * PLACEHOLDER_SPEAKERS in the speaker-name resolver; 'Other participants' is
+ * the Desktop Capture App's default system-audio label.
+ */
+const PLACEHOLDER_BASES = [DEFAULT_OTHER_SPEAKER_NAME, DEFAULT_LOCAL_SPEAKER_NAME, 'Other participants', ''];
+
+/**
+ * Channel-wide labels the engine has split into several voices.
+ *
+ * The participant name on the Stream Audio form is free text, so a channel can
+ * be called anything -- 'Others', or the user's address on the microphone. When
+ * every segment on a channel carries ONE base name and that name appears with
+ * two or more voice ids, it labels the channel rather than a person, and those
+ * voices need naming like any placeholder. A Virtual Participant channel carries
+ * a different roster name per attendee, so it never matches. The resolver's
+ * channel_label_bases applies the same test.
+ */
+const channelLabelBases = (segments) => {
+  const bases = {};
+  const voiceIds = {};
+  (segments ?? []).forEach((segment) => {
+    if (segment.isPartial || !NAMEABLE_CHANNELS.includes(segment.channel)) {
+      return;
+    }
+    const { base, suffix } = splitDiarizationLabel(segment.speaker);
+    if (!bases[segment.channel]) {
+      bases[segment.channel] = new Set();
+      voiceIds[segment.channel] = new Set();
+    }
+    bases[segment.channel].add(base);
+    if (suffix.trim()) {
+      voiceIds[segment.channel].add(suffix.trim());
+    }
+  });
+  const out = new Set();
+  Object.entries(bases).forEach(([channel, names]) => {
+    if (names.size === 1 && voiceIds[channel].size >= 2) {
+      out.add(`${channel}#${[...names][0]}`);
+    }
+  });
+  return out;
+};
+
+/**
  * The distinct voices in a meeting, for the Speakers panel.
  *
  * Built from the loaded segments rather than from the identity map, because the
@@ -212,6 +256,11 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
   // placeholder for a local-channel voice would disagree with the transcript
   // beside it.
   const fallbackFor = (channel) => (channel === 'CALLER' ? fallbackName : undefined);
+  const labels = channelLabelBases(segments);
+  // Whether a voice is waiting for a name -- what the panel's automatic passes
+  // and unnamed count act on. Distinct from `generic` below, which only decides
+  // whether the Stream Audio participant name substitutes in the display.
+  const needsNaming = (channel, base) => PLACEHOLDER_BASES.includes(base) || labels.has(`${channel}#${base}`);
 
   (segments ?? []).forEach((segment) => {
     if (segment.isPartial || !NAMEABLE_CHANNELS.includes(segment.channel)) {
@@ -240,7 +289,7 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
         existing.voiceId = fromTarget.suffix.trim();
         existing.baseName = fromTarget.base;
         existing.defaultName = generic ? fallbackFor(segment.channel) || DEFAULT_OTHER_SPEAKER_NAME : fromTarget.base;
-        existing.isPlaceholder = generic;
+        existing.isPlaceholder = needsNaming(segment.channel, fromTarget.base);
         existing.channel = segment.channel;
         existing.describesTarget = true;
       }
@@ -263,7 +312,7 @@ export const buildSpeakerRoster = (segments, identities, fallbackName) => {
       // True when the stored speaker is the generic placeholder rather than
       // something that already reads as a person (a meeting-roster name, or an
       // address the client supplied). Drives whether the panel has work to do.
-      isPlaceholder: base === DEFAULT_OTHER_SPEAKER_NAME || base === '',
+      isPlaceholder: needsNaming(segment.channel, base),
       name: entry?.name ?? '',
       status: entry?.name ? entry.status ?? 'confirmed' : 'unnamed',
       source: entry?.source,

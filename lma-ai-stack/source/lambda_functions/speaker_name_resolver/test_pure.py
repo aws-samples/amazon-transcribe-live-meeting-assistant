@@ -138,6 +138,86 @@ def test_an_undiarized_channel_is_still_nameable() -> None:
     assert pure.unresolved_voices(pure.build_turns(plain), empty()) == ["CALLER#Other Participant"]
 
 
+# A Stream Audio meeting whose participant field was set to "Others", with voice
+# separation on: the shape of a live meeting where the button found nothing.
+CUSTOM_LABEL_MEETING = [
+    seg("me@example.com", 0, "Let's get you to introduce yourselves", channel="AGENT"),
+    seg("Others", 2, "can you hear me"),
+    seg("Others (spk_0)", 5, "I'll go first. My name is Chris."),
+    seg("Others (spk_1)", 10, "My name is Jeremy"),
+    seg("Others (spk_0)", 15, "and I work on the platform team"),
+]
+
+
+def test_a_custom_channel_label_split_into_several_voices_is_unresolved() -> None:
+    """The label is the channel's, not a person's, once it carries two voice ids."""
+    assert pure.unresolved_voices(pure.build_turns(CUSTOM_LABEL_MEETING), empty()) == [
+        "CALLER#Others",
+        "CALLER#Others (spk_0)",
+        "CALLER#Others (spk_1)",
+    ]
+
+
+def test_a_custom_label_meeting_reaches_the_model_when_the_button_is_pressed() -> None:
+    assert pure.worth_a_model_call(pure.build_turns(CUSTOM_LABEL_MEETING), empty(), force=True)
+
+
+def test_a_self_introduction_on_a_custom_channel_label_is_applied() -> None:
+    meeting_turns = pure.build_turns(CUSTOM_LABEL_MEETING)
+    updated, applied = pure.apply_proposals(
+        empty(),
+        [
+            {
+                "basis": pure.SELF_INTRODUCTION,
+                "label": "CALLER#Others (spk_1)",
+                "turn": 4,
+                "name": "Jeremy",
+                "quote": "My name is Jeremy",
+            }
+        ],
+        meeting_turns,
+        NOW,
+    )
+    assert [entry["key"] for entry in applied] == ["CALLER#Others (spk_1)"]
+    assert updated["identities"]["CALLER#Others (spk_1)"]["status"] == "confirmed"
+
+
+def test_a_microphone_shared_by_several_voices_is_unresolved() -> None:
+    """A conference room on one microphone: the user's address labels the channel."""
+    room = [
+        seg("me@example.com (spk_0)", 0, "Hi, I'm Sam", channel="AGENT"),
+        seg("me@example.com (spk_1)", 5, "And I'm Priya", channel="AGENT"),
+    ]
+    assert pure.unresolved_voices(pure.build_turns(room), empty()) == [
+        "AGENT#me@example.com (spk_0)",
+        "AGENT#me@example.com (spk_1)",
+    ]
+
+
+def test_a_custom_label_with_one_voice_still_reads_as_a_person() -> None:
+    """One voice under a client-supplied name may well be that person."""
+    single = [seg("me@example.com (spk_0)", 0, "Hi, I'm Sam", channel="AGENT")]
+    assert pure.unresolved_voices(pure.build_turns(single), empty()) == []
+
+
+def test_roster_names_sharing_voice_ids_are_not_treated_as_a_channel_label() -> None:
+    """A Virtual Participant channel carries one roster name per attendee, so
+    several voice ids under several names is still a roster, not a label."""
+    roster = [
+        seg("Alice (spk_0)", 0, "hello"),
+        seg("Alice (spk_1)", 3, "sorry, that was me"),
+        seg("Bob (spk_1)", 5, "hi"),
+    ]
+    assert pure.unresolved_voices(pure.build_turns(roster), empty()) == []
+
+
+def test_the_desktop_app_default_label_is_a_placeholder() -> None:
+    single = [seg("Other participants (spk_0)", 0, "My name is Chris")]
+    assert pure.unresolved_voices(pure.build_turns(single), empty()) == [
+        "CALLER#Other participants (spk_0)"
+    ]
+
+
 # --------------------------------------------------------------------------
 # Skipping the model when there is nothing to find
 # --------------------------------------------------------------------------

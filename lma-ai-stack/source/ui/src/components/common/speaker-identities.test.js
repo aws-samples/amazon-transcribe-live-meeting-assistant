@@ -249,6 +249,44 @@ describe('buildSpeakerRoster', () => {
   it('handles no segments at all', () => {
     expect(buildSpeakerRoster(undefined, emptyIdentities(), 'Room 3')).toEqual([]);
   });
+
+  it('treats a custom channel label split into several voices as waiting for names', () => {
+    const custom = [
+      { channel: 'CALLER', speaker: 'Others (spk_0)', startTime: 0, endTime: 2, isPartial: false },
+      { channel: 'CALLER', speaker: 'Others (spk_1)', startTime: 3, endTime: 4, isPartial: false },
+      { channel: 'AGENT', speaker: 'me@example.com', startTime: 5, endTime: 6, isPartial: false },
+    ];
+    const roster = buildSpeakerRoster(custom, emptyIdentities(), 'Others');
+    expect(roster.map((r) => [r.key, r.isPlaceholder])).toEqual([
+      ['CALLER#Others (spk_0)', true],
+      ['CALLER#Others (spk_1)', true],
+      ['AGENT#me@example.com', false],
+    ]);
+    // The display is unchanged: the stored label still shows as itself.
+    expect(roster[0].defaultName).toBe('Others');
+  });
+
+  it('keeps Virtual Participant roster names out of naming even when they share voice ids', () => {
+    const roster = buildSpeakerRoster(
+      [
+        { channel: 'CALLER', speaker: 'Alice (spk_0)', startTime: 0, endTime: 2, isPartial: false },
+        { channel: 'CALLER', speaker: 'Alice (spk_1)', startTime: 3, endTime: 4, isPartial: false },
+        { channel: 'CALLER', speaker: 'Bob (spk_1)', startTime: 5, endTime: 6, isPartial: false },
+      ],
+      emptyIdentities(),
+      undefined,
+    );
+    expect(roster.every((r) => !r.isPlaceholder)).toBe(true);
+  });
+
+  it('treats the desktop app default label as a placeholder', () => {
+    const roster = buildSpeakerRoster(
+      [{ channel: 'CALLER', speaker: 'Other participants (spk_0)', startTime: 0, endTime: 2, isPartial: false }],
+      emptyIdentities(),
+      undefined,
+    );
+    expect(roster[0].isPlaceholder).toBe(true);
+  });
 });
 
 describe('parseAttendeeList', () => {
