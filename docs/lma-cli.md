@@ -223,9 +223,31 @@ lma vp list --json
 | `--platform [ZOOM\|TEAMS\|CHIME\|WEBEX]` | Meeting platform (required, case-insensitive) |
 | `--id TEXT` | Meeting ID (required) |
 | `--password TEXT` | Meeting password (default: empty) |
-| `--user-name TEXT` | Display name the scribe reports (default: `lma-cli@lma`) |
+| `--user-name TEXT` | Display name the scribe reports (default: the `--as-user` email, otherwise `lma-cli@lma`) |
+| `--as-user TEXT` | Launch the VP for this LMA user, given as an email address or Cognito user name (see below) |
+| `--zoom-credentials / --no-zoom-credentials` | With `--as-user` on a Zoom meeting: require, or skip, signing in with the user's stored Zoom credentials (default: use them if the user has saved some) |
 | `--wait / --no-wait` | Poll until the VP leaves `INITIALIZING` (default: `--wait`) |
 | `--timeout FLOAT` | Max seconds to wait for launch (default: 120) |
+
+#### Launching a VP for an LMA user (`--as-user`)
+
+Without `--as-user`, a VP launched from the CLI belongs to no LMA user. Its row is owned by your IAM principal, so in the Web UI only members of the Admin group see it, and the VP starts with a fresh browser profile and joins Zoom meetings as a guest. Meetings that only admit signed-in Zoom users therefore stop at Zoom's sign-in prompt.
+
+`--as-user` launches the VP the way the Web UI does when that user clicks **Join Now**. The CLI looks the user up in the stack's Cognito user pool, first by Cognito user name and then by email address. The VP row is then owned by that user, so it appears in their Virtual Participants list and they can open its viewer and end it. The VP restores the user's saved browser profile. For a Zoom meeting it also signs in with the Zoom credentials the user saved in the LMA UI (on the Virtual Participant form), when they have saved some. Pass `--zoom-credentials` to fail the launch if the user has none, or `--no-zoom-credentials` to join as a guest anyway. An unknown or disabled user, or an email address shared by more than one user, fails the launch before any VP row is written.
+
+```bash
+lma vp create --name "Weekly sync" --platform ZOOM --id 1234567890 \
+              --as-user alice@example.com
+```
+
+`--as-user` needs these permissions in addition to the ones `lma vp create` always uses (`appsync:GraphQL` on the LMA API and `states:StartSyncExecution` on the VP scheduler state machine):
+
+| Action | Resource | Used for |
+|--------|----------|----------|
+| `cognito-idp:AdminGetUser`, `cognito-idp:ListUsers` | The LMA user pool (`arn:aws:cognito-idp:<region>:<account>:userpool/<pool-id>`) | Looking up the user's Cognito user name and `sub` |
+| `secretsmanager:DescribeSecret` | `arn:aws:secretsmanager:<region>:<account>:secret:<stack-name>/zoom-credentials/*` | Zoom meetings only: checking whether the user has stored Zoom credentials. The secret value is never read by the CLI. |
+
+If the Secrets Manager check is not permitted, the CLI logs a warning and the VP joins without signing in to Zoom; with `--zoom-credentials` it fails instead. These permissions let the caller launch a VP for any user in the pool, so grant them to principals that administer LMA.
 
 > The underlying SDK methods are documented under [`client.vp`](lma-sdk.md#clientvp--virtual-participant-operations).
 

@@ -14,6 +14,12 @@ SigV4 and the Python SDK. The lifecycle is:
    most reliable way to detect ECS capacity failures since the state
    machine uses a non-``.sync`` ``ecs:runTask`` integration and SUCCEEDS
    even on placement failure.
+
+By default the VP row is owned by the calling IAM principal and the VP
+joins with a fresh browser profile and no stored Zoom sign-in. Pass
+``as_user=`` to launch it for an LMA user instead: the SDK looks the user
+up in the stack's Cognito user pool and sends the same owner and
+``userSub`` / ``userZoomSub`` values the Web UI sends for that user.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ from lma_sdk.exceptions import (
 )
 from lma_sdk.models.virtual_participant import (
     TERMINAL_VP_STATES,
+    LmaUser,
     VpLaunchResult,
     VpRow,
     VpStatus,
@@ -121,6 +128,7 @@ class VirtualParticipantOperations:
     def __init__(self, client: LMAClient) -> None:
         self._client = client
         self._scheduler_arn: str | None = None
+        self._user_pool_id: str | None = None
 
     # ── Scheduler ARN resolution ──────────────────────────────
 
@@ -192,10 +200,12 @@ class VirtualParticipantOperations:
         platform: str,
         meeting_id: str,
         meeting_password: str = "",
-        user_name: str = "loadtest@lma",
+        user_name: str | None = None,
         wait: bool = True,
         timeout_s: float = 120.0,
         poll_interval_s: float = 2.0,
+        as_user: str | None = None,
+        use_zoom_credentials: bool | None = None,
     ) -> VpLaunchResult:
         """Create and launch a Virtual Participant.
 
@@ -210,11 +220,25 @@ class VirtualParticipantOperations:
             meeting_id: Meeting ID (spaces stripped automatically).
             meeting_password: Meeting password (empty string if none).
             user_name: Display name the scribe reports as (shows up
-                as the Zoom/Teams participant name).
+                as the Zoom/Teams participant name). Defaults to the
+                user's email when ``as_user`` is given, otherwise
+                ``"loadtest@lma"``.
             wait: When ``True`` (default), poll ``getVirtualParticipant``
                 until status != ``INITIALIZING`` or timeout_s elapses.
             timeout_s: Max seconds to wait for launch detection.
             poll_interval_s: Seconds between getVirtualParticipant polls.
+            as_user: Email or Cognito user name of an LMA user to launch
+                the VP for. The row is owned by that user (so it appears
+                in their Virtual Participants list), and the VP uses the
+                user's saved browser profile. Requires
+                ``cognito-idp:AdminGetUser`` and ``cognito-idp:ListUsers``
+                on the stack's user pool.
+            use_zoom_credentials: Zoom only, requires ``as_user``.
+                ``None`` (default) signs in with the user's stored Zoom
+                credentials when they have saved some; ``True`` requires
+                them; ``False`` joins without signing in. Checking for
+                stored credentials requires ``secretsmanager:DescribeSecret``
+                on ``<stack>/zoom-credentials/*``.
 
         Returns:
             VpLaunchResult with the VP id, status, callId (if assigned),
@@ -237,8 +261,38 @@ class VirtualParticipantOperations:
             raise LMAVirtualParticipantError(
                 "meeting_name and meeting_id are required."
             )
+        if use_zoom_credentials is not None and not as_user:
+            raise LMAVirtualParticipantError(
+                "use_zoom_credentials requires as_user: stored Zoom "
+                "credentials belong to an LMA user."
+            )
+        if use_zoom_credentials and platform != "ZOOM":
+            raise LMAVirtualParticipantError(
+                "use_zoom_credentials only applies to ZOOM meetings."
+            )
 
         t0 = time.monotonic()
+
+        # Resolve the LMA user before writing anything, so an unknown or
+        # disabled user leaves no row behind.
+        user: LmaUser | None = None
+        user_zoom_sub = ""
+        if as_user:
+            user = self.resolve_user(as_user)
+            if platform == "ZOOM" and use_zoom_credentials is not False:
+                present = self.has_zoom_credentials(
+                    user.sub, required=bool(use_zoom_credentials)
+                )
+                if present:
+                    user_zoom_sub = user.sub
+                elif use_zoom_credentials:
+                    raise LMAVirtualParticipantError(
+                        f"LMA user {user.username!r} has no stored Zoom "
+                        f"credentials. Save them in the LMA UI first, or "
+                        f"launch without use_zoom_credentials."
+                    )
+        if user_name is None:
+            user_name = (user.email or user.username) if user else "loadtest@lma"
 
         # 1) AppSync createVirtualParticipant
         logger.info(
@@ -252,6 +306,11 @@ class VirtualParticipantOperations:
             "meetingPassword": meeting_password or "",
             "status": "INITIALIZING",
         }
+        if user:
+            # Honoured by the resolver for IAM callers only; it becomes the
+            # row's Owner, which is what the list/get resolvers compare
+            # against the signed-in user's Cognito user name.
+            vp_input["owner"] = user.username
         try:
             data = self._client.appsync.graphql(
                 query=_CREATE_MUTATION,
@@ -283,6 +342,8 @@ class VirtualParticipantOperations:
                 meeting_id=meeting_id_stripped,
                 meeting_password=meeting_password,
                 user_name=user_name,
+                user_sub=user.sub if user else "",
+                user_zoom_sub=user_zoom_sub,
             )
         except LMAVirtualParticipantError:
             self._best_effort_end(vp_id, reason="SDK: scheduler failed")
@@ -315,7 +376,130 @@ class VirtualParticipantOperations:
             waited_for_launch=waited,
             sfn_execution_arn=sfn_execution_arn,
             sfn_status=sfn_status,
+            owner=user.username if user else None,
+            user_sub=user.sub if user else None,
+            zoom_credentials_used=bool(user_zoom_sub),
         )
+
+    def resolve_user(self, email_or_username: str) -> LmaUser:
+        """Look up an LMA user in the stack's Cognito user pool.
+
+        Tries the value as a Cognito user name first, then as an email
+        address. Uses the caller's IAM credentials
+        (``cognito-idp:AdminGetUser``, ``cognito-idp:ListUsers``).
+
+        Raises:
+            LMAVirtualParticipantError: when the user does not exist, is
+                disabled, or the email matches more than one user.
+            LMAConfigurationError: when the user pool cannot be found or
+                the lookup is not permitted.
+        """
+        ident = (email_or_username or "").strip()
+        if not ident:
+            raise LMAVirtualParticipantError("as_user must not be empty.")
+        pool_id = self.user_pool_id
+        cognito = self._client.session.client("cognito-idp")
+
+        record: dict[str, Any] | None = None
+        try:
+            resp = cognito.admin_get_user(UserPoolId=pool_id, Username=ident)
+            record = {
+                "Username": resp.get("Username"),
+                "Attributes": resp.get("UserAttributes") or [],
+                "Enabled": resp.get("Enabled", True),
+            }
+        except Exception as err:  # noqa: BLE001
+            if _error_code(err) != "UserNotFoundException":
+                raise _lookup_error("cognito-idp:AdminGetUser", pool_id, err) from err
+
+        if record is None:
+            # Cognito filter strings are quoted; refuse values that would
+            # change the filter rather than trying to escape them.
+            if '"' in ident or "\\" in ident:
+                raise LMAVirtualParticipantError(
+                    f"LMA user {ident!r} not found in user pool {pool_id}."
+                )
+            try:
+                resp = cognito.list_users(
+                    UserPoolId=pool_id, Filter=f'email = "{ident}"', Limit=2
+                )
+            except Exception as err:  # noqa: BLE001
+                raise _lookup_error("cognito-idp:ListUsers", pool_id, err) from err
+            users = resp.get("Users") or []
+            if len(users) > 1:
+                raise LMAVirtualParticipantError(
+                    f"More than one LMA user has the email {ident!r}; "
+                    f"pass the Cognito user name instead."
+                )
+            if not users:
+                raise LMAVirtualParticipantError(
+                    f"LMA user {ident!r} not found in user pool {pool_id}."
+                )
+            record = users[0]
+
+        attrs = {a.get("Name"): a.get("Value") for a in record.get("Attributes") or []}
+        username = record.get("Username") or ""
+        sub = attrs.get("sub") or ""
+        if not username or not sub:
+            raise LMAVirtualParticipantError(
+                f"Cognito returned no user name or sub for {ident!r}."
+            )
+        if record.get("Enabled") is False:
+            raise LMAVirtualParticipantError(
+                f"LMA user {username!r} is disabled."
+            )
+        return LmaUser(username=username, sub=sub, email=attrs.get("email"))
+
+    @property
+    def user_pool_id(self) -> str:
+        """The LMA Cognito user pool id, read from the root stack outputs."""
+        if self._user_pool_id:
+            return self._user_pool_id
+        try:
+            outputs = {k: o.value for k, o in self._client.stack.outputs().items()}
+        except Exception as err:  # noqa: BLE001
+            raise LMAConfigurationError(
+                f"Could not read stack outputs to find the user pool: {err}"
+            ) from err
+        pool_id = _extract_user_pool_id(outputs)
+        if not pool_id:
+            raise LMAConfigurationError(
+                "Could not determine the Cognito user pool id from stack "
+                "outputs. Expected CognitoUserPoolTokenIssuerUrl or "
+                "LocalUITestingEnv with VITE_USER_POOL_ID=<id>."
+            )
+        self._user_pool_id = pool_id
+        return pool_id
+
+    def has_zoom_credentials(self, user_sub: str, required: bool = False) -> bool:
+        """Whether the LMA user has stored Zoom credentials.
+
+        Checks for the ``<stack>/zoom-credentials/<sub>`` secret the LMA UI
+        writes (``secretsmanager:DescribeSecret``; the secret value is not
+        read). When ``required`` is ``False`` a failed check is logged and
+        treated as "no credentials", so the VP still joins without signing
+        in; when ``True`` it raises.
+        """
+        secret_name = f"{self._client._require_stack()}/zoom-credentials/{user_sub}"
+        sm = self._client.session.client("secretsmanager")
+        try:
+            described = sm.describe_secret(SecretId=secret_name)
+        except Exception as err:  # noqa: BLE001
+            if _error_code(err) in ("ResourceNotFoundException", "InvalidRequestException"):
+                return False
+            if required:
+                raise LMAConfigurationError(
+                    f"Could not check for stored Zoom credentials "
+                    f"({secret_name}); the caller needs "
+                    f"secretsmanager:DescribeSecret on it: {err}"
+                ) from err
+            logger.warning(
+                "Could not check for stored Zoom credentials (%s): %s. "
+                "The VP will join without signing in to Zoom.",
+                secret_name, err,
+            )
+            return False
+        return not described.get("DeletedDate")
 
     def get(self, vp_id: str) -> VpRow:
         """Fetch a Virtual Participant row by id."""
@@ -406,12 +590,17 @@ class VirtualParticipantOperations:
         meeting_id: str,
         meeting_password: str,
         user_name: str,
+        user_sub: str = "",
+        user_zoom_sub: str = "",
     ) -> tuple[str | None, str | None]:
         """StartSyncExecution on the LMA VP scheduler state machine.
 
-        The input shape is verbatim from EmbedVpLoader.jsx — the scribe
+        The input shape matches the Web UI's launch — the scribe
         container's task role handles AppSync callbacks itself, so we
-        can send empty tokens here.
+        can send empty tokens here. ``userSub`` becomes the container's
+        ``LMA_USER_SUB`` (saved browser profile); a non-empty
+        ``userZoomSub`` makes the state machine pass the user's stored
+        Zoom credentials secret name.
         """
         sfn = self._client.session.client("stepfunctions")
         state_machine_arn = self.scheduler_state_machine_arn
@@ -426,6 +615,8 @@ class VirtualParticipantOperations:
                 "meetingTime": "",
                 "userName": user_name,
                 "virtualParticipantId": vp_id,
+                "userSub": user_sub,
+                "userZoomSub": user_zoom_sub,
                 "accessToken": "",
                 "idToken": "",
                 "rereshToken": "",  # sic: matches UI spelling
@@ -526,6 +717,33 @@ class VirtualParticipantOperations:
 
 
 # ── Helpers ───────────────────────────────────────────────────
+
+def _error_code(err: Exception) -> str:
+    """The AWS error code of a botocore ClientError, else ''."""
+    response = getattr(err, "response", None) or {}
+    return str((response.get("Error") or {}).get("Code") or "")
+
+
+def _lookup_error(action: str, pool_id: str, err: Exception) -> LMAConfigurationError:
+    return LMAConfigurationError(
+        f"Could not look up the LMA user in user pool {pool_id}; the "
+        f"caller needs {action} on it: {err}"
+    )
+
+
+def _extract_user_pool_id(raw_outputs: dict[str, str]) -> str | None:
+    """Find the Cognito user pool id in a dict of root-stack outputs."""
+    issuer = (raw_outputs.get("CognitoUserPoolTokenIssuerUrl") or "").strip().rstrip("/")
+    if issuer:
+        candidate = issuer.rsplit("/", 1)[-1]
+        if "_" in candidate:
+            return candidate
+    for pair in (raw_outputs.get("LocalUITestingEnv") or "").split():
+        key, _, value = pair.partition("=")
+        if key == "VITE_USER_POOL_ID" and value.strip():
+            return value.strip()
+    return None
+
 
 def _extract_sfn_error(output: Any) -> str | None:
     """Best-effort extraction of a human-readable error from SFN output."""
