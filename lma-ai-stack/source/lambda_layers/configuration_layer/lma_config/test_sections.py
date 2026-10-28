@@ -91,6 +91,18 @@ def test_the_summary_prompt_templates_section_is_on_the_standard_tier() -> None:
     assert spec.cache_tier is sections.CacheTier.STANDARD
 
 
+def test_the_nova_sonic_section_is_on_the_immediate_tier() -> None:
+    """The page promises the next meeting uses what was saved.
+
+    Its reader runs once per meeting, when the voice assistant starts, and read
+    the previous table with no cache at all. Any TTL would add a window in which
+    a meeting started after a save did not get it.
+    """
+    spec = sections.section_spec("nova_sonic_config")
+    assert spec is sections.NOVA_SONIC_CONFIG
+    assert spec.cache_tier is sections.CacheTier.IMMEDIATE
+
+
 def test_registering_the_same_section_twice_with_the_same_policy_is_allowed() -> None:
     """Re-importing a module must not fail."""
     spec = sections.SUMMARY_PROMPT_TEMPLATES

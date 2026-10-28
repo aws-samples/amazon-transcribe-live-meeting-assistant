@@ -1563,3 +1563,54 @@ def test_an_unset_numeric_or_text_argument_is_passed_as_absent(
     build_tools(Capturing(), budget_with())[tool_name](**args)
 
     assert captured[expected] is None
+
+
+# ── the answer's opening ────────────────────────────────────────────────────
+
+SECTIONS = "## Root Cause\n**Confidence:** HIGH\nX.\n\n## Recommendations\n1. Y."
+
+
+def test_an_answer_that_starts_with_its_first_section_is_unchanged() -> None:
+    assert agent_function.strip_preamble(SECTIONS) == SECTIONS
+
+
+def test_text_before_the_first_section_is_dropped() -> None:
+    answer = "Perfect! I now have all the evidence I need.\n\n" + SECTIONS
+
+    assert agent_function.strip_preamble(answer) == SECTIONS
+
+
+def test_a_heading_mentioned_mid_sentence_is_not_taken_for_the_first_section() -> None:
+    answer = "I will write ## Root Cause next.\n" + SECTIONS
+
+    assert agent_function.strip_preamble(answer) == SECTIONS
+
+
+def test_a_deeper_heading_is_not_taken_for_the_first_section() -> None:
+    answer = "### Notes\nsomething\n" + SECTIONS
+
+    assert agent_function.strip_preamble(answer) == SECTIONS
+
+
+def test_a_preamble_with_a_heading_of_its_own_is_dropped_too() -> None:
+    answer = "## Investigation\nI searched three groups.\n\n" + SECTIONS
+
+    assert agent_function.strip_preamble(answer) == SECTIONS
+
+
+def test_without_a_root_cause_heading_the_first_section_is_the_anchor() -> None:
+    answer = "Done.\n\n## Recommendations\n1. Y."
+
+    assert agent_function.strip_preamble(answer) == "## Recommendations\n1. Y."
+
+
+def test_an_answer_with_no_section_heading_is_returned_whole() -> None:
+    """With nothing to anchor on there is no telling which part is preamble,
+    and dropping the whole answer would be worse than showing it unformatted."""
+    answer = "  The participant joined and left normally.\n"
+
+    assert agent_function.strip_preamble(answer) == "The participant joined and left normally."
+
+
+def test_an_empty_answer_stays_empty() -> None:
+    assert agent_function.strip_preamble("") == ""

@@ -16,7 +16,7 @@
  *
  * Why a declared tier per section rather than one policy
  * ------------------------------------------------------
- * The two readers in `src/calleventdata/` disagree on caching today, and both
+ * The two readers in the transcriber's `src/calleventdata/` disagree on caching, and both
  * are right. `asr-config.ts` caches for 30 seconds so that a burst of meetings
  * starting at once does not each issue its own read. `voice-enrollment.ts`
  * never caches, because a withdrawal of consent is promised to take effect for
@@ -33,6 +33,16 @@
  *
  * There is no TTL argument on any read: `getSection` takes a section
  * declaration, and the declaration carries the policy.
+ *
+ * One file, two packages
+ * ----------------------
+ * The Virtual Participant is a separate npm package and LMA has no shared
+ * TypeScript package, so this file is copied verbatim to
+ * `lma-virtual-participant-stack/backend/src/configuration-store.ts`.
+ * `lma-ai-stack/test/test_configuration_store_contract.py` fails if the two
+ * copies differ, so a change is made here and copied there. The file imports
+ * nothing relative for that reason: it compiles unchanged under the
+ * transcriber's CommonJS build and the Virtual Participant's ES module one.
  */
 import { gunzipSync } from 'node:zlib';
 import { createHash } from 'node:crypto';
@@ -132,7 +142,18 @@ export interface SectionSpec {
 
 export interface ResolvedSection<T> {
     readonly name: string;
+    /** The section as resolved: the baseline with the active profile merged over it. */
     readonly values: T;
+    /**
+     * The two layers `values` was merged from: the section as the baseline
+     * ships it, and as the active profile holds it (empty when the profile
+     * holds nothing for it). For a reader whose settings do not simply
+     * override -- the Nova Sonic prompt can be appended to the shipped one
+     * rather than replace it -- and for telling "set to the shipped value" from
+     * "not set at all".
+     */
+    readonly baselineValues: T;
+    readonly profileValues: T;
     /** A short digest, so a caller can skip rebuilding derived state. */
     readonly fingerprint: string;
     readonly cacheTier: CacheTier;
@@ -142,6 +163,9 @@ export interface ResolvedSection<T> {
 
 export interface ConfigurationDocument {
     readonly body: Record<string, unknown>;
+    /** The baseline's body and the active profile's, before they were merged. */
+    readonly baselineBody: Record<string, unknown>;
+    readonly profileBody: Record<string, unknown>;
     readonly activeProfile: string | undefined;
     /**
      * Whether `Config#default` was there to read. False means the table has not
@@ -181,7 +205,7 @@ export const declaredSections = (): ReadonlyMap<string, SectionSpec> => new Map(
 /**
  * The summary prompt templates, declared here as well as in the Python half so
  * the two sides of the accessor describe one contract. Read by the
- * meeting-summary Lambda; nothing in this process reads it yet.
+ * meeting-summary Lambda; no TypeScript reader uses it.
  */
 export const SUMMARY_PROMPT_TEMPLATES = declareSection({
     name: 'summary_prompt_templates',
@@ -189,6 +213,19 @@ export const SUMMARY_PROMPT_TEMPLATES = declareSection({
     description:
         'Prompts used to generate each section of a meeting summary, keyed \'N#Title\' ' +
         'where N orders the sections.',
+});
+
+/**
+ * The voice assistant's settings, read by the Virtual Participant when its
+ * voice assistant starts. Immediate, as in the Python half: one read per
+ * meeting, and the page promises the next meeting uses what was saved.
+ */
+export const NOVA_SONIC_CONFIG = declareSection({
+    name: 'nova_sonic_config',
+    cacheTier: 'immediate',
+    description:
+        'Voice assistant settings: the Nova Sonic system prompt and prompt mode, model, voice, ' +
+        'endpointing sensitivity, meeting mode, and the translator languages and trigger phrases.',
 });
 
 /**
@@ -268,6 +305,14 @@ const splitItem = (item: Record<string, AttributeValue>): ConfigurationRecord =>
     });
 
     return { exists: true, metadata, body: body ?? inline };
+};
+
+/** A section of a body, or an empty object when it holds something else or nothing. */
+const sectionOf = (body: Record<string, unknown>, name: string): Record<string, unknown> => {
+    const raw = body[name];
+    return raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+        ? (raw as Record<string, unknown>)
+        : {};
 };
 
 /** `overlay` over `base`, recursing into nested objects, so a profile is a delta. */
@@ -405,12 +450,12 @@ export class ConfigurationStore {
             }
         }
 
-        const raw = document.body[spec.name];
-        const values =
-            raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+        const values = sectionOf(document.body, spec.name);
         return {
             name: spec.name,
             values: values as T,
+            baselineValues: sectionOf(document.baselineBody, spec.name) as T,
+            profileValues: sectionOf(document.profileBody, spec.name) as T,
             fingerprint: fingerprintOf(values),
             cacheTier: spec.cacheTier,
             servedFromCache,
@@ -452,6 +497,8 @@ export class ConfigurationStore {
         if (!activeProfile) {
             return {
                 body: baseline.body,
+                baselineBody: baseline.body,
+                profileBody: {},
                 activeProfile: undefined,
                 baselineExists: baseline.exists,
             };
@@ -459,6 +506,8 @@ export class ConfigurationStore {
         const profile = await this.readRecord(`${CONFIG_PREFIX}${activeProfile}`, consistentRead);
         return {
             body: deepMerge(baseline.body, profile.body),
+            baselineBody: baseline.body,
+            profileBody: profile.body,
             // A pointer naming a profile that is not stored resolves to the
             // baseline alone, rather than to nothing.
             activeProfile: profile.exists ? activeProfile : undefined,

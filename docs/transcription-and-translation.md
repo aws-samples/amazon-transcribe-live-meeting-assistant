@@ -180,6 +180,22 @@ not mean a wrong name is impossible: the model still chooses which turn to cite,
 so a genuinely ambiguous passage can still be read wrongly. That is why only
 self-introductions are applied, and why everything weaker is a suggestion.
 
+Which voices count as unnamed depends on the label they carry. A voice under the
+default label (`Other Participant`, the desktop app's `Other participants`, or
+`Me`) is always a candidate. A label you typed yourself — the participant name on
+the Stream Audio form, or your address on the microphone channel — is treated as
+a person's name while one voice is heard on that channel, and as a channel label
+once speaker separation has split it into two or more voices, at which point those
+voices are named like any other. A Virtual Participant channel carrying more than
+one attendee's roster name is left as it is; one carrying a single roster name
+that separation has split into several voices is treated like any other label,
+since that is one meeting seat with several people behind it.
+
+The default labels count as unnamed on an unseparated channel too, so a meeting
+whose remote side is a single `Other Participant` or `Other participants` voice,
+or whose microphone is `Me`, keeps its automatic passes running until that voice
+is named.
+
 On a long meeting the opening turns and the most recent ones are used rather than
 the whole transcript — introductions cluster at the start, and keeping the recent
 end means a late "by the way, I'm Priya" is still found.

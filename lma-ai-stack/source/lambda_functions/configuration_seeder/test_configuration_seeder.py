@@ -148,7 +148,7 @@ def test_the_shipped_prompts_are_numbered_in_the_order_they_appear(seeder) -> No
 
 def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seeder) -> None:
     body = seeder.shipped_default_body("default")
-    assert set(body) == {"summary_prompt_templates"}
+    assert set(body) == {"summary_prompt_templates", "nova_sonic_config"}
     assert set(body["summary_prompt_templates"]) == {"1#SUMMARY", "2#DETAILS", "3#ACTIONS"}
     assert "{transcript}" in body["summary_prompt_templates"]["1#SUMMARY"]
 
@@ -185,6 +185,294 @@ def test_the_shipped_prompts_match_the_copy_the_other_stack_still_ships(filename
         REPO_ROOT / "lma-llm-template-setup-stack" / "source" / "lambda_functions" / filename
     ).read_text(encoding="utf-8")
     assert list(json.loads(mine).items()) == list(json.loads(theirs).items())
+
+
+def _nova_sonic_stack_seeder(monkeypatch: pytest.MonkeyPatch):
+    """The nova-sonic-config stack's own seeder module, loaded by path.
+
+    Its directory holds a `cfnresponse` of its own, so it is loaded under a
+    private name with a placeholder in `sys.modules` rather than by putting that
+    directory on the path, where its `cfnresponse` would shadow this one's.
+    """
+    import importlib.util
+    import types
+
+    monkeypatch.setitem(sys.modules, "cfnresponse", types.ModuleType("cfnresponse"))
+    path = (
+        REPO_ROOT
+        / "lma-nova-sonic-config-stack"
+        / "source"
+        / "lambda_functions"
+        / "nova_sonic_config_upload.py"
+    )
+    spec = importlib.util.spec_from_file_location("nova_sonic_config_upload_under_test", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_shipped_nova_sonic_defaults_match_the_copy_the_other_stack_still_ships(
+    seeder, monkeypatch
+) -> None:
+    """The same arrangement as the prompts: two copies until the old table retires.
+
+    The nova-sonic-config stack keeps seeding its own table so a deployment can
+    be rolled back to a release that reads it. Only the configuration values are
+    compared; the partition key, the guidance text and the description are that
+    table's own bookkeeping.
+    """
+    theirs = _nova_sonic_stack_seeder(monkeypatch).get_default_config()
+    for bookkeeping in ("NovaSonicConfigId", "*Information*", "description"):
+        theirs.pop(bookkeeping)
+    assert seeder.shipped_default_body("default")["nova_sonic_config"] == theirs
+
+
+def test_the_nova_sonic_defaults_hold_only_fields_the_page_can_set(seeder) -> None:
+    """A shipped field the page cannot override would be one no admin could change."""
+    shipped = seeder.shipped_default_body("default")["nova_sonic_config"]
+    assert set(shipped) == seeder.NOVA_SONIC_FIELDS
+
+
+def test_the_nova_sonic_defaults_are_the_same_for_every_domain(seeder) -> None:
+    """Only the summary prompts have a healthcare variant."""
+    assert (
+        seeder.shipped_default_body("healthcare")["nova_sonic_config"]
+        == seeder.shipped_default_body("default")["nova_sonic_config"]
+    )
+
+
+# ── carrying a later store's edits across, one section at a time ───────────
+
+
+class LegacyNovaSonicTable:
+    """The previous Nova Sonic table, keyed on its own partition-key attribute."""
+
+    def __init__(self, item: Dict[str, Any] | None = None) -> None:
+        self.items: Dict[str, Dict[str, Any]] = {}
+        if item is not None:
+            self.items["CustomNovaSonicConfig"] = item
+        self.reads = 0
+
+    def get_item(self, **request: Any) -> Dict[str, Any]:
+        self.reads += 1
+        key = request["Key"]["NovaSonicConfigId"]["S"]
+        item = self.items.get(key)
+        return {"Item": item} if item is not None else {}
+
+
+CUSTOMISED_NOVA_SONIC_ITEM = {
+    "NovaSonicConfigId": {"S": "CustomNovaSonicConfig"},
+    "*Information*": {"S": "guidance text"},
+    "description": {"S": "Custom Nova Sonic configuration."},
+    "systemPrompt": {"S": "You are Sam, the team's assistant."},
+    "promptMode": {"S": "inject"},
+    "meetingMode": {"S": "translator"},
+    "translatorLanguageA": {"S": "French"},
+    "translatorLanguageB": {"S": "German"},
+    "groupMeetingMode": {"BOOL": False},
+    "UpdatedBy": {"S": "admin@example.com"},
+    "UpdatedAt": {"S": "2026-10-01T00:00:00Z"},
+}
+
+NOVA_TABLES = {"nova_sonic_config": "old-nova-table"}
+
+
+def test_an_upgrade_carries_the_nova_sonic_settings_into_the_existing_profile(seeder) -> None:
+    """The upgrade an existing deployment makes: the profile is already there."""
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")  # the release that created the profile
+    store.write_section(
+        "custom",
+        "summary_prompt_templates",
+        {"1#SUMMARY": "an admin's prompt"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=NOVA_TABLES,
+        legacy_client=LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM),
+    )
+
+    assert outcome["SectionAdoption"] == "nova_sonic_config=adopted-from-previous-table"
+    assert dynamo.body("Config#custom") == {
+        "summary_prompt_templates": {"1#SUMMARY": "an admin's prompt"},
+        "nova_sonic_config": {
+            "systemPrompt": "You are Sam, the team's assistant.",
+            "promptMode": "inject",
+            "meetingMode": "translator",
+            "translatorLanguageA": "French",
+            "translatorLanguageB": "German",
+            "groupMeetingMode": False,
+        },
+    }
+    resolved = store.get_section("nova_sonic_config").values
+    assert resolved["translatorLanguageA"] == "French"
+    assert resolved["voiceId"] == "tiffany"  # from the baseline
+
+
+def test_a_fresh_deployment_records_an_empty_nova_sonic_section(seeder) -> None:
+    """The previous table holds only its guidance text on a new deployment."""
+    store, dynamo = build_store()
+    legacy = LegacyNovaSonicTable(
+        {
+            "NovaSonicConfigId": {"S": "CustomNovaSonicConfig"},
+            "*Information*": {"S": "guidance text"},
+            "description": {"S": "Custom Nova Sonic configuration."},
+        }
+    )
+    outcome = seeder.seed(
+        store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=legacy
+    )
+    assert outcome["Profile"] == "created"
+    assert outcome["SectionAdoption"] == "nova_sonic_config=nothing-to-adopt"
+    assert dynamo.body("Config#custom") == {"nova_sonic_config": {}}
+
+
+def test_the_nova_sonic_adoption_happens_once(seeder) -> None:
+    """A later deployment must not replace an edit with the pre-upgrade values."""
+    store, dynamo = build_store()
+    legacy = LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM)
+    seeder.seed(store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=legacy)
+    store.write_section(
+        "custom",
+        "nova_sonic_config",
+        {"translatorLanguageA": "Japanese"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+    reads_before = legacy.reads
+
+    outcome = seeder.seed(
+        store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=legacy
+    )
+
+    assert outcome["SectionAdoption"] == "nova_sonic_config=already-present"
+    assert legacy.reads == reads_before, "the previous table was read again"
+    assert dynamo.body("Config#custom")["nova_sonic_config"] == {"translatorLanguageA": "Japanese"}
+
+
+def test_a_reset_to_defaults_is_not_undone_by_the_next_deployment(seeder) -> None:
+    """Reset saves an empty section, and an empty section is present."""
+    store, dynamo = build_store()
+    legacy = LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM)
+    seeder.seed(store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=legacy)
+    store.write_section(
+        "custom", "nova_sonic_config", {}, updated_by="admin@example.com", expected_version=None
+    )
+    seeder.seed(store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=legacy)
+    assert dynamo.body("Config#custom")["nova_sonic_config"] == {}
+
+
+def test_an_unreadable_previous_nova_sonic_table_is_retried_on_the_next_run(seeder) -> None:
+    """Unlike the profile's adoption, this one is not a one-shot.
+
+    Nothing is written when the read fails, so the section stays absent and the
+    next deployment that re-seeds reads the previous table again.
+    """
+    store, dynamo = build_store()
+    first = seeder.seed(
+        store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=Unreadable()
+    )
+    assert first["SectionAdoption"] == "nova_sonic_config=previous-table-unreadable"
+    assert "nova_sonic_config" not in dynamo.body("Config#custom")
+
+    later = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=NOVA_TABLES,
+        legacy_client=LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM),
+    )
+    assert later["SectionAdoption"] == "nova_sonic_config=adopted-from-previous-table"
+    assert dynamo.body("Config#custom")["nova_sonic_config"]["translatorLanguageB"] == "German"
+
+
+def test_an_unreadable_nova_sonic_table_does_not_stop_an_admins_save_counting(seeder) -> None:
+    """Once an admin saves the section, a later successful read changes nothing."""
+    store, dynamo = build_store()
+    seeder.seed(
+        store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=Unreadable()
+    )
+    store.write_section(
+        "custom",
+        "nova_sonic_config",
+        {"voiceId": "matthew"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+    later = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=NOVA_TABLES,
+        legacy_client=LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM),
+    )
+    assert later["SectionAdoption"] == "nova_sonic_config=already-present"
+    assert dynamo.body("Config#custom")["nova_sonic_config"] == {"voiceId": "matthew"}
+
+
+def test_no_previous_nova_sonic_table_writes_nothing(seeder) -> None:
+    """A stack given no previous table has nothing to record either way."""
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default")
+    assert outcome["SectionAdoption"] == "nova_sonic_config=no-previous-table"
+    assert dynamo.body("Config#custom") == {}
+
+
+def test_a_save_landing_mid_adoption_is_kept_and_the_adoption_retried(seeder, monkeypatch) -> None:
+    """An administrator saving another page during the deployment loses nothing."""
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+    real_seed_section = store.seed_section
+    raced = {"done": False}
+
+    def seed_section_after_a_concurrent_save(name, section, values):
+        if not raced["done"]:
+            raced["done"] = True
+            store.write_section(
+                "custom",
+                "summary_prompt_templates",
+                {"1#SUMMARY": "saved during the deployment"},
+                updated_by="admin@example.com",
+                expected_version=None,
+            )
+            # The profile moved on since the adoption read it.
+            raise seeder.ConcurrentModification("changed while it was being saved")
+        return real_seed_section(name, section, values)
+
+    monkeypatch.setattr(store, "seed_section", seed_section_after_a_concurrent_save)
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=NOVA_TABLES,
+        legacy_client=LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM),
+    )
+    assert outcome["SectionAdoption"] == "nova_sonic_config=adopted-from-previous-table"
+    body = dynamo.body("Config#custom")
+    assert body["summary_prompt_templates"] == {"1#SUMMARY": "saved during the deployment"}
+    assert body["nova_sonic_config"]["meetingMode"] == "translator"
+
+
+def test_the_handler_passes_the_previous_nova_sonic_table_through(seeder, monkeypatch) -> None:
+    dynamo = FakeDynamo()
+    monkeypatch.setattr(
+        seeder, "ConfigurationStore", lambda name: ConfigurationStore(name, client=dynamo)
+    )
+    seen: Dict[str, Any] = {}
+    real_seed = seeder.seed
+
+    def recording_seed(store, **kwargs):
+        seen.update(kwargs)
+        return real_seed(store, domain=kwargs["domain"])
+
+    monkeypatch.setattr(seeder, "seed", recording_seed)
+    event = _event("Update")
+    event["ResourceProperties"]["LegacyNovaSonicConfigTableName"] = "old-nova-table"
+    seeder.handler(event, _Context())
+    assert seen["legacy_section_tables"] == {"nova_sonic_config": "old-nova-table"}
+    assert "SectionAdoption" in seeder.recorder.sent[-1]["data"]
 
 
 # ── a stack update must not reset an operator's edits ──────────────────────

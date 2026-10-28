@@ -541,6 +541,93 @@ def test_seeding_reports_whether_it_created_the_profile() -> None:
     assert store.seed_profile("custom", {}) is False
 
 
+def test_a_section_can_be_added_to_a_profile_that_already_exists() -> None:
+    """A store moving in after the profile was created still lands in it."""
+    store, dynamo, _ = build()
+    seed(store)
+    store.write_section(
+        "custom",
+        "summary_prompt_templates",
+        {"1#SUMMARY": "the prompt an admin wrote"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+
+    assert store.seed_section("custom", "nova_sonic_config", {"voiceId": "matthew"}) is True
+
+    assert dynamo.body("Config#custom") == {
+        "summary_prompt_templates": {"1#SUMMARY": "the prompt an admin wrote"},
+        "nova_sonic_config": {"voiceId": "matthew"},
+    }
+    assert dynamo.metadata("Config#custom")["Version"] == 3
+
+
+def test_a_seeded_section_is_never_replaced_by_a_later_run() -> None:
+    """Presence is the guard, so a later deployment cannot resurrect old values."""
+    store, dynamo, _ = build()
+    seed(store)
+    store.seed_section("custom", "nova_sonic_config", {"voiceId": "matthew"})
+    store.write_section(
+        "custom",
+        "nova_sonic_config",
+        {"voiceId": "amy"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+
+    assert store.seed_section("custom", "nova_sonic_config", {"voiceId": "matthew"}) is False
+    assert dynamo.body("Config#custom")["nova_sonic_config"] == {"voiceId": "amy"}
+
+
+def test_an_empty_seeded_section_counts_as_present() -> None:
+    """What the seeder writes when there was nothing to carry across.
+
+    Equally what a page's "reset to defaults" saves. Either way, the next run
+    must leave it alone rather than read the previous table again.
+    """
+    store, dynamo, _ = build()
+    seed(store)
+    assert store.seed_section("custom", "nova_sonic_config", {}) is True
+    assert store.seed_section("custom", "nova_sonic_config", {"voiceId": "matthew"}) is False
+    assert dynamo.body("Config#custom")["nova_sonic_config"] == {}
+
+
+def test_seeding_a_section_into_a_missing_profile_writes_nothing() -> None:
+    store, dynamo, _ = build()
+    store.write_default(DEFAULT_BODY)
+    assert store.seed_section("custom", "nova_sonic_config", {"voiceId": "matthew"}) is False
+    assert "Config#custom" not in dynamo.items
+
+
+def test_seeding_a_section_is_conditional_on_the_record_it_read() -> None:
+    """A save landing between the read and the write must not be overwritten."""
+    store, dynamo, _ = build()
+    seed(store)
+    dynamo.requests.clear()
+
+    store.seed_section("custom", "nova_sonic_config", {})
+
+    (put,) = dynamo.puts()
+    assert put["ConditionExpression"] == "#version = :expected"
+    assert put["ExpressionAttributeValues"] == {":expected": {"N": "1"}}
+
+
+def test_seeding_a_section_keeps_how_the_profile_came_to_exist() -> None:
+    """ProfileOrigin is what the stack output reports; a seeder run must keep it."""
+    store, dynamo, _ = build()
+    store.write_default(DEFAULT_BODY)
+    store.seed_profile("custom", {}, origin="created-from-previous-table")
+    store.seed_section("custom", "nova_sonic_config", {})
+    assert dynamo.metadata("Config#custom")["ProfileOrigin"] == "created-from-previous-table"
+
+
+def test_seeding_an_unregistered_section_is_refused() -> None:
+    store, _, _ = build()
+    seed(store)
+    with pytest.raises(UnknownConfigurationSection):
+        store.seed_section("custom", "not_a_section", {})
+
+
 def test_a_repeated_deployment_leaves_the_active_pointer_where_an_operator_put_it() -> None:
     store, dynamo, _ = build()
     seed(store)

@@ -559,6 +559,56 @@ class ConfigurationStore:
             extra_metadata={"ProfileOrigin": origin} if origin else None,
         )
 
+    def seed_section(self, name: str, section: str, values: Mapping[str, Any]) -> bool:
+        """Add a section to a stored profile only if the profile does not hold it.
+
+        The per-section counterpart of :meth:`seed_profile`, for a store that
+        moves into this table after the profile already exists: the profile was
+        created when the first store moved in, so "write the profile if it is
+        absent" can no longer carry a later store's settings across.
+
+        The section's *presence* is the guard. An empty section counts as
+        present -- it is what the seeder writes when there was nothing to carry
+        across, and what a page's "reset to defaults" saves -- so once a section
+        is there, whether written here or by an administrator, no later run can
+        replace it with older values.
+
+        Args:
+            name: Profile name. Validated, so a reserved name is refused.
+            section: The section to add. Validated against the registry.
+            values: The section's contents. May be empty.
+
+        Returns:
+            True when this call added the section; False when the profile is
+            absent or already holds the section, in which case nothing is
+            written.
+
+        Raises:
+            ConcurrentModification: the profile changed between the read and
+                the write. Nothing is written; a caller can read again to see
+                what landed.
+        """
+        spec = section_spec(section)
+        key = profile_key(name)
+        current = self.read_record(key, consistent_read=True)
+        if not current.exists or spec.name in current.body:
+            return False
+        origin = current.profile_origin
+        self._put(
+            key,
+            {**current.body, spec.name: dict(values)},
+            updated_by="cloudformation",
+            version=current.version + 1,
+            created_at=current.metadata.get("CreatedAt"),
+            extra_metadata={"ProfileOrigin": origin} if origin else None,
+            # Pinned to the read above: an administrator's save landing in
+            # between must not be replaced by a body built before it existed.
+            condition=self._condition_for(current),
+            profile_name=name,
+        )
+        self.invalidate()
+        return True
+
     def set_active_profile(self, name: str, *, only_if_absent: bool = False) -> bool:
         """Point the active-profile sentinel at ``name``.
 

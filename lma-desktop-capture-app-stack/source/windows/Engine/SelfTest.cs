@@ -235,6 +235,19 @@ public static class SelfTest
         Check("malformed response → retryable",
             Rejected("no AuthenticationResult.AccessToken in REFRESH_TOKEN_AUTH response"), "False");
 
+        var first = new DateTime(2026, 10, 19, 8, 53, 20, DateTimeKind.Utc);
+        var later = first.AddHours(1);
+        Check("default callId uses the session start time",
+            Config.SessionCallId(null, "", later), "LMA native prototype - 2026-10-19T09:53:20Z");
+        Check("two default sessions get distinct callIds",
+            (Config.SessionCallId(null, "", first) != Config.SessionCallId(null, "", later)).ToString(), "True");
+        Check("empty meeting name takes the default callId",
+            Config.SessionCallId("", "", later), Config.DefaultCallId(later));
+        Check("meeting name wins over a configured callId",
+            Config.SessionCallId("Standup - 10:00", "Fixed", later), "Standup - 10:00");
+        Check("configured callId is kept across sessions",
+            Config.SessionCallId(null, "Fixed", later), "Fixed");
+
         Console.WriteLine(failures == 0 ? "\nAll self-tests PASSED" : $"\n{failures} self-test(s) FAILED");
         return failures == 0 ? 0 : 1;
     }

@@ -5,7 +5,12 @@ import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { simliAvatar } from './simli-avatar.js';
-import { loadNovaSonicConfig, MeetingMode } from './nova-sonic-config-loader.js';
+import {
+  hasNovaSonicConfigTable,
+  loadNovaSonicConfig,
+  MeetingMode,
+  novaSonicConfigTablesFromEnv,
+} from './nova-sonic-config-loader.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { mutedLookupSkipReason, SKIPPED_LOOKUP_RESULT, skippedLookupLogLine } from './muted-lookup.js';
 import { ActivationMode } from './voice-assistant-interface.js';
@@ -108,16 +113,16 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       console.log(`Agent ID: ${this.agentId || '(using default agent)'}`);
       console.log(`Activation mode: ${this.activationMode}`);
 
-      // Load shared voice-assistant configuration from DynamoDB (Nova Sonic config
-      // table is shared across providers for meeting-mode / translator settings).
-      const tableName = process.env.NOVA_SONIC_CONFIG_TABLE_NAME;
-      if (tableName) {
+      // Load shared voice-assistant configuration from DynamoDB (the Nova Sonic
+      // settings are shared across providers for meeting-mode / translator settings).
+      const configTables = novaSonicConfigTablesFromEnv();
+      if (hasNovaSonicConfigTable(configTables)) {
         try {
           const dynamoDbClient = new DynamoDBClient({
             region: this.region,
             credentials: defaultProvider(),
           });
-          const config = await loadNovaSonicConfig(dynamoDbClient, tableName);
+          const config = await loadNovaSonicConfig(dynamoDbClient, configTables);
           console.log('✓ Loaded voice-assistant config from DynamoDB');
 
           if (config.meetingMode) {

@@ -69,6 +69,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Mapping
@@ -330,6 +331,38 @@ failed. It does not record what a successful tool returned.
 ```
 </details>
 """
+
+
+#: The output contract's first section, and any section heading as the fallback
+#: anchor. Both are matched at the start of a line and with exactly two hashes,
+#: so a "###" sub-heading or a "##" inside a sentence is not taken for one.
+_ROOT_CAUSE_HEADING = re.compile(r"^## Root Cause\b", re.MULTILINE)
+_ANY_SECTION_HEADING = re.compile(r"^## ", re.MULTILINE)
+
+
+def strip_preamble(answer: str) -> str:
+    """Drop anything the model wrote before the answer's first section.
+
+    The output contract is three sections and nothing else, and the prompt
+    says so; some models still open with a line of their own ("I now have all
+    the evidence I need...") before ``## Root Cause``. That line is not part of
+    the diagnosis, and the reader pasting the answer into an issue should not
+    have to delete it. So it is removed here rather than left to the prompt.
+
+    The anchor is ``## Root Cause``, so a preamble with a ``##`` heading of its
+    own is dropped too. An answer without that heading is cut at its first
+    ``##`` heading instead, which still removes an opening sentence when the
+    model has renamed or skipped the first section.
+
+    An answer with no section heading at all is returned whole (stripped of
+    surrounding whitespace): with nothing to anchor on there is no telling
+    which part is preamble, and losing the model's whole answer would be worse
+    than showing it unformatted.
+    """
+    match = _ROOT_CAUSE_HEADING.search(answer) or _ANY_SECTION_HEADING.search(answer)
+    if match is None:
+        return answer.strip()
+    return answer[match.start():].strip()
 
 
 # ── AppSync streaming ───────────────────────────────────────────────────────
@@ -925,7 +958,8 @@ def build_tools(tools: TroubleshootingTools, budget: RunBudget) -> List[Any]:
 
         Returns:
             The resolved query, the time window searched, the matching rows and
-            the bytes scanned.
+            the bytes scanned. A row that is a log line carries the logGroup
+            and @logStream it came from; quote those, not a name you searched.
         """
         return guarded(
             "search_logs",
@@ -1083,7 +1117,7 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
                 reason=budget.ended_because, usage=json.dumps(budget.as_dict(), indent=2)
             )
         else:
-            answer = str(result)
+            answer = strip_preamble(str(result))
     finally:
         # In a `finally` so a run that raised still records what it spent. A
         # failed diagnosis has usually made several Bedrock calls, and that is

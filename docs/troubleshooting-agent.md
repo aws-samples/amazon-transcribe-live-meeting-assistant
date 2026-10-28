@@ -95,6 +95,13 @@ Three sections, always in this order:
 </details>
 ```
 
+The answer starts at `## Root Cause`: anything the model writes before that
+heading is removed before the answer is returned (or before its first `##`
+heading, if the model left out `## Root Cause`). Each log line
+`search_logs` returns carries the log group and stream it came from, and the
+Evidence section quotes those values rather than a group name the model
+recalls, so a line is cited against the group that actually holds it.
+
 `Not determined`, with the missing evidence named, is a deliberate and
 acceptable answer. The prompt forbids offering likely causes: a diagnosis you
 cannot check is worse than none, because you act on it.

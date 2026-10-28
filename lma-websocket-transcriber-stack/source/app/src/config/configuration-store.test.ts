@@ -40,6 +40,7 @@ import {
     ConfigurationStore,
     DEFAULT_KEY,
     METADATA_ATTRIBUTES,
+    NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
     TABLE_NAME_ENV_VAR,
     TIER_CONSISTENT_READ,
@@ -208,6 +209,34 @@ test('a profile is a delta over the shipped baseline', async () => {
         '2#ACTIONS': 'shipped actions',
     });
     assert.equal(section.activeProfile, 'custom');
+});
+
+test('a section carries the baseline and profile layers it was merged from', async () => {
+    const { store } = seeded();
+    const section = await store.getSection(SUMMARY_PROMPT_TEMPLATES);
+    assert.deepEqual(section.baselineValues, {
+        '1#SUMMARY': 'shipped summary',
+        '2#ACTIONS': 'shipped actions',
+    });
+    assert.deepEqual(section.profileValues, { '1#SUMMARY': 'the admin edit' });
+});
+
+test('a profile holding nothing for a section gives an empty profile layer', async () => {
+    const { table, store } = build();
+    table.seed(DEFAULT_KEY, { [SECTION]: { '1#SUMMARY': 'shipped summary' } });
+    table.seed('Config#custom', { other_section: { a: 1 } });
+    table.pointAt('custom');
+    const section = await store.getSection(SUMMARY_PROMPT_TEMPLATES);
+    assert.deepEqual(section.profileValues, {});
+    assert.deepEqual(section.baselineValues, { '1#SUMMARY': 'shipped summary' });
+});
+
+test('with no active profile the profile layer is empty', async () => {
+    const { table, store } = build();
+    table.seed(DEFAULT_KEY, { [SECTION]: { '1#SUMMARY': 'shipped summary' } });
+    const section = await store.getSection(SUMMARY_PROMPT_TEMPLATES);
+    assert.deepEqual(section.profileValues, {});
+    assert.deepEqual(section.values, section.baselineValues);
 });
 
 test('the baseline alone is served when no profile has been written', async () => {
@@ -511,6 +540,11 @@ test('a section may not be declared twice with different policies', () => {
             }),
         /different caching policy/
     );
+});
+
+test('the Nova Sonic section is declared on the immediate tier, as in Python', () => {
+    assert.equal(declaredSections().get('nova_sonic_config'), NOVA_SONIC_CONFIG);
+    assert.equal(NOVA_SONIC_CONFIG.cacheTier, 'immediate');
 });
 
 test('the summary prompt templates section is declared on the same tier as in Python', () => {

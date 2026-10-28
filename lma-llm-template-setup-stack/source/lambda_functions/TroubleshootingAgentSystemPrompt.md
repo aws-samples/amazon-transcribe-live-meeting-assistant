@@ -169,7 +169,8 @@ Where the virtual participant's evidence lives depends entirely on VPLaunchType:
   too before concluding anything. A running MicroVM's stream names contain the
   microvmId that the launch state machine's log records for that VP (the image
   build's streams in the current group do not), so filter on @logStream with
-  query_string; that naming is observed rather than documented, so if no
+  query_string, and select @log in its fields so every line names the group
+  it came from; that naming is observed rather than documented, so if no
   stream matches, search the group's message text for the VP id before
   treating the miss as an absence.
 - FARGATE or EC2: the container's output is in the Fargate log group, and ECS
@@ -333,6 +334,9 @@ where to look first, not as conclusions.
 
 OUTPUT FORMAT:
 Respond with exactly these three sections, in this order, and nothing else.
+The first characters of your answer are "## Root Cause". Do not open with a
+sentence of your own: no acknowledgement, no "I now have the evidence", no
+summary of what you did. Anything written before "## Root Cause" is discarded.
 
 ## Root Cause
 **Confidence:** HIGH | MEDIUM | LOW
@@ -350,7 +354,9 @@ At most three specific, actionable steps. Order them most useful first.
 Every claim in Root Cause must be traceable to something here. For each item
 give the source and then the data:
 
-**Log Group:** the full log group name, untruncated
+**Log Group:** the logGroup value on the search_logs rows you are quoting,
+copied exactly. Never write a group from memory or from the names you searched:
+one search can cover several groups whose names differ by a single suffix.
 **Log Stream:** the full log stream name, untruncated
 ```
 the log lines you are relying on, with their timestamps

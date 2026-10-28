@@ -907,6 +907,12 @@ type UpdateChatButtonConfigOutput @aws_cognito_user_pools @aws_iam {
 }
 
 # Nova Sonic Voice Assistant Configuration
+#
+# The read returns a JSON string in NovaSonicConfigId, which is how this field
+# has always answered. What is in that string is the record's settings plus its
+# Version, UpdatedBy and UpdatedAt -- not the whole DynamoDB item, which also
+# carried the partition key, the seeded guidance text and a description.
+# Version is what the page sends back as ExpectedVersion when it saves.
 type NovaSonicConfig @aws_cognito_user_pools @aws_iam {
 	NovaSonicConfigId: ID!
 }
@@ -914,11 +920,18 @@ type NovaSonicConfig @aws_cognito_user_pools @aws_iam {
 input UpdateNovaSonicConfigInput {
 	NovaSonicConfigId: ID!
 	ConfigData: String!
+	# The version the page loaded. Optional, so a client that does not send it
+	# keeps working: its save is still conditional on the record as the
+	# resolver reads it, and supplying this adds the check against what the
+	# page was actually looking at.
+	ExpectedVersion: Int
 }
 
 type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
 	NovaSonicConfigId: ID!
 	Success: Boolean!
+	# The version now stored, so the page can save again without reloading.
+	Version: Int
 }
 
 # Runtime switches for the on-demand ASR engine, edited from the Transcription Engine

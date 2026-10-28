@@ -91,3 +91,52 @@ class TestCheckPrereqs:
         mock_check.return_value = ["Docker not found"]
         result = runner.invoke(main, ["check-prereqs"])
         assert result.exit_code != 0
+
+
+class TestVpCreateCommand:
+    """Tests for `lma vp create`."""
+
+    def _invoke(self, runner, args):
+        from lma_sdk.models.virtual_participant import VpLaunchResult
+
+        mock_client = MagicMock()
+        mock_client.vp.create.return_value = VpLaunchResult(
+            id="vp-1", status="INITIALIZING", meeting_name="m",
+            meeting_platform="ZOOM", meeting_id="1",
+            owner="alice@example.com", user_sub="sub-1", zoom_credentials_used=True,
+        )
+        result = runner.invoke(
+            main,
+            ["vp", "create", "--name", "m", "--platform", "zoom", "--id", "1", "--no-wait", *args],
+            obj={"client_factory": lambda **kw: mock_client},
+        )
+        return result, mock_client
+
+    def test_without_as_user_launches_with_no_user(self, runner):
+        result, mock_client = self._invoke(runner, [])
+        assert result.exit_code == 0, result.output
+        kwargs = mock_client.vp.create.call_args.kwargs
+        assert kwargs["as_user"] is None
+        assert kwargs["use_zoom_credentials"] is None
+        assert kwargs["user_name"] == "lma-cli@lma"
+
+    def test_as_user_is_passed_through(self, runner):
+        result, mock_client = self._invoke(runner, ["--as-user", "alice@example.com"])
+        assert result.exit_code == 0, result.output
+        kwargs = mock_client.vp.create.call_args.kwargs
+        assert kwargs["as_user"] == "alice@example.com"
+        assert kwargs["user_name"] is None  # SDK defaults it to the user's email
+        assert "alice@example.com" in result.output
+        assert "stored credentials" in result.output
+
+    def test_zoom_credentials_flag_is_passed_through(self, runner):
+        result, mock_client = self._invoke(
+            runner, ["--as-user", "alice@example.com", "--no-zoom-credentials"],
+        )
+        assert result.exit_code == 0, result.output
+        assert mock_client.vp.create.call_args.kwargs["use_zoom_credentials"] is False
+
+    def test_zoom_credentials_flag_requires_as_user(self, runner):
+        result, mock_client = self._invoke(runner, ["--zoom-credentials"])
+        assert result.exit_code == 2
+        mock_client.vp.create.assert_not_called()

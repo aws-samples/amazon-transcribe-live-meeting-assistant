@@ -38,6 +38,7 @@ struct Config {
     /// interactive sign-in. Redeemed by TokenStore, never sent to the server.
     var refreshToken: String
     var callId: String
+    var configuredCallId: String
     var agentId: String
     var fromNumber: String
     var toNumber: String
@@ -143,6 +144,16 @@ struct Config {
         + "restrictions that apply to recording meetings and calls. Do not use this solution "
         + "to stream, record, or transcribe calls if otherwise prohibited."
 
+    static func defaultCallId(at date: Date) -> String {
+        "LMA native prototype - \(ISO8601DateFormatter().string(from: date))"
+    }
+
+    static func sessionCallId(requested: String?, configured: String, now: Date = Date()) -> String {
+        if let r = requested, !r.isEmpty { return r }
+        if !configured.isEmpty { return configured }
+        return defaultCallId(at: now)
+    }
+
     static func parse() -> Config {
         let env = ProcessInfo.processInfo.environment
         var args: [String: String] = [:]
@@ -166,14 +177,15 @@ struct Config {
         }
 
         let sr = Int(value("sample-rate", "LMA_SAMPLE_RATE", "samplingRate", "48000")) ?? 48000
-        let defaultCallId = "LMA native prototype - \(ISO8601DateFormatter().string(from: Date()))"
+        let configuredCallId = value("call-id", "LMA_CALL_ID")
 
         return Config(
             endpoint: value("endpoint", "LMA_WS_ENDPOINT", "wssEndpoint"),
             accessToken: value("token", "LMA_ACCESS_TOKEN"),
             idToken: value("id-token", "LMA_ID_TOKEN"),
             refreshToken: value("refresh-token", "LMA_REFRESH_TOKEN"),
-            callId: value("call-id", "LMA_CALL_ID", nil, defaultCallId),
+            callId: sessionCallId(requested: nil, configured: configuredCallId),
+            configuredCallId: configuredCallId,
             agentId: value("agent-id", "LMA_AGENT_ID", nil, "Me"),
             fromNumber: value("from", "LMA_FROM", nil, "Other participants"),
             toNumber: value("to", "LMA_TO", nil, "System"),

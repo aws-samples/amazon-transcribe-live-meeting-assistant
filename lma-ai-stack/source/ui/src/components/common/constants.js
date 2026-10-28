@@ -8,6 +8,8 @@
 export const LMA_VERSION = 'v<VERSION_TOKEN>';
 export const DEFAULT_OTHER_SPEAKER_NAME = 'Other Participant';
 export const DEFAULT_LOCAL_SPEAKER_NAME = 'Me';
+// The Desktop Capture App's default label for the system-audio channel.
+export const DEFAULT_DESKTOP_SYSTEM_LABEL = 'Other participants';
 export const SYSTEM = 'System';
 
 export const COMPREHEND_PII_TYPES = [

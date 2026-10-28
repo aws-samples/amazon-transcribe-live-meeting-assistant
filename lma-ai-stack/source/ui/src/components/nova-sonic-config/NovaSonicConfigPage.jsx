@@ -22,6 +22,7 @@ import {
 } from '@cloudscape-design/components';
 
 import AdminOnly from '../common/AdminOnly';
+import { isConflict } from '../common/config-conflict';
 
 const client = generateClient();
 const PROMPT_MODE_OPTIONS = [
@@ -58,9 +59,29 @@ const updateNovaSonicConfigMutation = `
     updateNovaSonicConfig(input: $input) {
       NovaSonicConfigId
       Success
+      Version
     }
   }
 `;
+
+// Shown when the stored profile moved on while this page was open -- another
+// administrator saved it, from this page or another configuration page, since
+// they share one profile. The save is refused rather than replacing their edit,
+// so the only way forward is to reload and reapply.
+const CONFLICT_MESSAGE =
+  'Someone else saved the configuration while this page was open. Reload the page to see ' +
+  'their version, then apply your changes again.';
+
+// What a read returns besides the settings: the record's version, which the page
+// sends back when it saves, and who saved it last.
+const PROVENANCE_FIELDS = ['Version', 'UpdatedBy', 'UpdatedAt'];
+
+// The settings in a read, without its provenance. Exported for the tests.
+export const settingsOnly = (data) =>
+  Object.fromEntries(Object.entries(data || {}).filter(([key]) => !PROVENANCE_FIELDS.includes(key)));
+
+// The version a read reports, or null when it reports none. Exported for the tests.
+export const versionOf = (data) => (typeof data?.Version === 'number' ? data.Version : null);
 
 const meetingModeFromData = (data) => {
   if (!data) return 'normal';
@@ -79,6 +100,9 @@ const NovaSonicConfigPageContent = () => {
   const [defaultConfig, setDefaultConfig] = useState({});
   // eslint-disable-next-line no-unused-vars
   const [customConfig, setCustomConfig] = useState({});
+  // The version of the profile this page loaded, sent back on save so a save
+  // against a profile someone else has since saved is refused.
+  const [version, setVersion] = useState(null);
 
   const [systemPrompt, setSystemPrompt] = useState('');
   const [promptMode, setPromptMode] = useState(null);
@@ -103,8 +127,9 @@ const NovaSonicConfigPageContent = () => {
       const defaultData = JSON.parse(defaultResult.data.getNovaSonicConfig.NovaSonicConfigId);
       const customData = JSON.parse(customResult.data.getNovaSonicConfig.NovaSonicConfigId);
 
-      setDefaultConfig(defaultData || {});
-      setCustomConfig(customData || {});
+      setDefaultConfig(settingsOnly(defaultData));
+      setCustomConfig(settingsOnly(customData));
+      setVersion(versionOf(customData));
 
       if (customData) {
         setSystemPrompt(customData.systemPrompt || '');
@@ -163,6 +188,7 @@ const NovaSonicConfigPageContent = () => {
           input: {
             NovaSonicConfigId: 'CustomNovaSonicConfig',
             ConfigData: JSON.stringify(configData),
+            ExpectedVersion: version,
           },
         },
       });
@@ -171,7 +197,7 @@ const NovaSonicConfigPageContent = () => {
       await loadConfig();
     } catch (err) {
       console.error('Error saving Nova Sonic config:', err);
-      setError('Failed to save configuration. Please try again.');
+      setError(isConflict(err) ? CONFLICT_MESSAGE : 'Failed to save configuration. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -188,6 +214,7 @@ const NovaSonicConfigPageContent = () => {
           input: {
             NovaSonicConfigId: 'CustomNovaSonicConfig',
             ConfigData: JSON.stringify({}),
+            ExpectedVersion: version,
           },
         },
       });
@@ -206,7 +233,7 @@ const NovaSonicConfigPageContent = () => {
       await loadConfig();
     } catch (err) {
       console.error('Error resetting config:', err);
-      setError('Failed to reset configuration. Please try again.');
+      setError(isConflict(err) ? CONFLICT_MESSAGE : 'Failed to reset configuration. Please try again.');
     } finally {
       setSaving(false);
     }

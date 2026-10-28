@@ -143,7 +143,9 @@ Python SDK (no Cognito login required). The lifecycle is:
 
 | Method | Description | Returns |
 |--------|-------------|---------|
-| `create(meeting_name, platform, meeting_id, meeting_password="", user_name="loadtest@lma", wait=True, timeout_s=120.0, poll_interval_s=2.0)` | Create + launch a VP and (by default) wait for it to leave `INITIALIZING` | `VpLaunchResult` |
+| `create(meeting_name, platform, meeting_id, meeting_password="", user_name=None, wait=True, timeout_s=120.0, poll_interval_s=2.0, as_user=None, use_zoom_credentials=None)` | Create + launch a VP and (by default) wait for it to leave `INITIALIZING`. `as_user` launches it for an LMA user (see below) | `VpLaunchResult` |
+| `resolve_user(email_or_username)` | Look up an LMA user in the stack's Cognito user pool | `LmaUser` (`username`, `sub`, `email`) |
+| `has_zoom_credentials(user_sub, required=False)` | Whether the user has stored Zoom credentials | `bool` |
 | `get(vp_id)` | Fetch a VP row by id | `VpRow` |
 | `end(vp_id, reason="SDK requested termination", ended_by="SDK")` | End (stop) a running VP | `VpRow` |
 | `list()` | List VPs visible to the calling IAM principal | `list[VpRow]` |
@@ -172,6 +174,28 @@ Raises `LMAVirtualParticipantError` on any failure (AppSync error, SFN
 `FAILED`, placement failure, or — when `wait=True` — failure to launch
 within `timeout_s`). Failed launches are best-effort cleaned up to avoid
 orphan `INITIALIZING` rows in the UI.
+
+By default the VP row is owned by the calling IAM principal, and the VP
+starts with a fresh browser profile and joins Zoom as a guest. Passing
+`as_user="alice@example.com"` (an email or Cognito user name) launches it
+for that LMA user instead, with the same values the Web UI sends: the row's
+owner is the user's Cognito user name, and the user's `sub` is passed to
+the VP so it restores their saved browser profile. For Zoom meetings the VP
+also signs in with the user's stored Zoom credentials when they exist;
+`use_zoom_credentials=True` requires them and `False` skips them. The result
+carries `owner`, `user_sub` and `zoom_credentials_used`. The extra IAM
+permissions this needs are listed under
+[`lma vp create --as-user`](lma-cli.md#launching-a-vp-for-an-lma-user---as-user).
+
+```python
+result = client.vp.create(
+    meeting_name="Weekly sync",
+    platform="ZOOM",
+    meeting_id="1234567890",
+    as_user="alice@example.com",
+)
+print(result.owner, result.zoom_credentials_used)
+```
 
 ### Data Models
 

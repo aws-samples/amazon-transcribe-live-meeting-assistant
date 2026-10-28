@@ -44,7 +44,7 @@ Parameters:
 
   AsrModelBundle:
     Type: String
-    Default: parakeet-tdt-v3-titanet-small
+    Default: parakeet-tdt-v3-live-nemotron35-sortformer
     AllowedValues:
       - fastconformer-titanet-small
       - fastconformer-transcription-only

@@ -245,7 +245,7 @@ final class CaptureController {
         guard !config.accessToken.isEmpty else { setState(.error("Not signed in")); return }
         setState(.starting)
 
-        if let c = callId, !c.isEmpty { config.callId = c }
+        config.callId = Config.sessionCallId(requested: callId, configured: config.configuredCallId)
         activeCallId = config.callId
 
         // Apply Settings overrides: speaker labels ride the START frame as

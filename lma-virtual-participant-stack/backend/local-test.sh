@@ -264,6 +264,14 @@ if [ "$SKIP_ENV_GENERATION" = false ]; then
             --output text 2>/dev/null)
         echo "Event Sourcing Table: $EVENT_SOURCING_TABLE_NAME"
 
+        # The shared configuration table, which the voice assistant reads its
+        # settings from (the Nova Sonic table above is the fallback)
+        CONFIGURATION_TABLE_NAME=$(aws cloudformation describe-stacks \
+            --stack-name "$AI_STACK" \
+            --query "Stacks[0].Outputs[?OutputKey=='ConfigurationTableName'].OutputValue" \
+            --output text 2>/dev/null)
+        echo "Configuration Table: $CONFIGURATION_TABLE_NAME"
+
         # Persistent CloakBrowser profile bucket (per-user tar.gz profiles)
         VP_PROFILES_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "$AI_STACK" \
@@ -364,6 +372,7 @@ NOVA_MODEL_ID=${NOVA_MODEL_ID:-amazon.nova-2-sonic-v1:0}
 NOVA_SYSTEM_PROMPT=${NOVA_SYSTEM_PROMPT:-You are Alex, an AI meeting assistant. Be concise and helpful.}
 STRANDS_LAMBDA_ARN=${STRANDS_LAMBDA_ARN:-}
 NOVA_SONIC_CONFIG_TABLE_NAME=${NOVA_SONIC_CONFIG_TABLE_NAME:-}
+CONFIGURATION_TABLE_NAME=${CONFIGURATION_TABLE_NAME:-}
 
 # Simli Avatar Configuration
 # Provides an animated lip-synced avatar as the VP's camera feed

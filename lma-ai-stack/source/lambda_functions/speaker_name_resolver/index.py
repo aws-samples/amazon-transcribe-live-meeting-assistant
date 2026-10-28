@@ -269,15 +269,17 @@ def resolve(call_id, identity=None, force=False, final=False):
     # is exactly the over-rejection this module has been bitten by five times:
     # an introduction with no phrase a regex can spot -- "Sarah Lee, platform
     # engineering" -- would never be found at all.
-    if not pure.worth_a_model_call(turns, identities, force=force or final):
+    if not pure.worth_a_model_call(turns, identities, force=force or final, all_turns=all_turns):
         LOGGER.info("Nothing to name for %s (turns=%d, forced=%s)", call_id, len(turns), force)
         return {"ok": True, "reason": "nothing to name", "applied": []}
 
-    labels = pure.unresolved_voices(turns, identities)
+    labels = pure.unresolved_voices(turns, identities, all_turns)
     prompt = pure.build_prompt(turns, labels, identities.get("candidates") or [])
     raw = call_bedrock(prompt)
     proposals = pure.parse_model_response(raw)
-    updated, applied = pure.apply_proposals(identities, proposals, turns, now_iso)
+    updated, applied = pure.apply_proposals(
+        identities, proposals, turns, now_iso, all_turns=all_turns
+    )
 
     # The gap between proposed and applied is how much the verification
     # rejected, which is the number worth watching when tuning the prompt.
