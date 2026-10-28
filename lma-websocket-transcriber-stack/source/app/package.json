@@ -23,17 +23,17 @@
   },
   "keywords": [],
   "dependencies": {
-    "@aws-sdk/client-dynamodb": "^3.1152.0",
-    "@aws-sdk/client-kinesis": "^3.1152.0",
-    "@aws-sdk/client-lambda": "^3.1152.0",
-    "@aws-sdk/client-s3": "^3.1152.0",
-    "@aws-sdk/client-transcribe-streaming": "^3.1152.0",
+    "@aws-sdk/client-dynamodb": "^3.1156.0",
+    "@aws-sdk/client-kinesis": "^3.1156.0",
+    "@aws-sdk/client-lambda": "^3.1156.0",
+    "@aws-sdk/client-s3": "^3.1156.0",
+    "@aws-sdk/client-transcribe-streaming": "^3.1156.0",
     "@fastify/websocket": "^11.3.4",
     "@smithy/node-http-handler": "^4.11.3",
     "aws-jwt-verify": "^5.2.1",
     "block-stream2": "^2.1.0",
     "buffer-from": "^1.1.2",
-    "dotenv": "^18.0.8",
+    "dotenv": "^18.0.9",
     "fastify": "^5.12.7",
     "pino-pretty": "^13.2.0",
     "ws": "^8.22.0"
@@ -48,6 +48,6 @@
     "eslint": "^10.13.0",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.71.2"
+    "typescript-eslint": "^8.72.0"
   }
 }
