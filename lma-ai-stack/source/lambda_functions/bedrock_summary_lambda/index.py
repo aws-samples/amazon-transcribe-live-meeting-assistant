@@ -20,8 +20,11 @@ from lma_config import SUMMARY_PROMPT_TEMPLATES, ConfigurationStore  # configura
 
 # pylint: enable=import-error
 
+# The root logger's level is what the configuration layer's own loggers inherit,
+# so this is also the level at which its warnings (an unreadable profile, a
+# fallback to the baseline) reach the function's log group.
 logger = logging.getLogger()
-logger.setLevel(logging.ERROR)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # grab environment variables
 
