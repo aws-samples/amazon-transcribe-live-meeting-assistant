@@ -1016,11 +1016,12 @@ export class NovaAgent implements VoiceAssistantProvider {
           // Each direction is named outright. Nova 2 Sonic, given only "the
           // OTHER language" and "speak in A or B", repeated an English
           // utterance back in English in 4 of 17 single-utterance replays of
-          // this session setup; with these three lines it translated 18 of 18.
+          // this session setup; with these three lines, in none of 24 (18 of
+          // them with an earlier wording of rule 6, 6 with the current one).
           ...translatorDirectionRules(a, b),
           '4. Do NOT greet, explain, summarize, answer questions, or add any commentary.',
           '5. Preserve meaning, names, numbers, and dates. Keep output concise.',
-          `6. If an utterance is unclear or in a third language, translate it into ${a}.`,
+          `6. If an utterance is in neither ${a} nor ${b}, translate it into ${a}.`,
           '7. Never say anything on your own. Do not introduce yourself. Do not ask clarifying questions.',
           '',
           'Begin translating from the very next utterance you hear.',

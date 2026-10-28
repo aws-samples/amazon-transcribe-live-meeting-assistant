@@ -9,8 +9,9 @@
  * prompt's language rules and the voice in its promptStart.
  *
  * What is NOT covered here: whether the model speaks the language the prompt
- * asks for. That was measured against Nova 2 Sonic itself (see
- * translatorDirectionRules) and needs a live meeting to confirm.
+ * asks for. That was measured against Nova 2 Sonic itself (the figures are in
+ * the comment above the rules in NovaAgent.buildSystemPromptContent) and needs
+ * a live meeting to confirm.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
@@ -41,9 +42,6 @@ async function queuedSetupEvents(agent: NovaAgent, isRefresh: boolean): Promise<
         sessionStartTime: Date.now(),
         lastRefreshTime: Date.now(),
     };
-    // Timers belong to a live session; none is wanted in a unit test.
-    inner.startSessionRefreshTimer = () => {};
-    inner.startKeepAliveTimer = () => {};
     await inner.setupInitialEvents(isRefresh);
     return inner.session.queue.map((entry: any) => entry.event);
 }
@@ -72,6 +70,10 @@ test('the direction rules follow the configured language pair', () => {
 test('every translator session carries the configured voice and the translator prompt', async () => {
     for (const isRefresh of [false, true]) {
         const agent = translatorAgent('English', 'Spanish', 'matthew');
+        // A refresh replays the conversation so far, so give it a turn to replay.
+        (agent as any).conversationHistory = [
+            { role: 'USER', content: 'good morning everyone', timestamp: Date.now() },
+        ];
         const events = await queuedSetupEvents(agent, isRefresh);
 
         const promptStart = events.find((e) => e.promptStart)?.promptStart;
@@ -82,8 +84,15 @@ test('every translator session carries the configured voice and the translator p
             ['mute'],
         );
 
-        const systemText = events.find((e) => e.textInput)?.textInput.content as string;
+        const systemBlock = events.find((e) => e.contentStart?.role === 'SYSTEM')?.contentStart;
+        assert.ok(systemBlock, 'a SYSTEM content block must be queued');
+        const systemText = events.find(
+            (e) => e.textInput?.contentName === systemBlock.contentName,
+        )?.textInput.content as string;
         assert.match(systemText, /^TRANSLATOR MODE:/);
         assert.match(systemText, /When you hear English, say it in Spanish\./);
+
+        const replayed = events.filter((e) => e.textInput?.content === 'good morning everyone');
+        assert.equal(replayed.length, isRefresh ? 1 : 0, 'history is replayed on a refresh only');
     }
 });
