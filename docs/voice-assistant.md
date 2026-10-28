@@ -16,6 +16,7 @@ title: "Voice Assistant"
   - [Nova Sonic 2](#nova-sonic-2)
   - [ElevenLabs](#elevenlabs)
 - [Barge-In](#barge-in)
+- [How the Assistant Appears in the Transcript](#how-the-assistant-appears-in-the-transcript)
 - [Asking the Assistant to Stop Talking](#asking-the-assistant-to-stop-talking)
 - [Meeting Mode](#meeting-mode)
   - [Group Meeting Mode](#group-meeting-mode)
@@ -92,6 +93,16 @@ The voice assistant supports barge-in, allowing meeting participants to interrup
 
 When the interruption is a correction or a new question, the assistant acknowledges it in one or two words ("Got it", "Of course") and then answers the new request. When the interruption is a request for silence, it is handled as described next.
 
+## How the Assistant Appears in the Transcript
+
+The meeting transcript keeps the participants and the assistant apart, on both transcription engines. On Amazon Transcribe the Virtual Participant sends one stream with two channels and channel identification on: the meeting audio on the first channel and the assistant's voice on the second. On the [MicroVM ASR engine](microvm-asr.md) it opens one session for each. Either way:
+
+- Participants' lines are on the `CALLER` channel, named from the meeting roster (never after the Virtual Participant, even while the meeting shows it speaking). Only these lines are checked for wake phrases and [stop requests](#asking-the-assistant-to-stop-talking), so the assistant cannot wake or stop itself.
+- The assistant's lines are on the `AGENT` channel, under the Virtual Participant's name, and are never [voice-separated](virtual-participant.md#transcription-engine).
+- A participant who speaks over the assistant, including to interrupt it, gets a line of their own instead of having their words merged into the assistant's.
+
+In [translator mode](#translator-mode) the assistant's channel on Amazon Transcribe is still sent but not written to the transcript; its lines come from the text of each translation instead. On the MicroVM ASR engine that holds only for a meeting that starts in translator mode — see [Translator Mode](#translator-mode) for a meeting switched into it. A two-channel Amazon Transcribe stream is billed for its duration, the same as a single mono stream. The S3 audio recording and the video recording still contain both the meeting and the assistant, mixed.
+
 ## Asking the Assistant to Stop Talking
 
 Saying something like **"Hey Alex, stop talking"** stops the assistant. It does not explain itself, summarize what it was saying, or offer further help — it stops.
@@ -164,7 +175,7 @@ Example:
 - French speaker: "Très bien, merci, et toi ?"
 - Assistant (in English): "Very well, thank you, and you?"
 
-**How translations appear in the transcript.** The meeting transcript is produced in the meeting's configured transcription language, which can only render one side of a bilingual conversation. So in translator mode the transcription path does not transcribe the assistant's audio: what Amazon Transcribe hears while the assistant is speaking is left out, and each translation is written instead as the assistant's line, from the text Nova Sonic generated for that turn; if the assistant is interrupted, the line can include words it did not get to say. A participant's sentence that the assistant starts translating before Transcribe has finished it is completed from what had been transcribed by then, so the last second or so of that sentence can be missing from its line. If a participant starts speaking again the moment the assistant finishes, what they say is written as a new line; its first word can be missing, or it can begin with a fragment of the assistant's speech, because where the assistant's speech ends is estimated from the audio rather than known exactly. Changing mode does not restart transcription, so this takes effect immediately on Amazon Transcribe. On the MicroVM ASR engine the assistant's voice gets its own transcript channel when a meeting starts outside translator mode, and that channel keeps transcribing the assistant's audio in the meeting language after a switch into translator mode; translations are written from Nova Sonic's text only for meetings that start in translator mode (or once that channel stops). On ElevenLabs the translation is not written to the transcript.
+**How translations appear in the transcript.** The meeting transcript is produced in the meeting's configured transcription language, which can only render one side of a bilingual conversation. So in translator mode the assistant's own channel is not written to the transcript, and each translation is written instead as the assistant's line, from the text Nova Sonic generated for that turn; if the assistant is interrupted, the line can include words it did not get to say. On Amazon Transcribe the participants are on a channel of their own (see [How the Assistant Appears in the Transcript](#how-the-assistant-appears-in-the-transcript)), so everything a participant says is transcribed in full, including while the assistant is speaking. Changing mode does not restart transcription, so this takes effect immediately on Amazon Transcribe. On the MicroVM ASR engine the assistant's voice gets its own transcript channel when a meeting starts outside translator mode, and that channel keeps transcribing the assistant's audio in the meeting language after a switch into translator mode; translations are written from Nova Sonic's text only for meetings that start in translator mode (or once that channel stops). On ElevenLabs the translation is not written to the transcript.
 
 #### ElevenLabs
 
@@ -229,7 +240,7 @@ The meeting mode decides the assistant's system prompt and the set of tools it i
 What that means in a live meeting:
 
 - **The assistant pauses while it switches.** It cannot hear or answer for the length of a rebuild — reckon on about a second, and on several if it has to wait behind a session refresh already running — the same gap the periodic refresh already produces. Unlike that refresh, which waits for a quiet moment, a command is acted on when it arrives — so an utterance the assistant was in the middle of hearing is lost, and whoever was speaking may need to repeat their question. The transcript still has it. A meeting-assistant search already running is dropped for the same reason, and that question needs asking again too; the assistant goes quiet on it rather than answering into the new mode.
-- **The transcript is not affected.** Transcription reads a separate PulseAudio sink that the Virtual Participant feeds itself, and that the assistant's voice reaches through a loopback inside the sound server. Nothing on the mode-change path starts or stops an audio process.
+- **The transcript is not affected.** Transcription reads the meeting audio and the assistant's output sink through capture processes the Virtual Participant owns, and the assistant's output sink exists whether or not a Nova session is open. Nothing on the mode-change path starts or stops an audio process.
 - **The conversation so far is not carried into a new mode.** The next session is built for the mode it is now in, so replaying earlier turns would prime it with a conversation that mode never had. An activation-mode change on its own does not discard the conversation, since the mode and the prompt are unchanged — the assistant keeps it, and replays it into the next session it *refreshes*. A session opened from nothing, which is what `LMA always` does when none was held and what the next wake phrase does after `LMA wake`, starts without the replay.
 - **Group mode starts quiet.** Switching to `group` leaves the assistant muted until a wake phrase, exactly as deploying in group mode would.
 - **A "stop talking" still being resolved is called off by a meeting-mode change.** In the conversational modes the assistant holds a [stop request](#asking-the-assistant-to-stop-talking) for a moment so it can say "Okay" first. A meeting-mode change inside that moment decides for itself whether the assistant is audible, so the request is superseded rather than carried into the new mode — most importantly, it never pauses a translator, which is only paused by its own trigger phrase. A change to the activation mode alone leaves the request standing. Either way, the next stop request is taken the way the new mode takes it. The stand-down is recorded as `[stop-request] ... action=cancelled why=mode-changed`, or `action=superseded-by-mode-change` if the assistant's own mute was already under way.

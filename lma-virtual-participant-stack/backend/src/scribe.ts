@@ -26,7 +26,15 @@ import { voiceAssistant } from './voice-assistant.js';
 import { RosterTimeline } from './roster-timeline.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
-import { OpenPartialTracker, assistantRowSpan, onAssistantTurn, resultAfter } from './translator-transcript.js';
+import { OpenPartialTracker, assistantRowSpan, onAssistantTurn } from './translator-transcript.js';
+import {
+    PcmQueue,
+    StereoInterleaver,
+    assistantSegmentFromResult,
+    isOwnIdentity,
+    resultChannel,
+    writesAssistantChannel,
+} from './transcribe-channels.js';
 
 const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
 
@@ -40,6 +48,10 @@ export function rosterLagSeconds(platform: string = details.invite.meetingPlatfo
 
 // Global current speaker (matching Python)
 let currentSpeaker = "none";
+// The latest active speaker who is not the VP itself. On the two-channel stream
+// the participants' channel never carries the assistant's voice, so its rows are
+// never attributed to the VP even while the platform shows the VP speaking.
+let currentParticipantSpeaker = "none";
 
 // Local testing mode - skip AWS services
 const isLocalTest = process.env.LOCAL_TEST === 'true';
@@ -55,8 +67,10 @@ const isLocalTest = process.env.LOCAL_TEST === 'true';
  * frame size and try your request again." and, before this fix, transcription
  * aborted for the rest of the meeting (GitHub #536).
  *
- * 16 KB = 512 ms at 16 kHz mono PCM16 (16000 * 2 bytes/s). Comfortably under the
- * service limit while keeping frames large enough not to add per-frame overhead.
+ * 16 KB = 512 ms at 16 kHz mono PCM16 (16000 * 2 bytes/s), 256 ms on the
+ * two-channel stream. Comfortably under the service limit while keeping frames
+ * large enough not to add per-frame overhead, and a whole number of stereo
+ * frames (4 bytes each).
  */
 export const MAX_AUDIO_CHUNK_BYTES = 16 * 1024;
 
@@ -115,10 +129,13 @@ const isStaleSessionError = (error: any): boolean => {
 };
 
 export class TranscriptionService {
-    private process: ChildProcess | null = null;           // FFmpeg: combined_audio.monitor → Transcribe
+    // FFmpeg: combined_audio.monitor → Transcribe (mono stream) and the recording.
+    // On the two-channel stream it feeds the recording only.
+    private process: ChildProcess | null = null;
     private novaAudioProcess: ChildProcess | null = null;  // FFmpeg: meeting_audio.monitor → Nova (NOT the recording)
     // pacat: meeting audio → combined_audio. This is the SOLE route for meeting
-    // audio into the sink Transcribe reads, and it must stay an ACTIVE stream:
+    // audio into the sink the recordings (and the mono Transcribe stream) read,
+    // and it must stay an ACTIVE stream:
     // a module-loopback alone let the null sink idle/suspend and combined_audio
     // went digitally silent (peak amplitude 0 over 50s) while meeting_audio still
     // had audio (GitHub #569).
@@ -139,14 +156,16 @@ export class TranscriptionService {
     // a dead transcription pipe (GitHub #292). Mirrors the WebSocket
     // transcriber's clean-close reconnect (transcribe.ts).
     private reconnectRequested = false;
-    private readonly channels = 1;
+    // The two-channel Transcribe input of the current session (see
+    // transcribe-channels.ts); null on the mono stream.
+    private stereoQueue: PcmQueue | null = null;
     private readonly sampleRate = 16000; // in hertz
     private transcribeClient: TranscribeStreamingClient;
     // Live only while this meeting is transcribed by the on-demand MicroVM engine: one
     // session per audio source, like Stream Audio's two channels.
     private meetingSession: MicrovmAsrSession | null = null;
     private agentSession: MicrovmAsrSession | null = null;
-    private agentAudioProcess: ChildProcess | null = null;  // FFmpeg: agent_output.monitor → assistant session
+    private agentAudioProcess: ChildProcess | null = null;  // FFmpeg: agent_output.monitor → assistant channel/session
     private engineRuns = 0;
     private engineTimeBase = 0;
     private sessionsFinishing: Promise<void> = Promise.resolve();
@@ -166,17 +185,14 @@ export class TranscriptionService {
     private preConnectTriggered = false;
     private wakeDetectionTimestamp: number | null = null;
 
-    // Translator-mode continuity (see translator-transcript.ts). Results that
-    // arrive while the assistant speaks are kept out of the transcript; this
-    // closes the participant row they would otherwise have finalised.
+    // A participant row whose final never arrives because its Transcribe
+    // session ended is closed from its last partial (see translator-transcript.ts).
     private readonly openPartials = new OpenPartialTracker();
     // Wall clock of the first audio frame of the current Transcribe session,
     // which is where that session's Item times start from.
     private transcribeClockStartMs: number | null = null;
     // Transcript-timeline position at which the assistant's audio last started.
     private agentSpeechStartedAt: number | null = null;
-    // Transcript-timeline position at which the assistant's audio last ended.
-    private agentSpeechEndedAt: number | null = null;
     private lastAssistantRowEnd = 0;
     private assistantRows = 0;
     private assistantTurnSubscription: (() => void) | null = null;
@@ -203,23 +219,29 @@ export class TranscriptionService {
     }
 
     /**
-     * @param recordingStream tee of the audio that goes to Transcribe, which is
-     *   what the meeting's S3 audio recording must contain. It used to be fed from
-     *   the meeting-ONLY ffmpeg in writeAudio, so the voice assistant's spoken
-     *   replies were structurally absent from every recording — while the video
-     *   recording, which captures combined_audio.monitor, had them. Teeing here
-     *   makes the audio recording match both the transcript and the video.
+     * The audio a Transcribe session reads.
+     *
+     * @param recordingStream the meeting's S3 audio recording, always written
+     *   from combined_audio.monitor (meeting + assistant mixed), so it contains
+     *   everything in the transcript and matches the video recording, which
+     *   captures the same source. It used to be fed from the meeting-ONLY
+     *   capture, which left the voice assistant's replies out of every
+     *   recording.
+     * @param stereo send the two-channel stream (transcribe-channels.ts):
+     *   participants on ch_0 from meeting_audio.monitor, the assistant on ch_1
+     *   from agent_output.monitor. Otherwise combined_audio is sent as mono.
      */
-    private async *audioStream(recordingStream?: NodeJS.WritableStream) {
+    private async *audioStream(recordingStream?: NodeJS.WritableStream, stereo = false) {
 
-        // Capture from combined_audio.monitor to get both meeting and agent audio for transcription
+        // combined_audio.monitor (meeting + agent): Transcribe's input on the
+        // mono stream; on the two-channel stream it feeds only the recording.
         this.process = spawn('ffmpeg', [
             '-f',
             'pulse',
             '-i',
-            'combined_audio.monitor',  // Combined audio (meeting + agent) for transcription
+            'combined_audio.monitor',
             '-ac',
-            String(this.channels),
+            '1',
             '-ar',
             String(this.sampleRate),
             '-acodec',
@@ -248,19 +270,47 @@ export class TranscriptionService {
             }
         });
 
+        // The recording's only writer, always fed from the combined capture.
+        // Gated on details.start for the same reason the silence branch below
+        // is — nothing before the meeting starts belongs in the recording.
+        const record = (chunk: Buffer): void => {
+            if (details.start && recordingStream) {
+                recordingStream.write(chunk);
+            }
+        };
+
+        let source: AsyncIterable<Buffer> = this.process.stdout!;
+        let interleaver: StereoInterleaver | null = null;
+        if (stereo) {
+            // Recorded straight from the capture; what Transcribe hears is
+            // built from the two separate sources below.
+            this.process.stdout?.on('data', record);
+            const queue = new PcmQueue();
+            const stereoPcm = new StereoInterleaver();
+            interleaver = stereoPcm;
+            this.stereoQueue = queue;
+            // The meeting fan-out (Nova's input and the pacat route into
+            // combined_audio) is started here rather than in writeAudio, so the
+            // participants' channel is the same capture Nova hears.
+            this.startMeetingAudioFanout((chunk) => queue.push(stereoPcm.pushLeft(chunk)));
+            this.startAgentAudioCapture((chunk) => queue.push(stereoPcm.pushRight(chunk)));
+            source = queue;
+            console.log('Transcribe input: two channels (ch_0 participants, ch_1 voice assistant)');
+        }
+
         try {
-            for await (const chunk of this.process.stdout!) {
-                // Record exactly what Transcribe hears, before framing: the frames
-                // below are subarrays of this chunk, so writing them instead would
-                // duplicate nothing but cost an extra write per frame. Gated on
-                // details.start for the same reason the silence branch below is —
-                // nothing before the meeting starts belongs in the recording.
-                if (details.start && recordingStream) {
-                    recordingStream.write(chunk);
+            for await (const chunk of source) {
+                // On the mono stream, record exactly what Transcribe hears,
+                // before framing: the frames below are subarrays of this chunk,
+                // so writing them instead would cost an extra write per frame.
+                if (!stereo) {
+                    record(chunk);
                 }
                 // Cap the frame size (see MAX_AUDIO_CHUNK_BYTES). ffmpeg can hand
                 // over a buffer larger than Transcribe accepts, which used to
                 // abort transcription for the rest of the meeting (GitHub #536).
+                // The cap is a whole number of stereo frames, so a split never
+                // separates a sample's two channels.
                 for (const frame of frameAudioChunk(chunk)) {
                     if (!details.start) {
                         // Before the meeting starts, send silence of the same
@@ -288,6 +338,14 @@ export class TranscriptionService {
             } else {
                 console.error(msg + ' (fatal in production)');
                 throw error;
+            }
+        } finally {
+            if (interleaver) {
+                const ms = (samples: number) => Math.round((samples / this.sampleRate) * 1000);
+                console.log(
+                    `Transcribe two-channel input ended: silence inserted participants=${ms(interleaver.paddedLeftSamples)}ms ` +
+                        `assistant=${ms(interleaver.paddedRightSamples)}ms`,
+                );
             }
         }
     }
@@ -387,13 +445,26 @@ export class TranscriptionService {
             this.reconnectRequested = false;
             this.transcribeClockStartMs = null;
             const sessionStartMs = Date.now();
+            // With a voice assistant, the participants and the assistant go on
+            // separate channels of one stream, so Transcribe never merges a
+            // participant's speech and the assistant's into one row. Without
+            // one, agent_output is always silent and the mono stream from
+            // combined_audio is the meeting audio alone.
+            const stereo = voiceAssistant.isEnabled();
             try {
                 const transcriptionParams: any = {
-                    AudioStream: this.audioStream(recordingStream),
+                    AudioStream: this.audioStream(recordingStream, stereo),
                     MediaSampleRateHertz: this.sampleRate,
                     MediaEncoding: 'pcm',
+                    // Stream-level; with two channels the labels are read on
+                    // the participants' channel only.
                     ShowSpeakerLabel: true,
                 };
+                if (stereo) {
+                    // Billed for the stream's duration, like one mono stream.
+                    transcriptionParams.EnableChannelIdentification = true;
+                    transcriptionParams.NumberOfChannels = 2;
+                }
 
                 const langCode = details.transcribeLanguageCode;
                 const langOptions = (details.transcribeLanguageOptions || '')
@@ -459,11 +530,11 @@ export class TranscriptionService {
                 if (isLocalTest) {
                     try {
                         await Promise.all([
-                            this.writeAudio(response).catch(err => {
+                            this.writeAudio(response, stereo).catch(err => {
                                 console.error('Audio write error (non-fatal in local test):', err.message);
                                 return Promise.resolve();
                             }),
-                            this.handleTranscriptEvents(response).catch(err => {
+                            this.handleTranscriptEvents(response, stereo).catch(err => {
                                 console.error('Transcript event error (non-fatal in local test):', err.message);
                                 return Promise.resolve();
                             })
@@ -474,8 +545,8 @@ export class TranscriptionService {
                 } else {
                     // Production mode - let errors crash the task
                     await Promise.all([
-                        this.writeAudio(response),
-                        this.handleTranscriptEvents(response)
+                        this.writeAudio(response, stereo),
+                        this.handleTranscriptEvents(response, stereo)
                     ]);
                 }
 
@@ -821,7 +892,7 @@ export class TranscriptionService {
             endTime: segment.endSec,
             transcript: segment.text,
             isPartial: segment.isPartial,
-            speaker: (details.lmaIdentity || details.scribeIdentity || 'LMA').trim(),
+            speaker: this.vpName(),
         }).catch((error) => {
             console.error('Failed to send transcript to Kinesis:', error);
         });
@@ -1062,6 +1133,10 @@ export class TranscriptionService {
     // Deliberately does NOT touch isTranscribing, the recording stream, or the
     // Kinesis/voice-assistant lifecycle — those span the whole meeting.
     private teardownSessionProcesses(): void {
+        if (this.stereoQueue) {
+            this.stereoQueue.end();
+            this.stereoQueue = null;
+        }
         if (this.process) {
             try { this.process.kill(); } catch (_) { /* ignore */ }
             this.process = null;
@@ -1127,7 +1202,10 @@ export class TranscriptionService {
     async speakerChange(speaker: string): Promise<void> {
         // Update global current speaker
         currentSpeaker = speaker;
-        
+        if (speaker && speaker !== 'none' && !isOwnIdentity(speaker, this.ownIdentities())) {
+            currentParticipantSpeaker = speaker;
+        }
+
         const timestamp = Date.now();
         details.speakers.push({ name: speaker, timestamp });
         this.rosterTimeline.record(this.meetingSession?.audioSeconds ?? this.engineTimeBase, speaker);
@@ -1197,9 +1275,13 @@ export class TranscriptionService {
     // NOT the recording — see audioStream(), which tees it from combined_audio.
     // Uses separate process variables to avoid overwriting the transcription FFmpeg in audioStream().
     // Channel separation (meeting vs combined) prevents Nova from hearing its own voice.
-    private async writeAudio(transcribeResponse: any): Promise<void> {
+    // On the two-channel stream audioStream() starts the fan-out itself, because
+    // the same capture is also the participants' channel.
+    private async writeAudio(transcribeResponse: any, stereo = false): Promise<void> {
         try {
-            this.startMeetingAudioFanout();
+            if (!stereo) {
+                this.startMeetingAudioFanout();
+            }
 
             // Keep processing while the meeting is active AND this session is
             // still current. reconnectRequested is set when Transcribe closes
@@ -1256,23 +1338,6 @@ export class TranscriptionService {
         }
     }
 
-    /**
-     * The part of a closed row's later delivery spoken after the assistant
-     * stopped, as a row of its own, or null if there is none (or the assistant
-     * has not stopped since).
-     */
-    private speechAfterAssistant(result: any, sessionOffsetSeconds: number, closedEnd: number): any | null {
-        if (this.agentSpeechEndedAt === null) {
-            return null;
-        }
-        // Never before the end of the row already written, whatever the clock says.
-        const rest = resultAfter(result, Math.max(this.agentSpeechEndedAt - sessionOffsetSeconds, closedEnd));
-        if (!rest || this.openPartials.isClosed(rest)) {
-            return null;
-        }
-        return rest;
-    }
-
     /** Current position on the transcript timeline, in seconds, for whichever engine is running. */
     private transcriptClockSeconds(): number {
         if (this.meetingSession) {
@@ -1288,7 +1353,8 @@ export class TranscriptionService {
      * Whether the assistant's spoken turns reach the transcript only through the
      * assistant's own text. On the MicroVM engine that is whenever no assistant
      * session is transcribing its voice; on Amazon Transcribe it is translator
-     * mode, where results heard while the assistant speaks are held back.
+     * mode, where the assistant's channel is not written (see
+     * writesAssistantChannel) because it is transcribed in the wrong language.
      */
     private assistantTurnsNeedTranscript(): boolean {
         if (this.meetingSession) {
@@ -1303,10 +1369,6 @@ export class TranscriptionService {
         }
         agentSpeakingDetector.on('started', () => {
             this.agentSpeechStartedAt = this.transcriptClockSeconds();
-        });
-        agentSpeakingDetector.on('stopped', () => {
-            // 'stopped' fires after the detector's silence hangover.
-            this.agentSpeechEndedAt = this.transcriptClockSeconds() - agentSpeakingDetector.silenceMs / 1000;
         });
         this.assistantTurnSubscription = onAssistantTurn((text) => this.handleAssistantTurn(text));
     }
@@ -1329,7 +1391,7 @@ export class TranscriptionService {
         this.lastAssistantRowEnd = end;
         this.agentSpeechStartedAt = null;
         this.assistantRows += 1;
-        const speaker = (details.lmaIdentity || details.scribeIdentity || 'LMA').trim();
+        const speaker = this.vpName();
         console.log(`🌐 Assistant turn written to the transcript (${start.toFixed(2)}-${end.toFixed(2)}s): "${text}"`);
         sendAsrTranscriptSegment({
             channel: 'AGENT',
@@ -1344,8 +1406,42 @@ export class TranscriptionService {
         });
     }
 
+    /** The VP's own names in the meeting roster. */
+    private ownIdentities(): string[] {
+        return [details.lmaIdentity || '', details.scribeIdentity || ''];
+    }
+
+    /** The name the assistant's rows are written under, on every engine. */
+    private vpName(): string {
+        return (details.lmaIdentity || details.scribeIdentity || 'LMA').trim();
+    }
+
+    /**
+     * One result from the assistant's channel (ch_1), written as an AGENT row
+     * under the VP's name — the same shape as the MicroVM engine's assistant
+     * session. It never reaches processTranscriptResult, so the assistant's
+     * own words can never be read as a wake phrase or a stop request, and it
+     * leaves the participants' speaker bookkeeping alone. Returns the row's
+     * end on the meeting timeline, or 0 if nothing was written.
+     */
+    private handleAssistantChannelResult(result: any, sessionOffsetSeconds: number): number {
+        if (!writesAssistantChannel(details.meetingMode)) {
+            // Translator mode: the turn's exact text is written by
+            // handleAssistantTurn instead.
+            return 0;
+        }
+        const segment = assistantSegmentFromResult(result, sessionOffsetSeconds, this.vpName());
+        if (!segment) {
+            return 0;
+        }
+        sendAsrTranscriptSegment(segment).catch((error) => {
+            console.error('Failed to send assistant transcript to Kinesis:', error);
+        });
+        return segment.endTime;
+    }
+
     // Handle transcript events
-    private async handleTranscriptEvents(transcribeResponse: any): Promise<void> {
+    private async handleTranscriptEvents(transcribeResponse: any, stereo = false): Promise<void> {
         // The reconnect offset must stay CONSTANT for the whole session and only
         // advance once, when this session ends (mirrors the WebSocket
         // transcriber). Transcribe's Item.StartTime/EndTime are already
@@ -1373,81 +1469,34 @@ export class TranscriptionService {
                     break;
                 }
                 for (const result of event.TranscriptEvent?.Transcript?.Results ?? []) {
-                    const lmaIdentity = (details.lmaIdentity || '').trim();
-                    const scribeIdentity = (details.scribeIdentity || '').trim();
-                    const speakerIsVp =
-                        !!currentSpeaker &&
-                        currentSpeaker !== 'none' &&
-                        ((lmaIdentity.length > 0 && currentSpeaker === lmaIdentity) ||
-                            (scribeIdentity.length > 0 && currentSpeaker === scribeIdentity));
-
-                    const suppressAgentTranscript =
-                        details.meetingMode === 'translator' &&
-                        (agentSpeakingDetector.isSpeaking() || speakerIsVp);
-
-                    if (suppressAgentTranscript) {
-                        // The participant row this result continues will not get
-                        // its final from Transcribe: the final also carries the
-                        // assistant's speech and is held back below. Close it now
-                        // from the last partial that was written.
-                        await closeOpenPartial();
-                        if (!result.IsPartial) {
-                            const text = result.Alternatives?.[0]?.Transcript || '';
-                            if (text) {
-                                console.log(`🌐 Translator mode: suppressing agent-origin transcript segment: "${text}"`);
-                            }
+                    if (resultChannel(result, stereo) === 'assistant') {
+                        const end = this.handleAssistantChannelResult(result, sessionOffsetSeconds);
+                        if (end > observedMaxEndTime) {
+                            observedMaxEndTime = end;
                         }
-                        try {
-                            kinesisStreamManager.syncTranscriptSegmentState(
-                                currentSpeaker,
-                                result,
-                                sessionOffsetSeconds,
-                            );
-                        } catch (error) {
-                            console.error('Failed to sync transcript segment state during suppression:', error);
-                        }
-                    } else {
-                        // A later delivery for a row closed above repeats the
-                        // participant's words and adds the assistant's. Only
-                        // speech after the assistant stopped is new; it goes out
-                        // as a row of its own, and the rest is not written again.
-                        const closedEnd = this.openPartials.closedRowEnd(result);
-                        const forward = closedEnd === null
-                            ? result
-                            : this.speechAfterAssistant(result, sessionOffsetSeconds, closedEnd);
-                        if (!forward) {
-                            if (!result.IsPartial) {
-                                console.log('🌐 Translator mode: dropping the final of a segment already closed when the assistant spoke');
-                            }
-                            try {
-                                kinesisStreamManager.syncTranscriptSegmentState(
-                                    currentSpeaker,
-                                    result,
-                                    sessionOffsetSeconds,
-                                );
-                            } catch (error) {
-                                console.error('Failed to sync transcript segment state:', error);
-                            }
-                            continue;
-                        }
-                        // Send all results to Kinesis
-                        try {
-                            const segMaxEndTime = await sendAddTranscriptSegment(
-                                currentSpeaker,
-                                forward,
-                                sessionOffsetSeconds,
-                            );
-                            if (segMaxEndTime > observedMaxEndTime) {
-                                observedMaxEndTime = segMaxEndTime;
-                            }
-                            this.openPartials.noteSent(forward, currentSpeaker, sessionOffsetSeconds);
-                        } catch (error) {
-                            console.error('Failed to send transcript to Kinesis:', error);
-                        }
-
-                        // Process all results (partial + final) for wake phrase pre-connect and activation
-                        this.processTranscriptResult(forward);
+                        continue;
                     }
+                    // The participants. On the two-channel stream this channel
+                    // carries no assistant audio, so nothing on it is held back
+                    // while the assistant speaks, and its rows are named after
+                    // the latest participant rather than the VP.
+                    const speaker = stereo ? currentParticipantSpeaker : currentSpeaker;
+                    try {
+                        const segMaxEndTime = await sendAddTranscriptSegment(
+                            speaker,
+                            result,
+                            sessionOffsetSeconds,
+                        );
+                        if (segMaxEndTime > observedMaxEndTime) {
+                            observedMaxEndTime = segMaxEndTime;
+                        }
+                        this.openPartials.noteSent(result, speaker, sessionOffsetSeconds);
+                    } catch (error) {
+                        console.error('Failed to send transcript to Kinesis:', error);
+                    }
+
+                    // Process all results (partial + final) for wake phrase pre-connect and activation
+                    this.processTranscriptResult(result);
                 }
             }
 

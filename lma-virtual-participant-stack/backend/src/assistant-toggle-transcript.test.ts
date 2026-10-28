@@ -15,13 +15,17 @@
  * asserts that at the source level — like `scribe-asr-channels.test.ts`, whose
  * method-body approach it reuses. Three facts hold it up:
  *
- *   1. Transcription reads `combined_audio.monitor`. The Virtual Participant's
- *      own pacat stream is the sole writer of meeting audio into that sink
- *      (scribe.ts), and it is also what keeps the null sink from suspending.
- *   2. The assistant's voice reaches the same sink through a PulseAudio
- *      `module-loopback` loaded by entrypoint.sh — a module in the sound server,
- *      not a child process of the Node app, so nothing the agent does to its own
- *      session can take it down.
+ *   1. With a voice assistant, Amazon Transcribe hears `meeting_audio.monitor`
+ *      and `agent_output.monitor` as the two channels of one stream, through
+ *      capture processes owned by TranscriptionService (scribe.ts), which the
+ *      assistant's session lifecycle does not touch. Without one, and for the
+ *      recordings, it reads `combined_audio.monitor`; the Virtual Participant's
+ *      own pacat stream is the sole writer of meeting audio into that sink, and
+ *      it is also what keeps the null sink from suspending.
+ *   2. The assistant's voice reaches `combined_audio` (the recordings' sink)
+ *      through a PulseAudio `module-loopback` loaded by entrypoint.sh — a module
+ *      in the sound server, not a child process of the Node app, so nothing the
+ *      agent does to its own session can take it down.
  *   3. The reconfiguration path is Bedrock protocol events and agent state and
  *      nothing else. It starts no process and stops none, including the one
  *      audio process the agent does own: the pacat stream it plays its own voice
@@ -121,10 +125,12 @@ test('the one audio process the agent owns writes to its own sink, not the trans
     assert.equal(spawnSites.length, 1, `expected one spawn site in nova-agent.ts, found: ${spawnSites.join(' | ')}`);
 });
 
-test('meeting audio reaches the transcribed sink through the Virtual Participant own stream', () => {
+test('meeting audio reaches the combined sink through the Virtual Participant own stream', () => {
     // The sole writer, and what keeps the null sink from suspending (#542,
     // #569). It belongs to TranscriptionService, which the assistant's session
-    // lifecycle does not touch.
+    // lifecycle does not touch — as do the two captures the two-channel
+    // stream is built from.
+    assert.match(methodBody(scribe, 'private startAgentAudioCapture('), /agent_output\.monitor/);
     const fanout = methodBody(scribe, 'private startMeetingAudioFanout(');
     assert.match(fanout, /spawn\('pacat'/);
     assert.match(fanout, /--device=combined_audio/);
@@ -137,23 +143,26 @@ test('meeting audio reaches the transcribed sink through the Virtual Participant
     assert.doesNotMatch(fanout, /isActive\(\)\s*\|\|/, 'the fanout must not stop when the assistant session goes');
 });
 
-test('the assistant voice reaches the transcribed sink through the sound server, not the app', () => {
+test('the assistant voice reaches the combined sink through the sound server, not the app', () => {
     // A module-loopback inside PulseAudio. Rebuilding the Nova session cannot
     // unload it, so the sink stays alive and keeps carrying meeting audio
-    // whatever happens to the assistant.
+    // whatever happens to the assistant. The agent_output sink the
+    // assistant's channel is captured from is a null sink loaded the same way,
+    // so it too outlives any session.
     assert.match(entrypoint, /module-null-sink sink_name=combined_audio/);
     assert.match(entrypoint, /module-loopback source=agent_output\.monitor sink=combined_audio/);
     assert.match(entrypoint, /module-null-sink sink_name=agent_output/);
 });
 
 test('the mode the transcription path reads has one writer, so a toggle cannot leave it stale', () => {
-    // On the Amazon Transcribe path the mode is read for every transcript
-    // result, to keep the assistant's own translations out of a translator
-    // meeting's transcript. Both the configuration loader and a runtime toggle
-    // publish through the same function, which is also the one place to change
-    // when the configuration record moves into a unified store.
-    const suppression = scribe.slice(scribe.indexOf('const suppressAgentTranscript'));
-    assert.match(suppression.slice(0, 200), /details\.meetingMode === 'translator'/);
+    // On the Amazon Transcribe path the mode is read for every result on the
+    // assistant's channel, which is not written in translator mode (the
+    // translation is written from the assistant's own text instead). Both the
+    // configuration loader and a runtime toggle publish through the same
+    // function, which is also the one place to change when the configuration
+    // record moves into a unified store.
+    const assistantChannel = methodBody(scribe, 'private handleAssistantChannelResult(');
+    assert.match(assistantChannel, /writesAssistantChannel\(details\.meetingMode\)/);
 
     const writers = source('assistant-toggles.ts').match(/details\.meetingMode =/g) ?? [];
     assert.equal(writers.length, 1, 'the shared mode must have exactly one writer');

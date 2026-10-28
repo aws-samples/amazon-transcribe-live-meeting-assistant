@@ -5,29 +5,23 @@
  */
 
 /**
- * Keeping a translator meeting's transcript continuous.
+ * Keeping the Amazon Transcribe transcript continuous, and writing the
+ * assistant's turns from its own text.
  *
- * In translator mode the assistant speaks a translation into the meeting, and
- * on the Amazon Transcribe path that audio reaches the same stream as the
- * participants (agent_output is looped into combined_audio). The stream is
- * opened in the meeting's configured language, so the translation comes back
- * as a garbled rendering of the other language; scribe.ts therefore keeps
- * results that arrive while the assistant is speaking out of the transcript.
+ * - A participant row whose Transcribe session ends (a reconnect, or the
+ *   session failing) before its final arrives would stay "in progress" for the
+ *   rest of the meeting. {@link OpenPartialTracker} records the last partial
+ *   written and hands it back as a final exactly once, so the session's
+ *   teardown can close the row.
  *
- * Two things follow from that, and this module holds the logic for both:
- *
- * - A participant's utterance that the assistant starts answering before
- *   Transcribe has finalised it is delivered as one result whose final also
- *   carries the assistant's speech. That final is held back with the rest, so
- *   the participant's row has to be closed from the last partial that was
- *   sent, or it stays in progress for the rest of the meeting.
- *   {@link OpenPartialTracker} records that partial and hands it back as a
- *   final exactly once.
- *
- * - The translation itself is then absent from the transcript. The voice
- *   assistant already has its exact text, so it publishes each finished turn
- *   on {@link publishAssistantTurn} and the transcription path writes it as the
- *   assistant's row instead of transcribing the audio.
+ * - In translator mode the assistant speaks the other language, and its
+ *   channel of the Transcribe stream is opened in the meeting's language, so
+ *   transcribing it would give a garbled rendering. The voice assistant
+ *   already has the exact text, so it publishes each finished turn on
+ *   {@link publishAssistantTurn} and the transcription path writes it as the
+ *   assistant's row instead. The participants are on a channel of their own
+ *   (transcribe-channels.ts), so nothing on theirs is held back while the
+ *   assistant speaks.
  */
 
 /** A Transcribe result as forwarded to Kinesis, with what it was sent with. */
@@ -42,16 +36,12 @@ export interface OpenPartial {
  *
  * A Transcribe result is one row that a later delivery with the same
  * `ResultId` updates in place; the row stops being "in progress" only when a
- * delivery with `IsPartial: false` is written for it. When that final is
- * withheld, {@link close} returns the last partial re-stamped as final so the
- * caller can write it, and remembers the id so that the withheld final — or
- * any later delivery for the same result — does not reopen or duplicate the
- * row.
+ * delivery with `IsPartial: false` is written for it. When the session ends
+ * first, {@link close} returns the last partial re-stamped as final so the
+ * caller can write it.
  */
 export class OpenPartialTracker {
     private open: OpenPartial | null = null;
-    // Closed result id -> session time at which its written row ends.
-    private readonly closedIds = new Map<string, number>();
 
     /** Record a result that was written to the transcript. */
     noteSent(result: any, speaker: string, timeOffsetSeconds: number): void {
@@ -72,73 +62,13 @@ export class OpenPartialTracker {
         if (!open) {
             return null;
         }
-        if (open.result.ResultId) {
-            const items: any[] = open.result.Alternatives?.[0]?.Items ?? [];
-            const ends = items.map((item) => item?.EndTime).filter((t) => typeof t === 'number');
-            this.closedIds.set(open.result.ResultId, ends.length ? Math.max(...ends) : 0);
-        }
         return { ...open, result: { ...open.result, IsPartial: false } };
-    }
-
-    /**
-     * Session time at which the row {@link close} wrote for `result` ends, or
-     * null if `result` does not belong to a closed row. Its own final ends the
-     * result, so the id is forgotten once that has been seen.
-     */
-    closedRowEnd(result: any): number | null {
-        const id = result?.ResultId;
-        const end = id ? this.closedIds.get(id) : undefined;
-        if (end === undefined) {
-            return null;
-        }
-        if (!result.IsPartial) {
-            this.closedIds.delete(id);
-        }
-        return end;
-    }
-
-    /** Whether `result` belongs to a closed row; forgets it on its final, like {@link closedRowEnd}. */
-    isClosed(result: any): boolean {
-        return this.closedRowEnd(result) !== null;
     }
 
     /** A new Transcribe session: nothing from the previous one can be continued. */
     reset(): void {
         this.open = null;
-        this.closedIds.clear();
     }
-}
-
-/**
- * The words of `result` that start at or after `sessionSeconds` (on the
- * result's own session timeline), as a separate result, or null if there are
- * none. Its id is derived from the original and the split point, so the
- * partials and final split at the same point update one row of their own, and
- * a later split of the same result (after the assistant spoke again) gets a
- * new row rather than one that was already closed.
- */
-export function resultAfter(result: any, sessionSeconds: number): any | null {
-    const items: any[] = result?.Alternatives?.[0]?.Items ?? [];
-    const first = items.findIndex(
-        (item) => item?.Type === 'pronunciation' && (item.StartTime ?? -Infinity) >= sessionSeconds,
-    );
-    if (first === -1) {
-        return null;
-    }
-    const kept = items.slice(first);
-    let transcript = '';
-    for (const item of kept) {
-        if (item.Type === 'pronunciation' && transcript) {
-            transcript += ' ';
-        }
-        transcript += item.Content ?? '';
-    }
-    return {
-        ...result,
-        ResultId: result.ResultId ? `${result.ResultId}-after-${sessionSeconds.toFixed(3)}` : result.ResultId,
-        StartTime: kept[0].StartTime,
-        Alternatives: [{ ...result.Alternatives[0], Transcript: transcript, Items: kept }],
-    };
 }
 
 // ---------------------------------------------------------------------------

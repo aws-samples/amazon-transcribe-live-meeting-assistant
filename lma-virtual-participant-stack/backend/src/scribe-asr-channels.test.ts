@@ -61,7 +61,8 @@ test('meeting rows are attributed by start time and drive wake phrases; assistan
     assert.match(meeting, /processTranscriptResult\(/);
     const agent = methodBody('private handleAgentAsrSegment');
     assert.match(agent, /channel: 'AGENT'/);
-    assert.match(agent, /lmaIdentity/);
+    assert.match(agent, /this\.vpName\(\)/);
+    assert.match(methodBody('private vpName'), /lmaIdentity/);
     assert.doesNotMatch(agent, /processTranscriptResult/);
     assert.match(methodBody('async speakerChange'), /rosterTimeline\.record\(/);
     assert.match(methodBody('private teardownSessionProcesses'), /agentAudioProcess/);

@@ -131,9 +131,8 @@ one name cannot be separated at all. (Renaming on the Speakers panel would not
 help here — it is per voice, so it would rename every turn that voice produced,
 not the one that was misattributed.)
 
-In assistant mode on Amazon Transcribe the assistant's own speech shares the
-meeting channel, so it too acquires a voice id; on the on-demand engine it has
-its own channel and never does.
+The voice assistant's own speech is transcribed on a channel of its own on both
+engines, so it never acquires a voice id.
 
 ## Supported Platforms
 
@@ -524,7 +523,19 @@ In addition to the audio recording, the Virtual Participant can capture the meet
 
 ## Transcription Engine
 
-A Virtual Participant is transcribed by Amazon Transcribe. A deployment with
+A Virtual Participant is transcribed by Amazon Transcribe. With a voice assistant
+configured, the VP sends Amazon Transcribe one stream with two channels, with channel
+identification on: the meeting's participants on the first channel and the assistant's
+voice on the second, the same layout as Stream Audio's tab and microphone. Participant
+rows are on the `CALLER` channel, named from the meeting roster, and only they are
+checked for wake phrases and stop requests; the assistant's rows are on the `AGENT`
+channel under the VP's own name. A participant who talks over the assistant therefore
+gets a line of their own, and the assistant can never wake or stop itself. A two-channel
+stream is billed for its duration, the same as one mono stream. Without a voice
+assistant the VP sends one mono stream of the meeting audio. The S3 audio recording is
+always the mix of both, as is the video recording's audio track.
+
+A deployment with
 `EnableMicrovmAsr=true` can move Virtual Participants onto the on-demand MicroVM
 ASR engine instead, from **Configuration ▸ Transcription Engine** (admin only):
 
