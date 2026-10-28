@@ -194,3 +194,23 @@ CHAT_BUTTONS = register(
         ),
     )
 )
+
+#: The price table the per-meeting cost estimate is computed with: US dollars per
+#: unit for each metered service, a base region and per-region differences. Read
+#: by the cost resolver whenever a meeting's estimate is drawn, and edited by an
+#: administrator through the pricing API. See docs/meeting-cost-estimate.md.
+#:
+#: Standard tier: an estimate drawn a few minutes after a price edit using the
+#: previous price is what the documentation says happens, and nothing about a
+#: price is consent- or privacy-bearing. getCallPricing reads the stored records
+#: directly, so an administrator always sees what they saved.
+CALL_PRICING = register(
+    SectionSpec(
+        name="call_pricing",
+        cache_tier=CacheTier.STANDARD,
+        description=(
+            "Unit prices for the per-meeting cost estimate: USD per token, second or "
+            "vCPU-second for each metered service, by region."
+        ),
+    )
+)

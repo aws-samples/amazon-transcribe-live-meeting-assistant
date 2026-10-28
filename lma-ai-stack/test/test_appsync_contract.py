@@ -157,6 +157,9 @@ ADMIN_ONLY_FIELDS = [
     ("Query", "getLLMPromptTemplate"),
     ("Query", "getNovaSonicConfig"),
     ("Query", "listUsers"),
+    # The price table behind every meeting's cost estimate.
+    ("Mutation", "updateCallPricing"),
+    ("Query", "getCallPricing"),
 ]
 
 # Reads every signed-in user performs in the course of using the product, so the
@@ -246,6 +249,8 @@ OTHER_FIELDS = [
     ("Mutation", "deleteMyChromeProfile"),
     # Reads scoped to the caller, to one meeting, or to the caller's own record.
     ("Query", "getCall"),
+    # One meeting's cost estimate, authorized in the resolver by getCall's rule.
+    ("Query", "getCallCost"),
     ("Query", "voiceEnrollmentTerms"),
     ("Query", "getTranscriptSegments"),
     ("Query", "getTranscriptSegmentsWithSentiment"),
@@ -666,6 +671,9 @@ def test_the_prompt_template_resolvers_both_name_the_field_they_serve() -> None:
     for type_name, field_name in (
         ("Query", "getLLMPromptTemplate"),
         ("Mutation", "updateLLMPromptTemplate"),
+        ("Query", "getCallCost"),
+        ("Query", "getCallPricing"),
+        ("Mutation", "updateCallPricing"),
     ):
         resolver = _resolver(type_name, field_name)
         assert "ctx.info.fieldName" in resolver.mapping_source, (

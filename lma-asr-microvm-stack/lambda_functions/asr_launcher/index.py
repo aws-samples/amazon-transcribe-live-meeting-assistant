@@ -50,6 +50,12 @@ ACQUIRE_TIMEOUT_SECONDS = int(os.environ.get("ACQUIRE_TIMEOUT_SECONDS", "240"))
 ACQUIRE_ATTEMPTS = 2
 RETRY_MIN_REMAINING_SECONDS = 60
 POLL_INTERVAL_SECONDS = 2
+# The image's MinimumMemoryInMiB, reported back on acquire. Zero (unset) leaves
+# it out of the response.
+try:
+    MICROVM_MEMORY_MIB = int(os.environ.get("MICROVM_MEMORY_MIB", "0"))
+except ValueError:
+    MICROVM_MEMORY_MIB = 0
 
 _REGION = os.environ.get("AWS_REGION", "us-east-1")
 _CONNECTOR = "arn:aws:lambda:{}:aws:network-connector:aws-network-connector:{}"
@@ -183,7 +189,7 @@ def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
         _release(microvm_id)
         return {"ok": False, "reason": f"CreateMicrovmAuthToken failed: {exc}"}
 
-    return {
+    result = {
         "ok": True,
         "reason": "",
         "microvmId": microvm_id,
@@ -191,6 +197,11 @@ def _start_microvm(call_id: str, attempt: int, deadline: float) -> dict:
         "port": ASR_PORT,
         **token,
     }
+    # The size the image was built at, so the caller can meter the MicroVM's
+    # lifetime for the meeting cost estimate without knowing the bundle.
+    if MICROVM_MEMORY_MIB > 0:
+        result["memoryMiB"] = MICROVM_MEMORY_MIB
+    return result
 
 
 def _release(microvm_id: str) -> dict:

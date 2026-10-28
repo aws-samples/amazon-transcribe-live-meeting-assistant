@@ -148,9 +148,44 @@ def test_the_shipped_prompts_are_numbered_in_the_order_they_appear(seeder) -> No
 
 def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seeder) -> None:
     body = seeder.shipped_default_body("default")
-    assert set(body) == {"summary_prompt_templates", "nova_sonic_config", "chat_buttons"}
+    assert set(body) == {
+        "summary_prompt_templates",
+        "nova_sonic_config",
+        "chat_buttons",
+        "call_pricing",
+    }
     assert set(body["summary_prompt_templates"]) == {"1#SUMMARY", "2#DETAILS", "3#ACTIONS"}
     assert "{transcript}" in body["summary_prompt_templates"]["1#SUMMARY"]
+
+
+def test_the_baseline_carries_a_dated_price_table_in_one_currency(seeder) -> None:
+    """An estimate states the date and the source of its prices; both must be there."""
+    pricing = seeder.shipped_default_body("default")["call_pricing"]
+    assert pricing["currency"] == "USD"
+    assert pricing["pricesAsOf"] and pricing["source"]
+    assert pricing["baseRegion"] in pricing["pricedRegions"]
+    base = pricing["regions"]["default"]
+    for service, units in base.items():
+        assert "/" in service, f"{service} is not '<service>/<api-or-model>'"
+        for unit, price in units.items():
+            assert isinstance(price, (int, float)) and price >= 0, f"{service} {unit}: {price!r}"
+
+
+def test_every_model_a_deployment_can_choose_has_a_price(seeder) -> None:
+    """A model offered in lma-main.yaml with no price shows as unpriced on every meeting."""
+    import re
+
+    main = (Path(__file__).resolve().parents[4] / "lma-main.yaml").read_text(encoding="utf-8")
+    offered = set(
+        re.findall(r'"((?:global|us)\.(?:amazon|anthropic)\.[^"]+|amazon\.nova-[^"]+)"', main)
+    )
+    assert offered, "found no model ids in lma-main.yaml, so this test checks nothing"
+    base = seeder.shipped_default_body("default")["call_pricing"]["regions"]["default"]
+    missing = sorted(m for m in offered if f"bedrock/{m}" not in base)
+    assert not missing, f"no price for: {missing}"
+    for model_id in offered:
+        units = base[f"bedrock/{model_id}"]
+        assert units["inputTokens"] > 0 and units["outputTokens"] > 0
 
 
 def test_the_healthcare_domain_ships_its_own_prompts(seeder) -> None:

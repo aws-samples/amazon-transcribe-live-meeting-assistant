@@ -49,8 +49,9 @@ HERE = Path(__file__).parent
 # source/lambda_functions/call_event_processor -> source
 SOURCE = HERE.parents[1]
 LAYER = SOURCE / "lambda_layers" / "transcript_enrichment_layer"
+CONFIG_LAYER = SOURCE / "lambda_layers" / "configuration_layer"
 SCHEMA_FILE = SOURCE / "appsync" / "schema.graphql"
-for path in (str(HERE), str(LAYER)):
+for path in (str(HERE), str(LAYER), str(CONFIG_LAYER)):
     if path not in sys.path:
         sys.path.insert(0, path)
 

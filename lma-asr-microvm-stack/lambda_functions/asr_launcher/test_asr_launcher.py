@@ -67,6 +67,20 @@ def test_acquire_returns_the_endpoint_and_a_port_scoped_token() -> None:
     assert client.create_microvm_auth_token.call_args.kwargs["allowed_ports"] == [{"port": 8080}]
 
 
+def test_acquire_reports_the_size_the_caller_meters_the_microvm_at() -> None:
+    """The transcriber multiplies this by the MicroVM's lifetime for the cost estimate."""
+    client = fake_microvms()
+    with mock.patch.object(index, "microvms", client), mock.patch.object(
+        index, "MICROVM_MEMORY_MIB", 8192
+    ):
+        result = index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+    assert result["memoryMiB"] == 8192
+    with mock.patch.object(index, "microvms", fake_microvms()), mock.patch.object(
+        index, "MICROVM_MEMORY_MIB", 0
+    ):
+        assert "memoryMiB" not in index.lambda_handler({"action": "acquire", "callId": "c"}, None)
+
+
 def test_acquire_never_lets_a_microvm_suspend_mid_meeting() -> None:
     client = fake_microvms()
     with mock.patch.object(index, "microvms", client):

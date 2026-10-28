@@ -17,6 +17,7 @@ from botocore.config import Config
 
 # pylint: disable=import-error
 from lma_config import SUMMARY_PROMPT_TEMPLATES, ConfigurationStore  # configuration layer
+from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
 
@@ -66,6 +67,10 @@ lambda_client = boto3.client("lambda")
 # prompts once, so a container handling several meetings in a row reads DynamoDB
 # once per five minutes instead of twice per summary.
 CONFIG_STORE = ConfigurationStore()
+
+# Token usage of each model call, recorded against the meeting for its cost
+# estimate. Inert when METERING_TABLE_NAME is unset.
+METERING = MeteringWriter(source="bedrock-summary")
 
 bedrock = boto3.client(
     service_name="bedrock-runtime",
@@ -181,7 +186,7 @@ def get_generated_text(response):
     return extract_text(response)
 
 
-def call_bedrock(prompt_data):
+def call_bedrock(prompt_data, call_id=None):
     modelId = BEDROCK_MODEL_ID
     print("Bedrock request - ModelId", modelId)
     message = {"role": "user", "content": [{"text": prompt_data}]}
@@ -191,12 +196,21 @@ def call_bedrock(prompt_data):
         messages=[message],
         inferenceConfig=build_inference_config(modelId, SUMMARY_MAX_TOKENS),
     )
+    # One record per section of the summary, so a regeneration -- which runs
+    # every section again -- shows up as the extra usage it is.
+    METERING.record(
+        call_id,
+        "Summary",
+        bedrock_service(modelId),
+        bedrock_usage(response.get("usage")),
+        region=BEDROCK_REGION if BEDROCK_REGION != os.environ.get("AWS_REGION") else None,
+    )
     generated_text = get_generated_text(response)
     print("Bedrock response: ", json.dumps(generated_text))
     return generated_text
 
 
-def generate_summary(transcript, prompt_override, refresh_configuration=False):
+def generate_summary(transcript, prompt_override, refresh_configuration=False, call_id=None):
     # first check to see if this is one prompt, or many prompts as a json
     templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
     result = {}
@@ -205,7 +219,7 @@ def generate_summary(transcript, prompt_override, refresh_configuration=False):
         prompt = item[key]
         prompt = prompt.replace("{transcript}", transcript)
         print("Prompt:", prompt)
-        response = call_bedrock(prompt)
+        response = call_bedrock(prompt, call_id)
         print("API Response:", response)
         result[key] = response
     if len(result.keys()) == 1:
@@ -288,7 +302,7 @@ def handler(event, context):
         # that pressing it uses the prompt templates as they are now. An
         # end-of-meeting run does not, and is served from the cache.
         refresh_configuration = bool(event.get("RefreshConfiguration"))
-        summary = generate_summary(transcript, prompt_override, refresh_configuration)
+        summary = generate_summary(transcript, prompt_override, refresh_configuration, callId)
         if not prompt_override:
             # only write to S3 when using default summary prompt
             write_to_s3(callId, metadata, transcript, summary)

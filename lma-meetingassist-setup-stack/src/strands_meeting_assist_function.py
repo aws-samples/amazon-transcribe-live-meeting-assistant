@@ -24,6 +24,7 @@ from bedrock_compat import (
     extract_text,
 )
 import tavily_secret
+import call_metering
 
 # Import MCP server loader
 try:
@@ -2200,7 +2201,22 @@ def handler(event, context):
                     response_text = response
             
             logger.info(f"Strands agent response: {response_text}")
-            
+
+            # The tokens of every model call this answer took -- the agent loops
+            # through tool calls, so one question is usually several -- as the
+            # SDK accumulated them, recorded for the meeting's cost estimate.
+            metrics = getattr(agent, 'event_loop_metrics', None)
+            call_metering.record(
+                call_id,
+                'MeetingAssistant',
+                f'bedrock/{model_id}',
+                call_metering.bedrock_usage(
+                    getattr(metrics, 'accumulated_usage', None),
+                    requests=int(getattr(metrics, 'cycle_count', 0) or 1),
+                ),
+                source='strands-meeting-assist',
+            )
+
             # Format response for LMA
             return {
                 'message': response_text,
@@ -2351,9 +2367,17 @@ Please provide a helpful response based on the meeting context. Keep it concise 
             **converse_kwargs
         )
 
+        call_metering.record(
+            call_id,
+            'MeetingAssistant',
+            f'bedrock/{model_id}',
+            call_metering.bedrock_usage(response.get('usage')),
+            source='strands-meeting-assist',
+        )
+
         # Extract response text, leaving out any reasoning block
         response_text = extract_text(response)
-        
+
         logger.info(f"Fallback Bedrock response: {response_text}")
         
         return {

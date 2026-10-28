@@ -14,6 +14,7 @@ import WebSocket from 'ws';
 import { LambdaClient, InvokeCommand } from '@aws-sdk/client-lambda';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { createSignedFetcher } from 'aws-sigv4-fetch';
+import { meterAsrMicrovm } from './metering.js';
 
 const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
 const ASR_LAUNCHER_FUNCTION_ARN = process.env.ASR_LAUNCHER_FUNCTION_ARN || '';
@@ -230,11 +231,39 @@ export const acquireLease = async (callId: string): Promise<AsrLease | undefined
         return undefined;
     }
     console.log(`[ASR] acquired ASR MicroVM ${body.microvmId} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    if (body.microvmId) {
+        const memoryMiB = Number((body as Record<string, unknown>).memoryMiB);
+        leases.set(body.microvmId, { callId, acquiredAtMs: started, memoryMiB: memoryMiB > 0 ? memoryMiB : 0 });
+    }
     return { endpointUrl: `wss://${body.endpoint}`, microvmId: body.microvmId, authToken: body.authToken };
 };
 
+/**
+ * When each MicroVM this process launched was asked for, and its size, so that
+ * whichever path releases it can meter its lifetime for the meeting cost
+ * estimate. Keyed by MicroVM id; an entry is removed on release.
+ */
+const leases = new Map<string, { callId: string; acquiredAtMs: number; memoryMiB: number }>();
+
+/**
+ * The size the ASR image is built at when the launcher does not report one: the
+ * `BundleMemory` mapping in lma-asr-microvm-stack/template.yaml gives every
+ * bundle 8 GiB.
+ */
+const DEFAULT_ASR_MICROVM_MEMORY_MIB = 8192;
+
 export const releaseLease = async (microvmId: string): Promise<void> => {
     await invokeLauncher({ action: 'release', microvmId });
+    const lease = leases.get(microvmId);
+    if (lease) {
+        leases.delete(microvmId);
+        await meterAsrMicrovm(
+            lease.callId,
+            (Date.now() - lease.acquiredAtMs) / 1000,
+            lease.memoryMiB || DEFAULT_ASR_MICROVM_MEMORY_MIB,
+            { size: lease.memoryMiB ? 'reported by the launcher' : 'assumed from the image default' },
+        );
+    }
 };
 
 export const subprotocols = (authToken?: string): string[] =>

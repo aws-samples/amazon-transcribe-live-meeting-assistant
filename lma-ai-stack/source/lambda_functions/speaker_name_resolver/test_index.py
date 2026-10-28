@@ -42,6 +42,8 @@ def _load():
     ``import index`` resolves to whichever directory comes first on sys.path.
     """
     sys.path.insert(0, str(HERE))
+    # The configuration layer, which carries lma_metering, as the Lambda has it.
+    sys.path.insert(0, str(HERE.parents[1] / "lambda_layers" / "configuration_layer"))
     spec = importlib.util.spec_from_file_location("speaker_name_resolver_index", HERE / "index.py")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
@@ -191,6 +193,32 @@ def test_self_introductions_are_named_and_written(monkeypatch: pytest.MonkeyPatc
     assert identities["identities"][SPK0]["name"] == "Sarah Lee"
     assert identities["identities"][SPK0]["status"] == "confirmed"
     assert identities["identities"][SPK1]["name"] == "Priya Raman"
+
+
+def test_a_naming_pass_records_its_model_usage_against_the_meeting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, bedrock, _ = install(monkeypatch)
+    original = bedrock.converse
+
+    def with_usage(**kwargs):
+        return {**original(**kwargs), "usage": {"inputTokens": 900, "outputTokens": 60}}
+
+    bedrock.converse = with_usage
+    stored = []
+
+    class Table:
+        def put_item(self, TableName, Item):  # noqa: N803
+            stored.append(Item)
+
+    monkeypatch.setattr(
+        index, "METERING", index.MeteringWriter("calls", source="test", client=Table())
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert len(stored) == 1
+    assert stored[0]["PK"] == {"S": f"mtr#{CALL_ID}"}
+    assert stored[0]["Context"] == {"S": "SpeakerNaming"}
+    assert stored[0]["Usage"]["M"]["inputTokens"] == {"N": "900"}
 
 
 def test_the_prompt_carries_the_transcript_and_the_open_labels(

@@ -2408,6 +2408,9 @@ Resources:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           S3_BUCKET_NAME: !Ref S3BucketName
           S3_PREFIX: !Ref TranscriptFilePrefix
+          # Token usage per summary section, for the meeting cost estimate.
+          METERING_TABLE_NAME: !Ref EventSourcingTable
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
       Timeout: 900
       MemorySize: 512
       Handler: index.handler
@@ -2485,6 +2488,16 @@ Resources:
                   - "dynamodb:GetItem"
                 Resource:
                   - !GetAtt ConfigurationTable.Arn
+              # Metering records for the meeting cost estimate: PutItem only,
+              # and only under the mtr# partitions.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -2850,6 +2863,9 @@ Resources:
       Handler: lambda_function.handler
       Layers:
         - !Ref TranscriptEnrichmentPythonLayer
+        # lma_metering, for the Comprehend sentiment counter. Pure Python, so
+        # compatible with this function's arm64 architecture.
+        - !Ref ConfigurationPythonLayer
       MemorySize: 3000
       Policies:
         - DynamoDBCrudPolicy:
@@ -2996,6 +3012,9 @@ Resources:
           # record does not fail the invocation, so the event source mapping's
           # on-failure destination never sees it.
           DISCARDED_RECORDS_QUEUE_URL: !Ref CallEventProcessorDiscardedRecordsQueue
+          # Comprehend sentiment requests, counted for the meeting cost estimate.
+          METERING_TABLE_NAME: !Ref EventSourcingTable
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/CallEventProcessorFunction
@@ -3098,7 +3117,7 @@ Resources:
     Metadata:
       BuildMethod: python3.12
     Properties:
-      Description: !Sub "Shared configuration accessor for stack: ${AWS::StackName}"
+      Description: !Sub "Shared configuration accessor and meeting metering for stack: ${AWS::StackName}"
       ContentUri: ../source/lambda_layers/configuration_layer
       CompatibleArchitectures:
         - arm64
@@ -3866,6 +3885,12 @@ Resources:
           UPLOADS_PENDING_PREFIX: lma-uploads-pending/
           RECORDINGS_PREFIX: !Ref AudioFilePrefix
           TRANSCRIPTS_PREFIX: !Ref TranscriptFilePrefix
+          # Batch transcription seconds, for the meeting cost estimate.
+          METERING_TABLE_NAME: !Ref EventSourcingTable
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
+      # lma_metering; pure Python, so compatible with this function's arm64.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UploadMeetingFinalizerFunction
@@ -3932,6 +3957,16 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:UpdateItem
                 Resource: !GetAtt EventSourcingTable.Arn
+              # Metering records for the meeting cost estimate: PutItem only,
+              # and only under the mtr# partitions.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
               # Emit transcript-segment / recording-url / END events onto the
               # same Kinesis stream the live websocket transcriber uses; the
               # existing call_event_processor consumes them.
@@ -4497,6 +4532,13 @@ Resources:
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
+          # Token usage per naming pass, for the meeting cost estimate.
+          METERING_TABLE_NAME: !Ref EventSourcingTable
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
+      # Carries lma_metering. Pure Python, so it does not pin this function to an
+      # architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/SpeakerNameResolverFunction
@@ -4548,6 +4590,16 @@ Resources:
                   - dynamodb:GetItem
                   - dynamodb:Query
                 Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+              # The one write: metering records for the meeting cost estimate,
+              # and only under the mtr# partitions.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
               - Effect: Allow
                 Action:
                   - appsync:GraphQL
@@ -5029,6 +5081,153 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncUpdateLLMPromptTemplateLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt UpdateLLMPromptTemplateResolverFunction.Arn
+
+  ##########################################################################
+  # Per-meeting cost estimate: Query.getCallCost computes an itemised estimate
+  # from the meeting's metering records (PK mtr#<CallId> in EventSourcingTable)
+  # and the call_pricing section of the configuration store. getCallPricing and
+  # updateCallPricing let an Admin read and change that price table. See
+  # docs/meeting-cost-estimate.md.
+  ##########################################################################
+
+  CallCostResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt CallCostResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/call_cost_resolver
+      Description: >-
+        Lambda resolver for the per-meeting cost estimate and the price table it
+        is computed with
+      MemorySize: 256
+      Timeout: 30
+      Tracing: Active
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      Environment:
+        Variables:
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          ADMIN_GROUP: "Admin"
+          LOG_LEVEL: !Ref LogLevel
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/CallCostResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names and a group name"
+    DependsOn:
+      - CallCostResolverFunctionLogGroup
+      # An estimate drawn before the price table is seeded would show every
+      # line as unpriced.
+      - SeedConfiguration
+
+  CallCostResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/CallCostResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  CallCostResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: CallCostResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-CallCostResolver
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # Reads only: a meeting's metering records and the Owner and
+              # SharedWith of its call row, which decide who may see it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !GetAtt EventSourcingTable.Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+                      - "mtr#*"
+              # The price table. PutItem is the Admin's save, which is a
+              # conditional write of the custom profile; no DeleteItem.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt ConfigurationTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncCallCostLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt CallCostResolverFunction.Arn
+
+  CallCostLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: CallCostLambda
+      Description: Lambda function for the per-meeting cost estimate and its price table
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncCallCostLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt CallCostResolverFunction.Arn
 
   # AppSync Event API for MCP command delivery (separate from GraphQL API)
   AppSyncEventApi:
@@ -6080,6 +6279,47 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/updateLLMPromptTemplateLambda.js
+
+  # The three cost fields share one data source and one resolver body, which
+  # forwards only the arguments, the verified identity and the field name.
+  GetCallCostResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt CallCostLambdaDataSource.Name
+      TypeName: Query
+      FieldName: getCallCost
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/callCostLambda.js
+
+  GetCallPricingResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt CallCostLambdaDataSource.Name
+      TypeName: Query
+      FieldName: getCallPricing
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/callCostLambda.js
+
+  UpdateCallPricingResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt CallCostLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: updateCallPricing
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/callCostLambda.js
 
   SendChatMessageResolver:
     Type: AWS::AppSync::Resolver

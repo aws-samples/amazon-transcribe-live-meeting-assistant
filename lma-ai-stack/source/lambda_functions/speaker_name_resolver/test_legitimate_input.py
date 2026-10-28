@@ -42,6 +42,8 @@ os.environ.setdefault("BEDROCK_MODEL_ID", "test.model")
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+# The configuration layer, which carries lma_metering, as the Lambda has it.
+sys.path.insert(0, str(HERE.parents[1] / "lambda_layers" / "configuration_layer"))
 
 spec = importlib.util.spec_from_file_location("legit_index", HERE / "index.py")
 index = importlib.util.module_from_spec(spec)

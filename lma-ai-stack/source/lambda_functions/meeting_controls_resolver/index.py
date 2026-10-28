@@ -421,12 +421,13 @@ def delete_meetings(calls, owner):
 
 def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
     try:
-        # Run the three independent preparation steps in parallel:
+        # Run the independent preparation steps in parallel:
         #  1. Virtual Participant cleanup (scan + ECS/DDB writes)
         #  2. Fetch + bulk-delete transcript segments via AppSync
         #  3. Fetch call details (needed to preserve SharedWith on deleteCall)
-        # Plus start S3 prefix deletion as soon as we kick off steps 1-3.
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        #  4. S3 prefix deletion
+        #  5. Deletion of the meeting's metering records (PK mtr#<CallId>)
+        with ThreadPoolExecutor(max_workers=5) as pool:
             vp_future = pool.submit(cleanup_virtual_participants, callid)
             segments_future = pool.submit(
                 _delete_all_transcript_segments, appsync_session, schema, callid
@@ -434,12 +435,14 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             details_future = pool.submit(get_call_details, appsync_session, schema, callid)
             # S3 cleanup is independent of AppSync/DDB state, so start it now.
             s3_future = pool.submit(delete_recordings_transcripts, callid)
+            metering_future = pool.submit(delete_metering_records, callid)
 
             # Surface any exception from the parallel preparation steps.
             vp_future.result()
             segments_future.result()
             details_result = details_future.result()
             s3_future.result()
+            metering_future.result()
 
         shared_with = (
             details_result.get("getCall", {}).get("SharedWith") if details_result else None
@@ -475,6 +478,35 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         raise
     else:
         return
+
+
+def delete_metering_records(callid):
+    """Delete the meeting's metering records (PK ``mtr#<CallId>``).
+
+    They hold the usage behind the meeting's cost estimate and would otherwise
+    outlive a deleted meeting until their TTL. Item by item with DeleteItem,
+    which this function is already granted: a meeting has tens of these, not
+    thousands.
+    """
+    pk = f"mtr#{callid}"
+    kwargs = {
+        "KeyConditionExpression": "PK = :pk",
+        "ExpressionAttributeValues": {":pk": pk},
+        "ProjectionExpression": "PK, SK",
+    }
+    deleted = 0
+    while True:
+        response = ddbTable.query(**kwargs)
+        for item in response.get("Items", []):
+            ddbTable.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+            deleted += 1
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            break
+        kwargs["ExclusiveStartKey"] = last
+    if deleted:
+        logger.info("Deleted %d metering record(s) for %s", deleted, callid)
+    return deleted
 
 
 def _delete_all_transcript_segments(appsync_session, schema, callid):

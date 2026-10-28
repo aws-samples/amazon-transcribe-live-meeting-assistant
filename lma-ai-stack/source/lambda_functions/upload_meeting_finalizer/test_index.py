@@ -54,6 +54,8 @@ os.environ["S3_BUCKET_NAME"] = BUCKET
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 HERE = Path(__file__).resolve().parent
+# The configuration layer, which carries lma_metering, as the Lambda has it.
+sys.path.insert(0, str(HERE.parents[1] / "lambda_layers" / "configuration_layer"))
 PROCESSOR_DIR = HERE.parent / "upload_meeting_processor"
 INITIATOR_DIR = HERE.parent / "upload_meeting_initiator"
 
@@ -436,6 +438,32 @@ def test_a_segment_event_matches_what_the_live_transcriber_emits(h) -> None:
         "CreatedAt": created_at,
         "UpdatedAt": created_at,
     }
+
+
+def test_the_batch_job_is_metered_to_the_last_transcribed_word(h, monkeypatch) -> None:
+    stored = []
+
+    class Table:
+        def put_item(self, TableName, Item):  # noqa: N803
+            stored.append(Item)
+
+    monkeypatch.setattr(
+        index, "METERING", index.MeteringWriter("calls", source="t", client=Table())
+    )
+    h.run()
+    assert len(stored) == 1
+    assert stored[0]["Service"] == {"S": "transcribe/batch"}
+    assert stored[0]["Context"] == {"S": "Transcription"}
+    # The fixture's transcript is shorter than the per-job minimum.
+    assert stored[0]["Usage"]["M"]["seconds"] == {"N": "15"}
+
+
+@pytest.mark.parametrize(
+    "items,seconds",
+    [([], 0.0), ([{"end_time": "1.5"}, {"end_time": "62.25"}, {"end_time": None}], 62.25)],
+)
+def test_the_transcribed_duration_is_the_latest_end_time(items, seconds) -> None:
+    assert index.transcribed_seconds({"results": {"items": items}}) == seconds
 
 
 def test_segments_are_final_not_partial(h) -> None:

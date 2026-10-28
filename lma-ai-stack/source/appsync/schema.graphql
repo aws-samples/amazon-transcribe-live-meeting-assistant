@@ -230,6 +230,8 @@ type Mutation @aws_iam {
 	updateNovaSonicConfig(input: UpdateNovaSonicConfigInput!): UpdateNovaSonicConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateAsrConfig(input: UpdateAsrConfigInput!): UpdateAsrConfigOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The price table the per-meeting cost estimate is computed with.
+	updateCallPricing(input: UpdateCallPricingInput!): UpdateCallPricingOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -291,6 +293,12 @@ type Query @aws_cognito_user_pools
 	# signed with IAM credentials does not carry, so the declaration here
 	# names the one mode that can be answered.
 	getLLMPromptTemplate(LLMPromptTemplateId: ID!): LLMPromptTemplate @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The itemised cost estimate of one meeting, computed when read. Answered to
+	# the callers getCall answers -- an Admin, the owner, anyone the meeting is
+	# shared with, or a backend role with IAM -- and checked in the resolver.
+	getCallCost(CallId: ID!): CallCost @aws_cognito_user_pools @aws_iam
+	# The price table behind those estimates, for the Admin who edits it.
+	getCallPricing: CallPricing @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
@@ -998,6 +1006,80 @@ type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
 	LLMPromptTemplateId: ID!
 	Success: Boolean!
 	# The version now stored, so the editor can save again without reloading.
+	Version: Int
+}
+
+# An estimate of what one meeting cost, built from metering records written
+# where the usage happened and a configurable price table. It is an estimate:
+# list prices, first usage tier, and only the usage that is metered -- NotIncluded
+# names what is left out. See docs/meeting-cost-estimate.md.
+type CallCost @aws_cognito_user_pools @aws_iam {
+	CallId: ID!
+	Currency: String
+	# Sum of every priced line. Lines with no price are excluded, and counted in
+	# UnpricedCount, so a non-zero count means this total is incomplete.
+	TotalCost: Float
+	ContextTotals: [CallCostContextTotal]
+	Items: [CallCostLineItem]
+	UnpricedCount: Int
+	# Metering records read for this meeting.
+	RecordCount: Int
+	# The date the default prices were taken, and from where.
+	PricesAsOf: String
+	PriceSource: String
+	# The deployment's region, and the region whose prices stand in for any
+	# region the price table does not list (named in RegionsWithoutListedPrices).
+	Region: String
+	BaseRegion: String
+	RegionsWithoutListedPrices: [String]
+	NotIncluded: [String]
+	ComputedAt: AWSDateTime
+}
+
+type CallCostContextTotal @aws_cognito_user_pools @aws_iam {
+	# What the usage was for: Transcription, VirtualParticipant, VoiceAssistant,
+	# MeetingAssistant, Summary, SpeakerNaming, Sentiment, PageAutomation.
+	Context: String
+	Cost: Float
+}
+
+type CallCostLineItem @aws_cognito_user_pools @aws_iam {
+	Context: String
+	# "<service>/<api-or-model>", the key the price table is looked up by.
+	Service: String
+	Region: String
+	Unit: String
+	Quantity: Float
+	# USD per unit; null when the price table has no price for this unit.
+	UnitPrice: Float
+	Cost: Float
+	# False for a unit that is shown for reference but not billed on its own
+	# (requests, sessions, runtime seconds).
+	Chargeable: Boolean
+	Priced: Boolean
+	# Why a figure is approximate or deliberately unpriced, from the price table.
+	Note: String
+	# How the usage was measured: launch type, sizes, session counts.
+	Details: String
+}
+
+# A JSON string: {"Default", "Custom", "Effective", "Version", "UpdatedBy",
+# "UpdatedAt", "Region"}. Default is the table this release ships, Custom the
+# Admin's changes over it, Effective the merge every estimate uses.
+type CallPricing @aws_cognito_user_pools {
+	Pricing: String
+}
+
+input UpdateCallPricingInput {
+	# A JSON object holding the changes over the shipped table -- the same shape,
+	# naming only what differs. "{}" returns every price to the shipped value.
+	Pricing: String!
+	# The Version getCallPricing returned; a save against a newer record is refused.
+	ExpectedVersion: Int!
+}
+
+type UpdateCallPricingOutput @aws_cognito_user_pools {
+	Success: Boolean!
 	Version: Int
 }
 

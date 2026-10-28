@@ -154,6 +154,10 @@ export default defineConfig({
               slug: "well-architected",
             },
             {
+              label: "Meeting Cost Estimate",
+              slug: "meeting-cost-estimate",
+            },
+            {
               label: "Monitoring & Alerting",
               slug: "monitoring",
             },

@@ -44,6 +44,7 @@ from .keys import (
     validate_profile_name,
 )
 from .sections import (
+    CALL_PRICING,
     CHAT_BUTTONS,
     NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
@@ -68,6 +69,7 @@ __all__ = [
     "ACTIVE_POINTER_KEY",
     "BODY_ATTRIBUTE",
     "CHAT_BUTTONS",
+    "CALL_PRICING",
     "CONFIG_PREFIX",
     "DEFAULT_KEY",
     "DEFAULT_PROFILE_NAME",

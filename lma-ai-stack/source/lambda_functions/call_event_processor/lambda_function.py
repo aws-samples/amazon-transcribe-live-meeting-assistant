@@ -26,6 +26,9 @@ from batch_item_failures import SequenceTrackingBatchProcessor, send_discarded_r
 from botocore.config import Config as BotoCoreConfig
 from event_processor import execute_process_event_api_mutation
 from graphql_helpers import describe_exception, traceback_frames
+
+# from the configuration layer
+from lma_metering import MeteringWriter, comprehend_units
 from metrics_utils.emf import METRICS
 
 # pylint: enable=import-error
@@ -74,6 +77,22 @@ else:
     COMPREHEND_CLIENT = None
 COMPREHEND_LANGUAGE_CODE = getenv("COMPREHEND_LANGUAGE_CODE", "en")
 
+# Comprehend sentiment is one request per final transcript segment, so it is
+# metered on a running counter per meeting rather than a record per request.
+# Inert when METERING_TABLE_NAME is unset.
+METERING = MeteringWriter(source="call-event-processor")
+
+
+def meter_sentiment_request(call_id: str, text: str) -> None:
+    """Count one DetectSentiment request against the meeting's cost estimate."""
+    METERING.add(
+        call_id,
+        "Sentiment",
+        "comprehend/detect-sentiment",
+        {"units": comprehend_units(text), "requests": 1},
+    )
+
+
 SNS_CLIENT: SNSClient = BOTO3_SESSION.client("sns", config=CLIENT_CONFIG)
 SSM_CLIENT: SSMClient = BOTO3_SESSION.client("ssm", config=CLIENT_CONFIG)
 
@@ -103,7 +122,9 @@ async def process_event(event) -> SequenceTrackingBatchProcessor:
             is_lambda_agent_assist_enabled=IS_LAMBDA_AGENT_ASSIST_ENABLED,
         ),
         sentiment_analysis_args=dict(
-            comprehend_client=COMPREHEND_CLIENT, comprehend_language_code=COMPREHEND_LANGUAGE_CODE
+            comprehend_client=COMPREHEND_CLIENT,
+            comprehend_language_code=COMPREHEND_LANGUAGE_CODE,
+            on_comprehend_request=meter_sentiment_request,
         ),
         # called for each record right before the context manager exits
         api_mutation_fn=execute_process_event_api_mutation,
