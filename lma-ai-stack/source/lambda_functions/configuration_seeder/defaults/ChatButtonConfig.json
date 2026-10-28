@@ -1,0 +1,9 @@
+{
+  "SUMMARIZE": "Summarize this meeting",
+  "ACTIONS": "What were the action items?",
+  "TOPICS": "What topics were discussed?",
+  "ASK ASSISTANT!": "Please respond to the last question or instruction in this meeting.",
+  "FACT CHECK": "Can you fact-check the recent statements made in this meeting?",
+  "DISCUSSED BEFORE?": "Based on what we're discussing in this meeting, have we talked about this topic in previous meetings?",
+  "FIND DOCS": "Based on the current meeting discussion, are there any relevant company documents or policies?"
+}

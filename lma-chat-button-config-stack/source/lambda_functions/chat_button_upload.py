@@ -9,11 +9,12 @@ import os
 
 DEFAULT_BUTTON_CONFIG_PK = "DefaultChatButtonConfig"
 CUSTOM_BUTTON_CONFIG_PK = "CustomChatButtonConfig"
-DEFAULT_BUTTON_CONFIG_INFO = f"""LMA default STRANDS agent chat button configuration. Do not edit - changes may be overridden by updates.
-To override default buttons, use same keys in item: {CUSTOM_BUTTON_CONFIG_PK}. Button keys must be in the form 'N#Label' where N is a sequence number.
+DEFAULT_BUTTON_CONFIG_INFO = """LMA default STRANDS agent chat button configuration, kept so a deployment can be rolled back to a release that reads this table.
+The chat panel reads its buttons from the stack's configuration table. Edit them from the Edit Chat Buttons dialog on a meeting page; edits made here have no effect.
 """
-CUSTOM_BUTTON_CONFIG_INFO = f"""LMA custom STRANDS agent chat button configuration. Any key values defined here override defaults with same key defined in item: {DEFAULT_BUTTON_CONFIG_PK}. 
-To disable a default button, override it here with the same key, and value either empty or 'NONE'. Button keys must be in the form 'N#Label' where N is a sequence number.
+CUSTOM_BUTTON_CONFIG_INFO = """LMA custom STRANDS agent chat button configuration as it was saved before the buttons moved into the stack's configuration table, which carries it across on upgrade.
+The chat panel reads its buttons from the configuration table, so edit them from the Edit Chat Buttons dialog on a meeting page; edits made here have no effect.
+Button keys are in the form 'N#Label' where N is a sequence number.
 """
 
 def get_new_item(pk, info, button_config):

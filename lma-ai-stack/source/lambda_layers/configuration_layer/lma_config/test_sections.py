@@ -103,6 +103,13 @@ def test_the_nova_sonic_section_is_on_the_immediate_tier() -> None:
     assert spec.cache_tier is sections.CacheTier.IMMEDIATE
 
 
+def test_the_chat_buttons_section_is_on_the_immediate_tier() -> None:
+    """The Edit Chat Buttons dialog shows the saved buttons straight after a save."""
+    spec = sections.section_spec("chat_buttons")
+    assert spec is sections.CHAT_BUTTONS
+    assert spec.cache_tier is sections.CacheTier.IMMEDIATE
+
+
 def test_registering_the_same_section_twice_with_the_same_policy_is_allowed() -> None:
     """Re-importing a module must not fail."""
     spec = sections.SUMMARY_PROMPT_TEMPLATES

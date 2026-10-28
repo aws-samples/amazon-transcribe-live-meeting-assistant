@@ -148,7 +148,7 @@ def test_the_shipped_prompts_are_numbered_in_the_order_they_appear(seeder) -> No
 
 def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seeder) -> None:
     body = seeder.shipped_default_body("default")
-    assert set(body) == {"summary_prompt_templates", "nova_sonic_config"}
+    assert set(body) == {"summary_prompt_templates", "nova_sonic_config", "chat_buttons"}
     assert set(body["summary_prompt_templates"]) == {"1#SUMMARY", "2#DETAILS", "3#ACTIONS"}
     assert "{transcript}" in body["summary_prompt_templates"]["1#SUMMARY"]
 
@@ -278,6 +278,11 @@ CUSTOMISED_NOVA_SONIC_ITEM = {
 NOVA_TABLES = {"nova_sonic_config": "old-nova-table"}
 
 
+def adoption(outcome: Dict[str, str]) -> Dict[str, str]:
+    """The SectionAdoption report, as section -> outcome."""
+    return dict(pair.split("=", 1) for pair in outcome["SectionAdoption"].split(","))
+
+
 def test_an_upgrade_carries_the_nova_sonic_settings_into_the_existing_profile(seeder) -> None:
     """The upgrade an existing deployment makes: the profile is already there."""
     store, dynamo = build_store()
@@ -297,7 +302,7 @@ def test_an_upgrade_carries_the_nova_sonic_settings_into_the_existing_profile(se
         legacy_client=LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM),
     )
 
-    assert outcome["SectionAdoption"] == "nova_sonic_config=adopted-from-previous-table"
+    assert adoption(outcome)["nova_sonic_config"] == "adopted-from-previous-table"
     assert dynamo.body("Config#custom") == {
         "summary_prompt_templates": {"1#SUMMARY": "an admin's prompt"},
         "nova_sonic_config": {
@@ -328,7 +333,7 @@ def test_a_fresh_deployment_records_an_empty_nova_sonic_section(seeder) -> None:
         store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=legacy
     )
     assert outcome["Profile"] == "created"
-    assert outcome["SectionAdoption"] == "nova_sonic_config=nothing-to-adopt"
+    assert adoption(outcome)["nova_sonic_config"] == "nothing-to-adopt"
     assert dynamo.body("Config#custom") == {"nova_sonic_config": {}}
 
 
@@ -350,7 +355,7 @@ def test_the_nova_sonic_adoption_happens_once(seeder) -> None:
         store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=legacy
     )
 
-    assert outcome["SectionAdoption"] == "nova_sonic_config=already-present"
+    assert adoption(outcome)["nova_sonic_config"] == "already-present"
     assert legacy.reads == reads_before, "the previous table was read again"
     assert dynamo.body("Config#custom")["nova_sonic_config"] == {"translatorLanguageA": "Japanese"}
 
@@ -377,7 +382,7 @@ def test_an_unreadable_previous_nova_sonic_table_is_retried_on_the_next_run(seed
     first = seeder.seed(
         store, domain="default", legacy_section_tables=NOVA_TABLES, legacy_client=Unreadable()
     )
-    assert first["SectionAdoption"] == "nova_sonic_config=previous-table-unreadable"
+    assert adoption(first)["nova_sonic_config"] == "previous-table-unreadable"
     assert "nova_sonic_config" not in dynamo.body("Config#custom")
 
     later = seeder.seed(
@@ -386,7 +391,7 @@ def test_an_unreadable_previous_nova_sonic_table_is_retried_on_the_next_run(seed
         legacy_section_tables=NOVA_TABLES,
         legacy_client=LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM),
     )
-    assert later["SectionAdoption"] == "nova_sonic_config=adopted-from-previous-table"
+    assert adoption(later)["nova_sonic_config"] == "adopted-from-previous-table"
     assert dynamo.body("Config#custom")["nova_sonic_config"]["translatorLanguageB"] == "German"
 
 
@@ -409,7 +414,7 @@ def test_an_unreadable_nova_sonic_table_does_not_stop_an_admins_save_counting(se
         legacy_section_tables=NOVA_TABLES,
         legacy_client=LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM),
     )
-    assert later["SectionAdoption"] == "nova_sonic_config=already-present"
+    assert adoption(later)["nova_sonic_config"] == "already-present"
     assert dynamo.body("Config#custom")["nova_sonic_config"] == {"voiceId": "matthew"}
 
 
@@ -417,7 +422,7 @@ def test_no_previous_nova_sonic_table_writes_nothing(seeder) -> None:
     """A stack given no previous table has nothing to record either way."""
     store, dynamo = build_store()
     outcome = seeder.seed(store, domain="default")
-    assert outcome["SectionAdoption"] == "nova_sonic_config=no-previous-table"
+    assert adoption(outcome)["nova_sonic_config"] == "no-previous-table"
     assert dynamo.body("Config#custom") == {}
 
 
@@ -449,7 +454,7 @@ def test_a_save_landing_mid_adoption_is_kept_and_the_adoption_retried(seeder, mo
         legacy_section_tables=NOVA_TABLES,
         legacy_client=LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM),
     )
-    assert outcome["SectionAdoption"] == "nova_sonic_config=adopted-from-previous-table"
+    assert adoption(outcome)["nova_sonic_config"] == "adopted-from-previous-table"
     body = dynamo.body("Config#custom")
     assert body["summary_prompt_templates"] == {"1#SUMMARY": "saved during the deployment"}
     assert body["nova_sonic_config"]["meetingMode"] == "translator"
@@ -471,8 +476,167 @@ def test_the_handler_passes_the_previous_nova_sonic_table_through(seeder, monkey
     event = _event("Update")
     event["ResourceProperties"]["LegacyNovaSonicConfigTableName"] = "old-nova-table"
     seeder.handler(event, _Context())
-    assert seen["legacy_section_tables"] == {"nova_sonic_config": "old-nova-table"}
+    assert seen["legacy_section_tables"] == {
+        "nova_sonic_config": "old-nova-table",
+        "chat_buttons": "",
+    }
     assert "SectionAdoption" in seeder.recorder.sent[-1]["data"]
+
+
+# ── the chat buttons ───────────────────────────────────────────────────────
+
+
+def _chat_button_stack_seeder(monkeypatch: pytest.MonkeyPatch):
+    """The chat-button-config stack's own seeder, loaded by path (see above)."""
+    import importlib.util
+    import types
+
+    monkeypatch.setitem(sys.modules, "cfnresponse", types.ModuleType("cfnresponse"))
+    path = (
+        REPO_ROOT
+        / "lma-chat-button-config-stack"
+        / "source"
+        / "lambda_functions"
+        / "chat_button_upload.py"
+    )
+    spec = importlib.util.spec_from_file_location("chat_button_upload_under_test", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_shipped_chat_buttons_match_the_copy_the_other_stack_still_ships() -> None:
+    """Compared as ordered pairs: the order is the buttons' sequence numbers."""
+    mine = (HERE / "defaults" / "ChatButtonConfig.json").read_text(encoding="utf-8")
+    theirs = (
+        REPO_ROOT
+        / "lma-chat-button-config-stack"
+        / "source"
+        / "lambda_functions"
+        / "ChatButtonConfig.json"
+    ).read_text(encoding="utf-8")
+    assert list(json.loads(mine).items()) == list(json.loads(theirs).items())
+
+
+def test_the_shipped_chat_buttons_are_numbered_as_the_other_stack_numbers_them(
+    seeder, monkeypatch
+) -> None:
+    """The same keys, so a rollback's table and this baseline name the same buttons."""
+    shipped = json.loads((HERE / "defaults" / "ChatButtonConfig.json").read_text(encoding="utf-8"))
+    theirs = _chat_button_stack_seeder(monkeypatch).get_new_item("Default", "info", shipped)
+    for bookkeeping in ("ChatButtonConfigId", "*Information*"):
+        theirs.pop(bookkeeping)
+    assert seeder.shipped_default_body("default")["chat_buttons"] == theirs
+
+
+CUSTOMISED_CHAT_BUTTON_ITEM = {
+    "ChatButtonConfigId": {"S": "CustomChatButtonConfig"},
+    "*Information*": {"S": "guidance text"},
+    "1#MY SUMMARY": {"S": "Summarize in three bullets"},
+    "2#RISKS": {"S": "What risks were raised?"},
+    "UpdatedBy": {"S": "admin@example.com"},
+    "UpdatedAt": {"S": "2026-10-01T00:00:00Z"},
+}
+
+
+class LegacyChatButtonTable:
+    """The previous chat-button table, keyed on its own partition-key attribute."""
+
+    def __init__(self, item: Dict[str, Any] | None = None) -> None:
+        self.items: Dict[str, Dict[str, Any]] = {}
+        if item is not None:
+            self.items["CustomChatButtonConfig"] = item
+
+    def get_item(self, **request: Any) -> Dict[str, Any]:
+        item = self.items.get(request["Key"]["ChatButtonConfigId"]["S"])
+        return {"Item": item} if item is not None else {}
+
+
+CHAT_TABLES = {"chat_buttons": "old-chat-table"}
+
+
+def test_an_upgrade_carries_the_custom_chat_buttons_across_whole(seeder) -> None:
+    """A custom list replaces the shipped one, so it is carried as the list it is."""
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=CHAT_TABLES,
+        legacy_client=LegacyChatButtonTable(CUSTOMISED_CHAT_BUTTON_ITEM),
+    )
+
+    assert adoption(outcome)["chat_buttons"] == "adopted-from-previous-table"
+    assert dynamo.body("Config#custom")["chat_buttons"] == {
+        "1#MY SUMMARY": "Summarize in three bullets",
+        "2#RISKS": "What risks were raised?",
+    }
+
+
+def test_a_custom_button_list_identical_to_the_shipped_one_is_still_carried(seeder) -> None:
+    """Nothing is pruned: dropping a button would change what the list replaces."""
+    store, dynamo = build_store()
+    shipped = seeder.shipped_default_body("default")["chat_buttons"]
+    item = {"ChatButtonConfigId": {"S": "CustomChatButtonConfig"}}
+    item.update({key: {"S": value} for key, value in shipped.items()})
+
+    seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=CHAT_TABLES,
+        legacy_client=LegacyChatButtonTable(item),
+    )
+
+    assert dynamo.body("Config#custom")["chat_buttons"] == shipped
+
+
+def test_a_fresh_deployment_records_an_empty_chat_button_section(seeder) -> None:
+    """The previous table holds only its guidance text on a new deployment."""
+    store, dynamo = build_store()
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=CHAT_TABLES,
+        legacy_client=LegacyChatButtonTable(
+            {
+                "ChatButtonConfigId": {"S": "CustomChatButtonConfig"},
+                "*Information*": {"S": "guidance text"},
+            }
+        ),
+    )
+    assert adoption(outcome)["chat_buttons"] == "nothing-to-adopt"
+    assert dynamo.body("Config#custom") == {"chat_buttons": {}}
+
+
+def test_both_later_stores_are_carried_in_one_run(seeder) -> None:
+    """Each section is read from its own table, through the one client."""
+
+    class BothTables:
+        def __init__(self) -> None:
+            self.nova = LegacyNovaSonicTable(CUSTOMISED_NOVA_SONIC_ITEM)
+            self.chat = LegacyChatButtonTable(CUSTOMISED_CHAT_BUTTON_ITEM)
+
+        def get_item(self, **request: Any) -> Dict[str, Any]:
+            table = {"old-nova-table": self.nova, "old-chat-table": self.chat}[request["TableName"]]
+            return table.get_item(**request)
+
+    store, dynamo = build_store()
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables={**NOVA_TABLES, **CHAT_TABLES},
+        legacy_client=BothTables(),
+    )
+
+    assert adoption(outcome) == {
+        "nova_sonic_config": "adopted-from-previous-table",
+        "chat_buttons": "adopted-from-previous-table",
+    }
+    body = dynamo.body("Config#custom")
+    assert body["chat_buttons"]["2#RISKS"] == "What risks were raised?"
+    assert body["nova_sonic_config"]["translatorLanguageA"] == "French"
 
 
 # ── a stack update must not reset an operator's edits ──────────────────────

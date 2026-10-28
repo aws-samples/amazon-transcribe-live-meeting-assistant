@@ -134,9 +134,16 @@ Outputs:
     Description: DynamoDB table name for chat button configuration
   
   DefaultChatButtonConfig:
-    Description: View the *default* STRANDS agent chat button configuration. Do not edit. To override default buttons, add or edit attributes in the custom button config item.
+    Description: >-
+      View the *default* STRANDS agent chat button configuration in this table,
+      kept so a deployment can be rolled back. The chat panel reads its buttons
+      from the stack's configuration table; edit them from the Edit Chat Buttons
+      dialog.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=DefaultChatButtonConfig&route=ROUTE_ITEM_EXPLORER&table=${ChatButtonConfigTable}"
   
   CustomChatButtonConfig:
-    Description: Edit the *custom* STRANDS agent chat button configuration. Attribute values here override the default button config, and are preserved during stack updates.
+    Description: >-
+      View the *custom* STRANDS agent chat button configuration as it was saved
+      before the buttons moved into the stack's configuration table. Edits here
+      have no effect; edit the buttons from the Edit Chat Buttons dialog.
     Value: !Sub "https://${AWS::Region}.console.aws.amazon.com/dynamodbv2/home?region=${AWS::Region}#edit-item?itemMode=2&pk=CustomChatButtonConfig&route=ROUTE_ITEM_EXPLORER&table=${ChatButtonConfigTable}"

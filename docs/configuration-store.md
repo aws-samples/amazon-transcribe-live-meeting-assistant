@@ -15,9 +15,9 @@ cached. This page describes the single store that replaces them, and the state o
 the migration into it.
 
 **Current state:** the store, the accessor and the deploy-time seeder are in
-place, and the **summary prompt templates** and the **Nova Sonic voice assistant
-settings** are served from them. The other stores still work exactly as before
-and are migrated in later releases.
+place, and the **summary prompt templates**, the **Nova Sonic voice assistant
+settings** and the **Meeting Assist chat buttons** are served from them. The
+other stores still work exactly as before and are migrated in later releases.
 
 ## The table
 
@@ -162,6 +162,7 @@ Today's sections and their tiers:
 |---|---|---|
 | `summary_prompt_templates` | `standard` | Read by an end-of-meeting summary nobody is waiting on; **Regenerate** drops the cache before reading |
 | `nova_sonic_config` | `immediate` | Read once per meeting when the voice assistant starts, and the page says a save applies to the next meeting; a cache would save a read or two per meeting and add a window in which that is not true |
+| `chat_buttons` | `immediate` | Read record by record through the chat panel's resolver, which reads directly and consistently; the Edit Chat Buttons dialog shows the saved buttons straight after a save. The browser holds what it read for the life of the chat panel, as it always has |
 
 ### Resolving a read
 
@@ -485,6 +486,34 @@ configuration page after this one was loaded. Nothing is lost either way — the
 message says to reload and apply the change again — but it is a refusal that a
 per-page record would not have produced.
 
+### The Meeting Assist chat buttons
+
+The quick-action buttons in the Meeting Assist chat panel are the
+`chat_buttons` section, keyed `N#Label` where `N` orders them.
+
+- `Config#default` holds the shipped buttons, from
+  `configuration_seeder/defaults/ChatButtonConfig.json`, numbered as the
+  chat-button-config stack numbers its own copy. A test fails if the two files
+  differ.
+- `Config#custom` holds the buttons an administrator saved from the **Edit Chat
+  Buttons** dialog, as the whole list. This section is the one exception to
+  "a profile is a delta": a non-empty custom list *replaces* the shipped buttons
+  rather than overriding them key by key, so nothing in it is pruned against
+  the baseline, and the two records are read separately rather than merged.
+  **Reset to Defaults** stores an empty list, and the shipped buttons apply.
+- `Query.getChatButtonConfig` and `Mutation.updateChatButtonConfig` are served
+  by one Lambda resolver. The read stays open to every signed-in user and to
+  IAM, because the chat panel renders its buttons for whoever is viewing a
+  meeting, and it answers with one record's buttons and its `Version` —
+  never the attributes saying who saved it. The write stays Admin-only and is
+  conditional on the version the dialog loaded.
+
+**On an upgrade** the seeder carries the custom buttons across as described in
+[Carrying a later store across](#carrying-a-later-store-across); the
+`ConfigurationSectionAdoption` output reports `chat_buttons=...`. Editing the
+`CustomChatButtonConfig` item in the DynamoDB console stops having any effect:
+edit the buttons from the dialog.
+
 ## Still to come
 
 | Stage | What it adds |
@@ -492,7 +521,7 @@ per-page record would not have produced.
 | Revisions and audit | Revision bodies in S3 with metadata in one DynamoDB index item per profile, forward-only restore, pruning that keeps the published and labelled revisions |
 | Import / export | Export as a client-side download; import that always routes into a create-new-profile flow rather than applying in place |
 | Schema-driven UI | A profile table, a form generated from the `Schema` document, a diff against the baseline and per-field "restore default" |
-| Migrating the other stores | The chat-button config, the ASR switches, the MCP server list, and the SSM settings blob |
+| Migrating the other stores | The ASR switches, the MCP server list, and the SSM settings blob |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired |
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
 

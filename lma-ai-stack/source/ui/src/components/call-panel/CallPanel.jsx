@@ -67,6 +67,7 @@ import { SentimentIcon } from '../sentiment-icon/SentimentIcon';
 import useAppContext from '../../contexts/app';
 import useUserGroups from '../../hooks/use-user-groups';
 import { AccessDenied } from '../common/AdminOnly';
+import { isConflict } from '../common/config-conflict';
 import awsExports from '../../aws-exports';
 import {
   downloadTranscriptAsExcel,
@@ -1199,10 +1200,22 @@ const CallInProgressTranscript = ({
   );
 };
 
+// Shown when the stored profile moved on while the Edit Chat Buttons dialog was
+// open -- another administrator saved it, from this dialog or a configuration
+// page, since they share one profile. The save is refused rather than replacing
+// their edit, so the way forward is to reopen the dialog and reapply.
+const CHAT_BUTTON_CONFLICT_MESSAGE =
+  'Someone else saved the configuration while this dialog was open. Close and reopen it to see ' +
+  'their version, then apply your changes again.';
+
 const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setShowVNCPreview, vpData, loadingVP) => {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showMCPModal, setShowMCPModal] = useState(false);
   const [buttonConfig, setButtonConfig] = useState(null);
+  // The version of the stored profile the dialog loaded, sent back on save so a
+  // save against a profile someone else has since saved is refused rather than
+  // replacing their edit.
+  const [buttonConfigVersion, setButtonConfigVersion] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [alertMessage, setAlertMessage] = useState(null);
   const [alertType, setAlertType] = useState('success');
@@ -1261,6 +1274,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
       // If custom buttons exist, use those; otherwise use defaults
       const hasCustomButtons = Object.keys(customButtons).length > 0;
       setButtonConfig(hasCustomButtons ? customButtons : defaultButtons);
+      setButtonConfigVersion(typeof customData.Version === 'number' ? customData.Version : null);
     } catch (error) {
       console.error('Failed to load button configuration:', error);
       setAlertType('error');
@@ -1287,6 +1301,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           updateChatButtonConfig(input: $input) {
             ChatButtonConfigId
             Success
+            Version
           }
         }
       `;
@@ -1295,10 +1310,13 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
         input: {
           ChatButtonConfigId: 'CustomChatButtonConfig',
           ButtonConfig: JSON.stringify(buttonConfig),
+          ExpectedVersion: buttonConfigVersion,
         },
       };
 
-      await client.graphql({ query: mutation, variables });
+      const saved = await client.graphql({ query: mutation, variables });
+      // So a second save from the same dialog is checked against this one.
+      setButtonConfigVersion(saved?.data?.updateChatButtonConfig?.Version ?? null);
 
       setAlertType('success');
       setAlertMessage('Button configuration saved successfully!');
@@ -1322,7 +1340,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
     } catch (error) {
       console.error('Failed to save button configuration:', error);
       setAlertType('error');
-      setAlertMessage('Failed to save button configuration');
+      setAlertMessage(isConflict(error) ? CHAT_BUTTON_CONFLICT_MESSAGE : 'Failed to save button configuration');
     } finally {
       setIsLoading(false);
     }
@@ -1344,6 +1362,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
           updateChatButtonConfig(input: $input) {
             ChatButtonConfigId
             Success
+            Version
           }
         }
       `;
@@ -1352,10 +1371,12 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
         input: {
           ChatButtonConfigId: 'CustomChatButtonConfig',
           ButtonConfig: JSON.stringify({}),
+          ExpectedVersion: buttonConfigVersion,
         },
       };
 
-      await client.graphql({ query: mutation, variables });
+      const saved = await client.graphql({ query: mutation, variables });
+      setButtonConfigVersion(saved?.data?.updateChatButtonConfig?.Version ?? null);
 
       setAlertType('success');
       setAlertMessage('Reset to defaults successfully!');
@@ -1379,7 +1400,7 @@ const getAgentAssistPanel = (item, collapseSentiment, user, showVNCPreview, setS
     } catch (error) {
       console.error('Failed to reset button configuration:', error);
       setAlertType('error');
-      setAlertMessage('Failed to reset to defaults');
+      setAlertMessage(isConflict(error) ? CHAT_BUTTON_CONFLICT_MESSAGE : 'Failed to reset to defaults');
     } finally {
       setIsLoading(false);
     }
@@ -2225,7 +2246,14 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         }
       }
 
-      // Handle update button configuration requests (admin only)
+      // Handle update button configuration requests (admin only).
+      //
+      // Nothing in LMA sends this message: strands-chat.html only reads its
+      // buttons (STRANDS_BUTTON_CONFIG_REQUEST), and they are edited from the Edit
+      // Chat Buttons dialog, which sends the version it loaded. This path sends
+      // none, so its save is conditional on the record as the resolver reads it
+      // at save time but not on what the sender was looking at; a sender that
+      // wants that check has to supply the version itself.
       else if (event.data && event.data.type === 'STRANDS_UPDATE_BUTTON_CONFIG_REQUEST') {
         try {
           const mutation = `

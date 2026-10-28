@@ -24,7 +24,7 @@ The Live Meeting Assistant (LMA) demonstrates strong alignment with AWS Well-Arc
 - **Real-Time Stream Processing**: Kinesis Data Streams buffer transcription events, decoupling ingestion from processing and enabling observability into pipeline throughput.
 - **Observability**: Detailed logging across all components with configurable retention periods (1 to 3653 days via `CloudWatchLogsExpirationInDays` parameter), with each Lambda function writing to a dedicated, KMS-encrypted log group.
 - **Operational Tooling**: Includes load testing utilities, local SAM invocation targets, and comprehensive linting (cfn-lint, pylint, bandit, mypy, ESLint).
-- **Configurable Templates**: LLM prompt templates and chat button configurations stored in DynamoDB enable runtime customization without redeployment.
+- **Configurable Templates**: LLM prompt templates, chat button configurations and voice assistant settings stored in a DynamoDB configuration table enable runtime customization without redeployment.
 
 ### Recommendations
 

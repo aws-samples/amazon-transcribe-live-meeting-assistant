@@ -172,3 +172,25 @@ NOVA_SONIC_CONFIG = register(
         ),
     )
 )
+
+#: The Meeting Assist chat panel's quick-action buttons, keyed "N#Label" where N
+#: orders them, each holding the prompt the button sends. Unlike the other
+#: sections a profile's buttons do not override the shipped ones key by key: a
+#: non-empty list in the profile is the whole list, and the shipped buttons
+#: apply only while it is empty. So readers take the two records separately --
+#: the chat panel reads both through the getChatButtonConfig resolver and picks
+#: one -- rather than reading the merged section.
+#:
+#: Immediate tier. The resolver reads each record directly with a consistent
+#: read, and the Edit Chat Buttons dialog shows the saved buttons straight
+#: after a save; a reader of the section would have to honour the same promise.
+CHAT_BUTTONS = register(
+    SectionSpec(
+        name="chat_buttons",
+        cache_tier=CacheTier.IMMEDIATE,
+        description=(
+            "Meeting Assist chat panel quick-action buttons, keyed 'N#Label' where "
+            "N orders them; a non-empty profile list replaces the shipped one."
+        ),
+    )
+)
