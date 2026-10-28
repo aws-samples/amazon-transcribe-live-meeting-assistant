@@ -5,6 +5,8 @@
 Usage::
 
     lma vp create --name "Weekly sync" --platform ZOOM --id 1234567890
+    lma vp create --name "Weekly sync" --platform ZOOM --id 1234567890 \
+        --as-user alice@example.com
     lma vp get --id <vp-id>
     lma vp end --id <vp-id>
     lma vp list
@@ -47,8 +49,21 @@ def vp_cmd() -> None:
 @click.option("--id", "meeting_id", required=True, help="Meeting ID.")
 @click.option("--password", default="", help="Meeting password (if any).")
 @click.option(
-    "--user-name", default="lma-cli@lma",
-    help="Display name the scribe reports (e.g. Zoom participant name).",
+    "--user-name", default=None,
+    help="Display name the scribe reports (e.g. Zoom participant name). "
+    "Default: the --as-user email, otherwise lma-cli@lma.",
+)
+@click.option(
+    "--as-user", "as_user", default=None,
+    help="Launch for this LMA user (email or Cognito user name): the VP is "
+    "owned by them and uses their saved browser profile and, for Zoom, "
+    "their stored Zoom credentials.",
+)
+@click.option(
+    "--zoom-credentials/--no-zoom-credentials", "use_zoom_credentials",
+    default=None,
+    help="With --as-user on a Zoom meeting: require (or skip) the user's "
+    "stored Zoom sign-in. Default: use it when the user has saved one.",
 )
 @click.option(
     "--wait/--no-wait", default=True,
@@ -69,12 +84,20 @@ def vp_create_cmd(
     meeting_id,
     password,
     user_name,
+    as_user,
+    use_zoom_credentials,
     wait,
     timeout_s,
     as_json,
 ):
     """Create and launch a Virtual Participant in a meeting."""
     from lma_sdk.exceptions import LMAError
+
+    if use_zoom_credentials is not None and not as_user:
+        print_error("--zoom-credentials/--no-zoom-credentials requires --as-user.")
+        sys.exit(2)
+    if user_name is None and not as_user:
+        user_name = "lma-cli@lma"
 
     client = ctx.obj["client_factory"](stack_name=stack_name, region=region)
 
@@ -87,6 +110,8 @@ def vp_create_cmd(
             user_name=user_name,
             wait=wait,
             timeout_s=timeout_s,
+            as_user=as_user,
+            use_zoom_credentials=use_zoom_credentials,
         )
     except LMAError as e:
         print_error(str(e))
@@ -101,6 +126,11 @@ def vp_create_cmd(
     if result.call_id:
         console.print(f"  Call ID:      [cyan]{result.call_id}[/cyan]")
     console.print(f"  Meeting:      {result.meeting_name} ({result.meeting_platform} / {result.meeting_id})")
+    if result.owner:
+        console.print(f"  Owner:        {result.owner} (sub {result.user_sub})")
+        if result.meeting_platform == "ZOOM":
+            zoom = "stored credentials" if result.zoom_credentials_used else "not signed in"
+            console.print(f"  Zoom sign-in: {zoom}")
     console.print(f"  Elapsed:      {result.elapsed_ms:.1f} ms")
     if result.sfn_execution_arn:
         console.print(f"  SFN exec:     [dim]{result.sfn_execution_arn}[/dim]")
