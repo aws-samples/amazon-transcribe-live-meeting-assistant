@@ -15,9 +15,11 @@
  * asserts that at the source level — like `scribe-asr-channels.test.ts`, whose
  * method-body approach it reuses. Three facts hold it up:
  *
- *   1. Transcription reads `combined_audio.monitor`. The Virtual Participant's
- *      own pacat stream is the sole writer of meeting audio into that sink
- *      (scribe.ts), and it is also what keeps the null sink from suspending.
+ *   1. Transcription reads `meeting_audio.monitor` and `agent_output.monitor`
+ *      as the two channels of one stream, and the recording reads
+ *      `combined_audio.monitor`. The Virtual Participant's own pacat stream is
+ *      the sole writer of meeting audio into that sink (scribe.ts), and it is
+ *      also what keeps the null sink from suspending.
  *   2. The assistant's voice reaches the same sink through a PulseAudio
  *      `module-loopback` loaded by entrypoint.sh — a module in the sound server,
  *      not a child process of the Node app, so nothing the agent does to its own
@@ -147,13 +149,14 @@ test('the assistant voice reaches the transcribed sink through the sound server,
 });
 
 test('the mode the transcription path reads has one writer, so a toggle cannot leave it stale', () => {
-    // On the Amazon Transcribe path the mode is read for every transcript
-    // result, to keep the assistant's own translations out of a translator
-    // meeting's transcript. Both the configuration loader and a runtime toggle
-    // publish through the same function, which is also the one place to change
-    // when the configuration record moves into a unified store.
-    const suppression = scribe.slice(scribe.indexOf('const suppressAgentTranscript'));
-    assert.match(suppression.slice(0, 200), /details\.meetingMode === 'translator'/);
+    // On the Amazon Transcribe path the mode is read for every result on the
+    // assistant's channel, which is not written in translator mode (the
+    // translation is written from the assistant's own text instead). Both the
+    // configuration loader and a runtime toggle publish through the same
+    // function, which is also the one place to change when the configuration
+    // record moves into a unified store.
+    const assistantChannel = methodBody(scribe, 'private handleAssistantChannelResult(');
+    assert.match(assistantChannel, /writesAssistantChannel\(details\.meetingMode\)/);
 
     const writers = source('assistant-toggles.ts').match(/details\.meetingMode =/g) ?? [];
     assert.equal(writers.length, 1, 'the shared mode must have exactly one writer');

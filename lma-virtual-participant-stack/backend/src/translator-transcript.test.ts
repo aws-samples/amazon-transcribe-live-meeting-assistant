@@ -5,9 +5,9 @@
  */
 
 /**
- * A translator meeting keeps a continuous transcript: a participant row the
- * assistant starts answering is closed rather than left in progress, and the
- * assistant's translation is written from its own text.
+ * The Amazon Transcribe transcript stays continuous: a participant row whose
+ * session ends before its final is closed rather than left in progress, and a
+ * translator meeting's translations are written from the assistant's own text.
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
@@ -15,7 +15,6 @@ import { readFileSync } from 'node:fs';
 import {
     OpenPartialTracker,
     assistantRowSpan,
-    resultAfter,
     assistantTurnText,
     onAssistantTurn,
     publishAssistantTurn,
@@ -70,100 +69,12 @@ test('closing does not change the partial that was already written', () => {
     assert.equal(partial.IsPartial, true);
 });
 
-test('later deliveries for a closed row are recognised until its own final', () => {
-    const tracker = new OpenPartialTracker();
-    tracker.noteSent(result('r1', 'The weather today', true), 'Bob', 0);
-    tracker.close();
-
-    assert.equal(tracker.isClosed(result('r1', 'The weather today in Herndon El clima', true)), true);
-    assert.equal(tracker.isClosed(result('r1', 'The weather today in Herndon El clima hoy', false)), true);
-    // Its final ended the result; the id is not held for ever.
-    assert.equal(tracker.isClosed(result('r1', 'anything', true)), false);
-    assert.equal(tracker.isClosed(result('r2', 'Next utterance', true)), false);
-});
-
-test('a closed row reports where it ends, and is forgotten on its final', () => {
-    const tracker = new OpenPartialTracker();
-    tracker.noteSent(result('r1', 'one two three', true), 'Bob', 0);
-    tracker.close();
-    // Three words at 0, 0.4, 0.8 (each 0.3 long): the row ends at 1.1.
-    assert.equal(tracker.closedRowEnd(result('r1', 'one two three four', true)), 1.1);
-    assert.equal(tracker.closedRowEnd(result('r1', 'one two three four five', false)), 1.1);
-    assert.equal(tracker.closedRowEnd(result('r1', 'anything', false)), null);
-});
-
-test('the words after a point are split off as a row of their own', () => {
-    const full = result('r1', 'The weather is dry El clima Thanks everyone', false);
-    // Words start at 0, 0.4, ... 2.8; keep from the one at 2.4 ("Thanks").
-    const rest = resultAfter(full, 2.3);
-    assert.ok(rest);
-    assert.equal(rest.ResultId, 'r1-after-2.300');
-    assert.equal(rest.IsPartial, false);
-    assert.equal(rest.Alternatives[0].Transcript, 'Thanks everyone');
-    assert.equal(rest.Alternatives[0].Items.length, 2);
-    assert.ok(Math.abs(rest.StartTime - 2.4) < 1e-9);
-    // The original is untouched.
-    assert.equal(full.ResultId, 'r1');
-    assert.equal(full.Alternatives[0].Items.length, 8);
-    assert.equal(resultAfter(full, 10), null);
-});
-
-test('each time the assistant speaks within one result, the speech after it gets a new row', () => {
-    const tracker = new OpenPartialTracker();
-    // Participant, assistant, participant, assistant, participant — one ResultId throughout.
-    const words = 'p1 p2 a1 a2 q1 q2 b1 b2 s1 s2';
-    tracker.noteSent(result('r1', 'p1 p2', true), 'Bob', 0);
-    tracker.close(); // first assistant turn
-    const closedEnd = tracker.closedRowEnd(result('r1', words, true));
-    assert.ok(closedEnd !== null);
-
-    // Assistant stopped at 1.6 (before q1): q1 q2 go out as a row of their own.
-    const first = resultAfter(result('r1', 'p1 p2 a1 a2 q1 q2', true), Math.max(1.6, closedEnd));
-    assert.ok(first);
-    assert.equal(first.Alternatives[0].Transcript, 'q1 q2');
-    assert.equal(tracker.isClosed(first), false);
-    tracker.noteSent(first, 'Bob', 0);
-    tracker.close(); // second assistant turn closes that row
-
-    // Assistant stopped again at 3.2 (before s1): s1 s2 must not be dropped.
-    const second = resultAfter(result('r1', words, false), Math.max(3.2, closedEnd));
-    assert.ok(second);
-    assert.notEqual(second.ResultId, first.ResultId);
-    assert.equal(second.Alternatives[0].Transcript, 's1 s2');
-    assert.equal(tracker.isClosed(second), false);
-});
-
-test('punctuation stays attached when words are split off', () => {
-    const r = {
-        ResultId: 'r1',
-        IsPartial: false,
-        Alternatives: [
-            {
-                Transcript: 'Hola. Thanks, all.',
-                Items: [
-                    { Type: 'pronunciation', Content: 'Hola', StartTime: 0, EndTime: 0.3 },
-                    { Type: 'punctuation', Content: '.' },
-                    { Type: 'pronunciation', Content: 'Thanks', StartTime: 1, EndTime: 1.3 },
-                    { Type: 'punctuation', Content: ',' },
-                    { Type: 'pronunciation', Content: 'all', StartTime: 1.4, EndTime: 1.6 },
-                    { Type: 'punctuation', Content: '.' },
-                ],
-            },
-        ],
-    };
-    assert.equal(resultAfter(r, 0.9)?.Alternatives[0].Transcript, 'Thanks, all.');
-});
-
 test('a new session forgets the previous one', () => {
     const tracker = new OpenPartialTracker();
     tracker.noteSent(result('r1', 'Hello there', true), 'Bob', 0);
     tracker.reset();
     assert.equal(tracker.close(), null);
 
-    tracker.noteSent(result('r2', 'Hello again', true), 'Bob', 0);
-    tracker.close();
-    tracker.reset();
-    assert.equal(tracker.isClosed(result('r2', 'Hello again', false)), false);
 });
 
 test('a partial with no words is not kept open', () => {
@@ -227,21 +138,17 @@ function methodBody(src: string, name: string): string {
     return end === -1 ? rest : rest.slice(0, end + 1);
 }
 
-test('a held-back result first closes the participant row it continues', () => {
+test('participant results are never held back while the assistant speaks', () => {
+    // The participants' channel carries no assistant audio, so speech that
+    // overlaps the assistant's (a participant answering, or asking it to stop)
+    // is a participant's and is always written.
     const events = methodBody(scribe, 'private async handleTranscriptEvents');
-    const held = events.indexOf('if (suppressAgentTranscript) {');
-    assert.notEqual(held, -1);
-    const closeAt = events.indexOf('await closeOpenPartial()', held);
-    const syncAt = events.indexOf('syncTranscriptSegmentState', held);
-    assert.ok(closeAt > held && closeAt < syncAt, 'the row is closed before segment state moves on');
+    assert.doesNotMatch(events, /suppressAgentTranscript/);
+    assert.doesNotMatch(events, /agentSpeakingDetector/);
+    assert.doesNotMatch(events, /syncTranscriptSegmentState/);
     assert.match(events, /this\.openPartials\.reset\(\)/);
-    assert.match(events, /this\.openPartials\.noteSent\(forward, currentSpeaker, sessionOffsetSeconds\)/);
-    assert.match(events, /this\.openPartials\.closedRowEnd\(result\)/);
-    assert.match(events, /this\.speechAfterAssistant\(result, sessionOffsetSeconds, closedEnd\)/);
-    const after = methodBody(scribe, 'private speechAfterAssistant');
-    assert.match(after, /Math\.max\(this\.agentSpeechEndedAt - sessionOffsetSeconds, closedEnd\)/);
-    const subscribe = methodBody(scribe, 'private subscribeToAssistantTurns');
-    assert.match(subscribe, /on\('stopped'[\s\S]*silenceMs/);
+    assert.match(events, /this\.openPartials\.noteSent\(result, speaker, sessionOffsetSeconds\)/);
+    assert.match(events, /this\.processTranscriptResult\(result\)/);
 });
 
 test('a session that ends, cleanly or not, closes its open row before the timeline moves on', () => {
@@ -256,12 +163,15 @@ test('a session that ends, cleanly or not, closes its open row before the timeli
 test('assistant turns are written as the assistant only when nothing else transcribes its voice', () => {
     const needs = methodBody(scribe, 'private assistantTurnsNeedTranscript');
     assert.match(needs, /details\.meetingMode === 'translator'/);
+    // The other half of the same rule: in translator mode the assistant's
+    // channel is not written, so a translation never gets two rows.
+    assert.match(methodBody(scribe, 'private handleAssistantChannelResult'), /writesAssistantChannel\(details\.meetingMode\)/);
     assert.match(needs, /!this\.agentSession \|\| this\.agentSession\.hasGivenUp/);
     const write = methodBody(scribe, 'private handleAssistantTurn');
     assert.match(write, /this\.assistantTurnsNeedTranscript\(\)/);
     assert.match(write, /channel: 'AGENT'/);
     assert.match(write, /isPartial: false/);
-    assert.match(write, /lmaIdentity/);
+    assert.match(write, /this\.vpName\(\)/);
     assert.doesNotMatch(write, /processTranscriptResult/);
 });
 

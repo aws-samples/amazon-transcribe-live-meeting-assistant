@@ -79,7 +79,7 @@ test('writeAudio no longer takes a recording stream at all', () => {
     // Leaving the parameter in place would invite the bug straight back; removing
     // it makes reintroducing the write a compile error rather than a silent
     // regression that only shows up in a recording nobody plays back.
-    assert.match(src, /private async writeAudio\(transcribeResponse: any\): Promise<void>/);
+    assert.match(src, /private async writeAudio\(transcribeResponse: any, stereo = false\): Promise<void>/);
     assert.doesNotMatch(src, /this\.writeAudio\(response, recordingStream\)/);
 });
 
@@ -103,9 +103,14 @@ test('the recording tees the pre-framing chunk, not each frame', () => {
 });
 
 test('the audio recording and the transcript come from the same samples', () => {
-    // The user-visible promise of a recording: it is what was transcribed. Both
-    // now derive from the single ffmpeg on combined_audio.monitor in audioStream.
+    // The user-visible promise of a recording: it is what was transcribed. On
+    // the mono stream both derive from the single ffmpeg on
+    // combined_audio.monitor in audioStream. On the two-channel stream (with a
+    // voice assistant) Transcribe hears the participants and the assistant on
+    // separate channels and the recording is the same capture's mix of both.
     const body = methodBody('private async *audioStream');
     assert.match(body, /yield \{ AudioEvent: \{ AudioChunk: frame \} \}/);
     assert.equal((src.match(/recordingStream\.write/g) || []).length, 1, 'exactly one writer');
+    assert.match(body, /if \(!stereo\) \{\s*record\(chunk\);/);
+    assert.match(body, /this\.process\.stdout\?\.on\('data', record\)/);
 });
