@@ -669,6 +669,9 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     this.sessionId = randomUUID();
     const now = Date.now();
+    // A tool call answers a turn of the session that issued it, so a turn
+    // heard by an earlier session must not let a lookup through on this one.
+    this.lastUserTurnText = '';
     this.session = {
       queue: [],
       isActive: true,

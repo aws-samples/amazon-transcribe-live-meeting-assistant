@@ -32,7 +32,6 @@
  * rebuild, which is exactly when it needs to answer.
  */
 
-import { normalizeChatText as normalize } from './chat-text.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 
 /** Why a lookup was not run. */
@@ -54,23 +53,37 @@ function escapeForRegExp(text: string): string {
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * The agents' own wake-phrase normalisation (their `containsWakePhrase`, which
+ * is what unmutes the assistant): lowercase, a fixed set of punctuation to
+ * spaces, whitespace collapsed. Kept identical so that this check and the
+ * unmute agree on what counts as being addressed. `normalizeChatText` is not
+ * used because it drops every character outside a-z and 0-9.
+ */
+function normalizeForWakePhrase(text: string): string {
+    return text.toLowerCase()
+        .replace(/[,.?!;:'"]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 /** Whether `text` addresses the assistant by one of the configured wake phrases. */
 export function addressesAssistant(
     text: string,
     wakePhrases: string[] = configuredWakePhrases(),
 ): boolean {
-    const normalized = normalize(text || '');
+    const normalized = normalizeForWakePhrase(text || '');
     if (!normalized) {
         return false;
     }
     return wakePhrases.some((phrase) => {
-        const normalizedPhrase = normalize(phrase);
+        const normalizedPhrase = normalizeForWakePhrase(phrase);
         if (!normalizedPhrase) {
             return false;
         }
         const pattern = escapeForRegExp(normalizedPhrase).replace(/\s+/g, '\\s+');
         // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- the phrase is regex-escaped above, so an escaped wake phrase cannot produce catastrophic backtracking
-        return new RegExp(`\\b${pattern}\\b`).test(normalized);
+        return new RegExp(`\\b${pattern}\\b`, 'i').test(normalized);
     });
 }
 

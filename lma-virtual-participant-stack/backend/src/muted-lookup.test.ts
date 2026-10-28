@@ -213,6 +213,17 @@ test('nova: an audible assistant runs a follow-up lookup that does not name it',
     assert.deepEqual(lookupLines(), []);
 });
 
+test('nova: a turn heard by an earlier session does not let a lookup through on a new one', () => {
+    const h = nova('group');
+    h.a.lastUserTurnText = 'hey alex what did we decide last week';
+    assert.equal(h.a.strandsLookupSkipReason(), null);
+    h.a.streamingActive = false;
+    h.a.initiateBidirectionalStreaming = async () => {};
+    // Cleared synchronously, before createSession's first await.
+    void h.a.createSession(true);
+    assert.equal(h.a.strandsLookupSkipReason(), 'not-addressed');
+});
+
 test('nova: the group prompt asks the model to look things up only when asked', () => {
     const h = nova('group');
     const prompt: string = h.a.buildSystemPromptContent();

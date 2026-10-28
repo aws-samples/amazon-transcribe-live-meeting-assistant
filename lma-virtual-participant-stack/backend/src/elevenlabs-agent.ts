@@ -196,6 +196,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         this.ws.on('open', () => {
           console.log('✓ Connected to ElevenLabs Conversational AI');
           this.isConnected = true;
+          // A turn heard on an earlier connection must not let a lookup through on this one.
+          this.lastUserTranscript = '';
 
           // Send initial configuration. The ElevenLabs agent's persona (system
           // prompt, first message, tools, language, voice) is configured in the
