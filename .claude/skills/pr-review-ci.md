@@ -199,7 +199,7 @@ them on the one thing the reader can get for free:
 | Already run by `code_checks` | Covers |
 |---|---|
 | `make lint-cfn` | cfn-lint over every CloudFormation template |
-| `make lint-python` / `lint-cicd` | ruff check + ruff format over the Lambda tree |
+| `make lint-python-check` | ruff check + ruff format --check over the Lambda functions, the Lambda layers and `scripts/pr_review` |
 | `make lint-ui-force` | ESLint (airbnb-base) + Prettier over the React UI |
 | `make lint-typescript` | `tsc` + eslint for the transcriber and VP stacks |
 | `make test-sdk`, `test-cli`, `test-lambdas` | Python unit suites |
