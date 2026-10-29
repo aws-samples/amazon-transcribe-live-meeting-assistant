@@ -15,7 +15,7 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { EMPTY, getAsrConfigQuery } from './AsrConfigPage';
+import { EMPTY, getAsrConfigQuery, versionOf } from './AsrConfigPage';
 
 describe('ASR config form shape', () => {
   it('requests every field it holds state for', () => {
@@ -39,5 +39,19 @@ describe('ASR config form shape', () => {
     Object.entries(EMPTY).forEach(([field, value]) => {
       expect(value, `${field} must default to false`).toBe(false);
     });
+  });
+});
+
+describe('the version a save is checked against', () => {
+  it('is requested with the switches', () => {
+    // Without it in the selection set every save would go unchecked, and a save
+    // made after another administrator's would replace it.
+    expect(getAsrConfigQuery).toContain('Version');
+  });
+
+  it('is the version a read or a save reported, or null when there is none', () => {
+    expect(versionOf({ streamingEngineMicrovm: true, Version: 3 })).toBe(3);
+    expect(versionOf({ streamingEngineMicrovm: true })).toBeNull();
+    expect(versionOf(null)).toBeNull();
   });
 });

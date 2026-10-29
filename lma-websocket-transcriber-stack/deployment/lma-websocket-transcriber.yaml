@@ -326,11 +326,20 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      (Optional) Runtime ASR configuration table, holding the three switches the
-      Transcription Engine admin page edits (streaming-meetings engine, Virtual Participant
-      engine, Virtual Participant voice separation). Read at meeting start, so a
+      (Optional) The table the three switches the Transcription Engine admin page
+      edits (streaming-meetings engine, Virtual Participant engine, Virtual
+      Participant voice separation) were stored in before they moved into the
+      configuration table. Read only as a fallback, when ConfigurationTableName
+      holds no shipped ASR switches or cannot be read. Empty when the on-demand
+      engine is not deployed.
+
+  ConfigurationTableName:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) The shared configuration table created by the AI stack. The
+      Transcription Engine page's switches are read from it at meeting start, so a
       change needs no stack update.
-      Empty when the on-demand engine is not deployed.
 
   AsrDiarizationAvailable:
     Type: String
@@ -552,6 +561,7 @@ Conditions:
   HasVoiceEnrollment: !Not [!Equals [!Ref VoiceEnrollmentSeedsFunctionArn, ""]]
   HasAsrConfigTable: !Not [!Equals [!Ref AsrConfigTableName, ""]]
   HasEventSourcingTable: !Not [!Equals [!Ref EventSourcingTableName, ""]]
+  HasConfigurationTable: !Not [!Equals [!Ref ConfigurationTableName, ""]]
   ShouldEnableTranscriberAutoScaling:
     !Equals [!Ref TranscriberAutoScalingEnabled, "true"]
 
@@ -1303,7 +1313,15 @@ Resources:
               Effect: Allow
               Resource: !Ref VoiceEnrollmentSeedsFunctionArn
             - !Ref AWS::NoValue
-          # Runtime diarization overrides, read once per meeting (and cached).
+          # The Transcription Engine page's switches, read at meeting start (and
+          # cached for 30 seconds) from the configuration table; the previous
+          # table only as a fallback.
+          - !If
+            - HasConfigurationTable
+            - Action: dynamodb:GetItem
+              Effect: Allow
+              Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
+            - !Ref AWS::NoValue
           - !If
             - HasAsrConfigTable
             - Action: dynamodb:GetItem
@@ -1470,6 +1488,8 @@ Resources:
               Value: !Ref AsrLauncherFunctionArn
             - Name: ASR_CONFIG_TABLE_NAME
               Value: !Ref AsrConfigTableName
+            - Name: CONFIGURATION_TABLE_NAME
+              Value: !Ref ConfigurationTableName
             # Voice enrollment. Empty unless the deployment has it switched on,
             # in which case a meeting asks this function at session start which
             # enrolled voices consent lets it label by name.

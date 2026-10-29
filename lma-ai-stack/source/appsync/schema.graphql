@@ -961,22 +961,33 @@ type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
 # so a change needs no stack update: which engine streaming meetings use, which
 # engine Virtual Participants use, and whether VPs ask for per-voice labels.
 # Deliberately no tuning fields: the diarization operating point is measured per
-# model bundle and baked into the ASR image.
+# model bundle and baked into the ASR image. The read answers with the effective
+# switches -- the shipped ones, all off, with the saved ones over them.
 type AsrConfig @aws_cognito_user_pools @aws_iam {
 	AsrConfigId: ID!
 	streamingEngineMicrovm: Boolean
 	virtualParticipantEngineMicrovm: Boolean
 	diarizeVirtualParticipant: Boolean
+	# The version of the stored profile, which the Transcription Engine page sends
+	# back as ExpectedVersion when it saves.
+	Version: Int
 }
 
 input UpdateAsrConfigInput {
 	AsrConfigId: ID!
 	ConfigData: String!
+	# The version the page loaded. Optional, so a client that does not send it
+	# keeps working: its save is still conditional on the record as the
+	# resolver reads it, and supplying this adds the check against what the
+	# page was actually looking at.
+	ExpectedVersion: Int
 }
 
 type UpdateAsrConfigOutput @aws_cognito_user_pools @aws_iam {
 	AsrConfigId: ID!
 	Success: Boolean!
+	# The version now stored, so the page can save again without reloading.
+	Version: Int
 }
 
 # LLM Prompt Summary Templates

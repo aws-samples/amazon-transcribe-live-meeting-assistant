@@ -3436,6 +3436,9 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
           - ""
+        # The shared configuration table, which the switches above are read
+        # from; the ASR table stays as the fallback read.
+        ConfigurationTableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
         # Empty when voice enrollment is off, which is how the transcriber knows
         # not to ask. The AI stack decides that, since the enrollments live there.
         VoiceEnrollmentSeedsFunctionArn: !GetAtt AISTACK.Outputs.VoiceEnrollmentSeedsFunctionArn
