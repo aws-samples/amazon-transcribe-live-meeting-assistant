@@ -11,13 +11,18 @@ LMA's runtime configuration — the things an administrator can change from the 
 UI without redeploying the stack — has grown up one store at a time. There are
 six of them, each with its own DynamoDB table or SSM parameter, its own seeding
 custom resource, its own resolver and its own idea of how long a value may be
-cached. This page describes the single store that replaces them, and the state of
-the migration into it.
+cached. This page describes the single store five of them move into, and the
+state of the migration into it; the sixth, the MCP server list, stays a table of
+its own, for the reason under [Still to come](#still-to-come).
 
 **Current state:** the store, the accessor and the deploy-time seeder are in
 place, and the **summary prompt templates**, the **Nova Sonic voice assistant
-settings** and the **Meeting Assist chat buttons** are served from them. The
-other stores still work exactly as before and are migrated in later releases.
+settings**, the **Meeting Assist chat buttons** and the **ASR engine switches** are
+served from them, alongside the meeting cost estimate's price table, which had no
+earlier store. The SSM settings blob moves later, with the CloudFormation
+parameters; see [Still to come](#still-to-come) for that, for the MCP server
+list, and for the troubleshooting agent's prompt, which shares the summary
+prompts' old table and moves after the configuration UI.
 
 ## The table
 
@@ -162,6 +167,7 @@ Today's sections and their tiers:
 |---|---|---|
 | `summary_prompt_templates` | `standard` | Read by an end-of-meeting summary nobody is waiting on; **Regenerate** drops the cache before reading |
 | `nova_sonic_config` | `immediate` | Read once per meeting when the voice assistant starts, and the page says a save applies to the next meeting; a cache would save a read or two per meeting and add a window in which that is not true |
+| `asr_engine` | `short` | Read by the WebSocket transcriber at the start of each streaming meeting; 30 seconds keeps a burst of meetings starting together from each doing its own reads, which is the policy that reader has always had. The Virtual Participant reads through the `getAsrConfig` resolver, which caches nothing |
 | `chat_buttons` | `immediate` | Read record by record through the chat panel's resolver, which reads directly and consistently; the Edit Chat Buttons dialog shows the saved buttons straight after a save. The browser holds what it read for the life of the chat panel, as it always has |
 | `call_pricing` | `standard` | Read whenever a meeting's cost estimate is drawn; an estimate priced a few minutes after a price change at the previous price is what [Meeting Cost Estimate](meeting-cost-estimate.md) says happens |
 
@@ -515,6 +521,33 @@ The quick-action buttons in the Meeting Assist chat panel are the
 `CustomChatButtonConfig` item in the DynamoDB console stops having any effect:
 edit the buttons from the dialog.
 
+### The ASR engine switches
+
+The three switches on the **Transcription Engine** page — which engine streaming
+meetings use, which engine Virtual Participants use, and whether a Virtual
+Participant asks for per-voice labels — are the `asr_engine` section.
+
+- `Config#default` holds them as a new deployment ships them, all off, from
+  `configuration_seeder/defaults/AsrEngine.json`. The previous table had no
+  seeder and read an absent record as exactly that.
+- `Config#custom` holds the switches an administrator saved.
+- The WebSocket transcriber reads the section on the `short` tier. It falls back
+  to the previous `AsrConfigTable` only when the configuration table cannot be
+  read or holds no shipped switches, and a fallback answer is reused for the same
+  30 seconds, so a table that cannot be read does not add a failed read to the
+  start of every meeting.
+- `Query.getAsrConfig` and `Mutation.updateAsrConfig` are served by one Lambda
+  resolver, created, as before, only when the on-demand engine is deployed. The
+  read stays open to every signed-in user and to IAM — the Stream Audio and
+  Upload Audio forms read it, and the Virtual Participant reads its two switches
+  with SigV4 — and answers with the *effective* switches plus `Version`. The
+  write stays Admin-only and is conditional on the version the page loaded.
+
+**On an upgrade** the seeder carries the saved switches across as described in
+[Carrying a later store across](#carrying-a-later-store-across), reporting
+`asr_engine=...` in `ConfigurationSectionAdoption` — `no-previous-table` on a
+deployment without the on-demand engine. Turning the engine on later passes the
+new table's name to the seeder, which then records the (empty) section.
 ### The meeting cost price table
 
 The unit prices the [meeting cost estimate](meeting-cost-estimate.md) is computed
@@ -534,9 +567,9 @@ configuration pages' saves.
 | Revisions and audit | Revision bodies in S3 with metadata in one DynamoDB index item per profile, forward-only restore, pruning that keeps the published and labelled revisions |
 | Import / export | Export as a client-side download; import that always routes into a create-new-profile flow rather than applying in place |
 | Schema-driven UI | A profile table, a form generated from the `Schema` document, a diff against the baseline and per-field "restore default" |
-| Migrating the other stores | The ASR switches, the MCP server list, and the SSM settings blob |
-| Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired |
+| Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waits for the schema-driven UI: today the custom prompt is edited in the DynamoDB console, which is exactly the route a compressed body closes, so moving it first would leave it with no way to edit it |
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
+| Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
 
 One known gap belongs to that third row and is worth stating rather than leaving
 to be discovered. A shipped prompt section that has been turned off is hidden
@@ -548,6 +581,18 @@ page numbers a new section above the highest one it can see, so it comes back
 under its own key only when the section that was turned off was the last one.
 The per-field "restore default" control in the schema-driven editor is where
 that belongs.
+
+One of the six stores this page's opening counts is not migrated at all.
+**The MCP server list** (`MCPServersTable`) is a registry of installed servers,
+one record each, holding each server's credentials and updated in place as its
+OAuth tokens are refreshed. That is entity data with its own lifecycle rather
+than a configuration document, and putting credentials into a profile body would
+mix them into a record every configuration page reads. It stays a table of its
+own; the `standard` tier is its caching policy, generalised.
+
+The troubleshooting agent's prompt is not one of the six — it lives in the table
+the summary prompts moved out of — and it does move, but after the schema-driven
+UI, for the reason given in its row of the table above.
 
 ## Reference
 

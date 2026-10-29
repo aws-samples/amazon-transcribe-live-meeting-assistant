@@ -229,6 +229,20 @@ export const NOVA_SONIC_CONFIG = declareSection({
 });
 
 /**
+ * The on-demand ASR engine's runtime switches, read by the transcriber at the
+ * start of each streaming meeting. Short, as in the Python half: a burst of
+ * meetings starting together shares one read, and a change reaches every
+ * meeting that starts more than 30 seconds after it was saved.
+ */
+export const ASR_ENGINE = declareSection({
+    name: 'asr_engine',
+    cacheTier: 'short',
+    description:
+        'On-demand ASR engine switches: whether streaming meetings and Virtual Participants ' +
+        'use it, and whether Virtual Participants ask it for per-voice labels.',
+});
+
+/**
  * Decompress a body read back from DynamoDB.
  *
  * The layout is detected from the item rather than configured: a `Body`

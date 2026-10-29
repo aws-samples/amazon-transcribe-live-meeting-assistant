@@ -141,3 +141,14 @@ def test_no_read_api_accepts_a_caching_argument() -> None:
             f"ConfigurationStore.{name} takes {sorted(parameters & forbidden)}, which "
             "would let a call site choose its own caching policy"
         )
+
+
+def test_the_asr_engine_section_is_on_the_short_tier() -> None:
+    """The transcriber's reader has always cached these switches for 30 seconds.
+
+    A burst of meetings starting together shares one read; a change reaches every
+    meeting that starts more than 30 seconds after it was saved.
+    """
+    spec = sections.section_spec("asr_engine")
+    assert spec is sections.ASR_ENGINE
+    assert spec.cache_tier is sections.CacheTier.SHORT

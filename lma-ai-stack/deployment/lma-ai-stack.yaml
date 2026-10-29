@@ -416,8 +416,11 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      Runtime configuration table for the MicroVM ASR engine. Empty when that
-      engine is not deployed, in which case the Transcription Engine page is not offered.
+      The table the MicroVM ASR engine's runtime switches were stored in before
+      they moved into the configuration table; read by the configuration seeder
+      only, to carry them across on upgrade. Empty when that engine is not
+      deployed, in which case the Transcription Engine page is not offered and
+      its resolvers are not created.
 
   AsrConfigTableArn:
     Type: String
@@ -3205,9 +3208,9 @@ Resources:
                   - dynamodb:PutItem
                 Resource: !GetAtt ConfigurationTable.Arn
               # Read-only on the tables the prompt templates, the Nova Sonic
-              # settings and the chat buttons used to live in: the seeder
-              # carries an existing deployment's edits across once and never
-              # writes there.
+              # settings, the chat buttons and the ASR switches used to live in:
+              # the seeder carries an existing deployment's edits across once
+              # and never writes there.
               - Effect: Allow
                 Action:
                   - dynamodb:GetItem
@@ -3221,6 +3224,10 @@ Resources:
                   - !Sub
                     - "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${Table}"
                     - Table: !Ref ChatButtonConfigTableName
+                  - !If
+                    - HasAsrConfigTable
+                    - !Ref AsrConfigTableArn
+                    - !Ref AWS::NoValue
               - Effect: Allow
                 Action:
                   - kms:Decrypt
@@ -3241,8 +3248,10 @@ Resources:
       # Read once, while the operator's profile holds no Nova Sonic section, to
       # carry the settings saved before the upgrade across.
       LegacyNovaSonicConfigTableName: !Ref NovaSonicConfigTableName
-      # Likewise for the chat buttons.
+      # Likewise for the chat buttons, and for the ASR switches when the
+      # on-demand engine is deployed (empty otherwise).
       LegacyChatButtonConfigTableName: !Ref ChatButtonConfigTableName
+      LegacyAsrConfigTableName: !Ref AsrConfigTableName
       # Changes when the shipped configuration content or the code that
       # processes it changes, and is the only reason CloudFormation re-invokes
       # this resource on a stack update.
@@ -4423,18 +4432,25 @@ Resources:
       Role: !GetAtt UpdateAsrConfigResolverFunctionExecutionRole.Arn
       Runtime: python3.12
       CodeUri: ../source/lambda_functions/update_asr_config_resolver
-      Description: Lambda resolver for updateAsrConfig with input validation
+      Description: >-
+        Lambda resolver for the ASR runtime switches: reads the effective
+        switches and saves an edit, with input validation
       MemorySize: 256
       Timeout: 30
+      Layers:
+        - !Ref ConfigurationPythonLayer
       Environment:
         Variables:
-          ASR_CONFIG_TABLE_NAME: !Ref AsrConfigTableName
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/UpdateAsrConfigResolverFunction
     DependsOn:
       - UpdateAsrConfigResolverFunctionLogGroup
+      # The Transcription Engine page and the Virtual Participant should not read
+      # an unseeded table and get no shipped switches.
+      - SeedConfiguration
 
   UpdateAsrConfigResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4456,30 +4472,31 @@ Resources:
           - Effect: Allow
             Action: sts:AssumeRole
             Principal:
-              Service: lambda.amazonaws.com
+              Service: !Sub "lambda.${AWS::URLSuffix}"
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-UpdateAsrConfig
           PolicyDocument:
             Version: 2012-10-17
             Statement:
+              # GetItem as well as PutItem: every read is served from here, and a
+              # save reads the profile's current version so a write that another
+              # session has superseded can be refused. Deliberately no DeleteItem.
               - Effect: Allow
                 Action:
-                  - dynamodb:PutItem
                   - dynamodb:GetItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AsrConfigTableName}"
+                  - dynamodb:PutItem
+                Resource: !GetAtt ConfigurationTable.Arn
               - Effect: Allow
                 Action:
                   - kms:Decrypt
-                  - kms:Encrypt
-                  - kms:GenerateDataKey
                   - kms:DescribeKey
                 Resource: !Ref CustomerManagedEncryptionKeyArn
                 Condition:
                   StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   AppSyncUpdateAsrConfigLambdaRole:
     Type: AWS::IAM::Role
@@ -4858,55 +4875,19 @@ Resources:
       LambdaConfig:
         LambdaFunctionArn: !GetAtt UpdateAsrConfigResolverFunction.Arn
 
-  AsrConfigDataSource:
-    Type: AWS::AppSync::DataSource
-    Condition: HasAsrConfigTable
-    Properties:
-      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      Name: AsrConfigTable
-      Description: MicroVM ASR runtime configuration DynamoDB Table
-      Type: AMAZON_DYNAMODB
-      ServiceRoleArn: !GetAtt AsrConfigDataSourceRole.Arn
-      DynamoDBConfig:
-        TableName: !Ref AsrConfigTableName
-        AwsRegion: !Ref AWS::Region
 
-  AsrConfigDataSourceRole:
-    Type: AWS::IAM::Role
-    Condition: HasAsrConfigTable
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action: sts:AssumeRole
-            Principal:
-              Service: appsync.amazonaws.com
-      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
-      Policies:
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action: dynamodb:GetItem
-                Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${AsrConfigTableName}"
-              - Effect: Allow
-                Action:
-                  - kms:Decrypt
-                  - kms:DescribeKey
-                Resource: !Ref CustomerManagedEncryptionKeyArn
-                Condition:
-                  StringEquals:
-                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
-
+  # Served by the same Lambda as the mutation rather than by a DynamoDB data
+  # source, for the reason given at the LLM prompt template resolvers below: the
+  # switches live compressed in the shared configuration table. The function
+  # answers with the effective switches, so an operator who never saved any gets
+  # the shipped ones -- all off -- as before.
   GetAsrConfigResolver:
     Type: AWS::AppSync::Resolver
     Condition: HasAsrConfigTable
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AsrConfigDataSource.Name
+      DataSourceName: !GetAtt UpdateAsrConfigLambdaDataSource.Name
       TypeName: Query
       FieldName: getAsrConfig
       Runtime:
@@ -4917,8 +4898,12 @@ Resources:
 
         export function request(ctx) {
           return {
-            operation: 'GetItem',
-            key: util.dynamodb.toMapValues({ AsrConfigId: ctx.args.AsrConfigId }),
+            operation: 'Invoke',
+            payload: {
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              info: { fieldName: ctx.info.fieldName }
+            }
           };
         }
 
@@ -4926,9 +4911,7 @@ Resources:
           if (ctx.error) {
             util.error(ctx.error.message, ctx.error.type);
           }
-          // No record yet simply means every value falls back to the stack
-          // parameter, so an absent item is not an error.
-          return ctx.result ?? { AsrConfigId: ctx.args.AsrConfigId };
+          return ctx.result;
         }
 
   UpdateAsrConfigResolver:
@@ -4946,8 +4929,18 @@ Resources:
       Code: |
         import { util } from '@aws-appsync/utils';
 
+        // The arguments, the identity the function re-checks group membership
+        // from, and the field name it dispatches on -- the same function answers
+        // Query.getAsrConfig.
         export function request(ctx) {
-          return { operation: 'Invoke', payload: ctx };
+          return {
+            operation: 'Invoke',
+            payload: {
+              arguments: ctx.arguments,
+              identity: ctx.identity,
+              info: { fieldName: ctx.info.fieldName }
+            }
+          };
         }
 
         export function response(ctx) {

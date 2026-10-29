@@ -44,6 +44,7 @@ from .keys import (
     validate_profile_name,
 )
 from .sections import (
+    ASR_ENGINE,
     CALL_PRICING,
     CHAT_BUTTONS,
     NOVA_SONIC_CONFIG,
@@ -67,6 +68,7 @@ from .store import (
 
 __all__ = [
     "ACTIVE_POINTER_KEY",
+    "ASR_ENGINE",
     "BODY_ATTRIBUTE",
     "CHAT_BUTTONS",
     "CALL_PRICING",

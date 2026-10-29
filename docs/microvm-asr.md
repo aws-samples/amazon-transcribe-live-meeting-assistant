@@ -94,7 +94,9 @@ deployment, chosen per meeting.
 
 Set **`EnableMicrovmAsr` = `true`** on the main stack. This creates the
 `lma-asr-microvm-stack` nested stack: a MicroVM image, a session launcher Lambda,
-the runtime-switch table the Transcription Engine page edits, and the IAM roles they need.
+the table the runtime switches were stored in before they moved into the shared
+[configuration store](configuration-store.md) (kept so a deployment can be rolled
+back), and the IAM roles they need.
 
 **Region requirement.** AWS Lambda MicroVMs must be available in your region. It is
 not available in GovCloud. Deploying with `MicrovmAsr` in an unsupported region
@@ -270,7 +272,12 @@ transcript.
 ## Runtime switches
 
 **Configuration ▸ Transcription Engine** (admin only) has exactly three settings. All are read at
-the start of each meeting, so a change needs no stack update and no image rebuild.
+the start of each meeting, so a change needs no stack update and no image rebuild. The
+WebSocket transcriber reuses what it read for up to 30 seconds, so a streaming meeting that
+starts within 30 seconds of a save may still use the previous engine; a Virtual Participant
+reads them fresh each time. They are stored in the shared
+[configuration store](configuration-store.md) as the `asr_engine` section, so they are changed
+on the page rather than in the DynamoDB console.
 
 | Setting | Default | Effect |
 |---|---|---|

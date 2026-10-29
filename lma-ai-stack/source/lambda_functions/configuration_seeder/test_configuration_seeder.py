@@ -153,6 +153,7 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "nova_sonic_config",
         "chat_buttons",
         "call_pricing",
+        "asr_engine",
     }
     assert set(body["summary_prompt_templates"]) == {"1#SUMMARY", "2#DETAILS", "3#ACTIONS"}
     assert "{transcript}" in body["summary_prompt_templates"]["1#SUMMARY"]
@@ -514,6 +515,7 @@ def test_the_handler_passes_the_previous_nova_sonic_table_through(seeder, monkey
     assert seen["legacy_section_tables"] == {
         "nova_sonic_config": "old-nova-table",
         "chat_buttons": "",
+        "asr_engine": "",
     }
     assert "SectionAdoption" in seeder.recorder.sent[-1]["data"]
 
@@ -668,10 +670,87 @@ def test_both_later_stores_are_carried_in_one_run(seeder) -> None:
     assert adoption(outcome) == {
         "nova_sonic_config": "adopted-from-previous-table",
         "chat_buttons": "adopted-from-previous-table",
+        "asr_engine": "no-previous-table",
     }
     body = dynamo.body("Config#custom")
     assert body["chat_buttons"]["2#RISKS"] == "What risks were raised?"
     assert body["nova_sonic_config"]["translatorLanguageA"] == "French"
+
+
+# ── the ASR engine switches ────────────────────────────────────────────────
+
+
+class LegacyAsrConfigTable:
+    """The previous ASR config table, keyed on its own partition-key attribute."""
+
+    def __init__(self, item: Dict[str, Any] | None = None) -> None:
+        self.item = item
+
+    def get_item(self, **request: Any) -> Dict[str, Any]:
+        assert request["Key"] == {"AsrConfigId": {"S": "CustomAsrConfig"}}
+        return {"Item": self.item} if self.item is not None else {}
+
+
+ASR_TABLES = {"asr_engine": "old-asr-table"}
+
+
+def test_the_shipped_asr_switches_are_all_off(seeder) -> None:
+    """Every meeting is transcribed by Amazon Transcribe until an admin chooses otherwise."""
+    assert seeder.shipped_default_body("default")["asr_engine"] == {
+        "streamingEngineMicrovm": False,
+        "virtualParticipantEngineMicrovm": False,
+        "diarizeVirtualParticipant": False,
+    }
+
+
+def test_an_upgrade_carries_the_asr_switches_across(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default")
+
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=ASR_TABLES,
+        legacy_client=LegacyAsrConfigTable(
+            {
+                "AsrConfigId": {"S": "CustomAsrConfig"},
+                "streamingEngineMicrovm": {"BOOL": True},
+                "diarizeVirtualParticipant": {"BOOL": True},
+                # Retired by an earlier release; nothing reads it.
+                "speakerThreshold": {"S": "0.35"},
+                "UpdatedBy": {"S": "admin@example.com"},
+            }
+        ),
+    )
+
+    assert adoption(outcome)["asr_engine"] == "adopted-from-previous-table"
+    assert dynamo.body("Config#custom")["asr_engine"] == {
+        "streamingEngineMicrovm": True,
+        "diarizeVirtualParticipant": True,
+    }
+    resolved = store.get_section("asr_engine").values
+    assert resolved["virtualParticipantEngineMicrovm"] is False  # from the baseline
+
+
+def test_an_asr_table_that_was_never_written_records_an_empty_section(seeder) -> None:
+    """The previous table had no seeder, so an untouched deployment has no record."""
+    store, dynamo = build_store()
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_section_tables=ASR_TABLES,
+        legacy_client=LegacyAsrConfigTable(None),
+    )
+    assert adoption(outcome)["asr_engine"] == "nothing-to-adopt"
+    assert dynamo.body("Config#custom") == {"asr_engine": {}}
+
+
+def test_a_deployment_without_the_asr_engine_records_nothing(seeder) -> None:
+    """No table is passed, so enabling the engine later still carries its record."""
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default", legacy_section_tables={"asr_engine": ""})
+    assert adoption(outcome)["asr_engine"] == "no-previous-table"
+    assert "asr_engine" not in dynamo.body("Config#custom")
 
 
 # ── a stack update must not reset an operator's edits ──────────────────────

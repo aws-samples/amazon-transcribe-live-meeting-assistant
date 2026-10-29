@@ -173,6 +173,29 @@ NOVA_SONIC_CONFIG = register(
     )
 )
 
+#: The on-demand ASR engine's three runtime switches: whether streaming meetings
+#: use it (``streamingEngineMicrovm``), whether Virtual Participants do
+#: (``virtualParticipantEngineMicrovm``), and whether a Virtual Participant on it
+#: asks for per-voice labels (``diarizeVirtualParticipant``). Edited on the
+#: Transcription Engine page.
+#:
+#: Short tier, which is the policy the transcriber's reader has always had: it
+#: reads at the start of each streaming meeting, and 30 seconds keeps a burst of
+#: meetings starting together from each doing its own reads. The Virtual
+#: Participant reads through the getAsrConfig resolver, which reads the records
+#: directly and caches nothing, as that path always has.
+ASR_ENGINE = register(
+    SectionSpec(
+        name="asr_engine",
+        cache_tier=CacheTier.SHORT,
+        description=(
+            "On-demand ASR engine switches: whether streaming meetings and Virtual "
+            "Participants use it, and whether Virtual Participants ask it for "
+            "per-voice labels."
+        ),
+    )
+)
+
 #: The Meeting Assist chat panel's quick-action buttons, keyed "N#Label" where N
 #: orders them, each holding the prompt the button sends. Unlike the other
 #: sections a profile's buttons do not override the shipped ones key by key: a
