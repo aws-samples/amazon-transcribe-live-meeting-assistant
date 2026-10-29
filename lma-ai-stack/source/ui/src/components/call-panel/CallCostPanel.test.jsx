@@ -107,6 +107,32 @@ describe('CallCostPanel', () => {
     expect(screen.getByText('Unauthorized')).toBeTruthy();
   });
 
+  it('does not keep showing an earlier table when a later load fails', async () => {
+    const loadCost = vi
+      .fn()
+      .mockResolvedValueOnce(ESTIMATE)
+      .mockRejectedValueOnce({ errors: [{ message: 'Throttled' }] });
+    const { rerender } = render(<CallCostPanel callId="Meeting-1" refreshKey="a" loadCost={loadCost} />);
+    await waitFor(() => expect(screen.getByText('$0.2468 estimated')).toBeTruthy());
+    rerender(<CallCostPanel callId="Meeting-1" refreshKey="b" loadCost={loadCost} />);
+    await waitFor(() => expect(screen.getByText('Unavailable')).toBeTruthy());
+    expect(screen.queryByText('Total: $0.2468')).toBeNull();
+  });
+
+  it('keeps the newest answer when an older request finishes last', async () => {
+    let releaseFirst;
+    const first = new Promise((resolve) => {
+      releaseFirst = () => resolve({ ...ESTIMATE, TotalCost: 1 });
+    });
+    const loadCost = vi.fn().mockReturnValueOnce(first).mockResolvedValueOnce(ESTIMATE);
+    const { rerender } = render(<CallCostPanel callId="Meeting-1" refreshKey="a" loadCost={loadCost} />);
+    rerender(<CallCostPanel callId="Meeting-1" refreshKey="b" loadCost={loadCost} />);
+    await waitFor(() => expect(screen.getByText('$0.2468 estimated')).toBeTruthy());
+    releaseFirst();
+    await first;
+    expect(screen.getByText('$0.2468 estimated')).toBeTruthy();
+  });
+
   it('loads again when the meeting status changes', async () => {
     const loadCost = vi.fn().mockResolvedValue(ESTIMATE);
     const { rerender } = render(<CallCostPanel callId="Meeting-1" refreshKey="In Progress" loadCost={loadCost} />);

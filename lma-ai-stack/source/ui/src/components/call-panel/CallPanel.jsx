@@ -2591,7 +2591,12 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         readOnly={speakerNamesReadOnly}
         isLive={item.recordingStatusLabel === IN_PROGRESS_STATUS}
       />
-      <CallCostPanel callId={item.callId} refreshKey={item.recordingStatusLabel || ''} />
+      <CallCostPanel
+        callId={item.callId}
+        refreshKey={`${item.recordingStatusLabel || ''}|${(item.callSummaryText || '').length}|${
+          item.callSummaryState || ''
+        }`}
+      />
       <CallTranscriptContainer
         item={item}
         setToolsOpen={setToolsOpen}

@@ -76,9 +76,13 @@ export const formatUnitPrice = (value, currency = 'USD') => {
     return 'No price';
   }
   const symbol = currency === 'USD' ? '$' : `${currency} `;
-  return `${symbol}${Number(value)
-    .toPrecision(4)
-    .replace(/\.?0+(e|$)/, '$1')}`;
+  // Fixed notation with four significant digits: per-token prices go well below
+  // 1e-6, where toPrecision would switch to exponent form.
+  const text = Number(value).toLocaleString('en-US', {
+    maximumSignificantDigits: 4,
+    maximumFractionDigits: 20,
+  });
+  return `${symbol}${text}`;
 };
 
 /** A quantity with thousands separators and no more than two decimals. */

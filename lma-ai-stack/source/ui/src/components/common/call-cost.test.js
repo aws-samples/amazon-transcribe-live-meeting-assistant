@@ -70,6 +70,17 @@ describe('formatUnitPrice', () => {
     expect(formatUnitPrice(0.0001667)).toBe('$0.0001667');
   });
 
+  it('never writes a price in exponent form, however small', () => {
+    expect(formatUnitPrice(7.5e-8)).toBe('$0.000000075');
+    expect(formatUnitPrice(1e-8)).toBe('$0.00000001');
+    expect(formatUnitPrice(2.76944e-5)).toBe('$0.00002769');
+  });
+
+  it('keeps the zeros of a whole-number price', () => {
+    expect(formatUnitPrice(1000)).toBe('$1,000');
+    expect(formatUnitPrice(0)).toBe('$0');
+  });
+
   it('says so when there is no price', () => {
     expect(formatUnitPrice(null)).toBe('No price');
   });

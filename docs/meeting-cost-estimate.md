@@ -29,7 +29,7 @@ Speakers panel — shows the total in its header ("$0.1234 estimated", with
 
 | Column | Shows |
 |---|---|
-| Service | The service and model or API, grouped by what the usage was for, with a subtotal row per group. Hover a service for how its usage was measured (launch type, sizes, why a figure is approximate). |
+| Service | The service and model or API, grouped by what the usage was for, with a subtotal row per group. Select a service to see how its usage was measured (launch type, sizes, why a figure is approximate). |
 | Unit, Quantity | What was counted and how much. |
 | Unit price | US dollars per unit from the price table, or **No price** when the table has none. |
 | Estimated cost | Quantity times unit price. Below $0.0001 is written "< $0.0001", never rounded to zero. Units that are shown for reference only read "not billed separately". |
@@ -37,9 +37,11 @@ Speakers panel — shows the total in its header ("$0.1234 estimated", with
 Above the table the panel says that this is an estimate, the date of its prices, and
 any line it could not price or region it priced at another region's rates. Below it
 are what the estimate does not include, the region, and when the figure was
-computed. The estimate is re-read when the meeting's status changes and with the
-refresh button, because most of a meeting's usage is recorded as it ends. A meeting
-with no metering records shows **No metering data** rather than a cost of zero.
+computed. The estimate is re-read when the meeting's status changes and when its
+summary arrives, because most of a meeting's usage is recorded as it ends. A Virtual
+Participant writes its runtime as it leaves, which can be later still; the refresh
+button picks that up. A meeting with no metering records shows **No metering data**
+rather than a cost of zero.
 
 ### Through the API
 

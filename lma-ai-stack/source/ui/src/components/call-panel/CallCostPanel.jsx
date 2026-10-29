@@ -16,7 +16,7 @@
  * prices, with the lines it could not price, the regions it priced at another
  * region's rates, and what it leaves out. See docs/meeting-cost-estimate.md.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { generateClient } from 'aws-amplify/api';
 import { ConsoleLogger } from 'aws-amplify/utils';
@@ -118,23 +118,38 @@ const CallCostPanel = ({ callId, refreshKey = '', loadCost = defaultLoadCost }) 
   const [error, setError] = useState(null);
   const [expanded, setExpanded] = useState(false);
 
+  // Only the latest request may update the panel: a refresh pressed while a
+  // reload is in flight, or a different meeting opened mid-request, must not be
+  // overwritten by the older answer arriving last.
+  const latestRequest = useRef(0);
+
   const refresh = useCallback(async () => {
     if (!callId) return;
+    latestRequest.current += 1;
+    const request = latestRequest.current;
     setLoading(true);
     setError(null);
     try {
-      setEstimate(await loadCost(callId));
+      const result = await loadCost(callId);
+      if (request === latestRequest.current) setEstimate(result);
     } catch (err) {
       logger.error('could not load the cost estimate', err);
-      setError(err?.errors?.[0]?.message || err?.message || 'The estimate could not be loaded.');
+      if (request === latestRequest.current) {
+        // Cleared, so a failed refresh is not shown above an older table as if
+        // that table were current.
+        setEstimate(null);
+        setError(err?.errors?.[0]?.message || err?.message || 'The estimate could not be loaded.');
+      }
     } finally {
-      setLoading(false);
+      if (request === latestRequest.current) setLoading(false);
     }
   }, [callId, loadCost]);
 
-  // Loaded when the meeting changes and when its status does: most of a
-  // meeting's usage is recorded as it ends (the summary, the Virtual
-  // Participant's runtime), so an estimate drawn during the meeting goes stale.
+  // Loaded when the meeting changes and whenever refreshKey does. The page keys
+  // it on the meeting's status and on its summary, because most of a meeting's
+  // usage is recorded as it ends and the summary's own usage is written just
+  // before the summary appears. The Virtual Participant's runtime is written as
+  // it leaves, which can be after both; the refresh button picks that up.
   useEffect(() => {
     refresh();
   }, [refresh, refreshKey]);
