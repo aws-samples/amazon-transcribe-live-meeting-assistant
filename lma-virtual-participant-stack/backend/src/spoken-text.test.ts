@@ -68,6 +68,14 @@ test('links keep their text and bare URLs keep only their host', () => {
     );
 });
 
+test('formatting tags are removed, other angle brackets are kept', () => {
+    assert.equal(toSpokenText('<b>Today</b> is <em>sunny</em>'), 'Today is sunny');
+    // Removal repeats until no formatting tag is left.
+    assert.equal(toSpokenText('<sp<span>an>x'), '<sp an>x');
+    assert.equal(toSpokenText('<<b>b>bold'), '< b>bold');
+    assert.equal(toSpokenText('when x<5 and y>3'), 'when x<5 and y>3');
+});
+
 test('inline code, italics and HTML are unwrapped, snake_case is kept', () => {
     assert.equal(
         toSpokenText('Run `make build`, then check _the_ value of my_config_key.<br>Done'),
@@ -126,5 +134,13 @@ test('a plain answer reaches the model unchanged, and a non-text answer is still
     assert.equal(
         await novaWithStrandsAnswer({ message: { rows: 2 } }).invokeStrandsAgent({ content: JSON.stringify({ query: 'q' }) }),
         '{"rows":2}',
+    );
+});
+
+test('a response with no answer in it reaches the model as the JSON it was', async () => {
+    const payload = { errorMessage: 'Task timed out', link: 'https://example.com/a_b_c', note: '**x** | y' };
+    assert.equal(
+        await novaWithStrandsAnswer(payload).invokeStrandsAgent({ content: JSON.stringify({ query: 'q' }) }),
+        JSON.stringify(payload),
     );
 });

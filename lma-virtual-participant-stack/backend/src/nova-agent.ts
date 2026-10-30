@@ -2070,8 +2070,13 @@ export class NovaAgent implements VoiceAssistantProvider {
     
     console.log('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
     
-    // Extract the message from the response and ensure it's a string
-    const message = responsePayload.message || JSON.stringify(responsePayload);
+    // Extract the message from the response and ensure it's a string. Only an
+    // answer the agent wrote is reduced to spoken text below; a response
+    // without one is passed on as JSON, unchanged.
+    const message = responsePayload.message;
+    if (!message) {
+      return JSON.stringify(responsePayload);
+    }
     if (typeof message !== 'string') {
       return JSON.stringify(message);
     }

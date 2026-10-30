@@ -19,8 +19,8 @@
  * and table row becomes a sentence of its own, so the structure the chat reader
  * gets from line breaks is kept as sentence boundaries for the listener, and
  * the result is one paragraph. A link is reduced to its text, a bare URL to its
- * host name, and a table row is read with its column headings as labels
- * ("Day: Monday, High: 60°F.").
+ * host name, and a table row is read with its column headings as labels on
+ * every column but the first, which names the row ("Monday, High: 60°F.").
  *
  * The Strands Lambda has no notion of who is asking, so it cannot be asked for
  * a spoken answer instead; the chat keeps its markdown because nothing upstream
@@ -57,16 +57,31 @@ function hostOf(url: string): string {
     }
 }
 
+/**
+ * The HTML formatting tags a markdown answer may carry. Only these are removed,
+ * so prose that compares values ("x<5 and y>3") is left alone.
+ */
+const FORMATTING_TAG = /<\/?(?:a|b|i|u|s|em|strong|small|mark|sub|sup|span|code|p|div|br|hr|ul|ol|li|h[1-6]|table|thead|tbody|tr|td|th)\b[^<>]*>/gi;
+
+/** Remove formatting tags, repeating until none is left. */
+function stripFormattingTags(text: string): string {
+    let previous: string;
+    let current = text;
+    do {
+        previous = current;
+        current = current.replace(FORMATTING_TAG, ' ');
+    } while (current !== previous);
+    return current;
+}
+
 /** Inline markup within one line: links, code, emphasis, HTML tags, bare URLs. */
 function stripInline(text: string): string {
-    return text
+    return stripFormattingTags(text)
         // Images and links keep their text; a link whose text is empty keeps nothing.
         .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
         .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
         // Reference-style links, [text][ref].
         .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
-        .replace(/<br\s*\/?>/gi, ' ')
-        .replace(/<\/?[a-z][^>]*>/gi, '')
         .replace(/`([^`]*)`/g, '$1')
         // Bold and italic, asterisk and underscore forms. The underscore forms
         // only at word boundaries, so snake_case identifiers keep their underscores.
