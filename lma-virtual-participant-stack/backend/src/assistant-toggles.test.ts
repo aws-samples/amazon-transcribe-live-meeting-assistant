@@ -541,6 +541,36 @@ test('a declined LMA wake is honoured on leaving translator mode even when the m
     assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'wake_phrase' });
 });
 
+test('a restore whose own request is declined is kept for the next attempt', async () => {
+    const assistant = statefulAssistant('normal', 'wake_phrase');
+    const restore = createActivationRestore();
+    await typeCommands(assistant, restore, 'LMA translate');
+    assert.equal(restore.pending(), 'wake_phrase');
+    // The provider has stopped and declines everything.
+    await applyAssistantChatCommand(new NoOpAgent(), parseAssistantChatCommand('LMA assist')!, 'Alice', restore);
+    assert.equal(restore.pending(), 'wake_phrase');
+});
+
+test('a declined LMA always is not taken as a wish to stay always listening', async () => {
+    // Refused for a reason other than the combination rule (here: a switch in
+    // progress), so the reply said declined and the memory must agree.
+    const restore = createActivationRestore();
+    const inProgress = {
+        reconfigure: async (): Promise<AssistantReconfigureOutcome> => ({
+            result: 'declined',
+            changed: [],
+            sessionRebuilt: false,
+            meetingModeBefore: 'translator',
+            meetingModeAfter: 'translator',
+            activationModeBefore: 'always_active',
+            activationModeAfter: 'always_active',
+            detail: 'a mode change is already in progress',
+        }),
+    };
+    await applyAssistantChatCommand(inProgress, parseAssistantChatCommand('LMA always')!, 'Alice', restore);
+    assert.equal(restore.pending(), null);
+});
+
 test('nothing is restored when the meeting was always listening already', async () => {
     const assistant = statefulAssistant('normal', 'always_active');
     const restore = createActivationRestore();

@@ -443,10 +443,14 @@ export function createActivationRestore() {
         record(command: AssistantChatCommand, sent: AssistantChatCommand, outcome: AssistantReconfigureOutcome): void {
             if (outcome.result === 'declined') {
                 // An activation request the current mode refused is a wish for
-                // when the mode ends, not a request that did not happen.
+                // when the mode ends, not a request that did not happen. Only a
+                // request to stop listening continuously can be refused by the
+                // combination rule; a declined `LMA always` was refused for some
+                // other reason (a switch still in progress) and is not a wish.
                 if (
                     command.meetingMode === undefined
                     && command.activationMode !== undefined
+                    && command.activationMode !== 'always_active'
                     && requiresAlwaysListening(outcome.meetingModeBefore)
                 ) {
                     restoreTo = command.activationMode;
