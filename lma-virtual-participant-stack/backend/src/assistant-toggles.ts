@@ -272,6 +272,12 @@ const CHAT_COMMAND_INDEX: ReadonlyMap<string, AssistantChatCommand> = new Map(CH
  */
 const TRANSLATE_WITH_LANGUAGE = /^(?:translate|translator|interpret)(?: mode)?(?: (?:to|into|in))? (.+)$/;
 
+/** Single words after "translate" that are ordinary chat, not a language. */
+const NOT_A_LANGUAGE: ReadonlySet<string> = new Set([
+    'to', 'into', 'in', 'it', 'this', 'that', 'these', 'those', 'me', 'us', 'them', 'please', 'now', 'all',
+    'everything', 'again', 'here', 'there', 'for', 'mode',
+]);
+
 /**
  * Whether `message` is a participant asking the assistant to change mode, and
  * which change they asked for.
@@ -317,7 +323,7 @@ export function parseAssistantChatCommand(message: string): AssistantChatCommand
     if (language) {
         return { ...CHAT_COMMAND_INDEX.get('translate'), translatorLanguage: language.name };
     }
-    if (/^[a-z]{2,20}$/.test(withLanguage[1])) {
+    if (/^[a-z]{2,20}$/.test(withLanguage[1]) && !NOT_A_LANGUAGE.has(withLanguage[1])) {
         return { unsupportedLanguage: withLanguage[1] };
     }
     return null;
@@ -561,17 +567,29 @@ const meetingActivationRestore: ActivationRestore = createActivationRestore();
  * already in flight, which the provider bounds at five seconds.
  */
 export async function applyAssistantChatCommand(
-    assistant: Pick<VoiceAssistantProvider, 'reconfigure'>,
+    assistant: Pick<VoiceAssistantProvider, 'reconfigure'> & Partial<Pick<VoiceAssistantProvider, 'supportsModeChanges'>>,
     command: AssistantChatCommand,
     requestedBy?: string | null,
     restore: ActivationRestore = meetingActivationRestore,
 ): Promise<string[]> {
     const prefix = 'Live Meeting Assistant:';
-    if (command.unsupportedLanguage !== undefined) {
-        console.log(
-            `${ASSISTANT_TOGGLE_LOG_TAG} route=chat result=declined`
-                + ` detail="unsupported translator language ${logSafe(command.unsupportedLanguage)}"`,
+    // The two language checks below answer without the provider, so they only
+    // run for one that can change mode at all. Any other is asked as usual and
+    // declines with its own reason, as it does for every mode command.
+    const namesLanguage = command.unsupportedLanguage !== undefined || command.translatorLanguage !== undefined;
+    if (namesLanguage && assistant.supportsModeChanges?.() === false) {
+        return assistantToggleChatReply(
+            await assistant.reconfigure({
+                meetingMode: 'translator',
+                activationMode: 'always_active',
+                route: 'chat',
+                requestedBy,
+            }),
         );
+    }
+    if (command.unsupportedLanguage !== undefined) {
+        const detail = `unsupported translator language ${command.unsupportedLanguage}`;
+        console.log(formatChatRefusalLog(requestedBy, detail));
         return [
             `${prefix} I can't translate into "${command.unsupportedLanguage}". `
                 + `Supported languages: ${supportedTranslatorLanguageNames().join(', ')}.`,
@@ -585,6 +603,7 @@ export async function applyAssistantChatCommand(
     if (command.translatorLanguage !== undefined) {
         const own = meetingLanguage(details.transcribeLanguageCode, details.transcribePreferredLanguage);
         if (own && own.name === command.translatorLanguage) {
+            console.log(formatChatRefusalLog(requestedBy, `${own.name} is the meeting's own language`));
             return [
                 `${prefix} ${own.name} is the language this meeting is transcribed in.`
                     + ' Name the language to translate it into, for example "LMA translate French".',
@@ -660,6 +679,28 @@ function logSafe(value: string): string {
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 80);
+}
+
+/**
+ * The line for a chat request refused before it reached the provider — an
+ * unsupported language, or the meeting's own language. Carries the same
+ * identifying fields as `formatAssistantToggleLog`, without the mode axes the
+ * chat layer does not know.
+ */
+export function formatChatRefusalLog(
+    requestedBy: string | null | undefined,
+    detail: string,
+    identity: AssistantToggleIdentity = assistantToggleIdentity(),
+): string {
+    return [
+        ASSISTANT_TOGGLE_LOG_TAG,
+        `vp=${logSafe(identity.vpId)}`,
+        `call=${logSafe(identity.callId)}`,
+        'route=chat',
+        `by="${requestedBy ? logSafe(requestedBy) : '-'}"`,
+        'result=declined',
+        `detail="${logSafe(detail)}"`,
+    ].join(' ');
 }
 
 function axis(name: string, before: string, after: string): string {

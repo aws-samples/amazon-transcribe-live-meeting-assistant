@@ -18,12 +18,14 @@ import {
     applyAssistantChatCommand,
     createActivationRestore,
     formatAssistantToggleLog,
+    formatChatRefusalLog,
     parseAssistantChatCommand,
     type AssistantReconfigureOutcome,
     type AssistantReconfigureRequest,
 } from './assistant-toggles.js';
 import { meetingLanguage, resolveTranslatorLanguage } from './translator-languages.js';
 import { NovaAgent } from './nova-agent.js';
+import { NoOpAgent } from './noop-agent.js';
 import { details } from './details.js';
 
 const captured: string[] = [];
@@ -97,6 +99,9 @@ test('one unknown word is answered; several are ordinary chat', () => {
     assert.deepEqual(parseAssistantChatCommand('LMA translate Klingon'), { unsupportedLanguage: 'klingon' });
     assert.equal(parseAssistantChatCommand('LMA translate the slides'), null);
     assert.equal(parseAssistantChatCommand('can LMA translate French'), null);
+    for (const message of ['LMA translate to', 'LMA translate in', 'LMA translate it', 'LMA translate this', 'LMA translate please']) {
+        assert.equal(parseAssistantChatCommand(message), null, `"${message}" is chat, not a language`);
+    }
 });
 
 // ---------------------------------------------------------------------------
@@ -294,5 +299,43 @@ test('a pair of one language twice is declined', async () => {
         route: 'chat',
     });
     assert.equal(outcome.result, 'declined');
+    assert.match(outcome.detail!, /needs two different languages/);
     assert.equal((agent as any).meetingMode, 'normal');
+});
+
+test('with an assistant that cannot change mode, a language command is declined by the assistant itself', async () => {
+    // Not answered with a language list or a suggestion that would then be
+    // declined too.
+    for (const message of ['LMA translate Klingon', 'LMA translate French']) {
+        const reply = await withTranscribeLanguage('en-US', '', () =>
+            applyAssistantChatCommand(new NoOpAgent(), parseAssistantChatCommand(message)!, 'Alice', createActivationRestore()),
+        );
+        assert.deepEqual(reply, ['Live Meeting Assistant: the voice assistant is not enabled for this meeting.'], message);
+    }
+});
+
+test('a refusal made before the provider is logged with the same identifying fields', async () => {
+    captured.length = 0;
+    await withTranscribeLanguage('en-US', '', () =>
+        applyAssistantChatCommand(recordingAssistant(), parseAssistantChatCommand('LMA translate English')!, 'Alice', createActivationRestore()),
+    );
+    const line = captured.find((l) => l.includes('[assistant-toggle]'))!;
+    assert.match(line, /vp=\S+ call=\S+ route=chat by="Alice" result=declined detail="English is the meeting's own language"/);
+    assert.equal(
+        formatChatRefusalLog('Bob', 'unsupported translator language klingon', { vpId: 'vp', callId: 'call' }),
+        '[assistant-toggle] vp=vp call=call route=chat by="Bob" result=declined detail="unsupported translator language klingon"',
+    );
+});
+
+test('an unchanged pair still logs the pair in use', async () => {
+    captured.length = 0;
+    const agent = nova('translator');
+    await agent.reconfigure({
+        meetingMode: 'translator',
+        activationMode: 'always_active',
+        translatorLanguages: { a: 'English', b: 'Spanish' },
+        route: 'chat',
+    });
+    const line = captured.find((l) => l.includes('[assistant-toggle]'))!;
+    assert.match(line, /translator="English<->Spanish"\(unchanged\)/);
 });

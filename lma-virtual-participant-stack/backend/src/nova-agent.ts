@@ -3891,6 +3891,11 @@ export class NovaAgent implements VoiceAssistantProvider {
         meetingModeAfter: meetingModeBefore,
         activationModeBefore,
         activationModeAfter: activationModeBefore,
+        // The pair in use, for the log, when one was asked about and the
+        // assistant is translating with it.
+        translatorLanguagesAfter: request.translatorLanguages && meetingModeBefore === 'translator'
+          ? { a: this.translatorLanguageA, b: this.translatorLanguageB }
+          : undefined,
         detail,
       });
 
@@ -3928,7 +3933,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         a = same(this.translatorLanguageA, b) ? this.translatorLanguageB : this.translatorLanguageA;
       }
       if (!b || same(a, b)) {
-        return notApplied('declined', `${b || 'that'} is already the other language of the pair`);
+        return notApplied('declined', 'the translator needs two different languages');
       }
       languagesAfter = { a, b };
     }
