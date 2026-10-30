@@ -1817,8 +1817,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
 
       // If we get here, the stream closed normally or with an error
-      // Check if session is still supposed to be active (always_active mode)
-      if (this.activationMode === 'always_active' && !this.isRefreshing) {
+      // Check if session is still supposed to be active (always_active mode).
+      // Not once the agent is stopping: stop() closes the session, and its
+      // stream ends before the session is cleared.
+      if (this.activationMode === 'always_active' && !this.isRefreshing && !this.stopped) {
         console.log('⚠️  Stream closed unexpectedly - triggering automatic refresh');
         // Trigger immediate refresh to recover
         this.refreshSession().catch(error => {

@@ -267,3 +267,19 @@ test('nova: a mute called by an outgoing session is not answered on the new one'
         'the new session never issued that tool use');
     assert.equal(a._translatorState, 'MUTED');
 });
+
+test('nova: a stream that ends while the agent is stopping does not open another session', async () => {
+    const { a } = translator();
+    a.initiateBidirectionalStreaming = Object.getPrototypeOf(a).initiateBidirectionalStreaming;
+    a.bedrockClient = { send: async () => ({ body: (async function* () {})() }) };
+    let refreshes = 0;
+    a.refreshSession = async () => { refreshes++; };
+    a.stopped = true;
+    await a.initiateBidirectionalStreaming(a.session);
+    assert.equal(refreshes, 0);
+
+    // The same stream ending unexpectedly in a running meeting still recovers.
+    a.stopped = false;
+    await a.initiateBidirectionalStreaming(a.session);
+    assert.equal(refreshes, 1);
+});
