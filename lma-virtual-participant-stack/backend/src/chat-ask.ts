@@ -218,7 +218,9 @@ export const askStrandsMeetingAssistant: AskMeetingAssistant = async (question) 
     if (typeof body?.message === 'string' && body.message.trim()) {
         return body.message;
     }
-    throw new Error(`meeting assistant returned no answer: ${JSON.stringify(body).slice(0, 200)}`);
+    // Only the shape, so no echoed text reaches the Virtual Participant's log.
+    const shape = body && typeof body === 'object' ? Object.keys(body).join(',') : typeof body;
+    throw new Error(`meeting assistant returned no answer (statusCode=${body?.statusCode ?? '-'} keys=${shape})`);
 };
 
 /**
@@ -227,8 +229,17 @@ export const askStrandsMeetingAssistant: AskMeetingAssistant = async (question) 
  */
 export function createChatAnswerer(
     ask: AskMeetingAssistant = askStrandsMeetingAssistant,
-    options: { intervalMs?: number; now?: () => number; available?: () => boolean; timeoutMs?: number } = {},
+    options: {
+        intervalMs?: number;
+        now?: () => number;
+        available?: () => boolean;
+        timeoutMs?: number;
+        paused?: () => boolean;
+    } = {},
 ) {
+    // While `LMA pause` is in effect nothing from the meeting is sent on, so a
+    // question waits for `LMA start` like the transcript does.
+    const paused = options.paused ?? (() => !details.start);
     const intervalMs = options.intervalMs ?? PER_SENDER_INTERVAL_MS;
     const timeoutMs = options.timeoutMs ?? ANSWER_TIMEOUT_MS;
     const now = options.now ?? Date.now;
@@ -257,6 +268,11 @@ export function createChatAnswerer(
                 ? reply('questions in the chat need the Strands meeting assistant, which this deployment does not use.')
                 : [];
         }
+        if (paused()) {
+            return parsed.explicit
+                ? reply('the transcript is paused, so questions wait until someone types "LMA start".')
+                : [];
+        }
         if (!parsed.question) {
             return reply('type your question after "LMA ask", for example "LMA ask what did we decide about the budget?"');
         }
@@ -281,6 +297,13 @@ export function createChatAnswerer(
             return reply('still answering the previous question; ask again in a moment.');
         }
 
+        // Forget senders whose interval has passed, so the maps stay bounded.
+        for (const [sender, askedAt] of lastAskedAt) {
+            if (at - askedAt >= intervalMs) {
+                lastAskedAt.delete(sender);
+                toldToWait.delete(sender);
+            }
+        }
         lastAskedAt.set(key, at);
         toldToWait.delete(key);
         toldBusy.clear();

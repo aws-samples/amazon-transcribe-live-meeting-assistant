@@ -124,7 +124,7 @@ function answerer(reply: string | Error = 'An answer.', start = 0) {
             if (reply instanceof Error) throw reply;
             return reply;
         },
-        { intervalMs: 20_000, now: () => clock, available: () => true },
+        { intervalMs: 20_000, now: () => clock, available: () => true, paused: () => false },
     );
     return { a, asked, advance: (ms: number) => (clock += ms) };
 }
@@ -156,6 +156,7 @@ test('one question is answered at a time', async () => {
     let release: (value: string) => void = () => {};
     const a = createChatAnswerer(() => new Promise<string>((resolve) => (release = resolve)), {
         available: () => true,
+        paused: () => false,
     });
     const first = a.answer(Q('slow'), 'Alice', 'teams-sdk');
     const second = await a.answer(Q('meanwhile'), 'Bob', 'teams-sdk');
@@ -181,7 +182,7 @@ test('an agent that never answers frees the slot after the timeout', async () =>
     let calls = 0;
     const a = createChatAnswerer(
         () => (++calls === 1 ? new Promise<string>(() => {}) : Promise.resolve('Fine.')),
-        { available: () => true, timeoutMs: 20 },
+        { available: () => true, timeoutMs: 20, paused: () => false },
     );
     assert.match((await a.answer(Q('slow'), 'Alice', 'zoom'))[0], /could not get an answer/);
     assert.deepEqual(await a.answer(Q('next'), 'Bob', 'zoom'), ['Live Meeting Assistant: Fine.']);
@@ -193,6 +194,14 @@ test('without a meeting assistant an @LMA aside is not a question, but LMA ask s
         question: 'what are the action items?',
         explicit: true,
     });
+});
+
+test('while the transcript is paused, questions are not sent and only LMA ask is told why', async () => {
+    const asked: string[] = [];
+    const a = createChatAnswerer(async (q) => (asked.push(q), 'unused'), { available: () => true, paused: () => true });
+    assert.match((await a.answer(Q('anything', true), 'Alice', 'zoom'))[0], /paused/);
+    assert.deepEqual(await a.answer(Q('anything', false), 'Bob', 'zoom'), []);
+    assert.deepEqual(asked, []);
 });
 
 test('with no Strands meeting assistant, only an explicit LMA ask is told', async () => {
