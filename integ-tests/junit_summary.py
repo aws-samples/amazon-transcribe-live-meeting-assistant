@@ -68,6 +68,10 @@ _MAX_FAILURES_LISTED = 8
 # which the whole post is rejected for exceeding.
 _MAX_AGENT_CHARS = 1200
 
+# Why a publish or deploy failed (see failure_cause.py). Inside the body's own
+# budget rather than on top of it: for those stages it is most of the message.
+_MAX_CAUSE_CHARS = 1400
+
 # Above this many distinct checks, a module is summarised by its count rather
 # than listed. The live suite sits well under it and is listed in full; the
 # pipeline's own plumbing tests are numerous, uniform and not what anyone reads
@@ -93,10 +97,9 @@ _STAGE_TRIAGE = {
         "failure, not a test failure: read the job log, not the stack."
     ),
     _DEPLOY_STAGE: (
-        "The branch built but CloudFormation did not accept it, so the stack may "
-        "be mid-update or rolled back. Check the stack's events before the next "
-        "run, because a stack left in a failed update state will fail every "
-        "night until someone resolves it."
+        "The branch built but CloudFormation did not accept it. A rollback left "
+        "unfinished is resumed by the next nightly deploy before it deploys; a "
+        "failure that repeats is the branch, or a stack that needs a person."
     ),
 }
 
@@ -344,6 +347,7 @@ def build_summary(
     stage: str = _TESTS_STAGE,
     template_url: str | None = None,
     agent_report: str | None = None,
+    cause: str | None = None,
     max_chars: int = _DEFAULT_MAX_CHARS,
 ) -> str:
     """Compose the human-readable body of the notification."""
@@ -358,6 +362,11 @@ def build_summary(
         # "no results to report" would read as a broken notification rather
         # than as a build that never got as far as testing.
         lines.append(f"Stack {where} — the {stage} stage failed, so no tests ran.")
+        if cause and cause.strip():
+            # The reason first: it is what decides who acts and how, and the
+            # stage's general guidance below is the same every night.
+            lines.append("")
+            lines.append(_capped(cause.strip(), _MAX_CAUSE_CHARS))
         lines.append("")
         lines.append(_STAGE_TRIAGE.get(stage, _STAGE_TRIAGE[_DEPLOY_STAGE]))
         body = "\n".join(lines).strip()
@@ -446,6 +455,7 @@ def build_payload(
     stage: str = _TESTS_STAGE,
     template_url: str | None = None,
     agent_report: str | None = None,
+    cause: str | None = None,
     max_chars: int = _DEFAULT_MAX_CHARS,
 ) -> dict[str, str]:
     """Build the flat, all-string object a Workflow Builder trigger accepts."""
@@ -474,6 +484,7 @@ def build_payload(
             stage=stage,
             template_url=template_url,
             agent_report=agent_report,
+            cause=cause,
             max_chars=max_chars,
         ),
     }
@@ -522,6 +533,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args_parser.add_argument(
+        "--cause",
+        default=None,
+        help=(
+            "Path to the reason a publish or deploy failed, from "
+            "failure_cause.py. Shown under the failed stage when the file exists "
+            "and is non-empty; ignored for the tests stage, which has its report."
+        ),
+    )
+    args_parser.add_argument(
         "--max-chars",
         type=int,
         default=_DEFAULT_MAX_CHARS,
@@ -539,6 +559,7 @@ def main(argv: list[str] | None = None) -> int:
         stage=args.stage,
         template_url=args.template_url,
         agent_report=_read_optional(args.agent_report),
+        cause=_read_optional(args.cause),
         max_chars=args.max_chars,
     )
     json.dump(payload, sys.stdout)
