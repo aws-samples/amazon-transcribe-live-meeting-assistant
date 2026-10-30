@@ -2534,7 +2534,6 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         <VNCViewer
           vpId={vpData.id}
           vncEndpoint={vpData.vncEndpoint}
-          websocketUrl={vpData.vncEndpoint}
           status={vpData.status}
           manualActionType={vpData.manualActionType}
           manualActionMessage={vpData.manualActionMessage}
