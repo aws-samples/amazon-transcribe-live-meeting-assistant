@@ -383,7 +383,7 @@ test('switching out of translator mode restores the assistant prompt and tools',
     assert.match(prompt, /STOP REQUESTS:/);
     assert.match(prompt, /INTERRUPTION HANDLING:/);
     assert.doesNotMatch(prompt, /TRANSLATOR MODE/);
-    assert.deepEqual(toolNames(agent), ['strands_agent', 'mute']);
+    assert.deepEqual(toolNames(agent), ['strands_agent', 'mute', 'set_mode']);
 });
 
 test('translator pause state starts from unpaused on the way in and on the way out', async () => {

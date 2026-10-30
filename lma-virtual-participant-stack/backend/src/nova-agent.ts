@@ -28,10 +28,23 @@ import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
 import { toSpokenText } from './spoken-text.js';
 import { pcmMs, RecentAudio, TRANSLATOR_DRAIN_MAX_MS } from './translator-turns.js';
+import {
+  isStopTranslatingRequest,
+  isVoiceMode,
+  predictVoiceModeChange,
+  SET_MODE_NOT_ADDRESSED_RESULT,
+  SET_MODE_PROMPT,
+  SET_MODE_TOOL_SPEC,
+  STOPPED_TRANSLATING_PHRASE,
+  translatorAddressees,
+  voiceModeCommand,
+  voiceModeSentence,
+} from './voice-mode-switch.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { pcmDurationMs, renderToolAckClip } from './tool-ack-clip.js';
 import { NovaSonicUsage } from './metering.js';
 import {
+  addressesAssistant,
   LookupSkipReason,
   mutedLookupSkipReason,
   SKIPPED_LOOKUP_RESULT,
@@ -39,6 +52,7 @@ import {
 } from './muted-lookup.js';
 import { ActivationMode } from './voice-assistant-interface.js';
 import {
+  applyAssistantChatCommand,
   AssistantReconfigureOutcome,
   AssistantReconfigureRequest,
   describeMeetingMode,
@@ -289,6 +303,16 @@ interface SessionData {
   audioTurnOpen?: boolean;
   /** Order of creation, so audio from a later session can wait for an earlier one. */
   seq?: number;
+  /** Set when a participant has asked a translator to stop: whatever this
+   *  session says from then on is a translation of that request, and is dropped. */
+  silenced?: boolean;
+  /** Drop this session's audio until its current turn ends (an unaddressed
+   *  `set_mode` call; see handleSetModeTool). */
+  dropTurn?: boolean;
+  /** Keep the text of that same reply out of the history and the transcript.
+   *  Cleared at the next participant turn rather than with the audio, because
+   *  the FINAL text of a turn arrives after its audio has ended. */
+  dropReplyText?: boolean;
 }
 
 interface ConversationTurn {
@@ -524,6 +548,23 @@ export class NovaAgent implements VoiceAssistantProvider {
   private recentMeetingAudio = new RecentAudio();
   /** Translated turns so far, for the per-turn log line. */
   private translatorTurn: number = 0;
+
+  // Changing mode by voice (voice-mode-switch.ts).
+  /** When a participant's turn last addressed the assistant by wake phrase. */
+  private lastAddressedAt: number = 0;
+  /** A `set_mode` switch waiting for its confirmation to be spoken. */
+  private pendingVoiceModeSwitch: {
+    command: { meetingMode?: MeetingMode; activationMode?: ActivationMode };
+    session: SessionData | null;
+    sawAudio: boolean;
+    timer: NodeJS.Timeout | null;
+  } | null = null;
+  /** "Okay, I've stopped translating." in the configured voice, rendered when
+   *  translator mode is entered, or null. */
+  private stoppedTranslatingClip: Buffer | null = null;
+  private stoppedTranslatingClipRendering = false;
+  /** Set while "stop translating" is being applied. */
+  private leavingTranslator = false;
   
   // Lambda client and Strands agent configuration
   private lambdaClient: LambdaClient | null = null;
@@ -705,6 +746,9 @@ export class NovaAgent implements VoiceAssistantProvider {
           .catch((error) => {
             console.warn('[tool-ack] action=render-failed', error);
           });
+      }
+      if (this.meetingMode === 'translator') {
+        this.renderStoppedTranslatingClip();
       }
 
       // In wake_phrase mode, defer session creation until activation
@@ -1187,6 +1231,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       });
     }
 
+    if (!translatorMode) {
+      tools.push(SET_MODE_TOOL_SPEC);
+    }
+
     if (translatorMode) {
       const mutePhraseList = this.translatorMutePhrases.map(p => `"${p}"`).join(' or ');
       const unmutePhraseList = this.translatorUnmutePhrases.map(p => `"${p}"`).join(' or ');
@@ -1353,6 +1401,10 @@ export class NovaAgent implements VoiceAssistantProvider {
         + 'direct reply to something you just said. Participants telling EACH OTHER to be quiet '
         + 'is ordinary meeting conversation: stay as you are and do NOT call the `mute` tool.\n';
     }
+
+    // The set_mode tool is registered in every mode that reaches this point
+    // (translator mode returns its own prompt above).
+    systemPromptContent += '\n\n' + SET_MODE_PROMPT;
 
     // Add Strands agent tool instructions.
     //
@@ -1935,6 +1987,9 @@ export class NovaAgent implements VoiceAssistantProvider {
               }
               if (jsonResponse.event.contentStart.type === 'AUDIO') {
                 session.audioTurnOpen = true;
+                if (this.pendingVoiceModeSwitch && this.pendingVoiceModeSwitch.session === session) {
+                  this.pendingVoiceModeSwitch.sawAudio = true;
+                }
                 this.noteAudioBlockStarted();
                 this.noteAssistantAudioBlockStarted();
               } else if (
@@ -1988,7 +2043,10 @@ export class NovaAgent implements VoiceAssistantProvider {
             } else if (jsonResponse.event?.audioOutput) {
               // Received audio from Nova - play it immediately (non-blocking)
               const audioBuffer = Buffer.from(jsonResponse.event.audioOutput.content, 'base64');
-              if (session && this.holdsPlaybackFor(session)) {
+              if (session?.silenced || session?.dropTurn) {
+                // A translation of "stop translating", or a reply to an
+                // unaddressed set_mode call: not to be heard.
+              } else if (session && this.holdsPlaybackFor(session)) {
                 this.holdPlayback(session, audioBuffer);
               } else {
                 this.playAudio(audioBuffer).catch(err => {
@@ -2035,6 +2093,10 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this.handleMuteTool(toolUseId, session).catch(error => {
                   console.error('Error handling mute tool:', error);
                 });
+              } else if (toolName === 'set_mode' && toolUseContent) {
+                this.handleSetModeTool(toolUseId, toolUseContent, session).catch(error => {
+                  console.error('Error handling set_mode tool:', error);
+                });
               } else if (toolName === 'unmute') {
                 // Handle unmute tool call (translator-mode only)
                 this.handleUnmuteTool(toolUseId, session).catch(error => {
@@ -2052,12 +2114,30 @@ export class NovaAgent implements VoiceAssistantProvider {
                 // PARTIAL_TURN separates the blocks of one answer; anything else ends it.
                 if (endReason && endReason !== 'PARTIAL_TURN') {
                   session.audioTurnOpen = false;
+                  session.dropTurn = false;
                   if (this.heldPlayback.size > 0) {
                     this.releaseHeldPlayback();
+                  }
+                  // The confirmation of a set_mode switch has been generated
+                  // (it plays out from the buffer), so the switch can be made.
+                  const pending = this.pendingVoiceModeSwitch;
+                  if (pending && pending.session === session && pending.sawAudio) {
+                    this.runVoiceModeSwitch('confirmed');
                   }
                 }
               }
               
+              // "Alex, stop translating": translator mode registers only its pause
+              // tool, so it is left by this phrase (voice-mode-switch.ts).
+              if (
+                this.meetingMode === 'translator'
+                && currentTurn.role === 'USER'
+                && currentTurn.isFinal
+                && isStopTranslatingRequest(currentTurn.content, this.translatorAddressees())
+              ) {
+                this.handleStopTranslating(session);
+              }
+
               // Skip appending while paused in translator mode — replaying
               // muted-period utterances on the next UNMUTED session would
               // pressure the model to translate them as backlog.
@@ -2066,7 +2146,16 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this._translatorState === 'MUTED'
               );
 
-              if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim() && !skipForTranslatorMuted) {
+              // A reply nobody heard — the translation of "stop translating", or
+              // the answer to an unaddressed set_mode call — is kept out of the
+              // history and the transcript as well.
+              const unheardReply = currentTurn.role === 'ASSISTANT'
+                && !!(session?.silenced || session?.dropReplyText);
+
+              if (
+                currentTurn.role && currentTurn.isFinal && currentTurn.content.trim()
+                && !skipForTranslatorMuted && !unheardReply
+              ) {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
                 if (currentTurn.role === 'ASSISTANT') {
@@ -2083,6 +2172,9 @@ export class NovaAgent implements VoiceAssistantProvider {
                 if (currentTurn.role === 'USER') {
                   this.lastUserTurnText = currentTurn.content.trim();
                   session.lastUserTurnEndAt = Date.now();
+                  // A participant's new turn is not the dropped one.
+                  session.dropTurn = false;
+                  session.dropReplyText = false;
                   this.handleUserTurnWakePhrase(currentTurn.content);
                 }
               }
@@ -2146,6 +2238,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (!this.containsWakePhrase(content)) {
       return;
     }
+    this.lastAddressedAt = Date.now();
 
     // Being addressed again re-arms an activation window that is running. The
     // scribe does not activate an assistant that is already activated, so for
@@ -3011,6 +3104,8 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     const activationDuration = duration || this.defaultActivationDuration;
     console.log(`🎤 Nova agent activated for ${activationDuration} seconds`);
+    // Activation is by wake phrase.
+    this.lastAddressedAt = Date.now();
     
     // Create session if not already active (may already be pre-connected)
     if (!this._isActive) {
@@ -4349,6 +4444,184 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Changing mode by voice (voice-mode-switch.ts)
+  // -------------------------------------------------------------------------
+
+  /** How recently the assistant must have been addressed by wake phrase for a
+   *  `set_mode` call to count as asked for. Nova splits one utterance into
+   *  several turns, so the turn just before the call need not hold the phrase. */
+  private readonly VOICE_MODE_ADDRESSED_WINDOW_MS = 15000;
+
+  /** How long a `set_mode` switch waits for its confirmation to be spoken.
+   *  Not `readonly`, so the tests can shorten it. */
+  private VOICE_MODE_SWITCH_MAX_WAIT_MS = 4000;
+
+  /**
+   * A `set_mode` call: answer it with the sentence to say, and arm the switch
+   * to run once that sentence has been generated.
+   */
+  private async handleSetModeTool(
+    toolUseId: string,
+    toolUseContent: any,
+    issuingSession: SessionData | null,
+  ): Promise<void> {
+    let mode: unknown;
+    try {
+      mode = JSON.parse(toolUseContent.content)?.mode;
+    } catch {
+      mode = undefined;
+    }
+    const addressed = addressesAssistant(this.lastUserTurnText, configuredWakePhrases())
+      || Date.now() - this.lastAddressedAt < this.VOICE_MODE_ADDRESSED_WINDOW_MS;
+
+    const reply = async (result: object): Promise<void> => {
+      if (issuingSession && issuingSession === this.session && issuingSession.isActive) {
+        try {
+          await this.sendToolResult(toolUseId, result);
+        } catch (err) {
+          console.warn('Failed to send set_mode tool result (non-fatal):', err);
+        }
+      }
+    };
+
+    if (!isVoiceMode(mode) || !addressed) {
+      console.log(`[voice-mode] mode=${isVoiceMode(mode) ? mode : 'unrecognised'} action=ignored addressed=${addressed}`);
+      // The model calls the tool for talk about modes that was not addressed to
+      // it, and told to stay silent it still answered out loud after the call
+      // in 8 runs of 8 (amazon.nova-2-sonic-v1:0, October 2026), so whatever it
+      // says for the rest of this turn is dropped.
+      if (issuingSession) {
+        issuingSession.dropTurn = true;
+        issuingSession.dropReplyText = true;
+      }
+      await reply(SET_MODE_NOT_ADDRESSED_RESULT);
+      return;
+    }
+
+    const command = voiceModeCommand(mode);
+    const state = {
+      meetingMode: this.meetingMode,
+      activationMode: this.activationMode as ActivationMode,
+      reconfiguring: this._reconfiguring || !!this.pendingVoiceModeSwitch,
+    };
+    const prediction = predictVoiceModeChange(state, command);
+    const sentence = voiceModeSentence(state, command, prediction);
+    console.log(`[voice-mode] mode=${mode} action=${prediction.result === 'applied' ? 'switching' : prediction.result}`);
+
+    if (prediction.result === 'applied') {
+      this.pendingVoiceModeSwitch = {
+        command,
+        session: issuingSession,
+        sawAudio: false,
+        timer: setTimeout(() => this.runVoiceModeSwitch('timed-out'), this.VOICE_MODE_SWITCH_MAX_WAIT_MS),
+      };
+    } else if (!this.pendingVoiceModeSwitch) {
+      // A request that changes nothing rebuilds nothing, so it goes through the
+      // chat route's path at once: that writes its [assistant-toggle] line and
+      // lets the restore memory record it (a refused "wake mode" in listen mode
+      // is remembered for when the meeting goes back to assistant mode). Not
+      // while a voice switch is waiting, which `reconfigure` cannot see: it
+      // would apply this request instead of declining it.
+      applyAssistantChatCommand(this, command, null, undefined, 'voice').catch((error) => {
+        console.error('Error recording a voice mode request:', error);
+      });
+    }
+    await reply({
+      status: prediction.result,
+      instruction: `Say exactly "${sentence}" and nothing else.`,
+    });
+  }
+
+  /** Make the switch a `set_mode` call asked for, through the chat route's own
+   *  path so the activation mode a translator or listen mode replaced comes back. */
+  private runVoiceModeSwitch(why: 'confirmed' | 'timed-out'): void {
+    const pending = this.pendingVoiceModeSwitch;
+    if (!pending) return;
+    this.pendingVoiceModeSwitch = null;
+    if (pending.timer) clearTimeout(pending.timer);
+    if (this.stopped) return;
+    // The sentence was decided when the tool was called. If another route has
+    // changed the mode since, the switch it announced may no longer apply.
+    const now = predictVoiceModeChange({
+      meetingMode: this.meetingMode,
+      activationMode: this.activationMode as ActivationMode,
+      reconfiguring: this._reconfiguring,
+    }, pending.command);
+    if (now.result !== 'applied') {
+      console.log(`[voice-mode] action=superseded after=${why} now=${now.result}`);
+      return;
+    }
+    console.log(`[voice-mode] action=switch after=${why}`);
+    applyAssistantChatCommand(this, pending.command, null, undefined, 'voice').catch((error) => {
+      console.error('Error applying a voice mode change:', error);
+    });
+  }
+
+  /** Who a translator answers to, for "Alex, stop translating". */
+  private translatorAddressees(): string[] {
+    return translatorAddressees(configuredWakePhrases(), this.translatorMutePhrases);
+  }
+
+  /**
+   * "Alex, stop translating": leave translator mode for assistant mode, through
+   * the chat route's path, so the activation mode translator mode replaced
+   * comes back with it.
+   *
+   * The session that heard the request is about to translate it, so its audio
+   * is dropped from here on. The confirmation cannot come from the model —
+   * after the switch there may be no session at all (a wake-phrase meeting
+   * holds none between activations) — so it is a clip in the configured
+   * voice, rendered when translator mode was entered, or the pause tone if the
+   * clip is not available.
+   */
+  private handleStopTranslating(session: SessionData | null): void {
+    // Nova can deliver the same request on two sessions around a hand-over.
+    if (this._reconfiguring || this.leavingTranslator) return;
+    this.leavingTranslator = true;
+    if (session) session.silenced = true;
+    console.log('[voice-mode] mode=assistant action=stop-translating');
+    applyAssistantChatCommand(this, { meetingMode: 'normal' }, null, undefined, 'voice')
+      .then(() => {
+        if (this.meetingMode !== 'normal') {
+          console.log(`[voice-mode] action=stop-translating-declined meetingMode=${this.meetingMode}`);
+          // Still translating, so this session's later answers are to be heard.
+          if (session) session.silenced = false;
+          return;
+        }
+        if (this.stoppedTranslatingClip) {
+          this.writePlayback(this.stoppedTranslatingClip);
+          this.markSpeaking();
+        } else {
+          this.playConfirmationTone('mute');
+        }
+      })
+      .catch((error) => {
+        console.error('Error leaving translator mode by voice:', error);
+        if (session && this.meetingMode === 'translator') session.silenced = false;
+      })
+      .finally(() => {
+        this.leavingTranslator = false;
+      });
+  }
+
+  /** Render the stopped-translating confirmation, once, in the background. */
+  private renderStoppedTranslatingClip(): void {
+    const client = this.bedrockClient;
+    if (!client || this.stoppedTranslatingClip || this.stoppedTranslatingClipRendering) return;
+    this.stoppedTranslatingClipRendering = true;
+    renderToolAckClip(client, this.modelId, this.voiceId, STOPPED_TRANSLATING_PHRASE)
+      .then((clip) => {
+        this.stoppedTranslatingClip = clip;
+      })
+      .catch((error) => {
+        console.warn('[voice-mode] action=render-failed', error);
+      })
+      .finally(() => {
+        this.stoppedTranslatingClipRendering = false;
+      });
+  }
+
   /** Emit the one canonical log line for a toggle and return the outcome
    *  unchanged, so every exit from `reconfigure` is recorded. */
   private recordReconfigure(
@@ -4427,6 +4700,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     console.log(`🔀 Meeting mode is now ${mode}`);
     if (mode === 'translator') {
       console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
+      this.renderStoppedTranslatingClip();
     }
   }
 
