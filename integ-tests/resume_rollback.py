@@ -68,6 +68,14 @@ def resume_if_stuck(cfn: Any, stack: str) -> bool:
         except Exception as exc:  # noqa: BLE001 - the reason is best-effort
             failures = []
             print(f"(the stack's events could not be read: {type(exc).__name__})")
+        status = cfn.describe_stacks(StackName=stack)["Stacks"][0]["StackStatus"]
+        if status.endswith("_IN_PROGRESS"):
+            # Out of waiting time, not failed: it may well finish on its own.
+            print(
+                f"The resumed rollback is still running ({status}) after the wait; "
+                "the next night's deploy will find it finished or resume it again."
+            )
+            raise
         print("Error: the resumed rollback did not complete.")
         for failure in failures:
             print(f"✗ {failure['where']}: {failure_cause.reason(failure['reason'])}")

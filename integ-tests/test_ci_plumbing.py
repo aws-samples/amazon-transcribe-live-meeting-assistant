@@ -466,7 +466,7 @@ def test_a_long_cause_keeps_the_post_inside_its_budget(tmp_path: Path, capsys):
         ]
     )
     summary = json.loads(capsys.readouterr().out)["summary"]
-    assert len(summary) <= junit_summary._DEFAULT_MAX_CHARS + 100
+    assert len(summary) <= junit_summary._DEFAULT_MAX_CHARS + len("\n… (truncated — see the job log)")
     assert "line 0 " in summary
 
 
@@ -747,6 +747,27 @@ def test_a_resumed_rollback_that_fails_names_the_resources_that_failed_again(cap
     assert "✗ CHILD → Image: did not stabilize" in out
     # A line the cause step's log reader picks out of deploy-output.log.
     assert failure_cause.log_cause(out)[:1] == ["Error: the resumed rollback did not complete."]
+
+
+def test_a_resumed_rollback_still_running_after_the_wait_is_not_called_failed(capsys):
+    """Running out of waiting time is not a failure that needs a person."""
+    cfn = mock.Mock()
+    cfn.describe_stacks.side_effect = [
+        {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED"}]},
+        {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_IN_PROGRESS"}]},
+    ]
+    cfn.get_waiter.return_value.wait.side_effect = RuntimeError("Max attempts exceeded")
+    with mock.patch.object(resume_rollback.failure_cause, "own_failures", return_value=[]):
+        with pytest.raises(RuntimeError):
+            resume_rollback.resume_if_stuck(cfn, "s")
+    out = capsys.readouterr().out
+    assert "still running" in out
+    assert "needs a person" not in failure_cause.describe("deploy", out, ["Stack is X."])
+
+
+def test_only_a_failed_status_line_is_treated_as_decisive():
+    log = "Status: UPDATE_IN_PROGRESS\nStatus: UPDATE_ROLLBACK_FAILED\n"
+    assert failure_cause.log_cause(log) == ["Status: UPDATE_ROLLBACK_FAILED"]
 
 
 def test_a_stuck_rollback_is_resumed_without_skipping_resources_and_awaited():

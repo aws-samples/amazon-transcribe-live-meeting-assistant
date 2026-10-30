@@ -57,7 +57,7 @@ MAX_BUILD_LINES = 3
 # runner's ANSI colouring already removed.
 _DECISIVE = re.compile(
     r"(^Traceback |^\w*(Error|Exception)\b|^E\s|^ERROR\b|^FAILED\b|^Error:|"
-    r"\berror:|^npm ERR!|^make: \*\*\* |^✗|^❌|Status: )"
+    r"\berror:|^npm ERR!|^make: \*\*\* |^✗|^❌|^Status: \S*FAILED)"
 )
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 _RULE = re.compile(r"^[\s━─=\-]+$")
