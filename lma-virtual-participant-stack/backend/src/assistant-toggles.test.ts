@@ -504,7 +504,7 @@ test('leaving translator mode restores the wake phrase it replaced', async () =>
     assert.equal(restore.pending(), null, 'a restore is used once');
 });
 
-test('leaving group mode restores the activation mode it replaced', async () => {
+test('leaving listen mode restores the activation mode it replaced', async () => {
     const assistant = statefulAssistant('normal', 'wake_phrase');
     const restore = createActivationRestore();
     await typeCommands(assistant, restore, 'LMA listen', 'LMA assist');

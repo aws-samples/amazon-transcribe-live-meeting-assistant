@@ -9,9 +9,9 @@
  *
  * Two things about the assistant are worth changing mid-meeting, and until now
  * both were fixed for the life of the Virtual Participant: the meeting mode
- * (`normal` assistant / `group` listening, which the chat calls `listen` /
- * `translator`), which came from the
- * Nova Sonic configuration record and was read once at task start, and the
+ * (`normal` assistant / `group` listening — `listen` in the chat — /
+ * `translator`), which came from the Nova Sonic configuration record and was
+ * read once at task start, and the
  * activation mode (`always_active` / `wake_phrase`), which came from a stack
  * parameter. Changing either meant editing configuration and starting a new
  * meeting.
@@ -38,6 +38,12 @@ import type { MeetingMode } from './nova-sonic-config-loader.js';
 import { details } from './details.js';
 // So "@LMA, translate!" and "lma translate" arrive at the matcher the same.
 import { normalizeChatText as normalize } from './chat-text.js';
+import {
+    foldLanguageText,
+    meetingLanguage,
+    resolveTranslatorLanguage,
+    supportedTranslatorLanguageNames,
+} from './translator-languages.js';
 
 /**
  * Which surface asked for the change, recorded on every toggle so one log line
@@ -55,6 +61,13 @@ export interface AssistantReconfigureRequest {
     meetingMode?: MeetingMode;
     /** Activation mode to switch to. Omitted leaves the current mode alone. */
     activationMode?: ActivationMode;
+    /**
+     * The translator's language pair for the rest of this meeting. `b` is the
+     * language asked for; `a` is the meeting's own language, omitted when the
+     * route could not tell, in which case the provider keeps its configured
+     * first language. Omitted leaves the pair alone. Never persisted.
+     */
+    translatorLanguages?: { a?: string; b: string };
     /** Which surface the request came from. */
     route: AssistantToggleRoute;
     /** Who asked, when the route knows (a chat sender name, a signed-in user). */
@@ -73,15 +86,17 @@ export type AssistantToggleResult = 'applied' | 'unchanged' | 'declined';
 
 export interface AssistantReconfigureOutcome {
     result: AssistantToggleResult;
-    /** The fields that changed, from `['meetingMode', 'activationMode']`. Empty
-     *  unless `result` is `applied`. */
-    changed: Array<'meetingMode' | 'activationMode'>;
+    /** The fields that changed. Empty unless `result` is `applied`. */
+    changed: Array<'meetingMode' | 'activationMode' | 'translatorLanguages'>;
     /** Whether the provider tore down and rebuilt its model session. */
     sessionRebuilt: boolean;
     meetingModeBefore: MeetingMode;
     meetingModeAfter: MeetingMode;
     activationModeBefore: ActivationMode;
     activationModeAfter: ActivationMode;
+    /** The translator's language pair once the request settled, set when the
+     *  assistant ends up in translator mode. */
+    translatorLanguagesAfter?: { a: string; b: string };
     /**
      * Extra context for the participant and for the log. Always set when
      * `result` is not `applied`, saying why; may also be set on an applied
@@ -157,6 +172,12 @@ export function publishMeetingMode(mode: MeetingMode): void {
 export interface AssistantChatCommand {
     meetingMode?: MeetingMode;
     activationMode?: ActivationMode;
+    /** `LMA translate <language>`: the supported language asked for, by its
+     *  canonical name. */
+    translatorLanguage?: string;
+    /** `LMA translate <word>` where the word is not a supported language. The
+     *  command carries no change; it is answered with the supported list. */
+    unsupportedLanguage?: string;
 }
 
 /**
@@ -174,7 +195,7 @@ export interface AssistantChatCommand {
  * `assist` rather than with `normal` because the pair has to read as two jobs
  * the assistant can do, not as one mode and the absence of it.
  *
- * `translate` and `group` both also set `always_active`, because neither mode
+ * `translate` and `listen` (`group`) both also set `always_active`, because neither mode
  * works without it. A translator speaks on every completed utterance, so on
  * `wake_phrase` activation it receives no audio until somebody says the wake
  * phrase and translates nothing in between. Group mode is worse: it starts muted
@@ -186,7 +207,7 @@ export interface AssistantChatCommand {
  * a reading of these commands worth supporting.
  *
  * `assist` carries no activation change of its own: `normal` mode works under
- * either activation mode. When `translate` or `group` switched activation on
+ * either activation mode. When `translate` or `listen` switched activation on
  * the way in, though, leaving that mode puts back the activation mode it
  * replaced — see `createActivationRestore`, which `applyAssistantChatCommand`
  * consults, so a wake-phrase meeting that was briefly translated goes back to
@@ -210,7 +231,7 @@ export const ASSISTANT_CHAT_COMMANDS: ReadonlyArray<AssistantChatCommandEntry> =
     {
         phrases: ['translate', 'translator', 'translate mode', 'translator mode', 'interpret'],
         command: { meetingMode: 'translator', activationMode: 'always_active' },
-        summary: 'translator mode',
+        summary: 'translator mode; add a language to pick it',
     },
     {
         phrases: ['assist', 'assistant', 'assist mode', 'assistant mode', 'normal', 'normal mode'],
@@ -245,6 +266,13 @@ const CHAT_COMMANDS: ReadonlyArray<readonly [string, AssistantChatCommand]> = AS
 const CHAT_COMMAND_INDEX: ReadonlyMap<string, AssistantChatCommand> = new Map(CHAT_COMMANDS);
 
 /**
+ * `translate <language>` and its variants: the translate phrases, optionally
+ * followed by "to" / "into" / "in", then the language. The language part is
+ * matched against the closed list in translator-languages.ts.
+ */
+const TRANSLATE_WITH_LANGUAGE = /^(?:translate|translator|interpret)(?: mode)?(?: (?:to|into|in))? (.+)$/;
+
+/**
  * Whether `message` is a participant asking the assistant to change mode, and
  * which change they asked for.
  *
@@ -265,7 +293,9 @@ const CHAT_COMMAND_INDEX: ReadonlyMap<string, AssistantChatCommand> = new Map(CH
 export function parseAssistantChatCommand(message: string): AssistantChatCommand | null {
     if (!message) return null;
 
-    const normalized = normalize(message);
+    // Accents are folded as well, so "LMA translate Español" keeps its
+    // language rather than splitting it at the accent.
+    const normalized = foldLanguageText(message);
     if (!normalized) return null;
 
     const tokens = normalized.split(' ');
@@ -274,9 +304,23 @@ export function parseAssistantChatCommand(message: string): AssistantChatCommand
 
     const remainder = [...tokens.slice(0, addressee), ...tokens.slice(addressee + 1)].join(' ');
     const command = CHAT_COMMAND_INDEX.get(remainder);
-    if (!command) return null;
+    if (command) return { ...command };
 
-    return { ...command };
+    // `translate <language>`. A single unknown word of letters is answered
+    // with the supported list, because "LMA translate klingon" is plainly a
+    // request;
+    // several unknown words ("LMA translate the slides") are ordinary chat and
+    // are left alone, like any other message that is not a command.
+    const withLanguage = TRANSLATE_WITH_LANGUAGE.exec(remainder);
+    if (!withLanguage) return null;
+    const language = resolveTranslatorLanguage(withLanguage[1]);
+    if (language) {
+        return { ...CHAT_COMMAND_INDEX.get('translate'), translatorLanguage: language.name };
+    }
+    if (/^[a-z]{2,20}$/.test(withLanguage[1])) {
+        return { unsupportedLanguage: withLanguage[1] };
+    }
+    return null;
 }
 
 /**
@@ -374,8 +418,12 @@ export function assistantToggleChatReply(outcome: AssistantReconfigureOutcome): 
     }
 
     const parts: string[] = [];
+    const pair = outcome.translatorLanguagesAfter;
     if (outcome.changed.includes('meetingMode')) {
-        parts.push(`switched to ${describeMeetingMode(outcome.meetingModeAfter)}`);
+        const pairText = pair ? ` (${pair.a} and ${pair.b})` : '';
+        parts.push(`switched to ${describeMeetingMode(outcome.meetingModeAfter)}${pairText}`);
+    } else if (outcome.changed.includes('translatorLanguages') && pair) {
+        parts.push(`now translating between ${pair.a} and ${pair.b}`);
     }
     if (outcome.changed.includes('activationMode')) {
         parts.push(`now ${describeActivationMode(outcome.activationModeAfter)}`);
@@ -392,7 +440,7 @@ export function assistantToggleChatReply(outcome: AssistantReconfigureOutcome): 
  * Remembers the activation mode a forced-always-listening meeting mode replaced,
  * so leaving that mode can put it back.
  *
- * `translate` and `group` ask for `always_active` because neither mode works
+ * `translate` and `listen` ask for `always_active` because neither mode works
  * without it (see `requiresAlwaysListening`). That is a side effect of the mode,
  * not something the participant chose, so when the meeting later leaves the
  * mode — `LMA assist`, today the only mode that does not need always-listening —
@@ -518,6 +566,33 @@ export async function applyAssistantChatCommand(
     requestedBy?: string | null,
     restore: ActivationRestore = meetingActivationRestore,
 ): Promise<string[]> {
+    const prefix = 'Live Meeting Assistant:';
+    if (command.unsupportedLanguage !== undefined) {
+        console.log(
+            `${ASSISTANT_TOGGLE_LOG_TAG} route=chat result=declined`
+                + ` detail="unsupported translator language ${logSafe(command.unsupportedLanguage)}"`,
+        );
+        return [
+            `${prefix} I can't translate into "${command.unsupportedLanguage}". `
+                + `Supported languages: ${supportedTranslatorLanguageNames().join(', ')}.`,
+        ];
+    }
+
+    // The other half of the pair is the meeting's own language, from how it is
+    // being transcribed. When that is unknown the provider keeps its configured
+    // first language.
+    let translatorLanguages: AssistantReconfigureRequest['translatorLanguages'];
+    if (command.translatorLanguage !== undefined) {
+        const own = meetingLanguage(details.transcribeLanguageCode, details.transcribePreferredLanguage);
+        if (own && own.name === command.translatorLanguage) {
+            return [
+                `${prefix} ${own.name} is the language this meeting is transcribed in.`
+                    + ' Name the language to translate it into, for example "LMA translate French".',
+            ];
+        }
+        translatorLanguages = { a: own?.name, b: command.translatorLanguage };
+    }
+
     const sent = restore.requestFor(command);
     if (sent.activationMode !== command.activationMode) {
         console.log(
@@ -528,12 +603,25 @@ export async function applyAssistantChatCommand(
     const outcome = await assistant.reconfigure({
         meetingMode: sent.meetingMode,
         activationMode: sent.activationMode,
+        ...(translatorLanguages ? { translatorLanguages } : {}),
         route: 'chat',
         requestedBy,
     });
     restore.record(command, sent, outcome);
 
-    return assistantToggleChatReply(outcome);
+    const reply = assistantToggleChatReply(outcome);
+    // A language set from chat lasts for this meeting and is not written to
+    // the configuration store. A chat sender is known only by the display name
+    // the meeting platform shows, which the participant chooses, so no sender
+    // can be tied to the LMA user who launched this Virtual Participant; the
+    // deployment default stays an Admin setting on the configuration page.
+    if (translatorLanguages && outcome.result === 'applied') {
+        return [
+            `${reply[0]} This applies to this meeting only; the default language pair is set`
+                + ' on the Nova Sonic Configuration page.',
+        ];
+    }
+    return reply;
 }
 
 // ---------------------------------------------------------------------------
@@ -601,6 +689,11 @@ export function formatAssistantToggleLog(
         axis('activationMode', outcome.activationModeBefore, outcome.activationModeAfter),
         `session=${outcome.sessionRebuilt ? 'rebuilt' : 'kept'}`,
     ];
+    if (request.translatorLanguages) {
+        const pair = outcome.translatorLanguagesAfter;
+        const unchanged = outcome.changed.includes('translatorLanguages') ? '' : '(unchanged)';
+        fields.push(`translator="${pair ? `${logSafe(pair.a)}<->${logSafe(pair.b)}` : '-'}"${unchanged}`);
+    }
     if (outcome.detail) {
         fields.push(`detail="${logSafe(outcome.detail)}"`);
     }

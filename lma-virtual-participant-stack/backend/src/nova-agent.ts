@@ -3914,12 +3914,37 @@ export class NovaAgent implements VoiceAssistantProvider {
       return notApplied('declined', `unrecognised activation mode "${request.activationMode}"`);
     }
 
-    const changed: Array<'meetingMode' | 'activationMode'> = [];
+    // The translator pair, when one was asked for. `a` falls back to the
+    // configured first language when the route could not name the meeting's
+    // own, and to the second when the first is the language asked for — so
+    // "translate English" on a deployment configured English/Spanish still
+    // produces a pair rather than English to English.
+    let languagesAfter: { a: string; b: string } | undefined;
+    if (request.translatorLanguages !== undefined) {
+      const same = (x: string, y: string) => x.trim().toLowerCase() === y.trim().toLowerCase();
+      const b = (request.translatorLanguages.b || '').trim();
+      let a = (request.translatorLanguages.a || '').trim();
+      if (!a) {
+        a = same(this.translatorLanguageA, b) ? this.translatorLanguageB : this.translatorLanguageA;
+      }
+      if (!b || same(a, b)) {
+        return notApplied('declined', `${b || 'that'} is already the other language of the pair`);
+      }
+      languagesAfter = { a, b };
+    }
+
+    const changed: Array<'meetingMode' | 'activationMode' | 'translatorLanguages'> = [];
     if (request.meetingMode !== undefined && request.meetingMode !== meetingModeBefore) {
       changed.push('meetingMode');
     }
     if (request.activationMode !== undefined && request.activationMode !== activationModeBefore) {
       changed.push('activationMode');
+    }
+    if (
+      languagesAfter
+      && (languagesAfter.a !== this.translatorLanguageA || languagesAfter.b !== this.translatorLanguageB)
+    ) {
+      changed.push('translatorLanguages');
     }
 
     // Ahead of the no-change check: the new values are on the agent as soon as
@@ -3934,7 +3959,12 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Without this, a participant retyping a command — or a chat observer
     // delivering one twice — would tear down a working session each time.
     if (changed.length === 0) {
-      return notApplied('unchanged', 'already in the requested configuration');
+      return notApplied(
+        'unchanged',
+        languagesAfter
+          ? `already translating between ${this.translatorLanguageA} and ${this.translatorLanguageB}`
+          : 'already in the requested configuration',
+      );
     }
 
     // Validate the combination, not just each axis. Group and translator mode
@@ -3970,6 +4000,15 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     this._reconfiguring = true;
     try {
+      // Before the meeting mode, so entering translator mode logs the new pair.
+      if (changed.includes('translatorLanguages') && languagesAfter) {
+        this.translatorLanguageA = languagesAfter.a;
+        this.translatorLanguageB = languagesAfter.b;
+        // Turns translated under the old pair would prime the new session to
+        // keep translating into the language it has just left.
+        this.conversationHistory = [];
+        console.log(`🌐 Translator languages are now ${languagesAfter.a} ↔ ${languagesAfter.b} (this meeting only)`);
+      }
       if (changed.includes('meetingMode')) {
         this.applyMeetingMode(request.meetingMode as MeetingMode);
       }
@@ -4011,6 +4050,9 @@ export class NovaAgent implements VoiceAssistantProvider {
         meetingModeAfter: this.meetingMode,
         activationModeBefore,
         activationModeAfter: this.activationMode as ActivationMode,
+        translatorLanguagesAfter: this.meetingMode === 'translator'
+          ? { a: this.translatorLanguageA, b: this.translatorLanguageB }
+          : undefined,
         detail,
       });
     } finally {

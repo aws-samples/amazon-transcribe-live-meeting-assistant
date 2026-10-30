@@ -680,7 +680,7 @@ test('a rebuild that fails still answers the participant and leaves one log line
 
     // The participant is told it landed, and that it is still settling.
     assert.deepEqual(assistantToggleChatReply(outcome), [
-        'Live Meeting Assistant: switched to translator mode, the assistant will finish switching shortly.',
+        'Live Meeting Assistant: switched to translator mode (English and Spanish), the assistant will finish switching shortly.',
     ]);
 });
 
