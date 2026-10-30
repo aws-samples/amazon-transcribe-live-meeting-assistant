@@ -9,7 +9,8 @@
  *
  * Two things about the assistant are worth changing mid-meeting, and until now
  * both were fixed for the life of the Virtual Participant: the meeting mode
- * (`normal` assistant / `group` listening / `translator`), which came from the
+ * (`normal` assistant / `group` listening, which the chat calls `listen` /
+ * `translator`), which came from the
  * Nova Sonic configuration record and was read once at task start, and the
  * activation mode (`always_active` / `wake_phrase`), which came from a stack
  * parameter. Changing either meant editing configuration and starting a new
@@ -217,9 +218,12 @@ export const ASSISTANT_CHAT_COMMANDS: ReadonlyArray<AssistantChatCommandEntry> =
         summary: 'assistant mode',
     },
     {
-        phrases: ['group', 'group mode'],
+        // `listen` is the name participants are told; `group` is the name of
+        // the configuration value and was the chat command before it, so it
+        // stays accepted. Only the first phrase is listed by `LMA help`.
+        phrases: ['listen', 'listen mode', 'listening mode', 'group', 'group mode'],
         command: { meetingMode: 'group', activationMode: 'always_active' },
-        summary: 'group mode',
+        summary: 'listen mode, quiet until addressed',
     },
     // Activation mode — when the assistant is listening.
     {
@@ -327,7 +331,7 @@ export function describeMeetingMode(mode: MeetingMode): string {
         case 'translator':
             return 'translator mode';
         case 'group':
-            return 'group mode';
+            return 'listen mode';
         case 'normal':
             return 'assistant mode';
         default: {
@@ -442,11 +446,13 @@ export function createActivationRestore() {
         /** Update the memory from what was asked for and how it ended. */
         record(command: AssistantChatCommand, sent: AssistantChatCommand, outcome: AssistantReconfigureOutcome): void {
             if (outcome.result === 'declined') {
-                // An activation request the current mode refused is a wish for
-                // when the mode ends, not a request that did not happen. Only a
-                // request to stop listening continuously can be refused by the
-                // combination rule; a declined `LMA always` was refused for some
-                // other reason (a switch still in progress) and is not a wish.
+                // An activation request refused while a forcing mode is running
+                // is a wish for when the mode ends, not a request that did not
+                // happen. That holds for any refused `LMA wake`, whether the
+                // combination rule or a switch still in progress refused it —
+                // either way the participant asked to stop listening
+                // continuously. A refused `LMA always` cannot be the
+                // combination rule, so it is not taken as a wish.
                 if (
                     command.meetingMode === undefined
                     && command.activationMode !== undefined
@@ -515,7 +521,7 @@ export async function applyAssistantChatCommand(
     const sent = restore.requestFor(command);
     if (sent.activationMode !== command.activationMode) {
         console.log(
-            `${ASSISTANT_TOGGLE_LOG_TAG} restoring activationMode=${sent.activationMode}`
+            `${ASSISTANT_TOGGLE_LOG_TAG} requesting restore of activationMode=${sent.activationMode}`
                 + ` on leaving an always-listening meeting mode for meetingMode=${command.meetingMode}`,
         );
     }
