@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -35,7 +36,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cognito_test_user  # noqa: E402
+import failure_cause  # noqa: E402
 import junit_summary  # noqa: E402
+import resume_rollback  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -368,8 +371,8 @@ def test_a_failed_publish_stage_names_the_stage_rather_than_the_missing_report(
     assert "No JUnit report" not in payload["summary"]
 
 
-def test_a_failed_deploy_stage_warns_that_the_stack_may_need_attention(tmp_path: Path, capsys):
-    """A stack stuck mid-update fails every following night, so say so once."""
+def test_a_failed_deploy_stage_says_what_the_next_night_will_do(tmp_path: Path, capsys):
+    """A stuck rollback is resumed by the next deploy, and the post says so."""
     exit_code = junit_summary.main(
         [
             "--report",
@@ -385,7 +388,7 @@ def test_a_failed_deploy_stage_warns_that_the_stack_may_need_attention(tmp_path:
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert "deploy stage failed" in payload["summary"]
-    assert "every night" in payload["summary"]
+    assert "resumes a rollback" in payload["summary"]
 
 
 def test_the_tests_stage_is_the_default_and_still_summarises_the_report(tmp_path: Path, capsys):
@@ -407,6 +410,248 @@ def test_an_unknown_stage_is_refused_rather_than_silently_mislabelled(tmp_path: 
         junit_summary.main(
             ["--report", str(tmp_path / "absent.xml"), "--status", "failed", "--stage", "deployy"]
         )
+
+
+def test_a_failed_stage_quotes_its_cause_ahead_of_the_general_guidance(
+    tmp_path: Path, capsys
+):
+    """The reason is the news; the stage's standing advice is the same every night."""
+    cause = tmp_path / "failure-cause.txt"
+    cause.write_text("Stack is UPDATE_ROLLBACK_COMPLETE.\n• CodeBuildRun: build failed\n")
+    junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "deploy",
+            "--cause",
+            str(cause),
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert "• CodeBuildRun: build failed" in summary
+    assert summary.index("CodeBuildRun") < summary.index("resumes a rollback")
+
+
+def test_an_empty_or_missing_cause_leaves_the_failed_stage_post_unchanged(
+    tmp_path: Path, capsys
+):
+    """The after_script always creates the file, and empty means nothing to quote."""
+    empty = tmp_path / "failure-cause.txt"
+    empty.write_text("")
+    args = ["--report", str(tmp_path / "absent.xml"), "--status", "failed", "--stage", "publish"]
+    junit_summary.main(args)
+    plain = json.loads(capsys.readouterr().out)["summary"]
+    junit_summary.main(args + ["--cause", str(empty)])
+    assert json.loads(capsys.readouterr().out)["summary"] == plain
+    junit_summary.main(args + ["--cause", str(tmp_path / "absent.txt")])
+    assert json.loads(capsys.readouterr().out)["summary"] == plain
+
+
+def test_a_long_cause_keeps_the_post_inside_its_budget(tmp_path: Path, capsys):
+    cause = tmp_path / "failure-cause.txt"
+    cause.write_text("\n".join(f"line {i} " + "x" * 80 for i in range(100)))
+    junit_summary.main(
+        [
+            "--report",
+            str(tmp_path / "absent.xml"),
+            "--status",
+            "failed",
+            "--stage",
+            "deploy",
+            "--cause",
+            str(cause),
+        ]
+    )
+    summary = json.loads(capsys.readouterr().out)["summary"]
+    assert len(summary) <= junit_summary._DEFAULT_MAX_CHARS + 100
+    assert "line 0 " in summary
+
+
+# ── why a publish or deploy failed ──────────────────────────────────────────
+
+
+def test_the_decisive_lines_of_a_job_log_are_quoted():
+    log = "\n".join(
+        ["Installing...", "\x1b[31mERROR: npm run build exited 2\x1b[0m", "Done", "make: *** [build] Error 2"]
+    )
+    assert failure_cause.log_cause(log) == [
+        "ERROR: npm run build exited 2",
+        "make: *** [build] Error 2",
+    ]
+
+
+def test_a_log_with_no_decisive_line_is_quoted_from_its_end():
+    log = "\n".join(f"step {i}" for i in range(40))
+    lines = failure_cause.log_cause(log)
+    assert lines[-1] == "step 39"
+    assert len(lines) == failure_cause.MAX_LOG_LINES
+
+
+def test_a_job_that_wrote_no_output_is_said_to_have_failed_in_setup():
+    text = failure_cause.describe("publish", None, None)
+    assert "before its main step started" in text
+
+
+_T0 = datetime(2026, 10, 30, 0, 17, tzinfo=timezone.utc)
+_ROOT = "arn:aws:cloudformation:us-west-2:1:stack/root/a"
+_CHILD = "arn:aws:cloudformation:us-west-2:1:stack/root-CHILD/b"
+
+
+def _event(stack_id, minutes, logical, status, reason="", rtype="AWS::Lambda::Function", physical=None):
+    return {
+        "StackId": stack_id,
+        "Timestamp": _T0 + timedelta(minutes=minutes),
+        "LogicalResourceId": logical,
+        "ResourceStatus": status,
+        "ResourceStatusReason": reason,
+        "ResourceType": rtype,
+        "PhysicalResourceId": physical if physical is not None else logical,
+    }
+
+
+class _Paged:
+    def __init__(self, pages):
+        self._pages = pages
+
+    def paginate(self, **kwargs):
+        return self._pages(**kwargs)
+
+
+class _StubCfn:
+    """Events newest first, as describe_stack_events returns them."""
+
+    def __init__(self, events, resources=(), status="UPDATE_ROLLBACK_COMPLETE"):
+        self._events = events
+        self._resources = resources
+        self._status = status
+
+    def describe_stacks(self, StackName):
+        return {"Stacks": [{"StackStatus": self._status}]}
+
+    def get_paginator(self, name):
+        if name == "describe_stack_events":
+            return _Paged(
+                lambda StackName: [{"StackEvents": sorted(
+                    [e for e in self._events if e["StackId"] == StackName or (StackName == "root" and e["StackId"] == _ROOT)],
+                    key=lambda e: e["Timestamp"], reverse=True,
+                )}]
+            )
+        return _Paged(lambda StackName: [{"StackResourceSummaries": list(self._resources)}])
+
+
+def _failed_update_events():
+    return [
+        # Last night's successful update, which must not be reported.
+        _event(_ROOT, -1440, "root", "UPDATE_IN_PROGRESS", "User Initiated", "AWS::CloudFormation::Stack", _ROOT),
+        _event(_ROOT, -1439, "Old", "UPDATE_FAILED", "an old failure"),
+        _event(_ROOT, 0, "root", "UPDATE_IN_PROGRESS", "User Initiated", "AWS::CloudFormation::Stack", _ROOT),
+        _event(_CHILD, 1, "CodeBuildRun", "UPDATE_FAILED",
+               "Received response status [FAILED] from custom resource. Message returned: "
+               "build did not complete - status: [FAILED] (RequestId: abc)", "Custom::CodeBuildRun"),
+        _event(_ROOT, 2, "CHILD", "UPDATE_FAILED",
+               "Embedded stack x was not successfully updated", "AWS::CloudFormation::Stack", _CHILD),
+        _event(_ROOT, 2, "Other", "UPDATE_FAILED", "Resource update cancelled"),
+        _event(_ROOT, 2, "root", "UPDATE_ROLLBACK_IN_PROGRESS", "The following resource(s) failed",
+               "AWS::CloudFormation::Stack", _ROOT),
+        _event(_ROOT, 5, "Image", "UPDATE_FAILED", "Resource handler returned message: did not stabilize"),
+    ]
+
+
+class _StubCodeBuild:
+    def list_builds_for_project(self, projectName):
+        return {"ids": ["p:new", "p:old"]}
+
+    def batch_get_builds(self, ids):
+        return {"builds": [
+            {
+                "buildStatus": "FAILED",
+                "startTime": _T0 + timedelta(seconds=30),
+                "phases": [{"phaseType": "BUILD", "phaseStatus": "FAILED",
+                            "contexts": [{"message": "Error while executing command: docker build"}]}],
+                "logs": {"groupName": "g", "streamName": "s"},
+            },
+        ]}
+
+
+class _StubLogs:
+    def get_log_events(self, **kwargs):
+        lines = [
+            "[Container] 2026/10/30 Running command docker build",
+            "Step 2/23 : FROM node AS builder",
+            "Get https://public.ecr.aws/x: net/http: TLS handshake timeout",
+            "",
+            "[Container] 2026/10/30 Command did not exit successfully docker build exit status 1",
+            "after the failure",
+        ]
+        return {"events": [{"message": line + "\n"} for line in lines]}
+
+
+def test_a_deploy_cause_names_the_nested_resource_and_its_build_log():
+    """The CodeBuild run's own log is where the actual reason is."""
+    cfn = _StubCfn(
+        _failed_update_events(),
+        resources=[{"ResourceType": "AWS::CodeBuild::Project", "PhysicalResourceId": "p"}],
+    )
+    lines = failure_cause.stack_cause(cfn, _StubCodeBuild(), _StubLogs(), "root")
+    text = "\n".join(lines)
+    assert lines[0].startswith("Stack is UPDATE_ROLLBACK_COMPLETE: it rolled back")
+    assert "• CHILD → CodeBuildRun: build did not complete - status: [FAILED]" in text
+    assert "RequestId" not in text
+    assert "CodeBuild BUILD phase: Error while executing command: docker build" in text
+    assert "TLS handshake timeout" in text
+    assert "after the failure" not in text
+
+
+def test_a_deploy_cause_separates_rollback_failures_and_skips_cascades_and_old_runs():
+    lines = failure_cause.stack_cause(
+        _StubCfn(_failed_update_events(), status="UPDATE_ROLLBACK_FAILED"),
+        _StubCodeBuild(), _StubLogs(), "root",
+    )
+    text = "\n".join(lines)
+    assert "resumes it before deploying" in lines[0]
+    assert text.index("CodeBuildRun") < text.index("during the rollback") < text.index("Image")
+    assert "Image: did not stabilize" in text
+    assert "Other" not in text
+    assert "old failure" not in text
+
+
+def test_a_stack_cause_is_preferred_to_the_log_but_the_log_fills_in_when_it_says_nothing():
+    stack_lines = ["Stack is UPDATE_COMPLETE."]
+    text = failure_cause.describe("deploy", "Error: No updates are to be performed", stack_lines)
+    assert text.splitlines() == ["Stack is UPDATE_COMPLETE.", "Error: No updates are to be performed"]
+    assert failure_cause.describe("deploy", "Error: x", ["Stack is A.", "Failed:"]) == "Stack is A.\nFailed:"
+
+
+def test_the_cause_script_never_fails_the_after_script(tmp_path: Path, capsys):
+    """No credentials, no stack: still a cause from the log, and exit 0."""
+    log = tmp_path / "deploy-output.log"
+    log.write_text("Error: something broke\n")
+    with mock.patch.object(failure_cause, "_stack_cause_or_none", return_value=None):
+        code = failure_cause.main(["--stage", "deploy", "--log", str(log), "--stack", "s"])
+    assert code == 0
+    assert "Error: something broke" in capsys.readouterr().out
+
+
+# ── resuming a stuck rollback ───────────────────────────────────────────────
+
+
+def test_a_stack_in_any_other_state_is_left_alone():
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_COMPLETE"}]}
+    assert resume_rollback.resume_if_stuck(cfn, "s") is False
+    cfn.continue_update_rollback.assert_not_called()
+
+
+def test_a_stuck_rollback_is_resumed_without_skipping_resources_and_awaited():
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED"}]}
+    assert resume_rollback.resume_if_stuck(cfn, "s") is True
+    cfn.continue_update_rollback.assert_called_once_with(StackName="s")
+    cfn.get_waiter.assert_called_once_with("stack_rollback_complete")
+    cfn.get_waiter.return_value.wait.assert_called_once()
 
 
 # ── the per-test listing ────────────────────────────────────────────────────
@@ -608,6 +853,23 @@ def test_the_nightly_deploy_refuses_to_pass_off_an_unchanged_stack() -> None:
 def test_the_nightly_deploy_waits_for_the_stack_before_testing_it() -> None:
     """Without --wait the suite races the update it just started."""
     assert "--wait" in _nightly_deploy_command()
+
+
+def test_the_nightly_deploy_resumes_a_stuck_rollback_before_deploying() -> None:
+    """Otherwise one failed rollback fails every night after it."""
+    deploy_job = _nightly_deploy_command()
+    assert "integ-tests/resume_rollback.py" in deploy_job
+    assert deploy_job.index("resume_rollback.py") < deploy_job.index("lma deploy")
+
+
+def test_the_nightly_publish_and_deploy_capture_what_the_cause_step_reads() -> None:
+    """The after_script reads $NIGHTLY_STAGE-output.log; a renamed file quotes nothing."""
+    config = (Path(__file__).resolve().parents[1] / ".gitlab-ci.yml").read_text()
+    assert '--log "$NIGHTLY_STAGE-output.log"' in config
+    assert "--cause failure-cause.txt" in config
+    publish = config.split("nightly_publish:", 1)[1].split("\nnightly_deploy:", 1)[0]
+    assert "| tee publish-output.log" in publish
+    assert "| tee -a deploy-output.log" in _nightly_deploy_command()
 
 
 def test_a_skip_from_an_off_by_default_feature_is_not_an_environment_gap() -> None:

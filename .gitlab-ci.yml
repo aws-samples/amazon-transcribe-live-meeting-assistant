@@ -507,6 +507,23 @@ ai_mr_review:
 # one are documented in integ-tests/junit_summary.py — read that before
 # changing either side.
 .nightly_slack_post: &nightly_slack_post
+  # Why a publish or deploy failed, for the post below to quote. Each of those
+  # jobs captures its main step's output to $NIGHTLY_STAGE-output.log, and the
+  # deploy's cause is read from the stack's own events as well, through every
+  # nested stack down to the build log of a failed in-stack CodeBuild run. The
+  # venv's python when the job got as far as creating it (it has boto3), the
+  # image's otherwise; either way a failure here only means less detail. The
+  # file is created either way so the declared artifact always exists, and
+  # empty is what junit_summary reads as "no cause to quote".
+  - |
+    : > failure-cause.txt
+    if [ "$CI_JOB_STATUS" != "success" ] && [ "$NIGHTLY_STAGE" != "tests" ]; then
+      CAUSE_PY=python3; [ -x .venv/bin/python ] && CAUSE_PY=.venv/bin/python
+      "$CAUSE_PY" integ-tests/failure_cause.py --stage "$NIGHTLY_STAGE" \
+        --log "$NIGHTLY_STAGE-output.log" \
+        --stack "$LMA_INTEG_STACK" --region "$AWS_DEFAULT_REGION" > failure-cause.txt \
+        || echo "⚠️ Could not determine the failure cause; posting without it"
+    fi
   # Built unconditionally, even when no webhook is configured and even when
   # this job is not the one that will post: it costs nothing, it prints the
   # stage's verdict to the end of the log (readable form on stderr, JSON on
@@ -530,6 +547,7 @@ ai_mr_review:
     --stack "$LMA_INTEG_STACK"
     --region "$AWS_DEFAULT_REGION"
     --template-url "$LMA_TEMPLATE_URL"
+    --cause failure-cause.txt
     --agent-report triage-report.txt > slack-payload.json
   - |
     if [ "$NIGHTLY_POST_WHEN" = "on_failure" ] && [ "$CI_JOB_STATUS" = "success" ]; then
@@ -642,13 +660,18 @@ nightly_publish:
     # --force: skip the SHA-based change detection. A nightly that reused a
     # previous build when it thought nothing had changed would be back to
     # testing an older artifact, which is the thing this job exists to stop.
-    - >
-      .venv/bin/lma publish
-      --source-dir .
-      --bucket-basename "$LMA_ARTIFACT_BUCKET_BASENAME"
-      --prefix "$LMA_ARTIFACT_PREFIX"
-      --region "$AWS_DEFAULT_REGION"
-      --force
+    #
+    # Captured to publish-output.log as well as the log, so a failure's Slack
+    # post can quote why (see .nightly_slack_post). pipefail so the pipe
+    # reports the publish's exit status rather than tee's.
+    - |
+      set -o pipefail
+      .venv/bin/lma publish \
+        --source-dir . \
+        --bucket-basename "$LMA_ARTIFACT_BUCKET_BASENAME" \
+        --prefix "$LMA_ARTIFACT_PREFIX" \
+        --region "$AWS_DEFAULT_REGION" \
+        --force 2>&1 | tee publish-output.log
 
   after_script: *nightly_slack_post
 
@@ -656,6 +679,8 @@ nightly_publish:
     when: always
     paths:
       - slack-payload.json
+      - publish-output.log
+      - failure-cause.txt
     expire_in: 1 month
 
 # ── 2/3: deploy what was just published ────────────────────────────────────
@@ -692,6 +717,16 @@ nightly_deploy:
       print(boto3.client('sts').get_caller_identity()['Arn'])"
 
   script:
+    # A stack whose last rollback could not finish refuses every update, so
+    # one bad night would otherwise fail every night after it. Resumed once,
+    # skipping nothing; a no-op on a stack in any other state. See the script.
+    # Captured to deploy-output.log, as the deploy below is, so the Slack post
+    # can quote it if this is what failed (see .nightly_slack_post).
+    - |
+      set -o pipefail
+      .venv/bin/python integ-tests/resume_rollback.py \
+        --stack "$LMA_INTEG_STACK" \
+        --region "$AWS_DEFAULT_REGION" 2>&1 | tee deploy-output.log
     # $LMA_TEMPLATE_URL is the URL the publish job uploaded to, derived in the
     # shared variables above rather than passed as an artifact or scraped from
     # the other job's log: the CLI builds it the same way (see
@@ -704,13 +739,16 @@ nightly_deploy:
     # says the stack "was built and deployed from this commit" when it was not.
     # A stack that silently stops tracking `develop` is worse than a red
     # pipeline, because the green one is read as evidence about the branch.
-    - >
-      .venv/bin/lma deploy
-      --stack-name "$LMA_INTEG_STACK"
-      --region "$AWS_DEFAULT_REGION"
-      --template-url "$LMA_TEMPLATE_URL"
-      --fail-if-unchanged
-      --wait
+    #
+    # Appended to deploy-output.log, after the rollback step's output.
+    - |
+      set -o pipefail
+      .venv/bin/lma deploy \
+        --stack-name "$LMA_INTEG_STACK" \
+        --region "$AWS_DEFAULT_REGION" \
+        --template-url "$LMA_TEMPLATE_URL" \
+        --fail-if-unchanged \
+        --wait 2>&1 | tee -a deploy-output.log
 
   after_script: *nightly_slack_post
 
@@ -718,6 +756,8 @@ nightly_deploy:
     when: always
     paths:
       - slack-payload.json
+      - deploy-output.log
+      - failure-cause.txt
     expire_in: 1 month
 
 # ── 3/3: run the suite against the stack just deployed ─────────────────────

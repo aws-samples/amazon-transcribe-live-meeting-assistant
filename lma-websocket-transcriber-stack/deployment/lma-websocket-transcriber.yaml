@@ -907,7 +907,24 @@ Resources:
                 # liblzma5 5.4.1-1 flagged by Mirador/CVE-2026-34743) even though
                 # the Dockerfile already applies the fix. Patching happens here at
                 # build time, so it adds zero container-startup cost.
-                - docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/
+                #
+                # Retried, up to three attempts, when the failure is a network
+                # fetch (a registry, apt or npm timing out or resetting the
+                # connection): one such blip otherwise fails the whole stack
+                # update and rolls it back. Any other failure is not retried.
+                - |
+                  for attempt in 1 2 3; do
+                    if docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/ > /tmp/docker-build.log 2>&1; then
+                      cat /tmp/docker-build.log
+                      break
+                    fi
+                    cat /tmp/docker-build.log
+                    if [ "$attempt" = 3 ] || ! grep -Eq 'TLS handshake timeout|i/o timeout|connection reset|Client\.Timeout|unexpected EOF|toomanyrequests|ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure resolving|Could not connect' /tmp/docker-build.log; then
+                      exit 1
+                    fi
+                    echo "docker build hit a network error (attempt $attempt of 3); retrying in $((attempt * 30))s"
+                    sleep $((attempt * 30))
+                  done
                 - >
                   printf '{"RepositoryUri":"%s","ProjectName":"%s","ArtifactBucket":"%s"}'
                   $REPOSITORY_URI $PROJECT_NAME $ARTIFACT_BUCKET > build.json
