@@ -10,6 +10,7 @@ import {
     parseAssistantChatCommand,
 } from './assistant-toggles.js';
 import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
@@ -868,6 +869,7 @@ export default class Webex {
             // reconfigure sees the requested mode already in place), but the
             // duplicate would post a second chat reply right after the first.
             const assistantToggle = parseAssistantChatCommand(message);
+            const chatQuestion = assistantToggle ? null : parseChatQuestion(message);
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
                 // (it can emit duplicate add events) — only act on the first.
@@ -915,6 +917,11 @@ export default class Webex {
                 await this.sendMessages(frame, details.startMessages);
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
+            } else if (chatQuestion) {
+                // The duplicate filter again: a doubled add event would otherwise
+                // ask twice, and the second would be answered with the rate limit.
+                if (!this.freshToggle(message, sender)) return;
+                void startChatAnswer(chatQuestion, sender, 'webex', (messages) => this.sendMessages(frame, messages));
             } else if (details.start) {
                 // Process meeting messages (LMA feature)
                 const timestamp = new Date().toLocaleTimeString('en-US', {

@@ -1714,6 +1714,15 @@ def handler(event, context):
         conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
         user_email = event.get('userEmail', '') or event.get('user_email', '')
+        # toolScope 'meeting_chat' is a question typed in the meeting chat (the
+        # Virtual Participant's `LMA ask`). It is answered from the current
+        # meeting's transcript, the document knowledge base and web search,
+        # without the MCP servers or the VNC and browser controls; the caller
+        # sends no userEmail, so the meeting-history tools are not offered
+        # either.
+        meeting_chat_scope = event.get('toolScope') == 'meeting_chat'
+        if meeting_chat_scope:
+            logger.info("Tool scope: meeting_chat")
         
         if not user_input:
             return {
@@ -1755,7 +1764,7 @@ def handler(event, context):
         # Load installed MCP servers (account-level) - returns MCPClient objects
         # Uses module-level caching: on warm Lambda starts with unchanged config,
         # cached clients are returned almost instantly (no DynamoDB query, no subprocess spawn)
-        if MCP_LOADER_AVAILABLE:
+        if MCP_LOADER_AVAILABLE and not meeting_chat_scope:
             try:
                 logger.info("Loading installed MCP servers...")
                 mcp_clients, from_cache = load_account_mcp_servers()
@@ -1946,7 +1955,7 @@ def handler(event, context):
             logger.info("Current meeting transcript tool enabled")
         
         # Add VNC preview control tool (available to all users)
-        if APPSYNC_GRAPHQL_URL:
+        if APPSYNC_GRAPHQL_URL and not meeting_chat_scope:
             tools.append(create_vnc_preview_control_tool(
                 call_id=call_id,
                 appsync_url=APPSYNC_GRAPHQL_URL,
@@ -1955,7 +1964,7 @@ def handler(event, context):
             logger.info("VNC preview control tool enabled")
         
         # Add VP browser control tool (available to all users)
-        if EVENT_API_HTTP_URL:
+        if EVENT_API_HTTP_URL and not meeting_chat_scope:
             tools.append(create_vp_browser_control_tool(
                 call_id=call_id,
                 event_api_http_url=EVENT_API_HTTP_URL,

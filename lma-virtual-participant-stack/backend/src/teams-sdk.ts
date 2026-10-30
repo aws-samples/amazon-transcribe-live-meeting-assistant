@@ -6,6 +6,7 @@ import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startTeamsSdkServer, TeamsSdkServerHandle } from './teams-sdk-server.js';
@@ -427,6 +428,8 @@ export default class TeamsSdk {
                     // lands whether or not transcription is paused; the two
                     // vocabularies are disjoint.
                     const assistantToggle = parseAssistantChatCommand(body);
+                    // Answered in the background, so the next poll is not held up.
+                    const chatQuestion = assistantToggle ? null : parseChatQuestion(body);
                     if (assistantToggle) {
                         await this.sendMessages(
                             page,
@@ -446,6 +449,8 @@ export default class TeamsSdk {
                         console.log(details.startMessages[0]);
                         await this.sendMessages(page, details.startMessages);
                         transcriptionService.startTranscription();
+                    } else if (chatQuestion) {
+                        void startChatAnswer(chatQuestion, sender, 'teams-sdk', (messages) => this.sendMessages(page, messages));
                     } else if (details.start) {
                         const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                         const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;

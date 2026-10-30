@@ -30,6 +30,7 @@ import {
 } from './details.js';
 import { ASSISTANT_CHAT_COMMANDS, parseAssistantChatCommand } from './assistant-toggles.js';
 import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion } from './chat-ask.js';
 import { splitZoomChatLabel } from './zoom.js';
 
 const NOVA_LIKE = { isEnabled: () => true, supportsModeChanges: () => true };
@@ -121,6 +122,7 @@ function commandsTriggeredBy(message: string): string[] {
     if (matchesChatCommand(message, details.pauseCommand)) triggered.push('pause');
     if (matchesChatCommand(message, details.startCommand)) triggered.push('start');
     if (matchesChatCommand(message, details.helpCommand)) triggered.push('help');
+    if (parseChatQuestion(message)) triggered.push('ask');
     return triggered;
 }
 
@@ -154,12 +156,12 @@ test('an introduction message that explains the commands does not trigger them',
 test('every command the help reply lists is accepted by its matcher', () => {
     // Pulled back out of the reply text, so a reply that drifts from the
     // matchers fails here rather than in a meeting.
-    const listed = allChatHelpMessages()
+    const listed = [...new Set(allChatHelpMessages()
         .join(' ')
         .match(/"LMA [^"]+"/g)!
-        .map((quoted) => quoted.slice(1, -1));
-    // leave, pause, start and help, plus one canonical form per mode command.
-    assert.equal(listed.length, 4 + ASSISTANT_CHAT_COMMANDS.length);
+        .map((quoted) => quoted.slice(1, -1)))];
+    // leave, pause, start, ask and help, plus one canonical form per mode command.
+    assert.equal(listed.length, 5 + ASSISTANT_CHAT_COMMANDS.length);
     for (const command of listed) {
         assert.ok(
             commandsTriggeredBy(command).length === 1,
@@ -194,6 +196,11 @@ test('the help reply names listen mode "LMA listen", and the configuration name 
     assert.ok(!text.includes('group'), 'the help reply still mentions group');
     assert.equal(parseAssistantChatCommand('LMA group')?.meetingMode, 'group');
     assert.equal(parseAssistantChatCommand('LMA listen')?.meetingMode, 'group');
+});
+
+test('the help reply lists LMA ask only when a meeting assistant can answer it', () => {
+    assert.ok(chatHelpMessages(NO_ASSISTANT, true).join(' ').includes('"LMA ask <question>"'));
+    assert.ok(!chatHelpMessages(NOVA_LIKE, false).join(' ').includes('LMA ask'));
 });
 
 test('the help reply leaves out the mode commands when no assistant can change mode', () => {
@@ -331,5 +338,20 @@ test('every platform handler matches pause, resume and help with matchesChatComm
                 `${file} still matches details.${command} some other way`,
             );
         }
+    }
+});
+
+test('every platform handler answers chat questions with startChatAnswer under its own name', () => {
+    for (const [file, platform] of [
+        ['zoom.ts', 'zoom'],
+        ['zoom-sdk.ts', 'zoom-sdk'],
+        ['teams.ts', 'teams'],
+        ['teams-sdk.ts', 'teams-sdk'],
+        ['webex.ts', 'webex'],
+        ['chime.ts', 'chime'],
+    ]) {
+        const src = readSource(file);
+        assert.match(src, /parseChatQuestion\(/, `${file} does not parse chat questions`);
+        assert.ok(src.includes(`'${platform}', (messages) =>`), `${file} does not answer chat questions as '${platform}'`);
     }
 });

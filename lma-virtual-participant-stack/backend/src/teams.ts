@@ -7,6 +7,7 @@ import { createStatusManager } from "./status-manager.js";
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
@@ -793,6 +794,9 @@ export default class Teams {
         // whether or not transcription is paused; the two vocabularies are
         // disjoint.
         const assistantToggle = parseAssistantChatCommand(message);
+        // Answered in the background, so the next message is not held up. With
+        // no sender on this node, every participant shares one rate limit.
+        const chatQuestion = assistantToggle ? null : parseChatQuestion(message);
         if (matchesEndCommand(message)) {
             console.log(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
             try {
@@ -827,6 +831,8 @@ export default class Teams {
             details.start = true;
             console.log(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
+        } else if (chatQuestion) {
+            void startChatAnswer(chatQuestion, null, 'teams', (messages) => this.sendMessages(page, messages));
         } else if (details.start) {
             details.messages.push(message);
         }

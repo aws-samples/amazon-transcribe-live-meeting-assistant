@@ -24,6 +24,7 @@
 import { details, END_COMMAND_VERBS } from './details.js';
 import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
 import type { VoiceAssistantProvider } from './voice-assistant-interface.js';
+import { chatAskAvailable } from './chat-ask.js';
 
 /** What the help reply needs to know about the voice assistant. */
 export type ChatHelpAssistant = Pick<VoiceAssistantProvider, 'isEnabled' | 'supportsModeChanges'>;
@@ -43,11 +44,15 @@ function typed(command: string): string {
  * with a refusal, so listing them would be advertising something that does not
  * work in this meeting.
  */
-export function chatHelpMessages(assistant: ChatHelpAssistant): string[] {
+export function chatHelpMessages(assistant: ChatHelpAssistant, canAsk: boolean = chatAskAvailable()): string[] {
+    // `LMA ask` is listed only when a Strands meeting assistant is there to
+    // answer it, for the same reason as the mode commands below.
+    const ask = canAsk ? `${typed('ask <question>')} to ask the meeting assistant, ` : '';
     const messages = [
         'Live Meeting Assistant chat commands: '
             + `${typed(END_COMMAND_VERBS[0])} to remove me from the meeting, `
             + `${typed(details.pauseCommand)} / ${typed(details.startCommand)} to pause or resume the transcript, `
+            + ask
             + `${typed(details.helpCommand)} to show this list.`,
     ];
 
@@ -64,7 +69,10 @@ export function chatHelpMessages(assistant: ChatHelpAssistant): string[] {
  * for the platforms that recognise the VP's own outgoing chat by its text.
  */
 export function allChatHelpMessages(): string[] {
-    const withModes = chatHelpMessages({ isEnabled: () => true, supportsModeChanges: () => true });
-    const withoutModes = chatHelpMessages({ isEnabled: () => false, supportsModeChanges: () => false });
-    return [...new Set([...withModes, ...withoutModes])];
+    const all: string[] = [];
+    for (const canAsk of [true, false]) {
+        all.push(...chatHelpMessages({ isEnabled: () => true, supportsModeChanges: () => true }, canAsk));
+        all.push(...chatHelpMessages({ isEnabled: () => false, supportsModeChanges: () => false }, canAsk));
+    }
+    return [...new Set(all)];
 }

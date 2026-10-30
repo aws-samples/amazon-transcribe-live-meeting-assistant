@@ -88,6 +88,33 @@ test('LMA translate <language> asks for translator mode with that language', () 
     }
 });
 
+test('naming two languages is answered with the one-language form', async () => {
+    for (const message of ['LMA translate English to French', 'LMA translate French and Spanish']) {
+        const command = parseAssistantChatCommand(message)!;
+        assert.equal(command.twoLanguages, true, message);
+        const reply = await applyAssistantChatCommand(recordingAssistant(), command, null, createActivationRestore());
+        assert.match(reply[0], /name one language/);
+    }
+});
+
+test('a configured pair typed in another case is the same pair', async () => {
+    const agent = new NovaAgent({
+        modelId: 'amazon.nova-2-sonic-v1:0',
+        systemPrompt: 'base',
+        activationMode: 'always_active',
+        meetingMode: 'translator',
+        translatorLanguageA: 'english',
+        translatorLanguageB: 'spanish',
+    });
+    const outcome = await agent.reconfigure({
+        meetingMode: 'translator',
+        activationMode: 'always_active',
+        translatorLanguages: { a: 'English', b: 'Spanish' },
+        route: 'chat',
+    });
+    assert.equal(outcome.result, 'unchanged');
+});
+
 test('bare LMA translate carries no language, so the configured pair is kept', () => {
     assert.deepEqual(parseAssistantChatCommand('LMA translate'), {
         meetingMode: 'translator',

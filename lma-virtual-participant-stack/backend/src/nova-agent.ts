@@ -3924,9 +3924,11 @@ export class NovaAgent implements VoiceAssistantProvider {
     // own, and to the second when the first is the language asked for — so
     // "translate English" on a deployment configured English/Spanish still
     // produces a pair rather than English to English.
+    // Case-insensitive: the configured pair is free text from the
+    // configuration page, and the chat sends canonical names.
+    const same = (x: string, y: string) => x.trim().toLowerCase() === y.trim().toLowerCase();
     let languagesAfter: { a: string; b: string } | undefined;
     if (request.translatorLanguages !== undefined) {
-      const same = (x: string, y: string) => x.trim().toLowerCase() === y.trim().toLowerCase();
       const b = (request.translatorLanguages.b || '').trim();
       let a = (request.translatorLanguages.a || '').trim();
       if (!a) {
@@ -3947,7 +3949,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
     if (
       languagesAfter
-      && (languagesAfter.a !== this.translatorLanguageA || languagesAfter.b !== this.translatorLanguageB)
+      && (!same(languagesAfter.a, this.translatorLanguageA) || !same(languagesAfter.b, this.translatorLanguageB))
     ) {
       changed.push('translatorLanguages');
     }
