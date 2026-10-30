@@ -8,6 +8,7 @@ import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistan
 import { chatHelpMessages } from './chat-help.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
+import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 
 const STATUS_CONNECTED = 2;
 const STATUS_DISCONNECTED = 3;
@@ -83,7 +84,7 @@ export default class ZoomSdk {
             return false;
         }
         try {
-            await el.click({ force: true });
+            await el.click({ force: true, timeout: POSITIONAL_CLICK_TIMEOUT_MS });
             return true;
         } catch (err) {
             console.warn('[zoom-sdk] click failed:', err);
@@ -254,7 +255,7 @@ export default class ZoomSdk {
                 const btn = await page.$('button.preview-join-button');
                 if (btn) {
                     try {
-                        await btn.click();
+                        await btn.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
                         previewClicked = true;
                         console.log('[zoom-sdk] clicked preview Join');
                     } catch (err) {

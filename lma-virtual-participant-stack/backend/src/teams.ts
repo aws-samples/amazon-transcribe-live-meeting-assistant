@@ -11,7 +11,7 @@ import { simliAvatar } from './simli-avatar.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { findElementWithFallback, classifyJoinState, isResolverEnabled } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
-import { humanClick, humanType } from './prejoin-actions.js';
+import { humanClick, humanType, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 
 /** What one poll of the Teams roster badge told us. */
@@ -1255,12 +1255,12 @@ export default class Teams {
             const viewPanelElement = await page.waitForSelector("#custom-view-button", {
                 timeout: 5000,
             });
-            await viewPanelElement?.click();
+            await viewPanelElement?.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
             console.log("Selecting speaker view.");
             const speakerViewElement = await page.waitForSelector("#SpeakerView-button", {
                 timeout: 5000,
             });
-            await speakerViewElement?.click();
+            await speakerViewElement?.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
         } catch {
             console.log("View/speaker-view controls not found (likely light-meetings client) — skipping.");
         }

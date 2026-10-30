@@ -14,7 +14,7 @@ import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
-import { humanClick } from './prejoin-actions.js';
+import { clickWithDomFallback, humanClick, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 
 /**
  * The pre-join display-name field, in both markups Webex serves.
@@ -323,7 +323,11 @@ export default class Webex {
                 throw new Error('Webex meeting-ID input not found');
             }
             await meetingIdRes.element.type(meetingIdValue);
-            await meetingIdRes.element.press('Enter');
+            // Enter goes to whatever the humanized type() click focused (CloakBrowser
+            // focuses a field by clicking it). ElementHandle.press() would first
+            // click the matched element again whenever that element is not itself
+            // the focused node, and #join-meeting-form may be a container.
+            await page.keyboard.press('Enter');
 
             // Wait a moment for the page to stabilize after entering meeting ID
             await new Promise(resolve => setTimeout(resolve, 2000));
@@ -520,7 +524,7 @@ export default class Webex {
                 // No CAPTCHA, just password - click Next button
                 console.log('No CAPTCHA detected, clicking Next button...');
                 const nextButton = await frame.waitForSelector('mdc-button[type="submit"]', { timeout: 5000 });
-                await nextButton?.click();
+                if (nextButton) await clickWithDomFallback(nextButton, 'password Next');
                 await new Promise((resolve) => setTimeout(resolve, 2000));
             }
         }
@@ -558,7 +562,7 @@ export default class Webex {
                 
                 console.log('Clicking Next button...');
                 const nextButton = await frame.$('#guest_next-btn');
-                await nextButton?.click();
+                if (nextButton) await clickWithDomFallback(nextButton, 'guest Next');
                 
                 // Wait for password page to load
                 await new Promise(resolve => setTimeout(resolve, 5000));
@@ -572,7 +576,7 @@ export default class Webex {
                     
                     console.log('Clicking Next button after password...');
                     const passwordNextButton = await frame.$('#password_validate_btn');
-                    await passwordNextButton?.click();
+                    if (passwordNextButton) await clickWithDomFallback(passwordNextButton, 'password Next');
                 }
             }
         } else {
@@ -618,7 +622,7 @@ export default class Webex {
                 isEnterprise ? '#cookie-banner-text > div.cookie-manage-option > div.cookie-banner-btnContainer > button:nth-child(1)' : '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
                 { timeout: 3000 }
             );
-            await rejectButton?.click();
+            await rejectButton?.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
             console.log('Successfully clicked Reject cookie button');
         } catch (error) {
             console.log('Cookie banner not found (non-fatal).');

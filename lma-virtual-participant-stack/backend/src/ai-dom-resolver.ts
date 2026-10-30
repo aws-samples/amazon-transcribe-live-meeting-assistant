@@ -13,6 +13,7 @@ import {
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { buildClaudeInvokeParams } from './bedrock-model-compat.js';
 import { CONTEXT_PAGE_AUTOMATION, anthropicUsage, currentCallId, recordMetering } from './metering.js';
+import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 
 export type Platform = 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME';
 
@@ -926,7 +927,9 @@ export async function scrollIntoViewAndClick(
       // ignore — scroll is best-effort
     }
     try {
-      await handle.click();
+      // Bounded so a miss reaches the DOM-click fallback promptly (see
+      // POSITIONAL_CLICK_TIMEOUT_MS).
+      await handle.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
       return true;
     } catch {
       // fallback: dispatch a synthetic click on the element. Works even
