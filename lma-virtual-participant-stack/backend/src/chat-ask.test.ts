@@ -42,7 +42,7 @@ test('LMA ask and @LMA introduce a question', () => {
         question: 'summarise the last ten minutes',
         explicit: true,
     });
-    assert.deepEqual(parseChatQuestion('@LMA what are the action items?'), {
+    assert.deepEqual(parseChatQuestion('@LMA what are the action items?', true), {
         question: 'what are the action items?',
         explicit: false,
     });
@@ -50,13 +50,13 @@ test('LMA ask and @LMA introduce a question', () => {
 
 test('the other chat commands win over @LMA', () => {
     for (const message of ['@LMA help', '@LMA leave', '@LMA pause', '@LMA start', '@LMA translate', '@LMA listen', '@LMA translate French']) {
-        assert.equal(parseChatQuestion(message), null, `"${message}" was taken as a question`);
+        assert.equal(parseChatQuestion(message, true), null, `"${message}" was taken as a question`);
     }
 });
 
 test('LMA without @ or "ask" is not a question, and nor is a mention mid-sentence', () => {
     for (const message of ['LMA what are the action items', 'thanks LMA', 'I asked @LMA earlier', 'LMA asked me', '@LMA', 'LMA ask']) {
-        const parsed = parseChatQuestion(message);
+        const parsed = parseChatQuestion(message, true);
         if (message === 'LMA ask') {
             assert.deepEqual(parsed, { question: '', explicit: true }, 'a bare "LMA ask" is answered with how to use it');
         } else {
@@ -69,7 +69,7 @@ test("no message the Virtual Participant posts is a question", () => {
     for (const platform of Object.keys(CHAT_MESSAGE_LIMITS) as ChatPlatform[]) {
         for (const message of splitForChat('@LMA ask LMA ask something. '.repeat(80), CHAT_MESSAGE_LIMITS[platform])) {
             assert.ok(message.startsWith(ANSWER_PREFIX));
-            assert.equal(parseChatQuestion(message), null, `own answer parsed as a question: "${message.slice(0, 60)}"`);
+            assert.equal(parseChatQuestion(message, true), null, `own answer parsed as a question: "${message.slice(0, 60)}"`);
         }
     }
 });
@@ -160,6 +160,7 @@ test('one question is answered at a time', async () => {
     const first = a.answer(Q('slow'), 'Alice', 'teams-sdk');
     const second = await a.answer(Q('meanwhile'), 'Bob', 'teams-sdk');
     assert.match(second[0], /still answering the previous question/);
+    assert.deepEqual(await a.answer(Q('again'), 'Bob', 'teams-sdk'), [], 'told once while busy');
     release('Done.');
     assert.deepEqual(await first, ['Live Meeting Assistant: Done.']);
 });
@@ -177,10 +178,21 @@ test('a failed agent call is answered with an apology, not silence or an error',
 });
 
 test('an agent that never answers frees the slot after the timeout', async () => {
-    const a = createChatAnswerer(() => new Promise<string>(() => {}), { available: () => true, timeoutMs: 20 });
+    let calls = 0;
+    const a = createChatAnswerer(
+        () => (++calls === 1 ? new Promise<string>(() => {}) : Promise.resolve('Fine.')),
+        { available: () => true, timeoutMs: 20 },
+    );
     assert.match((await a.answer(Q('slow'), 'Alice', 'zoom'))[0], /could not get an answer/);
-    const b = createChatAnswerer(async () => 'Fine.', { available: () => true });
-    assert.deepEqual(await b.answer(Q('next'), 'Bob', 'zoom'), ['Live Meeting Assistant: Fine.']);
+    assert.deepEqual(await a.answer(Q('next'), 'Bob', 'zoom'), ['Live Meeting Assistant: Fine.']);
+});
+
+test('without a meeting assistant an @LMA aside is not a question, but LMA ask still is', () => {
+    assert.equal(parseChatQuestion('@LMA what are the action items?', false), null);
+    assert.deepEqual(parseChatQuestion('LMA ask what are the action items?', false), {
+        question: 'what are the action items?',
+        explicit: true,
+    });
 });
 
 test('with no Strands meeting assistant, only an explicit LMA ask is told', async () => {

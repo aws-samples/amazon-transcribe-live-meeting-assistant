@@ -91,7 +91,8 @@ test('LMA translate <language> asks for translator mode with that language', () 
 test('naming two languages is answered with the one-language form', async () => {
     for (const message of ['LMA translate English to French', 'LMA translate French and Spanish']) {
         const command = parseAssistantChatCommand(message)!;
-        assert.equal(command.twoLanguages, true, message);
+        assert.ok(command.twoLanguages, message);
+        assert.equal(command.unsupportedLanguage, undefined);
         const reply = await applyAssistantChatCommand(recordingAssistant(), command, null, createActivationRestore());
         assert.match(reply[0], /name one language/);
     }

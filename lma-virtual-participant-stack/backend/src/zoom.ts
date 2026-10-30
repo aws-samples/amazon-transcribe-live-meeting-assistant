@@ -1723,6 +1723,11 @@ export default class Zoom {
             // A question for the meeting assistant; answered in the background
             // so a slow answer does not hold up the next command.
             const chatQuestion = assistantToggle ? null : parseChatQuestion(body);
+            // Not a branch of the chain below: a question is still meeting chat,
+            // and is recorded as such.
+            if (chatQuestion) {
+                void startChatAnswer(chatQuestion, sender, 'zoom', (messages) => this.sendMessages(page, messages));
+            }
             if (matchesEndCommand(body)) {
                 console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                 await this.sendMessages(page, exitMessagesFor(sender));
@@ -1750,8 +1755,6 @@ export default class Zoom {
                 await this.sendMessages(page, details.startMessages);
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
-            } else if (chatQuestion) {
-                void startChatAnswer(chatQuestion, sender, 'zoom', (messages) => this.sendMessages(page, messages));
             } else if (details.start) {
                 // Process meeting messages (LMA feature)
                 const timestamp = new Date().toLocaleTimeString('en-US', {

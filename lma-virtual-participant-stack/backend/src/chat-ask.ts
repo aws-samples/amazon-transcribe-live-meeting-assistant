@@ -107,14 +107,17 @@ function isOtherChatCommand(message: string): boolean {
  * likely to be someone talking about LMA as to it.
  *
  * Neither form can match a message this module posts, because those all start
- * with `ANSWER_PREFIX`.
+ * with `ANSWER_PREFIX`. With no Strands meeting assistant only the explicit
+ * form is recognised (and answered with a note saying so).
  */
-export function parseChatQuestion(message: string): ChatQuestion | null {
+export function parseChatQuestion(message: string, available: boolean = chatAskAvailable()): ChatQuestion | null {
     if (!message) return null;
     const explicit = EXPLICIT_ASK.exec(message);
     if (explicit) {
         return { question: explicit[1].trim(), explicit: true };
     }
+    // Without a meeting assistant an `@LMA` aside is only meeting chat.
+    if (!available) return null;
     const mention = MENTION.exec(message);
     if (mention && mention[1].trim() && !isOtherChatCommand(message)) {
         return { question: mention[1].trim(), explicit: false };
@@ -232,6 +235,7 @@ export function createChatAnswerer(
     const available = options.available ?? (() => chatAskAvailable());
     const lastAskedAt = new Map<string, number>();
     const toldToWait = new Set<string>();
+    const toldBusy = new Set<string>();
     let busy = false;
 
     /**
@@ -271,11 +275,15 @@ export function createChatAnswerer(
             return reply(`one question every ${Math.round(intervalMs / 1000)} seconds, please.`);
         }
         if (busy) {
+            // Once per sender per answer in progress, for the same reason.
+            if (toldBusy.has(key)) return [];
+            toldBusy.add(key);
             return reply('still answering the previous question; ask again in a moment.');
         }
 
         lastAskedAt.set(key, at);
         toldToWait.delete(key);
+        toldBusy.clear();
         busy = true;
         const started = now();
         try {

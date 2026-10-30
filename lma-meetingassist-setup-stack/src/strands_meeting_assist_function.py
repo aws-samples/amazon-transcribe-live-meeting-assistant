@@ -1646,6 +1646,22 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         logger.error(f"Error querying knowledge base: {str(e)}")
         return ""
 
+def meeting_chat_tool_scope(event: Dict[str, Any]) -> tuple:
+    """Whether the event is a meeting-chat question, and the user email to use.
+
+    toolScope 'meeting_chat' is a question typed in the meeting chat (the
+    Virtual Participant's `LMA ask`). It is answered from the current meeting's
+    transcript, the document knowledge base and web search: the MCP servers and
+    the VNC and browser controls are not offered, and the user email is
+    cleared here, whatever the event carries, so the meeting-history tools that
+    are scoped to it are not offered either.
+    """
+    user_email = event.get('userEmail', '') or event.get('user_email', '')
+    if event.get('toolScope') == 'meeting_chat':
+        return True, ''
+    return False, user_email
+
+
 def handler(event, context):
     """
     Lambda handler for Strands-based meeting assistance with tools
@@ -1713,14 +1729,7 @@ def handler(event, context):
         call_id = event.get('callId', '') or event.get('call_id', '')
         conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
-        user_email = event.get('userEmail', '') or event.get('user_email', '')
-        # toolScope 'meeting_chat' is a question typed in the meeting chat (the
-        # Virtual Participant's `LMA ask`). It is answered from the current
-        # meeting's transcript, the document knowledge base and web search,
-        # without the MCP servers or the VNC and browser controls; the caller
-        # sends no userEmail, so the meeting-history tools are not offered
-        # either.
-        meeting_chat_scope = event.get('toolScope') == 'meeting_chat'
+        meeting_chat_scope, user_email = meeting_chat_tool_scope(event)
         if meeting_chat_scope:
             logger.info("Tool scope: meeting_chat")
         

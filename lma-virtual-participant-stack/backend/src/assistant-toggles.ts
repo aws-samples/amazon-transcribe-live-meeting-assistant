@@ -178,9 +178,9 @@ export interface AssistantChatCommand {
     /** `LMA translate <word>` where the word is not a supported language. The
      *  command carries no change; it is answered with the supported list. */
     unsupportedLanguage?: string;
-    /** `unsupportedLanguage` names two supported languages; the answer says
-     *  to name one. */
-    twoLanguages?: boolean;
+    /** `LMA translate <language> to <language>`: two supported languages
+     *  named. Carries no change; the answer says to name one. */
+    twoLanguages?: string;
 }
 
 /**
@@ -333,10 +333,9 @@ export function parseAssistantChatCommand(message: string): AssistantChatCommand
     // "translate English to French" / "translate French and Spanish": two
     // supported languages, which is a real attempt at the command. Answered
     // with the one-language form rather than left unanswered.
-    const words = withLanguage[1].split(' ');
-    const two = /^(.+) (?:to|into|and|or) (.+)$/.exec(withLanguage[1]);
-    if (two && resolveTranslatorLanguage(two[1]) && resolveTranslatorLanguage(two[2]) && words.length <= 5) {
-        return { unsupportedLanguage: withLanguage[1], twoLanguages: true };
+    const two = withLanguage[1].split(' ').length <= 5 ? /^(.+) (?:to|into|and|or) (.+)$/.exec(withLanguage[1]) : null;
+    if (two && resolveTranslatorLanguage(two[1]) && resolveTranslatorLanguage(two[2])) {
+        return { twoLanguages: withLanguage[1] };
     }
     return null;
 }
@@ -588,7 +587,9 @@ export async function applyAssistantChatCommand(
     // The two language checks below answer without the provider, so they only
     // run for one that can change mode at all. Any other is asked as usual and
     // declines with its own reason, as it does for every mode command.
-    const namesLanguage = command.unsupportedLanguage !== undefined || command.translatorLanguage !== undefined;
+    const namesLanguage = command.unsupportedLanguage !== undefined
+        || command.translatorLanguage !== undefined
+        || command.twoLanguages !== undefined;
     if (namesLanguage && assistant.supportsModeChanges?.() === false) {
         return assistantToggleChatReply(
             await assistant.reconfigure({
@@ -599,14 +600,14 @@ export async function applyAssistantChatCommand(
             }),
         );
     }
+    if (command.twoLanguages !== undefined) {
+        console.log(formatChatRefusalLog(requestedBy, 'two translator languages named'));
+        return [
+            `${prefix} name one language and I will translate between it and the meeting's language,`
+                + ' for example "LMA translate French".',
+        ];
+    }
     if (command.unsupportedLanguage !== undefined) {
-        if (command.twoLanguages) {
-            console.log(formatChatRefusalLog(requestedBy, 'two translator languages named'));
-            return [
-                `${prefix} name one language and I will translate between it and the meeting's language,`
-                    + ' for example "LMA translate French".',
-            ];
-        }
         const detail = `unsupported translator language ${command.unsupportedLanguage}`;
         console.log(formatChatRefusalLog(requestedBy, detail));
         return [

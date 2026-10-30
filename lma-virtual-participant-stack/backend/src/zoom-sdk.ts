@@ -363,6 +363,11 @@ export default class ZoomSdk {
                 const assistantToggle = parseAssistantChatCommand(body);
                 // Answered in the background, so the next poll is not held up.
                 const chatQuestion = assistantToggle ? null : parseChatQuestion(body);
+                // Not a branch of the chain below, so the question is still
+                // recorded as meeting chat.
+                if (chatQuestion) {
+                    void startChatAnswer(chatQuestion, sender, 'zoom-sdk', (messages) => this.sendMessages(page, messages));
+                }
                 if (assistantToggle) {
                     await this.sendMessages(
                         page,
@@ -382,8 +387,6 @@ export default class ZoomSdk {
                     console.log(details.startMessages[0]);
                     await this.sendMessages(page, details.startMessages);
                     transcriptionService.startTranscription();
-                } else if (chatQuestion) {
-                    void startChatAnswer(chatQuestion, sender, 'zoom-sdk', (messages) => this.sendMessages(page, messages));
                 } else if (details.start) {
                     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' });
                     const formatted = `[${timestamp}] ${sender ? `${sender}: ` : ''}${body}`;

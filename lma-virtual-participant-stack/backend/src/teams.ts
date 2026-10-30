@@ -797,6 +797,11 @@ export default class Teams {
         // Answered in the background, so the next message is not held up. With
         // no sender on this node, every participant shares one rate limit.
         const chatQuestion = assistantToggle ? null : parseChatQuestion(message);
+        // Not a branch of the chain below, so the question is still recorded as
+        // meeting chat.
+        if (chatQuestion) {
+            void startChatAnswer(chatQuestion, null, 'teams', (messages) => this.sendMessages(page, messages));
+        }
         if (matchesEndCommand(message)) {
             console.log(`LMA Virtual Participant has been asked to leave the meeting: ${JSON.stringify(message)}`);
             try {
@@ -831,8 +836,6 @@ export default class Teams {
             details.start = true;
             console.log(details.startMessages[0]);
             await this.sendMessages(page, details.startMessages);
-        } else if (chatQuestion) {
-            void startChatAnswer(chatQuestion, null, 'teams', (messages) => this.sendMessages(page, messages));
         } else if (details.start) {
             details.messages.push(message);
         }

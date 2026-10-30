@@ -239,6 +239,11 @@ export default class Chime {
                 const assistantToggle = text ? parseAssistantChatCommand(text) : null;
                 // Answered in the background, so the next message is not held up.
                 const chatQuestion = text && !assistantToggle ? parseChatQuestion(text) : null;
+                // Not a branch of the chain below, so the question is still
+                // recorded as meeting chat.
+                if (chatQuestion && sender !== 'Amazon Chime' && !sender?.includes(details.scribeName)) {
+                    void startChatAnswer(chatQuestion, sender, 'chime', (messages) => this.sendMessages(page, messages));
+                }
                 if (text && matchesEndCommand(text)) {
                     console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(text)}`);
                     await this.sendMessages(page, exitMessagesFor(sender));
@@ -269,8 +274,6 @@ export default class Chime {
                     await this.sendMessages(page, details.startMessages);
                     // Restart transcription if needed
                     transcriptionService.startTranscription();
-                } else if (chatQuestion && sender !== 'Amazon Chime' && !sender?.includes(details.scribeName)) {
-                    void startChatAnswer(chatQuestion, sender, 'chime', (messages) => this.sendMessages(page, messages));
                 } else if (
                     details.start &&
                     sender !== 'Amazon Chime' &&

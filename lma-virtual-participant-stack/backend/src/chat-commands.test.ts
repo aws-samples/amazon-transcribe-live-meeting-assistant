@@ -122,7 +122,7 @@ function commandsTriggeredBy(message: string): string[] {
     if (matchesChatCommand(message, details.pauseCommand)) triggered.push('pause');
     if (matchesChatCommand(message, details.startCommand)) triggered.push('start');
     if (matchesChatCommand(message, details.helpCommand)) triggered.push('help');
-    if (parseChatQuestion(message)) triggered.push('ask');
+    if (parseChatQuestion(message, true)) triggered.push('ask');
     return triggered;
 }
 
@@ -352,6 +352,9 @@ test('every platform handler answers chat questions with startChatAnswer under i
     ]) {
         const src = readSource(file);
         assert.match(src, /parseChatQuestion\(/, `${file} does not parse chat questions`);
+        // Started beside the command chain rather than as a branch of it, so a
+        // question still reaches the branch that records meeting chat.
+        assert.ok(!/else if \(chatQuestion/.test(src), `${file} answers a question instead of recording it`);
         assert.ok(src.includes(`'${platform}', (messages) =>`), `${file} does not answer chat questions as '${platform}'`);
     }
 });

@@ -870,6 +870,13 @@ export default class Webex {
             // duplicate would post a second chat reply right after the first.
             const assistantToggle = parseAssistantChatCommand(message);
             const chatQuestion = assistantToggle ? null : parseChatQuestion(message);
+            // Not a branch of the chain below, so the question is still recorded
+            // as meeting chat. The duplicate filter again: a doubled add event
+            // would otherwise ask twice, and the second would be answered with
+            // the rate limit.
+            if (chatQuestion && this.freshToggle(message, sender)) {
+                void startChatAnswer(chatQuestion, sender, 'webex', (messages) => this.sendMessages(frame, messages));
+            }
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
                 // (it can emit duplicate add events) — only act on the first.
@@ -917,11 +924,6 @@ export default class Webex {
                 await this.sendMessages(frame, details.startMessages);
                 // Restart transcription if needed
                 transcriptionService.startTranscription();
-            } else if (chatQuestion) {
-                // The duplicate filter again: a doubled add event would otherwise
-                // ask twice, and the second would be answered with the rate limit.
-                if (!this.freshToggle(message, sender)) return;
-                void startChatAnswer(chatQuestion, sender, 'webex', (messages) => this.sendMessages(frame, messages));
             } else if (details.start) {
                 // Process meeting messages (LMA feature)
                 const timestamp = new Date().toLocaleTimeString('en-US', {
