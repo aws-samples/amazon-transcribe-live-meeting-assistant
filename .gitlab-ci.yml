@@ -725,7 +725,7 @@ nightly_deploy:
     # can quote it if this is what failed (see .nightly_slack_post).
     - |
       set -o pipefail
-      .venv/bin/python integ-tests/resume_rollback.py \
+      .venv/bin/python -u integ-tests/resume_rollback.py \
         --stack "$LMA_INTEG_STACK" \
         --region "$AWS_DEFAULT_REGION" 2>&1 | tee deploy-output.log
     # $LMA_TEMPLATE_URL is the URL the publish job uploaded to, derived in the

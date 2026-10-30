@@ -737,6 +737,27 @@ def test_the_cause_script_never_fails_the_after_script(tmp_path: Path, capsys):
 # ── resuming a stuck rollback ───────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _no_sleeping_in_the_rollback_wait():
+    with mock.patch.object(resume_rollback.time, "sleep") as sleep:
+        yield sleep
+
+
+def test_the_wait_starts_only_once_the_stack_has_left_the_stuck_state(
+    _no_sleeping_in_the_rollback_wait,
+):
+    """The waiter would read a lingering UPDATE_ROLLBACK_FAILED as a final failure."""
+    cfn = mock.Mock()
+    order = []
+    cfn.describe_stacks.side_effect = lambda StackName: order.append("describe") or {
+        "Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED" if len(order) < 3 else "UPDATE_ROLLBACK_IN_PROGRESS"}]
+    }
+    cfn.get_waiter.return_value.wait.side_effect = lambda **kw: order.append("wait")
+    resume_rollback.resume_if_stuck(cfn, "s")
+    assert order == ["describe", "describe", "describe", "wait"]
+    assert _no_sleeping_in_the_rollback_wait.call_count == 1
+
+
 def test_a_stack_in_any_other_state_is_left_alone():
     cfn = mock.Mock()
     cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_COMPLETE"}]}
@@ -764,6 +785,7 @@ def test_a_resumed_rollback_still_running_after_the_wait_is_not_called_failed(ca
     cfn = mock.Mock()
     cfn.describe_stacks.side_effect = [
         {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED"}]},
+        {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_IN_PROGRESS"}]},
         {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_IN_PROGRESS"}]},
     ]
     cfn.get_waiter.return_value.wait.side_effect = RuntimeError("Max attempts exceeded")

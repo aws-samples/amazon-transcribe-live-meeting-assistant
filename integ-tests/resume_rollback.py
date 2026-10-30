@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,12 @@ def resume_if_stuck(cfn: Any, stack: str) -> bool:
     print(f"Stack {stack} is {STUCK}; resuming its rollback before deploying.")
     resumed = datetime.now(timezone.utc)
     cfn.continue_update_rollback(StackName=stack)
+    # The waiter treats UPDATE_ROLLBACK_FAILED as a final failure, so it must
+    # not start before the stack has visibly left that state.
+    for _ in range(12):
+        if cfn.describe_stacks(StackName=stack)["Stacks"][0]["StackStatus"] != STUCK:
+            break
+        time.sleep(5)
     try:
         cfn.get_waiter("stack_rollback_complete").wait(StackName=stack, WaiterConfig=_WAIT)
     except Exception:

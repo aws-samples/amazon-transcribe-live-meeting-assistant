@@ -62,7 +62,9 @@ finish. A stack in that second state (`UPDATE_ROLLBACK_FAILED`) refuses every
 update, so `nightly_deploy` first resumes such a rollback, once and skipping no
 resource, before deploying (`integ-tests/resume_rollback.py`); if the resumed
 rollback fails as well, the deploy job fails there and its output names
-each resource that failed again and the reason it gave. See `--stage`
+each resource that failed again and the reason it gave. If it is still running
+after 15 minutes the job fails too, saying so, and the next night's deploy finds
+it finished or resumes it again. See `--stage`
 in `integ-tests/junit_summary.py`.
 
 ### The suite itself
