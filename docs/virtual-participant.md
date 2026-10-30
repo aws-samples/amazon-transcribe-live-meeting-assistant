@@ -573,7 +573,7 @@ Anyone in the meeting can control the VP by typing one of these commands in the 
 | `LMA start` | Resumes a paused session. |
 | `LMA help` | The VP posts the list of chat commands in the meeting chat. |
 
-When a Nova Sonic voice assistant is configured, the assistant-mode commands (`LMA translate`, `LMA assist`, `LMA listen`, `LMA always`, `LMA wake`) also work, and `LMA help` lists them; see [Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting). With no voice assistant, or with ElevenLabs, which cannot change mode during a meeting, `LMA help` leaves them out.
+When a Nova Sonic voice assistant is configured, the assistant-mode commands (`LMA translate`, `LMA translate <language>`, `LMA assist`, `LMA listen`, `LMA always`, `LMA wake`) also work, and `LMA help` lists them; see [Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting). With no voice assistant, or with ElevenLabs, which cannot change mode during a meeting, `LMA help` leaves them out.
 
 Notes:
 
