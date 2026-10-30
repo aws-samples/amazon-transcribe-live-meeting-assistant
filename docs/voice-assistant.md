@@ -214,12 +214,12 @@ Every command must address LMA by name, and the whole message must be the name p
 | Type in chat | Effect |
 |---|---|
 | `LMA translate` | Switch to translator mode, and to always-listening. Aliases: `LMA translator`, `LMA translate mode`, `LMA translator mode`, `LMA interpret` |
-| `LMA assist` | Switch to `normal` assistant mode. Leaves activation alone. Aliases: `LMA assistant`, `LMA assist mode`, `LMA assistant mode`, `LMA normal`, `LMA normal mode` |
+| `LMA assist` | Switch to `normal` assistant mode. After `LMA translate` or `LMA group`, also restores the activation mode they replaced (see below). Aliases: `LMA assistant`, `LMA assist mode`, `LMA assistant mode`, `LMA normal`, `LMA normal mode` |
 | `LMA group` | Switch to group mode — the assistant goes quiet and waits to be addressed by wake phrase — and to always-listening. Alias: `LMA group mode` |
 
 `LMA translate` and `LMA group` both switch activation to always-listening as well, because neither mode works without it. A translator speaks on every completed utterance, so with a wake phrase it would receive no audio until addressed and translate nothing in between. Group mode starts muted and the state machine that unmutes it runs on transcripts that only arrive while a session is open, so with a wake phrase it would never become audible at all.
 
-The same rule applies in the other direction: `LMA wake` is **declined** while the assistant is in translator or group mode, and the reply says to switch to assistant mode first with `LMA assist`. (On a deployment configured as group or translator mode with `wake_phrase` activation — the combination the configuration page warns about — `LMA wake` is instead answered as a no-op, since that is already what the meeting is doing. `LMA assist` is the way out of it.) Switching back and then asking for the wake phrase takes two commands, which is deliberate — the alternative is one command silently changing the meeting mode nobody asked about.
+The same rule applies in the other direction: `LMA wake` is **declined** while the assistant is in translator or group mode, and the reply says to switch to assistant mode first with `LMA assist`. (On a deployment configured as group or translator mode with `wake_phrase` activation — the combination the configuration page warns about — `LMA wake` is instead answered as a no-op, since that is already what the meeting is doing. `LMA assist` is the way out of it.) Asking for the wake phrase is declined rather than silently changing the meeting mode nobody asked about; `LMA assist` on its own then brings the wake phrase back, as described below.
 
 **Activation mode:**
 
@@ -228,7 +228,7 @@ The same rule applies in the other direction: `LMA wake` is **declined** while t
 | `LMA always` | Always listening. Aliases: `LMA always on`, `LMA always active`, `LMA always listen`, `LMA open mic` |
 | `LMA wake` | Listen only after a wake phrase. Aliases: `LMA wake word`, `LMA wake phrase`, `LMA on request` |
 
-`LMA assist` leaves activation where `LMA translate` or `LMA group` put it, because `normal` mode works under either activation mode and the command carries no record of what it was before. Use `LMA wake` to get the wake phrase back. There is no command that restores the activation mode the meeting *started* in — nothing here is persisted, so that comes back by itself at the next meeting.
+When `LMA translate` or `LMA group` switched the assistant to always-listening, `LMA assist` switches it back to the activation mode it was in before — so a wake-phrase meeting that was translated for a while returns to the wake phrase, and the reply says so (`switched to assistant mode, now listening for the wake phrase.`). Going from one of those modes straight to the other keeps the original activation mode to restore. The exception is an explicit choice in between: if somebody typed `LMA always` (or `LMA wake`) while translator or group mode was running and the assistant accepted it or was already doing that, `LMA assist` leaves activation as it is. A declined `LMA wake` does count as a choice: it is remembered, and the next `LMA assist` switches to the wake phrase even if the meeting was always listening before translator or group mode started. The restore is logged as `[assistant-toggle] restoring activationMode=<mode> on leaving an always-listening meeting mode for meetingMode=normal` just before the usual toggle line. Nothing here is persisted; the next meeting starts in the configured activation mode.
 
 The assistant replies in chat either way — naming the mode it is now in, or saying that nothing changed and why. A command for the mode the meeting is already in is answered and does nothing else, so it costs the meeting no interruption.
 

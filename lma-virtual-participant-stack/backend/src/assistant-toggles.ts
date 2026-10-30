@@ -184,10 +184,12 @@ export interface AssistantChatCommand {
  * become audible at all. Asking for a mode and getting permanent silence is not
  * a reading of these commands worth supporting.
  *
- * `assist` carries no activation change: `normal` mode works under either
- * activation mode, and the command has no record of what activation was before
- * `translate` or `group` changed it — `LMA wake` is how you get the wake phrase
- * back.
+ * `assist` carries no activation change of its own: `normal` mode works under
+ * either activation mode. When `translate` or `group` switched activation on
+ * the way in, though, leaving that mode puts back the activation mode it
+ * replaced — see `createActivationRestore`, which `applyAssistantChatCommand`
+ * consults, so a wake-phrase meeting that was briefly translated goes back to
+ * the wake phrase rather than staying always listening.
  *
  * Grouped by the change each set of phrases asks for, with the first phrase of
  * each group as its canonical form, so the `LMA help` reply (chat-help.ts) is
@@ -383,6 +385,111 @@ export function assistantToggleChatReply(outcome: AssistantReconfigureOutcome): 
 }
 
 /**
+ * Remembers the activation mode a forced-always-listening meeting mode replaced,
+ * so leaving that mode can put it back.
+ *
+ * `translate` and `group` ask for `always_active` because neither mode works
+ * without it (see `requiresAlwaysListening`). That is a side effect of the mode,
+ * not something the participant chose, so when the meeting later leaves the
+ * mode — `LMA assist`, today the only mode that does not need always-listening —
+ * the activation mode in effect before it was forced comes back with it. Without
+ * this a meeting deployed on `wake_phrase` that was translated for five minutes
+ * stays always listening, and streaming audio to the model, for the rest of the
+ * meeting.
+ *
+ * The memory is cleared by an explicit activation command (`LMA always`,
+ * `LMA wake`) that the assistant accepted or was already in: the participant
+ * has then said what they want, and that wins over what the meeting started
+ * with. A declined `LMA wake` is recorded instead: it is declined while a
+ * translator or group-mode assistant is running, and the participant who typed
+ * it still wants the wake phrase once that mode ends — including in a meeting
+ * that was always listening before translation started, where there would
+ * otherwise be nothing to restore.
+ *
+ * Only the first forced switch is remembered. Going from translator straight to
+ * group changes no activation (it is already `always_active`), so the original
+ * mode is still the one restored when the meeting finally returns to `assist`.
+ *
+ * One instance per process is enough: a Virtual Participant process runs one
+ * meeting. The factory exists so tests can start from an empty memory.
+ */
+export function createActivationRestore() {
+    let restoreTo: ActivationMode | null = null;
+
+    return {
+        /** The activation mode a later `assist` would restore, if any. */
+        pending(): ActivationMode | null {
+            return restoreTo;
+        },
+
+        /**
+         * The request to send for `command`: the command itself, plus the
+         * remembered activation mode when the command leaves a forcing mode and
+         * names no activation of its own.
+         */
+        requestFor(command: AssistantChatCommand): AssistantChatCommand {
+            if (
+                restoreTo !== null
+                && command.meetingMode !== undefined
+                && !requiresAlwaysListening(command.meetingMode)
+                && command.activationMode === undefined
+            ) {
+                return { ...command, activationMode: restoreTo };
+            }
+            return { ...command };
+        },
+
+        /** Update the memory from what was asked for and how it ended. */
+        record(command: AssistantChatCommand, sent: AssistantChatCommand, outcome: AssistantReconfigureOutcome): void {
+            if (outcome.result === 'declined') {
+                // An activation request the current mode refused is a wish for
+                // when the mode ends, not a request that did not happen. Only a
+                // request to stop listening continuously can be refused by the
+                // combination rule; a declined `LMA always` was refused for some
+                // other reason (a switch still in progress) and is not a wish.
+                if (
+                    command.meetingMode === undefined
+                    && command.activationMode !== undefined
+                    && command.activationMode !== 'always_active'
+                    && requiresAlwaysListening(outcome.meetingModeBefore)
+                ) {
+                    restoreTo = command.activationMode;
+                }
+                return;
+            }
+
+            // An explicit activation command is the participant's own choice.
+            if (command.meetingMode === undefined && command.activationMode !== undefined) {
+                restoreTo = null;
+                return;
+            }
+
+            // The restore was sent and either landed or was already true.
+            if (sent.activationMode !== undefined && command.activationMode === undefined) {
+                restoreTo = null;
+                return;
+            }
+
+            // Entering a forcing mode that actually moved activation: remember
+            // where it moved it from, unless an earlier forced switch already did.
+            if (
+                command.meetingMode !== undefined
+                && requiresAlwaysListening(command.meetingMode)
+                && outcome.changed.includes('activationMode')
+                && restoreTo === null
+            ) {
+                restoreTo = outcome.activationModeBefore;
+            }
+        },
+    };
+}
+
+export type ActivationRestore = ReturnType<typeof createActivationRestore>;
+
+/** The memory for the meeting this process is running. */
+const meetingActivationRestore: ActivationRestore = createActivationRestore();
+
+/**
  * Hand a parsed chat command to the voice assistant and produce the chat reply.
  *
  * Takes the provider rather than reaching for the singleton so the chat path can
@@ -403,13 +510,22 @@ export async function applyAssistantChatCommand(
     assistant: Pick<VoiceAssistantProvider, 'reconfigure'>,
     command: AssistantChatCommand,
     requestedBy?: string | null,
+    restore: ActivationRestore = meetingActivationRestore,
 ): Promise<string[]> {
+    const sent = restore.requestFor(command);
+    if (sent.activationMode !== command.activationMode) {
+        console.log(
+            `${ASSISTANT_TOGGLE_LOG_TAG} restoring activationMode=${sent.activationMode}`
+                + ` on leaving an always-listening meeting mode for meetingMode=${command.meetingMode}`,
+        );
+    }
     const outcome = await assistant.reconfigure({
-        meetingMode: command.meetingMode,
-        activationMode: command.activationMode,
+        meetingMode: sent.meetingMode,
+        activationMode: sent.activationMode,
         route: 'chat',
         requestedBy,
     });
+    restore.record(command, sent, outcome);
 
     return assistantToggleChatReply(outcome);
 }
