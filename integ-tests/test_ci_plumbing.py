@@ -659,6 +659,16 @@ def test_a_build_log_longer_than_one_page_is_read_to_the_failure():
     assert Logs.calls == 2
 
 
+def test_a_child_reported_failed_twice_has_its_failures_listed_once():
+    """The parent reports a child's failure in the update and again in the rollback."""
+    events = _failed_update_events() + [
+        _event(_ROOT, 6, "CHILD", "UPDATE_FAILED",
+               "Embedded stack x was not successfully updated", "AWS::CloudFormation::Stack", _CHILD),
+    ]
+    failures = failure_cause.own_failures(_StubCfn(events), "root", _T0)
+    assert [f["where"] for f in failures].count("CHILD → CodeBuildRun") == 1
+
+
 def test_the_quoted_build_is_the_newest_failed_one_before_the_resource_failed():
     """Across every project in the stack, not the first project listed."""
 

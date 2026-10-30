@@ -155,9 +155,20 @@ def _events_since(cfn: Any, stack: str, since: datetime | None) -> list[dict]:
 
 
 def own_failures(
-    cfn: Any, stack: str, since: datetime, path: str = "", depth: int = 0
+    cfn: Any,
+    stack: str,
+    since: datetime,
+    path: str = "",
+    depth: int = 0,
+    walked: set[str] | None = None,
 ) -> list[dict]:
-    """Every resource in ``stack`` and its children that failed on its own account."""
+    """Every resource in ``stack`` and its children that failed on its own account.
+
+    A parent can report the same child's failure more than once — during the
+    update and again during the rollback — so each child is walked once
+    (``walked``), or its failures would be listed once per report.
+    """
+    walked = set() if walked is None else walked
     found: list[dict] = []
     for event in _events_since(cfn, stack, since):
         status = event.get("ResourceStatus", "")
@@ -170,14 +181,10 @@ def own_failures(
         if event.get("ResourceType") == "AWS::CloudFormation::Stack" and any(
             marker in why for marker in _NESTED_WRAPPER
         ):
-            if depth < 5 and event.get("PhysicalResourceId"):
-                found += own_failures(
-                    cfn,
-                    event["PhysicalResourceId"],
-                    since,
-                    f"{path}{name} → ",
-                    depth + 1,
-                )
+            child = event.get("PhysicalResourceId")
+            if depth < 5 and child and child not in walked:
+                walked.add(child)
+                found += own_failures(cfn, child, since, f"{path}{name} → ", depth + 1, walked)
             continue
         found.append(
             {
