@@ -1,4 +1,4 @@
-boto3>=1.43.118
+boto3>=1.43.120
 botocore>=1.43.98
 # The embedding session is a WebSocket to an ASR MicroVM. Without this the
 # enrollment path fails at the import, not at a handled error.
