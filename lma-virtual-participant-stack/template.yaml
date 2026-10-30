@@ -103,6 +103,14 @@ Parameters:
     Type: String
     Description: Name of the EventSourcingTable (CallEventTable) DynamoDB table from AI stack
 
+  MeetingRecordExpirationInDays:
+    Type: String
+    Default: ""
+    Description: >-
+      (Optional) Days a meeting record is kept. The Virtual Participant's
+      metering records for the meeting cost estimate expire with the meeting
+      they belong to. Empty leaves them without a TTL.
+
   VNCTargetGroupArn:
     Type: String
     Description: ARN of the VNC Target Group from AI stack
@@ -1351,6 +1359,23 @@ Resources:
                 Condition:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.amazonaws.com"
+        # Metering records for the meeting cost estimate: the VP's compute,
+        # Transcribe, Nova Sonic and page-automation usage. PutItem only, and
+        # only under the mtr# partitions of the meeting table; the KMS grant
+        # its encryption needs is on VPTaskRegistryPolicy above.
+        - PolicyName: MeteringPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:PutItem"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTableName}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
         - PolicyName: DomSelectorCachePolicy
           PolicyDocument:
             Version: 2012-10-17
@@ -2774,6 +2799,16 @@ Resources:
               Value: ""
             - Name: DYNAMODB_TABLE_NAME
               Value: !Ref EventSourcingTableName
+            # The meeting cost estimate's metering records (see metering.ts),
+            # kept as long as the meeting they belong to.
+            - Name: METERING_TABLE_NAME
+              Value: !Ref EventSourcingTableName
+            - Name: METERING_EXPIRATION_DAYS
+              Value: !Ref MeetingRecordExpirationInDays
+            # The MicroVM image's MinimumMemoryInMiB, which the VP meters its
+            # own compute at under the MICROVM launch type. Kept equal to it.
+            - Name: VP_MICROVM_MEMORY_MIB
+              Value: "4096"
             - Name: ENABLE_AUDIO_RECORDING
               Value: !Ref EnableAudioRecording
             # Deployment default for video recording; overridden per-VP at task

@@ -472,7 +472,9 @@ def test_the_handler_asks_for_a_re_read_only_when_the_invoke_does(
     monkeypatch.setattr(
         index,
         "generate_summary",
-        lambda transcript, override, refresh=False: seen.append(refresh) or "a summary",
+        lambda transcript, override, refresh=False, call_id=None: (
+            seen.append(refresh) or "a summary"
+        ),
     )
     install(monkeypatch, templates=ddb_item(**{"1#Summary": "p"}), custom=ddb_item())
     index.handler({"CallId": CALL_ID}, None)
@@ -1028,3 +1030,40 @@ def test_root_logger_level_follows_the_stack_log_level(
 def test_root_logger_level_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
     """Without LOG_LEVEL, configuration-layer warnings are still emitted."""
     assert _root_level_after_import(monkeypatch, None) == 20
+
+
+class FakeMeteringTable:
+    def __init__(self):
+        self.items = []
+
+    def put_item(self, TableName, Item):  # noqa: N803
+        self.items.append(Item)
+
+
+def test_each_summary_section_records_its_token_usage_against_the_meeting(monkeypatch) -> None:
+    """One record per model call, in the units the price table prices."""
+    response = {
+        "output": {"message": {"content": [{"text": "a summary"}]}},
+        "usage": {"inputTokens": 1200, "outputTokens": 80, "totalTokens": 1280},
+    }
+    install(
+        monkeypatch,
+        bedrock=FakeBedrock(response=response),
+        templates=ddb_item(**{"1#Summary": "p {transcript}", "2#Actions": "q {transcript}"}),
+        custom=ddb_item(),
+    )
+    metering = FakeMeteringTable()
+    monkeypatch.setattr(
+        index, "METERING", index.MeteringWriter("calls", source="test", client=metering)
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert len(metering.items) == 2
+    for item in metering.items:
+        assert item["PK"] == {"S": f"mtr#{CALL_ID}"}
+        assert item["Context"] == {"S": "Summary"}
+        assert item["Service"] == {"S": f"bedrock/{index.BEDROCK_MODEL_ID}"}
+        assert item["Usage"]["M"] == {
+            "inputTokens": {"N": "1200"},
+            "outputTokens": {"N": "80"},
+            "requests": {"N": "1"},
+        }

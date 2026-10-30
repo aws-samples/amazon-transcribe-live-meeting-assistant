@@ -26,6 +26,14 @@ import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { acquireProfile, persistProfile, releaseProfile } from './profile-store.js';
 import { requiresAlbSelfRegistration } from './launch-mode.js';
 import {
+    CONTEXT_VIRTUAL_PARTICIPANT,
+    LaunchType,
+    currentCallId,
+    recordMetering,
+    resolveComputeSize,
+    virtualParticipantUsage,
+} from './metering.js';
+import {
     patchPreferencesFor3pCookies,
     patchPreferencesForExternalProtocols,
     profileIsFresh,
@@ -108,6 +116,39 @@ let browserContext: any = null;
 let activeProfileHandle: import('./profile-store.js').ProfileHandle | null = null;
 let profilePersisted = false;
 
+// When main() began: the start of this Virtual Participant's own compute as the
+// meeting cost estimate counts it. Set in main() rather than at module load so
+// a MicroVM resumed from a snapshot is not charged for the time it sat in it.
+let runStartedMs = Date.now();
+let runtimeMetered = false;
+
+// Record this Virtual Participant's compute time against its meeting, once,
+// from whichever shutdown path runs first. Never throws.
+const meterRuntime = async (): Promise<void> => {
+    if (runtimeMetered) {
+        return;
+    }
+    runtimeMetered = true;
+    try {
+        const callId = currentCallId();
+        if (!callId) {
+            return;
+        }
+        const launchType = (process.env.VP_LAUNCH_TYPE || 'FARGATE').toUpperCase() as LaunchType;
+        const size = await resolveComputeSize(launchType);
+        const runSeconds = (Date.now() - runStartedMs) / 1000;
+        const { service, usage } = virtualParticipantUsage(launchType, runSeconds, size);
+        await recordMetering(callId, CONTEXT_VIRTUAL_PARTICIPANT, service, usage, {
+            launchType,
+            vcpus: launchType === 'EC2' ? undefined : size.vcpus,
+            memoryMiB: launchType === 'EC2' ? undefined : size.memoryMiB,
+            size: launchType === 'EC2' ? undefined : size.sizeSource,
+        });
+    } catch (error) {
+        console.warn(`[METERING] could not record the Virtual Participant's runtime: ${error}`);
+    }
+};
+
 // Close the browser context (flushing Chromium's cookie/SQLite state to the
 // userDataDir) and upload the profile tar to S3. Guarded so it runs exactly
 // once across whichever shutdown path fires first (normal exit, SIGINT/SIGTERM
@@ -160,6 +201,7 @@ const readBuildInfo = (): { buildDate: string; gitCommit: string; buildSource: s
 };
 
 const main = async (): Promise<void> => {
+    runStartedMs = Date.now();
     const buildInfo = readBuildInfo();
     console.log(
         `LMA Virtual Participant starting... [build ${buildInfo.buildDate} commit ${buildInfo.gitCommit} via ${buildInfo.buildSource}]`,
@@ -869,6 +911,7 @@ const main = async (): Promise<void> => {
         // log line above keeps the trigger exactly as the handler reported it.
         const endTrigger = normalizeExitTrigger(exitInfo?.trigger);
         const joined = exitInfo ? didJoinMeeting(exitInfo) : true;
+        await meterRuntime();
         if (success && joined) {
             const completionMessage = exitInfo ? formatExitMessage(exitInfo) : undefined;
             if (statusManager) {
@@ -972,6 +1015,7 @@ const signalHandler = async (signal: string) => {
     // remembered next launch. nodemon/Ctrl-C deliver SIGTERM/SIGINT here, so
     // without this the latest session would never be persisted.
     await closeAndPersistProfile();
+    await meterRuntime();
 
     console.log('Graceful shutdown complete. Exiting...');
     process.exit(0);

@@ -173,6 +173,29 @@ NOVA_SONIC_CONFIG = register(
     )
 )
 
+#: The on-demand ASR engine's three runtime switches: whether streaming meetings
+#: use it (``streamingEngineMicrovm``), whether Virtual Participants do
+#: (``virtualParticipantEngineMicrovm``), and whether a Virtual Participant on it
+#: asks for per-voice labels (``diarizeVirtualParticipant``). Edited on the
+#: Transcription Engine page.
+#:
+#: Short tier, which is the policy the transcriber's reader has always had: it
+#: reads at the start of each streaming meeting, and 30 seconds keeps a burst of
+#: meetings starting together from each doing its own reads. The Virtual
+#: Participant reads through the getAsrConfig resolver, which reads the records
+#: directly and caches nothing, as that path always has.
+ASR_ENGINE = register(
+    SectionSpec(
+        name="asr_engine",
+        cache_tier=CacheTier.SHORT,
+        description=(
+            "On-demand ASR engine switches: whether streaming meetings and Virtual "
+            "Participants use it, and whether Virtual Participants ask it for "
+            "per-voice labels."
+        ),
+    )
+)
+
 #: The Meeting Assist chat panel's quick-action buttons, keyed "N#Label" where N
 #: orders them, each holding the prompt the button sends. Unlike the other
 #: sections a profile's buttons do not override the shipped ones key by key: a
@@ -191,6 +214,26 @@ CHAT_BUTTONS = register(
         description=(
             "Meeting Assist chat panel quick-action buttons, keyed 'N#Label' where "
             "N orders them; a non-empty profile list replaces the shipped one."
+        ),
+    )
+)
+
+#: The price table the per-meeting cost estimate is computed with: US dollars per
+#: unit for each metered service, a base region and per-region differences. Read
+#: by the cost resolver whenever a meeting's estimate is drawn, and edited by an
+#: administrator through the pricing API. See docs/meeting-cost-estimate.md.
+#:
+#: Standard tier: an estimate drawn a few minutes after a price edit using the
+#: previous price is what the documentation says happens, and nothing about a
+#: price is consent- or privacy-bearing. getCallPricing reads the stored records
+#: directly, so an administrator always sees what they saved.
+CALL_PRICING = register(
+    SectionSpec(
+        name="call_pricing",
+        cache_tier=CacheTier.STANDARD,
+        description=(
+            "Unit prices for the per-meeting cost estimate: USD per token, second or "
+            "vCPU-second for each metered service, by region."
         ),
     )
 )

@@ -119,6 +119,14 @@ Interact with the meeting assistant by typing questions or requests:
 - Multiple sections based on configured prompt templates
 - Copy to clipboard support for easy sharing
 
+### Estimated Cost
+
+A collapsed section showing an itemised estimate of what the meeting cost: Transcribe
+seconds, Bedrock tokens per feature, Nova Sonic, and the Virtual Participant's
+compute, priced at dated list prices. It is labelled as an estimate and lists the
+lines it could not price and what it leaves out. See
+[Meeting Cost Estimate](meeting-cost-estimate.md).
+
 ### Audio Playback
 
 When recording is enabled, a WAV recording player is available for audio playback of the meeting.

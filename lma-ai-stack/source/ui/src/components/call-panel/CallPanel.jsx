@@ -50,6 +50,7 @@ import {
   serializeSpeakerIdentities,
 } from '../common/speaker-identities';
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
+import CallCostPanel from './CallCostPanel';
 
 import RecordingPlayer from '../recording-player';
 import VideoPlayer from '../video-player';
@@ -2589,6 +2590,12 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         onIdentify={identifySpeakers}
         readOnly={speakerNamesReadOnly}
         isLive={item.recordingStatusLabel === IN_PROGRESS_STATUS}
+      />
+      <CallCostPanel
+        callId={item.callId}
+        refreshKey={`${item.recordingStatusLabel || ''}|${(item.callSummaryText || '').length}|${
+          item.callSummaryState || ''
+        }`}
       />
       <CallTranscriptContainer
         item={item}

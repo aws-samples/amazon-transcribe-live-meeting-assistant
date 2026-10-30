@@ -57,6 +57,7 @@ index = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(index)
 
 ADMIN_IDENTITY = {"claims": {"cognito:groups": ["Admin"], "email": "admin@example.com"}}
+OTHER_ADMIN = {"claims": {"cognito:groups": ["Admin"], "email": "someone-else@example.com"}}
 IAM_IDENTITY = {
     "accountId": "123456789012",
     "userArn": "arn:aws:sts::123456789012:assumed-role/a-service-role/session",
@@ -543,3 +544,17 @@ def test_audit_attributes_come_from_the_identity_not_the_request(
 
     assert table.stored_metadata()["UpdatedBy"] == "admin@example.com"
     assert "UpdatedBy" not in table.stored()
+
+
+def test_a_refused_save_is_logged_without_the_previous_saver_s_address(
+    capsys: pytest.CaptureFixture, table: FakeConfigurationTable
+) -> None:
+    """The refusal names who saved first; that goes to the admin, not to CloudWatch."""
+    loaded = read("CustomNovaSonicConfig")["Version"]
+    save({"voiceId": "matthew"}, identity=OTHER_ADMIN)
+    capsys.readouterr()
+
+    with pytest.raises(Exception, match="^Conflict: .*someone-else@example.com"):
+        save(CONFIG, expected_version=loaded)
+
+    assert "someone-else@example.com" not in capsys.readouterr().out

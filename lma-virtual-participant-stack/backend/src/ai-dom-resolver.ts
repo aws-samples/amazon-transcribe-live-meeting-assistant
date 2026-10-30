@@ -12,6 +12,7 @@ import {
 } from '@aws-sdk/client-dynamodb';
 import { marshall, unmarshall } from '@aws-sdk/util-dynamodb';
 import { buildClaudeInvokeParams } from './bedrock-model-compat.js';
+import { CONTEXT_PAGE_AUTOMATION, anthropicUsage, currentCallId, recordMetering } from './metering.js';
 
 export type Platform = 'ZOOM' | 'TEAMS' | 'WEBEX' | 'CHIME';
 
@@ -487,6 +488,14 @@ async function invokeClaude(
   const response = await getBedrock().send(command);
   const decoded = new TextDecoder().decode(response.body);
   const parsed = JSON.parse(decoded) as ClaudeResponse;
+  // A cache miss costs a vision call; recorded against the meeting the
+  // Virtual Participant is joining, for its cost estimate.
+  void recordMetering(
+    currentCallId(),
+    CONTEXT_PAGE_AUTOMATION,
+    `bedrock/${DEFAULT_MODEL_ID}`,
+    anthropicUsage((parsed as { usage?: unknown }).usage),
+  );
   const text = parsed.content
     ?.filter((c) => c.type === 'text')
     .map((c) => c.text || '')

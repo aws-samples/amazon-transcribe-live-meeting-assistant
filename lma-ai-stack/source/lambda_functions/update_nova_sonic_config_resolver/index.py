@@ -339,7 +339,10 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except ConcurrentModification as error:
         # Surfaced as itself: the admin has to be told their copy is stale, not
         # that the save failed for an unknown reason.
-        print(f"Refused a save against a superseded record: {error}")
+        # A fixed line: the message names whoever saved the record,
+        # which belongs in the error returned to the admin and on the
+        # record's UpdatedBy, not in CloudWatch.
+        print("Refused a save against a superseded record")
         raise Exception(f"Conflict: {error}") from error
     except Exception as error:
         print(f"Error updating Nova Sonic config: {error}")

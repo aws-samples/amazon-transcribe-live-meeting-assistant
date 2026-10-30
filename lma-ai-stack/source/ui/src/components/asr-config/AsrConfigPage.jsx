@@ -22,6 +22,7 @@ import {
 
 import useSettingsContext from '../../contexts/settings';
 import AdminOnly from '../common/AdminOnly';
+import { isConflict } from '../common/config-conflict';
 
 const client = generateClient();
 const CONFIG_ID = 'CustomAsrConfig';
@@ -33,6 +34,7 @@ export const getAsrConfigQuery = `
       streamingEngineMicrovm
       virtualParticipantEngineMicrovm
       diarizeVirtualParticipant
+      Version
     }
   }
 `;
@@ -42,6 +44,7 @@ const updateAsrConfigMutation = `
     updateAsrConfig(input: $input) {
       AsrConfigId
       Success
+      Version
     }
   }
 `;
@@ -71,6 +74,16 @@ const ENGINE_ITEMS = [
   },
 ];
 
+// Shown when the stored profile moved on while this page was open -- another
+// administrator saved it, from this page or another configuration page, since
+// they share one profile. The save is refused rather than replacing their edit.
+const CONFLICT_MESSAGE =
+  'Someone else saved the configuration while this page was open. Reload the page to see their ' +
+  'version, then apply your changes again.';
+
+// The version a read or a save reports, or null when it reports none.
+export const versionOf = (data) => (typeof data?.Version === 'number' ? data.Version : null);
+
 const AsrConfigPageContent = () => {
   const { settings } = useSettingsContext();
   const engineDeployed = `${settings?.AsrEngineAvailable}` === 'true';
@@ -83,6 +96,8 @@ const AsrConfigPageContent = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState(null);
+  // The version of the profile this page last read or saved, sent back on save.
+  const [version, setVersion] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -96,6 +111,7 @@ const AsrConfigPageContent = () => {
       setConfig(
         Object.fromEntries(Object.entries(EMPTY).map(([field, fallback]) => [field, stored[field] ?? fallback])),
       );
+      setVersion(versionOf(stored));
       setStatus(null);
     } catch (err) {
       setStatus({ type: 'error', text: `Could not load the ASR configuration: ${err.message || err}` });
@@ -115,13 +131,20 @@ const AsrConfigPageContent = () => {
   const save = async () => {
     setSaving(true);
     try {
-      await client.graphql({
+      const result = await client.graphql({
         query: updateAsrConfigMutation,
-        variables: { input: { AsrConfigId: CONFIG_ID, ConfigData: JSON.stringify(config) } },
+        variables: {
+          input: { AsrConfigId: CONFIG_ID, ConfigData: JSON.stringify(config), ExpectedVersion: version },
+        },
       });
+      // So a second save from the same page is checked against this one.
+      setVersion(versionOf(result.data?.updateAsrConfig));
       setStatus({ type: 'success', text: 'Saved. Applies to the next meeting that starts.' });
     } catch (err) {
-      setStatus({ type: 'error', text: `Could not save: ${err.message || err}` });
+      setStatus({
+        type: 'error',
+        text: isConflict(err) ? CONFLICT_MESSAGE : `Could not save: ${err.message || err}`,
+      });
     } finally {
       setSaving(false);
     }

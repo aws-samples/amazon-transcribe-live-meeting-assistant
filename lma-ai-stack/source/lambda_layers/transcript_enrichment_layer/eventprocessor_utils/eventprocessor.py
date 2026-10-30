@@ -3,6 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime, timedelta
 from os import getenv
@@ -509,6 +510,16 @@ async def transform_segment_to_add_sentiment(
         sentiment_response: DetectSentimentResponseTypeDef = await detect_sentiment(
             text, comprehend_client, comprehend_language_code
         )
+        # Counted for the meeting's cost estimate. A metering failure must never
+        # cost the segment its sentiment, so it is contained here.
+        on_request = sentiment_analysis_args.get("on_comprehend_request")
+        if on_request:
+            try:
+                on_request(message.get("CallId"), text)
+            except Exception:  # pylint: disable=broad-except
+                logging.getLogger(__name__).warning(
+                    "could not meter a sentiment request", exc_info=True
+                )
         comprehend_weighted_sentiment = ComprehendWeightedSentiment()
 
         sentiment = {

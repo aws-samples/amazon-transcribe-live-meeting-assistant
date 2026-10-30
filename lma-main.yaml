@@ -3337,6 +3337,9 @@ Resources:
         VirtualParticipantTableName: !GetAtt AISTACK.Outputs.VirtualParticipantTableName
         LLMPromptTemplateTableName: !GetAtt LLMTEMPLATESTACK.Outputs.LLMPromptTemplateTableName
         AppSyncApiId: !GetAtt AISTACK.Outputs.AppSyncApiId
+        # Where the meeting assistant records each answer's token usage for the
+        # meeting cost estimate.
+        EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
         # Threaded through so this nested stack's IAM roles carry the
         # deployment's permissions boundary, as the other nested stacks' do.
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn
@@ -3433,9 +3436,16 @@ Resources:
           - ShouldDeployMicrovmAsr
           - !GetAtt ASRMICROVMSTACK.Outputs.AsrConfigTableName
           - ""
+        # The shared configuration table, which the switches above are read
+        # from; the ASR table stays as the fallback read.
+        ConfigurationTableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
         # Empty when voice enrollment is off, which is how the transcriber knows
         # not to ask. The AI stack decides that, since the enrollments live there.
         VoiceEnrollmentSeedsFunctionArn: !GetAtt AISTACK.Outputs.VoiceEnrollmentSeedsFunctionArn
+        # Where the transcriber records each meeting's Transcribe seconds and ASR
+        # MicroVM time for the meeting cost estimate, kept as long as the meeting.
+        EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         PcaS3BucketName: ""
         PcaTranscriptsPrefix: ""
         PcaPlaybackAudioFilePrefix: ""
@@ -3574,6 +3584,7 @@ Resources:
         DomSelectorCacheTableName: !GetAtt AISTACK.Outputs.DomSelectorCacheTableName
         VPProfilesBucketName: !GetAtt AISTACK.Outputs.VPProfilesBucketName
         EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
+        MeetingRecordExpirationInDays: !Ref MeetingRecordExpirationInDays
         VNCTargetGroupArn: !GetAtt AISTACK.Outputs.VNCTargetGroupArn
         VNCALBListenerArn: !GetAtt AISTACK.Outputs.VNCALBListenerArn
         VncOriginVerifyHeaderValueSecretArn: !GetAtt AISTACK.Outputs.VncOriginVerifyHeaderValueSecretArn

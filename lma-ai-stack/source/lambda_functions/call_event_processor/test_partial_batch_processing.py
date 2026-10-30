@@ -35,7 +35,8 @@ HERE = Path(__file__).parent
 # The function imports appsync_utils / transcript_batch_processor from the
 # transcript enrichment Lambda layer, which is on the path at runtime only.
 LAYER = HERE.parents[1] / "lambda_layers" / "transcript_enrichment_layer"
-for path in (str(HERE), str(LAYER)):
+CONFIG_LAYER = HERE.parents[1] / "lambda_layers" / "configuration_layer"
+for path in (str(HERE), str(LAYER), str(CONFIG_LAYER)):
     if path not in sys.path:
         sys.path.insert(0, path)
 

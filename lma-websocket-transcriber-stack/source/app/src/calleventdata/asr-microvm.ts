@@ -27,6 +27,7 @@ import { diarizationEnabledFor } from './diarization';
 // Type-only in the other direction, so this is not a runtime cycle.
 import { fetchEnrolledVoices } from './voice-enrollment';
 import { normalizeErrorForLogging } from '../utils/common';
+import { meterMicrovm } from '../metering';
 import {
     ASR_CHANNEL_IDS,
     ASR_SAMPLE_RATE,
@@ -78,7 +79,33 @@ export interface AsrLease {
     endpointUrl: string;
     microvmId?: string;
     authToken?: string;
+    /** When the launch was requested (epoch ms): the start of what is billed. */
+    acquiredAtMs?: number;
+    /** The MicroVM's configured memory, as the launcher reports it. */
+    memoryMiB?: number;
 }
+
+/**
+ * The size the ASR image is built at when a launcher does not report one: the
+ * `BundleMemory` mapping in lma-asr-microvm-stack/template.yaml gives every
+ * bundle 8 GiB.
+ */
+const DEFAULT_ASR_MICROVM_MEMORY_MIB = 8192;
+
+/** Record a released MicroVM's lifetime for the meeting cost estimate. */
+const meterLease = async (callId: string, lease: AsrLease, server: FastifyInstance): Promise<void> => {
+    if (!lease.microvmId || !lease.acquiredAtMs) {
+        return;
+    }
+    const reported = typeof lease.memoryMiB === 'number' && lease.memoryMiB > 0;
+    await meterMicrovm(
+        callId,
+        (Date.now() - lease.acquiredAtMs) / 1000,
+        reported ? (lease.memoryMiB as number) : DEFAULT_ASR_MICROVM_MEMORY_MIB,
+        { size: reported ? 'reported by the launcher' : 'assumed from the image default' },
+        server.log
+    );
+};
 
 /** What a session asks of the engine; the operating point is baked into the image, not negotiable. */
 interface AsrSessionOptions {
@@ -311,6 +338,8 @@ export const acquireLease = async (
         endpointUrl: `wss://${body['endpoint']}`,
         microvmId: body['microvmId'],
         authToken: body['authToken'],
+        acquiredAtMs: started,
+        memoryMiB: Number(body['memoryMiB']) > 0 ? Number(body['memoryMiB']) : undefined,
     };
 };
 
@@ -852,6 +881,7 @@ export const startMicrovmAsr = async (
         );
         if (lease.microvmId) {
             await releaseLease(lease.microvmId, server);
+            await meterLease(callMetadata.callId, lease, server);
         }
         return false;
     }
@@ -932,5 +962,6 @@ export const stopMicrovmAsr = async (
         server.log.info(
             `[ASR]: [${socketData.callMetadata.callId}] - released ASR MicroVM ${asr.lease.microvmId}`
         );
+        await meterLease(socketData.callMetadata.callId, asr.lease, server);
     }
 };

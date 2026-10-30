@@ -64,6 +64,8 @@ import cfnresponse  # vendored beside this handler; see cfnresponse.py
 
 # pylint: disable=import-error
 from lma_config import (  # from the configuration layer
+    ASR_ENGINE,
+    CALL_PRICING,
     CHAT_BUTTONS,
     NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
@@ -115,6 +117,15 @@ NOVA_SONIC_DEFAULTS_FILE = "NovaSonicConfig.json"
 #: fails if the two drift.
 CHAT_BUTTONS_DEFAULTS_FILE = "ChatButtonConfig.json"
 
+#: The price table for the per-meeting cost estimate. See
+#: docs/meeting-cost-estimate.md for where each price came from.
+CALL_PRICING_FILE = "CallPricing.json"
+#: The on-demand ASR engine's switches as a new deployment ships them: all off,
+#: so every meeting is transcribed by Amazon Transcribe until an administrator
+#: chooses otherwise. The previous table had no seeder and read an absent record
+#: as exactly this, so there is no second copy to keep in step.
+ASR_ENGINE_DEFAULTS_FILE = "AsrEngine.json"
+
 #: The profile an operator's edits land in. One profile in this stage; the key
 #: layout holds as many as wanted.
 OPERATOR_PROFILE = "custom"
@@ -150,15 +161,25 @@ def numbered_prompts(prompts: Mapping[str, str]) -> Dict[str, str]:
 
 
 def shipped_default_body(domain: str) -> Dict[str, Any]:
-    """The baseline document for ``domain``, read from the shipped JSON."""
+    """The baseline document for ``domain``, read from the shipped JSON.
+
+    The price table is the same whatever the domain. It is part of the baseline,
+    so a release that updates a price reaches every deployment on its next stack
+    update; a price an administrator changed lives in the profile and keeps
+    winning over it.
+    """
     filename = PROMPT_TEMPLATE_FILES.get(domain.lower(), PROMPT_TEMPLATE_FILES["default"])
     prompts = json.loads((DEFAULTS_DIR / filename).read_text(encoding="utf-8"))
     nova_sonic = json.loads((DEFAULTS_DIR / NOVA_SONIC_DEFAULTS_FILE).read_text(encoding="utf-8"))
     buttons = json.loads((DEFAULTS_DIR / CHAT_BUTTONS_DEFAULTS_FILE).read_text(encoding="utf-8"))
+    pricing = json.loads((DEFAULTS_DIR / CALL_PRICING_FILE).read_text(encoding="utf-8"))
+    asr_engine = json.loads((DEFAULTS_DIR / ASR_ENGINE_DEFAULTS_FILE).read_text(encoding="utf-8"))
     return {
         SUMMARY_PROMPT_TEMPLATES.name: numbered_prompts(prompts),
         NOVA_SONIC_CONFIG.name: nova_sonic,
         CHAT_BUTTONS.name: numbered_prompts(buttons),
+        CALL_PRICING.name: pricing,
+        ASR_ENGINE.name: asr_engine,
     }
 
 
@@ -338,6 +359,14 @@ NOVA_SONIC_FIELDS = frozenset(
     }
 )
 
+#: The switches the Transcription Engine page saves, which are the ones the
+#: resolver behind it accepts.
+#: `test_the_seeder_adopts_exactly_the_switches_this_resolver_accepts` holds the
+#: two lists equal.
+ASR_ENGINE_FIELDS = frozenset(
+    {"streamingEngineMicrovm", "virtualParticipantEngineMicrovm", "diarizeVirtualParticipant"}
+)
+
 #: A key in "N#Label" form, where N orders the entries. ASCII digits only.
 SEQUENCED_KEY = re.compile(r"^[0-9]+#")
 
@@ -361,6 +390,16 @@ LEGACY_SECTIONS = (
         # replaces the shipped buttons rather than adding to them, so nothing
         # in it can be pruned against the baseline.
         carries=lambda name: bool(SEQUENCED_KEY.match(name)),
+    ),
+    LegacySection(
+        section=ASR_ENGINE,
+        property_name="LegacyAsrConfigTableName",
+        key_attribute="AsrConfigId",
+        key="CustomAsrConfig",
+        # The three switches the Transcription Engine page saves. A record
+        # written by an older release can also hold retired tuning fields,
+        # which no reader uses; they are left behind.
+        carries=ASR_ENGINE_FIELDS.__contains__,
     ),
 )
 

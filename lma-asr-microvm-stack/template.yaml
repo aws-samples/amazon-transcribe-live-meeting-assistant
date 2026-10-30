@@ -725,6 +725,12 @@ Resources:
           # output goes to a service-created group with no expiry.
           MICROVM_LOG_GROUP_NAME: !Ref AsrMicrovmLogGroup
           MAX_MEETING_SECONDS: !Ref AsrMaxMeetingSeconds
+          # Reported on acquire so the transcriber can meter the MicroVM for the
+          # meeting cost estimate. The same figure as the image's
+          # MinimumMemoryInMiB.
+          MICROVM_MEMORY_MIB: !Sub
+            - "${Mib}"
+            - Mib: !FindInMap [BundleMemory, !Ref AsrModelBundle, MiB]
           LOG_LEVEL: !Ref LogLevel
       Code:
         S3Bucket: !Ref LambdaArtifactBucket
