@@ -13,7 +13,7 @@ import json
 import os
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import logging
 from datetime import datetime
 from bedrock_compat import (
@@ -1646,15 +1646,18 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         logger.error(f"Error querying knowledge base: {str(e)}")
         return ""
 
-def meeting_chat_tool_scope(event: Dict[str, Any]) -> tuple:
+
+
+def meeting_chat_tool_scope(event: Dict[str, Any]) -> Tuple[bool, str]:
     """Whether the event is a meeting-chat question, and the user email to use.
 
     toolScope 'meeting_chat' is a question typed in the meeting chat (the
-    Virtual Participant's `LMA ask`). It is answered from the current meeting's
-    transcript, the document knowledge base and web search: the MCP servers and
-    the VNC and browser controls are not offered, and the user email is
-    cleared here, whatever the event carries, so the meeting-history tools that
-    are scoped to it are not offered either.
+    Virtual Participant's `LMA ask`), whose answer everyone in the meeting
+    reads. It is answered from the current meeting's transcript and web search
+    only: the document knowledge base, the MCP servers and the VNC and browser
+    controls are not offered, and the user email is cleared here, whatever the
+    event carries, so the meeting-history tools that are scoped to it are not
+    offered either.
     """
     user_email = event.get('userEmail', '') or event.get('user_email', '')
     if event.get('toolScope') == 'meeting_chat':
@@ -1915,7 +1918,7 @@ def handler(event, context):
         # Add document retrieval tool if KB configured. The factory returns None
         # when the knowledge-base model cannot generate an answer, in which case
         # the agent is offered no such tool rather than one that cannot answer.
-        if kb_id:
+        if kb_id and not meeting_chat_scope:
             document_search_tool = create_document_search_tool(
                 kb_id=kb_id,
                 kb_region=kb_region,

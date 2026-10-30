@@ -40,11 +40,12 @@ def test_other_requests_keep_their_user_email():
 
 
 def test_meeting_chat_scope_gates_the_mcp_and_control_tools():
-    # The three tool groups the scope leaves out are each guarded by it.
+    # The four tool groups the scope leaves out are each guarded by it.
     source = (SOURCE_DIR / "strands_meeting_assist_function.py").read_text()
     for guard in (
         "if MCP_LOADER_AVAILABLE and not meeting_chat_scope:",
         "if APPSYNC_GRAPHQL_URL and not meeting_chat_scope:",
         "if EVENT_API_HTTP_URL and not meeting_chat_scope:",
+        "if kb_id and not meeting_chat_scope:",
     ):
         assert guard in source, guard

@@ -15,11 +15,12 @@
  * meeting assistant is a Strands one, whatever the voice-assistant provider.
  *
  * Questions from the chat are asked with `toolScope: 'meeting_chat'` and no
- * user email, so the agent answers from the current meeting's transcript, the
- * document knowledge base and web search. It is not given the owner's meeting
+ * user email, so the agent answers from the current meeting's transcript and
+ * web search. It is not given the document knowledge base, the owner's meeting
  * history, MCP servers, or the browser and VNC controls: a chat sender is known
- * only by the display name the meeting shows, so a question in the chat is
- * answered as any participant's question rather than as the LMA user's.
+ * only by the display name the meeting shows, and the answer is read by
+ * everyone in the meeting, so a question in the chat is answered as any
+ * participant's question rather than as the LMA user's.
  *
  * The answer is posted as plain text (markdown reduced by `toSpokenText`, which
  * also makes it a single line — the one shape every platform's send path
