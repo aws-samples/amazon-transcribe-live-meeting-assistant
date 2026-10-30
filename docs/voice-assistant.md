@@ -251,6 +251,22 @@ These commands do not overlap with the existing chat commands: `LMA leave` / `LM
 - **It lasts for this meeting only.** The reply says so: `switched to translator mode (English and French), now always listening. This applies to this meeting only; the default language pair is set on the Nova Sonic Configuration page.` The choice is **not** saved as the deployment default for anyone, including the person who launched the Virtual Participant. A chat sender is known to the Virtual Participant only by the display name the meeting platform shows, which participants choose for themselves, and the Virtual Participant knows its owner only as an LMA sign-in (an email address), so no chat sender can be matched to the owner with confidence. Rather than guess, the chat never writes configuration; the default pair stays an Admin setting on the Nova Sonic Configuration page.
 - The `[assistant-toggle]` line carries a `translator="English<->French"` field when a pair was asked for, marked `(unchanged)` when it was already in use.
 
+### Asking the Assistant
+
+Outside translator mode, the same changes can be asked for out loud. Address the assistant by its wake phrase and say what you want:
+
+| Say | Effect |
+|---|---|
+| "Hey Alex, switch to translator mode" | `LMA translate` |
+| "Hey Alex, go back to assistant mode" | `LMA assist`, including restoring the activation mode a translator or listen mode replaced |
+| "Hey Alex, listen mode" | `LMA listen` |
+| "Hey Alex, always listen" | `LMA always` |
+| "Hey Alex, wake mode" | `LMA wake` |
+
+The assistant has a `set_mode` tool for this, and a call to it is applied as the chat command in the table, so the rules above hold the same way and the `[assistant-toggle]` log line reads `route=voice`. The assistant confirms in one sentence — "Switching to translator mode.", "I'm already in assistant mode.", or why it can't — and then switches; it says the sentence first because the switch replaces the session that would say it. A call is only acted on when the assistant was addressed by wake phrase within the last 15 seconds: the model does call the tool when participants merely talk about a mode, and what it says in reply to such a call is not played. Each call writes a `[voice-mode]` line to the Virtual Participant log.
+
+Translator mode keeps only its pause tool, so it is left with a phrase instead: "Alex, stop translating" (or "Hey Alex, stop translating", "Alex, go back to assistant mode"). The name can be a wake phrase or the name in one of the translator's pause phrases. The translation of the request itself is not played; the assistant switches to assistant mode — restoring the activation mode translator mode replaced — and says "Okay, I've stopped translating." in its own voice. Nothing else may be said in the same sentence, so "Alex said to stop translating the slides" is translated as usual. The phrase is read from Nova Sonic's own transcript of the meeting, so it is only as reliable as that transcript.
+
 ### What Happens When the Mode Changes
 
 The meeting mode decides the assistant's system prompt and the set of tools it is given, and both are sent once when its Nova session opens — translator mode most visibly, because it *replaces* the base prompt rather than adding to it. So a mode change is not a flag flip: LMA rebuilds the session around the new configuration, using the same mechanism as the periodic session refresh.

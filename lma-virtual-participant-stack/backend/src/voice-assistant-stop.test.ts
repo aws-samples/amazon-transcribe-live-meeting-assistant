@@ -71,19 +71,19 @@ test('the stop-talking tool is registered in both conversational meeting modes',
     assert.equal(hasStopTalkingTool('group'), true);
     assert.equal(hasStopTalkingTool('translator'), false);
 
-    assert.deepEqual(toolNames(novaAgent({ meetingMode: 'normal' })), ['mute']);
-    assert.deepEqual(toolNames(novaAgent({ meetingMode: 'group' })), ['mute']);
+    assert.deepEqual(toolNames(novaAgent({ meetingMode: 'normal' })), ['mute', 'set_mode']);
+    assert.deepEqual(toolNames(novaAgent({ meetingMode: 'group' })), ['mute', 'set_mode']);
 });
 
 test('the stop-talking tool is registered alongside the meeting-assistant tool', () => {
     // Registering one tool must not displace the other.
     assert.deepEqual(
         toolNames(novaAgent({ meetingMode: 'normal', strandsLambdaArn: 'arn:aws:lambda:us-east-1:123456789012:function:strands' })),
-        ['strands_agent', 'mute'],
+        ['strands_agent', 'mute', 'set_mode'],
     );
     assert.deepEqual(
         toolNames(novaAgent({ meetingMode: 'group', strandsLambdaArn: 'arn:aws:lambda:us-east-1:123456789012:function:strands' })),
-        ['strands_agent', 'mute'],
+        ['strands_agent', 'mute', 'set_mode'],
     );
 });
 

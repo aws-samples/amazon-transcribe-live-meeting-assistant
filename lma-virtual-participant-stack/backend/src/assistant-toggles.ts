@@ -18,9 +18,10 @@
  *
  * This module holds the parts that every route into that change can share: the
  * request and outcome shapes, the chat vocabulary, the confirmation wording, and
- * the single log line each toggle emits. The meeting chat is the only route that
- * calls it today; a route differs only in how it arrives at a request, so
- * another one supplies an `AssistantToggleRoute` and reuses everything below.
+ * the single log line each toggle emits. The meeting chat and the voice
+ * assistant's own `set_mode` tool (voice-mode-switch.ts) call it; a route
+ * differs only in how it arrives at a request, so each supplies an
+ * `AssistantToggleRoute` and reuses everything below.
  *
  * Nothing here is persisted. A toggle changes the assistant running this one
  * meeting and lasts until the meeting ends; the configuration record keeps
@@ -49,10 +50,10 @@ import {
  * Which surface asked for the change, recorded on every toggle so one log line
  * says where a change came from.
  *
- * Only `chat` has a caller today — the other three are the surfaces the log
- * would otherwise be unable to distinguish once they do, and naming them here
- * keeps that a one-line change rather than a change to the outcome shape and
- * every provider.
+ * `chat` and `voice` have callers today — the other two are the surfaces the
+ * log would otherwise be unable to distinguish once they do, and naming them
+ * here keeps that a one-line change rather than a change to the outcome shape
+ * and every provider.
  */
 export type AssistantToggleRoute = 'chat' | 'voice' | 'api' | 'config';
 
@@ -582,6 +583,9 @@ export async function applyAssistantChatCommand(
     command: AssistantChatCommand,
     requestedBy?: string | null,
     restore: ActivationRestore = meetingActivationRestore,
+    // The voice route (voice-mode-switch.ts) asks through here too, so that it
+    // shares the activation restore above; only the logged route differs.
+    route: AssistantToggleRoute = 'chat',
 ): Promise<string[]> {
     const prefix = 'Live Meeting Assistant:';
     // The two language checks below answer without the provider, so they only
@@ -643,7 +647,7 @@ export async function applyAssistantChatCommand(
         meetingMode: sent.meetingMode,
         activationMode: sent.activationMode,
         ...(translatorLanguages ? { translatorLanguages } : {}),
-        route: 'chat',
+        route,
         requestedBy,
     });
     restore.record(command, sent, outcome);
