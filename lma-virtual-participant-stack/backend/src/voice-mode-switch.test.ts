@@ -248,6 +248,44 @@ test('nova: "Alex, stop translating" leaves translator mode and drops the transl
     assert.deepEqual(played.map((b) => [...b]), [[7]], 'only the confirmation is heard');
 });
 
+test('nova: "Alex, stop translating" also works while the translator is paused', async () => {
+    const { a, requests } = nova('translator');
+    a._translatorState = 'MUTED';
+    await stream(a, userTurn('alex stop translating'));
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].meetingMode, 'normal');
+});
+
+test('nova: without the rendered clip, leaving translator mode is confirmed with the pause tone', async () => {
+    const { a } = nova('translator');
+    const tones: string[] = [];
+    a.playConfirmationTone = (kind: string) => { tones.push(kind); };
+    await stream(a, userTurn('alex stop translating'));
+    assert.deepEqual(tones, ['mute']);
+});
+
+test('nova: a second set_mode while one is waiting is told the switch is still under way', async () => {
+    const { a, requests } = nova('normal', 'wake_phrase');
+    await stream(a, [...userTurn('hey alex switch to translator mode'), ...setMode('translator')]);
+    await stream(a, [...userTurn('hey alex listen mode'), ...setMode('listen')]);
+    const results = toolResults(a);
+    assert.equal(results[1].status, 'declined');
+    assert.match(results[1].instruction, /I'm still switching modes\. Please ask again in a moment\./);
+    await stream(a, spoken());
+    assert.deepEqual(requests.map((r) => r.meetingMode), ['translator'], 'only the first is applied');
+});
+
+test('nova: a switch another route has already made is not applied again', async () => {
+    const { a, requests } = nova('normal', 'wake_phrase');
+    await stream(a, [...userTurn('hey alex switch to translator mode'), ...setMode('translator')]);
+    // A chat command lands while the confirmation is being spoken.
+    a.meetingMode = 'translator';
+    a.activationMode = 'always_active';
+    await stream(a, spoken());
+    assert.equal(requests.length, 0);
+    assert.ok(logs.some((l) => l === '[voice-mode] action=superseded after=confirmed now=unchanged'));
+});
+
 test('nova: other speech in translator mode is translated as usual', async () => {
     const { a, requests, played } = nova('translator');
     a.startNextTranslatorSession = () => {};

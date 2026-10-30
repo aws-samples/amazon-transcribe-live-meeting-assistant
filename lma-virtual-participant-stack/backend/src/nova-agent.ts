@@ -4437,8 +4437,9 @@ export class NovaAgent implements VoiceAssistantProvider {
    *  several turns, so the turn just before the call need not hold the phrase. */
   private readonly VOICE_MODE_ADDRESSED_WINDOW_MS = 15000;
 
-  /** How long a `set_mode` switch waits for its confirmation to be spoken. */
-  private readonly VOICE_MODE_SWITCH_MAX_WAIT_MS = 4000;
+  /** How long a `set_mode` switch waits for its confirmation to be spoken.
+   *  Not `readonly`, so the tests can shorten it. */
+  private VOICE_MODE_SWITCH_MAX_WAIT_MS = 4000;
 
   /**
    * A `set_mode` call: answer it with the sentence to say, and arm the switch
@@ -4472,7 +4473,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       console.log(`[voice-mode] mode=${isVoiceMode(mode) ? mode : 'unrecognised'} action=ignored addressed=${addressed}`);
       // The model calls the tool for talk about modes that was not addressed to
       // it, and told to stay silent it still answered out loud after the call
-      // in 8 runs of 8, so whatever it says for the rest of this turn is dropped.
+      // in 8 runs of 8 (amazon.nova-2-sonic-v1:0, October 2026), so whatever it
+      // says for the rest of this turn is dropped.
       if (issuingSession) issuingSession.dropTurn = true;
       await reply(SET_MODE_NOT_ADDRESSED_RESULT);
       return;
@@ -4510,6 +4512,17 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.pendingVoiceModeSwitch = null;
     if (pending.timer) clearTimeout(pending.timer);
     if (this.stopped) return;
+    // The sentence was decided when the tool was called. If another route has
+    // changed the mode since, the switch it announced may no longer apply.
+    const now = predictVoiceModeChange({
+      meetingMode: this.meetingMode,
+      activationMode: this.activationMode as ActivationMode,
+      reconfiguring: this._reconfiguring,
+    }, pending.command);
+    if (now.result !== 'applied') {
+      console.log(`[voice-mode] action=superseded after=${why} now=${now.result}`);
+      return;
+    }
     console.log(`[voice-mode] action=switch after=${why}`);
     applyAssistantChatCommand(this, pending.command, null, undefined, 'voice').catch((error) => {
       console.error('Error applying a voice mode change:', error);
