@@ -309,6 +309,10 @@ interface SessionData {
   /** Drop this session's audio until its current turn ends (an unaddressed
    *  `set_mode` call; see handleSetModeTool). */
   dropTurn?: boolean;
+  /** Keep the text of that same reply out of the history and the transcript.
+   *  Cleared at the next participant turn rather than with the audio, because
+   *  the FINAL text of a turn arrives after its audio has ended. */
+  dropReplyText?: boolean;
 }
 
 interface ConversationTurn {
@@ -559,6 +563,8 @@ export class NovaAgent implements VoiceAssistantProvider {
    *  translator mode is entered, or null. */
   private stoppedTranslatingClip: Buffer | null = null;
   private stoppedTranslatingClipRendering = false;
+  /** Set while "stop translating" is being applied. */
+  private leavingTranslator = false;
   
   // Lambda client and Strands agent configuration
   private lambdaClient: LambdaClient | null = null;
@@ -2140,7 +2146,16 @@ export class NovaAgent implements VoiceAssistantProvider {
                 this._translatorState === 'MUTED'
               );
 
-              if (currentTurn.role && currentTurn.isFinal && currentTurn.content.trim() && !skipForTranslatorMuted) {
+              // A reply nobody heard — the translation of "stop translating", or
+              // the answer to an unaddressed set_mode call — is kept out of the
+              // history and the transcript as well.
+              const unheardReply = currentTurn.role === 'ASSISTANT'
+                && !!(session?.silenced || session?.dropReplyText);
+
+              if (
+                currentTurn.role && currentTurn.isFinal && currentTurn.content.trim()
+                && !skipForTranslatorMuted && !unheardReply
+              ) {
                 this.addToConversationHistory(currentTurn.role, currentTurn.content.trim());
                 console.log(`💬 Saved ${currentTurn.role} turn to history: "${currentTurn.content.substring(0, 50)}..."`);
                 if (currentTurn.role === 'ASSISTANT') {
@@ -2159,6 +2174,7 @@ export class NovaAgent implements VoiceAssistantProvider {
                   session.lastUserTurnEndAt = Date.now();
                   // A participant's new turn is not the dropped one.
                   session.dropTurn = false;
+                  session.dropReplyText = false;
                   this.handleUserTurnWakePhrase(currentTurn.content);
                 }
               }
@@ -4475,7 +4491,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       // it, and told to stay silent it still answered out loud after the call
       // in 8 runs of 8 (amazon.nova-2-sonic-v1:0, October 2026), so whatever it
       // says for the rest of this turn is dropped.
-      if (issuingSession) issuingSession.dropTurn = true;
+      if (issuingSession) {
+        issuingSession.dropTurn = true;
+        issuingSession.dropReplyText = true;
+      }
       await reply(SET_MODE_NOT_ADDRESSED_RESULT);
       return;
     }
@@ -4557,12 +4576,17 @@ export class NovaAgent implements VoiceAssistantProvider {
    * clip is not available.
    */
   private handleStopTranslating(session: SessionData | null): void {
-    if (this._reconfiguring) return;
+    // Nova can deliver the same request on two sessions around a hand-over.
+    if (this._reconfiguring || this.leavingTranslator) return;
+    this.leavingTranslator = true;
     if (session) session.silenced = true;
     console.log('[voice-mode] mode=assistant action=stop-translating');
     applyAssistantChatCommand(this, { meetingMode: 'normal' }, null, undefined, 'voice')
       .then(() => {
-        if (this.meetingMode !== 'normal') return;
+        if (this.meetingMode !== 'normal') {
+          console.log(`[voice-mode] action=stop-translating-declined meetingMode=${this.meetingMode}`);
+          return;
+        }
         if (this.stoppedTranslatingClip) {
           this.writePlayback(this.stoppedTranslatingClip);
           this.markSpeaking();
@@ -4572,6 +4596,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       })
       .catch((error) => {
         console.error('Error leaving translator mode by voice:', error);
+      })
+      .finally(() => {
+        this.leavingTranslator = false;
       });
   }
 

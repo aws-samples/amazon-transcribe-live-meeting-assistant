@@ -20,6 +20,7 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 import { applyAssistantChatCommand } from './assistant-toggles.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
 import { NovaAgent } from './nova-agent.js';
+import { onAssistantTurn } from './translator-transcript.js';
 import {
     isStopTranslatingRequest,
     ModeState,
@@ -314,6 +315,36 @@ test('nova: a switch another route has already made is not applied again', async
     await stream(a, spoken());
     assert.equal(requests.length, 0);
     assert.ok(logs.some((l) => l === '[voice-mode] action=superseded after=confirmed now=unchanged'));
+});
+
+const finalAnswer = (text: string) => [
+    chunk({ contentStart: { type: 'TEXT', role: 'ASSISTANT', additionalModelFields: FINAL } }),
+    chunk({ textOutput: { content: text } }),
+    chunk({ contentEnd: { type: 'TEXT', stopReason: 'END_TURN' } }),
+];
+
+test('nova: replies nobody heard are kept out of the history and the transcript', async () => {
+    const published: string[] = [];
+    const unsubscribe = onAssistantTurn((text: string) => { published.push(text); });
+    try {
+        // The translation of "Alex, stop translating".
+        const t = nova('translator');
+        await stream(t.a, [...userTurn('alex stop translating'), ...spoken(), ...finalAnswer('Alex, deja de traducir.')]);
+        // The reply to an unaddressed set_mode call, whose final text arrives
+        // after its audio has ended.
+        const n = nova();
+        await stream(n.a, [...userTurn('we should try translator mode'), ...setMode('translator'), ...spoken(),
+            ...finalAnswer('Okay, switching us to translator mode.')]);
+        assert.deepEqual(published, []);
+        for (const a of [t.a, n.a]) {
+            assert.equal(a.conversationHistory.filter((turn: any) => turn.role === 'ASSISTANT').length, 0);
+        }
+        // The next answer is kept as usual.
+        await stream(n.a, [...userTurn('hey alex what time is it'), ...spoken(), ...finalAnswer('It is three.')]);
+        assert.deepEqual(published, ['It is three.']);
+    } finally {
+        unsubscribe();
+    }
 });
 
 test('nova: other speech in translator mode is translated as usual', async () => {

@@ -188,7 +188,8 @@ function normalize(text: string): string {
  * Who a translator can be addressed as: each wake phrase, and the name in each
  * translator pause phrase ("alex" from "alex mute", "translator" from
  * "translator mute"), so "Alex, stop translating" works as well as
- * "Hey Alex, stop translating".
+ * "Hey Alex, stop translating". Only a pause phrase of the form "<name> mute"
+ * yields a name; any other is taken whole.
  */
 export function translatorAddressees(wakePhrases: string[], mutePhrases: string[]): string[] {
     const names = mutePhrases
