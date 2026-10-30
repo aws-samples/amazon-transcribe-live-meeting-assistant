@@ -33,7 +33,9 @@ import {
     type AssistantReconfigureOutcome,
     type AssistantReconfigureRequest,
 } from './assistant-toggles.js';
-import { createDuplicateToggleFilter } from './assistant-toggles.js';
+import { createActivationRestore, createDuplicateToggleFilter } from './assistant-toggles.js';
+import type { ActivationMode } from './voice-assistant-interface.js';
+import type { MeetingMode } from './nova-sonic-config-loader.js';
 import { NoOpAgent } from './noop-agent.js';
 import { details, matchesChatCommand, matchesEndCommand } from './details.js';
 
@@ -402,6 +404,144 @@ test('the modes that need an always-listening assistant are named in one place',
         assert.equal(requiresAlwaysListening(command.meetingMode!), false);
         assert.equal(command.activationMode, undefined, `"${message}" must not force an activation mode`);
     }
+});
+
+// ---------------------------------------------------------------------------
+// Restoring the activation mode a forcing meeting mode replaced
+// ---------------------------------------------------------------------------
+
+/**
+ * A provider that keeps the two modes and applies the same combination rule as
+ * Nova's `reconfigure`: a mode that requires always-listening cannot end up
+ * without it.
+ */
+function statefulAssistant(meetingMode: MeetingMode, activationMode: ActivationMode) {
+    const state = { meetingMode, activationMode };
+    const requests: AssistantReconfigureRequest[] = [];
+    return {
+        state,
+        requests,
+        reconfigure: async (request: AssistantReconfigureRequest): Promise<AssistantReconfigureOutcome> => {
+            requests.push(request);
+            const before = { ...state };
+            const base = {
+                sessionRebuilt: false,
+                meetingModeBefore: before.meetingMode,
+                activationModeBefore: before.activationMode,
+            };
+            const nextMeeting = request.meetingMode ?? before.meetingMode;
+            const nextActivation = request.activationMode ?? before.activationMode;
+            const changed: Array<'meetingMode' | 'activationMode'> = [];
+            if (nextMeeting !== before.meetingMode) changed.push('meetingMode');
+            if (nextActivation !== before.activationMode) changed.push('activationMode');
+            if (changed.length === 0) {
+                return {
+                    ...base,
+                    result: 'unchanged',
+                    changed,
+                    meetingModeAfter: before.meetingMode,
+                    activationModeAfter: before.activationMode,
+                    detail: 'already in the requested configuration',
+                };
+            }
+            if (requiresAlwaysListening(nextMeeting) && nextActivation !== 'always_active') {
+                return {
+                    ...base,
+                    result: 'declined',
+                    changed: [],
+                    meetingModeAfter: before.meetingMode,
+                    activationModeAfter: before.activationMode,
+                    detail: 'has to stay always listening',
+                };
+            }
+            state.meetingMode = nextMeeting;
+            state.activationMode = nextActivation;
+            return {
+                ...base,
+                result: 'applied',
+                changed,
+                sessionRebuilt: true,
+                meetingModeAfter: nextMeeting,
+                activationModeAfter: nextActivation,
+            };
+        },
+    };
+}
+
+async function typeCommands(
+    assistant: ReturnType<typeof statefulAssistant>,
+    restore: ReturnType<typeof createActivationRestore>,
+    ...messages: string[]
+): Promise<string[][]> {
+    const replies: string[][] = [];
+    for (const message of messages) {
+        replies.push(await applyAssistantChatCommand(assistant, parseAssistantChatCommand(message)!, 'Alice', restore));
+    }
+    return replies;
+}
+
+test('leaving translator mode restores the wake phrase it replaced', async () => {
+    // The live report: a wake-phrase meeting, `LMA translate`, then
+    // `LMA assist` — which left the assistant always listening.
+    const assistant = statefulAssistant('normal', 'wake_phrase');
+    const restore = createActivationRestore();
+    const replies = await typeCommands(assistant, restore, 'LMA translate', 'LMA assist');
+
+    assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'wake_phrase' });
+    assert.equal(assistant.requests[1].activationMode, 'wake_phrase', 'assist must carry the restore');
+    assert.deepEqual(replies[1], [
+        'Live Meeting Assistant: switched to assistant mode, now listening for the wake phrase.',
+    ]);
+    assert.equal(restore.pending(), null, 'a restore is used once');
+});
+
+test('leaving group mode restores the activation mode it replaced', async () => {
+    const assistant = statefulAssistant('normal', 'wake_phrase');
+    const restore = createActivationRestore();
+    await typeCommands(assistant, restore, 'LMA group', 'LMA assist');
+    assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'wake_phrase' });
+});
+
+test('moving between two forcing modes keeps the original activation to restore', async () => {
+    // translator -> group changes no activation, so the mode to restore is
+    // still the one in effect before translator.
+    const assistant = statefulAssistant('normal', 'wake_phrase');
+    const restore = createActivationRestore();
+    await typeCommands(assistant, restore, 'LMA translate', 'LMA group', 'LMA assist');
+    assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'wake_phrase' });
+});
+
+test('an explicit LMA always while translating is kept after leaving translator mode', async () => {
+    // "Unchanged" is still the participant saying what they want.
+    const assistant = statefulAssistant('normal', 'wake_phrase');
+    const restore = createActivationRestore();
+    await typeCommands(assistant, restore, 'LMA translate', 'LMA always', 'LMA assist');
+    assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'always_active' });
+    assert.equal(assistant.requests[2].activationMode, undefined, 'assist must not carry a restore');
+});
+
+test('a declined LMA wake while translating does not cancel the restore', async () => {
+    const assistant = statefulAssistant('normal', 'wake_phrase');
+    const restore = createActivationRestore();
+    const replies = await typeCommands(assistant, restore, 'LMA translate', 'LMA wake', 'LMA assist');
+    assert.match(replies[1][0], /always listening/);
+    assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'wake_phrase' });
+});
+
+test('nothing is restored when the meeting was always listening already', async () => {
+    const assistant = statefulAssistant('normal', 'always_active');
+    const restore = createActivationRestore();
+    await typeCommands(assistant, restore, 'LMA translate');
+    assert.equal(restore.pending(), null);
+    await typeCommands(assistant, restore, 'LMA assist');
+    assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'always_active' });
+    assert.equal(assistant.requests[1].activationMode, undefined);
+});
+
+test('a declined entry into translator mode remembers nothing', async () => {
+    const restore = createActivationRestore();
+    await applyAssistantChatCommand(new NoOpAgent(), parseAssistantChatCommand('LMA translate')!, 'Alice', restore);
+    assert.equal(restore.pending(), null);
 });
 
 // ---------------------------------------------------------------------------
