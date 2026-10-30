@@ -378,7 +378,6 @@ const EmbedVirtualParticipant = ({ params, sendToParent }) => {
             <VNCViewer
               vpId={vpId}
               vncEndpoint={vpDetails.vncEndpoint}
-              websocketUrl={vpDetails.vncEndpoint}
               status={vpDetails.status}
               manualActionType={vpDetails.manualActionType}
               manualActionMessage={vpDetails.manualActionMessage}

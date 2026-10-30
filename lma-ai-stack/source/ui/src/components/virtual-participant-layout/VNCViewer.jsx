@@ -48,10 +48,15 @@ import { buildVncConnection, isMicrovmEndpoint, fetchMicrovmAuthToken, fetchVncE
 // Used to mint the short-lived VNC token for whichever transport is in play.
 const gqlClient = generateClient();
 
+// Give up auto-reconnecting after this many consecutive failed attempts.
+const MAX_RECONNECT_ATTEMPTS = 8;
+// A connection that held at least this long counts as having worked, so the
+// next drop starts the backoff over instead of continuing it.
+const STABLE_CONNECTION_MS = 30000;
+
 const VNCViewer = ({
   vpId,
   vncEndpoint,
-  websocketUrl,
   status = null,
   manualActionType = null,
   manualActionMessage = null,
@@ -63,10 +68,12 @@ const VNCViewer = ({
 }) => {
   const canvasRef = useRef(null);
   const rfbRef = useRef(null);
-  // Set while we (or React) intentionally tear down the connection (cleanup,
-  // unmount, manual reconnect) so the disconnect handler doesn't treat it as a
-  // dropout and kick off an auto-reconnect.
-  const intentionalDisconnectRef = useRef(false);
+  // The connection attempt the effect below currently owns: { cancelled, ended,
+  // rfb }. Each run of the effect creates its own and cancels the previous one
+  // in its cleanup. Events from a cancelled session are ignored, because noVNC
+  // reports `disconnect` asynchronously (after the WebSocket's own close event,
+  // or after a 3 s timeout), which is after the next session has started.
+  const sessionRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
   const [connected, setConnected] = useState(false);
@@ -75,12 +82,14 @@ const VNCViewer = ({
   const [error, setError] = useState(null);
   const [viewOnly, setViewOnly] = useState(true);
   const [scaleViewport, setScaleViewport] = useState(true);
+  // Read by the connection effect when it creates a client, so that changing
+  // either toggle updates the live client instead of reconnecting.
+  const viewOnlyRef = useRef(viewOnly);
+  const scaleViewportRef = useRef(scaleViewport);
   const [manualActionTimeRemaining, setManualActionTimeRemaining] = useState(0);
   // Bumping this forces the connection effect to tear down and reconnect. The
   // Reconnect button and auto-reconnect logic both drive it.
   const [reconnectNonce, setReconnectNonce] = useState(0);
-
-  const MAX_RECONNECT_ATTEMPTS = 8;
 
   // Determine if manual action is required based on props
   const manualActionRequired = status === 'MANUAL_ACTION_REQUIRED' && manualActionType;
@@ -91,6 +100,22 @@ const VNCViewer = ({
       setViewOnly(false);
     }
   }, [manualActionRequired]);
+
+  // Apply the toggles to the live client. noVNC supports changing both on a
+  // connected client, so neither is a reason to reconnect.
+  useEffect(() => {
+    viewOnlyRef.current = viewOnly;
+    if (rfbRef.current) {
+      rfbRef.current.viewOnly = viewOnly;
+    }
+  }, [viewOnly]);
+
+  useEffect(() => {
+    scaleViewportRef.current = scaleViewport;
+    if (rfbRef.current) {
+      rfbRef.current.scaleViewport = scaleViewport;
+    }
+  }, [scaleViewport]);
 
   // Calculate time remaining when manual action is required
   useEffect(() => {
@@ -119,10 +144,14 @@ const VNCViewer = ({
     return () => clearInterval(timer);
   }, [manualActionRequired, manualActionStartTime, manualActionTimeoutSeconds]);
 
+  // One connection per viewer session. Only the VP, its endpoint, and an
+  // explicit reconnect (button, backoff timer, returning to the tab) start a
+  // new one; status updates and the View Only / Scale to Fit toggles do not.
   useEffect(() => {
     if (!canvasRef.current || !vpId || !vncEndpoint) return undefined;
 
-    intentionalDisconnectRef.current = false;
+    const session = { cancelled: false, ended: false, rfb: null };
+    sessionRef.current = session;
     setConnecting(true);
     setError(null);
 
@@ -149,6 +178,9 @@ const VNCViewer = ({
           edgeToken = minted.token;
           vncPassword = minted.vncPassword || '';
         }
+        // Torn down while the token was being minted: connecting now would
+        // leave a client nothing owns.
+        if (session.cancelled) return;
         const { url: wsUrl, wsProtocols } = buildVncConnection({
           endpoint: vncEndpoint,
           edgeToken,
@@ -167,16 +199,20 @@ const VNCViewer = ({
           // noVNC 1.7 forwards this to `new WebSocket(url, protocols)`.
           ...(wsProtocols.length > 0 ? { wsProtocols } : {}),
         });
+        session.rfb = rfb;
 
         // Configure RFB
-        rfb.scaleViewport = scaleViewport;
+        rfb.scaleViewport = scaleViewportRef.current;
         rfb.resizeSession = false;
-        rfb.viewOnly = viewOnly;
+        rfb.viewOnly = viewOnlyRef.current;
+
+        let connectedAt = null;
 
         // Event handlers
         rfb.addEventListener('connect', () => {
+          if (session.cancelled) return;
           console.log('VNC connected successfully');
-          reconnectAttemptsRef.current = 0;
+          connectedAt = Date.now();
           setConnected(true);
           setConnecting(false);
           setReconnecting(false);
@@ -184,21 +220,26 @@ const VNCViewer = ({
         });
 
         rfb.addEventListener('disconnect', (e) => {
+          // A session this effect already tore down (re-run, unmount, manual
+          // reconnect). The run that replaced it owns the connection now.
+          if (session.cancelled) return;
           console.log('VNC disconnected:', e.detail);
+          session.ended = true;
           setConnected(false);
           setConnecting(false);
-          rfbRef.current = null;
-
-          // Intentional teardown (cleanup, unmount, manual reconnect): the
-          // effect that triggered it will re-establish the connection.
-          if (intentionalDisconnectRef.current) {
-            return;
+          if (rfbRef.current === rfb) {
+            rfbRef.current = null;
           }
 
           // Unexpected drop. This includes "clean" closes that happen when the
           // browser idles or the tab is backgrounded (the proxy/websocket gets
           // torn down), which is the black-screen case. Auto-reconnect with
-          // exponential backoff up to a cap.
+          // exponential backoff up to a cap. The backoff only starts over after
+          // a connection has held for a while, so a server that accepts and then
+          // drops at once is retried with growing delays rather than every second.
+          if (connectedAt !== null && Date.now() - connectedAt >= STABLE_CONNECTION_MS) {
+            reconnectAttemptsRef.current = 0;
+          }
           if (reconnectAttemptsRef.current >= MAX_RECONNECT_ATTEMPTS) {
             setReconnecting(false);
             setError('Connection lost. The virtual participant may have ended. Use Reconnect to try again.');
@@ -215,17 +256,20 @@ const VNCViewer = ({
             clearTimeout(reconnectTimerRef.current);
           }
           reconnectTimerRef.current = setTimeout(() => {
+            reconnectTimerRef.current = null;
             setReconnectNonce((n) => n + 1);
           }, delayMs);
         });
 
         rfb.addEventListener('securityfailure', (e) => {
+          if (session.cancelled) return;
           console.error('VNC security failure:', e.detail);
           setError(`Security failure: ${e.detail.reason}`);
           setConnecting(false);
         });
 
         rfb.addEventListener('credentialsrequired', () => {
+          if (session.cancelled) return;
           console.log('VNC credentials required');
           setError('Authentication required');
           setConnecting(false);
@@ -233,6 +277,8 @@ const VNCViewer = ({
 
         rfbRef.current = rfb;
       } catch (err) {
+        if (session.cancelled) return;
+        session.ended = true;
         console.error('Failed to connect:', err);
         setError(`Failed to connect: ${err.message}`);
         setConnecting(false);
@@ -243,27 +289,31 @@ const VNCViewer = ({
     connectWithAuth();
 
     return () => {
-      // Mark teardown as intentional so the disconnect handler doesn't queue
-      // an auto-reconnect when React re-runs this effect or unmounts.
-      intentionalDisconnectRef.current = true;
+      // Cancel first, so the disconnect event noVNC fires later for this
+      // client is recognised as ours and does not queue a reconnect.
+      session.cancelled = true;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
       }
-      if (rfbRef.current) {
-        rfbRef.current.disconnect();
+      if (session.rfb) {
+        session.rfb.disconnect();
+      }
+      if (rfbRef.current === session.rfb) {
         rfbRef.current = null;
       }
     };
-  }, [vpId, vncEndpoint, websocketUrl, scaleViewport, viewOnly, reconnectNonce]);
+  }, [vpId, vncEndpoint, reconnectNonce]);
 
   // When the user returns to the tab/window after it was backgrounded, the VNC
-  // connection has often been silently dropped (going black). If we're not
-  // connected anymore, reconnect right away instead of waiting on backoff.
+  // connection has often been silently dropped (going black). If the current
+  // session has ended, reconnect right away instead of waiting on backoff. A
+  // session that is still connected, or still connecting, is left alone.
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
-      if (rfbRef.current) return; // still connected
+      const { current } = sessionRef;
+      if (current && !current.cancelled && !current.ended) return;
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
@@ -297,7 +347,8 @@ const VNCViewer = ({
 
   const handleRefresh = () => {
     // Cancel any pending auto-reconnect and reset backoff so a manual click
-    // always tries immediately.
+    // always tries immediately. Bumping the nonce re-runs the connection
+    // effect, whose cleanup tears down the current client.
     if (reconnectTimerRef.current) {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
@@ -305,15 +356,6 @@ const VNCViewer = ({
     reconnectAttemptsRef.current = 0;
     setError(null);
     setReconnecting(false);
-    // Tear down the current connection (if any) intentionally, then bump the
-    // nonce so the connection effect re-runs and reconnects. Previously this
-    // only called disconnect(), but nothing in the effect's deps changed so it
-    // never reconnected — the button did nothing.
-    if (rfbRef.current) {
-      intentionalDisconnectRef.current = true;
-      rfbRef.current.disconnect();
-      rfbRef.current = null;
-    }
     setReconnectNonce((n) => n + 1);
   };
 
@@ -507,7 +549,6 @@ const VNCViewer = ({
 VNCViewer.propTypes = {
   vpId: PropTypes.string.isRequired,
   vncEndpoint: PropTypes.string.isRequired,
-  websocketUrl: PropTypes.string.isRequired,
   status: PropTypes.string,
   manualActionType: PropTypes.string,
   manualActionMessage: PropTypes.string,
