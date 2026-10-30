@@ -16,7 +16,8 @@ Run from the job's ``after_script`` on failure. Prints the cause to stdout,
 which the caller writes to a file and hands to ``junit_summary.py --cause``::
 
     python integ-tests/failure_cause.py --stage deploy --log deploy-output.log \\
-        --stack "$LMA_INTEG_STACK" --region "$AWS_DEFAULT_REGION" > failure-cause.txt
+        --stack "$LMA_INTEG_STACK" --region "$AWS_DEFAULT_REGION" \\
+        --since "$CI_JOB_STARTED_AT" > failure-cause.txt
 
 Two sources, best first:
 
@@ -76,7 +77,7 @@ _STATE_MEANING = {
     ),
     "UPDATE_ROLLBACK_FAILED": (
         "its rollback could not finish, so every later deploy fails until the "
-        "rollback is resumed (the next nightly deploy resumes it before deploying)"
+        "rollback is resumed (each nightly deploy tries to resume it first)"
     ),
     "ROLLBACK_COMPLETE": "its creation rolled back, so it must be deleted before it can be recreated",
     "ROLLBACK_FAILED": "its creation could not roll back, so it must be deleted by hand",
@@ -96,7 +97,8 @@ _REASON_NOISE = re.compile(
 )
 
 
-def _reason(text: str) -> str:
+def reason(text: str) -> str:
+    """A CloudFormation reason without its wrapping."""
     return _REASON_NOISE.sub("", text).strip()
 
 
@@ -152,7 +154,9 @@ def _events_since(cfn: Any, stack: str, since: datetime | None) -> list[dict]:
     return list(reversed(events))
 
 
-def _own_failures(cfn: Any, stack: str, since: datetime, path: str, depth: int = 0) -> list[dict]:
+def own_failures(
+    cfn: Any, stack: str, since: datetime, path: str = "", depth: int = 0
+) -> list[dict]:
     """Every resource in ``stack`` and its children that failed on its own account."""
     found: list[dict] = []
     for event in _events_since(cfn, stack, since):
@@ -167,7 +171,7 @@ def _own_failures(cfn: Any, stack: str, since: datetime, path: str, depth: int =
             marker in reason for marker in _NESTED_WRAPPER
         ):
             if depth < 5 and event.get("PhysicalResourceId"):
-                found += _own_failures(
+                found += own_failures(
                     cfn,
                     event["PhysicalResourceId"],
                     since,
@@ -281,7 +285,7 @@ def stack_cause(
         None,
     )
 
-    failures = sorted(_own_failures(cfn, stack, started, ""), key=lambda f: f["time"])
+    failures = sorted(own_failures(cfn, stack, started), key=lambda f: f["time"])
     forward = [f for f in failures if rollback is None or f["time"] < rollback]
     backward = [f for f in failures if rollback is not None and f["time"] >= rollback]
 
@@ -290,7 +294,7 @@ def stack_cause(
             continue
         lines.append(heading)
         for failure in group[:MAX_CAUSES]:
-            lines.append(_clip(f"• {failure['where']}: {_reason(failure['reason'])}"))
+            lines.append(_clip(f"• {failure['where']}: {reason(failure['reason'])}"))
             if "build did not complete" in failure["reason"]:
                 try:
                     detail = _build_cause(codebuild, logs, cfn, failure["stack"], started)

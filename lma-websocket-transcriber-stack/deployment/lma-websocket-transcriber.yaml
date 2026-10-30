@@ -916,11 +916,13 @@ Resources:
                 # unrelated failure retried.
                 - |
                   for attempt in 1 2 3; do
-                    if docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/ > /tmp/docker-build.log 2>&1; then
-                      cat /tmp/docker-build.log
+                    # Streamed through tee, so the build's output reaches the log
+                    # as it runs; its exit status is carried out of the pipe in
+                    # a file, which works in any POSIX sh.
+                    { docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/; echo $? > /tmp/docker-build.rc; } 2>&1 | tee /tmp/docker-build.log
+                    if [ "$(cat /tmp/docker-build.rc)" = 0 ]; then
                       break
                     fi
-                    cat /tmp/docker-build.log
                     if [ "$attempt" = 3 ] || ! tail -n 50 /tmp/docker-build.log | grep -Eq 'TLS handshake timeout|i/o timeout|connection reset|Client\.Timeout|unexpected EOF|toomanyrequests|ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure resolving|Could not connect'; then
                       exit 1
                     fi
@@ -955,7 +957,9 @@ Resources:
             Value: !Ref BootstrapVersion
           - Name: SOURCE_CODE_LOCATION
             Value: !Sub "${BootstrapBucketBaseName}-${AWS::Region}/${BootstrapS3Prefix}/${BootstrapVersion}"
-      TimeoutInMinutes: 10
+      # A build takes about 2.5 minutes; this leaves room for the docker build's
+      # three attempts and their back-off.
+      TimeoutInMinutes: 20
 
   LambdaCodeBuildStartBuildExecutionRole:
     Type: AWS::IAM::Role

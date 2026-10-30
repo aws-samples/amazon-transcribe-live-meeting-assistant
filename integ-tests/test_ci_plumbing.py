@@ -611,7 +611,7 @@ def test_a_deploy_cause_separates_rollback_failures_and_skips_cascades_and_old_r
         _StubCodeBuild(), _StubLogs(), "root",
     )
     text = "\n".join(lines)
-    assert "resumes it before deploying" in lines[0]
+    assert "tries to resume it first" in lines[0]
     assert text.index("CodeBuildRun") < text.index("during the rollback") < text.index("Image")
     assert "Image: did not stabilize" in text
     assert "Other" not in text
@@ -683,6 +683,21 @@ def test_a_stack_in_any_other_state_is_left_alone():
     cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_COMPLETE"}]}
     assert resume_rollback.resume_if_stuck(cfn, "s") is False
     cfn.continue_update_rollback.assert_not_called()
+
+
+def test_a_resumed_rollback_that_fails_names_the_resources_that_failed_again(capsys):
+    """The waiter's error names only the final status; the reasons are in the events."""
+    cfn = mock.Mock()
+    cfn.describe_stacks.return_value = {"Stacks": [{"StackStatus": "UPDATE_ROLLBACK_FAILED"}]}
+    cfn.get_waiter.return_value.wait.side_effect = RuntimeError("Waiter encountered a terminal failure state")
+    failed = [{"where": "CHILD → Image", "reason": "Resource handler returned message: did not stabilize"}]
+    with mock.patch.object(resume_rollback.failure_cause, "own_failures", return_value=failed):
+        with pytest.raises(RuntimeError):
+            resume_rollback.resume_if_stuck(cfn, "s")
+    out = capsys.readouterr().out
+    assert "✗ CHILD → Image: did not stabilize" in out
+    # A line the cause step's log reader picks out of deploy-output.log.
+    assert failure_cause.log_cause(out)[:1] == ["Error: the resumed rollback did not complete."]
 
 
 def test_a_stuck_rollback_is_resumed_without_skipping_resources_and_awaited():

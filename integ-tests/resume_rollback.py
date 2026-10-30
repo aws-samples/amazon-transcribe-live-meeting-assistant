@@ -15,8 +15,9 @@ The nightly deploy job runs this first. On a stack in any other state it does
 nothing. On UPDATE_ROLLBACK_FAILED it resumes the rollback once, without
 skipping any resource, and waits: the usual cause is a resource that was busy
 when the rollback first reached it and has since settled. If the resumed
-rollback fails again the job fails here, with the stack's own reason, rather
-than in a deploy CloudFormation would reject anyway.
+rollback fails again the job fails here, printing the reason each resource
+that failed gave (read from the stack's events, as failure_cause.py does),
+rather than in a deploy CloudFormation would reject anyway.
 
 Usage::
 
@@ -27,7 +28,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import failure_cause  # noqa: E402
 
 STUCK = "UPDATE_ROLLBACK_FAILED"
 # A resumed rollback rebuilds whatever the failed update had replaced, which
@@ -48,8 +55,23 @@ def resume_if_stuck(cfn: Any, stack: str) -> bool:
         print(f"Stack {stack} is {status}; no rollback to resume.")
         return False
     print(f"Stack {stack} is {STUCK}; resuming its rollback before deploying.")
+    resumed = datetime.now(timezone.utc)
     cfn.continue_update_rollback(StackName=stack)
-    cfn.get_waiter("stack_rollback_complete").wait(StackName=stack, WaiterConfig=_WAIT)
+    try:
+        cfn.get_waiter("stack_rollback_complete").wait(StackName=stack, WaiterConfig=_WAIT)
+    except Exception:
+        # The waiter names only the stack's final status. The reasons are in
+        # the events of the resources that failed again, in this stack or a
+        # nested one; printed so they reach the job's captured output.
+        try:
+            failures = failure_cause.own_failures(cfn, stack, resumed)
+        except Exception as exc:  # noqa: BLE001 - the reason is best-effort
+            failures = []
+            print(f"(the stack's events could not be read: {type(exc).__name__})")
+        print("Error: the resumed rollback did not complete.")
+        for failure in failures:
+            print(f"✗ {failure['where']}: {failure_cause.reason(failure['reason'])}")
+        raise
     print(f"Stack {stack} rolled back; deploying over it.")
     return True
 
