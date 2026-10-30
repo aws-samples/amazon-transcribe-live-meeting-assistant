@@ -125,7 +125,9 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ChatButtonUploadFunction.Arn
       ChatButtonConfigTableName: !Ref ChatButtonConfigTable
-      # hash below is updated by publish.sh script- used to force template updates when source has changed.
+      # Publishing writes a hash of ../source into the packaged copy of this
+      # template, so a source change forces this resource to re-run. The value
+      # committed here is not updated and is never deployed.
       source_hash: 463888057a014a53
 
 Outputs:

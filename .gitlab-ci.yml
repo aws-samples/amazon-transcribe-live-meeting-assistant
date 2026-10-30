@@ -91,7 +91,7 @@ code_checks:
     # UI: lint + tests (force = ignore the local checksum cache).
     - make lint-ui-force
     - make test-ui-force
-    # TypeScript build checks for the transcriber + VP stacks (tsc/eslint).
+    # TypeScript build checks (tsc/eslint): transcriber, VP, utilities/websocket-client.
     - make lint-typescript
     # Virtual Participant backend unit tests (launch modes, MicroVM hooks).
     - make test-vp

@@ -138,7 +138,9 @@ Resources:
     Properties:
       ServiceToken: !GetAtt NovaSonicConfigUploadFunction.Arn
       NovaSonicConfigTableName: !Ref NovaSonicConfigTable
-      # hash below is updated by publish.sh script - used to force template updates when source has changed.
+      # Publishing writes a hash of ../source into the packaged copy of this
+      # template, so a source change forces this resource to re-run. The value
+      # committed here is not updated and is never deployed.
       source_hash: 773f9c9c2a6e04f4
 
 Outputs:

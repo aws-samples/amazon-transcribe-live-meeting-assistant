@@ -9,10 +9,26 @@ import { WebSocket } from 'ws';
 import * as fs from 'fs';
 import { chainUnchecked } from 'stream-chain';
 import { randomUUID } from 'crypto';
-import { CallMetaData } from '../../../lma-websocket-transcriber-stack/source/app/src/lca';
 
 import dotenv from 'dotenv';
 dotenv.config();
+
+/**
+ * The START / END control frame this client sends, as described in
+ * docs/websocket-streaming-api.md. It is declared here rather than imported
+ * from the transcriber because the server's own CallMetaData type is its
+ * internal per-call state (it requires fields the server fills in, such as
+ * activeSpeaker and channels), and importing it would make this utility's
+ * build depend on the transcriber's installed node_modules.
+ */
+type CallEventMessage = {
+    callId: string;
+    fromNumber?: string;
+    toNumber?: string;
+    agentId?: string;
+    samplingRate: number;
+    callEvent: 'START' | 'END';
+};
 
 const SAMPLE_RATE = parseInt(process.env['SAMPLE_RATE'] || '8000', 10);
 const BYTES_PER_SAMPLE = parseInt(process.env['BYTES_PER_SAMPLE'] || '2', 10);
@@ -57,7 +73,7 @@ new Command()
                 console.log('Sending Call start event');
 
                 (async () => {
-                    const metadata: CallMetaData = {
+                    const metadata: CallEventMessage = {
                         callId: _CALL_ID,
                         fromNumber: process.env['CALL_FROM_NUMBER'] || '+9165551234',
                         toNumber: process.env['CALL_TO_NUMBER'] || '+8001112222',
@@ -99,7 +115,7 @@ new Command()
                     console.log('Finished Sending the audio data chunks');
                     console.log('Sending Call End Event');
 
-                    const metadata: CallMetaData = {
+                    const metadata: CallEventMessage = {
                         callId: _CALL_ID,
                         fromNumber: process.env['CALL_FROM_NUMBER'] || '+9165551234',
                         toNumber: process.env['CALL_TO_NUMBER'] || '+8001112222',

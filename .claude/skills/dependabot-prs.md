@@ -125,7 +125,8 @@ What `code-checks.yml` actually installs and exercises:
 | `lma-browser-extension-stack` | Yes — `npm install` (deliberately not `npm ci`) + test + build |
 | `lma-asr-microvm-stack/source` | Yes — its `requirements-dev.txt` **is** pip-installed by `make test-asr` |
 | All other pip manifests (Lambda functions, layers, `lma-ai-stack/requirements/*`) | **No** — `make setup-python` installs a fixed lint-tool list, and `make test-lambdas` runs pytest in the repo venv. Nothing resolves these files. |
-| `/`, `/docs-site`, `/lma-ai-stack` (prettier), `/lma-ai-stack/deployment/manifest-generator`, `/utilities/websocket-client` | **No** — never installed or built in CI |
+| `/utilities/websocket-client` | Yes — `npm ci` + `tsc --noEmit` + eslint (`make lint-typescript`) |
+| `/`, `/docs-site`, `/lma-ai-stack` (prettier), `/lma-ai-stack/deployment/manifest-generator` | **No** — never installed or built in CI |
 | Container image builds (transcriber, VP) | **No** — `make docker-build-check*`, local only |
 | Live runtime behaviour | **No** — `make integ-tests`, and `docs/dependency-upgrade-validation-runbook.md` |
 
@@ -143,8 +144,8 @@ python3 -m venv /tmp/v<NN> && /tmp/v<NN>/bin/pip install -r <changed requirement
 # Resolution failure here is exactly the #612 class of problem. Then, if the dir
 # has tests: cd <dir> && /tmp/v<NN>/bin/python -m pytest -q
 
-# npm dir that CI does not build (docs-site, manifest-generator,
-# websocket-client, root, lma-ai-stack tooling):
+# npm dir that CI does not build (docs-site, manifest-generator, root,
+# lma-ai-stack tooling):
 cd <dir> && npm ci && npm run build   # whichever scripts exist
 
 # Browser extension — run `npm ci` FIRST as a lockfile check. It has repeatedly

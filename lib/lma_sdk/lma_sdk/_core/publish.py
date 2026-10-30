@@ -290,6 +290,22 @@ def _calculate_dir_hash(directory: str | Path) -> str:
     return hasher.hexdigest()[:16]
 
 
+def _inject_source_hash(template_path: Path, field: str, content_hash: str) -> None:
+    """Set ``field`` to ``content_hash`` in the template file at ``template_path``.
+
+    Called on the packaged copy of a template, never on the tracked source. The
+    value is quoted so a digest that happens to look numeric stays a string. A
+    template with no such field is an error rather than a silent no-op: without
+    the property, a changed source would no longer re-run the seeder.
+    """
+    pattern = re.compile(rf"^(\s*{re.escape(field)}:[ \t]*).*$", re.MULTILINE)
+    content = template_path.read_text()
+    patched, count = pattern.subn(lambda m: f'{m.group(1)}"{content_hash}"', content)
+    if count == 0:
+        raise LMAPublishError(f"{template_path.name} has no '{field}:' property to set the source hash on")
+    template_path.write_text(patched)
+
+
 #: Everything whose contents decide what the configuration seeder writes: the
 #: shipped baseline content and the handler that reads it, plus the accessor
 #: that encodes it. Relative to the project root.
@@ -1154,7 +1170,13 @@ class Publisher:
     def _publish_hash_and_package(
         self, *, stack_def, project_dir, bucket, prefix_and_version, region, tmpdir, **_kw
     ) -> dict:
-        """Compute source hash, inject into template, then cfn package."""
+        """cfn package the template, then write the source hash into the packaged copy.
+
+        The hash is a property of the stack's seeding custom resource, so a change
+        to the seeded content changes a property and CloudFormation re-runs the
+        seeder. It is written into the packaged output in ``tmpdir`` rather than
+        into the tracked template, so publishing leaves the checkout unmodified.
+        """
         stack_dir = project_dir / stack_def.name
         deployment_dir = stack_dir / (stack_def.deployment_subdir or "deployment")
         source_dir = (deployment_dir / stack_def.hash_source_dir).resolve() if stack_def.hash_source_dir else stack_dir
@@ -1163,14 +1185,8 @@ class Publisher:
         content_hash = _calculate_dir_hash(source_dir)
         logger.info("Source hash for %s: %s", stack_def.name, content_hash)
 
-        # Read and patch template
-        template_path = deployment_dir / stack_def.template_file
-        template_content = template_path.read_text()
-        pattern = rf"({stack_def.hash_template_field}: ).*"
-        patched = re.sub(pattern, rf"\g<1>{content_hash}", template_content)
-        template_path.write_text(patched)
-
-        # cfn package
+        # cfn package the tracked template as-is. It is packaged in place, not
+        # from a copy, because its local artifact paths are relative to it.
         output_file = tmpdir / stack_def.template_file
         s3_prefix = f"{prefix_and_version}/{stack_def.name}"
         cmd = [
@@ -1182,6 +1198,8 @@ class Publisher:
             "--region", region,
         ]
         self._run_command(cmd, cwd=str(deployment_dir), desc=f"cfn package {stack_def.name}")
+
+        _inject_source_hash(output_file, stack_def.hash_template_field, content_hash)
 
         # Upload
         s3_path = stack_def.s3_template_path or f"{stack_def.template_file}"

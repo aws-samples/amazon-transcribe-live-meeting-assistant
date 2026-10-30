@@ -451,3 +451,111 @@ class TestUntrackedPreflight:
         assert "- ai-new.py" in msg
         assert "lma-websocket-transcriber-stack:" in msg
         assert "- ws-new.py" in msg
+
+
+class TestHashAndPackage:
+    """Tests for the HASH_AND_PACKAGE publish path (config seeding stacks)."""
+
+    TEMPLATE = (
+        "Resources:\n"
+        "  Fn:\n"
+        "    Type: AWS::Lambda::Function\n"
+        "    Properties:\n"
+        "      Code: ../source/lambda_functions\n"
+        "  Seed:\n"
+        "    Type: AWS::CloudFormation::CustomResource\n"
+        "    Properties:\n"
+        "      ServiceToken: !GetAtt Fn.Arn\n"
+        "      # comment mentioning source_hash: not a property\n"
+        "      source_hash: committedvalue\n"
+    )
+
+    @staticmethod
+    def _stack_def() -> StackDefinition:
+        return StackDefinition(
+            name="lma-example-config-stack",
+            package_type=StackPackageType.HASH_AND_PACKAGE,
+            template_file="example.yaml",
+            deployment_subdir="deployment",
+            hash_source_dir="../source",
+            hash_template_field="source_hash",
+        )
+
+    def _project(self, tmp_path: Path, template: str | None = None) -> Path:
+        project = tmp_path / "project"
+        stack = project / "lma-example-config-stack"
+        (stack / "deployment").mkdir(parents=True)
+        (stack / "source" / "lambda_functions").mkdir(parents=True)
+        (stack / "source" / "lambda_functions" / "seed.py").write_text("print('seed')\n")
+        (stack / "deployment" / "example.yaml").write_text(template or self.TEMPLATE)
+        return project
+
+    def _publish(self, client, project: Path, tmp_path: Path):
+        """Run _publish_hash_and_package with `cfn package` simulated as a copy."""
+        from lma_sdk._core.publish import Publisher
+
+        publisher = Publisher(client)
+        uploaded = {}
+
+        def fake_package(cmd, cwd, desc):
+            src = Path(cwd) / cmd[cmd.index("--template-file") + 1]
+            Path(cmd[cmd.index("--output-template-file") + 1]).write_text(src.read_text())
+
+        def capture_upload(path, bucket, key):
+            uploaded[key] = Path(path).read_text()
+
+        out_dir = tmp_path / "out"
+        out_dir.mkdir(parents=True)
+        s3 = MagicMock()
+        s3.upload_file.side_effect = capture_upload
+        with patch.object(Publisher, "_run_command", side_effect=fake_package), \
+                patch.object(Publisher, "_s3", new=s3):
+            result = publisher._publish_hash_and_package(
+                stack_def=self._stack_def(),
+                project_dir=project,
+                bucket="bucket",
+                prefix_and_version="prefix/1.0.0",
+                region="us-east-1",
+                tmpdir=out_dir,
+            )
+        return result, uploaded
+
+    def test_tracked_template_is_left_unmodified(self, client, tmp_path):
+        project = self._project(tmp_path)
+        template = project / "lma-example-config-stack" / "deployment" / "example.yaml"
+        self._publish(client, project, tmp_path)
+        assert template.read_text() == self.TEMPLATE
+
+    def test_uploaded_template_carries_the_source_hash(self, client, tmp_path):
+        project = self._project(tmp_path)
+        expected = _calculate_dir_hash(project / "lma-example-config-stack" / "source")
+        _, uploaded = self._publish(client, project, tmp_path)
+        body = uploaded["prefix/1.0.0/lma-example-config-stack/example.yaml"]
+        assert f'      source_hash: "{expected}"\n' in body
+        assert "committedvalue" not in body
+        assert "# comment mentioning source_hash: not a property" in body
+
+    def test_uploaded_hash_follows_source_changes(self, client, tmp_path):
+        project = self._project(tmp_path)
+        _, first = self._publish(client, project, tmp_path / "a")
+        seed = project / "lma-example-config-stack" / "source" / "lambda_functions" / "seed.py"
+        seed.write_text("print('changed')\n")
+        _, second = self._publish(client, project, tmp_path / "b")
+        key = "prefix/1.0.0/lma-example-config-stack/example.yaml"
+        assert first[key] != second[key]
+
+    def test_template_without_the_hash_field_is_rejected(self, client, tmp_path):
+        project = self._project(tmp_path, template="Resources: {}\n")
+        with pytest.raises(LMAPublishError, match="source_hash"):
+            self._publish(client, project, tmp_path)
+
+    @pytest.mark.parametrize(
+        "stack_name",
+        ["lma-llm-template-setup-stack", "lma-chat-button-config-stack", "lma-nova-sonic-config-stack"],
+    )
+    def test_shipped_templates_carry_the_hash_field(self, stack_name):
+        stack_def = next(s for s in STACK_DEFINITIONS if s.name == stack_name)
+        assert stack_def.package_type == StackPackageType.HASH_AND_PACKAGE
+        repo = Path(__file__).resolve().parents[3]
+        template = repo / stack_name / stack_def.deployment_subdir / stack_def.template_file
+        assert f"\n      {stack_def.hash_template_field}: " in template.read_text()

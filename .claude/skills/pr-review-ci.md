@@ -201,7 +201,7 @@ them on the one thing the reader can get for free:
 | `make lint-cfn` | cfn-lint over every CloudFormation template |
 | `make lint-python-check` | ruff check + ruff format --check over the Lambda functions, the Lambda layers and `scripts/pr_review` |
 | `make lint-ui-force` | ESLint (airbnb-base) + Prettier over the React UI |
-| `make lint-typescript` | `tsc` + eslint for the transcriber and VP stacks |
+| `make lint-typescript` | `tsc` + eslint for the transcriber and VP stacks and `utilities/websocket-client` |
 | `make test-sdk`, `test-cli`, `test-lambdas` | Python unit suites |
 | `make test-ui-force` | vitest |
 | `make test-vp`, `test-vp-template` | VP backend + CloudFormation invariants |
