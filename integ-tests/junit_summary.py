@@ -97,10 +97,9 @@ _STAGE_TRIAGE = {
         "failure, not a test failure: read the job log, not the stack."
     ),
     _DEPLOY_STAGE: (
-        "The branch built but CloudFormation did not accept it. The next nightly "
-        "deploy resumes a rollback left unfinished before deploying, so a one-off "
-        "failure clears itself; one that repeats is the branch, or a stack that "
-        "needs a person."
+        "The branch built but CloudFormation did not accept it. A rollback left "
+        "unfinished is resumed by the next nightly deploy before it deploys; a "
+        "failure that repeats is the branch, or a stack that needs a person."
     ),
 }
 

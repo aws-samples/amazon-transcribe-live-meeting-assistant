@@ -388,7 +388,7 @@ def test_a_failed_deploy_stage_says_what_the_next_night_will_do(tmp_path: Path, 
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out)
     assert "deploy stage failed" in payload["summary"]
-    assert "resumes a rollback" in payload["summary"]
+    assert "is resumed by the next nightly deploy" in payload["summary"]
 
 
 def test_the_tests_stage_is_the_default_and_still_summarises_the_report(tmp_path: Path, capsys):
@@ -432,7 +432,7 @@ def test_a_failed_stage_quotes_its_cause_ahead_of_the_general_guidance(
     )
     summary = json.loads(capsys.readouterr().out)["summary"]
     assert "• CodeBuildRun: build failed" in summary
-    assert summary.index("CodeBuildRun") < summary.index("resumes a rollback")
+    assert summary.index("CodeBuildRun") < summary.index("is resumed by the next")
 
 
 def test_an_empty_or_missing_cause_leaves_the_failed_stage_post_unchanged(
@@ -672,7 +672,7 @@ def test_the_quoted_build_is_the_newest_failed_one_before_the_resource_failed():
         }
 
     builds = {
-        "ui": [build("ui:1", 0.2, "ui build, too early")],
+        "ui": [build("ui:1", 0.2, "ui build, older")],
         "img": [build("img:1", 0.5, "image build, the one"), build("img:2", 3, "after the failure")],
     }
 
@@ -697,7 +697,7 @@ def test_the_quoted_build_is_the_newest_failed_one_before_the_resource_failed():
     assert lines == ["CodeBuild BUILD phase: image build, the one"]
     # Quoted once: another resource failing in the same window does not repeat it.
     assert failure_cause._build_cause(CodeBuild(), None, cfn, "child", window, quoted) == [
-        "CodeBuild BUILD phase: ui build, too early"
+        "CodeBuild BUILD phase: ui build, older"
     ]
 
 
