@@ -1787,7 +1787,8 @@ export class NovaAgent implements VoiceAssistantProvider {
             } else if (jsonResponse.event?.contentEnd) {
               // The stop reason tells a finished turn (END_TURN) from one still
               // being spoken (PARTIAL_TURN) or cut off (INTERRUPTED).
-              console.log('Content end:', jsonResponse.event.contentEnd.type, jsonResponse.event.contentEnd.stopReason ?? '');
+              const stopReason = jsonResponse.event.contentEnd.stopReason;
+              console.log(`Content end: ${jsonResponse.event.contentEnd.type}${stopReason ? ` ${stopReason}` : ''}`);
               if (jsonResponse.event.contentEnd.type === 'AUDIO') {
                 this.noteAudioBlockEnded();
                 this.dropCurrentAudioBlock = false;

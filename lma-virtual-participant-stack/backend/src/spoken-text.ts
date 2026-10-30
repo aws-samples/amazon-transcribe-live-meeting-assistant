@@ -94,7 +94,11 @@ function stripInline(text: string): string {
         .replace(/~~([^~]+)~~/g, '$1')
         // Any emphasis marker left unpaired.
         .replace(/\*{2,}/g, '')
-        .replace(/https?:\/\/[^\s)]+/g, (url) => hostOf(url.replace(/[.,;:!?]+$/, '')))
+        // Punctuation after a URL ends the sentence, not the URL, so it is kept.
+        .replace(/https?:\/\/[^\s)]+/g, (url) => {
+            const trailing = /[.,;:!?]+$/.exec(url)?.[0] ?? '';
+            return hostOf(url.slice(0, url.length - trailing.length)) + trailing;
+        })
         // A pipe used as a separator in prose ("High: 63°F | Low: 47°F").
         .replace(/\s+\|\s+/g, ', ')
         .replace(/[ \t]+/g, ' ')
@@ -146,11 +150,20 @@ export function toSpokenText(markdown: string): string {
             continue;
         }
 
-        if (line.startsWith('|') || (line.includes('|') && TABLE_SEPARATOR.test((lines[i + 1] || '').trim()))) {
+        // A table's separator row, with or without outer pipes.
+        if (TABLE_SEPARATOR.test(line)) {
             flushParagraph();
-            if (TABLE_SEPARATOR.test(line)) continue;
+            continue;
+        }
+
+        const nextIsSeparator = TABLE_SEPARATOR.test((lines[i + 1] || '').trim());
+        // A table row: one with outer pipes, a header (followed by the separator),
+        // or, inside a table, any line with a pipe — GFM allows rows without
+        // outer pipes.
+        if (line.startsWith('|') || (line.includes('|') && (nextIsSeparator || tableHeader !== null))) {
+            flushParagraph();
             const cells = tableCells(line).map(stripInline);
-            if (!tableHeader && TABLE_SEPARATOR.test((lines[i + 1] || '').trim())) {
+            if (!tableHeader && nextIsSeparator) {
                 tableHeader = cells;
                 continue;
             }

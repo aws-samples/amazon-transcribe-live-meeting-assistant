@@ -57,6 +57,13 @@ test('a table is read row by row with its column headings as labels', () => {
     );
 });
 
+test('a table without outer pipes is read the same way', () => {
+    assert.equal(
+        toSpokenText('Day | High | Low\n---|:---:|---\nMonday | 60°F | 48°F\nTuesday | 64°F | 45°F\n\nDone'),
+        'Monday, High: 60°F, Low: 48°F. Tuesday, High: 64°F, Low: 45°F. Done',
+    );
+});
+
 test('links keep their text and bare URLs keep only their host', () => {
     assert.equal(
         toSpokenText('*Source: [National Weather Service](https://forecast.weather.gov/x?y=1)*'),
@@ -66,6 +73,7 @@ test('links keep their text and bare URLs keep only their host', () => {
         toSpokenText('See https://www.weather.gov/lwx/ for more.'),
         'See weather.gov for more.',
     );
+    assert.equal(toSpokenText('Visit https://example.com/x. Then rain.'), 'Visit example.com. Then rain.');
 });
 
 test('formatting tags are removed, other angle brackets are kept', () => {
