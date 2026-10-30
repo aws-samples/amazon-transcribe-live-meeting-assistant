@@ -43,7 +43,7 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -227,24 +227,43 @@ def _build_cause(codebuild: Any, logs: Any, cfn: Any, stack: str, since: datetim
 
 def _build_log_cause(logs: Any, group: str, stream: str) -> list[str]:
     """The output just before a CodeBuild command was reported as failed."""
-    response = logs.get_log_events(
-        logGroupName=group, logStreamName=stream, startFromHead=True, limit=10000
-    )
-    lines = [
-        line.rstrip()
-        for event in response.get("events", [])
-        for line in event.get("message", "").splitlines()
-    ]
+    marker = "Command did not exit successfully"
+    lines: list[str] = []
+    token = None
+    # Paged until the marker: a --no-cache image build can log more than one
+    # page holds, and the lines that matter are just before the marker.
+    for _ in range(20):
+        kwargs = {"logGroupName": group, "logStreamName": stream, "startFromHead": True}
+        if token:
+            kwargs["nextToken"] = token
+        response = logs.get_log_events(**kwargs)
+        lines += [
+            line.rstrip()
+            for event in response.get("events", [])
+            for line in event.get("message", "").splitlines()
+        ]
+        following = response.get("nextForwardToken")
+        if any(marker in line for line in lines) or not following or following == token:
+            break
+        token = following
     end = next(
-        (i for i, line in enumerate(lines) if "Command did not exit successfully" in line),
+        (i for i, line in enumerate(lines) if marker in line),
         len(lines),
     )
     output = [line for line in lines[:end] if not _CODEBUILD_NOISE.match(line)]
     return output[-MAX_BUILD_LINES:]
 
 
-def stack_cause(cfn: Any, codebuild: Any, logs: Any, stack: str) -> list[str]:
-    """The stack's state and the resources whose failure decided it."""
+def stack_cause(
+    cfn: Any, codebuild: Any, logs: Any, stack: str, since: datetime | None = None
+) -> list[str]:
+    """The stack's state and the resources whose failure decided it.
+
+    ``since`` is when the job started. An operation older than that was not
+    started by this job — the deploy failed before CloudFormation began one —
+    so its failures are another night's and are not reported as this one's;
+    only the stack's state is, and the job's own output supplies the cause.
+    """
     state = cfn.describe_stacks(StackName=stack)["Stacks"][0]["StackStatus"]
     meaning = _STATE_MEANING.get(state)
     lines = [f"Stack is {state}" + (f": {meaning}." if meaning else ".")]
@@ -253,6 +272,8 @@ def stack_cause(cfn: Any, codebuild: Any, logs: Any, stack: str) -> list[str]:
     if not root_events:
         return lines
     started = root_events[0]["Timestamp"]
+    if since is not None and started < since:
+        return lines
     rollback = next(
         (e["Timestamp"] for e in root_events
          if e.get("PhysicalResourceId") == e.get("StackId")
@@ -281,7 +302,9 @@ def stack_cause(cfn: Any, codebuild: Any, logs: Any, stack: str) -> list[str]:
     return lines
 
 
-def _stack_cause_or_none(stack: str, region: str | None) -> list[str] | None:
+def _stack_cause_or_none(
+    stack: str, region: str | None, since: datetime | None
+) -> list[str] | None:
     try:
         import boto3  # noqa: PLC0415 - optional; the log fallback needs no AWS
     except ImportError:
@@ -293,10 +316,21 @@ def _stack_cause_or_none(stack: str, region: str | None) -> list[str] | None:
             session.client("codebuild"),
             session.client("logs"),
             stack,
+            since,
         )
     except Exception as exc:  # noqa: BLE001 - never fail the notification
         print(f"stack events unreadable: {type(exc).__name__}: {exc}", file=sys.stderr)
         return None
+
+
+def _parse_time(text: str | None) -> datetime | None:
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def describe(stage: str, log_text: str | None, stack_lines: list[str] | None) -> str:
@@ -323,6 +357,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--log", default=None, help="The job's captured output, if any.")
     parser.add_argument("--stack", default=None, help="Stack to read events from (deploy only).")
     parser.add_argument("--region", default=None)
+    parser.add_argument(
+        "--since",
+        default=None,
+        help="When the job started (ISO 8601, e.g. $CI_JOB_STARTED_AT); older operations are ignored.",
+    )
     args = parser.parse_args(argv)
 
     log_text = None
@@ -334,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
 
     stack_lines = None
     if args.stage == "deploy" and args.stack:
-        stack_lines = _stack_cause_or_none(args.stack, args.region)
+        stack_lines = _stack_cause_or_none(args.stack, args.region, _parse_time(args.since))
 
     print(describe(args.stage, log_text, stack_lines))
     return 0

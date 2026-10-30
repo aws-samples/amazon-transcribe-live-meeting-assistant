@@ -618,6 +618,46 @@ def test_a_deploy_cause_separates_rollback_failures_and_skips_cascades_and_old_r
     assert "old failure" not in text
 
 
+def test_an_operation_older_than_the_job_is_not_reported_as_its_cause(tmp_path: Path, capsys):
+    """A deploy refused before CloudFormation started must not inherit last night's failure."""
+    lines = failure_cause.stack_cause(
+        _StubCfn(_failed_update_events()), _StubCodeBuild(), _StubLogs(), "root",
+        since=_T0 + timedelta(hours=20),
+    )
+    assert lines == ["Stack is UPDATE_ROLLBACK_COMPLETE: it rolled back to its previous "
+                     "build and is usable, so the next night can deploy over it."]
+    text = failure_cause.describe("deploy", "Error: template URL not readable", lines)
+    assert "Error: template URL not readable" in text
+    assert "CodeBuildRun" not in text
+
+
+def test_the_job_start_time_is_parsed_from_gitlabs_format():
+    parsed = failure_cause._parse_time("2026-10-30T00:12:36Z")
+    assert parsed == datetime(2026, 10, 30, 0, 12, 36, tzinfo=timezone.utc)
+    assert failure_cause._parse_time("") is None
+    assert failure_cause._parse_time("not a time") is None
+
+
+def test_a_build_log_longer_than_one_page_is_read_to_the_failure():
+    pages = {
+        None: {"events": [{"message": "Step 1/2\n"}], "nextForwardToken": "t1"},
+        "t1": {"events": [{"message": "net/http: TLS handshake timeout\n"},
+                          {"message": "[Container] Command did not exit successfully\n"}],
+               "nextForwardToken": "t2"},
+    }
+
+    class Logs:
+        calls = 0
+
+        def get_log_events(self, **kwargs):
+            Logs.calls += 1
+            return pages[kwargs.get("nextToken")]
+
+    lines = failure_cause._build_log_cause(Logs(), "g", "s")
+    assert lines[-1] == "net/http: TLS handshake timeout"
+    assert Logs.calls == 2
+
+
 def test_a_stack_cause_is_preferred_to_the_log_but_the_log_fills_in_when_it_says_nothing():
     stack_lines = ["Stack is UPDATE_COMPLETE."]
     text = failure_cause.describe("deploy", "Error: No updates are to be performed", stack_lines)
@@ -867,6 +907,7 @@ def test_the_nightly_publish_and_deploy_capture_what_the_cause_step_reads() -> N
     config = (Path(__file__).resolve().parents[1] / ".gitlab-ci.yml").read_text()
     assert '--log "$NIGHTLY_STAGE-output.log"' in config
     assert "--cause failure-cause.txt" in config
+    assert '--since "$CI_JOB_STARTED_AT"' in config
     publish = config.split("nightly_publish:", 1)[1].split("\nnightly_deploy:", 1)[0]
     assert "| tee publish-output.log" in publish
     assert "| tee -a deploy-output.log" in _nightly_deploy_command()

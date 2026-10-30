@@ -521,7 +521,8 @@ ai_mr_review:
       CAUSE_PY=python3; [ -x .venv/bin/python ] && CAUSE_PY=.venv/bin/python
       "$CAUSE_PY" integ-tests/failure_cause.py --stage "$NIGHTLY_STAGE" \
         --log "$NIGHTLY_STAGE-output.log" \
-        --stack "$LMA_INTEG_STACK" --region "$AWS_DEFAULT_REGION" > failure-cause.txt \
+        --stack "$LMA_INTEG_STACK" --region "$AWS_DEFAULT_REGION" \
+        --since "$CI_JOB_STARTED_AT" > failure-cause.txt \
         || echo "⚠️ Could not determine the failure cause; posting without it"
     fi
   # Built unconditionally, even when no webhook is configured and even when

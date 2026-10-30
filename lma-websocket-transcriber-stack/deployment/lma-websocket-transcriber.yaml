@@ -911,7 +911,9 @@ Resources:
                 # Retried, up to three attempts, when the failure is a network
                 # fetch (a registry, apt or npm timing out or resetting the
                 # connection): one such blip otherwise fails the whole stack
-                # update and rolls it back. Any other failure is not retried.
+                # update and rolls it back. Only the end of the log is matched,
+                # so a network warning the build recovered from does not get an
+                # unrelated failure retried.
                 - |
                   for attempt in 1 2 3; do
                     if docker build --pull --no-cache -t "${REPOSITORY_URI}:${IMAGE_TAG}" source/app/ > /tmp/docker-build.log 2>&1; then
@@ -919,7 +921,7 @@ Resources:
                       break
                     fi
                     cat /tmp/docker-build.log
-                    if [ "$attempt" = 3 ] || ! grep -Eq 'TLS handshake timeout|i/o timeout|connection reset|Client\.Timeout|unexpected EOF|toomanyrequests|ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure resolving|Could not connect' /tmp/docker-build.log; then
+                    if [ "$attempt" = 3 ] || ! tail -n 50 /tmp/docker-build.log | grep -Eq 'TLS handshake timeout|i/o timeout|connection reset|Client\.Timeout|unexpected EOF|toomanyrequests|ETIMEDOUT|ECONNRESET|EAI_AGAIN|Temporary failure resolving|Could not connect'; then
                       exit 1
                     fi
                     echo "docker build hit a network error (attempt $attempt of 3); retrying in $((attempt * 30))s"

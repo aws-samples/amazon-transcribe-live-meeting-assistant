@@ -31,9 +31,11 @@ from typing import Any
 
 STUCK = "UPDATE_ROLLBACK_FAILED"
 # A resumed rollback rebuilds whatever the failed update had replaced, which
-# for a MicroVM image is a build of several minutes. Polled every 30 seconds,
-# inside the deploy job's own timeout with the deploy still to run.
-_WAIT = {"Delay": 30, "MaxAttempts": 50}
+# for a MicroVM image is a build of several minutes; one observed took about
+# ten. Capped at 15 minutes so a slow rollback fails here, saying so, rather
+# than leaving the deploy too little of the job's 55-minute timeout. A stack
+# that needed it may then finish the deploy only on the next night.
+_WAIT = {"Delay": 30, "MaxAttempts": 30}
 
 
 def resume_if_stuck(cfn: Any, stack: str) -> bool:
