@@ -320,7 +320,12 @@ test('a chat command reaches the provider tagged with the chat route and the sen
     // The route and the requester are what make the log line diagnostic, and
     // chat is the only route that can supply a name today.
     const assistant = fakeAssistant();
-    return applyAssistantChatCommand(assistant, parseAssistantChatCommand('LMA translate')!, 'Alice').then((reply) => {
+    return applyAssistantChatCommand(
+        assistant,
+        parseAssistantChatCommand('LMA translate')!,
+        'Alice',
+        createActivationRestore(),
+    ).then((reply) => {
         assert.deepEqual(assistant.requests, [
             {
                 meetingMode: 'translator',
@@ -378,6 +383,7 @@ test('every provider is asked, so one attempt is always one log line', async () 
         new NoOpAgent(),
         parseAssistantChatCommand('LMA translate')!,
         'Alice',
+        createActivationRestore(),
     );
     assert.deepEqual(reply, ['Live Meeting Assistant: the voice assistant is not enabled for this meeting.']);
 });
@@ -525,6 +531,13 @@ test('a declined LMA wake while translating does not cancel the restore', async 
     const restore = createActivationRestore();
     const replies = await typeCommands(assistant, restore, 'LMA translate', 'LMA wake', 'LMA assist');
     assert.match(replies[1][0], /always listening/);
+    assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'wake_phrase' });
+});
+
+test('a declined LMA wake is honoured on leaving translator mode even when the meeting began always listening', async () => {
+    const assistant = statefulAssistant('normal', 'always_active');
+    const restore = createActivationRestore();
+    await typeCommands(assistant, restore, 'LMA translate', 'LMA wake', 'LMA assist');
     assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'wake_phrase' });
 });
 

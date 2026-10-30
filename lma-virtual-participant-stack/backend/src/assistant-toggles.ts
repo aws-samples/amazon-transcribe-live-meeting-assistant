@@ -400,9 +400,11 @@ export function assistantToggleChatReply(outcome: AssistantReconfigureOutcome): 
  * The memory is cleared by an explicit activation command (`LMA always`,
  * `LMA wake`) that the assistant accepted or was already in: the participant
  * has then said what they want, and that wins over what the meeting started
- * with. A declined command leaves it standing — `LMA wake` is declined while a
- * translator is running, and the participant who typed it still wants the wake
- * phrase back when translation ends.
+ * with. A declined `LMA wake` is recorded instead: it is declined while a
+ * translator or group-mode assistant is running, and the participant who typed
+ * it still wants the wake phrase once that mode ends — including in a meeting
+ * that was always listening before translation started, where there would
+ * otherwise be nothing to restore.
  *
  * Only the first forced switch is remembered. Going from translator straight to
  * group changes no activation (it is already `always_active`), so the original
@@ -439,7 +441,18 @@ export function createActivationRestore() {
 
         /** Update the memory from what was asked for and how it ended. */
         record(command: AssistantChatCommand, sent: AssistantChatCommand, outcome: AssistantReconfigureOutcome): void {
-            if (outcome.result === 'declined') return;
+            if (outcome.result === 'declined') {
+                // An activation request the current mode refused is a wish for
+                // when the mode ends, not a request that did not happen.
+                if (
+                    command.meetingMode === undefined
+                    && command.activationMode !== undefined
+                    && requiresAlwaysListening(outcome.meetingModeBefore)
+                ) {
+                    restoreTo = command.activationMode;
+                }
+                return;
+            }
 
             // An explicit activation command is the participant's own choice.
             if (command.meetingMode === undefined && command.activationMode !== undefined) {
@@ -499,7 +512,7 @@ export async function applyAssistantChatCommand(
     if (sent.activationMode !== command.activationMode) {
         console.log(
             `${ASSISTANT_TOGGLE_LOG_TAG} restoring activationMode=${sent.activationMode}`
-                + ` (in effect before an always-listening meeting mode)`,
+                + ` on leaving an always-listening meeting mode for meetingMode=${command.meetingMode}`,
         );
     }
     const outcome = await assistant.reconfigure({
