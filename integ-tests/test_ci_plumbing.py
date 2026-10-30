@@ -567,6 +567,7 @@ class _StubCodeBuild:
     def batch_get_builds(self, ids):
         return {"builds": [
             {
+                "id": "p:new",
                 "buildStatus": "FAILED",
                 "startTime": _T0 + timedelta(seconds=30),
                 "phases": [{"phaseType": "BUILD", "phaseStatus": "FAILED",
@@ -656,6 +657,54 @@ def test_a_build_log_longer_than_one_page_is_read_to_the_failure():
     lines = failure_cause._build_log_cause(Logs(), "g", "s")
     assert lines[-1] == "net/http: TLS handshake timeout"
     assert Logs.calls == 2
+
+
+def test_the_quoted_build_is_the_newest_failed_one_before_the_resource_failed():
+    """Across every project in the stack, not the first project listed."""
+
+    def build(build_id, minutes, message):
+        return {
+            "id": build_id,
+            "buildStatus": "FAILED",
+            "startTime": _T0 + timedelta(minutes=minutes),
+            "phases": [{"phaseType": "BUILD", "phaseStatus": "FAILED", "contexts": [{"message": message}]}],
+            "logs": {},
+        }
+
+    builds = {
+        "ui": [build("ui:1", 0.2, "ui build, too early")],
+        "img": [build("img:1", 0.5, "image build, the one"), build("img:2", 3, "after the failure")],
+    }
+
+    class CodeBuild:
+        def list_builds_for_project(self, projectName):
+            return {"ids": [b["id"] for b in builds[projectName]]}
+
+        def batch_get_builds(self, ids):
+            # Deliberately out of order: the API promises none.
+            return {"builds": [b for p in builds.values() for b in p if b["id"] in ids][::-1]}
+
+    cfn = _StubCfn(
+        [],
+        resources=[
+            {"ResourceType": "AWS::CodeBuild::Project", "PhysicalResourceId": "ui"},
+            {"ResourceType": "AWS::CodeBuild::Project", "PhysicalResourceId": "img"},
+        ],
+    )
+    quoted: set[str] = set()
+    window = (_T0, _T0 + timedelta(minutes=1))
+    lines = failure_cause._build_cause(CodeBuild(), None, cfn, "child", window, quoted)
+    assert lines == ["CodeBuild BUILD phase: image build, the one"]
+    # Quoted once: another resource failing in the same window does not repeat it.
+    assert failure_cause._build_cause(CodeBuild(), None, cfn, "child", window, quoted) == [
+        "CodeBuild BUILD phase: ui build, too early"
+    ]
+
+
+def test_a_resume_that_failed_tonight_is_said_to_need_a_person():
+    log = "Error: the resumed rollback did not complete.\n✗ CHILD → Image: did not stabilize\n"
+    text = failure_cause.describe("deploy", log, ["Stack is UPDATE_ROLLBACK_FAILED: ..."])
+    assert "needs a person" in text
 
 
 def test_a_stack_cause_is_preferred_to_the_log_but_the_log_fills_in_when_it_says_nothing():

@@ -161,14 +161,14 @@ def own_failures(
     found: list[dict] = []
     for event in _events_since(cfn, stack, since):
         status = event.get("ResourceStatus", "")
-        reason = event.get("ResourceStatusReason") or ""
+        why = event.get("ResourceStatusReason") or ""
         if "FAILED" not in status or event.get("PhysicalResourceId") == event.get("StackId"):
             continue
-        if any(marker in reason for marker in _CASCADE):
+        if any(marker in why for marker in _CASCADE):
             continue
         name = event.get("LogicalResourceId", "?")
         if event.get("ResourceType") == "AWS::CloudFormation::Stack" and any(
-            marker in reason for marker in _NESTED_WRAPPER
+            marker in why for marker in _NESTED_WRAPPER
         ):
             if depth < 5 and event.get("PhysicalResourceId"):
                 found += own_failures(
@@ -183,7 +183,7 @@ def own_failures(
             {
                 "where": f"{path}{name}",
                 "type": event.get("ResourceType", ""),
-                "reason": reason,
+                "reason": why,
                 "time": event["Timestamp"],
                 "stack": event.get("StackId", stack),
             }
@@ -191,14 +191,25 @@ def own_failures(
     return found
 
 
-def _build_cause(codebuild: Any, logs: Any, cfn: Any, stack: str, since: datetime) -> list[str]:
+def _build_cause(
+    codebuild: Any,
+    logs: Any,
+    cfn: Any,
+    stack: str,
+    window: tuple[datetime, datetime],
+    quoted: set[str],
+) -> list[str]:
     """Why the CodeBuild run started by a custom resource in ``stack`` failed.
 
-    The custom resource reports only that the build did not succeed. The build
-    is the most recent failed one of the stack's CodeBuild projects that
-    started after the update did; its failed phase and the lines of its log
-    just before CodeBuild gave up are the cause.
+    The custom resource reports only that the build did not succeed, not which
+    build. So: of every failed build of every CodeBuild project in that stack,
+    the newest one that started inside ``window`` — from the start of the
+    phase the resource failed in (the update, or the rollback) to the moment
+    it failed. Its failed phase and the lines of its log just before CodeBuild
+    gave up are the cause. A build already quoted for another resource
+    (``quoted``, updated here) is not quoted again.
     """
+    opened, closed = window
     projects = [
         summary["PhysicalResourceId"]
         for page in cfn.get_paginator("list_stack_resources").paginate(StackName=stack)
@@ -206,27 +217,34 @@ def _build_cause(codebuild: Any, logs: Any, cfn: Any, stack: str, since: datetim
         if summary.get("ResourceType") == "AWS::CodeBuild::Project"
         and summary.get("PhysicalResourceId")
     ]
+    candidates = []
     for project in projects:
         ids = codebuild.list_builds_for_project(projectName=project).get("ids", [])[:5]
-        if not ids:
-            continue
-        for build in codebuild.batch_get_builds(ids=ids).get("builds", []):
-            if build.get("buildStatus") not in _CODEBUILD_FAILED_STATES:
-                continue
-            if build.get("startTime") and build["startTime"] < since:
-                continue
-            lines = [
-                f"CodeBuild {phase['phaseType']} phase: {context.get('message') or context.get('statusCode')}"
-                for phase in build.get("phases", [])
-                if phase.get("phaseStatus") in _CODEBUILD_FAILED_STATES
-                for context in phase.get("contexts", [])[:1]
-            ][:1]
-            group = build.get("logs", {}).get("groupName")
-            stream = build.get("logs", {}).get("streamName")
-            if group and stream:
-                lines += _build_log_cause(logs, group, stream)
-            return [_clip(line) for line in lines]
-    return []
+        if ids:
+            candidates += codebuild.batch_get_builds(ids=ids).get("builds", [])
+    failed = [
+        build
+        for build in candidates
+        if build.get("buildStatus") in _CODEBUILD_FAILED_STATES
+        and build.get("startTime")
+        and opened <= build["startTime"] <= closed
+        and build.get("id") not in quoted
+    ]
+    if not failed:
+        return []
+    build = max(failed, key=lambda b: b["startTime"])
+    quoted.add(build.get("id", ""))
+    lines = [
+        f"CodeBuild {phase['phaseType']} phase: {context.get('message') or context.get('statusCode')}"
+        for phase in build.get("phases", [])
+        if phase.get("phaseStatus") in _CODEBUILD_FAILED_STATES
+        for context in phase.get("contexts", [])[:1]
+    ][:1]
+    group = build.get("logs", {}).get("groupName")
+    stream = build.get("logs", {}).get("streamName")
+    if group and stream:
+        lines += _build_log_cause(logs, group, stream)
+    return [_clip(line) for line in lines]
 
 
 def _build_log_cause(logs: Any, group: str, stream: str) -> list[str]:
@@ -289,7 +307,11 @@ def stack_cause(
     forward = [f for f in failures if rollback is None or f["time"] < rollback]
     backward = [f for f in failures if rollback is not None and f["time"] >= rollback]
 
-    for heading, group in (("Failed:", forward), ("Then, during the rollback:", backward)):
+    quoted: set[str] = set()
+    for heading, group, opened in (
+        ("Failed:", forward, started),
+        ("Then, during the rollback:", backward, rollback or started),
+    ):
         if not group:
             continue
         lines.append(heading)
@@ -297,7 +319,9 @@ def stack_cause(
             lines.append(_clip(f"• {failure['where']}: {reason(failure['reason'])}"))
             if "build did not complete" in failure["reason"]:
                 try:
-                    detail = _build_cause(codebuild, logs, cfn, failure["stack"], started)
+                    detail = _build_cause(
+                        codebuild, logs, cfn, failure["stack"], (opened, failure["time"]), quoted
+                    )
                 except Exception as exc:  # noqa: BLE001 - detail is best-effort
                     detail = [f"(the build's log could not be read: {type(exc).__name__})"]
                 lines += [f"    {line}" for line in detail]
@@ -337,6 +361,10 @@ def _parse_time(text: str | None) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
+# What resume_rollback.py prints when the rollback it resumed failed again.
+_RESUME_FAILED = "Error: the resumed rollback did not complete."
+
+
 def describe(stage: str, log_text: str | None, stack_lines: list[str] | None) -> str:
     """The cause, from the best source available."""
     if stack_lines and len(stack_lines) > 1:
@@ -348,6 +376,11 @@ def describe(stage: str, log_text: str | None, stack_lines: list[str] | None) ->
             "tools or reading the AWS credentials). See the job log."
         )
     body = log_cause(log_text)
+    if _RESUME_FAILED in log_text:
+        body.append(
+            "Tonight's deploy already tried to resume that rollback and it failed "
+            "again, so waiting for the next night will not clear it: it needs a person."
+        )
     if stack_lines:
         # The stack's state is still worth a line when its events said nothing
         # (a deploy refused before CloudFormation started, say).
