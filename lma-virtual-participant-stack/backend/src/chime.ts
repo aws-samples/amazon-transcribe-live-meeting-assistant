@@ -7,6 +7,7 @@ import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistan
 import { chatHelpMessages } from './chat-help.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
+import { clickWithDomFallback } from './prejoin-actions.js';
 
 export default class Chime {
     private prevSender: string = '';
@@ -92,7 +93,7 @@ export default class Chime {
                 },
                 { maxRetries: 10, delayMs: 500 },
             );
-            await muteRes?.element.click();
+            if (muteRes) await clickWithDomFallback(muteRes.element, 'Join muted');
         } else {
             console.log('Voice assistant enabled - skipping mute button for agent audio');
         }
@@ -116,7 +117,7 @@ export default class Chime {
             // completion.
             return { reason: 'never-joined', trigger: 'pre-join:no-join-button' };
         }
-        await joinRes.element.click();
+        await clickWithDomFallback(joinRes.element, 'Join');
 
         console.log('Opening chat panel.');
         try {
@@ -124,7 +125,7 @@ export default class Chime {
                 'button[data-testid="button"][aria-label^="Open chat panel"]',
                 { timeout: details.waitingTimeout }
             );
-            await chatPanelElement?.click();
+            if (chatPanelElement) await clickWithDomFallback(chatPanelElement, 'Open chat panel');
         } catch (error) {
             console.log('LMA Virtual Participant was not admitted into the meeting.');
             // Returned rather than thrown, so the reason travels as a code the
@@ -146,7 +147,7 @@ export default class Chime {
         const attendeesPanelElement = await page.waitForSelector(
             'button[data-testid="button"][aria-label^="Open attendees panel"]'
         );
-        await attendeesPanelElement?.click();
+        if (attendeesPanelElement) await clickWithDomFallback(attendeesPanelElement, 'Open attendees panel');
 
         // Set up attendee change monitoring
         await page.exposeFunction('attendeeChange', async (number: number) => {

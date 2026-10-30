@@ -926,7 +926,9 @@ export async function scrollIntoViewAndClick(
       // ignore — scroll is best-effort
     }
     try {
-      await handle.click();
+      // Bounded so a miss reaches the DOM-click fallback promptly: humanized
+      // clicks retry until the action timeout and then throw.
+      await handle.click({ timeout: 5000 });
       return true;
     } catch {
       // fallback: dispatch a synthetic click on the element. Works even
