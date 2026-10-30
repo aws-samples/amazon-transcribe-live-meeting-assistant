@@ -188,7 +188,7 @@ test('the help reply lists one canonical form of every command', () => {
     assert.ok(!text.includes('"LMA end"'), 'the help reply lists an alias of "LMA leave"');
 });
 
-test('the help reply names listen mode "LMA listen", and the older "LMA group" still works unlisted', () => {
+test('the help reply names listen mode "LMA listen", and the configuration name "LMA group" works unlisted', () => {
     const text = chatHelpMessages(NOVA_LIKE).join(' ');
     assert.ok(text.includes('"LMA listen"'));
     assert.ok(!text.includes('group'), 'the help reply still mentions group');

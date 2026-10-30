@@ -218,9 +218,9 @@ export const ASSISTANT_CHAT_COMMANDS: ReadonlyArray<AssistantChatCommandEntry> =
         summary: 'assistant mode',
     },
     {
-        // `listen` is the name participants are told; `group` is the name of
-        // the configuration value and was the chat command before it, so it
-        // stays accepted. Only the first phrase is listed by `LMA help`.
+        // `listen` is the name participants are told and the one `LMA help`
+        // lists; `group` / `group mode` are accepted as well because `group`
+        // is the configuration value's name.
         phrases: ['listen', 'listen mode', 'listening mode', 'group', 'group mode'],
         command: { meetingMode: 'group', activationMode: 'always_active' },
         summary: 'listen mode, quiet until addressed',

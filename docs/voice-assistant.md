@@ -215,7 +215,7 @@ Every command must address LMA by name, and the whole message must be the name p
 |---|---|
 | `LMA translate` | Switch to translator mode, and to always-listening. Aliases: `LMA translator`, `LMA translate mode`, `LMA translator mode`, `LMA interpret` |
 | `LMA assist` | Switch to `normal` assistant mode. After `LMA translate` or `LMA listen`, also restores the activation mode they replaced (see below). Aliases: `LMA assistant`, `LMA assist mode`, `LMA assistant mode`, `LMA normal`, `LMA normal mode` |
-| `LMA listen` | Switch to listen mode — the configuration's `group` mode: the assistant goes quiet and waits to be addressed by wake phrase — and to always-listening. Aliases: `LMA listen mode`, `LMA listening mode`, and `LMA group` / `LMA group mode`, which still work but are not listed by `LMA help` |
+| `LMA listen` | Switch to listen mode — the configuration's `group` mode: the assistant goes quiet and waits to be addressed by wake phrase — and to always-listening. Aliases: `LMA listen mode`, `LMA listening mode`, and `LMA group` / `LMA group mode`, which are also accepted (the configuration's name for the mode) but not listed by `LMA help` |
 
 `LMA listen` chooses the meeting mode and is a different command from `LMA always listen`, an alias of `LMA always` that only changes activation; each is matched as a whole message, so neither is mistaken for the other.
 
