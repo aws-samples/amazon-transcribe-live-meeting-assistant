@@ -57,8 +57,15 @@ these jobs has to preserve that. Don't merge them.
 **A build failure and a test failure are different news.** Keeping them in
 separate jobs is what lets the notification say which stage failed and what it
 means for the stack — a failed publish leaves the stack untouched, while a
-failed deploy can leave it mid-update, where it will fail every following night
-until someone resolves it. See `--stage` in `integ-tests/junit_summary.py`.
+failed deploy can leave it rolled back, or with a rollback that could not
+finish. A stack in that second state (`UPDATE_ROLLBACK_FAILED`) refuses every
+update, so `nightly_deploy` first resumes such a rollback, once and skipping no
+resource, before deploying (`integ-tests/resume_rollback.py`); if the resumed
+rollback fails as well, the deploy job fails there and its output names
+each resource that failed again and the reason it gave. If it is still running
+after 15 minutes the job fails too, saying so, and the next night's deploy finds
+it finished or resumes it again. See `--stage`
+in `integ-tests/junit_summary.py`.
 
 ### The suite itself
 
@@ -106,8 +113,13 @@ Four independent paths, so a red nightly cannot go unnoticed:
    they fail, and `nightly_integ_tests` posts pass or fail. The message carries
    the stack name, the counts, the template that was deployed, **every check
    that ran and how it ended**, the assertion messages of any failures, and a
-   link to the job — or, when an earlier stage failed, which stage it was and
-   what that leaves the stack in. Needs the `SLACK_WEBHOOK_URL` variable from
+   link to the job — or, when an earlier stage failed, which stage it was,
+   why, and what that leaves the stack in. For a failed publish the reason is
+   the decisive lines of the job's output; for a failed deploy it is read from
+   the stack's events, through every nested stack to the resources that failed
+   on their own account, and for a failed in-stack CodeBuild image build, the
+   lines of that build's log just before it gave up
+   (`integ-tests/failure_cause.py`). Needs the `SLACK_WEBHOOK_URL` variable from
    [step 4](#4-cicd-variables); absent, the job logs one line and skips the
    post. Setup is in [step 6](#6-optional-the-slack-notification).
 
