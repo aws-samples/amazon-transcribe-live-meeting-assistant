@@ -67,7 +67,7 @@ test('a mode command addressed to LMA is recognised however it is punctuated', (
         assert.equal(parseAssistantChatCommand(message)?.meetingMode, 'normal', `wrong mode for "${message}"`);
     }
 
-    for (const message of ['LMA group', 'LMA group mode']) {
+    for (const message of ['LMA listen', 'LMA listen mode', 'LMA listening mode', 'LMA group', 'LMA group mode']) {
         assert.equal(parseAssistantChatCommand(message)?.meetingMode, 'group', `wrong mode for "${message}"`);
     }
 });
@@ -134,6 +134,8 @@ test('ordinary meeting chat is left alone', () => {
         "I'll wake LMA later",
         'LMA group chat',
         'the LMA group meets on Tuesdays',
+        'LMA listen to this',
+        'can LMA listen in',
         'does LMA have a normal mode and a group mode',
         'translate the agenda please',
         'always on',
@@ -151,7 +153,7 @@ test('ordinary meeting chat is left alone', () => {
 test('a command word nobody addressed to the assistant is somebody talking to the meeting', () => {
     // The whole point of the addressee. "translate" on its own, in a meeting
     // with speakers of two languages, is one participant asking another.
-    for (const message of ['translate', 'translator', 'interpret', 'assist', 'group', 'always', 'wake', 'normal']) {
+    for (const message of ['translate', 'translator', 'interpret', 'assist', 'listen', 'group', 'always', 'wake', 'normal']) {
         assert.equal(parseAssistantChatCommand(message), null, `wrongly recognised: "${message}"`);
     }
 });
@@ -183,7 +185,7 @@ test('the dismissal vocabulary and the toggle vocabulary do not overlap', () => 
         assert.equal(parseAssistantChatCommand(message), null, `dismissal claimed as a toggle: "${message}"`);
     }
 
-    const toggles = ['LMA translate', 'LMA assist', 'LMA group', 'LMA always', 'LMA wake'];
+    const toggles = ['LMA translate', 'LMA assist', 'LMA listen', 'LMA group', 'LMA always', 'LMA wake'];
     for (const message of toggles) {
         assert.equal(matchesEndCommand(message), false, `toggle claimed as a dismissal: "${message}"`);
     }
@@ -234,7 +236,7 @@ test('only the configured modes are accepted', () => {
 
 test('every mode has wording for participants', () => {
     assert.equal(describeMeetingMode('normal'), 'assistant mode');
-    assert.equal(describeMeetingMode('group'), 'group mode');
+    assert.equal(describeMeetingMode('group'), 'listen mode');
     assert.equal(describeMeetingMode('translator'), 'translator mode');
     assert.equal(describeActivationMode('always_active'), 'always listening');
     assert.equal(describeActivationMode('wake_phrase'), 'listening for the wake phrase');
@@ -397,7 +399,7 @@ test('the modes that need an always-listening assistant are named in one place',
     }
     assert.equal(requiresAlwaysListening('normal'), false);
 
-    for (const message of ['LMA translate', 'LMA group', 'LMA translator mode', 'LMA group mode', 'LMA interpret']) {
+    for (const message of ['LMA translate', 'LMA listen', 'LMA group', 'LMA translator mode', 'LMA group mode', 'LMA interpret']) {
         const command = parseAssistantChatCommand(message)!;
         assert.equal(
             command.activationMode,
@@ -419,7 +421,8 @@ test('the modes that need an always-listening assistant are named in one place',
 /**
  * A provider that keeps the two modes and applies the same combination rule as
  * Nova's `reconfigure`: a mode that requires always-listening cannot end up
- * without it.
+ * without it. It models that rule only, not Nova's full order of checks (no
+ * stopped or in-progress declines, and "unchanged" is decided first).
  */
 function statefulAssistant(meetingMode: MeetingMode, activationMode: ActivationMode) {
     const state = { meetingMode, activationMode };
@@ -504,7 +507,7 @@ test('leaving translator mode restores the wake phrase it replaced', async () =>
 test('leaving group mode restores the activation mode it replaced', async () => {
     const assistant = statefulAssistant('normal', 'wake_phrase');
     const restore = createActivationRestore();
-    await typeCommands(assistant, restore, 'LMA group', 'LMA assist');
+    await typeCommands(assistant, restore, 'LMA listen', 'LMA assist');
     assert.deepEqual(assistant.state, { meetingMode: 'normal', activationMode: 'wake_phrase' });
 });
 

@@ -188,7 +188,7 @@ test('asking only for the wake phrase is refused in the modes that need to stay 
         assert.equal((agent as any).activationMode, 'always_active');
         // Worded for a request that is asking to leave a mode the assistant is
         // already in, which is the other half of the rule.
-        assert.match(outcome.detail || '', new RegExp(`the assistant is in ${mode === 'group' ? 'group' : 'translator'} mode`));
+        assert.match(outcome.detail || '', new RegExp(`the assistant is in ${mode === 'group' ? 'listen' : 'translator'} mode`));
         assert.match(outcome.detail || '', /has to stay always listening/);
         assert.match(outcome.detail || '', /LMA assist/, 'the reply must say how to get there');
         assert.deepEqual(calls, [], 'a refused request must not touch the session');
@@ -612,7 +612,7 @@ test('a refresh that will not settle is left to finish, with a rebuild queued be
     // still the one the agent has left.
     assert.equal(outcome.detail, 'the assistant will finish switching shortly');
     assert.deepEqual(assistantToggleChatReply(outcome), [
-        'Live Meeting Assistant: switched to group mode, the assistant will finish switching shortly.',
+        'Live Meeting Assistant: switched to listen mode, the assistant will finish switching shortly.',
     ]);
 });
 
@@ -708,7 +708,7 @@ test('a refresh that produced no session is reported as still switching, not as 
     assert.equal(lines.length, 1);
     assert.match(lines[0], /session=kept/);
     assert.deepEqual(assistantToggleChatReply(outcome), [
-        'Live Meeting Assistant: switched to group mode, the assistant will finish switching shortly.',
+        'Live Meeting Assistant: switched to listen mode, the assistant will finish switching shortly.',
     ]);
 });
 
