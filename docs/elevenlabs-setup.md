@@ -182,7 +182,7 @@ parameter to match, or the next stack update writes the old value back. See
 **Wake Phrase Mode** (Recommended)
 - Agent activates when user says "Hey Alex"
 - Saves costs by only connecting when needed
-- Automatically disconnects after 30 seconds of inactivity
+- Automatically disconnects once it has been idle for `VoiceAssistantActivationDuration` (default 30 seconds); a lookup in progress or an answer still playing is not idle
 - Set: `VoiceAssistantActivationMode=wake_phrase`
 
 **Always Active Mode**
@@ -195,7 +195,7 @@ parameter to match, or the next stack update writes the old value back. See
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `VoiceAssistantActivationDuration` | `30` | Seconds to stay active after wake phrase |
+| `VoiceAssistantActivationDuration` | `30` | Seconds of idle time before a wake-phrase activation disconnects (see [wake_phrase](voice-assistant.md#wake_phrase)) |
 | `ElevenLabsOutputFormat` | `pcm_16000` | Audio output format |
 | `ElevenLabsPlaybackRate` | `16000` | Audio playback rate in Hz |
 
@@ -397,7 +397,7 @@ Once configured, the voice assistant can:
 
 - **Recommended for most use cases**
 - Only connects when activated
-- Automatically disconnects after 30 seconds
+- Automatically disconnects after 30 seconds idle (`VoiceAssistantActivationDuration`)
 - Saves ~90% of connection costs
 
 ### Always Active Mode

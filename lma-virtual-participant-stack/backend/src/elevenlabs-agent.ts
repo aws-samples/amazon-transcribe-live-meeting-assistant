@@ -19,6 +19,8 @@ import {
   AssistantReconfigureRequest,
   formatAssistantToggleLog,
 } from './assistant-toggles.js';
+import { agentSpeakingDetector } from './agent-speaking-detector.js';
+import { ActivationWindow } from './voice-activation-window.js';
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
@@ -40,7 +42,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   private enabled: boolean;
   private isConnected: boolean = false;
   private _isSpeaking: boolean = false; // Track when agent is playing audio
-  private _isProcessingTool: boolean = false; // Track when processing tool calls
+  /** strands_agent lookups in progress; overlapping calls each hold the window. */
+  private toolCallsInFlight: number = 0;
   private audioQueue: Buffer[] = []; // Queue for audio chunks
   private isPlayingQueue: boolean = false; // Track if queue is being processed
   private activationMode: string;
@@ -49,8 +52,27 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
   /** The most recent participant turn the agent heard, which is the turn a
    *  tool call that follows it is answering. */
   private lastUserTranscript: string = '';
-  private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
+
+  /** When the local playback queue last finished (0 if nothing has played). */
+  private playbackEndedAt: number = 0;
+  /** When the agent last reported a participant's turn (user_transcript). */
+  private lastUserTranscriptAt: number = 0;
+  /** Whether the agent's output sink is carrying speech right now, which is
+   *  what the meeting hears. A field so tests can stand in for PulseAudio. */
+  private audibleOutput: () => boolean = () => agentSpeakingDetector.isSpeaking();
+  /** The wake-phrase activation window: idle time, not a deadline from the
+   *  wake phrase (see voice-activation-window.ts). */
+  private activationWindow = new ActivationWindow(
+    {
+      toolRunning: () => this.toolCallsInFlight > 0,
+      audioArriving: () => this._isSpeaking || this.audioQueue.length > 0,
+      playbackEndsAt: () => this.playbackEndedAt,
+      audible: () => this.audibleOutput(),
+      lastUserTurnAt: () => this.lastUserTranscriptAt,
+    },
+    () => this.deactivate(),
+  );
   private region: string;
 
   // Meeting-mode configuration (parity with Nova Sonic)
@@ -289,7 +311,17 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       case 'user_transcript': {
         const userText: string = message.user_transcription_event?.user_transcript || '';
         console.log('👤 Agent heard:', userText);
-        if (userText) this.lastUserTranscript = userText;
+        if (userText) {
+          this.lastUserTranscript = userText;
+          this.lastUserTranscriptAt = Date.now();
+        }
+        // Being addressed again re-arms a running activation window. The scribe
+        // does not activate an assistant that is already activated, so for a
+        // follow-up inside the window this is the only place it is noticed.
+        if (this.activationMode !== 'always_active' && this._isActivated && userText
+          && this.containsWakePhrase(userText)) {
+          this.activationWindow.rearm('addressed again');
+        }
         // Group-meeting wake-phrase handling for ElevenLabs (parity with Nova).
         // In translator mode we don't gate on wake phrases — every utterance
         // triggers a translation.
@@ -320,6 +352,9 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
       case 'interruption':
         console.log('⚠️  Agent interrupted');
+        // Somebody talking over the assistant is talking to it, so the idle
+        // countdown restarts and a correction is not cut off by the window.
+        this.activationWindow.noteEngagement();
         break;
 
       case 'ping':
@@ -368,8 +403,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     }
 
     try {
-      // Set flag to prevent deactivation while tool is processing
-      this._isProcessingTool = true;
+      // Holds the activation window open until the lookup finishes.
+      this.toolCallsInFlight++;
 
       let result: any;
 
@@ -392,8 +427,10 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
         details: error instanceof Error ? error.message : String(error)
       });
     } finally {
-      // Clear flag after tool processing completes
-      this._isProcessingTool = false;
+      this.toolCallsInFlight = Math.max(0, this.toolCallsInFlight - 1);
+      // The window counts its idle time from here at the earliest, so a lookup
+      // that took most of the window still leaves the whole of it for the answer.
+      this.activationWindow.noteEngagement();
     }
   }
 
@@ -573,75 +610,86 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       
       console.log(`🎵 Playing audio chunk (${audioBuffer.length} bytes) - ${this.audioQueue.length} remaining in queue`);
       
-      // Allow rate adjustment via environment variable
-      const playbackRate = parseInt(process.env.ELEVENLABS_PLAYBACK_RATE || '16000');
-      
-      await new Promise<void>((resolve, reject) => {
-        // Play audio at specified rate
-        const paplay = spawn('paplay', [
-          '--device=agent_output',
-          '--format=s16le',
-          '--rate=' + playbackRate,
-          '--channels=1',
-          '--raw'
-        ]);
-
-        // Handle stdin errors (EPIPE when paplay exits before write completes)
-        paplay.stdin.on('error', (error: any) => {
-          if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
-            // Expected during cleanup - paplay exited before we finished writing
-            resolve();
-          } else {
-            console.error('❌ paplay stdin error:', error);
-            reject(error);
-          }
-        });
-
-        // Send audio to paplay
-        paplay.stdin.write(audioBuffer);
-        paplay.stdin.end();
-
-        // Handle paplay completion
-        paplay.on('close', (code) => {
-          if (code === 0) {
-            console.log('✅ Audio chunk played');
-            resolve();
-          } else {
-            // During cleanup, non-zero exit is expected
-            resolve();
-          }
-        });
-
-        paplay.on('error', (error) => {
-          console.error('❌ paplay error:', error);
-          reject(error);
-        });
-
-        paplay.stderr.on('data', (data) => {
-          const msg = data.toString();
-          if (msg.trim()) {
-            console.log(`paplay: ${msg.trim()}`);
-          }
-        });
-      });
+      try {
+        await this.playChunk(audioBuffer);
+      } catch (error) {
+        // One chunk failing must not leave the queue marked as playing for
+        // good, which would also hold the activation window open.
+        console.error('❌ Audio chunk playback failed (continuing with the queue):', error);
+      }
     }
 
     // Clear speaking flag after all audio is played
     setTimeout(() => {
       this._isSpeaking = false;
       this.isPlayingQueue = false;
+      this.playbackEndedAt = Date.now();
       console.log('✅ All audio chunks played to virtual microphone');
+      // A chunk that arrived during this delay found the queue still marked as
+      // playing and was only queued, so it is picked up here.
+      if (this.audioQueue.length > 0) {
+        this.processAudioQueue();
+      }
     }, 500); // Short delay after last chunk
+  }
+
+  /** Play one chunk to the agent_output sink; resolves when paplay exits. */
+  private playChunk(audioBuffer: Buffer): Promise<void> {
+    // Allow rate adjustment via environment variable
+    const playbackRate = parseInt(process.env.ELEVENLABS_PLAYBACK_RATE || '16000');
+
+    return new Promise<void>((resolve, reject) => {
+      // Play audio at specified rate
+      const paplay = spawn('paplay', [
+        '--device=agent_output',
+        '--format=s16le',
+        '--rate=' + playbackRate,
+        '--channels=1',
+        '--raw'
+      ]);
+
+      // Handle stdin errors (EPIPE when paplay exits before write completes)
+      paplay.stdin.on('error', (error: any) => {
+        if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_DESTROYED') {
+          // Expected during cleanup - paplay exited before we finished writing
+          resolve();
+        } else {
+          console.error('❌ paplay stdin error:', error);
+          reject(error);
+        }
+      });
+
+      // Send audio to paplay
+      paplay.stdin.write(audioBuffer);
+      paplay.stdin.end();
+
+      // Handle paplay completion
+      paplay.on('close', (code) => {
+        if (code === 0) {
+          console.log('✅ Audio chunk played');
+        }
+        // During cleanup, non-zero exit is expected
+        resolve();
+      });
+
+      paplay.on('error', (error) => {
+        console.error('❌ paplay error:', error);
+        reject(error);
+      });
+
+      paplay.stderr.on('data', (data) => {
+        const msg = data.toString();
+        if (msg.trim()) {
+          console.log(`paplay: ${msg.trim()}`);
+        }
+      });
+    });
   }
 
   async stop(): Promise<void> {
     console.log('Stopping ElevenLabs agent...');
 
-    // Clear activation timeout
-    if (this.activationTimeout) {
-      clearTimeout(this.activationTimeout);
-      this.activationTimeout = null;
-    }
+    this.activationWindow.stop();
 
     if (this.audioProcess) {
       this.audioProcess.kill();
@@ -693,7 +741,7 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     }
 
     const activationDuration = duration || this.defaultActivationDuration;
-    console.log(`🎤 Voice assistant activated for ${activationDuration} seconds`);
+    console.log(`🎤 Voice assistant activated (closes after ${activationDuration} seconds idle)`);
     
     // Connect WebSocket if not already connected (may already be pre-connected)
     if (!this.isConnected) {
@@ -736,15 +784,8 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
       }
     }
 
-    // Clear any existing timeout
-    if (this.activationTimeout) {
-      clearTimeout(this.activationTimeout);
-    }
-
-    // Set timeout to deactivate (with speaking check)
-    this.activationTimeout = setTimeout(() => {
-      this.deactivateWithSpeakingCheck();
-    }, activationDuration * 1000);
+    // The window is an idle timeout, not a deadline: see voice-activation-window.ts.
+    this.activationWindow.start(activationDuration * 1000);
   }
 
   private extractQuestion(context: string): string {
@@ -766,27 +807,6 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     return cleaned;
   }
 
-  private deactivateWithSpeakingCheck(): void {
-    // If agent is speaking or processing a tool, wait for it to finish
-    if (this._isSpeaking) {
-      console.log('🔊 Agent is speaking, delaying deactivation...');
-      setTimeout(() => {
-        this.deactivateWithSpeakingCheck();
-      }, 1000);
-      return;
-    }
-    
-    if (this._isProcessingTool) {
-      console.log('🔧 Agent is processing tool call, delaying deactivation...');
-      setTimeout(() => {
-        this.deactivateWithSpeakingCheck();
-      }, 1000);
-      return;
-    }
-    
-    this.deactivate();
-  }
-
   deactivate(): void {
     if (this.activationMode === 'always_active') {
       // Can't deactivate always_active mode
@@ -795,11 +815,14 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
 
     console.log('🔇 Voice assistant deactivated');
     this._isActivated = false;
+    this.activationWindow.stop();
 
-    // Clear timeout
-    if (this.activationTimeout) {
-      clearTimeout(this.activationTimeout);
-      this.activationTimeout = null;
+    // A closed connection cannot hear a participant ask it to stop, so no
+    // queued assistant audio is played after it. The window does not lapse
+    // while audio is queued, so this only acts on a direct deactivate().
+    if (this.activationMode === 'wake_phrase' && this.audioQueue.length > 0) {
+      console.log(`🔇 Dropping ${this.audioQueue.length} queued audio chunks as the connection closes`);
+      this.audioQueue = [];
     }
 
     // In wake_phrase mode, disconnect WebSocket to save costs
