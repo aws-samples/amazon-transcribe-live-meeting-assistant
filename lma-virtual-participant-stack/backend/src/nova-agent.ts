@@ -4585,6 +4585,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       .then(() => {
         if (this.meetingMode !== 'normal') {
           console.log(`[voice-mode] action=stop-translating-declined meetingMode=${this.meetingMode}`);
+          // Still translating, so this session's later answers are to be heard.
+          if (session) session.silenced = false;
           return;
         }
         if (this.stoppedTranslatingClip) {
@@ -4596,6 +4598,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       })
       .catch((error) => {
         console.error('Error leaving translator mode by voice:', error);
+        if (session && this.meetingMode === 'translator') session.silenced = false;
       })
       .finally(() => {
         this.leavingTranslator = false;

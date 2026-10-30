@@ -287,6 +287,17 @@ test('nova: "Alex, stop translating" also works while the translator is paused',
     assert.equal(requests[0].meetingMode, 'normal');
 });
 
+test('nova: a declined "stop translating" leaves the translator heard', async () => {
+    const { a } = nova('translator');
+    a.reconfigure = async () => ({ result: 'declined', changed: [], sessionRebuilt: false,
+        meetingModeBefore: 'translator', meetingModeAfter: 'translator',
+        activationModeBefore: 'always_active', activationModeAfter: 'always_active' });
+    const session = a.session;
+    await stream(a, userTurn('alex stop translating'));
+    assert.equal(session.silenced, false);
+    assert.ok(logs.some((l) => l === '[voice-mode] action=stop-translating-declined meetingMode=translator'));
+});
+
 test('nova: without the rendered clip, leaving translator mode is confirmed with the pause tone', async () => {
     const { a } = nova('translator');
     const tones: string[] = [];
