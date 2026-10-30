@@ -14,7 +14,7 @@ import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
-import { clickWithDomFallback, humanClick } from './prejoin-actions.js';
+import { clickWithDomFallback, humanClick, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 
 /**
  * The pre-join display-name field, in both markups Webex serves.
@@ -323,8 +323,8 @@ export default class Webex {
                 throw new Error('Webex meeting-ID input not found');
             }
             await meetingIdRes.element.type(meetingIdValue);
-            // Enter goes to whatever the type() click focused. ElementHandle.press()
-            // would first click the matched element again whenever that element is
+            // Enter goes to whatever the humanized type() click focused (CloakBrowser
+            // focuses a field by clicking it). ElementHandle.press() would first click the matched element again whenever that element is
             // not itself the focused node (#join-meeting-form may be a container).
             await page.keyboard.press('Enter');
 
@@ -621,7 +621,7 @@ export default class Webex {
                 isEnterprise ? '#cookie-banner-text > div.cookie-manage-option > div.cookie-banner-btnContainer > button:nth-child(1)' : '.cookie-banner-body .a32ueaoVYHwRrsRMl0ci mdc-button:first-child',
                 { timeout: 3000 }
             );
-            await rejectButton?.click();
+            await rejectButton?.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS });
             console.log('Successfully clicked Reject cookie button');
         } catch (error) {
             console.log('Cookie banner not found (non-fatal).');

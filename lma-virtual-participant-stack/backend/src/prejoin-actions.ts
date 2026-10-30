@@ -20,7 +20,7 @@ import { Page, ElementHandle } from 'playwright-core';
  * throw (they do not fall back to Playwright's own click), so without a bound a
  * miss would hold the join for the page default (20s) before the fallback runs.
  */
-const POSITIONAL_CLICK_TIMEOUT_MS = 5_000;
+export const POSITIONAL_CLICK_TIMEOUT_MS = 5_000;
 
 /** Synthetic DOM click on the nearest clickable ancestor; no viewport, overlay
  * or element-identity constraint. */
