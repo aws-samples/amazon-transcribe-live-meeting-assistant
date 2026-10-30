@@ -21,6 +21,7 @@
 import { strict as assert } from 'node:assert';
 import { afterEach, beforeEach, mock, test } from 'node:test';
 import { ElevenLabsAgent } from './elevenlabs-agent.js';
+import * as nova from './nova-agent.js';
 import {
     ACTIVATION_AUDIBLE_HOLD_MAX_MS,
     ACTIVATION_RECHECK_MS,
@@ -127,6 +128,18 @@ function lookup(h: Harness, id: string): Promise<void> {
         client_tool_call: { tool_name: 'strands_agent', tool_call_id: id, parameters: { query: 'q' } },
     });
 }
+
+// ---------------------------------------------------------------------------
+// One set of rules for both providers
+// ---------------------------------------------------------------------------
+
+test('the shared window uses the same timings as the Nova Sonic agent', () => {
+    // nova-agent.ts still carries its own copy of the window; this fails if
+    // either copy changes without the other.
+    assert.equal(ACTIVATION_RECHECK_MS, nova.ACTIVATION_RECHECK_MS);
+    assert.equal(ACTIVATION_AUDIBLE_HOLD_MAX_MS, nova.ACTIVATION_AUDIBLE_HOLD_MAX_MS);
+    assert.equal(ACTIVATION_USER_TURN_GRACE_MS, nova.ACTIVATION_USER_TURN_GRACE_MS);
+});
 
 // ---------------------------------------------------------------------------
 // Still a timeout

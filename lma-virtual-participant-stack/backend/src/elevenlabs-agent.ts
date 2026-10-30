@@ -67,6 +67,10 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     {
       toolRunning: () => this.toolCallsInFlight > 0,
       audioArriving: () => this._isSpeaking || this.audioQueue.length > 0,
+      // There is no playback estimate on this provider: each chunk is played
+      // to completion by paplay, and queued or playing audio is covered by
+      // audioArriving. This is only ever in the past, as the reference point
+      // for the detector cap and for idle time.
       playbackEndsAt: () => this.playbackEndedAt,
       audible: () => this.audibleOutput(),
       lastUserTurnAt: () => this.lastUserTranscriptAt,
