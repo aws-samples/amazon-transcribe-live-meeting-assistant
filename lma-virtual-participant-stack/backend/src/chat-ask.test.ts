@@ -74,6 +74,17 @@ test("no message the Virtual Participant posts is a question", () => {
     }
 });
 
+test("the Virtual Participant's own configured messages are never questions, whatever they say", () => {
+    const before = details.introMessages;
+    details.introMessages = ['@LMA is here: type LMA help for the commands'];
+    try {
+        assert.equal(parseChatQuestion(details.introMessages[0], true), null);
+    } finally {
+        details.introMessages = before;
+    }
+    assert.ok(parseChatQuestion('@LMA is here: what next?', true), 'only the exact configured text is excluded');
+});
+
 test("the Virtual Participant's own name is recognised as a sender", () => {
     assert.equal(isOwnChatSender(details.scribeIdentity), true);
     assert.equal(isOwnChatSender('You'), true);
@@ -199,7 +210,7 @@ test('without a meeting assistant an @LMA aside is not a question, but LMA ask s
 test('while the transcript is paused, questions are not sent and only LMA ask is told why', async () => {
     const asked: string[] = [];
     const a = createChatAnswerer(async (q) => (asked.push(q), 'unused'), { available: () => true, paused: () => true });
-    assert.match((await a.answer(Q('anything', true), 'Alice', 'zoom'))[0], /paused/);
+    assert.match((await a.answer(Q('anything', true), 'Alice', 'zoom'))[0], /paused; ask again after someone types "LMA start"/);
     assert.deepEqual(await a.answer(Q('anything', false), 'Bob', 'zoom'), []);
     assert.deepEqual(asked, []);
 });

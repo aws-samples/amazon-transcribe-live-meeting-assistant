@@ -87,6 +87,13 @@ export interface ChatQuestion {
 const EXPLICIT_ASK = /^\s*@?lma\b[\s,:;.!-]*ask\b[\s,:;.!?-]*(.*)$/is;
 const MENTION = /^\s*@lma\b[\s,:;.!-]*(.*)$/is;
 
+/** Whether `message` is one of the messages the VP itself posts, as configured. */
+function isOwnStatusMessage(message: string): boolean {
+    const text = message.trim();
+    return [...details.introMessages, ...details.startMessages, ...details.pauseMessages, ...details.exitMessages]
+        .some((own) => own.trim() === text);
+}
+
 /** Whether `message` is one of the other chat commands, which win over a question. */
 function isOtherChatCommand(message: string): boolean {
     return (
@@ -113,6 +120,9 @@ function isOtherChatCommand(message: string): boolean {
  */
 export function parseChatQuestion(message: string, available: boolean = chatAskAvailable()): ChatQuestion | null {
     if (!message) return null;
+    // The VP's own configurable messages, which a platform with no sender
+    // (the Teams web client) reads back, are never questions.
+    if (isOwnStatusMessage(message)) return null;
     const explicit = EXPLICIT_ASK.exec(message);
     if (explicit) {
         return { question: explicit[1].trim(), explicit: true };
@@ -238,8 +248,8 @@ export function createChatAnswerer(
         paused?: () => boolean;
     } = {},
 ) {
-    // While `LMA pause` is in effect nothing from the meeting is sent on, so a
-    // question waits for `LMA start` like the transcript does.
+    // While `LMA pause` is in effect nothing from the meeting is sent on: a
+    // question is neither sent nor queued until `LMA start`.
     const paused = options.paused ?? (() => !details.start);
     const intervalMs = options.intervalMs ?? PER_SENDER_INTERVAL_MS;
     const timeoutMs = options.timeoutMs ?? ANSWER_TIMEOUT_MS;
@@ -271,7 +281,7 @@ export function createChatAnswerer(
         }
         if (paused()) {
             return parsed.explicit
-                ? reply('the transcript is paused, so questions wait until someone types "LMA start".')
+                ? reply('the transcript is paused; ask again after someone types "LMA start".')
                 : [];
         }
         if (!parsed.question) {

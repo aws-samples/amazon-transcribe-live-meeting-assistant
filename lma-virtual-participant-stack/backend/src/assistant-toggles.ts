@@ -201,8 +201,8 @@ export interface AssistantChatCommand {
  * `translate` and `listen` (`group`) both also set `always_active`, because
  * neither mode works without it. A translator speaks on every completed
  * utterance, so on `wake_phrase` activation it receives no audio until somebody
- * says the wake
- * phrase and translates nothing in between. Group mode is worse: it starts muted
+ * says the wake phrase and translates nothing in between. Group mode is worse:
+ * it starts muted
  * and `activate()` deliberately does not unmute it, because group mode owns its
  * own muted-until-addressed state machine — and that machine runs on Nova's USER
  * transcripts, which only arrive while a session is open. On `wake_phrase` there

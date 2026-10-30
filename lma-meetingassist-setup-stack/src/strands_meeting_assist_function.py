@@ -1647,6 +1647,13 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         return ""
 
 
+MEETING_CHAT_SCOPE_NOTE = (
+    "\n\nThis question was typed in the meeting chat, and your answer is posted there for "
+    "everyone in the meeting to read. Only the current meeting's transcript and web search "
+    "are available for it: do not try any other tool named above, and do not refer to past "
+    "meetings or documents. Answer briefly in plain sentences."
+)
+
 
 def meeting_chat_tool_scope(event: Dict[str, Any]) -> Tuple[bool, str]:
     """Whether the event is a meeting-chat question, and the user email to use.
@@ -2036,7 +2043,10 @@ def handler(event, context):
             # Cached MCPClients will be restarted on next invocation via load_tools() -> start().
             agent = Agent(
                 model=bedrock_model,
-                system_prompt=get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt(),
+                system_prompt=(
+                    (get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt())
+                    + (MEETING_CHAT_SCOPE_NOTE if meeting_chat_scope else '')
+                ),
                 tools=tools if tools else None,
                 hooks=[thinking_hook]  # Add hook provider to track all tool usage
             )

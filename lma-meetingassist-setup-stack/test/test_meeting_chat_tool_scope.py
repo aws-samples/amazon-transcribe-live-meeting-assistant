@@ -39,6 +39,14 @@ def test_other_requests_keep_their_user_email():
     )
 
 
+def test_meeting_chat_scope_tells_the_agent_which_tools_it_has():
+    note = handler_module.MEETING_CHAT_SCOPE_NOTE
+    assert "meeting chat" in note
+    assert "transcript and web search" in note
+    source = (SOURCE_DIR / "strands_meeting_assist_function.py").read_text()
+    assert "MEETING_CHAT_SCOPE_NOTE if meeting_chat_scope else ''" in source
+
+
 def test_meeting_chat_scope_gates_the_mcp_and_control_tools():
     # The four tool groups the scope leaves out are each guarded by it.
     source = (SOURCE_DIR / "strands_meeting_assist_function.py").read_text()
