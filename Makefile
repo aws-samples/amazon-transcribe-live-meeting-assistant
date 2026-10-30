@@ -44,6 +44,7 @@ WEBSOCKET_DIR := lma-websocket-transcriber-stack
 WEBSOCKET_APP_DIR := $(WEBSOCKET_DIR)/source/app
 VP_DIR := lma-virtual-participant-stack
 VP_BACKEND_DIR := $(VP_DIR)/backend
+WEBSOCKET_CLIENT_DIR := utilities/websocket-client
 ASR_DIR := lma-asr-microvm-stack
 ASR_SOURCE_DIR := $(ASR_DIR)/source
 MEETINGASSIST_TEST_DIR := lma-meetingassist-setup-stack/test
@@ -311,11 +312,13 @@ lint-ui: check-node ## Lint React UI (ESLint, skips if source unchanged; use FOR
 lint-ui-force: ## Lint React UI (ignore checksum, always run)
 	@$(MAKE) lint-ui FORCE=1
 
-lint-typescript: ## TypeScript build check on WebSocket and Virtual Participant stacks
+lint-typescript: ## TypeScript build check on WebSocket, Virtual Participant and websocket-client
 	@echo "Running TypeScript build check on WebSocket transcriber..."
 	@cd $(WEBSOCKET_APP_DIR) && $(NPM_CI) && npm run build
 	@echo "Running TypeScript build check on Virtual Participant..."
 	@cd $(VP_BACKEND_DIR) && $(NPM_CI) && npm run build
+	@echo "Running TypeScript build check on utilities/websocket-client..."
+	@cd $(WEBSOCKET_CLIENT_DIR) && $(NPM_CI) && npm run buildcheck
 	@echo -e "$(GREEN)✅ All TypeScript builds succeeded!$(NC)"
 
 format: ## Format Python code with ruff
@@ -532,21 +535,30 @@ test-coverage-python: ## Coverage for the Python suites only (faster; no npm)
 # renamed/deleted file) in ~1-2 min instead of via a ~40-min deploy that then
 # rolls back. The transcriber image runs 'tsc && eslint' at build time, so this
 # also catches missing lint/build config. Requires a running Docker daemon.
+# A failed image build fails the target. Only removing the throwaway tag
+# afterwards is allowed to fail. A missing docker CLI or a stopped daemon is
+# reported as an error rather than skipped, because a check that skips quietly
+# reads the same as one that passed.
+DOCKER_BUILD_CHECK_PREFLIGHT = command -v docker >/dev/null 2>&1 \
+	|| { echo -e "$(RED)ERROR: docker CLI not found; docker-build-check needs Docker.$(NC)"; exit 1; }; \
+	docker info >/dev/null 2>&1 \
+	|| { echo -e "$(RED)ERROR: Docker daemon not reachable (is it running?); docker-build-check needs it.$(NC)"; exit 1; }
+
 docker-build-check: docker-build-check-transcriber ## Build container images locally as CodeBuild does (transcriber; use docker-build-check-all for VP too)
 	@echo -e "$(GREEN)✅ Docker build check passed!$(NC)"
 
 docker-build-check-transcriber: ## Build the WebSocket transcriber image (fast; runs tsc + eslint 10)
-	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@$(DOCKER_BUILD_CHECK_PREFLIGHT)
 	@echo -e "$(CYAN)Building transcriber image (source/app/)...$(NC)"
-	@cd $(WEBSOCKET_APP_DIR) && docker build --pull -t lma-transcriber-buildcheck:local . \
-		&& docker rmi lma-transcriber-buildcheck:local >/dev/null 2>&1 || true
+	@cd $(WEBSOCKET_APP_DIR) && docker build --pull -t lma-transcriber-buildcheck:local .
+	@docker rmi lma-transcriber-buildcheck:local >/dev/null 2>&1 || true
 	@echo -e "$(GREEN)✅ Transcriber image built.$(NC)"
 
 docker-build-check-vp: ## Build the Virtual Participant image (heavy; downloads CloakBrowser Chromium)
-	@command -v docker >/dev/null 2>&1 || { echo -e "$(RED)ERROR: docker not found / daemon not running.$(NC)"; exit 1; }
+	@$(DOCKER_BUILD_CHECK_PREFLIGHT)
 	@echo -e "$(CYAN)Building Virtual Participant image (backend/) — this is heavy...$(NC)"
-	@cd $(VP_BACKEND_DIR) && docker build --pull -t lma-vp-buildcheck:local . \
-		&& docker rmi lma-vp-buildcheck:local >/dev/null 2>&1 || true
+	@cd $(VP_BACKEND_DIR) && docker build --pull -t lma-vp-buildcheck:local .
+	@docker rmi lma-vp-buildcheck:local >/dev/null 2>&1 || true
 	@echo -e "$(GREEN)✅ Virtual Participant image built.$(NC)"
 
 docker-build-check-all: docker-build-check-transcriber docker-build-check-vp ## Build BOTH container images locally

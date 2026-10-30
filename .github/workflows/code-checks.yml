@@ -75,6 +75,7 @@ jobs:
             lma-ai-stack/source/ui/package-lock.json
             lma-virtual-participant-stack/backend/package-lock.json
             lma-websocket-transcriber-stack/source/app/package-lock.json
+            utilities/websocket-client/package-lock.json
 
       - name: Cache pip downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
@@ -118,7 +119,8 @@ jobs:
       - name: React UI tests
         run: make test-ui-force
 
-      # TypeScript build checks for the transcriber + VP stacks (tsc/eslint).
+      # TypeScript build checks (tsc/eslint) for the transcriber + VP stacks and
+      # the utilities/websocket-client sample client.
       - name: TypeScript build checks
         run: make lint-typescript
 

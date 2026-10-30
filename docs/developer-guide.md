@@ -263,7 +263,7 @@ make lint-cfn                                # cfn-lint on all CloudFormation te
 make test-sdk && make test-cli               # LMA SDK + CLI unit tests
 make test-lambdas                            # Lambda unit suites (each dir isolated)
 make lint-ui-force && make test-ui-force     # React UI eslint + vitest
-make lint-typescript                         # tsc + eslint (transcriber, Virtual Participant)
+make lint-typescript                         # tsc + eslint (transcriber, Virtual Participant, websocket-client)
 make test-vp && make test-vp-template        # Virtual Participant unit + template tests
 make test-ai-stack                           # AppSync contract + AI stack CFN invariants
 make test-integ-plumbing                     # Scheduled integ-run machinery (no AWS)
