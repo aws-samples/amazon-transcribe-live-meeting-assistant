@@ -10,6 +10,7 @@ import {
     parseAssistantChatCommand,
 } from './assistant-toggles.js';
 import { allChatHelpMessages, chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { gotoMeetingPage, MEETING_HOST_PATTERNS } from './meeting-navigation.js';
@@ -868,6 +869,14 @@ export default class Webex {
             // reconfigure sees the requested mode already in place), but the
             // duplicate would post a second chat reply right after the first.
             const assistantToggle = parseAssistantChatCommand(message);
+            const chatQuestion = assistantToggle ? null : parseChatQuestion(message);
+            // Not a branch of the chain below, so the question is still recorded
+            // as meeting chat. The duplicate filter again: a doubled add event
+            // would otherwise ask twice, and the second would be answered with
+            // the rate limit.
+            if (chatQuestion && this.freshToggle(message, sender)) {
+                void startChatAnswer(chatQuestion, sender, 'webex', (messages) => this.sendMessages(frame, messages));
+            }
             if (matchesEndCommand(message)) {
                 // Guard against the observer firing twice for the same message
                 // (it can emit duplicate add events) — only act on the first.

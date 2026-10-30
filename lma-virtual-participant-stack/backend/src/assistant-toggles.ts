@@ -178,6 +178,9 @@ export interface AssistantChatCommand {
     /** `LMA translate <word>` where the word is not a supported language. The
      *  command carries no change; it is answered with the supported list. */
     unsupportedLanguage?: string;
+    /** `LMA translate <language> to <language>`: two supported languages
+     *  named. Carries no change; the answer says to name one. */
+    twoLanguages?: string;
 }
 
 /**
@@ -195,10 +198,11 @@ export interface AssistantChatCommand {
  * `assist` rather than with `normal` because the pair has to read as two jobs
  * the assistant can do, not as one mode and the absence of it.
  *
- * `translate` and `listen` (`group`) both also set `always_active`, because neither mode
- * works without it. A translator speaks on every completed utterance, so on
- * `wake_phrase` activation it receives no audio until somebody says the wake
- * phrase and translates nothing in between. Group mode is worse: it starts muted
+ * `translate` and `listen` (`group`) both also set `always_active`, because
+ * neither mode works without it. A translator speaks on every completed
+ * utterance, so on `wake_phrase` activation it receives no audio until somebody
+ * says the wake phrase and translates nothing in between. Group mode is worse:
+ * it starts muted
  * and `activate()` deliberately does not unmute it, because group mode owns its
  * own muted-until-addressed state machine — and that machine runs on Nova's USER
  * transcripts, which only arrive while a session is open. On `wake_phrase` there
@@ -325,6 +329,13 @@ export function parseAssistantChatCommand(message: string): AssistantChatCommand
     }
     if (/^[a-z]{2,20}$/.test(withLanguage[1]) && !NOT_A_LANGUAGE.has(withLanguage[1])) {
         return { unsupportedLanguage: withLanguage[1] };
+    }
+    // "translate English to French" / "translate French and Spanish": two
+    // supported languages, which is a real attempt at the command. Answered
+    // with the one-language form rather than left unanswered.
+    const two = withLanguage[1].split(' ').length <= 5 ? /^(.+) (?:to|into|and|or) (.+)$/.exec(withLanguage[1]) : null;
+    if (two && resolveTranslatorLanguage(two[1]) && resolveTranslatorLanguage(two[2])) {
+        return { twoLanguages: withLanguage[1] };
     }
     return null;
 }
@@ -576,7 +587,9 @@ export async function applyAssistantChatCommand(
     // The two language checks below answer without the provider, so they only
     // run for one that can change mode at all. Any other is asked as usual and
     // declines with its own reason, as it does for every mode command.
-    const namesLanguage = command.unsupportedLanguage !== undefined || command.translatorLanguage !== undefined;
+    const namesLanguage = command.unsupportedLanguage !== undefined
+        || command.translatorLanguage !== undefined
+        || command.twoLanguages !== undefined;
     if (namesLanguage && assistant.supportsModeChanges?.() === false) {
         return assistantToggleChatReply(
             await assistant.reconfigure({
@@ -586,6 +599,13 @@ export async function applyAssistantChatCommand(
                 requestedBy,
             }),
         );
+    }
+    if (command.twoLanguages !== undefined) {
+        console.log(formatChatRefusalLog(requestedBy, 'two translator languages named'));
+        return [
+            `${prefix} name one language and I will translate between it and the meeting's language,`
+                + ' for example "LMA translate French".',
+        ];
     }
     if (command.unsupportedLanguage !== undefined) {
         const detail = `unsupported translator language ${command.unsupportedLanguage}`;

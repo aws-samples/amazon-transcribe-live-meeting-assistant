@@ -4,6 +4,7 @@ import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import {
     findElementWithFallback,
@@ -1719,6 +1720,14 @@ export default class Zoom {
             // disjoint. Parsed from the body rather than the raw row, so the
             // "<sender> to <recipient>" prefix is not part of the match.
             const assistantToggle = parseAssistantChatCommand(body);
+            // A question for the meeting assistant; answered in the background
+            // so a slow answer does not hold up the next command.
+            const chatQuestion = assistantToggle ? null : parseChatQuestion(body);
+            // Not a branch of the chain below: a question is still meeting chat,
+            // and is recorded as such.
+            if (chatQuestion) {
+                void startChatAnswer(chatQuestion, sender, 'zoom', (messages) => this.sendMessages(page, messages));
+            }
             if (matchesEndCommand(body)) {
                 console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(body)}`);
                 await this.sendMessages(page, exitMessagesFor(sender));

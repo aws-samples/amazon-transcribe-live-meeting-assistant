@@ -5,6 +5,7 @@ import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
 import { clickWithDomFallback, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
@@ -236,6 +237,13 @@ export default class Chime {
                 // vocabularies are disjoint, so the order is not otherwise
                 // load-bearing.
                 const assistantToggle = text ? parseAssistantChatCommand(text) : null;
+                // Answered in the background, so the next message is not held up.
+                const chatQuestion = text && !assistantToggle ? parseChatQuestion(text) : null;
+                // Not a branch of the chain below, so the question is still
+                // recorded as meeting chat.
+                if (chatQuestion && sender !== 'Amazon Chime' && !sender?.includes(details.scribeName)) {
+                    void startChatAnswer(chatQuestion, sender, 'chime', (messages) => this.sendMessages(page, messages));
+                }
                 if (text && matchesEndCommand(text)) {
                     console.log(`LMA Virtual Participant has been asked to leave by ${sender || 'a participant'}: ${JSON.stringify(text)}`);
                     await this.sendMessages(page, exitMessagesFor(sender));

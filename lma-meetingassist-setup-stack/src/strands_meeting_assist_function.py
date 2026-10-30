@@ -13,7 +13,7 @@ import json
 import os
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import logging
 from datetime import datetime
 from bedrock_compat import (
@@ -1646,6 +1646,32 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         logger.error(f"Error querying knowledge base: {str(e)}")
         return ""
 
+
+MEETING_CHAT_SCOPE_NOTE = (
+    "\n\nThis question was typed in the meeting chat, and your answer is posted there for "
+    "everyone in the meeting to read. Only the current meeting's transcript and web search "
+    "are available for it: do not try any other tool named above, and do not refer to past "
+    "meetings or documents. Answer briefly in plain sentences."
+)
+
+
+def meeting_chat_tool_scope(event: Dict[str, Any]) -> Tuple[bool, str]:
+    """Whether the event is a meeting-chat question, and the user email to use.
+
+    toolScope 'meeting_chat' is a question typed in the meeting chat (the
+    Virtual Participant's `LMA ask`), whose answer everyone in the meeting
+    reads. It is answered from the current meeting's transcript and web search
+    only: the document knowledge base, the MCP servers and the VNC and browser
+    controls are not offered, and the user email is cleared here, whatever the
+    event carries, so the meeting-history tools that are scoped to it are not
+    offered either.
+    """
+    user_email = event.get('userEmail', '') or event.get('user_email', '')
+    if event.get('toolScope') == 'meeting_chat':
+        return True, ''
+    return False, user_email
+
+
 def handler(event, context):
     """
     Lambda handler for Strands-based meeting assistance with tools
@@ -1713,7 +1739,9 @@ def handler(event, context):
         call_id = event.get('callId', '') or event.get('call_id', '')
         conversation_history = event.get('conversation_history', [])
         dynamodb_table_name = event.get('dynamodb_table_name', '')
-        user_email = event.get('userEmail', '') or event.get('user_email', '')
+        meeting_chat_scope, user_email = meeting_chat_tool_scope(event)
+        if meeting_chat_scope:
+            logger.info("Tool scope: meeting_chat")
         
         if not user_input:
             return {
@@ -1755,7 +1783,7 @@ def handler(event, context):
         # Load installed MCP servers (account-level) - returns MCPClient objects
         # Uses module-level caching: on warm Lambda starts with unchanged config,
         # cached clients are returned almost instantly (no DynamoDB query, no subprocess spawn)
-        if MCP_LOADER_AVAILABLE:
+        if MCP_LOADER_AVAILABLE and not meeting_chat_scope:
             try:
                 logger.info("Loading installed MCP servers...")
                 mcp_clients, from_cache = load_account_mcp_servers()
@@ -1897,7 +1925,7 @@ def handler(event, context):
         # Add document retrieval tool if KB configured. The factory returns None
         # when the knowledge-base model cannot generate an answer, in which case
         # the agent is offered no such tool rather than one that cannot answer.
-        if kb_id:
+        if kb_id and not meeting_chat_scope:
             document_search_tool = create_document_search_tool(
                 kb_id=kb_id,
                 kb_region=kb_region,
@@ -1946,7 +1974,7 @@ def handler(event, context):
             logger.info("Current meeting transcript tool enabled")
         
         # Add VNC preview control tool (available to all users)
-        if APPSYNC_GRAPHQL_URL:
+        if APPSYNC_GRAPHQL_URL and not meeting_chat_scope:
             tools.append(create_vnc_preview_control_tool(
                 call_id=call_id,
                 appsync_url=APPSYNC_GRAPHQL_URL,
@@ -1955,7 +1983,7 @@ def handler(event, context):
             logger.info("VNC preview control tool enabled")
         
         # Add VP browser control tool (available to all users)
-        if EVENT_API_HTTP_URL:
+        if EVENT_API_HTTP_URL and not meeting_chat_scope:
             tools.append(create_vp_browser_control_tool(
                 call_id=call_id,
                 event_api_http_url=EVENT_API_HTTP_URL,
@@ -2015,7 +2043,10 @@ def handler(event, context):
             # Cached MCPClients will be restarted on next invocation via load_tools() -> start().
             agent = Agent(
                 model=bedrock_model,
-                system_prompt=get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt(),
+                system_prompt=(
+                    (get_meeting_assistant_prompt_with_tools() if tools else get_meeting_assistant_prompt())
+                    + (MEETING_CHAT_SCOPE_NOTE if meeting_chat_scope else '')
+                ),
                 tools=tools if tools else None,
                 hooks=[thinking_hook]  # Add hook provider to track all tool usage
             )

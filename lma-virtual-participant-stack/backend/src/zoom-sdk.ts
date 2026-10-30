@@ -6,6 +6,7 @@ import { transcriptionService } from './scribe.js';
 import { voiceAssistant } from './voice-assistant.js';
 import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistant-toggles.js';
 import { chatHelpMessages } from './chat-help.js';
+import { parseChatQuestion, startChatAnswer } from './chat-ask.js';
 import { simliAvatar } from './simli-avatar.js';
 import { startZoomSdkServer, ZoomSdkServerHandle } from './zoom-sdk-server.js';
 import { POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
@@ -360,6 +361,13 @@ export default class ZoomSdk {
                 // whether or not transcription is paused; the two vocabularies
                 // are disjoint.
                 const assistantToggle = parseAssistantChatCommand(body);
+                // Answered in the background, so the next poll is not held up.
+                const chatQuestion = assistantToggle ? null : parseChatQuestion(body);
+                // Not a branch of the chain below, so the question is still
+                // recorded as meeting chat.
+                if (chatQuestion) {
+                    void startChatAnswer(chatQuestion, sender, 'zoom-sdk', (messages) => this.sendMessages(page, messages));
+                }
                 if (assistantToggle) {
                     await this.sendMessages(
                         page,
