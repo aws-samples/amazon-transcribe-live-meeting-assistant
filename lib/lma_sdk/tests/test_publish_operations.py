@@ -2,6 +2,7 @@
 # This file is licensed under the MIT License.
 """Unit tests for publish operations."""
 
+import re
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -491,7 +492,14 @@ class TestHashAndPackage:
         return project
 
     def _publish(self, client, project: Path, tmp_path: Path):
-        """Run _publish_hash_and_package with `cfn package` simulated as a copy."""
+        """Run _publish_hash_and_package with `cfn package` simulated as a copy.
+
+        The real `aws cloudformation package` re-serialises the YAML and drops
+        comments; a byte-for-byte copy does not. The injector depends on neither,
+        so the comment-preservation check in
+        test_uploaded_template_carries_the_source_hash is about the injector, not
+        about what real packaged output looks like.
+        """
         from lma_sdk._core.publish import Publisher
 
         publisher = Publisher(client)
@@ -558,4 +566,5 @@ class TestHashAndPackage:
         assert stack_def.package_type == StackPackageType.HASH_AND_PACKAGE
         repo = Path(__file__).resolve().parents[3]
         template = repo / stack_name / stack_def.deployment_subdir / stack_def.template_file
-        assert f"\n      {stack_def.hash_template_field}: " in template.read_text()
+        pattern = rf"^[ \t]+{re.escape(stack_def.hash_template_field)}:"
+        assert re.search(pattern, template.read_text(), re.MULTILINE)

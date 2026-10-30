@@ -298,7 +298,7 @@ def _inject_source_hash(template_path: Path, field: str, content_hash: str) -> N
     template with no such field is an error rather than a silent no-op: without
     the property, a changed source would no longer re-run the seeder.
     """
-    pattern = re.compile(rf"^(\s*{re.escape(field)}:[ \t]*).*$", re.MULTILINE)
+    pattern = re.compile(rf"^([ \t]*{re.escape(field)}:[ \t]*).*$", re.MULTILINE)
     content = template_path.read_text()
     patched, count = pattern.subn(lambda m: f'{m.group(1)}"{content_hash}"', content)
     if count == 0:
