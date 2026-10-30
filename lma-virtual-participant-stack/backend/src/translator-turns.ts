@@ -55,10 +55,6 @@ export class RecentAudio {
     since(from: number): Buffer[] {
         return this.chunks.filter((c) => c.at >= from).map((c) => c.chunk);
     }
-
-    clear(): void {
-        this.chunks = [];
-    }
 }
 
 /** Milliseconds of 16 kHz, 16-bit mono PCM in `chunks`. */

@@ -240,6 +240,38 @@ test('nova: one session hands over once, however many blocks its answer has', as
     assert.equal(started.length, 1);
 });
 
+test('nova: an outgoing session that never finishes is closed after the limit, and held audio is played', async () => {
+    const { a, played } = translator();
+    const first = a.session;
+    await stream(a, first, [...userTurn('hello everyone'), ...answerStarts(),
+        chunk({ contentStart: { type: 'AUDIO', role: 'ASSISTANT' } })]);
+    // Re-arm the limit short; the one set at the hand-over is the full 30 s.
+    clearTimeout(first.drainTimer);
+    first.drainTimer = setTimeout(() => a.closeDrainingSession(first, 'timed-out'), 10);
+    await stream(a, a.session, [chunk({ contentStart: { type: 'AUDIO', role: 'ASSISTANT' } }),
+        chunk({ audioOutput: { content: Buffer.from([9]).toString('base64') } })]);
+    assert.equal(played.length, 0, 'held while the outgoing answer is open');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(a.drainingSessions.size, 0);
+    assert.deepEqual(played.map((b) => [...b]), [[9]]);
+    assert.ok(logs.some((l) => /^\[translator-turn\] closed first: timed-out after \d+ ms$/.test(l)));
+});
+
+test('nova: an outgoing session whose stream ends on its own is let go, not rebuilt', async () => {
+    const { a } = translator();
+    const first = a.session;
+    await stream(a, first, [...userTurn('hello everyone'), ...answerStarts()]);
+    let refreshes = 0;
+    a.refreshSession = async () => { refreshes++; };
+    a.initiateBidirectionalStreaming = Object.getPrototypeOf(a).initiateBidirectionalStreaming;
+    a.bedrockClient = { send: async () => ({ body: (async function* () {})() }) };
+    await a.initiateBidirectionalStreaming(first);
+    assert.equal(a.drainingSessions.size, 0);
+    assert.equal(first.isActive, false);
+    assert.equal(refreshes, 0, 'the current session is left alone');
+    assert.ok(logs.some((l) => l === '[translator-turn] first ended before it was closed'));
+});
+
 test('nova: a refresh closes an outgoing session with the one it replaces', async () => {
     const { a } = translator();
     const first = a.session;
