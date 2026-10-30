@@ -4497,6 +4497,16 @@ export class NovaAgent implements VoiceAssistantProvider {
         sawAudio: false,
         timer: setTimeout(() => this.runVoiceModeSwitch('timed-out'), this.VOICE_MODE_SWITCH_MAX_WAIT_MS),
       };
+    } else if (!this.pendingVoiceModeSwitch) {
+      // A request that changes nothing rebuilds nothing, so it goes through the
+      // chat route's path at once: that writes its [assistant-toggle] line and
+      // lets the restore memory record it (a refused "wake mode" in listen mode
+      // is remembered for when the meeting goes back to assistant mode). Not
+      // while a voice switch is waiting, which `reconfigure` cannot see: it
+      // would apply this request instead of declining it.
+      applyAssistantChatCommand(this, command, null, undefined, 'voice').catch((error) => {
+        console.error('Error recording a voice mode request:', error);
+      });
     }
     await reply({
       status: prediction.result,

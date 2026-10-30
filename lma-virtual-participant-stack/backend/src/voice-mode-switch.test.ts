@@ -17,6 +17,7 @@
  */
 import { strict as assert } from 'node:assert';
 import { afterEach, beforeEach, mock, test } from 'node:test';
+import { applyAssistantChatCommand } from './assistant-toggles.js';
 import { MeetingMode } from './nova-sonic-config-loader.js';
 import { NovaAgent } from './nova-agent.js';
 import {
@@ -134,6 +135,14 @@ function nova(meetingMode: MeetingMode = 'normal', activationMode = 'always_acti
     a.reconfigure = async (request: any) => {
         requests.push(request);
         const before = { meetingMode: a.meetingMode, activationMode: a.activationMode };
+        // The one refusal these tests need: leaving always-listening in listen mode.
+        if (!request.meetingMode && request.activationMode === 'wake_phrase' && a.meetingMode === 'group') {
+            return {
+                result: 'declined', changed: [], sessionRebuilt: false,
+                meetingModeBefore: before.meetingMode, meetingModeAfter: before.meetingMode,
+                activationModeBefore: before.activationMode, activationModeAfter: before.activationMode,
+            };
+        }
         if (request.meetingMode) a.meetingMode = request.meetingMode;
         if (request.activationMode) a.activationMode = request.activationMode;
         const changed = [
@@ -216,13 +225,34 @@ test('nova: a set_mode nobody asked for by name is not acted on, and its reply i
     assert.equal(played.length, 1);
 });
 
-test('nova: a set_mode for the mode it is in says so and changes nothing', async () => {
+test('nova: a set_mode for the mode it is in says so, and is recorded like the chat command', async () => {
     const { a, requests } = nova();
     await stream(a, [...userTurn('hey alex assistant mode'), ...setMode('assistant'), ...spoken()]);
     const [result] = toolResults(a);
     assert.equal(result.status, 'unchanged');
     assert.match(result.instruction, /I'm already in assistant mode\./);
-    assert.equal(requests.length, 0);
+    // Asked at once, without waiting for the sentence: it rebuilds nothing.
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].route, 'voice');
+    assert.equal(a.meetingMode, 'normal');
+});
+
+test('nova: a "wake mode" refused in listen mode is restored on going back to assistant mode', async () => {
+    const { a, requests } = nova('normal', 'always_active');
+    // The restore memory is the meeting's, shared with the tests above; an
+    // explicit activation command clears it, as it does in a meeting.
+    await applyAssistantChatCommand(a, { activationMode: 'always_active' }, null);
+    requests.length = 0;
+    for (const [said, mode] of [['hey alex listen mode', 'listen'], ['hey alex wake mode', 'wake_phrase'],
+        ['hey alex go back to assistant mode', 'assistant']]) {
+        a.session.queue = [];
+        await stream(a, [...userTurn(said), ...setMode(mode), ...spoken()]);
+    }
+    assert.deepEqual(
+        requests.map((r) => [r.meetingMode, r.activationMode]),
+        [['group', 'always_active'], [undefined, 'wake_phrase'], ['normal', 'wake_phrase']],
+    );
+    assert.equal(a.activationMode, 'wake_phrase');
 });
 
 test('nova: leaving listen mode by voice restores the activation it replaced', async () => {
