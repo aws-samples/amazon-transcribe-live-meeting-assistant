@@ -7,7 +7,7 @@ import { applyAssistantChatCommand, parseAssistantChatCommand } from './assistan
 import { chatHelpMessages } from './chat-help.js';
 import { findElementWithFallback } from './ai-dom-resolver.js';
 import { startDialogWatchdog } from './dialog-watchdog.js';
-import { clickWithDomFallback } from './prejoin-actions.js';
+import { clickWithDomFallback, POSITIONAL_CLICK_TIMEOUT_MS } from './prejoin-actions.js';
 
 export default class Chime {
     private prevSender: string = '';
@@ -93,7 +93,13 @@ export default class Chime {
                 },
                 { maxRetries: 10, delayMs: 500 },
             );
-            if (muteRes) await clickWithDomFallback(muteRes.element, 'Join muted');
+            // A toggle, so no DOM-click fallback: a fallback after a click that
+            // did land would flip it back. A miss is logged and the join goes on.
+            if (muteRes) {
+                await muteRes.element.click({ timeout: POSITIONAL_CLICK_TIMEOUT_MS }).catch((err: Error) => {
+                    console.log(`[chime] "Join muted" click failed (non-fatal): ${err?.message?.split('\n')[0]}`);
+                });
+            }
         } else {
             console.log('Voice assistant enabled - skipping mute button for agent audio');
         }

@@ -324,8 +324,9 @@ export default class Webex {
             }
             await meetingIdRes.element.type(meetingIdValue);
             // Enter goes to whatever the humanized type() click focused (CloakBrowser
-            // focuses a field by clicking it). ElementHandle.press() would first click the matched element again whenever that element is
-            // not itself the focused node (#join-meeting-form may be a container).
+            // focuses a field by clicking it). ElementHandle.press() would first
+            // click the matched element again whenever that element is not itself
+            // the focused node, and #join-meeting-form may be a container.
             await page.keyboard.press('Enter');
 
             // Wait a moment for the page to stabilize after entering meeting ID

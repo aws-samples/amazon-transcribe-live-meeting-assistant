@@ -50,7 +50,7 @@ export async function humanClick(
         typeof target === 'string' ? await page.$(target) : target;
     try {
         if (typeof target === 'string') {
-            await page.click(target, { force: true });
+            await page.click(target, { force: true, timeout: POSITIONAL_CLICK_TIMEOUT_MS });
         } else {
             await target.click({ force: true, timeout: POSITIONAL_CLICK_TIMEOUT_MS });
         }
