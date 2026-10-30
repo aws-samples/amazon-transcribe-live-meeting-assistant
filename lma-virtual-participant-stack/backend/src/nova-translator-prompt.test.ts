@@ -70,7 +70,7 @@ test('the direction rules follow the configured language pair', () => {
 test('every translator session carries the configured voice and the translator prompt', async () => {
     for (const isRefresh of [false, true]) {
         const agent = translatorAgent('English', 'Spanish', 'matthew');
-        // A refresh replays the conversation so far, so give it a turn to replay.
+        // A refresh in another mode replays the conversation so far, so give it a turn to replay.
         (agent as any).conversationHistory = [
             { role: 'USER', content: 'good morning everyone', timestamp: Date.now() },
         ];
@@ -92,7 +92,9 @@ test('every translator session carries the configured voice and the translator p
         assert.match(systemText, /^TRANSLATOR MODE:/);
         assert.match(systemText, /When you hear English, say it in Spanish\./);
 
+        // Not even on a refresh: earlier turns are what a translator session
+        // drifts on (translator-turns.ts).
         const replayed = events.filter((e) => e.textInput?.content === 'good morning everyone');
-        assert.equal(replayed.length, isRefresh ? 1 : 0, 'history is replayed on a refresh only');
+        assert.equal(replayed.length, 0, 'a translator session never replays history');
     }
 });
