@@ -287,6 +287,8 @@ interface SessionData {
   drainTimer?: NodeJS.Timeout | null;
   /** Whether this session's current answer is still producing audio. */
   audioTurnOpen?: boolean;
+  /** Order of creation, so audio from a later session can wait for an earlier one. */
+  seq?: number;
 }
 
 interface ConversationTurn {
@@ -513,9 +515,11 @@ export class NovaAgent implements VoiceAssistantProvider {
   // Translator mode: a fresh session per translated turn (translator-turns.ts).
   /** Outgoing translator sessions still finishing their answer. */
   private drainingSessions: Set<SessionData> = new Set();
-  /** Audio from the current session held back while an outgoing one is still
-   *  producing its own, so the two never interleave. */
-  private heldPlayback: Buffer[] = [];
+  /** Audio held back, per session, while an earlier session's answer is still
+   *  producing its own, so two answers never interleave. */
+  private heldPlayback: Map<SessionData, Buffer[]> = new Map();
+  /** Numbers sessions in the order they are created (SessionData.seq). */
+  private sessionSeq: number = 0;
   /** Meeting audio as sent, for replaying into the next translator session. */
   private recentMeetingAudio = new RecentAudio();
   /** Translated turns so far, for the per-turn log line. */
@@ -764,6 +768,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     const now = Date.now();
     return {
       id: randomUUID(),
+      seq: ++this.sessionSeq,
       queue: [],
       isActive: true,
       promptName: randomUUID(),
@@ -852,26 +857,54 @@ export class NovaAgent implements VoiceAssistantProvider {
     });
   }
 
-  /** Whether audio from `session` has to wait for an outgoing session's answer. */
+  /**
+   * Whether audio from `session` has to wait: an earlier outgoing session's
+   * answer is still producing audio, or audio of its own is already waiting.
+   *
+   * Decided by creation order, not by whether `session` is outgoing: a session
+   * hands over at the start of its answer, before its first audio arrives, so
+   * every answering session is outgoing by the time its audio does.
+   */
   private holdsPlaybackFor(session: SessionData | null): boolean {
-    if (!session || session.draining) return false;
+    if (!session) return false;
+    if (this.heldPlayback.has(session)) return true;
+    return this.earlierAnswerOpen(session);
+  }
+
+  private earlierAnswerOpen(session: SessionData): boolean {
     for (const outgoing of this.drainingSessions) {
-      if (outgoing.audioTurnOpen) return true;
+      if (outgoing !== session && (outgoing.seq ?? 0) < (session.seq ?? 0) && outgoing.audioTurnOpen) {
+        return true;
+      }
     }
     return false;
   }
 
-  /** Play what was held back, once no outgoing session is still producing audio. */
-  private releaseHeldPlayback(): void {
-    for (const outgoing of this.drainingSessions) {
-      if (outgoing.audioTurnOpen) return;
+  private holdPlayback(session: SessionData, chunk: Buffer): void {
+    const held = this.heldPlayback.get(session);
+    if (held) {
+      held.push(chunk);
+    } else {
+      this.heldPlayback.set(session, [chunk]);
     }
-    const held = this.heldPlayback;
-    this.heldPlayback = [];
-    for (const chunk of held) {
-      this.playAudio(chunk).catch(err => {
-        console.error('Error playing audio:', err);
-      });
+  }
+
+  /** Play what was held back, oldest session first, for every session that no
+   *  longer has an earlier answer to wait for. */
+  private releaseHeldPlayback(): void {
+    const waiting = [...this.heldPlayback.keys()].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+    for (const session of waiting) {
+      if (this.earlierAnswerOpen(session)) return;
+      const held = this.heldPlayback.get(session) ?? [];
+      this.heldPlayback.delete(session);
+      for (const chunk of held) {
+        this.playAudio(chunk).catch(err => {
+          console.error('Error playing audio:', err);
+        });
+      }
+      // This session's own answer may still be producing audio, and anything
+      // later waits for it in turn.
+      if (session.audioTurnOpen && session.draining) return;
     }
   }
 
@@ -897,7 +930,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     );
     if (why === 'closed') {
       // The agent is closing its session: nothing is left to play into.
-      if (this.drainingSessions.size === 0) this.heldPlayback = [];
+      if (this.drainingSessions.size === 0) this.heldPlayback.clear();
     } else {
       this.releaseHeldPlayback();
     }
@@ -1886,6 +1919,14 @@ export class NovaAgent implements VoiceAssistantProvider {
 
             if (jsonResponse.event?.contentStart) {
               console.log('Content start:', jsonResponse.event.contentStart.type);
+              // In translator mode up to three sessions deliver events here at
+              // once, and the agent-wide audio state below (the interruption
+              // gate, the dropped-block flag, the stop acknowledgement's block
+              // counting) is shared between them. That is safe because only
+              // the newest session ever hears the meeting: an outgoing one hears
+              // silence, so it is never barged in on and never asked to stop,
+              // and the newest has not started speaking, because a session
+              // hands over the moment it starts an answer.
               
               // Clear interruption gate when Nova starts a new AUDIO content block
               if (jsonResponse.event.contentStart.type === 'AUDIO' && this._isInterrupted) {
@@ -1947,8 +1988,8 @@ export class NovaAgent implements VoiceAssistantProvider {
             } else if (jsonResponse.event?.audioOutput) {
               // Received audio from Nova - play it immediately (non-blocking)
               const audioBuffer = Buffer.from(jsonResponse.event.audioOutput.content, 'base64');
-              if (this.holdsPlaybackFor(session)) {
-                this.heldPlayback.push(audioBuffer);
+              if (session && this.holdsPlaybackFor(session)) {
+                this.holdPlayback(session, audioBuffer);
               } else {
                 this.playAudio(audioBuffer).catch(err => {
                   console.error('Error playing audio:', err);
@@ -2011,7 +2052,7 @@ export class NovaAgent implements VoiceAssistantProvider {
                 // PARTIAL_TURN separates the blocks of one answer; anything else ends it.
                 if (endReason && endReason !== 'PARTIAL_TURN') {
                   session.audioTurnOpen = false;
-                  if (session.draining) {
+                  if (this.heldPlayback.size > 0) {
                     this.releaseHeldPlayback();
                   }
                 }
@@ -2465,6 +2506,8 @@ export class NovaAgent implements VoiceAssistantProvider {
     // activation-only change can replace the session during the flush above
     // without changing the meeting mode, and the mute still stands then, but
     // its toolUseId means nothing to the replacement.
+    // A translator session that has already handed over gets no result: the
+    // refresh below closes it anyway.
     if (this.session && this.session.isActive && this.session === issuingSession) {
       const muteInstruction = (this.meetingMode === 'translator')
         ? 'You are now paused. The session is being refreshed.'

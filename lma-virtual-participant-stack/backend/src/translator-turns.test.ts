@@ -194,20 +194,29 @@ test('nova: the outgoing session is closed once the final text of its answer is 
     assert.ok(logs.some((l) => /^\[translator-turn\] closed first: answered after \d+ ms$/.test(l)));
 });
 
-test('nova: the next answer waits until the outgoing one has finished playing out', async () => {
+test('nova: the next answer waits until the outgoing one has finished arriving', async () => {
     const { a, played } = translator();
     const first = a.session;
     await stream(a, first, [...userTurn('hello everyone'), ...answerStarts(),
         chunk({ contentStart: { type: 'AUDIO', role: 'ASSISTANT' } }),
         chunk({ audioOutput: { content: Buffer.from([1]).toString('base64') } })]);
     const next = a.session;
-    // The new session answers the next turn while the old one is still producing audio.
-    await stream(a, next, [chunk({ contentStart: { type: 'AUDIO', role: 'ASSISTANT' } }),
+    // The next session hears the next turn and answers it — handing over in
+    // turn, as it does live — while the first is still producing audio.
+    await stream(a, next, [...userTurn('and one more thing'), ...answerStarts(),
+        chunk({ contentStart: { type: 'AUDIO', role: 'ASSISTANT' } }),
         chunk({ audioOutput: { content: Buffer.from([9]).toString('base64') } })]);
+    assert.equal(next.draining, true, 'the second session has handed over too');
     assert.deepEqual(played.map((b) => [...b]), [[1]], 'held back');
 
+    // The second answer keeps arriving while it waits, and keeps its order.
+    await stream(a, next, [chunk({ audioOutput: { content: Buffer.from([10]).toString('base64') } })]);
     await stream(a, first, [chunk({ contentEnd: { type: 'AUDIO', stopReason: 'END_TURN' } })]);
-    assert.deepEqual(played.map((b) => [...b]), [[1], [9]], 'played after the outgoing answer');
+    assert.deepEqual(played.map((b) => [...b]), [[1], [9], [10]], 'played after the first answer');
+
+    // Once released, the rest of the second answer plays straight away.
+    await stream(a, next, [chunk({ audioOutput: { content: Buffer.from([11]).toString('base64') } })]);
+    assert.deepEqual(played.map((b) => [...b]).at(-1), [11]);
 });
 
 test('nova: a session is not replaced outside unpaused translator mode', async () => {
@@ -248,11 +257,12 @@ test('nova: an outgoing session that never finishes is closed after the limit, a
     // Re-arm the limit short; the one set at the hand-over is the full 30 s.
     clearTimeout(first.drainTimer);
     first.drainTimer = setTimeout(() => a.closeDrainingSession(first, 'timed-out'), 10);
-    await stream(a, a.session, [chunk({ contentStart: { type: 'AUDIO', role: 'ASSISTANT' } }),
+    await stream(a, a.session, [...userTurn('and one more thing'), ...answerStarts(),
+        chunk({ contentStart: { type: 'AUDIO', role: 'ASSISTANT' } }),
         chunk({ audioOutput: { content: Buffer.from([9]).toString('base64') } })]);
     assert.equal(played.length, 0, 'held while the outgoing answer is open');
     await new Promise((resolve) => setTimeout(resolve, 30));
-    assert.equal(a.drainingSessions.size, 0);
+    assert.equal(a.drainingSessions.has(first), false);
     assert.deepEqual(played.map((b) => [...b]), [[9]]);
     assert.ok(logs.some((l) => /^\[translator-turn\] closed first: timed-out after \d+ ms$/.test(l)));
 });
