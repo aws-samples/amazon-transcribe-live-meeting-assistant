@@ -308,7 +308,9 @@ const VNCViewer = ({
   // When the user returns to the tab/window after it was backgrounded, the VNC
   // connection has often been silently dropped (going black). If the current
   // session has ended, reconnect right away instead of waiting on backoff. A
-  // session that is still connected, or still connecting, is left alone.
+  // session that is still connected, or still connecting, is left alone. Only a
+  // viewer that had given up starts its attempt count over, so switching
+  // windows while connections keep dropping does not undo the backoff.
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState !== 'visible') return;
@@ -317,8 +319,9 @@ const VNCViewer = ({
       if (reconnectTimerRef.current) {
         clearTimeout(reconnectTimerRef.current);
         reconnectTimerRef.current = null;
+      } else {
+        reconnectAttemptsRef.current = 0;
       }
-      reconnectAttemptsRef.current = 0;
       setReconnectNonce((n) => n + 1);
     };
 

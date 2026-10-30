@@ -83,9 +83,6 @@ const vpProps = (overrides = {}) => ({
   ...overrides,
 });
 
-// Advance fake time in small steps, each inside its own act(), so React
-// commits the state changes a timer makes (a reconnect is a state change)
-// before the next timer is due, as it would in a browser.
 // One viewer as a page renders it from a VP record.
 const viewer = (overrides = {}) => {
   const p = vpProps(overrides);
@@ -102,6 +99,9 @@ const viewer = (overrides = {}) => {
   );
 };
 
+// Advance fake time in small steps, each inside its own act(), so React
+// commits the state changes a timer makes (a reconnect is a state change)
+// before the next timer is due, as it would in a browser.
 const flush = async (ms = 0) => {
   const step = 10;
   let remaining = ms;
