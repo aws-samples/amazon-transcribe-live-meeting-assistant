@@ -178,8 +178,8 @@ container and writes transcript segments straight to Kinesis, so a Virtual
 Participant that joins a meeting and transcribes nothing is not counted here
 and this alarm will not fire for it. The same goes for an uploaded recording.
 For a deployment whose meetings are mostly Virtual Participant ones, this alarm
-covers very little — the Virtual Participant publishes no metrics of its own
-yet, which is the first gap named under
+covers very little — the Virtual Participant publishes no transcript metrics of
+its own yet, which is the first gap named under
 [What is not published yet](#what-is-not-published-yet).
 
 One case to expect noise from: a transcriber task replaced mid-meeting, by a
@@ -207,10 +207,11 @@ instead, where its distribution is informative and a single value is not.
 ## Metrics LMA publishes
 
 Two of the alarms above, and one band of the dashboard, read metrics the
-application emits rather than metrics an AWS service emits. There are seven of
-them, and they answer one question end to end: a meeting was asked for — did a
+application emits rather than metrics an AWS service emits. There are eight of
+them. Seven answer one question end to end: a meeting was asked for — did a
 transcript come out of it, how long did that take, and was anything dropped on
-the way?
+the way? The eighth, from the Virtual Participant, counts the Nova Sonic voice
+assistant streams Amazon Bedrock refused for the account's concurrency quota.
 
 They are published in the CloudWatch namespace **`<stack-name>`** — the name of
 the top-level LMA stack, so two deployments in one account never mix. Each
@@ -227,6 +228,7 @@ name without being edited.
 | `StreamingSessionsStarted` | Count | WebSocket transcriber | A live audio session opened for a meeting, and the denominator for the metric below. One per audio session, not per meeting: a client that drops its socket and reconnects for the same meeting opens a second session and is counted again, where `MeetingsStarted` is not. Video sockets are separate and are not counted. **Counts only meetings streamed through the transcriber** — Stream Audio, the browser extension and the desktop app. A Virtual Participant transcribes in its own container and writes to Kinesis itself, and an uploaded recording never opens a live session, so neither appears here even though both are counted by `MeetingsStarted`. |
 | `TimeToFirstTranscriptSegmentMs` | Milliseconds | WebSocket transcriber | Milliseconds from a meeting's audio session opening to its first transcript segment reaching Kinesis, emitted once per audio session, so a client that reconnects produces a second value measured from the reconnect. Graphed, not alarmed; see the note above. |
 | `StreamingSessionsWithoutTranscript` | Count | WebSocket transcriber | A session closed having produced no transcript segment at all, after running long enough that silence is a fault. Alarmed. |
+| `NovaSonicStreamsThrottled` | Count | Virtual Participant | Amazon Bedrock refused to open a Nova Sonic stream because the account's concurrent-stream quota for the model (20 per region, not adjustable) was reached. One per refused attempt, so a wake phrase retried four times counts four. Each refusal is handled — a translator keeps the session it has, an assistant retries and then stays silent, the lookup acknowledgement is rendered later or skipped — so this is graphed rather than given an alarm of its own; a sustained non-zero value means voice assistants in this stack are degrading. Amazon Bedrock also counts these refusals in its own `InvocationThrottles` metric (measured: four refused streams appeared there as four), which the `bedrock-throttling` alarm reads account-wide, so five or more in five minutes already notify; this metric is what tells you they came from this stack's voice assistants. See [Nova Sonic Concurrency Quota](voice-assistant.md#nova-sonic-concurrency-quota). |
 
 ### How they are published, and what that implies
 
@@ -262,8 +264,9 @@ consequences are worth knowing before you read a graph:
 
 ### What is not published yet
 
-The Virtual Participant, the MicroVM ASR engine and the Meeting Assistant
-publish nothing. That means there is still no metric for the fraction of
+The MicroVM ASR engine and the Meeting Assistant publish nothing, and the
+Virtual Participant publishes only `NovaSonicStreamsThrottled`. That means
+there is still no metric for the fraction of
 Virtual Participant joins that fail and on which trigger, for how often ASR
 falls back to Amazon Transcribe, or for assistant and Bedrock latency and
 failure rates. The Virtual Participant is the significant one: it transcribes
@@ -370,7 +373,7 @@ so they add log ingestion and storage — a few hundred bytes per meeting and pe
 batch of transcript segments, which is immaterial next to the transcript log
 volume itself.
 
-The dashboard references 37 metrics, comfortably inside the metric allowance for
+The dashboard references 38 metrics, comfortably inside the metric allowance for
 a free dashboard, and CloudWatch includes three dashboards per account at no
 charge. An account that already has three custom dashboards pays $3.00 per month
 for this one, which is the realistic case for anyone running several LMA stacks
@@ -403,11 +406,12 @@ mislead. Reading top to bottom:
 | Transcriber target health | `HealthyHostCount` and `UnHealthyHostCount` | Whether new meetings can connect at all. Zero healthy targets refuses every new connection. |
 | Transcriber load balancer | `TargetResponseTime` p99 and `HTTPCode_Target_5XX_Count` | Errors at the edge. Response time is of limited use here: a meeting is one long-lived WebSocket, so what is being timed is the upgrade handshake, not the meeting. |
 | GraphQL API | `4XXError`, `5XXError` and `Latency` p99 | What the web UI is experiencing. 4XX is usually an expired client token and is not alarmed; 5XX is a failing resolver and is. |
-| Application metrics (band header) | A note naming the namespace these widgets read | The four widgets in this band come from LMA rather than from an AWS service; the error tables further down are Logs Insights queries, not metrics. If a series in the band is empty while meetings are running, the component is not publishing rather than nothing having happened — check that `METRIC_NAMESPACE` is set on it. |
+| Application metrics (band header) | A note naming the namespace these widgets read | The five widgets in this band come from LMA rather than from an AWS service; the error tables further down are Logs Insights queries, not metrics. If a series in the band is empty while meetings are running, the component is not publishing rather than nothing having happened — check that `METRIC_NAMESPACE` is set on it. |
 | Meetings | `MeetingsStarted`, `MeetingsEnded` and `StreamingSessionsStarted` | Whether meetings are happening, and whether they are finishing. Started and ended will not match over a short window, because a live meeting has started and not ended; a persistent gap over hours is meetings that never closed, which is what the stale-meeting reaper exists for. Live audio sessions count only the meetings streamed through the transcriber, so they are lower than meetings started by however many Virtual Participant and uploaded-recording meetings the deployment has — not a fault. |
 | Time to first transcript segment | `TimeToFirstTranscriptSegmentMs` at minimum, average, p90 and p99 | How long a meeting waits for its transcript to begin. Read the shape, not a value: the interval is dominated by when somebody first speaks, so the minimum is the closest thing here to a measure of the pipeline itself, and a rising p90 with a flat minimum usually means meetings are starting earlier rather than the pipeline slowing. |
 | Transcript segment writes | `TranscriptSegmentsWritten` and `TranscriptSegmentWriteFailed`, annotated at the alarm threshold | Whether the transcript is reaching the meeting page. Any value on the failure series is a line that is simply missing, with no error on the meeting page and nothing on the discarded-records queue. |
 | Audio sessions that produced no transcript | `StreamingSessionsWithoutTranscript` against `StreamingSessionsStarted`, annotated at the alarm threshold | Sessions that streamed audio and got nothing back. Sessions under thirty seconds are not counted, so a value here is a session that ran long enough for silence to be a fault rather than a user who changed their mind — though a muted room or a meeting abandoned at minute two still lands here, which is why the alarm needs three in a window. Read against sessions opened: one in fifty is a different problem from one in two. |
+| Nova Sonic streams refused | `NovaSonicStreamsThrottled` | Whether this stack's voice assistants are being refused Nova Sonic streams for the account's concurrency quota of 20 per region. Each refusal degrades an assistant rather than failing it — see [Nova Sonic Concurrency Quota](voice-assistant.md#nova-sonic-concurrency-quota) for what each one does — so a value here is a capacity signal: fewer concurrent voice-assistant meetings in the account and region, or another region, is the remedy, since the quota cannot be raised. |
 | Four error-log tables | The most recent 50 lines matching `/ERROR/` in the Call Event Processor, the Virtual Participant launch state machine, the Virtual Participant container and the WebSocket transcriber container log groups | A first look without leaving the dashboard. These are CloudWatch Logs Insights queries, so they run on demand and are billed per query, not continuously. |
 
 The dashboard is created whether or not `EnableOperationalAlarms` is `true`.

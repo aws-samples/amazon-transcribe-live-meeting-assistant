@@ -17,13 +17,15 @@ imported by three different readers:
 It therefore imports nothing outside the standard library — see the package
 docstring for why that constraint exists.
 
-The metrics the WebSocket transcriber emits are listed here too, even though
-nothing in Python emits them. They belong in the same catalogue because they
-share the namespace and because the gate that checks a metric reaches a widget
-should not have a hole in it wherever the emitter happens to be TypeScript. The
-transcriber's own copy of these names lives in
-``lma-websocket-transcriber-stack/source/app/src/metrics/catalogue.ts`` and a
-gate asserts the two agree.
+The metrics the WebSocket transcriber and the Virtual Participant emit are
+listed here too, even though nothing in Python emits them. They belong in the
+same catalogue because they share the namespace and because the gate that
+checks a metric reaches a widget should not have a hole in it wherever the
+emitter happens to be TypeScript. The transcriber's own copy of its names lives
+in ``lma-websocket-transcriber-stack/source/app/src/metrics/catalogue.ts``, the
+Virtual Participant's in
+``lma-virtual-participant-stack/backend/src/metrics-catalogue.ts``, and a gate
+asserts each agrees with this one.
 """
 
 from __future__ import annotations
@@ -84,6 +86,7 @@ class Component(str, Enum):
 
     CALL_EVENT_PROCESSOR = "call-event-processor"
     WEBSOCKET_TRANSCRIBER = "websocket-transcriber"
+    VIRTUAL_PARTICIPANT = "virtual-participant"
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,15 @@ TRANSCRIPT_SEGMENT_WRITE_FAILED = "TranscriptSegmentWriteFailed"
 STREAMING_SESSIONS_STARTED = "StreamingSessionsStarted"
 TIME_TO_FIRST_TRANSCRIPT_SEGMENT_MS = "TimeToFirstTranscriptSegmentMs"
 STREAMING_SESSIONS_WITHOUT_TRANSCRIPT = "StreamingSessionsWithoutTranscript"
+
+# ── voice assistant capacity ────────────────────────────────────────────────
+#
+# Amazon Bedrock allows an account a fixed number of concurrent Nova Sonic
+# streams per region, and every Virtual Participant's voice assistant in the
+# account and region shares it. The VP degrades when it is refused one, so the
+# refusals are counted where they happen.
+
+NOVA_SONIC_STREAMS_THROTTLED = "NovaSonicStreamsThrottled"
 
 
 CATALOGUE: tuple[MetricDefinition, ...] = (
@@ -226,6 +238,27 @@ CATALOGUE: tuple[MetricDefinition, ...] = (
             "error anywhere. Alarmed for that reason. Covers only meetings "
             "streamed through the transcriber, so a Virtual Participant that "
             "transcribes nothing is not counted -- it has no equivalent yet."
+        ),
+    ),
+    MetricDefinition(
+        name=NOVA_SONIC_STREAMS_THROTTLED,
+        unit="Count",
+        component=Component.VIRTUAL_PARTICIPANT,
+        # Graphed, without an alarm of its own. Each refusal is handled where
+        # it happens -- a translator keeps the session it has, the lookup
+        # acknowledgement is rendered later or skipped, a wake phrase is
+        # retried -- and Amazon Bedrock counts the same refusals in its own
+        # AWS/Bedrock InvocationThrottles (measured: four refused streams read
+        # as four), which the bedrock-throttling alarm already reads
+        # account-wide. This metric attributes them to this stack.
+        records_swallowed_failure=False,
+        meaning=(
+            "Amazon Bedrock refused to open a Nova Sonic stream because the "
+            "account's concurrent-stream quota for the model was reached in that "
+            "region. One per refused attempt, so a wake phrase retried four "
+            "times counts four. A sustained non-zero value means voice "
+            "assistants are degrading: translators staying on one session, "
+            "assistants not answering a wake phrase."
         ),
     ),
 )

@@ -14,6 +14,7 @@ title: "Voice Assistant"
 - [Wake Phrase Configuration](#wake-phrase-configuration)
 - [Session Management](#session-management)
   - [Nova Sonic 2](#nova-sonic-2)
+  - [Nova Sonic Concurrency Quota](#nova-sonic-concurrency-quota)
   - [ElevenLabs](#elevenlabs)
 - [Barge-In](#barge-in)
 - [How the Assistant Appears in the Transcript](#how-the-assistant-appears-in-the-transcript)
@@ -82,6 +83,30 @@ Configure the wake phrase using the **VoiceAssistantWakePhrase** parameter:
 ### Nova Sonic 2
 
 Nova Sonic has a native 8-minute session timeout. LMA works around this by automatically refreshing sessions every 4 minutes using keep-alive signals (30-second silence chunks). Conversation history is maintained across session refreshes, so the assistant retains full context of the meeting.
+
+### Nova Sonic Concurrency Quota
+
+Amazon Bedrock limits how many Nova Sonic streams one AWS account can have open at the same time in a region. The quota is **On-demand InvokeModel concurrent requests for Amazon Nova 2 Sonic**, it is **20** per account per region, and it cannot be raised through Service Quotas. Every Virtual Participant's voice assistant in the account and region draws on the same 20, whichever LMA stack it belongs to, along with anything else in the account that uses Nova Sonic.
+
+How many streams a meeting holds:
+
+| What the meeting is doing | Nova Sonic streams |
+|---|---|
+| Wake-phrase assistant, not addressed | 0 — no stream is open until the wake phrase |
+| Wake-phrase assistant, during an activation window | 1 |
+| Always-listening assistant (`normal` or `group` mode) | 1, for the whole meeting |
+| Translator | 2 to 3 while people are speaking (see [Translator Mode](#nova-sonic)), 1 when the meeting is quiet |
+| Any meeting with the meeting-assistant tool, at the start | 1 more for a few seconds, to record the "One moment, let me look that up" clip (and in translator mode one more, for the "I've stopped translating" clip) |
+
+So, as a rule of thumb, an account can run about six to ten translator meetings at once in one region, or about twenty meetings with an assistant listening, before Bedrock starts refusing new streams. Measured: of 24 streams opened at once in one region, 20 opened and 4 were refused within about 300 ms with `ThrottlingException: Too many connections, please wait before trying again.`
+
+When Bedrock refuses a stream, the Virtual Participant degrades rather than failing:
+
+- **A translator** that cannot open the session for its next turn keeps translating on the session it already has — one stream instead of two or three, which is how translator mode worked before it had a session per turn and is more prone to drift over a long conversation. It tries a new session again on a later turn, after a backoff that starts at one to two seconds and grows to at most a minute while the refusals continue.
+- **A wake-phrase assistant** that cannot open its session retries three more times with a randomised backoff, about eight seconds in all at most. Saying the wake phrase again while it retries opens no further stream; the latest question asked is the one answered. If it still cannot connect it says nothing and is not activated, so the next wake phrase tries again. An always-listening assistant whose session is refused retries in the background with a growing backoff, up to 30 seconds apart.
+- **The "One moment, let me look that up" clip** is rendered in the background and never delays the Virtual Participant joining. A render that is refused is retried up to three more times over about half a minute and then skipped; the assistant then simply has no spoken acknowledgement for a lookup.
+
+Each refusal writes a `[nova-throttle] context=<assistant-session | translator-turn | tool-ack-clip>` line to the Virtual Participant's CloudWatch log stream, a translator that keeps its session writes `[translator-turn] action=kept-session reason=throttled`, and an assistant that gives up writes `[nova-throttle] action=gave-up-activation`. Each refusal is also counted in the `NovaSonicStreamsThrottled` metric, graphed on the stack's CloudWatch dashboard (see [Monitoring](monitoring.md#metrics-lma-publishes)); Amazon Bedrock counts the same refusals in its account-wide `InvocationThrottles` metric, which the stack's `bedrock-throttling` alarm reads. A sustained non-zero value there means voice assistants in the account are degrading; the remedy is fewer concurrent voice-assistant meetings in that account and region, or spreading deployments across regions or accounts, since the quota itself cannot be raised.
 
 ### ElevenLabs
 
@@ -179,7 +204,7 @@ Example:
 
 **One session per translated turn.** A Nova Sonic session's translations drift over the course of a conversation: after a few turns it starts transcribing one language as the other and "translating" that back, so participants hear their own words repeated. So when a session starts speaking a translation, the meeting's audio moves to a new session, opened at that moment, and the audio heard since the speaker finished is replayed into it first, so the next speaker's opening words reach it even while it is still connecting. The previous session is left to finish its translation — it hears silence from then on, so somebody starting to speak does not cut it off — and is closed once its text for the transcript has arrived. If the next translation starts arriving while the previous one is still arriving, it is held back and played after it. No conversation history is carried into a translator session, including on the periodic session refresh. Each hand-over writes a line to the Virtual Participant log: `[translator-turn] n=<turn> from=<session> to=<session> backlog_ms=<replayed audio> draining=<sessions still finishing>`. Each previous session's end writes `[translator-turn] closed <session>: <reason> after <ms> ms`, where the reason is `answered` (its final text arrived), `timed-out` (it had not finished after 30 seconds), `refresh` (the session it handed over to was replaced, for a pause, a mode change or the periodic refresh) or `closed` (the assistant's session was closed), or `[translator-turn] <session> ended before it was closed` if its stream ended on its own.
 
-**What this costs.** A translator meeting now holds more than one Nova Sonic stream at a time: the current one, plus each previous session until it has finished its translation, which is usually about five seconds and at most 30. With turns close together, three can be open at once, and every translated turn opens a new stream. Each of those counts against your account's Amazon Bedrock quota for concurrent Nova Sonic streams, so check it if you run many translator meetings at once. Billing changes too: the silence a previous session hears while it finishes is billed as speech input, the audio replayed into the next session (about half a second per turn, at most three) is billed twice, and every session is sent the translator prompt again.
+**What this costs.** A translator meeting now holds more than one Nova Sonic stream at a time: the current one, plus each previous session until it has finished its translation, which is usually about five seconds and at most 30. With turns close together, three can be open at once, and every translated turn opens a new stream. Each of those counts against your account's Amazon Bedrock quota of 20 concurrent Nova Sonic streams per region; see [Nova Sonic Concurrency Quota](#nova-sonic-concurrency-quota) for what that allows and what happens when it is reached. Billing changes too: the silence a previous session hears while it finishes is billed as speech input, the audio replayed into the next session (about half a second per turn, at most three) is billed twice, and every session is sent the translator prompt again.
 
 #### ElevenLabs
 
