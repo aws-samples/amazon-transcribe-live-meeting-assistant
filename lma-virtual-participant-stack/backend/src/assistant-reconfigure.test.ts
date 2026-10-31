@@ -525,23 +525,25 @@ test('the activation window the old mode was counting down is dropped whatever t
     const { agent } = novaAgent({ activationMode: 'wake_phrase' });
     withLiveSession(agent);
     await agent.activate(600);
-    assert.notEqual((agent as any).activationTimeout, null);
+    const window = (agent as any).activationWindow;
+    assert.equal(window.isRunning(), true);
 
     try {
         // Dropped on the way to always_active, not only on the way back. A timer
         // left armed there happens to do nothing because `deactivate()` returns
         // early in that mode, which is not a reason worth relying on.
         await agent.reconfigure(chat({ activationMode: 'always_active' }));
-        assert.equal((agent as any).activationTimeout, null, 'switching to always listening drops the window');
+        assert.equal(window.isRunning(), false, 'switching to always listening drops the window');
+        assert.equal(window.timer, null);
 
         await agent.reconfigure(chat({ activationMode: 'wake_phrase' }));
-        assert.equal((agent as any).activationTimeout, null, 'switching back drops it too');
+        assert.equal(window.isRunning(), false, 'switching back drops it too');
+        assert.equal(window.timer, null);
     } finally {
         // A window that survived would hold the event loop open for ten
-        // minutes, so clear it whichever assertion failed: these should fail,
+        // minutes, so stop it whichever assertion failed: these should fail,
         // not hang.
-        const surviving = (agent as any).activationTimeout;
-        if (surviving) clearTimeout(surviving);
+        window.stop();
     }
 });
 

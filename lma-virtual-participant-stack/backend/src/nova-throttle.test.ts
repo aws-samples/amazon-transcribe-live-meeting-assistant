@@ -195,7 +195,7 @@ test('a wake phrase refused for the quota is retried, and the assistant activate
         assert.equal(warnings.filter((w) => w.startsWith('[nova-throttle] action=retry-activation')).length, 2);
     } finally {
         agent.stopped = true;
-        if (agent.activationTimeout) clearTimeout(agent.activationTimeout);
+        agent.activationWindow.stop();
         release();
     }
 });
@@ -226,7 +226,7 @@ test('a second wake phrase while the first is still opening does not open anothe
         assert.equal(agent._isActivated, true);
     } finally {
         agent.stopped = true;
-        if (agent.activationTimeout) clearTimeout(agent.activationTimeout);
+        agent.activationWindow.stop();
         release();
     }
 });
@@ -248,7 +248,7 @@ test('a second wake phrase while a pre-connect is still in flight does not open 
         assert.deepEqual(asked, ['what time is the launch'], 'the question of the later wake phrase is asked');
     } finally {
         agent.stopped = true;
-        if (agent.activationTimeout) clearTimeout(agent.activationTimeout);
+        agent.activationWindow.stop();
         release();
     }
 });

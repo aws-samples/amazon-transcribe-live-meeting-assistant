@@ -28,6 +28,7 @@ import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
 import { toSpokenText } from './spoken-text.js';
 import { pcmMs, RecentAudio, TRANSLATOR_DRAIN_MAX_MS } from './translator-turns.js';
+import { ActivationWindow } from './voice-activation-window.js';
 import { isNovaThrottle, noteNovaThrottle, throttleBackoffMs } from './nova-throttle.js';
 import {
   containsTriggerPhrase,
@@ -166,30 +167,6 @@ export function translatorDirectionRules(a: string, b: string): string[] {
       + 'Your speech and your text must be the same words in the same language.',
   ];
 }
-
-/**
- * How often a held-open activation window looks again at whether the assistant
- * has gone idle (see checkActivationWindow).
- */
-export const ACTIVATION_RECHECK_MS = 1000;
-
-/**
- * How far past the estimated end of playback the output detector may still
- * hold an activation window open (see activationHoldFor).
- */
-export const ACTIVATION_AUDIBLE_HOLD_MAX_MS = 10000;
-
-/**
- * How long a participant's turn holds a lapsing activation window open, so that
- * a question asked just before it lapses is not cut off before the model has
- * had the moment it needs to start answering or call a tool.
- *
- * Deliberately short and deliberately not a re-arm: the session hears the
- * whole meeting, so treating every turn as engagement would keep a wake-phrase
- * session open for as long as anyone in the meeting is talking. Being addressed
- * by wake phrase is what re-arms the full window.
- */
-export const ACTIVATION_USER_TURN_GRACE_MS = 3000;
 
 /**
  * How long after a `strands_agent` tool call the agent waits for the model's own
@@ -383,7 +360,6 @@ export class NovaAgent implements VoiceAssistantProvider {
   // Nova session; transitions trigger a session refresh.
   private _translatorState: 'UNMUTED' | 'MUTED' = 'UNMUTED';
   private _isInterrupted: boolean = false; // Gate: drops all audio (voice + avatar) after barge-in until next turn
-  private activationTimeout: NodeJS.Timeout | null = null;
   private defaultActivationDuration: number;
   /** Where the Nova Sonic model is invoked. NOT the stack's region — see stackRegion(). */
   private novaSonicRegion: string;
@@ -437,15 +413,27 @@ export class NovaAgent implements VoiceAssistantProvider {
    *  field so that tests can stand in for PulseAudio. */
   private audibleOutput: () => boolean = () => agentSpeakingDetector.isSpeaking();
 
-  /** Length of the current activation window, set by activate(). */
-  private activationWindowMs: number = 0;
-  /** When the activation window's idle countdown last restarted: activation,
-   *  being addressed again, a barge-in, a tool finishing, or the end of a
-   *  stretch in which the assistant was busy (see checkActivationWindow). */
-  private lastEngagementAt: number = 0;
-  /** What the window is being held open for, so it is logged once per change
-   *  rather than once a second. */
-  private activationHoldReason: string | null = null;
+  /**
+   * The wake-phrase activation window: an idle timeout, not a deadline from
+   * the wake phrase (see voice-activation-window.ts, which the ElevenLabs agent
+   * uses too). Its idle countdown restarts on activation, on being addressed
+   * again, on a barge-in, when a lookup finishes, and at the end of any
+   * stretch in which the assistant was busy.
+   */
+  private activationWindow = new ActivationWindow(
+    {
+      toolRunning: () => this._isProcessingTool,
+      audioArriving: () => this._isSpeaking,
+      // The estimate of when the audio already written finishes playing.
+      playbackEndsAt: () => this.playbackEndsAt,
+      // The detector covers what the estimate cannot see — PulseAudio's own
+      // latency, a stream that took a moment to connect.
+      audible: () => this.audibleOutput(),
+      // Nova's transcript of the meeting: the start of its latest user text block.
+      lastUserTurnAt: () => this.lastUserTextAt,
+    },
+    () => this.deactivate(),
+  );
 
   /** The pre-rendered "looking that up" acknowledgement, in the configured
    *  voice (see tool-ack-clip.ts), or null until it has been rendered. */
@@ -2439,8 +2427,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     // scribe does not activate an assistant that is already activated, so for
     // a follow-up inside the window this is the only place it is noticed.
     if (this.activationMode !== 'always_active' && this._isActivated) {
-      console.log('🔁 Activation window re-armed (addressed again)');
-      this.noteEngagement();
+      this.activationWindow.rearm('addressed again');
     }
 
     const askedToStop = isStopTalkingRequest(content, configuredWakePhrases());
@@ -2571,7 +2558,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         // The activation window counts its idle time from here at the
         // earliest, so a lookup that took most of the window still leaves the
         // whole of it for the answer and whatever is asked next.
-        this.noteEngagement();
+        this.activationWindow.noteEngagement();
         
         // Add 2-second padding before restarting conversation timeout
         // This gives Nova time to start speaking before the countdown begins
@@ -3423,11 +3410,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
     }
 
-    // The window is an idle timeout, not a deadline: see checkActivationWindow.
-    this.activationWindowMs = activationDuration * 1000;
-    this.activationHoldReason = null;
-    this.noteEngagement();
-    this.scheduleActivationCheck(this.activationWindowMs);
+    // The window is an idle timeout, not a deadline: see voice-activation-window.ts.
+    this.activationWindow.start(activationDuration * 1000);
   }
 
   /**
@@ -3508,95 +3492,6 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
   }
 
-  private scheduleActivationCheck(delayMs: number): void {
-    if (this.activationTimeout) {
-      clearTimeout(this.activationTimeout);
-    }
-    this.activationTimeout = setTimeout(() => {
-      this.activationTimeout = null;
-      this.checkActivationWindow();
-    }, Math.max(0, delayMs));
-  }
-
-  /** Restart the activation window's idle countdown. */
-  private noteEngagement(): void {
-    this.lastEngagementAt = Date.now();
-  }
-
-  /**
-   * Why the activation window must not lapse yet, or null if nothing holds it.
-   *
-   * A session closed while the meeting is still hearing the assistant cannot
-   * hear the participant who asks it to stop, and a session closed while a
-   * lookup is running throws its answer away — so all of these hold it, however
-   * long they take. A participant's turn holds it only briefly (see
-   * ACTIVATION_USER_TURN_GRACE_MS), and only within twice the window, so that a
-   * busy meeting cannot keep a wake-phrase session open indefinitely.
-   */
-  private activationHoldFor(now: number): string | null {
-    if (this._isProcessingTool) return 'tool';
-    if (this._isSpeaking) return 'audio-arriving';
-    if (this.playbackEndsAt > now) return 'playback';
-    // The detector covers what the estimate cannot see — PulseAudio's own
-    // latency, a stream that took a moment to connect — so it is believed only
-    // shortly past the estimate. A detector that never reports silence must
-    // not keep a wake-phrase session open for the rest of the meeting.
-    if (this.audibleOutput() && now - this.playbackEndsAt < ACTIVATION_AUDIBLE_HOLD_MAX_MS) return 'audible';
-    const idleSince = Math.max(this.lastEngagementAt, this.playbackEndsAt);
-    if (
-      now - this.lastUserTextAt < ACTIVATION_USER_TURN_GRACE_MS
-      && now - idleSince < 2 * this.activationWindowMs
-    ) {
-      return 'user-turn';
-    }
-    return null;
-  }
-
-  /**
-   * Close the activation window once the assistant has been idle for the whole
-   * of it.
-   *
-   * Idle time is counted from the latest of: the activation itself, being
-   * addressed again, a barge-in, a lookup finishing, and the end of any stretch
-   * in which the assistant was busy — so the configured duration is the quiet
-   * time after the assistant last spoke, not a deadline from the wake phrase
-   * that a slow lookup and a long answer could use up between them. Recorded
-   * on a live meeting with a 30-second window: a wake phrase at 22:08:49, two
-   * lookups, and an answer that started at 22:09:11 and was audible for 26
-   * seconds, which the session closed 8 seconds into — leaving the participant
-   * who then said "stop" talking to a session that could no longer hear it.
-   */
-  private checkActivationWindow(): void {
-    if (this.activationMode === 'always_active' || !this._isActivated) {
-      return;
-    }
-    const now = Date.now();
-    const hold = this.activationHoldFor(now);
-    if (hold) {
-      if (hold !== this.activationHoldReason) {
-        console.log(`⏳ Activation window held open (${hold})`);
-      }
-      this.activationHoldReason = hold;
-      // A participant's turn is not engagement (see ACTIVATION_USER_TURN_GRACE_MS);
-      // everything else is the assistant being busy, and the idle countdown
-      // starts again when it stops.
-      if (hold !== 'user-turn') {
-        this.noteEngagement();
-      }
-      this.scheduleActivationCheck(ACTIVATION_RECHECK_MS);
-      return;
-    }
-    this.activationHoldReason = null;
-    const idleSince = Math.max(this.lastEngagementAt, this.playbackEndsAt);
-    const remaining = this.activationWindowMs - (now - idleSince);
-    if (remaining > 0) {
-      this.scheduleActivationCheck(remaining);
-      return;
-    }
-    console.log(`⏰ Activation window elapsed (idle ${now - idleSince} ms of ${this.activationWindowMs} ms)`);
-    this.deactivate();
-  }
-
   private extractQuestion(context: string): string {
     // Remove all punctuation first, then remove wake phrases
     let cleaned = context.toLowerCase()
@@ -3623,13 +3518,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
     console.log('🔇 Nova agent deactivated');
     this._isActivated = false;
-    this.activationHoldReason = null;
-
-    // Clear timeout
-    if (this.activationTimeout) {
-      clearTimeout(this.activationTimeout);
-      this.activationTimeout = null;
-    }
+    this.activationWindow.stop();
 
     // A closed session cannot hear a participant ask it to stop, so no
     // assistant audio is left playing after it. The window does not lapse
@@ -3754,11 +3643,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.sessionRefreshTimer = null;
     }
 
-    // Clear activation timeout
-    if (this.activationTimeout) {
-      clearTimeout(this.activationTimeout);
-      this.activationTimeout = null;
-    }
+    // Stop the activation window
+    this.activationWindow.stop();
     
     // Clear conversation timeout
     this.clearConversationTimeout();
@@ -4357,7 +4243,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.lastInterruptionAt = Date.now();
     // Somebody talking over the assistant is talking to it: the window's idle
     // countdown restarts, so a correction is not cut off by the window lapsing.
-    this.noteEngagement();
+    this.activationWindow.noteEngagement();
     // Someone talking over an acknowledgement that is already playing wants it
     // to stop too. One that has not started yet is left alone: the barge-in
     // marker for the very utterance that asked for silence can arrive after
@@ -5152,16 +5038,12 @@ export class NovaAgent implements VoiceAssistantProvider {
   private applyActivationMode(mode: ActivationMode): void {
     this.activationMode = mode;
     this._isActivated = (mode === 'always_active');
-    this.activationHoldReason = null;
 
-    if (this.activationTimeout) {
-      // The window the old mode was counting down belongs to that mode, whatever
-      // the new one is. Cleared unconditionally: a timer left armed into
-      // `always_active` only fails to do anything because `deactivate()` returns
-      // early there, which is a reason the next reader should not have to find.
-      clearTimeout(this.activationTimeout);
-      this.activationTimeout = null;
-    }
+    // The window the old mode was counting down belongs to that mode, whatever
+    // the new one is. Stopped unconditionally: a window left running into
+    // `always_active` only fails to do anything because `deactivate()` returns
+    // early there, which is a reason the next reader should not have to find.
+    this.activationWindow.stop();
 
     console.log(`🔀 Activation mode is now ${mode}`);
   }
