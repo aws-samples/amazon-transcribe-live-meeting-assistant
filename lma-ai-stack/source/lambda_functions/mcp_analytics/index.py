@@ -470,6 +470,7 @@ def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
                 meeting_password=arguments.get("meetingPassword"),
                 user_id=user_id,
                 is_admin=is_admin,
+                agenda=arguments.get("agenda"),
             )
         elif tool_name == "start_meeting_now":
             result = start_meeting_now.execute(
@@ -480,6 +481,7 @@ def execute_tool_call(msg_id, tool_name, arguments, user_id, username, is_admin)
                 user_id=user_id,
                 is_admin=is_admin,
                 use_stored_zoom_credentials=arguments.get("useStoredZoomCredentials", True),
+                agenda=arguments.get("agenda"),
             )
         elif tool_name == "get_virtual_participant_status":
             result = get_virtual_participant_status.execute(

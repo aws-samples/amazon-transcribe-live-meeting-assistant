@@ -161,9 +161,51 @@ class TestToolSchemas(unittest.TestCase):
             self.assertEqual(schema["properties"]["agenda"]["type"], "string", name)
             self.assertNotIn("agenda", schema.get("required", []), name)
 
-    def test_the_handler_passes_the_agenda_to_both_tools(self):
-        source = (HERE.parent / "index.py").read_text(encoding="utf-8")
-        self.assertEqual(source.count('agenda=tool_input.get("agenda"),'), 2)
+
+class TestBothDispatchersForwardTheAgenda(unittest.TestCase):
+    """index.py routes a tool call two ways: lambda_handler for the AgentCore
+    Gateway (and plain API Gateway calls), and execute_tool_call for JSON-RPC
+    tools/call on the API-key endpoint. Both have to forward an argument that
+    tools/list advertises, or a client sends it and it is silently dropped."""
+
+    ARGUMENTS = {
+        "start_meeting_now": {"meetingName": "W", "meetingPlatform": "Zoom", "meetingId": "1"},
+        "schedule_meeting": {
+            "meetingName": "W",
+            "meetingPlatform": "Zoom",
+            "meetingId": "1",
+            "scheduledTime": "2099-01-01T10:00:00Z",
+        },
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        import index  # noqa: PLC0415 - after the environment above is set
+
+        cls.index = index
+
+    def _forwarded(self, tool, call):
+        with patch.object(
+            getattr(self.index, tool), "execute", return_value={"ok": True}
+        ) as execute:
+            call()
+        return execute.call_args.kwargs.get("agenda")
+
+    def test_the_json_rpc_dispatcher_forwards_the_agenda(self):
+        for tool, arguments in self.ARGUMENTS.items():
+            args = {**arguments, "agenda": "Budget"}
+            sent = self._forwarded(
+                tool,
+                lambda t=tool, a=args: self.index.execute_tool_call(1, t, a, "u", "u", False),
+            )
+            self.assertEqual(sent, "Budget", tool)
+
+    def test_the_gateway_dispatcher_forwards_the_agenda(self):
+        claims = {"requestContext": {"authorizer": {"claims": {"sub": "u", "email": "u@x"}}}}
+        for tool, arguments in self.ARGUMENTS.items():
+            event = {**arguments, "agenda": "Budget", **claims}
+            sent = self._forwarded(tool, lambda e=event: self.index.lambda_handler(e, None))
+            self.assertEqual(sent, "Budget", tool)
 
 
 if __name__ == "__main__":

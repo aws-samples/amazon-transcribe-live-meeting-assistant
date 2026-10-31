@@ -238,6 +238,10 @@ def clean_agenda(agenda):
     Asked for as one string, but a model asked for "the agenda items" will
     sometimes answer with a list, which is the same thing in another shape.
     Anything else is dropped rather than filled into the form as its repr.
+
+    Cut to the limit rather than refused, unlike the form and the MCP tools:
+    this only pre-fills a field the user sees and can edit before submitting,
+    and refusing would lose the rest of the parsed invitation with it.
     """
     if isinstance(agenda, list):
         agenda = "\n".join(str(item).strip() for item in agenda if str(item).strip())
