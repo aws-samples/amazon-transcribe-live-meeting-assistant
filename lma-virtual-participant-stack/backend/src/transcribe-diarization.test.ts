@@ -20,6 +20,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import {
+    VoiceLabelNames,
     DEFAULT_MIN_RUN_SECONDS,
     DEFAULT_MIN_RUN_WORDS,
     buildDiarizedSegments,
@@ -253,7 +254,7 @@ describe('segments for a result', () => {
         buildDiarizedSegments(items, {
             resultId,
             timeOffsetSeconds: offset,
-            rosterNameAt: () => roster,
+            rosterNameFor: () => roster,
             nameFor,
         });
 
@@ -314,7 +315,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
             resultId: 'res-3',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Conference Room'),
+            rosterNameFor: (start: number) => (start < 10 ? 'Alex' : 'Conference Room'),
             nameFor,
         });
         assert.deepEqual(
@@ -331,7 +332,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
             resultId: 'res-3b',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => (start < 5 ? 'Alex' : 'Conference Room'),
+            rosterNameFor: (start: number) => (start < 5 ? 'Alex' : 'Conference Room'),
             nameFor,
         });
         assert.deepEqual(
@@ -360,7 +361,7 @@ describe('segments for a result', () => {
             {
                 resultId: 'res-4',
                 timeOffsetSeconds: 0,
-                rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Beth'),
+                rosterNameFor: (start: number) => (start < 10 ? 'Alex' : 'Beth'),
                 nameFor,
             },
         );
@@ -379,13 +380,13 @@ describe('segments for a result', () => {
         const merged = buildDiarizedSegments(items, {
             resultId: 'res-5',
             timeOffsetSeconds: 0,
-            rosterNameAt: () => 'Room',
+            rosterNameFor: () => 'Room',
             nameFor,
         });
         const split = buildDiarizedSegments(items, {
             resultId: 'res-5',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Beth'),
+            rosterNameFor: (start: number) => (start < 10 ? 'Alex' : 'Beth'),
             nameFor,
         });
         assert.equal(Object.keys(merged).length, 1);
@@ -403,7 +404,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
             resultId: 'res-6',
             timeOffsetSeconds: 0,
-            rosterNameAt: () => 'Conference Room',
+            rosterNameFor: () => 'Conference Room',
             nameFor,
             isPartial: true,
         });
@@ -422,7 +423,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments(turn('0', 12, 0), {
             resultId: 'res-7',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => (start < 6 ? 'Alex' : 'Beth'),
+            rosterNameFor: (start: number) => (start < 6 ? 'Alex' : 'Beth'),
             nameFor,
             isPartial: true,
         });
@@ -439,7 +440,7 @@ describe('segments for a result', () => {
             {
                 resultId: 'res-8',
                 timeOffsetSeconds: 0,
-                rosterNameAt: (start) => (start < 20 ? 'Alex' : 'Beth'),
+                rosterNameFor: (start: number) => (start < 20 ? 'Alex' : 'Beth'),
                 nameFor,
             },
         );
@@ -462,7 +463,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([punctuation('.')], {
             resultId: 'res-8b',
             timeOffsetSeconds: 5,
-            rosterNameAt: (start) => (start < 5 ? 'Wrong' : 'Right'),
+            rosterNameFor: (start: number) => (start < 5 ? 'Wrong' : 'Right'),
             nameFor,
         });
         assert.equal(Object.keys(segments).length, 1);
@@ -480,7 +481,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([punctuation('.')], {
             resultId: 'res-8c',
             timeOffsetSeconds: 300,
-            rosterNameAt: () => 'Room',
+            rosterNameFor: () => 'Room',
             nameFor,
         });
         const [piece] = Object.values(segments);
@@ -512,7 +513,7 @@ describe('segments for a result', () => {
             {
                 resultId: 'res-8d',
                 timeOffsetSeconds: 0,
-                rosterNameAt: (start) => (start < 20 ? 'Alex' : 'Beth'),
+                rosterNameFor: (start: number) => (start < 20 ? 'Alex' : 'Beth'),
                 nameFor,
             },
         );
@@ -561,7 +562,7 @@ describe('an item with no timestamp', () => {
             {
                 resultId: 'res-9',
                 timeOffsetSeconds: 0,
-                rosterNameAt: (start) => (start < 30 ? 'Wrong' : 'Right'),
+                rosterNameFor: (start: number) => (start < 30 ? 'Wrong' : 'Right'),
                 nameFor,
             },
         );
@@ -588,7 +589,7 @@ describe('a partial with nothing timed in it', () => {
             {
                 resultId: 'res-p',
                 timeOffsetSeconds: 300,
-                rosterNameAt: (start) => (start < 339 ? 'Earlier' : 'Now'),
+                rosterNameFor: (start: number) => (start < 339 ? 'Earlier' : 'Now'),
                 nameFor,
                 isPartial: true,
             },
@@ -602,7 +603,7 @@ describe('a partial with nothing timed in it', () => {
         const segments = buildDiarizedSegments([punctuation('.')], {
             resultId: 'res-p2',
             timeOffsetSeconds: 300,
-            rosterNameAt: () => 'Conference Room',
+            rosterNameFor: () => 'Conference Room',
             nameFor,
             isPartial: true,
         });
@@ -623,13 +624,13 @@ describe('the roster is resolved on the meeting timeline, not the session one', 
     // The roster changes at an absolute 310s. Items sit at 5-10s within a
     // session that began at 300s, so they land after the change only if the
     // offset is applied.
-    const rosterNameAt = (start: number) => (start < 310 ? 'Before' : 'After');
+    const rosterNameFor = (start: number) => (start < 310 ? 'Before' : 'After');
 
     it('applies the offset when splitting a final by roster', () => {
         const segments = buildDiarizedSegments(turn('0', 6, 10), {
             resultId: 'res-off1',
             timeOffsetSeconds: 300,
-            rosterNameAt,
+            rosterNameFor,
             nameFor,
         });
         assert.deepEqual(
@@ -645,7 +646,7 @@ describe('the roster is resolved on the meeting timeline, not the session one', 
         const segments = buildDiarizedSegments(unlabelled, {
             resultId: 'res-off2',
             timeOffsetSeconds: 300,
-            rosterNameAt,
+            rosterNameFor,
             nameFor,
             isPartial: true,
         });
@@ -660,12 +661,58 @@ describe('the roster is resolved on the meeting timeline, not the session one', 
         const segments = buildDiarizedSegments([...turn('0', 4, 5), ...turn('0', 4, 15)], {
             resultId: 'res-off3',
             timeOffsetSeconds: 300,
-            rosterNameAt,
+            rosterNameFor,
             nameFor,
         });
         assert.deepEqual(
             Object.values(segments).map((segment) => segment.Speaker),
             ['Before (spk_0)', 'After (spk_0)'],
         );
+    });
+});
+
+describe('which rows carry a voice label', () => {
+    it('passes a row with no label through as the bare name', () => {
+        assert.equal(new VoiceLabelNames().nameFor('Sam Lee', undefined, 4), 'Sam Lee');
+    });
+
+    it('shows a label only with the participant it has coincided with for the most speech', () => {
+        const labels = new VoiceLabelNames();
+        assert.equal(labels.nameFor('Sam Lee', 'spk_3', 10), 'Sam Lee (spk_3)');
+        assert.equal(labels.nameFor('Ana Ruiz', 'spk_3', 2), 'Ana Ruiz');
+        assert.equal(labels.nameFor('Sam Lee', 'spk_3', 1), 'Sam Lee (spk_3)');
+        assert.equal(labels.ownerOf('spk_3'), 'Sam Lee');
+    });
+
+    it('gives a tie to the participant the label met first', () => {
+        const labels = new VoiceLabelNames();
+        assert.equal(labels.nameFor('Sam Lee', 'spk_0', 3), 'Sam Lee (spk_0)');
+        assert.equal(labels.nameFor('Ana Ruiz', 'spk_0', 3), 'Ana Ruiz');
+        assert.equal(labels.ownerOf('spk_0'), 'Sam Lee');
+    });
+
+    it('hands a label over once another participant has more speech with it', () => {
+        // Rows already written keep what they were given: the result of an
+        // earlier call is never revisited.
+        const labels = new VoiceLabelNames();
+        const first = labels.nameFor('Priya Patel', 'spk_0', 0.8);
+        const later = labels.nameFor('Ana Ruiz', 'spk_0', 5);
+        assert.equal(first, 'Priya Patel (spk_0)');
+        assert.equal(later, 'Ana Ruiz (spk_0)');
+        assert.equal(labels.nameFor('Priya Patel', 'spk_0', 1), 'Priya Patel');
+    });
+
+    it('counts a span with no length, or an inverted one, as no speech', () => {
+        const labels = new VoiceLabelNames();
+        labels.nameFor('Sam Lee', 'spk_1', 1);
+        assert.equal(labels.nameFor('Ana Ruiz', 'spk_1', -5), 'Ana Ruiz');
+        assert.equal(labels.nameFor('Ana Ruiz', 'spk_1', 0), 'Ana Ruiz');
+        assert.equal(labels.ownerOf('spk_1'), 'Sam Lee');
+    });
+
+    it('keeps the voices behind one participant apart', () => {
+        const labels = new VoiceLabelNames();
+        assert.equal(labels.nameFor('Conference Room', 'spk_0', 3), 'Conference Room (spk_0)');
+        assert.equal(labels.nameFor('Conference Room', 'spk_1', 2), 'Conference Room (spk_1)');
     });
 });

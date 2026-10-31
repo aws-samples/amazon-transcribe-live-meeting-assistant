@@ -122,7 +122,7 @@ When the interruption is a correction or a new question, the assistant acknowled
 
 The meeting transcript keeps the participants and the assistant apart, on both transcription engines. On Amazon Transcribe the Virtual Participant sends one stream with two channels and channel identification on: the meeting audio on the first channel and the assistant's voice on the second. On the [MicroVM ASR engine](microvm-asr.md) it opens one session for each. Either way:
 
-- Participants' lines are on the `CALLER` channel, named from the meeting roster (never after the Virtual Participant, even while the meeting shows it speaking). Only these lines are checked for wake phrases and [stop requests](#asking-the-assistant-to-stop-talking), so the assistant cannot wake or stop itself.
+- Participants' lines are on the `CALLER` channel, named after the attendee the meeting showed speaking during each line (never after the Virtual Participant, even while the meeting shows it speaking); see [How Speaker Names Are Assigned](virtual-participant.md#how-speaker-names-are-assigned). Only these lines are checked for wake phrases and [stop requests](#asking-the-assistant-to-stop-talking), so the assistant cannot wake or stop itself.
 - The assistant's lines are on the `AGENT` channel, under the Virtual Participant's name, and are never [voice-separated](virtual-participant.md#transcription-engine).
 - A participant who speaks over the assistant, including to interrupt it, gets a line of their own instead of having their words merged into the assistant's.
 

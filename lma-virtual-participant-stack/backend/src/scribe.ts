@@ -39,12 +39,29 @@ import {
 
 const ASR_STOP_RELEASE_TIMEOUT_MS = 10_000;
 
-export function rosterLagSeconds(platform: string = details.invite.meetingPlatform): number {
+/**
+ * How late the platform reports a change of active speaker, on both engines.
+ *
+ * The Zoom SDK monitor polls every 3 seconds, so its changes arrive up to 3 s
+ * late (2 s allowed). The Zoom web client reports through a DOM observer as the
+ * change happens: measured on a three-person Zoom meeting, it showed the VP as
+ * active 0.08-0.36 s (median 0.16 s) after the VP's own audio started, and other
+ * participants' changes landed in the gap before their first transcribed word,
+ * so no allowance is made. Other platforms get 0.75 s.
+ * ASR_ROSTER_LAG_SECONDS overrides all of them.
+ */
+export function rosterLagSeconds(
+    platform: string = details.invite.meetingPlatform,
+    zoomMethod: string = details.zoomMethod,
+): number {
     const configured = Number.parseFloat(process.env.ASR_ROSTER_LAG_SECONDS ?? '');
     if (Number.isFinite(configured) && configured >= 0) {
         return configured;
     }
-    return platform.toUpperCase() === 'ZOOM' ? 2.0 : 0.75;
+    if (platform.toUpperCase() === 'ZOOM') {
+        return zoomMethod === 'sdk' ? 2.0 : 0;
+    }
+    return 0.75;
 }
 
 // Global current speaker (matching Python)
@@ -164,6 +181,11 @@ export class TranscriptionService {
     // Audio bytes the current Transcribe request has carried, silence included:
     // the request is billed for every second it was sent. Reset per request.
     private sessionAudioBytes = 0;
+    // Channels and meeting-timeline start of the current Transcribe request:
+    // with sessionAudioBytes, the position of the audio Transcribe has been
+    // sent, on the same clock as its item times plus the session offset.
+    private sessionChannels = 1;
+    private sessionClockBase = 0;
     private transcribeClient: TranscribeStreamingClient;
     // Live only while this meeting is transcribed by the on-demand MicroVM engine: one
     // session per audio source, like Stream Audio's two channels.
@@ -426,6 +448,9 @@ export class TranscriptionService {
         // segment builder to recover turns from the per-item speaker labels,
         // which this path has always requested and never read.
         kinesisStreamManager.setDiarization(switches.diarizeVirtualParticipant);
+        // Transcribe rows are named from the same roster timeline as the
+        // engine's, by each word's span on the meeting timeline.
+        kinesisStreamManager.setRosterLookup((start, end) => this.rosterNameFor(start, end));
         if (switches.diarizeVirtualParticipant) {
             console.log('[DIARIZATION] VP voice separation is on for this meeting');
         }
@@ -460,6 +485,8 @@ export class TranscriptionService {
             // accepted request for the audio it was sent (15-second minimum) and
             // nothing for one it refused.
             this.sessionAudioBytes = 0;
+            this.sessionChannels = stereo ? 2 : 1;
+            this.sessionClockBase = this.transcribeTimeOffsetSeconds;
             let requestAccepted = false;
             let requestMetered = false;
             const redactionApplied = Boolean(details.enableContentRedaction && details.transcribeLanguageCode === 'en-US');
@@ -885,7 +912,7 @@ export class TranscriptionService {
         }
     }
 
-    /** A meeting row: the roster name at the row's START, plus the voice id when per-voice labels are on. */
+    /** A meeting row: the attendee the platform showed for most of the row, plus the voice id when per-voice labels are on. */
     private handleMeetingAsrSegment(segment: AsrSegment): void {
         const roster = this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, rosterLagSeconds());
         const speaker = speakerNameFor(roster, segment.speaker);
@@ -1241,7 +1268,7 @@ export class TranscriptionService {
 
         const timestamp = Date.now();
         details.speakers.push({ name: speaker, timestamp });
-        this.rosterTimeline.record(this.meetingSession?.audioSeconds ?? this.engineTimeBase, speaker);
+        this.rosterTimeline.record(this.rosterClockSeconds(), speaker);
         
         const formattedTime = this.formatTimestamp(timestamp);
         console.log(`[${formattedTime}] Speaker changed to: ${speaker}`);
@@ -1369,6 +1396,32 @@ export class TranscriptionService {
             console.error('Failed to close in-progress transcript segment:', error);
             return 0;
         }
+    }
+
+    /**
+     * Where on the meeting timeline the audio being transcribed has reached, for
+     * stamping a participant change as the platform reports it: the engine's
+     * audio clock, or the audio sent to the current Transcribe request. Both are
+     * the clock rows are timed on, so a row can be named by who was active
+     * during it rather than when it was emitted.
+     */
+    private rosterClockSeconds(): number {
+        if (this.meetingSession) {
+            return this.meetingSession.audioSeconds;
+        }
+        const sent = pcmSeconds(this.sessionAudioBytes, this.sampleRate, this.sessionChannels);
+        return Math.max(this.engineTimeBase, this.sessionClockBase + sent);
+    }
+
+    /**
+     * The participant the platform showed for most of a span of the meeting
+     * timeline, or undefined before anyone other than the VP was shown. Each
+     * reported change is moved back by the platform's reporting lag.
+     */
+    rosterNameFor(startSec: number, endSec: number): string | undefined {
+        return this.rosterTimeline.isEmpty
+            ? undefined
+            : this.rosterTimeline.speakerFor(startSec, endSec, rosterLagSeconds());
     }
 
     /** Current position on the transcript timeline, in seconds, for whichever engine is running. */
@@ -1581,6 +1634,12 @@ export class TranscriptionService {
             // Advance the cumulative offset exactly ONCE, as this session ends,
             // so the next session's timestamps continue the meeting timeline
             // instead of restarting at 0. Runs on both clean close and (re)throw.
+            // It covers all the audio the session was sent, not just its last
+            // word: participant changes are stamped on that clock
+            // (rosterClockSeconds), and a next session starting earlier would
+            // be named from changes stamped after it.
+            const sentSeconds = pcmSeconds(this.sessionAudioBytes, this.sampleRate, this.sessionChannels);
+            observedMaxEndTime = Math.max(observedMaxEndTime, sessionOffsetSeconds + sentSeconds);
             if (observedMaxEndTime > this.transcribeTimeOffsetSeconds) {
                 this.transcribeTimeOffsetSeconds = observedMaxEndTime;
             }
