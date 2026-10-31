@@ -4241,7 +4241,7 @@ Resources:
   # from each nested stack: every identifier the widgets need is already a
   # nested stack Output, so the variable map of the list form of Fn::Sub is
   # enough. The widgets above the "Application metrics" band read metrics AWS
-  # services publish; the four metric widgets in that band read metrics LMA
+  # services publish; the five metric widgets in that band read metrics LMA
   # publishes itself, in the namespace ${AWS::StackName} -- which needs no
   # variable in the map below, since Fn::Sub resolves the pseudo-parameter
   # directly. The log tables after the band are Logs Insights queries, not
@@ -4431,7 +4431,7 @@ Resources:
               {
                 "type": "text", "x": 0, "y": 38, "width": 24, "height": 2,
                 "properties": {
-                  "markdown": "## Application metrics\n\nThe four widgets in this band are published by LMA itself, in the namespace **${AWS::StackName}**, as Embedded Metric Format records in the emitting component's own log group. (The error tables below them are Logs Insights queries, not metrics.) A series that is empty here when meetings are running means the component is not publishing rather than that nothing happened — check that `METRIC_NAMESPACE` is set on it. Virtual Participant, MicroVM ASR and Meeting Assistant metrics are not published yet."
+                  "markdown": "## Application metrics\n\nThe five widgets in this band are published by LMA itself, in the namespace **${AWS::StackName}**, as Embedded Metric Format records in the emitting component's own log group. (The error tables below them are Logs Insights queries, not metrics.) A series that is empty here when meetings are running means the component is not publishing rather than that nothing happened — check that `METRIC_NAMESPACE` is set on it. The Virtual Participant publishes only its Nova Sonic quota refusals so far; MicroVM ASR and Meeting Assistant metrics are not published yet."
                 }
               },
               {
@@ -4506,7 +4506,19 @@ Resources:
                 }
               },
               {
-                "type": "log", "x": 0, "y": 52, "width": 12, "height": 6,
+                "type": "metric", "x": 0, "y": 52, "width": 24, "height": 6,
+                "properties": {
+                  "title": "Nova Sonic streams refused for the account's concurrency quota (20 per region, shared by every voice assistant in the account) — each refusal degrades a voice assistant rather than failing it",
+                  "region": "${AWS::Region}",
+                  "stat": "Sum",
+                  "period": 300,
+                  "metrics": [
+                    ["${AWS::StackName}", "NovaSonicStreamsThrottled", {"label": "Refused stream opens"}]
+                  ]
+                }
+              },
+              {
+                "type": "log", "x": 0, "y": 58, "width": 12, "height": 6,
                 "properties": {
                   "title": "Errors — Call Event Processor",
                   "region": "${AWS::Region}",
@@ -4515,7 +4527,7 @@ Resources:
                 }
               },
               {
-                "type": "log", "x": 12, "y": 52, "width": 12, "height": 6,
+                "type": "log", "x": 12, "y": 58, "width": 12, "height": 6,
                 "properties": {
                   "title": "Errors — Virtual Participant launch state machine",
                   "region": "${AWS::Region}",
@@ -4524,7 +4536,7 @@ Resources:
                 }
               },
               {
-                "type": "log", "x": 0, "y": 58, "width": 12, "height": 6,
+                "type": "log", "x": 0, "y": 64, "width": 12, "height": 6,
                 "properties": {
                   "title": "Errors — Virtual Participant container",
                   "region": "${AWS::Region}",
@@ -4533,7 +4545,7 @@ Resources:
                 }
               },
               {
-                "type": "log", "x": 12, "y": 58, "width": 12, "height": 6,
+                "type": "log", "x": 12, "y": 64, "width": 12, "height": 6,
                 "properties": {
                   "title": "Errors — WebSocket transcriber container",
                   "region": "${AWS::Region}",

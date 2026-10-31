@@ -28,6 +28,7 @@ import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
 import { toSpokenText } from './spoken-text.js';
 import { pcmMs, RecentAudio, TRANSLATOR_DRAIN_MAX_MS } from './translator-turns.js';
+import { isNovaThrottle, noteNovaThrottle, throttleBackoffMs } from './nova-throttle.js';
 import {
   containsTriggerPhrase,
   isStopTranslatingRequest,
@@ -319,7 +320,36 @@ interface SessionData {
    *  Cleared at the next participant turn rather than with the audio, because
    *  the FINAL text of a turn arrives after its audio has ended. */
   dropReplyText?: boolean;
+  /** Whether this session has moved the meeting on to the next translator
+   *  session for its current answer. Per session rather than per stream so
+   *  that a hand-over refused for the concurrency quota can be undone. */
+  handedOver?: boolean;
+  /** The translator session this one took the meeting over from, while its
+   *  stream is still opening (see keepOutgoingTranslatorSession). */
+  handoverFrom?: SessionData | null;
+  /** Settles once Amazon Bedrock has accepted or refused this session's stream. */
+  opened?: Promise<SessionOpenOutcome>;
+  resolveOpened?: (outcome: SessionOpenOutcome) => void;
 }
+
+/** How opening a session's stream ended. */
+type SessionOpenOutcome = 'open' | 'throttled' | 'failed';
+
+/** Tries in all, on a wake phrase, to open the assistant's session while
+ *  Nova Sonic's concurrency quota refuses it, and the backoff between them.
+ *  Four tries take at most about 7.5 seconds before the assistant gives up and
+ *  stays silent. */
+export const ASSISTANT_OPEN_ATTEMPTS = 4;
+export const ASSISTANT_OPEN_BACKOFF = { baseMs: 1000, capMs: 4000 };
+/** How long a wake-phrase activation waits to hear whether its stream opened
+ *  before carrying on as it always has. Measured refusals arrive in about
+ *  300 ms. */
+export const ASSISTANT_OPEN_WAIT_MS = 5000;
+/** Backoff before a translator tries handing over again after a refused
+ *  hand-over, and before an always-listening session is rebuilt after a
+ *  refused open. */
+export const TRANSLATOR_HANDOVER_BACKOFF = { baseMs: 2000, capMs: 60000 };
+export const SESSION_RECOVERY_BACKOFF = { baseMs: 2000, capMs: 30000 };
 
 interface ConversationTurn {
   role: 'USER' | 'ASSISTANT';
@@ -554,6 +584,18 @@ export class NovaAgent implements VoiceAssistantProvider {
   private recentMeetingAudio = new RecentAudio();
   /** Translated turns so far, for the per-turn log line. */
   private translatorTurn: number = 0;
+  /** No translator hand-over is attempted before this time, after one was
+   *  refused for Nova Sonic's concurrency quota. */
+  private translatorHandoverBlockedUntil: number = 0;
+  /** Consecutive hand-overs refused for the quota; reset by one that opens. */
+  private translatorHandoverThrottles: number = 0;
+  /** Consecutive session opens refused for the quota; reset by one that opens. */
+  private sessionOpenThrottles: number = 0;
+  /** A wake-phrase activation still opening its session, so a second wake
+   *  phrase meanwhile does not open another. */
+  private activationOpening: Promise<boolean> | null = null;
+  /** A field so that tests can shorten it. */
+  private assistantOpenBackoff: { baseMs: number; capMs: number } = ASSISTANT_OPEN_BACKOFF;
 
   // Changing mode by voice (voice-mode-switch.ts).
   /** When a participant's turn last addressed the assistant by wake phrase. */
@@ -754,7 +796,9 @@ export class NovaAgent implements VoiceAssistantProvider {
         // assistant something, and a render that fails costs the fallback
         // acknowledgement and nothing else.
         const client = this.bedrockClient;
-        renderToolAckClip(client, this.modelId, this.voiceId)
+        renderToolAckClip(client, this.modelId, this.voiceId, undefined, {
+          shouldContinue: () => !this.stopped,
+        })
           .then((clip) => {
             this.toolAckClip = clip;
           })
@@ -825,7 +869,13 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private newSessionData(): SessionData {
     const now = Date.now();
+    let resolveOpened: (outcome: SessionOpenOutcome) => void = () => {};
+    const opened = new Promise<SessionOpenOutcome>((resolve) => {
+      resolveOpened = resolve;
+    });
     return {
+      opened,
+      resolveOpened,
       id: randomUUID(),
       seq: ++this.sessionSeq,
       queue: [],
@@ -854,7 +904,8 @@ export class NovaAgent implements VoiceAssistantProvider {
       && this._translatorState === 'UNMUTED'
       && !this.isRefreshing
       && !this.stopped
-      && !!this.bedrockClient;
+      && !!this.bedrockClient
+      && Date.now() >= this.translatorHandoverBlockedUntil;
   }
 
   /**
@@ -879,6 +930,7 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.drainingSessions.add(outgoing);
 
     const next = this.newSessionData();
+    next.handoverFrom = outgoing;
     this.session = next;
     this.sessionId = next.id!;
     this.lastUserTurnText = '';
@@ -1829,7 +1881,7 @@ export class NovaAgent implements VoiceAssistantProvider {
    * whose meeting has already ended. Only one is held: a later recovery
    * supersedes an earlier one, since both would build the same session.
    */
-  private scheduleSessionCreateRetry(attempt: () => void): void {
+  private scheduleSessionCreateRetry(attempt: () => void, delayMs: number = 1000): void {
     if (this.sessionRecoveryTimer) {
       clearTimeout(this.sessionRecoveryTimer);
     }
@@ -1840,7 +1892,7 @@ export class NovaAgent implements VoiceAssistantProvider {
         return;
       }
       attempt();
-    }, 1000);
+    }, delayMs);
   }
 
   private addEventToQueue(event: any): void {
@@ -1890,8 +1942,101 @@ export class NovaAgent implements VoiceAssistantProvider {
     }
   }
 
+  /** A session's stream has been accepted: the refusal streaks end. */
+  private noteSessionOpened(session: SessionData): void {
+    session.resolveOpened?.('open');
+    this.sessionOpenThrottles = 0;
+    if (session.handoverFrom) {
+      session.handoverFrom = null;
+      this.translatorHandoverThrottles = 0;
+    }
+  }
+
+  /**
+   * Undo a translator hand-over whose new session was refused for Nova Sonic's
+   * concurrency quota, so the meeting stays on the session it was leaving: one
+   * stream rather than none.
+   *
+   * That session stops draining and becomes the current one again, is sent the
+   * meeting audio the refused session was sent in its place, and hands over
+   * again only after the next participant turn, and not before a backoff that
+   * grows while the refusals continue. Until then it translates on its own,
+   * as a translator did before it had a session per turn. Returns false when
+   * there is no such session to keep — it has already finished its answer, or
+   * the agent has moved on — and the caller recovers as for any failed session.
+   */
+  private keepOutgoingTranslatorSession(failed: SessionData): boolean {
+    const outgoing = failed.handoverFrom;
+    failed.handoverFrom = null;
+    if (
+      !outgoing
+      || failed !== this.session
+      || !this.drainingSessions.has(outgoing)
+      || !outgoing.isActive
+      || this.stopped
+    ) {
+      return false;
+    }
+
+    this.drainingSessions.delete(outgoing);
+    if (outgoing.drainTimer) {
+      clearTimeout(outgoing.drainTimer);
+      outgoing.drainTimer = null;
+    }
+    outgoing.draining = false;
+    outgoing.drainStartedAt = undefined;
+    outgoing.handedOver = false;
+    outgoing.lastUserTurnEndAt = undefined;
+
+    failed.isActive = false;
+    failed.signal?.();
+    this.heldPlayback.delete(failed);
+
+    this.session = outgoing;
+    this.sessionId = outgoing.id!;
+    // It heard silence while the refused session was being sent the meeting.
+    for (const chunk of this.recentMeetingAudio.since(failed.sessionStartTime)) {
+      this.queueAudio(outgoing, chunk);
+    }
+
+    const delay = throttleBackoffMs(this.translatorHandoverThrottles, TRANSLATOR_HANDOVER_BACKOFF);
+    this.translatorHandoverThrottles += 1;
+    this.translatorHandoverBlockedUntil = Date.now() + delay;
+    console.warn(
+      `[translator-turn] action=kept-session reason=throttled session=${outgoing.id} refused=${failed.id}`
+      + ` next_handover_after_ms=${delay} streak=${this.translatorHandoverThrottles}`,
+    );
+    this.releaseHeldPlayback();
+    return true;
+  }
+
+  /** Rebuild an always-listening session whose open was refused for the quota,
+   *  after a backoff. Superseded if anything replaces the session meanwhile. */
+  private scheduleThrottledRecovery(failed: SessionData): void {
+    const delay = throttleBackoffMs(this.sessionOpenThrottles, SESSION_RECOVERY_BACKOFF);
+    this.sessionOpenThrottles += 1;
+    console.warn(
+      `[nova-throttle] action=retry-session in_ms=${delay} streak=${this.sessionOpenThrottles}`,
+    );
+    const attempt = (): void => {
+      if (this.session !== failed || this.streamingActive) return;
+      if (this.isRefreshing) {
+        this.scheduleSessionCreateRetry(attempt, 1000);
+        return;
+      }
+      this.refreshSession().catch((error) => {
+        console.error('Error rebuilding the session after a refused open:', error);
+      });
+    };
+    this.scheduleSessionCreateRetry(attempt, delay);
+  }
+
   private async initiateBidirectionalStreaming(session: SessionData | null = this.session): Promise<void> {
-    if (!this.bedrockClient || !session) return;
+    if (!session) return;
+    if (!this.bedrockClient) {
+      session.resolveOpened?.('failed');
+      return;
+    }
 
     try {
       console.log('Starting bidirectional stream...');
@@ -1903,6 +2048,7 @@ export class NovaAgent implements VoiceAssistantProvider {
 
       const response = await this.bedrockClient.send(command);
       this.meteredUsage().noteSession();
+      this.noteSessionOpened(session);
 
       console.log('Stream established, processing responses...');
 
@@ -1929,7 +2075,23 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
 
     } catch (error) {
-      console.error('Error in bidirectional streaming:', error);
+      const throttled = isNovaThrottle(error);
+      session.resolveOpened?.(throttled ? 'throttled' : 'failed');
+      if (throttled) {
+        // A refusal is expected under load, and handled below: logged on one
+        // line rather than with a stack trace.
+        noteNovaThrottle(
+          session.handoverFrom ? 'translator-turn' : 'assistant-session',
+          `session=${session.id}`,
+        );
+      } else {
+        console.error('Error in bidirectional streaming:', error);
+      }
+      // A translator's next session refused for the quota: the session it was
+      // taking over from carries on instead.
+      if (throttled && this.keepOutgoingTranslatorSession(session)) {
+        return;
+      }
       // An outgoing translator session failing takes nothing else with it.
       if (session !== this.session) {
         this.forgetDrainingSession(session);
@@ -1937,7 +2099,17 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
       this._isActive = false;
       this.streamingActive = false;
-      
+
+      // An always-listening session refused for the quota is rebuilt after a
+      // backoff that grows while the refusals continue, instead of a second
+      // from now. A wake-phrase session is retried by activate() itself.
+      if (throttled) {
+        if (this.activationMode === 'always_active') {
+          this.scheduleThrottledRecovery(session);
+        }
+        return;
+      }
+
       // Trigger automatic refresh if in always_active mode
       if (this.activationMode === 'always_active' && !this.isRefreshing) {
         console.log('⚠️  Stream error detected - triggering automatic refresh');
@@ -1952,8 +2124,6 @@ export class NovaAgent implements VoiceAssistantProvider {
 
   private async processResponseStream(response: any, session: SessionData | null = this.session): Promise<void> {
     const textDecoder = new TextDecoder();
-    /** Whether this session has moved the meeting on to the next translator session. */
-    let handedOver = false;
     let toolUseContent: any = null;
     let toolUseId: string = '';
     let toolName: string = '';
@@ -2017,11 +2187,11 @@ export class NovaAgent implements VoiceAssistantProvider {
               // Translator mode: the session has started answering a
               // participant's turn, so the meeting moves on to a new session.
               if (
-                !handedOver
+                !session.handedOver
                 && jsonResponse.event.contentStart.role === 'ASSISTANT'
                 && this.shouldStartNextTranslatorSession(session)
               ) {
-                handedOver = true;
+                session.handedOver = true;
                 this.startNextTranslatorSession(session);
               }
 
@@ -3166,26 +3336,33 @@ export class NovaAgent implements VoiceAssistantProvider {
     // Activation is by wake phrase.
     this.lastAddressedAt = Date.now();
     
+    // A wake phrase heard while an earlier one is still opening the session
+    // is the same request: that activation finishes the job.
+    if (this.activationOpening) {
+      console.log('⏳ Activation already opening its session - not opening another');
+      return;
+    }
+
     // Create session if not already active (may already be pre-connected)
     if (!this._isActive) {
       if (this._preConnecting && this._preConnectPromise) {
         console.log('⏳ Waiting for in-flight pre-connect to complete...');
         await this._preConnectPromise;
       }
-      if (!this._isActive) {
-        console.log('🔌 Creating Nova session...');
-        try {
-          await this.createSession();
-          console.log('✓ Session created');
-        } catch (error) {
-          console.error('❌ Failed to create session:', error);
-          return; // Don't activate if session creation fails
-        }
-      }
-    } else {
-      console.log('✓ Session already active (pre-connected)');
     }
-    
+    // A pre-connected session may itself have been refused for the quota, or
+    // not have heard back yet; either way it is settled before activating.
+    this.activationOpening = this.openAssistantSession();
+    let opened: boolean;
+    try {
+      opened = await this.activationOpening;
+    } finally {
+      this.activationOpening = null;
+    }
+    if (!opened || this.stopped) {
+      return; // Don't activate if no session could be opened
+    }
+
     this._isActivated = true;
 
     // An activation is a decision to listen, so a stop request still resolving
@@ -3237,6 +3414,84 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.activationHoldReason = null;
     this.noteEngagement();
     this.scheduleActivationCheck(this.activationWindowMs);
+  }
+
+  /**
+   * Make sure a wake-phrase activation has a session whose stream Amazon
+   * Bedrock accepted, retrying with backoff while it is refused for Nova
+   * Sonic's concurrency quota.
+   *
+   * Resolves false only when every try was refused. In that case the
+   * assistant says nothing and is not activated — the participant hears no
+   * answer rather than waiting on an assistant that will never reply — and the
+   * next wake phrase tries again. Otherwise it resolves true, including when
+   * Bedrock has not answered within ASSISTANT_OPEN_WAIT_MS or the stream failed
+   * for some other reason, both of which are handled as they were before.
+   */
+  private async openAssistantSession(): Promise<boolean> {
+    for (let attempt = 0; attempt < ASSISTANT_OPEN_ATTEMPTS; attempt++) {
+      if (this.stopped) return false;
+      if (!this._isActive) {
+        console.log('🔌 Creating Nova session...');
+        try {
+          await this.createSession();
+          console.log('✓ Session created');
+        } catch (error) {
+          console.error('❌ Failed to create session:', error);
+          return false;
+        }
+      } else if (attempt === 0) {
+        console.log('✓ Session already active (pre-connected)');
+      }
+      const session = this.session as SessionData | null;
+      // Nothing to wait on: as before, an active agent or a created session
+      // is taken as ready.
+      if (!session) return true;
+      const outcome = await this.waitForSessionOpen(session);
+      // Any other failure is not the quota and is not retried here: the
+      // activation goes ahead as it always has, and the stream's own error
+      // handling deals with it.
+      if (outcome !== 'throttled') return true;
+      this.discardSession(session);
+      if (attempt + 1 >= ASSISTANT_OPEN_ATTEMPTS) break;
+      const delay = throttleBackoffMs(attempt, this.assistantOpenBackoff);
+      console.warn(
+        `[nova-throttle] action=retry-activation attempt=${attempt + 1}/${ASSISTANT_OPEN_ATTEMPTS} retry_in_ms=${delay}`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+    console.warn(
+      `[nova-throttle] action=gave-up-activation attempts=${ASSISTANT_OPEN_ATTEMPTS}`
+      + ' - the assistant stays silent for this wake phrase; the next one tries again',
+    );
+    return false;
+  }
+
+  /** How `session`'s stream open ended, or 'pending' if Bedrock has not
+   *  answered within ASSISTANT_OPEN_WAIT_MS. */
+  private async waitForSessionOpen(session: SessionData): Promise<SessionOpenOutcome | 'pending'> {
+    if (!session.opened) return 'open';
+    let timer: NodeJS.Timeout | null = null;
+    const timeout = new Promise<'pending'>((resolve) => {
+      timer = setTimeout(() => resolve('pending'), ASSISTANT_OPEN_WAIT_MS);
+    });
+    try {
+      return await Promise.race([session.opened, timeout]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /** Forget a session whose stream was never opened. */
+  private discardSession(session: SessionData): void {
+    session.isActive = false;
+    session.signal?.();
+    if (this.session === session) {
+      this.session = null;
+      this.sessionId = null;
+      this._isActive = false;
+      this.streamingActive = false;
+    }
   }
 
   private scheduleActivationCheck(delayMs: number): void {
@@ -4779,7 +5034,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     const client = this.bedrockClient;
     if (!client || this.stoppedTranslatingClip || this.stoppedTranslatingClipRendering) return;
     this.stoppedTranslatingClipRendering = true;
-    renderToolAckClip(client, this.modelId, this.voiceId, STOPPED_TRANSLATING_PHRASE)
+    renderToolAckClip(client, this.modelId, this.voiceId, STOPPED_TRANSLATING_PHRASE, {
+      shouldContinue: () => !this.stopped,
+    })
       .then((clip) => {
         this.stoppedTranslatingClip = clip;
       })

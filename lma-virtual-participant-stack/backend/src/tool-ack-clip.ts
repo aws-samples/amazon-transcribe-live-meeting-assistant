@@ -22,6 +22,7 @@ import {
   InvokeModelWithBidirectionalStreamInput,
 } from '@aws-sdk/client-bedrock-runtime';
 import { randomUUID } from 'crypto';
+import { isNovaThrottle, noteNovaThrottle, throttleBackoffMs } from './nova-throttle.js';
 
 /** What the fallback says. One short sentence that is true whatever was asked. */
 export const TOOL_ACK_PHRASE = 'One moment, let me look that up.';
@@ -47,19 +48,65 @@ export function pcmDurationMs(pcm: Buffer): number {
   return Math.round(pcm.length / BYTES_PER_MS);
 }
 
+/** How many times a render refused for Nova Sonic's concurrency quota is tried
+ *  in all, and the backoff between tries. Generous, because nothing waits on
+ *  the clip: it runs in the background and is needed only once somebody asks
+ *  the assistant something. Four tries span roughly 20 to 35 seconds. */
+export const TOOL_ACK_RENDER_ATTEMPTS = 4;
+export const TOOL_ACK_RENDER_BACKOFF = { baseMs: 5000, capMs: 30000 };
+
+export interface RenderOptions {
+  /** Tries in all when the render is refused for the concurrency quota. */
+  attempts?: number;
+  /** Checked before each retry; a render for an agent that has stopped is
+   *  abandoned rather than opening another stream. */
+  shouldContinue?: () => boolean;
+  /** Stand-ins for tests. */
+  sleep?: (ms: number) => Promise<void>;
+  random?: () => number;
+}
+
 /**
  * Ask Nova Sonic to speak `phrase` in `voiceId` and return the audio as PCM.
  *
  * Resolves to null on any failure, including a clip longer than
  * TOOL_ACK_MAX_CLIP_MS — the caller then has no fallback clip, which costs the
- * acknowledgement and nothing else.
+ * acknowledgement and nothing else. A render refused because the account's
+ * Nova Sonic streams are all in use is tried again later, with backoff, up to
+ * TOOL_ACK_RENDER_ATTEMPTS times, and then skipped.
  */
 export async function renderToolAckClip(
   client: BedrockRuntimeClient,
   modelId: string,
   voiceId: string,
   phrase: string = TOOL_ACK_PHRASE,
+  options: RenderOptions = {},
 ): Promise<Buffer | null> {
+  const attempts = Math.max(1, options.attempts ?? TOOL_ACK_RENDER_ATTEMPTS);
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const result = await renderOnce(client, modelId, voiceId, phrase);
+    if (!result.throttled) return result.clip;
+    noteNovaThrottle('tool-ack-clip', `attempt=${attempt + 1}/${attempts}`);
+    if (attempt + 1 >= attempts) break;
+    const delay = throttleBackoffMs(attempt, { ...TOOL_ACK_RENDER_BACKOFF, random: options.random });
+    console.warn(`[tool-ack] action=render-throttled attempt=${attempt + 1} retry_in_ms=${delay}`);
+    await sleep(delay);
+    if (options.shouldContinue && !options.shouldContinue()) {
+      console.warn('[tool-ack] action=render-abandoned reason=agent-stopped');
+      return null;
+    }
+  }
+  console.warn(`[tool-ack] action=render-skipped reason=throttled attempts=${attempts}`);
+  return null;
+}
+
+async function renderOnce(
+  client: BedrockRuntimeClient,
+  modelId: string,
+  voiceId: string,
+  phrase: string,
+): Promise<{ clip: Buffer | null; throttled: boolean }> {
   const promptName = randomUUID();
   const systemId = randomUUID();
   const textId = randomUUID();
@@ -165,8 +212,9 @@ export async function renderToolAckClip(
       }
     }
   } catch (error) {
+    if (isNovaThrottle(error)) return { clip: null, throttled: true };
     console.warn('[tool-ack] action=render-failed', error instanceof Error ? error.message : String(error));
-    return null;
+    return { clip: null, throttled: false };
   } finally {
     done = true;
   }
@@ -178,11 +226,11 @@ export async function renderToolAckClip(
       `[tool-ack] action=render-discarded audio_ms=${clipMs} render_ms=${Date.now() - startedAt}`
       + ` voice=${voiceId}`,
     );
-    return null;
+    return { clip: null, throttled: false };
   }
   console.log(
     `[tool-ack] action=rendered audio_ms=${clipMs} render_ms=${Date.now() - startedAt} voice=${voiceId}`
     + (spoken ? ` text="${spoken.trim()}"` : ''),
   );
-  return clip;
+  return { clip, throttled: false };
 }

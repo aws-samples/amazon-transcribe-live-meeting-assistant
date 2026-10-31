@@ -2758,6 +2758,15 @@ Resources:
               Value: !Ref ExitMessage
             - Name: GRAPHQL_ENDPOINT
               Value: !Ref GraphQLEndpoint
+            # The CloudWatch namespace for the application metrics the VP
+            # publishes: the parent stack's name, which LMAStackName is, so the
+            # dashboard in lma-main.yaml reads them. The MicroVM launch type
+            # gets it from here too (the launcher copies this environment).
+            # No cloudwatch:PutMetricData grant accompanies this: the records
+            # are Embedded Metric Format on stdout, which CloudWatch Logs turns
+            # into metrics with only the log-writing permission already held.
+            - Name: METRIC_NAMESPACE
+              Value: !Ref LMAStackName
             - Name: APPSYNC_EVENTS_URL
               Value: !Ref AppSyncEventApiUrl
             - Name: VP_TASK_REGISTRY_TABLE_NAME

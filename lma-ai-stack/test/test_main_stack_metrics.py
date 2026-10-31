@@ -29,9 +29,10 @@ inside the list form of `Fn::Sub`, so a stray comma or an unbalanced brace is a
 syntactically valid template that fails at `CREATE` time, 35-40 minutes into a
 deploy.
 
-The fourth checks that the TypeScript half of the catalogue agrees with the
-Python half. The transcriber is not a Lambda and cannot import the Python
-module, so the three names it emits are written in both places.
+The fourth checks that the TypeScript halves of the catalogue agree with the
+Python half. The transcriber and the Virtual Participant are not Lambdas and
+cannot import the Python module, so the names each emits are written in both
+places.
 
 Run via `make test-ai-stack` or pytest directly.
 """
@@ -62,6 +63,9 @@ TRANSCRIBER_CATALOGUE_TS = (
     / "metrics"
     / "catalogue.ts"
 )
+VP_TEMPLATE = REPO_ROOT / "lma-virtual-participant-stack" / "template.yaml"
+VP_SRC = REPO_ROOT / "lma-virtual-participant-stack" / "backend" / "src"
+VP_CATALOGUE_TS = VP_SRC / "metrics-catalogue.ts"
 MONITORING_DOC = REPO_ROOT / "docs" / "monitoring.md"
 
 # The catalogue is the single source of truth for the metric names, and it
@@ -188,6 +192,9 @@ EMITTERS = {
         TRANSCRIBER_TEMPLATE,
         catalogue.Component.WEBSOCKET_TRANSCRIBER,
     ),
+    # Also the MicroVM launch type's environment: its launcher copies this task
+    # definition's container environment into each MicroVM.
+    "TaskDefinition": (VP_TEMPLATE, catalogue.Component.VIRTUAL_PARTICIPANT),
 }
 
 
@@ -274,7 +281,16 @@ def test_no_emitter_has_two_disagreeing_names_for_one_namespace(logical_id: str)
     )
 
 
-def test_the_transcriber_is_given_the_parent_stack_name():
+@pytest.mark.parametrize(
+    ("template_path", "parent_logical_id"),
+    [
+        (TRANSCRIBER_TEMPLATE, "WEBSOCKETTRANSCRIBERSTACK"),
+        (VP_TEMPLATE, "VIRTUALPARTICIPANTSTACK"),
+    ],
+)
+def test_each_typescript_emitter_is_given_the_parent_stack_name(
+    template_path: Path, parent_logical_id: str
+):
     """The parameter the transcriber's namespace resolves through.
 
     It is the one nested stack the parent did not already pass its own name to,
@@ -283,9 +299,9 @@ def test_the_transcriber_is_given_the_parent_stack_name():
     with no default, fails the deploy, which is the better of the two outcomes
     but still worth pinning here.
     """
-    child = _load(TRANSCRIBER_TEMPLATE)
+    child = _load(template_path)
     assert "LMAStackName" in child["Parameters"], (
-        "the transcriber template no longer declares LMAStackName, which its "
+        f"{template_path.name} no longer declares LMAStackName, which its "
         "METRIC_NAMESPACE resolves through"
     )
     assert "Default" not in child["Parameters"]["LMAStackName"], (
@@ -293,14 +309,16 @@ def test_the_transcriber_is_given_the_parent_stack_name():
         "pass it and have the task publish to a plausible-looking wrong namespace"
     )
     parent = _load(MAIN_TEMPLATE)
-    passed = parent["Resources"]["WEBSOCKETTRANSCRIBERSTACK"]["Properties"]["Parameters"]
+    passed = parent["Resources"][parent_logical_id]["Properties"]["Parameters"]
     assert passed.get("LMAStackName") == {"Ref": "AWS::StackName"}, (
-        "lma-main.yaml must pass its own name to the transcriber stack as LMAStackName; "
+        f"lma-main.yaml must pass its own name to {parent_logical_id} as LMAStackName; "
         f"it passes {passed.get('LMAStackName')!r}"
     )
 
 
-@pytest.mark.parametrize("template_path", [AI_TEMPLATE, TRANSCRIBER_TEMPLATE, MAIN_TEMPLATE])
+@pytest.mark.parametrize(
+    "template_path", [AI_TEMPLATE, TRANSCRIBER_TEMPLATE, VP_TEMPLATE, MAIN_TEMPLATE]
+)
 def test_a_put_metric_data_grant_is_scoped_and_accompanied_by_the_variable(template_path: Path):
     """A `PutMetricData` grant must be scoped, and must come with the variable.
 
@@ -530,6 +548,31 @@ REQUIRED_CALL_SITES = {
     # is why the first segment of a meeting is recognised there and not twice.
     "noteTranscriptSegment": TRANSCRIBER_APP / "calleventdata" / "transcribe.ts",
 }
+
+
+# The Virtual Participant counts each refused Nova Sonic stream in one helper,
+# and each place that opens a stream must still call it.
+VP_REQUIRED_CALL_SITES = {
+    "METRICS.count(NOVA_SONIC_STREAMS_THROTTLED)": VP_SRC / "nova-throttle.ts",
+    "noteNovaThrottle('tool-ack-clip'": VP_SRC / "tool-ack-clip.ts",
+    "noteNovaThrottle(": VP_SRC / "nova-agent.ts",
+}
+
+
+@pytest.mark.parametrize("call", sorted(VP_REQUIRED_CALL_SITES))
+def test_the_virtual_participant_still_counts_each_refused_stream(call: str):
+    """The same check as the transcriber's, for the VP's one metric."""
+    source_file = VP_REQUIRED_CALL_SITES[call]
+    assert source_file.is_file(), f"{source_file} does not exist"
+    uncommented = "\n".join(
+        line
+        for line in source_file.read_text().splitlines()
+        if not line.lstrip().startswith(("//", "*"))
+    )
+    assert call in uncommented, (
+        f"{source_file.name} no longer calls {call}, so a refused Nova Sonic stream there "
+        f"is not counted and nothing else reports that"
+    )
 
 
 @pytest.mark.parametrize("helper", sorted(REQUIRED_CALL_SITES))
@@ -782,14 +825,24 @@ def test_every_alarm_threshold_annotation_names_an_alarm_that_exists(
 # ── the two halves of the catalogue ────────────────────────────────────────
 
 
-def test_the_typescript_catalogue_lists_exactly_what_the_transcriber_publishes():
-    """The transcriber cannot import the Python catalogue, so it has a copy.
+TYPESCRIPT_CATALOGUES = {
+    catalogue.Component.WEBSOCKET_TRANSCRIBER: TRANSCRIBER_CATALOGUE_TS,
+    catalogue.Component.VIRTUAL_PARTICIPANT: VP_CATALOGUE_TS,
+}
+
+
+@pytest.mark.parametrize("component", sorted(TYPESCRIPT_CATALOGUES, key=lambda c: c.value))
+def test_the_typescript_catalogue_lists_exactly_what_its_component_publishes(
+    component: catalogue.Component,
+):
+    """The transcriber and the VP cannot import the Python catalogue, so each has a copy.
 
     A name added on one side only produces either a metric the gates above
     cannot see or an emitter refusing a name the dashboard reads, and both look
     like a working deployment.
     """
-    source = TRANSCRIBER_CATALOGUE_TS.read_text()
+    catalogue_ts = TYPESCRIPT_CATALOGUES[component]
+    source = catalogue_ts.read_text()
     # The names as the TypeScript catalogue's entries declare them, which is the
     # list the emitter actually consults -- a constant declared and left out of
     # CATALOGUE would be refused at runtime.
@@ -801,22 +854,23 @@ def test_the_typescript_catalogue_lists_exactly_what_the_transcriber_publishes()
         assert constant in constants, f"CATALOGUE references {constant}, which is not declared"
         resolved[constants[constant]] = unit
 
-    expected = {
-        name: catalogue.BY_NAME[name].unit
-        for name in catalogue.names_for(catalogue.Component.WEBSOCKET_TRANSCRIBER)
-    }
+    expected = {name: catalogue.BY_NAME[name].unit for name in catalogue.names_for(component)}
     assert resolved == expected, (
-        f"src/metrics/catalogue.ts and metrics_utils/catalogue.py disagree about what the "
-        f"transcriber publishes: TypeScript has {resolved}, Python expects {expected}"
+        f"{catalogue_ts.name} and metrics_utils/catalogue.py disagree about what the "
+        f"{component.value} publishes: TypeScript has {resolved}, Python expects {expected}"
     )
 
 
-def test_the_typescript_catalogue_uses_the_same_environment_variable():
-    source = TRANSCRIBER_CATALOGUE_TS.read_text()
+@pytest.mark.parametrize("component", sorted(TYPESCRIPT_CATALOGUES, key=lambda c: c.value))
+def test_the_typescript_catalogue_uses_the_same_environment_variable(
+    component: catalogue.Component,
+):
+    catalogue_ts = TYPESCRIPT_CATALOGUES[component]
+    source = catalogue_ts.read_text()
     match = re.search(r"METRIC_NAMESPACE_ENV_VAR = '(\w+)'", source)
-    assert match, "src/metrics/catalogue.ts no longer declares METRIC_NAMESPACE_ENV_VAR"
+    assert match, f"{catalogue_ts.name} no longer declares METRIC_NAMESPACE_ENV_VAR"
     assert match.group(1) == catalogue.NAMESPACE_ENV_VAR, (
-        f"the transcriber reads {match.group(1)!r} but the templates set "
+        f"the {component.value} reads {match.group(1)!r} but the templates set "
         f"{catalogue.NAMESPACE_ENV_VAR!r}"
     )
 
