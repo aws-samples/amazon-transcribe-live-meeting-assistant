@@ -82,10 +82,15 @@ test('a translator is addressed by a wake phrase or by the name in its pause phr
     }
 });
 
-test('stopping translation needs the name and nothing else asked for', () => {
-    const names = translatorAddressees(['hey alex'], ['alex mute']);
-    for (const text of ['stop translating', 'Alex, stop translating this part later',
-        'I asked Alex to stop translating yesterday', 'alexander stop translating', '']) {
+test('stopping translation needs no name, but nothing else may be asked for', () => {
+    const names = translatorAddressees(['hey alex'], ['translator mute', 'alex mute']);
+    for (const text of ['stop translating', 'Stop translating.', 'Stop translation, please.', 'translator off',
+        'Exit translator mode.', 'Hey Alex, turn off the translator', 'end the translation', 'OK, stop translating now']) {
+        assert.equal(isStopTranslatingRequest(text, names), true, text);
+    }
+    for (const text of ['Alex, stop translating this part later', 'I asked Alex to stop translating yesterday',
+        'we should stop translating the slides after lunch', 'did you stop translating', 'alexander stop translating',
+        'translator mute', 'stop', '']) {
         assert.equal(isStopTranslatingRequest(text, names), false, text);
     }
 });
@@ -364,4 +369,150 @@ test('nova: other speech in translator mode is translated as usual', async () =>
     await stream(a, [...userTurn('alex said we should stop translating the slides'), ...spoken()]);
     assert.equal(requests.length, 0);
     assert.deepEqual(played.map((b) => [...b]), [[1, 2]]);
+});
+
+// ---------------------------------------------------------------------------
+// Leaving translator mode without the name, and the paused translator
+// ---------------------------------------------------------------------------
+
+const muteTool = () => [
+    chunk({ toolUse: { toolName: 'mute', toolUseId: 'mt-1', content: '{}' } }),
+    chunk({ contentEnd: { type: 'TOOL' } }),
+];
+
+test('nova: "stop translating" without the name leaves translator mode', async () => {
+    const { a, requests } = nova('translator');
+    await stream(a, userTurn('stop translating'));
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].route, 'voice');
+    assert.equal(requests[0].meetingMode, 'normal');
+    assert.ok(logs.some((l) => l === '[voice-mode] mode=assistant action=stop-translating route=nova'));
+});
+
+test('nova: the mute call that follows "stop translating" leaves translator mode rather than pausing', async () => {
+    const { a, requests } = nova('translator');
+    const tones: string[] = [];
+    a.playConfirmationTone = (kind: string) => { tones.push(kind); };
+    // Nova's live order: its transcript of the turn, then the mute call.
+    await stream(a, [...userTurn('stop translating'), ...muteTool()]);
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].meetingMode, 'normal');
+    assert.equal(a._translatorState, 'UNMUTED', 'not paused');
+    assert.ok(logs.some((l) => l === '[voice-mode] action=mute-tool-ignored why=stop-translating'));
+    // The only tone is the confirmation of leaving (no rendered clip here).
+    assert.deepEqual(tones, ['mute']);
+});
+
+test('nova: a mute call just after the participants\' transcript heard "stop translating" is taken as it', async () => {
+    const { a, requests } = nova('translator');
+    // Nova's own transcript of the turn was wrong; Amazon Transcribe's was not,
+    // and the switch it started has already been made.
+    a.leaveTranslatorRequestedAt = Date.now();
+    await stream(a, [...userTurn('stop translate in'), ...muteTool()]);
+    assert.equal(a._translatorState, 'UNMUTED');
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].meetingMode, 'normal');
+    assert.ok(logs.some((l) => l === '[voice-mode] action=mute-tool-taken-as-stop-translating'));
+});
+
+test('nova: a sentence that contains "stop translating" is translated, on either transcript', async () => {
+    const { a, requests } = nova('translator');
+    a.startNextTranslatorSession = () => {};
+    a.noteParticipantUtterance('I think we should stop translating the slides after lunch.');
+    await stream(a, userTurn('i think we should stop translating the slides after lunch'));
+    assert.equal(requests.length, 0);
+});
+
+test('nova: "Stop translating." on the participants\' transcript leaves translator mode, once', async () => {
+    const { a, requests } = nova('translator');
+    a.noteParticipantUtterance('Stop translating.');
+    // Nova's transcript of the same turn arrives while the switch is under way.
+    await stream(a, userTurn('stop translating'));
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].meetingMode, 'normal');
+    assert.ok(logs.some((l) => l === '[voice-mode] mode=assistant action=stop-translating route=transcript'));
+});
+
+test('nova: a wake phrase while the translator is paused leaves for assistant mode and passes the question on', async () => {
+    const { a, requests } = nova('translator');
+    // An explicit activation command clears the meeting's restore memory, so
+    // the assistant stays always listening and the question goes as a message.
+    await applyAssistantChatCommand(a, { activationMode: 'always_active' }, null);
+    requests.length = 0;
+    const asked: string[] = [];
+    a.sendUserMessage = (text: string) => { asked.push(text); };
+    a._translatorState = 'MUTED';
+    a.noteParticipantUtterance('Hey Alex, did you stop translating?');
+    for (let i = 0; i < 5; i++) await flush();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].meetingMode, 'normal');
+    assert.deepEqual(asked, ['did you stop translating']);
+    assert.ok(logs.some((l) => l.endsWith('route=transcript why=wake-phrase-while-paused')));
+});
+
+test('nova: on wake-phrase activation the question is handed over as an activation', async () => {
+    const { a } = nova('translator');
+    const activations: Array<string | undefined> = [];
+    a.activate = async (_duration: number | undefined, context?: string) => { activations.push(context); };
+    a.reconfigure = async () => {
+        a.meetingMode = 'normal';
+        a.activationMode = 'wake_phrase';
+        return { result: 'applied', changed: ['meetingMode', 'activationMode'], sessionRebuilt: true,
+            meetingModeBefore: 'translator', meetingModeAfter: 'normal',
+            activationModeBefore: 'always_active', activationModeAfter: 'wake_phrase' };
+    };
+    a._translatorState = 'MUTED';
+    a.noteParticipantUtterance('Hey Alex, where did you go');
+    for (let i = 0; i < 5; i++) await flush();
+    assert.deepEqual(activations, ['Hey Alex, where did you go']);
+});
+
+test('nova: while paused, the wake phrase heard by Nova defers to the participants\' transcript', async () => {
+    const { a, requests } = nova('translator');
+    a.noteParticipantUtterance('Bonjour.');
+    a._translatorState = 'MUTED';
+    await stream(a, userTurn('hey alex are you there'));
+    assert.equal(requests.length, 0, 'acted on once, from the transcript, not twice');
+});
+
+test('nova: "Hey Alex, stop" while paused stays paused', async () => {
+    const { a, requests } = nova('translator');
+    a._translatorState = 'MUTED';
+    a.noteParticipantUtterance('Hey Alex, stop.');
+    assert.equal(requests.length, 0);
+    assert.equal(a._translatorState, 'MUTED');
+});
+
+test('nova: a paused translator is not sent the meeting once the participants\' transcript is there', () => {
+    const { a } = nova('translator');
+    const audioEvents = () => a.session.queue.filter((e: any) => e.event?.audioInput).length;
+    a._translatorState = 'MUTED';
+    a.sendAudioChunk(Buffer.alloc(4));
+    assert.equal(audioEvents(), 1, 'without the transcript it still hears the resume phrase itself');
+    a.noteParticipantUtterance('Bonjour.');
+    a.sendAudioChunk(Buffer.alloc(4));
+    assert.equal(audioEvents(), 1, 'withheld');
+    a._translatorState = 'UNMUTED';
+    a.sendAudioChunk(Buffer.alloc(4));
+    assert.equal(audioEvents(), 2, 'translating, it hears the meeting again');
+});
+
+test('nova: the resume phrase on the participants\' transcript resumes a paused translator', async () => {
+    const { a, requests } = nova('translator');
+    const tones: string[] = [];
+    let refreshes = 0;
+    a.playConfirmationTone = (kind: string) => { tones.push(kind); };
+    a.refreshSession = async () => { refreshes += 1; };
+    a._translatorState = 'MUTED';
+    a._isMuted = true;
+    a.noteParticipantUtterance('Translator, unmute.');
+    assert.equal(a._translatorState, 'UNMUTED');
+    assert.equal(a._isMuted, false);
+    assert.equal(refreshes, 1);
+    assert.deepEqual(tones, ['unmute']);
+    assert.equal(requests.length, 0);
+    // The paused session's own unmute call, arriving after, changes nothing.
+    await stream(a, [chunk({ toolUse: { toolName: 'unmute', toolUseId: 'u-1', content: '{}' } }),
+        chunk({ contentEnd: { type: 'TOOL' } })]);
+    assert.equal(refreshes, 1);
 });

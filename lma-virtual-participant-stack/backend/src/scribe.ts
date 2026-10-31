@@ -1057,7 +1057,14 @@ export class TranscriptionService {
             // Trim old entries
             const cutoff = timestamp - this.bufferWindowMs;
             this.transcriptBuffer = this.transcriptBuffer.filter(t => t.timestamp > cutoff);
-            
+
+            // The translator's spoken controls are read from this transcript
+            // as well as from the model's own (nova-agent.ts). Before the
+            // branches below, which do nothing in translator mode.
+            if (voiceAssistant.isEnabled()) {
+                voiceAssistant.noteParticipantUtterance?.(transcript);
+            }
+
             // "Hey Alex, stop talking" while the assistant is already answering.
             // The wake phrase on its own would be dropped here, because
             // handleWakePhraseDetected has nothing to do for an assistant that

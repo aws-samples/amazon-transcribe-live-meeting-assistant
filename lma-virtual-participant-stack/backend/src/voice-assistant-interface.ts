@@ -195,4 +195,12 @@ export interface VoiceAssistantProvider {
    *   stop requests from this route.
    */
   requestStopTalking(reason?: string): boolean;
+
+  /**
+   * A participant's finished utterance, from the participants' transcript
+   * (Amazon Transcribe channel 0, or the ASR MicroVM). Optional: Nova Sonic's
+   * translator reads its spoken controls ("stop translating", the resume
+   * phrase, the wake phrase while paused) from it.
+   */
+  noteParticipantUtterance?(text: string): void;
 }
