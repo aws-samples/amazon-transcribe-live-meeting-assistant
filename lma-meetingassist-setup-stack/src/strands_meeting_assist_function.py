@@ -922,7 +922,7 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
             full_transcript = fetch_meeting_transcript(
                 call_id, dynamodb_table_name, with_timestamps=with_timestamps
             )
-                        
+
             if not full_transcript:
                 result = "No transcript available for current meeting yet."
             elif mode == "full":
@@ -1518,12 +1518,15 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
     except Exception as e:
         logger.error(f"Error sending thinking step to AppSync: {str(e)}")
 
-def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_id: str = None):
+def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_id: str = None,
+                               include_editor: bool = True):
     """Factory for the tool that reads the current meeting's agenda.
 
     Offered in every tool scope, the meeting chat's included: the agenda belongs
     to the meeting, and the people in the meeting chat are the people it is for.
-    It reads only the meeting this invocation is about.
+    It reads only the meeting this invocation is about. ``include_editor`` is
+    off in the meeting chat, whose answers everyone reads; see
+    meeting_agenda.describe_agenda_for_agent.
     """
     from strands import tool
 
@@ -1550,7 +1553,7 @@ def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_i
             }, 0)
         try:
             record = meeting_agenda.read_meeting_record(dynamodb.Table(dynamodb_table_name), call_id)
-            result = meeting_agenda.describe_agenda_for_agent(record)
+            result = meeting_agenda.describe_agenda_for_agent(record, include_editor=include_editor)
             success = True
         except Exception as e:
             logger.error(f"Error reading the meeting agenda: {str(e)}")
@@ -2044,10 +2047,11 @@ def handler(event, context):
             tools.append(create_meeting_agenda_tool(
                 call_id=call_id,
                 dynamodb_table_name=dynamodb_table_name,
-                message_id=message_id
+                message_id=message_id,
+                include_editor=not meeting_chat_scope
             ))
             logger.info("Meeting agenda tool enabled")
-                
+
         # Add VNC preview control tool (available to all users)
         if APPSYNC_GRAPHQL_URL and not meeting_chat_scope:
             tools.append(create_vnc_preview_control_tool(

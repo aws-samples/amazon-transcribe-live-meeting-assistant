@@ -87,8 +87,8 @@ The same question can be asked three ways:
   in the meeting chat is answered from the current meeting's transcript, its
   agenda and web search only, and the answer is posted in the chat for
   everyone. **Guests may read the agenda of the meeting they are in** this way,
-  just as they can ask about its transcript; nothing else about the meeting
-  record is read for them.
+  just as they can ask about its transcript. The answer gives the agenda's
+  items and where the agenda came from, but not who last changed it.
 
 ## Who can change it
 

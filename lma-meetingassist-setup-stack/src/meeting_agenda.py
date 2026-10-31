@@ -41,7 +41,9 @@ NO_AGENDA = (
 def parse_agenda_items(text: Optional[str]) -> List[str]:
     """The agenda's items, in order, with blank lines and list marks removed."""
     items = []
-    for line in (text or "").splitlines():
+    # Split on line breaks only, as the page does (/\r?\n/), not on every
+    # separator str.splitlines() knows, so both number an agenda the same way.
+    for line in re.split(r"\r?\n", text or ""):
         item = _LIST_MARK.sub("", line).strip()
         if item:
             items.append(item)
@@ -65,8 +67,16 @@ def format_elapsed(seconds: Any) -> str:
     return f"[{minutes:02d}:{secs:02d}]"
 
 
-def describe_agenda_for_agent(meeting: Optional[Mapping[str, Any]]) -> str:
-    """The text the get_meeting_agenda tool returns for a meeting record."""
+def describe_agenda_for_agent(
+    meeting: Optional[Mapping[str, Any]], include_editor: bool = True
+) -> str:
+    """The text the get_meeting_agenda tool returns for a meeting record.
+
+    ``include_editor`` adds who last changed the agenda and when. It is off for a
+    question typed in the meeting chat, whose answer everyone in the meeting
+    reads: the editor is recorded by username, which is commonly an email
+    address, and nothing about the agenda's items needs it.
+    """
     items = parse_agenda_items((meeting or {}).get("Agenda"))
     if not items:
         return NO_AGENDA
@@ -74,7 +84,7 @@ def describe_agenda_for_agent(meeting: Optional[Mapping[str, Any]]) -> str:
     provenance: List[str] = []
     if source:
         provenance.append(source)
-    if meeting.get("AgendaUpdatedBy") and meeting.get("AgendaUpdatedAt"):
+    if include_editor and meeting.get("AgendaUpdatedBy") and meeting.get("AgendaUpdatedAt"):
         provenance.append(
             f"last updated by {meeting['AgendaUpdatedBy']} at {meeting['AgendaUpdatedAt']}"
         )

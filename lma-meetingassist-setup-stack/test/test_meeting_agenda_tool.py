@@ -131,3 +131,62 @@ def test_the_prompt_guides_a_progress_check_with_transcript_times():
     for status in ("Covered", "In progress", "Remaining"):
         assert status in prompt
     assert "Never invent an agenda" in prompt
+
+
+def test_the_meeting_chat_answer_does_not_name_the_last_editor():
+    """Everyone in the meeting reads a chat answer; the editor's username,
+    commonly an email address, is left out of it."""
+    record = {
+        "Agenda": "Budget",
+        "AgendaSource": "ui",
+        "AgendaUpdatedBy": "alice@example.com",
+        "AgendaUpdatedAt": "2026-10-31T10:00:00Z",
+    }
+    text = meeting_agenda.describe_agenda_for_agent(record, include_editor=False)
+    assert "alice@example.com" not in text
+    assert "set on the meeting page" in text
+    assert "1. Budget" in text
+
+
+def test_items_split_on_line_breaks_only_as_the_page_does():
+    assert meeting_agenda.parse_agenda_items("Budget\u2028review\r\nHiring") == [
+        "Budget\u2028review",
+        "Hiring",
+    ]
+
+
+def _agenda_tool(monkeypatch, table, include_editor=True):
+    import sys  # noqa: PLC0415
+    import types  # noqa: PLC0415
+
+    strands = types.ModuleType("strands")
+    strands.tool = lambda fn: fn
+    monkeypatch.setitem(sys.modules, "strands", strands)
+
+    class FakeResource:
+        @staticmethod
+        def Table(_name):  # noqa: N802 - the boto3 resource's own method name
+            return table
+
+    monkeypatch.setattr(handler_module, "dynamodb", FakeResource)
+    monkeypatch.setattr(handler_module, "APPSYNC_GRAPHQL_URL", "")
+    return handler_module.create_meeting_agenda_tool(
+        call_id="call-1", dynamodb_table_name="events", include_editor=include_editor
+    )
+
+
+def test_the_tool_reads_the_meeting_and_leaves_the_editor_out_in_the_chat(monkeypatch):
+    record = {"Agenda": "Budget", "AgendaUpdatedBy": "alice@example.com", "AgendaUpdatedAt": "t"}
+    assert "alice@example.com" in _agenda_tool(monkeypatch, FakeTable(record))()
+    assert "alice@example.com" not in _agenda_tool(monkeypatch, FakeTable(record), False)()
+
+
+def test_a_failed_read_is_reported_to_the_agent_not_raised(monkeypatch):
+    class BrokenTable:
+        @staticmethod
+        def get_item(**_kwargs):
+            raise RuntimeError("throttled")
+
+    assert _agenda_tool(monkeypatch, BrokenTable())() == (
+        "The meeting agenda could not be read just now."
+    )
