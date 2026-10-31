@@ -105,8 +105,15 @@ test('a code fence on one line is a code span, and the lines after it are read a
         'Run npm install first. Then test.',
     );
     assert.equal(toSpokenText('```make build```\n- **Done**'), 'make build. Done');
-    // A real fence with an info string still opens a block.
+    // A real fence with an info string still opens a block, and so does a
+    // longer fence, used to nest one fenced example inside another.
     assert.equal(toSpokenText('```bash\nnpm test\n```\nAfter.'), 'npm test. After.');
+    assert.equal(toSpokenText('````markdown\n**not bold**\n````\nAfter.'), '**not bold**. After.');
+    assert.equal(toSpokenText('````\nx\n````'), 'x');
+});
+
+test('an empty code span leaves nothing behind', () => {
+    assert.equal(toSpokenText('Type `` and press enter.'), 'Type and press enter.');
 });
 
 test('formatting tags are removed, other angle brackets are kept', () => {

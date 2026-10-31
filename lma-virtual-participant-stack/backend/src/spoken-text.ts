@@ -110,6 +110,8 @@ function stripInline(text: string, options: SpokenTextOptions = {}): string {
         // Code spans, delimited by a run of backticks of any length, so that
         // ```code``` on one line is unwrapped as well as `code`.
         .replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (_m, _ticks: string, code: string) => code.trim())
+        // An empty code span.
+        .replace(/(^|[^`])``(?!`)/g, '$1')
         // Bold and italic, asterisk and underscore forms. The underscore forms
         // only at word boundaries, so snake_case identifiers keep their underscores.
         .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
@@ -164,7 +166,7 @@ export function toSpokenText(markdown: string, options: SpokenTextOptions = {}):
         // later in it: an info string cannot contain one, so ```code``` on a
         // single line is a code span, handled with the rest of the line's
         // inline markup below.
-        if (/^(```|~~~)/.test(line) && (inFence || !/^`{3,}[^`]*`/.test(line))) {
+        if (/^(```|~~~)/.test(line) && (inFence || !/^`{3,}[^`]+`/.test(line))) {
             flushParagraph();
             inFence = !inFence;
             continue;

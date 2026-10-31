@@ -25,8 +25,8 @@
  * The answer is posted as plain text (markdown reduced by `toSpokenText`, which
  * also makes it a single line — the one shape every platform's send path
  * delivers intact, see chat-help.ts — and, with `keepUrls`, leaves link
- * addresses whole for the reader to follow) and split into messages no longer than
- * the platform's limit. Each sender may ask once per `PER_SENDER_INTERVAL_MS`,
+ * addresses whole for the reader to follow) and split into messages no longer
+ * than the platform's limit. Each sender may ask once per `PER_SENDER_INTERVAL_MS`,
  * and one question is answered at a time.
  *
  * The answer is produced in the background: the platform handlers call
