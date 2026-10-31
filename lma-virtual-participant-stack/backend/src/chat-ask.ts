@@ -24,8 +24,9 @@
  *
  * The answer is posted as plain text (markdown reduced by `toSpokenText`, which
  * also makes it a single line — the one shape every platform's send path
- * delivers intact, see chat-help.ts) and split into messages no longer than
- * the platform's limit. Each sender may ask once per `PER_SENDER_INTERVAL_MS`,
+ * delivers intact, see chat-help.ts — and, with `keepUrls`, leaves link
+ * addresses whole for the reader to follow) and split into messages no longer
+ * than the platform's limit. Each sender may ask once per `PER_SENDER_INTERVAL_MS`,
  * and one question is answered at a time.
  *
  * The answer is produced in the background: the platform handlers call
@@ -328,7 +329,8 @@ export function createChatAnswerer(
                     timer = setTimeout(() => reject(new Error(`no answer within ${timeoutMs} ms`)), timeoutMs);
                 }),
             ]).finally(() => clearTimeout(timer));
-            const plain = toSpokenText(raw);
+            // Read rather than spoken, so links keep their addresses.
+            const plain = toSpokenText(raw, { keepUrls: true });
             const messages = splitForChat(plain || 'I have no answer to that.', limit);
             console.log(
                 `[chat-ask] answered platform=${platform} chars=${plain.length} messages=${messages.length}`

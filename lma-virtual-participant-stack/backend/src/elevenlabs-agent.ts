@@ -21,6 +21,7 @@ import {
 } from './assistant-toggles.js';
 import { agentSpeakingDetector } from './agent-speaking-detector.js';
 import { ActivationWindow } from './voice-activation-window.js';
+import { spokenStrandsAnswer } from './spoken-text.js';
 
 export interface ElevenLabsAgentConfig {
   apiKey: string;
@@ -484,11 +485,11 @@ export class ElevenLabsAgent implements VoiceAssistantProvider {
     
     console.log('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
     
-    // Extract the message from the response
-    const message = responsePayload.message || JSON.stringify(responsePayload);
-    
-    // Return as string for ElevenLabs
-    return typeof message === 'string' ? message : JSON.stringify(message);
+    // The answer is written for the meeting chat, in markdown, and the
+    // ElevenLabs agent speaks it: reduced to spoken text, as the Nova Sonic
+    // agent does, so that markup and link addresses are not read out. A
+    // response without a written answer is passed on as JSON.
+    return spokenStrandsAnswer(responsePayload);
   }
 
   /**

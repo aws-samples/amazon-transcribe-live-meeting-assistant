@@ -26,7 +26,7 @@ import {
 } from './nova-sonic-config-loader.js';
 import { configuredWakePhrases, isStopTalkingRequest } from './stop-request.js';
 import { publishAssistantTurn } from './translator-transcript.js';
-import { toSpokenText } from './spoken-text.js';
+import { spokenStrandsAnswer } from './spoken-text.js';
 import { pcmMs, RecentAudio, TRANSLATOR_DRAIN_MAX_MS } from './translator-turns.js';
 import { ActivationWindow } from './voice-activation-window.js';
 import { isNovaThrottle, noteNovaThrottle, throttleBackoffMs } from './nova-throttle.js';
@@ -2623,28 +2623,14 @@ export class NovaAgent implements VoiceAssistantProvider {
     
     console.log('Strands agent response received:', JSON.stringify(responsePayload).substring(0, 200));
     
-    // Extract the message from the response and ensure it's a string. Only an
-    // answer the agent wrote is reduced to spoken text below; a response
-    // without one is passed on as JSON, unchanged.
-    const message = responsePayload.message;
-    if (!message) {
-      return JSON.stringify(responsePayload);
-    }
-    if (typeof message !== 'string') {
-      return JSON.stringify(message);
-    }
-
     // The answer is written for the meeting chat, in markdown. Nova Sonic is
     // handed it to speak, and given a markdown answer late in a session it
     // can end its turn after the first line: replaying a live meeting's four
     // lookups, the fourth answer stopped after "here's the 5-day forecast for
     // Herndon, VA:" in 6 runs of 6, and was spoken in full in 6 of 6 once
-    // reduced to plain sentences.
-    const spoken = toSpokenText(message);
-    if (spoken !== message) {
-      console.log(`Strands answer reduced to spoken text (${message.length} -> ${spoken.length} chars)`);
-    }
-    return spoken;
+    // reduced to plain sentences. Only an answer the agent wrote is reduced;
+    // a response without one is passed on as JSON, unchanged.
+    return spokenStrandsAnswer(responsePayload);
   }
 
   private async sendToolResult(toolUseId: string, result: any): Promise<void> {
