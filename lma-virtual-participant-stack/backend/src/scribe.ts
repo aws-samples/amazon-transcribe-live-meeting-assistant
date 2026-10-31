@@ -912,7 +912,7 @@ export class TranscriptionService {
         }
     }
 
-    /** A meeting row: the roster name at the row's START, plus the voice id when per-voice labels are on. */
+    /** A meeting row: the attendee the platform showed for most of the row, plus the voice id when per-voice labels are on. */
     private handleMeetingAsrSegment(segment: AsrSegment): void {
         const roster = this.rosterTimeline.speakerFor(segment.startSec, segment.endSec, rosterLagSeconds());
         const speaker = speakerNameFor(roster, segment.speaker);

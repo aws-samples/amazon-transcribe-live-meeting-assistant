@@ -100,6 +100,20 @@ describe('with voice separation off', () => {
         assert.ok(!records[0]?.SegmentId?.includes('spk_'));
     });
 
+    it('replaces its own partial with the first row of its final, even when the final is split', async () => {
+        // The default path: a partial and its final share only the
+        // ResultId-keyed id of their first piece.
+        rosterOf([[0, 'Alex'], [10, 'Beth']]);
+        const partial = await emit('Alex', result(turn(undefined, 4, 7), { isPartial: true, resultId: 'X' }));
+        const final = await emit('Beth', result(turn('0', 6, 7), { resultId: 'X' }));
+        assert.equal(partial.length, 1);
+        assert.deepEqual(
+            final.map((record) => [record.SegmentId, record.Speaker, record.IsPartial]),
+            [['X-r0', 'Alex', false], ['X-r1', 'Beth', false]],
+        );
+        assert.equal(partial[0]?.SegmentId, final[0]?.SegmentId);
+    });
+
     it('ignores the speaker labels entirely', async () => {
         const records = await emit('Conference Room', result([...turn('0', 6, 0), ...turn('1', 6, 10)]));
         assert.equal(records.length, 1);
