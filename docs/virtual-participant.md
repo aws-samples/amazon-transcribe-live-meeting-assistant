@@ -167,13 +167,14 @@ overrides the allowance for every platform.
 
 **How the voice label combines with the name (Amazon Transcribe).** With voice
 separation on, the name is always the platform's, and Transcribe's voice label is
-kept only as a hint. A label is shown with **one attendee only**: the attendee it
-has coincided with for the most speech so far in the Transcribe session. Under
+kept only as a hint. At any moment a label is shown with **one attendee only**:
+the attendee it has coincided with for the most speech so far in the Transcribe
+session. Under
 anyone else the row carries the bare name. So a room's voices, all of which
 coincide mostly with the room, still read `Conference Room (spk_0)`,
 `Conference Room (spk_1)`. A remote attendee's row that Transcribe happens to label
-with a voice it mostly hears from somebody else reads just `Ana Ruiz`, never
-`Ana Ruiz (spk_3)` next to `Sam Lee (spk_3)`.
+with a voice it mostly hears from somebody else reads just `Ana Ruiz`, not
+`Ana Ruiz (spk_3)` alongside `Sam Lee (spk_3)`.
 
 The platform's name wins because it is exact for a remote attendee, while
 Transcribe's labels on the mixed meeting audio are not. On the same three-person

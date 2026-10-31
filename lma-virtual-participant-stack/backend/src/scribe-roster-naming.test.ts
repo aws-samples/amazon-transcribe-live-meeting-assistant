@@ -185,7 +185,7 @@ describe('rows from the Zoom standup', () => {
         assert.deepEqual(await emit(result, 'Sam Lee'), [['Priya Patel (spk_2)', 'the new soft former']]);
     });
 
-    it('never show one voice label under two names', async () => {
+    it('show each voice label with one name while its majority holds', async () => {
         // On the call, Transcribe's spk_3 coincided with Sam for most of the
         // meeting and with Ana and Priya too. The platform's name is kept
         // for every row; the label is shown only with the participant it has

@@ -436,10 +436,10 @@ const firstSpokenTime = (
  * adds something: telling apart several voices behind ONE participant, such
  * as a conference room's speakerphone.
  *
- * A label is shown under one name only: the participant it has coincided with
- * for the most speech so far in this Transcribe session. Under any other
- * participant the row is written with the bare name. So `Sam (spk_3)` and
- * `Ana (spk_3)` never both appear for the same voice, while a room's voices
+ * At any moment a label is shown under one name only: the participant it has
+ * coincided with for the most speech so far in this Transcribe session. Under
+ * any other participant the row is written with the bare name. So `Ana (spk_3)`
+ * is not written while spk_3 belongs to Sam, while a room's voices
  * -- every one of which coincides mostly with the room -- stay `Room (spk_0)`,
  * `Room (spk_1)`.
  *
