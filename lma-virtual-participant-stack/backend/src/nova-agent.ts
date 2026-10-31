@@ -3364,6 +3364,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       return; // Don't activate if no session could be opened
     }
 
+    // From here to activationWindow.start() below nothing awaits, so the
+    // window is running whenever `_isActivated` is: the re-arm on being
+    // addressed again checks the window's own state and relies on that.
     this._isActivated = true;
 
     // An activation is a decision to listen, so a stop request still resolving
@@ -3643,7 +3646,6 @@ export class NovaAgent implements VoiceAssistantProvider {
       this.sessionRefreshTimer = null;
     }
 
-    // Stop the activation window
     this.activationWindow.stop();
     
     // Clear conversation timeout
