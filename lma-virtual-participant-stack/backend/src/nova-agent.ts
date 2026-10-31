@@ -594,6 +594,8 @@ export class NovaAgent implements VoiceAssistantProvider {
   /** A wake-phrase activation still opening its session, so a second wake
    *  phrase meanwhile does not open another. */
   private activationOpening: Promise<boolean> | null = null;
+  /** The context of the latest wake phrase while an activation is opening. */
+  private activationContext: string | undefined = undefined;
   /** A field so that tests can shorten it. */
   private assistantOpenBackoff: { baseMs: number; capMs: number } = ASSISTANT_OPEN_BACKOFF;
 
@@ -2038,6 +2040,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
 
+    /** Whether Bedrock accepted the stream. Only a refusal to open it is the
+     *  concurrency quota; anything after that is an ordinary stream error. */
+    let accepted = false;
     try {
       console.log('Starting bidirectional stream...');
 
@@ -2047,6 +2052,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       });
 
       const response = await this.bedrockClient.send(command);
+      accepted = true;
       this.meteredUsage().noteSession();
       this.noteSessionOpened(session);
 
@@ -2075,7 +2081,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       }
 
     } catch (error) {
-      const throttled = isNovaThrottle(error);
+      const throttled = !accepted && isNovaThrottle(error);
       session.resolveOpened?.(throttled ? 'throttled' : 'failed');
       if (throttled) {
         // A refusal is expected under load, and handled below: logged on one
@@ -3337,28 +3343,36 @@ export class NovaAgent implements VoiceAssistantProvider {
     this.lastAddressedAt = Date.now();
     
     // A wake phrase heard while an earlier one is still opening the session
-    // is the same request: that activation finishes the job.
+    // does not open another: the activation already running finishes the job,
+    // and asks the latest question it was given.
     if (this.activationOpening) {
+      if (initialContext) this.activationContext = initialContext;
       console.log('⏳ Activation already opening its session - not opening another');
       return;
     }
+    this.activationContext = initialContext;
 
-    // Create session if not already active (may already be pre-connected)
-    if (!this._isActive) {
-      if (this._preConnecting && this._preConnectPromise) {
+    // Set before anything awaits, so that the wait for a pre-connect is
+    // covered too. A pre-connected session may itself have been refused for
+    // the quota, or not have heard back yet; either way it is settled before
+    // activating.
+    const opening = (async () => {
+      // Create session if not already active (may already be pre-connected)
+      if (!this._isActive && this._preConnecting && this._preConnectPromise) {
         console.log('⏳ Waiting for in-flight pre-connect to complete...');
         await this._preConnectPromise;
       }
-    }
-    // A pre-connected session may itself have been refused for the quota, or
-    // not have heard back yet; either way it is settled before activating.
-    this.activationOpening = this.openAssistantSession();
+      return this.openAssistantSession();
+    })();
+    this.activationOpening = opening;
     let opened: boolean;
     try {
-      opened = await this.activationOpening;
+      opened = await opening;
     } finally {
-      this.activationOpening = null;
+      if (this.activationOpening === opening) this.activationOpening = null;
     }
+    initialContext = this.activationContext;
+    this.activationContext = undefined;
     if (!opened || this.stopped) {
       return; // Don't activate if no session could be opened
     }

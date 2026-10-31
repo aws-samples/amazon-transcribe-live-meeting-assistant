@@ -231,6 +231,28 @@ test('a second wake phrase while the first is still opening does not open anothe
     }
 });
 
+test('a second wake phrase while a pre-connect is still in flight does not open another session, and its question is asked', async () => {
+    const agent = wakePhraseAgent();
+    const { client, sends, release } = sessionClient(1);
+    agent.bedrockClient = client;
+    const asked: string[] = [];
+    agent.sendUserMessage = (text: string) => { asked.push(text); };
+    try {
+        const preConnect = agent.preConnect();
+        assert.equal(agent._preConnecting, true);
+        const first = agent.activate(30);
+        const second = agent.activate(30, 'hey alex what time is the launch');
+        await Promise.all([preConnect, first, second]);
+        assert.equal(sends(), 2, 'the refused pre-connect and one retry, and no session of the second activation');
+        assert.equal(agent._isActivated, true);
+        assert.deepEqual(asked, ['what time is the launch'], 'the question of the later wake phrase is asked');
+    } finally {
+        agent.stopped = true;
+        if (agent.activationTimeout) clearTimeout(agent.activationTimeout);
+        release();
+    }
+});
+
 // ---------------------------------------------------------------------------
 // An always-listening session
 // ---------------------------------------------------------------------------
