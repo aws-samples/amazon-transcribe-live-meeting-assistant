@@ -146,6 +146,26 @@ describe('ConfigurationHistoryContent', () => {
     expect(await screen.findByText(/Refresh the history to see their change/)).toBeTruthy();
   });
 
+  it('keeps the dialog and the comment when a restore fails for another reason', async () => {
+    graphqlMock.mockImplementation(async (request) => {
+      if (request.query.includes('mutation RestoreConfigurationRevision')) {
+        throw new Error('Network error');
+      }
+      return LISTING;
+    });
+    render(<ConfigurationHistoryContent />);
+    await screen.findByText('first@example.com');
+
+    selectRow('first@example.com');
+    fireEvent.click(button('Restore'));
+    const dialog = await screen.findByRole('dialog', { name: /Restore revision 2/ });
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: 'typed once' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Restore' }));
+
+    expect(await within(dialog).findByText(/Could not restore revision 2: Network error/)).toBeTruthy();
+    expect(within(dialog).getByRole('textbox').value).toBe('typed once');
+  });
+
   it('compares two revisions from the older to the newer', async () => {
     graphqlMock.mockImplementation(async (request) =>
       request.query.includes('query DiffConfigurationRevisions')
