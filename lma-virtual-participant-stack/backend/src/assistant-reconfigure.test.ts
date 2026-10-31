@@ -191,6 +191,9 @@ test('asking only for the wake phrase is refused in the modes that need to stay 
         assert.match(outcome.detail || '', new RegExp(`the assistant is in ${mode === 'group' ? 'listen' : 'translator'} mode`));
         assert.match(outcome.detail || '', /has to stay always listening/);
         assert.match(outcome.detail || '', /LMA assist/, 'the reply must say how to get there');
+        if (mode === 'translator') {
+            assert.match(outcome.detail || '', /or say "stop translating"/, 'and how to get there out loud');
+        }
         assert.deepEqual(calls, [], 'a refused request must not touch the session');
     }
 });

@@ -213,7 +213,7 @@ test('the help reply leaves out the mode commands when no assistant can change m
         assert.ok(text.includes('"LMA help"'));
     }
     assert.equal(chatHelpMessages(NO_ASSISTANT).length, 1);
-    assert.equal(chatHelpMessages(NOVA_LIKE).length, 2);
+    assert.equal(chatHelpMessages(NOVA_LIKE).length, 3);
 });
 
 test('every help message is one short line', () => {

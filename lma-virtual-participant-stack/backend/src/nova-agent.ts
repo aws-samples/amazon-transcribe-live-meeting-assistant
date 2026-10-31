@@ -29,6 +29,7 @@ import { publishAssistantTurn } from './translator-transcript.js';
 import { toSpokenText } from './spoken-text.js';
 import { pcmMs, RecentAudio, TRANSLATOR_DRAIN_MAX_MS } from './translator-turns.js';
 import {
+  containsTriggerPhrase,
   isStopTranslatingRequest,
   isVoiceMode,
   predictVoiceModeChange,
@@ -271,6 +272,11 @@ const USAGE_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
 
 const DEFAULT_TRANSLATOR_MUTE_PHRASES = ['translator mute', 'alex mute'];
 const DEFAULT_TRANSLATOR_UNMUTE_PHRASES = ['translator unmute', 'alex unmute'];
+
+/** How long after "stop translating" a translator's `mute` call is taken as
+ *  that request rather than as the pause phrase. In a live meeting Nova's tool
+ *  call followed its transcript of the utterance by about 350 ms. */
+const LEAVE_TRANSLATOR_MUTE_WINDOW_MS = 5000;
 
 /** Lowercases, collapses whitespace, and strips trailing punctuation so that
  *  speech-recognized text and configured trigger phrases can be compared. */
@@ -565,6 +571,15 @@ export class NovaAgent implements VoiceAssistantProvider {
   private stoppedTranslatingClipRendering = false;
   /** Set while "stop translating" is being applied. */
   private leavingTranslator = false;
+  /** When a participant last asked, in translator mode, to stop translating —
+   *  on either transcript. A `mute` call that follows it is that request,
+   *  read by the model as the pause phrase (see handleMuteTool). */
+  private leaveTranslatorRequestedAt = 0;
+  /** Whether the participants' transcript (Amazon Transcribe channel 0, or the
+   *  ASR MicroVM) has reached this agent in this meeting, through
+   *  noteParticipantUtterance. While it has, a paused translator is resumed or
+   *  left from that transcript and the model is not sent the meeting's audio. */
+  private participantTranscriptSeen = false;
   
   // Lambda client and Strands agent configuration
   private lambdaClient: LambdaClient | null = null;
@@ -2068,10 +2083,13 @@ export class NovaAgent implements VoiceAssistantProvider {
                   // from the tool-use event, not from the end of its content block.
                   this.noteStrandsToolRequested(toolUseId);
                 }
-              } else if (toolName === 'mute') {
+              } else if (toolName === 'mute' && !session?.silenced) {
                 // Earliest point the transcript route can be told to stand
                 // down: the handler below is a step later, and every
                 // millisecond of this window belongs to the acknowledgement.
+                // Not for a session that heard "stop translating": its call
+                // is that request (handleMuteTool), and the mode it is about
+                // to be in has a stop request of its own to protect.
                 this.noteMuteToolRequested();
               }
             } else if (jsonResponse.event?.contentEnd && jsonResponse.event?.contentEnd?.type === 'TOOL') {
@@ -2127,15 +2145,16 @@ export class NovaAgent implements VoiceAssistantProvider {
                 }
               }
               
-              // "Alex, stop translating": translator mode registers only its pause
-              // tool, so it is left by this phrase (voice-mode-switch.ts).
+              // "Stop translating": translator mode registers only its pause
+              // tool, so it is left by this phrase (voice-mode-switch.ts). The
+              // participants' transcript is read for it as well
+              // (noteParticipantUtterance); whichever arrives first acts.
               if (
                 this.meetingMode === 'translator'
                 && currentTurn.role === 'USER'
                 && currentTurn.isFinal
-                && isStopTranslatingRequest(currentTurn.content, this.translatorAddressees())
               ) {
-                this.handleStopTranslating(session);
+                this.handleTranslatorUtterance(currentTurn.content, session, 'nova');
               }
 
               // Skip appending while paused in translator mode — replaying
@@ -2527,6 +2546,23 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private async handleMuteTool(toolUseId: string, issuingSession: SessionData | null = this.session): Promise<void> {
+    // Nova's translator calls its `mute` tool for "stop translating" as well as
+    // for the pause phrase. A participant who asked to stop translating has
+    // asked to leave translator mode, and pausing instead leaves a translator
+    // that only the resume phrase brings back.
+    if (issuingSession?.silenced) {
+      // The session already acted on as "stop translating".
+      console.log('[voice-mode] action=mute-tool-ignored why=stop-translating');
+      return;
+    }
+    if (
+      this.meetingMode === 'translator'
+      && (this.leavingTranslator || Date.now() - this.leaveTranslatorRequestedAt < LEAVE_TRANSLATOR_MUTE_WINDOW_MS)
+    ) {
+      console.log('[voice-mode] action=mute-tool-taken-as-stop-translating');
+      this.handleStopTranslating(issuingSession, 'tool');
+      return;
+    }
     console.log('🔇 Mute tool called - muting agent');
     // Only translator mode gets an audible cue, sounded before the audio gate
     // engages so the beep itself isn't dropped. That mode replaces the base
@@ -2560,6 +2596,12 @@ export class NovaAgent implements VoiceAssistantProvider {
         `[stop-request] route=tool action=superseded-by-mode-change`
         + ` from=${calledInMode} to=${this.meetingMode}`,
       );
+      return;
+    }
+    // "Stop translating" arrived on the participants' transcript during that
+    // wait, and leaving translator mode is under way.
+    if (this.meetingMode === 'translator' && this.leavingTranslator) {
+      console.log('[voice-mode] action=mute-tool-superseded why=stop-translating');
       return;
     }
 
@@ -2625,6 +2667,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (this.meetingMode === 'translator') {
       this._translatorState = 'MUTED';
       console.log('🔄 Translator state -> MUTED, refreshing session...');
+      if (this.participantTranscriptSeen) {
+        console.log('[translator] action=paused audio=withheld resume=transcript');
+      }
       this.refreshSession().catch(error => {
         console.error('Error refreshing session for translator MUTE transition:', error);
       });
@@ -2632,6 +2677,11 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   private async handleUnmuteTool(toolUseId: string, issuingSession: SessionData | null = this.session): Promise<void> {
+    if (this.meetingMode === 'translator' && this._translatorState === 'UNMUTED') {
+      // Resumed already, from the participants' transcript.
+      console.log('[translator] action=unmute-tool-ignored why=already-resumed');
+      return;
+    }
     console.log('🔓 Unmute tool called - unmuting agent');
     this.unmute('tool');
     // Audio gate is now off; play the unmute confirmation tone directly.
@@ -2678,6 +2728,15 @@ export class NovaAgent implements VoiceAssistantProvider {
     
     // Don't send audio during session refresh
     if (this.isRefreshing) {
+      return;
+    }
+
+    // A paused translator is not sent the meeting while the participants'
+    // transcript is there to resume it from. Sent the audio, it answers what
+    // it hears ("I'm paused, say translator unmute") with replies the mute
+    // gate drops, and it has resumed itself on speech that only mentioned the
+    // translator.
+    if (this.meetingMode === 'translator' && this._translatorState === 'MUTED' && this.participantTranscriptSeen) {
       return;
     }
     
@@ -4377,7 +4436,8 @@ export class NovaAgent implements VoiceAssistantProvider {
         request.meetingMode !== undefined
           ? `${named} needs the assistant to be always listening — ask for that too`
           : `the assistant is in ${named}, which has to stay always listening`
-              + ' — switch to assistant mode first with "LMA assist"',
+              + ' — switch to assistant mode first with "LMA assist"'
+              + (resultingMeetingMode === 'translator' ? ', or say "stop translating"' : ''),
       );
     }
 
@@ -4564,9 +4624,79 @@ export class NovaAgent implements VoiceAssistantProvider {
   }
 
   /**
-   * "Alex, stop translating": leave translator mode for assistant mode, through
-   * the chat route's path, so the activation mode translator mode replaced
-   * comes back with it.
+   * A participant's finished utterance, from the participants' own transcript
+   * (Amazon Transcribe channel 0, or the ASR MicroVM), passed on by the scribe.
+   *
+   * Nova's own transcript of the same speech arrives on its session, and in
+   * translator mode it has been seen to be wrong, so the controls a translator
+   * answers to are read from both, and the first to recognise one acts. While
+   * the translator is paused only this one is read: the paused session is not
+   * sent the meeting's audio (sendAudioChunk).
+   */
+  noteParticipantUtterance(text: string): void {
+    if (!text || !text.trim()) return;
+    this.participantTranscriptSeen = true;
+    this.handleTranslatorUtterance(text, this.session, 'transcript');
+  }
+
+  /**
+   * What a translator does with a participant's utterance, beyond translating it:
+   *
+   * - "Stop translating" (voice-mode-switch.ts), paused or not, leaves
+   *   translator mode for assistant mode.
+   * - While paused, the resume phrase resumes translating. On Nova's
+   *   transcript that is the paused session's `unmute` tool, so only the
+   *   participants' transcript is matched for it here.
+   * - While paused, the wake phrase leaves translator mode, and what was asked
+   *   is passed to the assistant. A wake phrase addresses the assistant, not
+   *   the translator: resuming would translate the question rather than answer
+   *   it, and staying paused leaves the participant talking to an assistant
+   *   that never answers.
+   */
+  private handleTranslatorUtterance(
+    text: string,
+    session: SessionData | null,
+    route: 'nova' | 'transcript',
+  ): void {
+    if (this.meetingMode !== 'translator' || this.stopped) return;
+    if (isStopTranslatingRequest(text, this.translatorAddressees())) {
+      this.leaveTranslatorRequestedAt = Date.now();
+      this.handleStopTranslating(session, route);
+      return;
+    }
+    if (this._translatorState !== 'MUTED') return;
+    // A paused session still hearing the meeting has no participants'
+    // transcript to defer to; one that is not hears nothing to act on.
+    if (route === 'nova' && this.participantTranscriptSeen) return;
+    if (route === 'transcript' && containsTriggerPhrase(text, this.translatorUnmutePhrases)) {
+      this.resumeTranslator(route);
+      return;
+    }
+    if (this.isTranslatorTriggerUtterance(text)) return;
+    // addressesAssistant rather than containsWakePhrase, which logs every
+    // utterance it is given — here, everything said while the translator is paused.
+    if (addressesAssistant(text, configuredWakePhrases()) && !isStopTalkingRequest(text, configuredWakePhrases())) {
+      this.handleStopTranslating(session, route, text);
+    }
+  }
+
+  /** Resume a paused translator from the participants' transcript, as the
+   *  `unmute` tool does from the paused session. */
+  private resumeTranslator(route: 'transcript'): void {
+    if (this._reconfiguring || this.leavingTranslator) return;
+    console.log(`[translator] action=resume route=${route}`);
+    this.unmute(route);
+    this.playConfirmationTone('unmute');
+    this._translatorState = 'UNMUTED';
+    this.refreshSession().catch(error => {
+      console.error('Error refreshing session for translator UNMUTE transition:', error);
+    });
+  }
+
+  /**
+   * "Stop translating": leave translator mode for assistant mode, through the
+   * chat route's path, so the activation mode translator mode replaced comes
+   * back with it.
    *
    * The session that heard the request is about to translate it, so its audio
    * is dropped from here on. The confirmation cannot come from the model —
@@ -4574,19 +4704,38 @@ export class NovaAgent implements VoiceAssistantProvider {
    * holds none between activations) — so it is a clip in the configured
    * voice, rendered when translator mode was entered, or the pause tone if the
    * clip is not available.
+   *
+   * `request` is a wake-phrase utterance heard while the translator was
+   * paused: once in assistant mode, it is handed to the assistant as if it had
+   * been said there.
    */
-  private handleStopTranslating(session: SessionData | null): void {
-    // Nova can deliver the same request on two sessions around a hand-over.
-    if (this._reconfiguring || this.leavingTranslator) return;
+  private handleStopTranslating(
+    session: SessionData | null,
+    route: 'nova' | 'transcript' | 'tool' = 'nova',
+    request?: string,
+  ): void {
+    // Nova can deliver the same request on two sessions around a hand-over,
+    // and both transcripts carry it.
+    if (this.leavingTranslator) return;
+    if (this._reconfiguring) {
+      // Another change is under way; this request is not being acted on.
+      this.leaveTranslatorRequestedAt = 0;
+      return;
+    }
     this.leavingTranslator = true;
     if (session) session.silenced = true;
-    console.log('[voice-mode] mode=assistant action=stop-translating');
+    console.log(
+      `[voice-mode] mode=assistant action=stop-translating route=${route}`
+      + `${request !== undefined ? ' why=wake-phrase-while-paused' : ''}`,
+    );
     applyAssistantChatCommand(this, { meetingMode: 'normal' }, null, undefined, 'voice')
       .then(() => {
         if (this.meetingMode !== 'normal') {
           console.log(`[voice-mode] action=stop-translating-declined meetingMode=${this.meetingMode}`);
-          // Still translating, so this session's later answers are to be heard.
+          // Still translating, so this session's later answers are to be heard,
+          // and a pause asked for next is a pause.
           if (session) session.silenced = false;
+          this.leaveTranslatorRequestedAt = 0;
           return;
         }
         if (this.stoppedTranslatingClip) {
@@ -4595,14 +4744,34 @@ export class NovaAgent implements VoiceAssistantProvider {
         } else {
           this.playConfirmationTone('mute');
         }
+        if (request !== undefined) {
+          this.passRequestToAssistant(request);
+        }
       })
       .catch((error) => {
         console.error('Error leaving translator mode by voice:', error);
         if (session && this.meetingMode === 'translator') session.silenced = false;
+        this.leaveTranslatorRequestedAt = 0;
       })
       .finally(() => {
         this.leavingTranslator = false;
       });
+  }
+
+  /** Hand a wake-phrase utterance to the assistant, as the scribe does on a
+   *  wake phrase: an activation with it as context, or, where the assistant is
+   *  always listening and so never activated, the question as a message. */
+  private passRequestToAssistant(request: string): void {
+    if (this.activationMode === 'always_active') {
+      const question = this.extractQuestion(request);
+      if (question && this.session?.isActive) {
+        this.sendUserMessage(question);
+      }
+      return;
+    }
+    this.activate(undefined, request).catch((error) => {
+      console.error('Error activating the assistant after leaving translator mode:', error);
+    });
   }
 
   /** Render the stopped-translating confirmation, once, in the background. */
@@ -4701,6 +4870,9 @@ export class NovaAgent implements VoiceAssistantProvider {
     if (mode === 'translator') {
       console.log(`  🌐 Translator mode: ${this.translatorLanguageA} ↔ ${this.translatorLanguageB}`);
       this.renderStoppedTranslatingClip();
+      // A "stop translating" from a previous spell in translator mode says
+      // nothing about a pause asked for in this one.
+      this.leaveTranslatorRequestedAt = 0;
     }
   }
 

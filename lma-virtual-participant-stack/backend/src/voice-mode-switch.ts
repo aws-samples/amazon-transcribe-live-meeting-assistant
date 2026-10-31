@@ -25,7 +25,8 @@
  * that is then declined.
  *
  * Translator mode keeps its single `mute` tool, so it is left by a phrase
- * instead: "Alex, stop translating" ({@link isStopTranslatingRequest}).
+ * instead: "stop translating", with or without the assistant's name
+ * ({@link isStopTranslatingRequest}).
  */
 
 import type { ActivationMode } from './voice-assistant-interface.js';
@@ -168,10 +169,23 @@ const STOP_TRANSLATING_COMMANDS = new Set([
     'stop translating',
     'stop translation',
     'stop the translation',
+    'stop the translator',
     'stop interpreting',
     'no more translating',
     'no more translation',
     'end translation',
+    'end the translation',
+    'end translator mode',
+    'exit translator',
+    'exit translator mode',
+    'exit translation',
+    'exit translation mode',
+    'leave translator mode',
+    'translator off',
+    'translation off',
+    'turn off translation',
+    'turn off the translator',
+    'turn off translator mode',
     'assistant mode',
     'switch to assistant mode',
     'go back to assistant mode',
@@ -201,20 +215,46 @@ export function translatorAddressees(wakePhrases: string[], mutePhrases: string[
 }
 
 /**
- * Whether `text` asks a translator to stop translating: it names the assistant
- * and, apart from filler, says nothing but one of the phrases above.
+ * Whether `text` asks a translator to stop translating: apart from the
+ * assistant's name, if it is used, and filler, the utterance says nothing but
+ * one of the phrases above.
+ *
+ * The name is optional because people do not use it: "Stop translating" on its
+ * own is how a participant asks, and a translator that waited for "Alex" kept
+ * translating and then paused instead. The whole-utterance rule is what keeps
+ * ordinary speech out — "we should stop translating the slides" or "Alex,
+ * stop translating this part later" is a sentence to translate, not a command.
  */
 export function isStopTranslatingRequest(text: string, addressees: string[]): boolean {
-    let remainder = ` ${normalize(text || '')} `;
-    let addressed = false;
+    const words = normalize(text || '').split(' ').filter((word) => word && !FILLER.has(word));
+    // The name is taken off either end, where it is said ("Alex, stop
+    // translating", "stop translating, Alex"), and each form is tried with and
+    // without it: "translator" is a name (from "translator mute") and also the
+    // last word of "turn off the translator".
+    const lead = stripAddressee(words, addressees, 'start');
+    const candidates = [words, lead, stripAddressee(words, addressees, 'end'), stripAddressee(lead, addressees, 'end')];
+    return candidates.some((candidate) => STOP_TRANSLATING_COMMANDS.has(candidate.join(' ')));
+}
+
+function stripAddressee(words: string[], addressees: string[], end: 'start' | 'end'): string[] {
     for (const name of addressees) {
-        const padded = ` ${name} `;
-        if (remainder.includes(padded)) {
-            addressed = true;
-            remainder = remainder.split(padded).join(' ');
+        const nameWords = name.split(' ');
+        const n = nameWords.length;
+        if (words.length <= n) continue;
+        const slice = end === 'start' ? words.slice(0, n) : words.slice(words.length - n);
+        if (slice.join(' ') === name) {
+            return end === 'start' ? words.slice(n) : words.slice(0, words.length - n);
         }
     }
-    if (!addressed) return false;
-    const words = remainder.split(' ').filter((word) => word && !FILLER.has(word));
-    return STOP_TRANSLATING_COMMANDS.has(words.join(' '));
+    return words;
+}
+
+/** Whether `text` contains one of `phrases` as whole words, whatever the
+ *  punctuation: "Translator, unmute." contains "translator unmute". */
+export function containsTriggerPhrase(text: string, phrases: string[]): boolean {
+    const padded = ` ${normalize(text || '')} `;
+    return phrases.some((phrase) => {
+        const normalized = normalize(phrase);
+        return normalized.length > 0 && padded.includes(` ${normalized} `);
+    });
 }

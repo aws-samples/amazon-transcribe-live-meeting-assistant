@@ -574,7 +574,7 @@ Anyone in the meeting can control the VP by typing one of these commands in the 
 | `LMA help` | The VP posts the list of chat commands in the meeting chat. |
 | `LMA ask <question>`, `@LMA <question>` | The meeting assistant answers the question in the meeting chat, using the meeting's transcript. See [Asking the Meeting Assistant from Chat](#asking-the-meeting-assistant-from-chat). |
 
-When a Nova Sonic voice assistant is configured, the assistant-mode commands (`LMA translate`, `LMA translate <language>`, `LMA assist`, `LMA listen`, `LMA always`, `LMA wake`) also work, and `LMA help` lists them; see [Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting). With no voice assistant, or with ElevenLabs, which cannot change mode during a meeting, `LMA help` leaves them out.
+When a Nova Sonic voice assistant is configured, the assistant-mode commands (`LMA translate`, `LMA translate <language>`, `LMA assist`, `LMA listen`, `LMA always`, `LMA wake`) also work, and `LMA help` lists them, along with the spoken forms: the wake phrase plus a mode ("Hey Alex, switch to translator mode") and "stop translating", which leaves translator mode and needs no wake phrase; see [Changing Mode During a Meeting](voice-assistant.md#changing-mode-during-a-meeting). With no voice assistant, or with ElevenLabs, which cannot change mode during a meeting, `LMA help` leaves them out.
 
 Notes:
 
@@ -582,7 +582,7 @@ Notes:
 - When the chat platform exposes the sender name (Zoom, Chime, Webex), the goodbye message acknowledges who asked the VP to leave: *"Thanks Alice — I'll head out now."*
 - The default introduction message tells participants to type `LMA leave` to dismiss the bot and `LMA help` to see the other commands. Customize via the `IntroMessage` CloudFormation parameter of the Virtual Participant stack or the `INTRO_MESSAGE` env var; a customized message is used as it is.
 - `LMA pause`, `LMA start` and `LMA help` must be the whole chat message: the `LMA` addressee (or `@LMA`, before or after the command) plus the command word, matched case-insensitively with punctuation ignored, so *"@LMA, pause!"* and *"start LMA"* count as the command. A bare `PAUSE` or `START` without the addressee is ordinary chat, as is a message that merely contains the command — *"LMA PAUSED"*, *"please LMA pause now"*, or an introduction message that explains the commands.
-- The help reply is posted as one or two single-line chat messages, listing each command in one canonical form. It is answered whether or not transcription is paused.
+- The help reply is posted as one to three single-line chat messages, listing each command in one canonical form. It is answered whether or not transcription is paused.
 
 ### Asking the Meeting Assistant from Chat
 

@@ -17,11 +17,12 @@
  * Each message is a single line. Chime and Webex post by typing into the
  * composer, where a newline is an Enter key and would send the list in pieces,
  * and the Zoom and Teams fallbacks type too; one line per message is the one
- * shape every platform's send path delivers intact. The list is split into two
+ * shape every platform's send path delivers intact. The list is split into
  * messages instead, each about the length of the introduction message, which
  * every platform already posts.
  */
 import { details, END_COMMAND_VERBS } from './details.js';
+import { configuredWakePhrases } from './stop-request.js';
 import { ASSISTANT_CHAT_COMMANDS } from './assistant-toggles.js';
 import type { VoiceAssistantProvider } from './voice-assistant-interface.js';
 import { chatAskAvailable } from './chat-ask.js';
@@ -33,6 +34,12 @@ export type ChatHelpAssistant = Pick<VoiceAssistantProvider, 'isEnabled' | 'supp
  *  command word, in lower case. */
 function typed(command: string): string {
     return `"LMA ${command.toLowerCase()}"`;
+}
+
+/** The first configured wake phrase, capitalised as it would be written. */
+function spokenWakePhrase(): string {
+    const phrase = configuredWakePhrases()[0] || 'hey alex';
+    return phrase.replace(/\b\p{L}/gu, (letter) => letter.toUpperCase());
 }
 
 /**
@@ -59,6 +66,12 @@ export function chatHelpMessages(assistant: ChatHelpAssistant, canAsk: boolean =
     if (assistant.isEnabled() && assistant.supportsModeChanges()) {
         const modes = ASSISTANT_CHAT_COMMANDS.map((entry) => `${typed(entry.phrases[0])} (${entry.summary})`);
         messages.push(`Voice assistant: ${modes.join(', ')}.`);
+        // The spoken route to the same changes (voice-mode-switch.ts). Translator
+        // mode is left by a phrase, which needs no wake phrase.
+        messages.push(
+            `Or say it: "${spokenWakePhrase()}, switch to translator mode" (or assistant, listen mode), `
+                + 'and "stop translating" to leave translator mode.',
+        );
     }
 
     return messages;
