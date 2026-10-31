@@ -468,7 +468,7 @@ def test_numbers_continue_above_the_index_when_the_counters_were_lost() -> None:
     store.seed_profile(PROFILE, {})
     save(store, {"voiceId": "matthew"})
     # A release that keeps no history rewrites the record without its
-    # counters -- a rollback across this one -- while the index survives.
+    # counters -- code that predates them -- while the index survives.
     del dynamo.items[PROFILE_KEY]["LatestRevision"]
     del dynamo.items[PROFILE_KEY]["PublishedRevision"]
 
@@ -497,7 +497,7 @@ def test_the_seeder_puts_back_a_current_revision_whose_object_is_missing() -> No
     store, _, s3 = build()
     store.seed_profile(PROFILE, {})
     save(store, {"voiceId": "matthew"})
-    s3.objects.clear()  # a stack upgraded again after a rollback gets a new bucket
+    s3.objects.clear()  # a bucket replaced while the table was not
 
     assert store.ensure_revision_history(PROFILE) == "recovered"
 

@@ -4623,12 +4623,12 @@ Outputs:
   ConfigurationRevisionHistory:
     Description: >-
       What the latest deployment that ran the configuration seeder found of the
-      configuration profile's revision history, as profile=outcome. 'started' is
-      what the deployment that introduces history reports: the profile as it
-      stood was recorded as its first revision. 'present' means it was already
-      recorded. 'not-started' means it could not be recorded at deploy time;
-      nothing is lost, as the first save from a configuration page records it
-      before replacing it, but the seeder's log says why.
+      configuration profile's revision history, as profile=outcome. 'present'
+      is what a new deployment, an upgrade and every later deployment report:
+      the profile's current state is a recorded revision. 'not-started' means
+      the history could not be written at deploy time; nothing is lost, as the
+      first save from a configuration page records the profile before replacing
+      it, but the configuration seeder's log says why.
     Value: !GetAtt AISTACK.Outputs.ConfigurationRevisionHistory
 
   # Both links below point at the shared configuration table. The record's body

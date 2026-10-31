@@ -1033,10 +1033,10 @@ class ConfigurationStore:
             self._record_prior(name, *plan.prior)
             return "recovered"
         # Listed, but is the body there? Not if the bucket is not the one the
-        # index was written against -- a stack rolled back across the release
-        # that created it and then upgraded again gets a new bucket. The
-        # current state is the one revision that can always be put back,
-        # because the record still holds it.
+        # index was written against -- a table restored from a backup into a
+        # stack whose bucket was replaced, say. The current state is the one
+        # revision that can always be put back, because the record still
+        # holds it.
         if log.read_body(name, published) is None:
             log.put_body(name, self._recovered_entry(current, published), current.body)
             return "recovered"
@@ -1163,7 +1163,7 @@ class ConfigurationStore:
         index = self._revisions.read_index(name)
         # Above the index as well as the counter. They agree except where the
         # record has been rewritten without its counters while the index
-        # survived -- by a rollback to a release that kept no history, or a
+        # survived -- by code that keeps no history and predates the counters, or a
         # profile deleted by hand and recreated -- and a number the index
         # already lists must not be given to a second body.
         latest = max(current.latest_revision, index.highest_revision)

@@ -796,12 +796,13 @@ Outputs:
   ConfigurationRevisionHistory:
     Description: >-
       What the latest deployment that ran the configuration seeder found of the
-      configuration profile's revision history, as profile=outcome. 'started'
-      means the profile as it stood was recorded as its first revision, which is
-      what the deployment that introduces history reports; 'present' means it
-      was already recorded. 'not-started' means it could not be recorded at
-      deploy time: nothing is lost, and the first save from a configuration
-      page records it before replacing it, but check the seeder's log.
+      configuration profile's revision history, as profile=outcome. 'present'
+      means the profile's current state is a recorded revision, which is what a
+      new deployment, an upgrade and every later deployment report. 'started'
+      means a profile that had no history had its state recorded as its first
+      revision. 'not-started' means the history could not be written at deploy
+      time: nothing is lost, and the first save from a configuration page
+      records the profile before replacing it, but check the seeder's log.
     Value: !GetAtt SeedConfiguration.RevisionHistory
   EventSourcingTableName:
     Description:

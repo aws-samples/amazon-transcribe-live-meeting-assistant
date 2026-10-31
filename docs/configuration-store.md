@@ -341,7 +341,7 @@ this order:
    same conditional write. Only one write can succeed from a given record, so
    only one save can ever hold a given number. The number is one above both the
    record's `LatestRevision` and the highest number the index lists, so a number
-   is not reused even after the counters have been lost (by a rollback, say).
+   is not reused even where the counters have been lost, as on a record replaced by hand.
 3. The save stores the new revision's body and index entry, then prunes. If
    this step fails, the save still stands and the failure is logged. The record
    now holds the body, so the next save records it, as `recovered`, before
@@ -403,34 +403,45 @@ for `immediate`, within 30 seconds for `short`, and within five minutes for
 
 ### Upgrading an existing deployment: history starts at revision 1
 
-Nothing to do. The first deployment that includes revision history records the
-profile as it stands as **revision 1**. Its author and time are those of
-whoever last saved it before the upgrade, and it carries `Source: backfill`.
-Recording it does not count as a save, so the profile's version, `UpdatedBy` and
-`UpdatedAt` stay as they were. A configuration page open across the upgrade is
-not told that somebody saved it. A new deployment starts at revision 1 too, as
-the empty profile the seeder creates.
+Nothing to do. On an upgrade from a release with no configuration store, the
+seeder creates the profile and carries every earlier store's edits into it in
+one write (see [Carrying a later store across](#carrying-a-later-store-across)).
+That write is **revision 1**, `Source: deploy`, by `cloudformation`, and it holds
+the configuration exactly as the upgrade left it. A new deployment starts the
+same way, with revision 1 holding the empty profile and empty sections the
+seeder records. Either way the history has one revision, and the
+`ConfigurationRevisionHistory` output reads `custom=present`. Later deployments
+add a revision only when they add something to the profile.
+
+There is one other case, kept for safety: a profile that exists but has no
+revision history yet. That can only be a profile written by a pre-release build
+of the configuration store, or saved by code that keeps no history. The seeder
+records that profile as it stands as its first revision, with `Source: backfill`
+and the author and time of whoever last saved it. Recording it does not count as
+a save, so the profile's version, `UpdatedBy` and `UpdatedAt` stay as they were,
+and a configuration page open at the time is not told that somebody saved it.
+That run reports `custom=started`.
 
 The stack output **`ConfigurationRevisionHistory`** says what the latest
 deployment that ran the seeder found:
 
 | Value | Meaning |
 |---|---|
-| `custom=started` | History began on this deployment: the profile as it stood is revision 1. What the upgrade reports |
-| `custom=present` | Already recorded. What a new deployment, and every later one, reports |
+| `custom=present` | The profile's current state is a recorded revision. What a new deployment, an upgrade, and every later deployment report |
+| `custom=started` | The profile existed with no history; its state as it stood has been recorded as its first revision |
 | `custom=recovered` | The profile's current revision was not in the bucket, and has been recorded from the profile |
-| `custom=saved-concurrently` | An administrator saved while the seeder ran; that save recorded the history |
-| `custom=not-started` | The history could not be written at deploy time. The deployment still succeeds and nothing is lost: the first save from a configuration page records the profile before replacing it, and is refused rather than made if it cannot. **Check the seeder's log** (`/<stack>/lambda/ConfigurationSeederFunction`) for why |
+| `custom=saved-concurrently` | An administrator saved while the seeder ran; that save did the recording |
+| `custom=not-started` | The history could not be written at deploy time. The deployment still succeeds and nothing is lost: the first save from a configuration page records the profile before replacing it, and is refused rather than made if it cannot. A section that the seeder could not add for the same reason is reported as `revision-history-unavailable` in `ConfigurationSectionAdoption`. **Check the seeder's log** (`/<stack>/lambda/ConfigurationSeederFunction`) for why |
 
-**Before rolling back** across the release that adds history, know what happens
-to it. The rollback removes `ConfigurationBucket` together with the history it
-holds: the bucket is retained, orphaned, when `EnableDataRetentionOnDelete=true`,
-and emptied and deleted when it is `false`. The index items stay in the table.
-Deploying the history release again creates a new, empty bucket. The seeder
-records the profile's current state into it, and numbering continues above what
-the index lists. Revisions listed from before the rollback can still be listed,
-but their bodies are no longer in the bucket, so opening or restoring one
-reports it as not retained until the retention cap prunes them.
+**Rolling back** to a release with no configuration store removes
+`ConfigurationBucket` along with `ConfigurationTable`, under the same
+`EnableDataRetentionOnDelete` rule described in
+[Upgrading an existing deployment: the summary prompts](#upgrading-an-existing-deployment-the-summary-prompts):
+retained and orphaned when it is `true`, emptied and deleted when it is `false`.
+The history goes with them. Deploying this release again creates a new table and
+a new bucket, so history starts again at revision 1, holding the configuration
+carried across from the per-store tables. If retention was on, the orphaned
+bucket is where to read the earlier revisions from.
 
 ## Deploy-time seeding
 
@@ -484,10 +495,12 @@ every profile untouched.
 ### Carrying a later store across
 
 The summary prompts were adopted by *creating* the profile: when `Config#custom`
-is absent, the seeder fills it from the previous table. That route is closed to
-every store that moves in afterwards, because by then the profile exists on
-every upgraded deployment. So each later store is carried across one **section**
-at a time:
+is absent, the seeder fills it from the previous table. When the seeder creates
+the profile, it puts the later stores' settings into the creating write too.
+That is what happens on a new deployment and on an upgrade from a release with no
+configuration store, and it means the profile's first revision holds the whole
+configuration as it arrived. A profile that already exists cannot be filled that
+way, so on it each later store is carried across one **section** at a time:
 
 - While the profile does not hold the section, the seeder reads the
   administrator's settings from the store's previous table and adds them to the
@@ -517,6 +530,7 @@ published as the **`ConfigurationSectionAdoption`** stack output: one
 | `already-present` | The profile already holds the section. Every run after the first reports this |
 | `previous-table-unreadable` | **Act on this one**, or wait for the next deployment that runs the seeder: the settings were not carried across, and the shipped ones apply until they are. Saving the settings from their page also settles it |
 | `no-previous-table` | The stack was given no previous table, so there is nothing to carry; nothing is recorded |
+| `revision-history-unavailable` | The settings were read but not added, because the profile's current state could not be recorded in its [revision history](#revisions-and-audit) first, and a profile is not changed until it is. The deployment still succeeds, the section is left unset and the shipped settings apply, and the next deployment that runs the seeder tries again. `ConfigurationRevisionHistory` reads `custom=not-started` on the same run; check the seeder's log |
 
 ## What is served from the store today
 
