@@ -349,9 +349,11 @@ this order:
 
 A body is only ever stored under a number that a committed write allocated. That
 is what keeps two administrators who save at the same moment from storing two
-different bodies under one number. Each such save adds one `GetItem` on the
-index, one `PutObject` and one `UpdateItem` on top of the save's own read and
-write.
+different bodies under one number. On top of the save's own read and write, each
+such save makes two `GetItem` calls on the index (one to plan, one to prune), one
+`PutObject` and one `UpdateItem` to append. Once the retention cap is reached it
+also makes a conditional `UpdateItem` to rewrite the index and one `DeleteObject`
+per pruned revision.
 
 A `recovered` revision has the author and time of the record it was recovered
 from, which are those of the save that made it. What that revision changed and
@@ -374,9 +376,18 @@ index names. The bucket expires nothing else.
 
 ### Restoring, comparing and labelling
 
-These are GraphQL operations for the **Admin** group, pinned on the AppSync field
-and checked again in the resolver Lambda behind it. Each takes a `Profile`, which
-defaults to `custom`, the profile every configuration page saves into.
+In the web UI this is the **Configuration ▸ Configuration History** page, for
+Admin users. It lists the revisions with who saved each, when, what it changed,
+how it came to be and its comment, and marks the current one. Select one
+revision to **View** its whole configuration or **Restore** it, which asks for
+an optional comment first. Select two to **Compare** them, setting by setting,
+from the older to the newer. The page does not edit labels; set them with
+`labelConfigurationRevision`.
+
+Underneath, these are GraphQL operations for the **Admin** group, pinned on the
+AppSync field and checked again in the resolver Lambda behind it. Each takes a
+`Profile`, which defaults to `custom`, the profile every configuration page
+saves into.
 
 | Operation | What it does |
 |---|---|
