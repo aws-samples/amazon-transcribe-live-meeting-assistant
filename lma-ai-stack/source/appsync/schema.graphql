@@ -69,6 +69,17 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# ui/src/components/common/speaker-identities.js for the shape and the
 	# resolution order.
 	SpeakerIdentities: String
+	# The meeting's agenda: plain text, one item per line, written through
+	# updateCallAgenda. Absent on a meeting nobody gave an agenda. See
+	# docs/meeting-agenda.md.
+	Agenda: String
+	# Where the stored agenda came from: "ui" for an agenda typed on the meeting
+	# page; "scheduled", "mcp" or "derived" as named by a backend role's write.
+	AgendaSource: String
+	# Who last set the agenda -- a username for a person, a fixed label for the
+	# backend -- and when.
+	AgendaUpdatedBy: String
+	AgendaUpdatedAt: AWSDateTime
 	Owner: String
 	SharedWith: String
 }
@@ -198,6 +209,7 @@ type Mutation @aws_iam {
 	updateSpeakerIdentities(input: UpdateSpeakerIdentitiesInput!): Call @aws_cognito_user_pools @aws_iam
 	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
 	updateCallSummaryText(input: UpdateCallSummaryTextInput!): Call @aws_cognito_user_pools @aws_iam
+	updateCallAgenda(input: UpdateCallAgendaInput!): Call @aws_cognito_user_pools @aws_iam
 	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
@@ -565,7 +577,7 @@ type Subscription {
 	onCreateCall: CreateCallOutput
 		@aws_subscribe(mutations: ["createCall"])
 	onUpdateCall(CallId: ID): Call
-		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
+		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
@@ -781,6 +793,31 @@ input UpdateCallSummaryTextInput {
 	# one of CallSummaryText and CallSummaryState must be supplied.
 	CallSummaryText: String
 	CallSummaryState: String
+}
+
+# ----------------------------------------------------------------------------
+# Meeting agenda
+#
+# Browser-reachable, so held to the same access rule as the summary and speaker
+# writes above -- Admin, the meeting's owner, or a user it has been shared with --
+# as a DynamoDB condition in updateCallAgenda.request.vtl.
+# ----------------------------------------------------------------------------
+
+input UpdateCallAgendaInput {
+	CallId: ID!
+	# Plain text, one item per line. An empty string clears the agenda.
+	Agenda: String!
+	# One of "scheduled", "mcp", "ui", "derived". Honoured for a backend role
+	# with IAM credentials, which must supply it; a signed-in user's write is
+	# always recorded as "ui", whatever is sent here.
+	AgendaSource: String
+	# Backend roles only: the label the change is attributed to. A signed-in
+	# user's write is attributed to their username, whatever is sent here.
+	AgendaUpdatedBy: String
+	# When true the write applies only while the meeting has no agenda, so a
+	# writer filling in a missing agenda never replaces one somebody set. Checked in the same
+	# DynamoDB condition as access, so the check and the write are atomic.
+	OnlyIfUnset: Boolean
 }
 
 input RegenerateCallSummaryInput {

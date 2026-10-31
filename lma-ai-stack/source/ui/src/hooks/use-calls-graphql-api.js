@@ -23,6 +23,7 @@ import updateSpeakerIdentities from '../graphql/queries/updateSpeakerIdentities'
 import resolveSpeakerNames from '../graphql/queries/resolveSpeakerNames';
 import updateCallSummaryText from '../graphql/queries/updateCallSummaryText';
 import regenerateCallSummary from '../graphql/queries/regenerateCallSummary';
+import updateCallAgenda from '../graphql/queries/updateCallAgenda';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
 import { serializeSummaryState } from '../components/common/summary-state';
@@ -87,6 +88,12 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
    * their own fixed field list, so a status or aggregation update arriving
    * during a live meeting would otherwise blank it -- making a hand-edited
    * summary read as generated and hiding a regeneration in flight.
+   *
+   * The agenda is carried over for the same reason, as one unit keyed on
+   * AgendaUpdatedAt: every agenda write sets that timestamp, so an incoming call
+   * without one came from a mutation that did not select the agenda, while one
+   * with it is authoritative for all four fields -- including an agenda that
+   * was cleared, which a per-field `||` would resurrect.
    */
   const setCallsDeduped = (callValues) => {
     setCalls((currentCalls) => {
@@ -101,6 +108,14 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
             ListSK: call.ListSK || existing?.ListSK,
             SpeakerIdentities: call.SpeakerIdentities || existing?.SpeakerIdentities,
             CallSummaryState: call.CallSummaryState || existing?.CallSummaryState,
+            ...(call.AgendaUpdatedAt
+              ? {}
+              : {
+                  Agenda: existing?.Agenda,
+                  AgendaSource: existing?.AgendaSource,
+                  AgendaUpdatedBy: existing?.AgendaUpdatedBy,
+                  AgendaUpdatedAt: existing?.AgendaUpdatedAt,
+                }),
           };
         }),
       ];
@@ -576,6 +591,54 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   };
 
   /**
+   * Store a meeting's agenda as typed on the meeting page.
+   *
+   * Optimistic, with a rollback on a rejected write, like the summary and
+   * speaker-name writers above. The resolver records the source as 'ui' and the
+   * caller's own username whatever the browser sends, so the patch here only
+   * anticipates what the subscription will confirm.
+   */
+  const sendUpdateCallAgenda = async (callId, agenda, username) => {
+    const AGENDA_FIELDS = ['Agenda', 'AgendaSource', 'AgendaUpdatedBy', 'AgendaUpdatedAt'];
+    let previous;
+    setCalls((currentCalls) => {
+      const existing = currentCalls.find((c) => c.CallId === callId);
+      previous = Object.fromEntries(AGENDA_FIELDS.map((field) => [field, existing?.[field]]));
+      return currentCalls.map((c) =>
+        c.CallId === callId
+          ? {
+              ...c,
+              Agenda: agenda,
+              AgendaSource: 'ui',
+              AgendaUpdatedBy: username ?? c.AgendaUpdatedBy,
+              AgendaUpdatedAt: new Date().toISOString(),
+            }
+          : c,
+      );
+    });
+    try {
+      await client.graphql({
+        query: updateCallAgenda,
+        variables: { input: { CallId: callId, Agenda: agenda } },
+      });
+      return true;
+    } catch (error) {
+      logger.error('failed to update the meeting agenda', error);
+      const refused = JSON.stringify(error?.errors ?? error ?? '').includes('condition failure');
+      setErrorMessage(
+        refused
+          ? 'you do not have permission to edit the agenda of this meeting'
+          : 'failed to save the agenda - please try again later',
+      );
+      // Roll back only if what is on screen is still what THIS call put there.
+      setCalls((currentCalls) =>
+        currentCalls.map((c) => (c.CallId === callId && c.Agenda === agenda ? { ...c, ...previous } : c)),
+      );
+      return false;
+    }
+  };
+
+  /**
    * Ask the backend to summarise a meeting again.
    *
    * Nothing is patched into state here: the run outlives the request, and the
@@ -605,6 +668,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     sendResolveSpeakerNames,
     sendUpdateCallSummary,
     sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)

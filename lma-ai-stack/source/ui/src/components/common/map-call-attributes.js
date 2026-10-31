@@ -21,6 +21,10 @@ const mapCallsAttributes = (calls, settings) => {
       CallSummaryText: callSummaryText,
       CallSummaryState: callSummaryState,
       SpeakerIdentities: speakerIdentities,
+      Agenda: agenda,
+      AgendaSource: agendaSource,
+      AgendaUpdatedBy: agendaUpdatedBy,
+      AgendaUpdatedAt: agendaUpdatedAt,
       CreatedAt: callTimestamp,
       CustomerPhoneNumber: callerPhoneNumber,
       SystemPhoneNumber: systemPhoneNumber,
@@ -64,6 +68,10 @@ const mapCallsAttributes = (calls, settings) => {
       // Raw JSON string; parsed by the readers via parseSpeakerIdentities so a
       // malformed blob degrades to "no names" instead of breaking the mapping.
       speakerIdentities,
+      agenda,
+      agendaSource,
+      agendaUpdatedBy,
+      agendaUpdatedAt,
       callerPhoneNumber,
       systemPhoneNumber,
       updatedAt,

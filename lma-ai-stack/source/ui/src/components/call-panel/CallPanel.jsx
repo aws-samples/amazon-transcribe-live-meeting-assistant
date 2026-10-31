@@ -50,6 +50,7 @@ import {
   serializeSpeakerIdentities,
 } from '../common/speaker-identities';
 import SpeakerIdentitiesPanel from './SpeakerIdentitiesPanel';
+import AgendaPanel from './AgendaPanel';
 import CallCostPanel from './CallCostPanel';
 
 import RecordingPlayer from '../recording-player';
@@ -2001,8 +2002,13 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   const enableVoiceTone = settings?.EnableVoiceToneAnalysis === 'true';
   const enableSentimentAnalysis = settings?.IsSentimentAnalysisEnabled === 'true';
 
-  const { sendUpdateSpeakerIdentities, sendResolveSpeakerNames, sendUpdateCallSummary, sendRegenerateCallSummary } =
-    useCallsContext();
+  const {
+    sendUpdateSpeakerIdentities,
+    sendResolveSpeakerNames,
+    sendUpdateCallSummary,
+    sendRegenerateCallSummary,
+    sendUpdateCallAgenda,
+  } = useCallsContext();
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
   // rebuilds the entire transcript element list.
@@ -2031,7 +2037,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   // Presentation only -- it greys out controls the write would reject anyway.
   // The rule itself is enforced as a condition on the mutation (and, for the
   // regeneration, in the Lambda behind it). Shared by the Speakers panel, the
-  // transcript's inline rename and the summary controls so all three agree.
+  // transcript's inline rename, the summary controls and the Agenda panel so
+  // all four agree.
   const speakerNamesReadOnly =
     !isAdminUser && item.owner !== user?.username && !item.sharedWith?.includes(user?.username);
 
@@ -2555,6 +2562,12 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           readOnly={speakerNamesReadOnly}
         />
       )}
+
+      <AgendaPanel
+        item={item}
+        onSave={sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined}
+        readOnly={speakerNamesReadOnly}
+      />
 
       {(enableSentimentAnalysis || enableVoiceTone) && (
         <Grid

@@ -1,0 +1,109 @@
+## Write a meeting's agenda, with where it came from, who set it and when.
+##
+## This has its own template rather than sharing updateCall.request.vtl for the
+## same two reasons updateSpeakerIdentities and updateCallSummaryText do. That
+## template SETs every key present in the input, which is safe only because every
+## mutation using it is reachable by IAM callers alone; this field is written
+## from the browser, so the update is spelled out attribute by attribute instead.
+## And a browser caller has to be held to the same access rule the read path
+## applies in getCall.response.vtl -- Admin, the meeting's owner, or a user it
+## has been shared with -- which is expressed below as a DynamoDB condition so
+## the check and the write are one atomic operation.
+##
+## The provenance fields are decided here rather than taken from the input for a
+## signed-in user: their write is recorded as source "ui" and attributed to
+## their own username. Only a backend role with IAM credentials names a source,
+## and it must name one of the values listed below.
+##
+## OnlyIfUnset makes the write conditional on the meeting having no agenda yet,
+## in the same condition as access, so a writer filling in a missing agenda never
+## replaces one somebody set -- however the two writes interleave.
+##
+## UpdatedAt is deliberately NOT written here, and not used as a guard, matching
+## updateSpeakerIdentities and updateCallSummaryText: Call updates fed by the
+## Kinesis pipeline carry `#UpdatedAt < :UpdatedAt` so out-of-order events cannot
+## clobber newer state, and an agenda change is not one of those events.
+## AgendaUpdatedAt is the agenda's own timestamp.
+#set( $PK = "c#${ctx.args.input.CallId}" )
+#set( $agenda = $ctx.args.input.Agenda )
+
+## Long enough for any real agenda (a page of items), short enough that one
+## stored field cannot grow the meeting row towards the DynamoDB item limit.
+#set( $maxAgendaChars = 10000 )
+#if( $agenda.length() > $maxAgendaChars )
+  $util.error("The agenda is longer than ${maxAgendaChars} characters", "BadRequest")
+#end
+
+## A Lambda calling with IAM credentials arrives as an assumed role; a signed-in
+## user arrives through Cognito. Same detection as getCall.response.vtl.
+#set( $isCognitoUser = true )
+#if( $context.identity.userArn && $context.identity.userArn.contains(":assumed-role/") )
+  #set( $isCognitoUser = false )
+#end
+
+#set( $allowedSources = ["scheduled", "mcp", "ui", "derived"] )
+#if( $isCognitoUser )
+  #set( $source = "ui" )
+  #set( $updatedBy = $context.identity.username )
+#else
+  #set( $source = $ctx.args.input.AgendaSource )
+  #if( $util.isNullOrBlank($source) || !$allowedSources.contains($source) )
+    $util.error("AgendaSource must be one of scheduled, mcp, ui or derived", "BadRequest")
+  #end
+  #set( $updatedBy = $ctx.args.input.AgendaUpdatedBy )
+  #if( $util.isNullOrBlank($updatedBy) )
+    #set( $updatedBy = "LMA" )
+  #end
+#end
+
+#set( $conditionNames = { "#PK": "PK" } )
+#set( $conditionValues = {} )
+#set( $condition = "attribute_exists(#PK)" )
+
+## `contains` over #SharedWith covers both shapes this attribute is stored in;
+## see updateCallSummaryText.request.vtl for the semantics of each.
+#if( $isCognitoUser && !$context.identity.groups.contains("Admin") )
+  $util.qr( $conditionNames.put("#Owner", "Owner") )
+  $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )
+  $util.qr( $conditionValues.put(":caller", $util.dynamodb.toDynamoDB($context.identity.username)) )
+  #set( $condition = "${condition} AND (#Owner = :caller OR contains(#SharedWith, :caller))" )
+#end
+
+#if( $ctx.args.input.OnlyIfUnset == true )
+  ## Its own placeholder rather than #Agenda: the update and the condition each
+  ## carry a name map, and keeping the two disjoint leaves nothing to reconcile.
+  $util.qr( $conditionNames.put("#ExistingAgenda", "Agenda") )
+  $util.qr( $conditionValues.put(":noAgenda", $util.dynamodb.toDynamoDB("")) )
+  #set( $condition = "${condition} AND (attribute_not_exists(#ExistingAgenda) OR #ExistingAgenda = :noAgenda)" )
+#end
+
+{
+  "version" : "2018-05-29",
+  "operation" : "UpdateItem",
+  "key": {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($PK)
+  },
+  "update" : {
+    "expression": "SET #Agenda = :Agenda, #AgendaSource = :AgendaSource, #AgendaUpdatedBy = :AgendaUpdatedBy, #AgendaUpdatedAt = :AgendaUpdatedAt",
+    "expressionNames": {
+      "#Agenda": "Agenda",
+      "#AgendaSource": "AgendaSource",
+      "#AgendaUpdatedBy": "AgendaUpdatedBy",
+      "#AgendaUpdatedAt": "AgendaUpdatedAt"
+    },
+    "expressionValues": {
+      ":Agenda": $util.dynamodb.toDynamoDBJson($agenda),
+      ":AgendaSource": $util.dynamodb.toDynamoDBJson($source),
+      ":AgendaUpdatedBy": $util.dynamodb.toDynamoDBJson($updatedBy),
+      ":AgendaUpdatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
+    }
+  },
+  "condition": {
+    "expression": "$condition",
+    "expressionNames": $utils.toJson($conditionNames)
+    #if( !${conditionValues.isEmpty()} )
+      , "expressionValues": $utils.toJson($conditionValues)
+    #end
+  }
+}

@@ -119,6 +119,13 @@ Interact with the meeting assistant by typing questions or requests:
 - Multiple sections based on configured prompt templates
 - Copy to clipboard support for easy sharing
 
+### Agenda
+
+The meeting's agenda as a numbered list, with where it came from and who last
+changed it. The owner, anyone the meeting is shared with, and an Admin can edit
+it while the meeting runs and after it ends. See
+[Meeting Agenda](meeting-agenda.md).
+
 ### Estimated Cost
 
 A collapsed section showing an itemised estimate of what the meeting cost: Transcribe
