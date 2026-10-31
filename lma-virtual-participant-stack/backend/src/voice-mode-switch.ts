@@ -243,8 +243,7 @@ function stripAddressee(words: string[], addressees: string[], end: 'start' | 'e
         if (words.length <= n) continue;
         const slice = end === 'start' ? words.slice(0, n) : words.slice(words.length - n);
         if (slice.join(' ') === name) {
-            const rest = end === 'start' ? words.slice(n) : words.slice(0, words.length - n);
-            return rest.filter((word) => !FILLER.has(word));
+            return end === 'start' ? words.slice(n) : words.slice(0, words.length - n);
         }
     }
     return words;

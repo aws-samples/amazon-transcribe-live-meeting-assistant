@@ -93,6 +93,10 @@ test('stopping translation needs no name, but nothing else may be asked for', ()
         'translator mute', 'stop', '']) {
         assert.equal(isStopTranslatingRequest(text, names), false, text);
     }
+    // The short forms switch when said on their own, as an answer would be,
+    // and not inside a question.
+    assert.equal(isStopTranslatingRequest('Assistant mode?', names), true);
+    assert.equal(isStopTranslatingRequest('is it in assistant mode', names), false);
 });
 
 // ---------------------------------------------------------------------------
@@ -290,6 +294,20 @@ test('nova: "Alex, stop translating" also works while the translator is paused',
     await stream(a, userTurn('alex stop translating'));
     assert.equal(requests.length, 1);
     assert.equal(requests[0].meetingMode, 'normal');
+});
+
+test('nova: a pause asked for after a declined "stop translating" is a pause', async () => {
+    const { a } = nova('translator');
+    a.reconfigure = async () => ({ result: 'declined', changed: [], sessionRebuilt: false,
+        meetingModeBefore: 'translator', meetingModeAfter: 'translator',
+        activationModeBefore: 'always_active', activationModeAfter: 'always_active' });
+    a.MUTE_TOOL_AUDIO_FLUSH_MS = 0;
+    a.refreshSession = async () => {};
+    await stream(a, userTurn('stop translating'));
+    a.session = { id: 's2', isActive: true, queue: [], promptName: 'p', audioContentId: 'a', signal: null };
+    await stream(a, [...userTurn('translator mute'), ...muteTool()]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(a._translatorState, 'MUTED');
 });
 
 test('nova: a declined "stop translating" leaves the translator heard', async () => {

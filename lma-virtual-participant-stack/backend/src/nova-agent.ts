@@ -4673,7 +4673,9 @@ export class NovaAgent implements VoiceAssistantProvider {
       return;
     }
     if (this.isTranslatorTriggerUtterance(text)) return;
-    if (this.containsWakePhrase(text) && !isStopTalkingRequest(text, configuredWakePhrases())) {
+    // addressesAssistant rather than containsWakePhrase, which logs every
+    // utterance it is given — here, everything said while the translator is paused.
+    if (addressesAssistant(text, configuredWakePhrases()) && !isStopTalkingRequest(text, configuredWakePhrases())) {
       this.handleStopTranslating(session, route, text);
     }
   }
@@ -4714,7 +4716,12 @@ export class NovaAgent implements VoiceAssistantProvider {
   ): void {
     // Nova can deliver the same request on two sessions around a hand-over,
     // and both transcripts carry it.
-    if (this._reconfiguring || this.leavingTranslator) return;
+    if (this.leavingTranslator) return;
+    if (this._reconfiguring) {
+      // Another change is under way; this request is not being acted on.
+      this.leaveTranslatorRequestedAt = 0;
+      return;
+    }
     this.leavingTranslator = true;
     if (session) session.silenced = true;
     console.log(
@@ -4725,8 +4732,10 @@ export class NovaAgent implements VoiceAssistantProvider {
       .then(() => {
         if (this.meetingMode !== 'normal') {
           console.log(`[voice-mode] action=stop-translating-declined meetingMode=${this.meetingMode}`);
-          // Still translating, so this session's later answers are to be heard.
+          // Still translating, so this session's later answers are to be heard,
+          // and a pause asked for next is a pause.
           if (session) session.silenced = false;
+          this.leaveTranslatorRequestedAt = 0;
           return;
         }
         if (this.stoppedTranslatingClip) {
@@ -4742,6 +4751,7 @@ export class NovaAgent implements VoiceAssistantProvider {
       .catch((error) => {
         console.error('Error leaving translator mode by voice:', error);
         if (session && this.meetingMode === 'translator') session.silenced = false;
+        this.leaveTranslatorRequestedAt = 0;
       })
       .finally(() => {
         this.leavingTranslator = false;
