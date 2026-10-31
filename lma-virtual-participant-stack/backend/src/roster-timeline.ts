@@ -5,9 +5,11 @@
  */
 
 /**
- * Who the meeting platform showed as active speaker at each point of the engine's
- * audio clock, so a row is attributed by when it STARTED rather than by whoever is
- * active when it is emitted. The VP's own identities are never recorded.
+ * Who the meeting platform showed as active speaker at each point of the
+ * transcription audio clock (the on-demand engine's, or the audio sent to Amazon
+ * Transcribe), so a row or a word is attributed to whoever was shown for most of
+ * it rather than to whoever is active when it is emitted. The VP's own identities
+ * are never recorded.
  */
 export class RosterTimeline {
     private readonly own: Set<string>;

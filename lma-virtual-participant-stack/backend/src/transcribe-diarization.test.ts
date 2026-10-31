@@ -20,6 +20,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 
 import {
+    VoiceLabelNames,
     DEFAULT_MIN_RUN_SECONDS,
     DEFAULT_MIN_RUN_WORDS,
     buildDiarizedSegments,
@@ -667,5 +668,51 @@ describe('the roster is resolved on the meeting timeline, not the session one', 
             Object.values(segments).map((segment) => segment.Speaker),
             ['Before (spk_0)', 'After (spk_0)'],
         );
+    });
+});
+
+describe('which rows carry a voice label', () => {
+    it('passes a row with no label through as the bare name', () => {
+        assert.equal(new VoiceLabelNames().nameFor('Sam Lee', undefined, 4), 'Sam Lee');
+    });
+
+    it('shows a label only with the participant it has coincided with for the most speech', () => {
+        const labels = new VoiceLabelNames();
+        assert.equal(labels.nameFor('Sam Lee', 'spk_3', 10), 'Sam Lee (spk_3)');
+        assert.equal(labels.nameFor('Ana Ruiz', 'spk_3', 2), 'Ana Ruiz');
+        assert.equal(labels.nameFor('Sam Lee', 'spk_3', 1), 'Sam Lee (spk_3)');
+        assert.equal(labels.ownerOf('spk_3'), 'Sam Lee');
+    });
+
+    it('gives a tie to the participant the label met first', () => {
+        const labels = new VoiceLabelNames();
+        assert.equal(labels.nameFor('Sam Lee', 'spk_0', 3), 'Sam Lee (spk_0)');
+        assert.equal(labels.nameFor('Ana Ruiz', 'spk_0', 3), 'Ana Ruiz');
+        assert.equal(labels.ownerOf('spk_0'), 'Sam Lee');
+    });
+
+    it('hands a label over once another participant has more speech with it', () => {
+        // Rows already written keep what they were given: the result of an
+        // earlier call is never revisited.
+        const labels = new VoiceLabelNames();
+        const first = labels.nameFor('Priya Patel', 'spk_0', 0.8);
+        const later = labels.nameFor('Ana Ruiz', 'spk_0', 5);
+        assert.equal(first, 'Priya Patel (spk_0)');
+        assert.equal(later, 'Ana Ruiz (spk_0)');
+        assert.equal(labels.nameFor('Priya Patel', 'spk_0', 1), 'Priya Patel');
+    });
+
+    it('counts a span with no length, or an inverted one, as no speech', () => {
+        const labels = new VoiceLabelNames();
+        labels.nameFor('Sam Lee', 'spk_1', 1);
+        assert.equal(labels.nameFor('Ana Ruiz', 'spk_1', -5), 'Ana Ruiz');
+        assert.equal(labels.nameFor('Ana Ruiz', 'spk_1', 0), 'Ana Ruiz');
+        assert.equal(labels.ownerOf('spk_1'), 'Sam Lee');
+    });
+
+    it('keeps the voices behind one participant apart', () => {
+        const labels = new VoiceLabelNames();
+        assert.equal(labels.nameFor('Conference Room', 'spk_0', 3), 'Conference Room (spk_0)');
+        assert.equal(labels.nameFor('Conference Room', 'spk_1', 2), 'Conference Room (spk_1)');
     });
 });
