@@ -7,7 +7,7 @@
 /**
  * The wake-phrase activation window as an idle timeout rather than a deadline
  * from the wake phrase, for a voice-assistant provider to drive from its own
- * busy signals.
+ * busy signals. Both the Nova Sonic and the ElevenLabs agents use it.
  *
  * `VoiceAssistantActivationDuration` is the quiet time after the assistant was
  * last busy or engaged. The window does not lapse while a lookup is running,
@@ -17,9 +17,14 @@
  * lapsing window, and never beyond twice its length, so talk among the other
  * participants cannot keep a session open indefinitely.
  *
- * These are the rules the Nova Sonic agent has applied since #831 (its own copy
- * lives in nova-agent.ts, with the recorded meeting that motivated them); the
- * ElevenLabs agent uses this module.
+ * Why, as recorded on a live meeting with the Nova Sonic agent and a 30-second
+ * window that was then a deadline from the wake phrase: a wake phrase at
+ * 22:08:49, two lookups, and an answer that started at 22:09:11 and was audible
+ * for 26 seconds, which the session closed 8 seconds into — leaving the
+ * participant who then said "stop" talking to a session that could no longer
+ * hear it. A session closed while the meeting is still hearing the assistant
+ * cannot hear the participant who asks it to stop, and a session closed while
+ * a lookup is running throws its answer away (#831).
  */
 
 /** How often a held-open window looks again at whether the assistant has gone idle. */
@@ -32,9 +37,13 @@ export const ACTIVATION_AUDIBLE_HOLD_MAX_MS = 10000;
 
 /**
  * How long a participant's turn holds a lapsing window open, so that a
- * question asked just before it lapses is given a moment to be answered.
- * Deliberately short and deliberately not a re-arm: being addressed by wake
- * phrase is what re-arms the full window.
+ * question asked just before it lapses is not cut off before the model has had
+ * the moment it needs to start answering or call a tool.
+ *
+ * Deliberately short and deliberately not a re-arm: the session hears the
+ * whole meeting, so treating every turn as engagement would keep a wake-phrase
+ * session open for as long as anyone in the meeting is talking. Being addressed
+ * by wake phrase is what re-arms the full window.
  */
 export const ACTIVATION_USER_TURN_GRACE_MS = 3000;
 

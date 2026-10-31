@@ -26,6 +26,7 @@ import {
     ACTIVATION_AUDIBLE_HOLD_MAX_MS,
     ACTIVATION_RECHECK_MS,
     ACTIVATION_USER_TURN_GRACE_MS,
+    ActivationWindow,
 } from './voice-activation-window.js';
 
 const WINDOW_S = 30;
@@ -133,12 +134,16 @@ function lookup(h: Harness, id: string): Promise<void> {
 // One set of rules for both providers
 // ---------------------------------------------------------------------------
 
-test('the shared window uses the same timings as the Nova Sonic agent', () => {
-    // nova-agent.ts still carries its own copy of the window; this fails if
-    // either copy changes without the other.
-    assert.equal(ACTIVATION_RECHECK_MS, nova.ACTIVATION_RECHECK_MS);
-    assert.equal(ACTIVATION_AUDIBLE_HOLD_MAX_MS, nova.ACTIVATION_AUDIBLE_HOLD_MAX_MS);
-    assert.equal(ACTIVATION_USER_TURN_GRACE_MS, nova.ACTIVATION_USER_TURN_GRACE_MS);
+test('both providers drive the same shared window', () => {
+    // There is one copy of the rules: neither agent keeps timings of its own.
+    const novaAgent = new nova.NovaAgent({
+        modelId: 'amazon.nova-2-sonic-v1:0',
+        systemPrompt: 'You are Alex.',
+        activationMode: 'wake_phrase',
+    }) as any;
+    assert.ok(novaAgent.activationWindow instanceof ActivationWindow);
+    assert.ok(harness().a.activationWindow instanceof ActivationWindow);
+    assert.equal('ACTIVATION_RECHECK_MS' in nova, false, 'nova-agent.ts no longer exports its own copy');
 });
 
 // ---------------------------------------------------------------------------

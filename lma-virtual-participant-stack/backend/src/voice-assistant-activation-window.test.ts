@@ -27,12 +27,8 @@
  */
 import { strict as assert } from 'node:assert';
 import { afterEach, beforeEach, mock, test } from 'node:test';
-import {
-    ACTIVATION_RECHECK_MS,
-    ACTIVATION_USER_TURN_GRACE_MS,
-    NovaAgent,
-    STOP_REQUEST_TOOL_GRACE_MS,
-} from './nova-agent.js';
+import { NovaAgent, STOP_REQUEST_TOOL_GRACE_MS } from './nova-agent.js';
+import { ACTIVATION_RECHECK_MS, ACTIVATION_USER_TURN_GRACE_MS } from './voice-activation-window.js';
 
 const WINDOW_S = 30;
 const WINDOW_MS = WINDOW_S * 1000;
