@@ -16,6 +16,7 @@ import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-sec
 import { createSignedFetcher } from 'aws-sigv4-fetch';
 import { details } from './details.js';
 import { isMicrovmLaunch, microvmVncEndpoint } from './launch-mode.js';
+import { agendaFromVpRow, type VpAgenda } from './meeting-agenda.js';
 
 /**
  * Conditions for this participant's ALB listener rule.
@@ -643,6 +644,37 @@ export class VirtualParticipantStatusManager {
 
     } catch (error) {
       console.error('Error getting CallId:', error);
+      return null;
+    }
+  }
+
+  /**
+   * The agenda given when this VP was started or scheduled, from its own row.
+   *
+   * Null when the row has none or cannot be read: an agenda is an enhancement,
+   * and a VP that could not read one still joins and records the meeting.
+   */
+  async getAgenda(): Promise<VpAgenda | null> {
+    try {
+      const query = `
+        query GetVirtualParticipant($id: ID!) {
+          getVirtualParticipant(id: $id) {
+            id
+            agenda
+            agendaSource
+          }
+        }
+      `;
+      const result = await this.signAndSendGraphQLRequest(query, { id: this.participantId });
+      const agenda = agendaFromVpRow(result?.getVirtualParticipant);
+      console.log(
+        agenda
+          ? `VP ${this.participantId} has an agenda (${agenda.agenda.length} characters, source ${agenda.agendaSource})`
+          : `VP ${this.participantId} has no agenda`,
+      );
+      return agenda;
+    } catch (error) {
+      console.error('Error getting the agenda:', error);
       return null;
     }
   }

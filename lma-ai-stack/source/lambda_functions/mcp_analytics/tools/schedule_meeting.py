@@ -16,6 +16,7 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+from tools.agenda_helper import normalize_agenda
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 from tools.user_helper import has_zoom_credentials, resolve_user_sub
 
@@ -31,6 +32,7 @@ def execute(
     user_id: str = None,
     is_admin: bool = False,
     use_stored_zoom_credentials: bool = True,
+    agenda: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Schedule a future meeting with virtual participant.
@@ -48,6 +50,9 @@ def execute(
             the meeting (recommended; joins far more reliably and can join
             meetings that disallow guests). Set to False to force
             a guest join. Has no effect on non-Zoom platforms.
+        agenda: Optional meeting agenda, one item per line (for example the
+            agenda from a calendar invite). Stored on the Virtual Participant
+            and carried onto the meeting record when the meeting starts.
 
     Returns:
         Dict with scheduled virtual participant details
@@ -56,6 +61,8 @@ def execute(
         raise ValueError(
             "meeting_name, meeting_platform, meeting_id, and scheduled_time are required"
         )
+
+    agenda = normalize_agenda(agenda)
 
     # Remove ALL whitespace from meeting_id (including internal spaces)
     meeting_id = "".join(meeting_id.split())
@@ -141,6 +148,9 @@ def execute(
             # owner override — only honored by the resolver when the caller
             # is IAM (ours is, the MCP Lambda role).
             **({"owner": user_id} if user_id else {}),
+            # Stored on the VP row; the VP puts it on the meeting record when the
+            # meeting starts. The resolver records its source as "mcp".
+            **({"agenda": agenda} if agenda else {}),
             # Persisted on the VP row so VPScheduler can read them later.
             **({"userSub": cognito_sub} if cognito_sub else {}),
             **({"userZoomSub": cognito_sub} if use_zoom_creds else {}),

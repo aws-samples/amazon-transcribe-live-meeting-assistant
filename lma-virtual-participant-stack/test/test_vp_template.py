@@ -1745,3 +1745,18 @@ def test_every_log_group_in_the_template_has_its_own_name(template: dict) -> Non
         if resource["Type"] == "AWS::Logs::LogGroup"
     ]
     assert len(names) == len(set(names)), f"two log groups share a name: {names}"
+
+
+def test_both_launch_paths_lma_uses_tell_the_container_its_vp_id(raw: str, launcher: str) -> None:
+    """The container reads its own row at start, and the meeting agenda comes
+    from that row, so the VP id is the one thing every launch must carry.
+
+    The two paths LMA's own callers reach: the "start now" state machine's
+    RunTask (and the MICROVM launcher it invokes), and the VPScheduler Lambda
+    the scheduling form drives through the table's stream. The launcher refuses
+    a payload without the id rather than starting a VP that cannot find its row.
+    """
+    assert '"Name": "VIRTUAL_PARTICIPANT_ID",\n              "Value.$": "$.data.virtualParticipantId"' in raw
+    assert "{'Name': 'VIRTUAL_PARTICIPANT_ID', 'Value': vp_id}," in raw
+    assert '"VIRTUAL_PARTICIPANT_ID": ("virtualParticipantId", "id"),' in launcher
+    assert '"no virtualParticipantId in payload"' in launcher

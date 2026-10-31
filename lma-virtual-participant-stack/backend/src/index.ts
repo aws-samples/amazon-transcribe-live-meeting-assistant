@@ -238,6 +238,12 @@ const main = async (): Promise<void> => {
                 console.log(`Generated and set new VP CallId: ${callId}`);
             }
             
+            // The agenda the VP was started or scheduled with goes onto the
+            // meeting record in the START event. Read before the meeting
+            // starts; a VP without one starts its meeting exactly as before.
+            const { kinesisStreamManager: agendaStream } = await import('./kinesis-stream.js');
+            agendaStream.setAgenda(await statusManager.getAgenda());
+
             // Start with INITIALIZING status
             await statusManager.setInitializing();
             console.log(`VP ${vpId} status: INITIALIZING`);

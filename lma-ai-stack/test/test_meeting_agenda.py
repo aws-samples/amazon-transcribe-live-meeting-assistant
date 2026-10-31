@@ -14,6 +14,7 @@ subscription publish that keeps open pages current.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,7 @@ SCHEMA = APPSYNC / "schema.graphql"
 AGENDA_VTL = APPSYNC / "updateCallAgenda.request.vtl"
 SUMMARY_VTL = APPSYNC / "updateCallSummaryText.request.vtl"
 UI_SRC = AI_STACK / "source" / "ui" / "src"
+VP_SRC = AI_STACK.parent / "lma-virtual-participant-stack" / "backend" / "src"
 CALL_FIELDS = (
     AI_STACK
     / "source"
@@ -192,3 +194,103 @@ def test_the_browser_carries_the_agenda_over_a_pipeline_update() -> None:
     assert "...(call.AgendaUpdatedAt" in hook
     for field in AGENDA_FIELDS:
         assert f"{field}: existing?.{field}," in hook
+
+
+# ── carried in from starting or scheduling a Virtual Participant ───────────
+
+
+def test_create_call_accepts_the_agenda_fields(schema_sdl: str) -> None:
+    """createCall writes its whole input, so declaring the fields is what lets a
+    START event create the meeting with its agenda."""
+    create = _block(schema_sdl, "input CreateCallInput")
+    for field in AGENDA_FIELDS:
+        assert f"\t{field}:" in create, f"CreateCallInput does not declare {field}"
+
+
+def test_the_vp_row_declares_its_agenda(schema_sdl: str) -> None:
+    vp = _block(schema_sdl, "type VirtualParticipant ")
+    assert "\tagenda: String" in vp
+    assert "\tagendaSource: String" in vp
+    create_input = _block(schema_sdl, "input CreateVirtualParticipantInput")
+    assert "\tagenda: String" in create_input
+    # The source is decided by the resolver from the caller, never sent.
+    assert "agendaSource" not in create_input
+
+
+def _create_vp_template(resources: dict) -> str:
+    return resources["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+
+
+def test_the_vp_row_records_where_its_agenda_came_from(resources: dict) -> None:
+    vtl = _create_vp_template(resources)
+    agenda_block = vtl[vtl.index("isNullOrBlank($ctx.args.input.agenda)") :]
+    agenda_block = agenda_block[: agenda_block.index('"version"')]
+    assert '$util.qr($input.put("agenda", $ctx.args.input.agenda))' in agenda_block
+    # An IAM caller is the MCP server; anyone else used the form.
+    assert "#if($ctx.identity.userArn)" in agenda_block
+    assert '$input.put("agendaSource", "mcp")' in agenda_block
+    assert '$input.put("agendaSource", "scheduled")' in agenda_block
+    assert "length() > 10000" in agenda_block
+
+
+def test_the_vp_reads_its_agenda_from_its_row_and_sends_it_in_start() -> None:
+    status_manager = (VP_SRC / "status-manager.ts").read_text(encoding="utf-8")
+    stream = (VP_SRC / "kinesis-stream.ts").read_text(encoding="utf-8")
+    index = (VP_SRC / "index.ts").read_text(encoding="utf-8")
+    getter = status_manager[status_manager.index("async getAgenda()") :]
+    getter = getter[: getter.index("\n  }\n")]
+    assert "agenda\n            agendaSource" in getter
+    start = stream[stream.index("async sendStartMeeting()") :]
+    start = start[: start.index("await this.sendRecord(record);")]
+    assert "...agendaStartFields(this.agenda, details.lmaUser)," in start
+    # Read before the meeting starts, where the CallId is linked.
+    assert "setAgenda(await statusManager.getAgenda());" in index
+
+
+def test_the_scheduling_form_sends_the_agenda() -> None:
+    form = (
+        UI_SRC / "components" / "virtual-participant-layout" / "VirtualParticipantList.jsx"
+    ).read_text(encoding="utf-8")
+    assert "if (agendaText) vpInput.agenda = agendaText;" in form
+    assert "agenda: data.agenda || prev.agenda," in form
+
+
+# ── the two MCP endpoints advertise the same arguments ─────────────────────
+
+MCP_INDEX = AI_STACK / "source" / "lambda_functions" / "mcp_analytics" / "index.py"
+
+
+def _api_key_endpoint_tools() -> dict:
+    """MCP_TOOLS from the MCP Lambda: what the API-key endpoint's tools/list returns."""
+    tree = ast.parse(MCP_INDEX.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "MCP_TOOLS" for t in node.targets
+        ):
+            return {tool["name"]: tool for tool in ast.literal_eval(node.value)}
+    raise AssertionError("MCP_TOOLS not found")
+
+
+def _gateway_tools(resources: dict) -> dict:
+    """The AgentCore Gateway target's inline tool list: what the OAuth endpoint offers."""
+    for resource in resources.values():
+        config = (resource.get("Properties") or {}).get("TargetConfiguration") or {}
+        payload = ((config.get("Mcp") or {}).get("Lambda") or {}).get("ToolSchema", {})
+        if "InlinePayload" in payload:
+            return {tool["Name"]: tool for tool in payload["InlinePayload"]}
+    raise AssertionError("no gateway target with an inline tool schema")
+
+
+@pytest.mark.parametrize("tool", ["start_meeting_now", "schedule_meeting"])
+def test_both_mcp_endpoints_offer_the_agenda_argument(resources: dict, tool: str) -> None:
+    """The OAuth endpoint (an AgentCore Gateway target) declares its own copy of
+    each tool's schema in the stack template; a client on it learns only the
+    arguments that copy names, so an argument added to one list alone is
+    invisible to half the clients."""
+    gateway = _gateway_tools(resources)[tool]["InputSchema"]
+    api_key = _api_key_endpoint_tools()[tool]["inputSchema"]
+    assert gateway["Properties"]["agenda"]["Type"] == "string"
+    assert api_key["properties"]["agenda"]["type"] == "string"
+    assert "agenda" not in gateway.get("Required", [])
+    assert "agenda" not in api_key.get("required", [])
+    assert set(gateway["Properties"]) == set(api_key["properties"])

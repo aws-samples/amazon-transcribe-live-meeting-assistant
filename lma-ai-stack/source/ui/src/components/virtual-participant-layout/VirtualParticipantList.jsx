@@ -50,6 +50,7 @@ import {
 } from './vp-table-config';
 import ZoomCredentialsManager from './ZoomCredentialsManager';
 import ChromeProfileManager from './ChromeProfileManager';
+import { MAX_AGENDA_CHARS } from '../common/agenda';
 
 import '@cloudscape-design/global-styles/index.css';
 
@@ -111,6 +112,7 @@ const VirtualParticipantList = () => {
     meetingPassword: '',
     meetingDate: '',
     meetingTime: '',
+    agenda: '',
   });
   const [meetingTimeError, setMeetingTimeError] = useState('');
   const [consentChecked, setConsentChecked] = useState(false);
@@ -416,6 +418,9 @@ const VirtualParticipantList = () => {
           meetingPassword: data.meetingPassword || prev.meetingPassword,
           meetingDate: data.meetingDate || prev.meetingDate,
           meetingTime: data.meetingTime || prev.meetingTime,
+          // Only the agenda the invitation lists; the parser is told not to
+          // invent one, and leaves it null when there is none.
+          agenda: data.agenda || prev.agenda,
         }));
 
         // Close paste invite modal and open create modal
@@ -539,6 +544,11 @@ const VirtualParticipantList = () => {
         enableVideoRecording,
       };
 
+      // Stored on the VP row for immediate and scheduled meetings alike; the VP
+      // reads it from there when it starts and puts it on the meeting record.
+      const agendaText = (createForm.agenda || '').trim();
+      if (agendaText) vpInput.agenda = agendaText;
+
       // Add scheduling fields if this is a scheduled VP
       if (isScheduled && meetingTimestamp) {
         vpInput.meetingTime = meetingTimestamp;
@@ -625,6 +635,7 @@ const VirtualParticipantList = () => {
         meetingPassword: '',
         meetingDate: '',
         meetingTime: '',
+        agenda: '',
       });
       setMeetingTimeError('');
       setConsentChecked(false);
@@ -711,8 +722,11 @@ const VirtualParticipantList = () => {
   // server-side, so the UI relabels the field and hides the password input.
   const meetingIdIsUrl = /^\s*https?:\/\//i.test(createForm.meetingId || '');
 
+  // The resolver refuses a longer agenda, so the form does not offer to submit one.
+  const agendaTooLong = (createForm.agenda || '').trim().length > MAX_AGENDA_CHARS;
+
   // Check if form is ready for immediate execution
-  const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked;
+  const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked && !agendaTooLong;
 
   // Check if form is ready for scheduling
   const isFormValidForScheduling =
@@ -930,6 +944,25 @@ const VirtualParticipantList = () => {
             </FormField>
 
             <FormField
+              label="Agenda (Optional)"
+              description={
+                'One item per line. It is stored on the meeting, shown on its page and can be edited there ' +
+                'during and after the meeting.'
+              }
+              constraintText={agendaTooLong ? `The agenda is limited to ${MAX_AGENDA_CHARS} characters.` : undefined}
+              stretch
+            >
+              <Textarea
+                value={createForm.agenda || ''}
+                onChange={({ detail }) => setCreateForm((prev) => ({ ...prev, agenda: detail.value }))}
+                placeholder={'Introductions\nQ3 budget review\nHiring plan'}
+                rows={4}
+                ariaLabel="Agenda, one item per line"
+                invalid={agendaTooLong}
+              />
+            </FormField>
+
+            <FormField
               label="Video recording"
               description={
                 'Capture the meeting screen (screen shares, slides, participants) as an MP4 alongside the audio ' +
@@ -965,6 +998,7 @@ const VirtualParticipantList = () => {
             meetingPassword: '',
             meetingDate: '',
             meetingTime: '',
+            agenda: '',
           });
           setMeetingTimeError('');
           setConsentChecked(false);
@@ -987,6 +1021,7 @@ const VirtualParticipantList = () => {
                     meetingPassword: '',
                     meetingDate: '',
                     meetingTime: '',
+                    agenda: '',
                   });
                   setMeetingTimeError('');
                   setConsentChecked(false);

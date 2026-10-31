@@ -25,11 +25,31 @@ Beside the text the meeting records three things about it:
 
 | Field | Meaning |
 |---|---|
-| `AgendaSource` | Where the agenda came from. An agenda typed on the meeting page is recorded as `ui`. The field also accepts `scheduled`, `mcp` and `derived`, which a backend role writing with IAM credentials must choose between. |
+| `AgendaSource` | Where the agenda came from: `scheduled` (given on the Virtual Participant form), `mcp` (passed by an MCP client that started or scheduled a Virtual Participant) or `ui` (typed on the meeting page). The API also accepts `derived` from a backend role. |
 | `AgendaUpdatedBy` | The username of the person who last set it, or a fixed label when the backend set it. |
 | `AgendaUpdatedAt` | When it was last set. |
 
 An agenda is limited to 10,000 characters. Saving an empty agenda clears it.
+
+## Where an agenda comes from
+
+| Source | How |
+|---|---|
+| **The Virtual Participant form** (`scheduled`) | The **Create Virtual Participant** modal has an optional **Agenda** field. **Paste Meeting Invitation** fills it with the agenda the invitation lists, and leaves it as it was when the invitation lists none: the parser is told to extract an agenda, never to make one up from the title. |
+| **An MCP client** (`mcp`) | The `start_meeting_now` and `schedule_meeting` tools take an optional `agenda` argument — text with one item per line — so an agent such as Amazon Quick can pass the agenda from a calendar invite. See [Amazon Quick MCP setup](amazon-quick-mcp-setup.md#schedule_meeting). |
+| **The meeting page** (`ui`) | The Agenda panel, below. |
+
+For the first two, the agenda is stored with the Virtual Participant when it is
+started or scheduled. When the Virtual Participant starts, it reads the agenda
+back from its own record and sends it in the event that creates the meeting, so
+the meeting has its agenda from the moment it exists. Because the VP reads the
+agenda itself, it does not depend on how the VP was launched: a meeting started
+now (through the Step Functions state machine) and a scheduled one (through the
+scheduler Lambda that the Virtual Participant table's stream drives) both get it.
+
+A Virtual Participant that cannot read its agenda still joins and records the
+meeting, without one; the VP's log says which. An agenda can be added on the
+meeting page at any time.
 
 ## The Agenda panel
 
@@ -80,6 +100,7 @@ meeting pages update without reloading. A client that subscribes should select
 `Owner` and `SharedWith`, as the subscription requires them for every caller who
 is not an Admin.
 
-Backend roles calling with IAM credentials must name an `AgendaSource`, may set
-`AgendaUpdatedBy`, and may pass `OnlyIfUnset: true` to write only while the
-meeting has no agenda, which is checked atomically with the write.
+Backend roles calling with IAM credentials must name an `AgendaSource` (any of
+the four values above), may set `AgendaUpdatedBy`, and may pass
+`OnlyIfUnset: true` to write only while the meeting has no agenda, which is
+checked atomically with the write.

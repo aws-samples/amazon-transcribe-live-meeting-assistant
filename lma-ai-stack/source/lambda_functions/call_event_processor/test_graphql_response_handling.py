@@ -121,6 +121,7 @@ _STUBS: Dict[str, Any] = {
 try:
     from gql.transport.exceptions import TransportQueryError
     from graphql import build_ast_schema, parse
+    from graphql.language.printer import print_ast
     from graphql_helpers.response import GraphQLResponseError
 
     # The metric catalogue, imported here for the same reason as the others: the
@@ -803,6 +804,48 @@ def test_a_first_start_event_counts_one_meeting_started(schema, emitted, monkeyp
         monkeypatch,
     )
     assert emitted.counts.get(metric_names.MEETINGS_STARTED) == 1
+
+
+def test_a_start_event_creates_the_meeting_with_the_agenda_it_carries(schema, emitted, monkeypatch):
+    """A Virtual Participant started with an agenda sends it in START, so the
+    meeting has it from creation rather than from a second write racing it.
+
+    Nothing in the processor names the fields: createCall's input is the
+    message itself, and gql keeps only the keys CreateCallInput declares, so
+    the fields reach the resolver because the input type declares them."""
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    process_event(
+        session,
+        {
+            "EventType": "START",
+            "CallId": "call-1",
+            "AgentId": "someone@example.com",
+            "Agenda": "Budget\nHiring",
+            "AgendaSource": "scheduled",
+            "AgendaUpdatedBy": "someone@example.com",
+            "AgendaUpdatedAt": "2026-10-31T10:00:00.000Z",
+        },
+        monkeypatch,
+    )
+    sent = print_ast(session.queries[0])
+    assert 'Agenda: "Budget\\nHiring"' in sent
+    assert 'AgendaSource: "scheduled"' in sent
+    assert 'AgendaUpdatedBy: "someone@example.com"' in sent
+    assert 'AgendaUpdatedAt: "2026-10-31T10:00:00.000Z"' in sent
+
+
+def test_a_start_event_without_an_agenda_creates_the_meeting_without_one(
+    schema, emitted, monkeypatch
+):
+    created = {"createCall": {"CallId": "call-1", "Owner": "someone@example.com"}}
+    session = FakeSession(schema, created)
+    process_event(
+        session,
+        {"EventType": "START", "CallId": "call-1", "AgentId": "someone@example.com"},
+        monkeypatch,
+    )
+    assert "Agenda" not in print_ast(session.queries[0])
 
 
 def test_a_redelivered_start_event_counts_no_meeting_started(schema, emitted, monkeypatch):

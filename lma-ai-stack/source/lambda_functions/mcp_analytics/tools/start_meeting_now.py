@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 import boto3
 
+from tools.agenda_helper import normalize_agenda
 from tools.url_helper import get_meeting_url, get_virtual_participant_url
 from tools.user_helper import has_zoom_credentials, resolve_user_sub
 
@@ -28,6 +29,7 @@ def execute(
     user_id: str = None,
     is_admin: bool = False,
     use_stored_zoom_credentials: bool = True,
+    agenda: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Start a meeting immediately with virtual participant.
@@ -44,12 +46,17 @@ def execute(
             the meeting (recommended; joins far more reliably and can join
             meetings that disallow guests). Set to False to force
             a guest join. Has no effect on non-Zoom platforms.
+        agenda: Optional meeting agenda, one item per line (for example the
+            agenda from a calendar invite). Stored on the Virtual Participant
+            and carried onto the meeting record when the meeting starts.
 
     Returns:
         Dict with virtual participant details and status
     """
     if not meeting_name or not meeting_platform or not meeting_id:
         raise ValueError("meeting_name, meeting_platform, and meeting_id are required")
+
+    agenda = normalize_agenda(agenda)
 
     # Remove ALL whitespace from meeting_id (including internal spaces)
     meeting_id = "".join(meeting_id.split())
@@ -116,6 +123,9 @@ def execute(
             # is IAM (ours is, the MCP Lambda role). Cognito-authenticated
             # callers from the React UI ignore this and use their own identity.
             **({"owner": user_id} if user_id else {}),
+            # Stored on the VP row; the VP puts it on the meeting record when the
+            # meeting starts. The resolver records its source as "mcp".
+            **({"agenda": agenda} if agenda else {}),
         }
     }
 
