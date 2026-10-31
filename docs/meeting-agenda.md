@@ -102,7 +102,13 @@ per meeting.
 **Changing or turning off the automatic pass.** The Call Event Processor
 function's `AGENDA_DERIVATION_AFTER_SECONDS` environment variable sets how far
 into a meeting the automatic pass runs (300 seconds by default); `0` turns it
-off. The **Derive agenda** button works either way.
+off. It is set by the stack, so a change made on the function directly is
+undone by the next stack update. The **Derive agenda** button works either way.
+
+The button's request is answered within AppSync's 30-second limit in the usual
+case. If the model call takes longer, the panel says it is still reading the
+transcript; the pass finishes on its own, and an agenda it finds appears on the
+page without a reload.
 
 ## Agenda coverage in the summary
 

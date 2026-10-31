@@ -41,6 +41,15 @@ const formatUpdated = (updatedBy, updatedAt) => {
 
 /** What to say about a derivation's outcome, from the backend's answer. */
 export const deriveStatus = (result) => {
+  if (result?.NoAnswer) {
+    // The request ended without an answer -- typically AppSync's 30-second
+    // limit, which a long model call can outlast. The pass itself carries on
+    // and stores what it finds, which then arrives through the subscription.
+    return {
+      type: 'info',
+      text: 'Still reading the transcript; a stated agenda will appear here when found',
+    };
+  }
   if (!result?.Success) {
     return { type: 'error', text: result?.Message || 'could not derive an agenda' };
   }

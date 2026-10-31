@@ -30,7 +30,8 @@ SPEECH_CHANNELS = frozenset({"AGENT", "CALLER"})
 #: hour of conversation. Agendas are stated at the start of a meeting, so a long
 #: meeting is cut from the end, keeping its opening. Bounded this tightly because
 #: the on-demand pass answers an AppSync request, which AppSync gives up on after
-#: 30 seconds, and the model call is most of that time.
+#: 30 seconds, and the model call is most of that time. A pass that outlasts it
+#: still finishes and stores what it finds; the page is told through onUpdateCall.
 MAX_TRANSCRIPT_CHARS = 30000
 
 #: Bounds on what is stored, so one answer cannot fill the meeting record. The

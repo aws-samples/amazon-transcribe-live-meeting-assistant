@@ -1143,3 +1143,10 @@ def test_the_shipped_agenda_section_names_the_agenda_and_the_transcript() -> Non
     # Read by a summariser that predates the agenda, the placeholder is left as
     # it is; the prompt says what to answer then rather than inventing items.
     assert "No agenda was set for this meeting." in prompt
+
+
+def test_the_agenda_is_split_on_line_breaks_only_as_the_page_does() -> None:
+    assert (
+        index.numbered_agenda("Budget\u2028review\r\nHiring") == "1. Budget\u2028review\n2. Hiring"
+    )
+    assert index.numbered_agenda(None) == ""

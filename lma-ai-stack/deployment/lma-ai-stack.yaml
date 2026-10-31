@@ -3029,10 +3029,10 @@ Resources:
             !If [IsTranscriptSummaryEnabled, "true", "false"]
           ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN: !GetAtt AsyncTranscriptSummaryOrchestrator.Arn
           SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
+          AGENDA_DERIVER_ARN: !GetAtt AgendaDeriverFunction.Arn
           # Seconds into a meeting with no agenda at which the transcript is read
           # once for an agenda somebody stated. 0 turns the automatic pass off;
           # the Agenda panel's button works either way.
-          AGENDA_DERIVER_ARN: !GetAtt AgendaDeriverFunction.Arn
           AGENDA_DERIVATION_AFTER_SECONDS: "300"
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
@@ -4870,7 +4870,10 @@ Resources:
       MemorySize: 512
       # One model call over a bounded transcript, plus the paged transcript read.
       # The on-demand pass answers an AppSync request, which AppSync abandons at
-      # 30 seconds; the transcript bound in pure.py keeps the call well inside it.
+      # 30 seconds. The transcript bound in pure.py keeps the call short, but a
+      # reasoning model or Bedrock retries can still outlast that; the function
+      # then finishes on its own, any agenda it finds arrives through
+      # onUpdateCall, and the Agenda panel says so.
       Timeout: 60
       Environment:
         Variables:

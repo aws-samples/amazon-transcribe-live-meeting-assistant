@@ -224,7 +224,9 @@ def call_bedrock(prompt_data, call_id=None):
 def numbered_agenda(agenda):
     """The meeting's agenda as numbered lines, or "" when it has none."""
     items = []
-    for line in (agenda or "").splitlines() if isinstance(agenda, str) else []:
+    # Line breaks only, as the page splits (/\r?\n/), not every separator
+    # str.splitlines() knows, so the section numbers items as the page does.
+    for line in re.split(r"\r?\n", agenda) if isinstance(agenda, str) else []:
         item = AGENDA_LIST_MARK.sub("", line).strip()
         if item:
             items.append(item)

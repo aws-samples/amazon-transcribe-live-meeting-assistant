@@ -112,5 +112,9 @@ describe('AgendaPanel', () => {
       text: 'not permitted',
     });
     expect(deriveStatus(undefined).type).toBe('error');
+    expect(deriveStatus({ Success: false, NoAnswer: true })).toEqual({
+      type: 'info',
+      text: 'Still reading the transcript; a stated agenda will appear here when found',
+    });
   });
 });

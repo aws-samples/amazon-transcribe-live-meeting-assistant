@@ -652,7 +652,9 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
       return response?.data?.deriveCallAgenda ?? { Success: false, Message: 'no answer from the server' };
     } catch (error) {
       logger.error('failed to derive the meeting agenda', error);
-      return { Success: false, Message: 'request failed' };
+      // No answer is not a refusal: a pass that outlasts the request still
+      // finishes, so the panel is told the result may yet arrive.
+      return { Success: false, Message: 'request failed', NoAnswer: true };
     }
   }, []);
 
