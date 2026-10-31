@@ -63,6 +63,33 @@ while the meeting is running and after it has ended. Unlike the summary, which
 the end-of-meeting pipeline replaces when the meeting ends, a stored agenda is
 replaced only by somebody saving a new one.
 
+## Asking the assistant about the agenda
+
+The Strands meeting assistant has a `get_meeting_agenda` tool that reads the
+current meeting's agenda. Asked how the meeting is going against it, the
+assistant reads the agenda and the transcript with its times, and lists every
+item in agenda order, one line each, as **covered** (with the times it was
+discussed), **in progress** or **remaining**, noting briefly any substantial
+topic discussed that is not on the agenda. When the meeting has no agenda it
+says so instead of making one up.
+
+The same question can be asked three ways:
+
+- **The AGENDA CHECK chat button** on the meeting page's Meeting Assist panel.
+  It is one of the shipped default buttons, so a deployment that has not saved a
+  custom button list has it after an upgrade; a deployment with a custom list
+  can add it from **Edit Chat Buttons** (the custom list replaces the shipped
+  one, so it is not added there automatically).
+- **The voice assistant** — for example *"Hey Alex, what's left on the
+  agenda?"* The Nova Sonic voice assistant hands information requests to the
+  same meeting assistant, which uses the agenda tool.
+- **The meeting chat** — `LMA ask what's left on the agenda?` A question typed
+  in the meeting chat is answered from the current meeting's transcript, its
+  agenda and web search only, and the answer is posted in the chat for
+  everyone. **Guests may read the agenda of the meeting they are in** this way,
+  just as they can ask about its transcript; nothing else about the meeting
+  record is read for them.
+
 ## Who can change it
 
 The agenda follows the same rule as the rest of a meeting's editable content —

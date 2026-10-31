@@ -26,7 +26,7 @@ title: "LMA Documentation"
 - [Voice Enrollment (Speaker Recognition)](voice-enrollment.md) — Optional and off by default: people enrol their own voice, with first-party consent and an append-only consent log, so they are labelled by name from their first word
 - [Meeting Assistant](meeting-assistant.md) — Strands agent chat interface, built-in tools, Knowledge Base, Guardrails, model selection, wake phrase, custom prompts
 - [Transcript Summarization](transcript-summarization.md) — Automatic and on-demand summaries, regenerating and editing a stored summary, custom prompt templates, Lambda-based summarization
-- [Meeting Agenda](meeting-agenda.md) — An agenda on each meeting: given when a Virtual Participant is started or scheduled (on the form or by an MCP client), the Agenda panel on the meeting page, and who can change it
+- [Meeting Agenda](meeting-agenda.md) — An agenda on each meeting: given when a Virtual Participant is started or scheduled (on the form or by an MCP client), the Agenda panel on the meeting page, who can change it, and asking the assistant how the meeting is going against it
 - [Meetings Query Tool](meetings-query-tool.md) — Semantic search across past meetings via transcript knowledge base
 
 ### Meeting Sources

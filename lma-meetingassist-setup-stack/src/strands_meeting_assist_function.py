@@ -25,6 +25,7 @@ from bedrock_compat import (
 )
 import tavily_secret
 import call_metering
+import meeting_agenda
 
 # Import MCP server loader
 try:
@@ -872,7 +873,7 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
     from strands import tool
     
     @tool
-    def current_meeting_transcript(lines: int = 20, mode: str = "recent") -> str:
+    def current_meeting_transcript(lines: int = 20, mode: str = "recent", with_timestamps: bool = False) -> str:
         """Get transcript from the current meeting.
         
         Use this when:
@@ -890,7 +891,10 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
         Args:
             lines: Number of recent transcript lines to return (default 20, max 100)
             mode: "recent" for last N lines, "full" for complete transcript, "semantic" for relevant excerpts
-            
+            with_timestamps: Prefix each line with its time from the start of the meeting, as [MM:SS].
+                Use it when the answer should say WHEN something was discussed, such as an
+                agenda progress check.
+
         Returns:
             Meeting transcript text formatted with speaker names
         """
@@ -904,7 +908,7 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
                 thinking_step = {
                     'type': 'tool_use',
                     'tool_name': 'current_meeting_transcript',
-                    'tool_input': {'lines': lines, 'mode': mode},
+                    'tool_input': {'lines': lines, 'mode': mode, 'with_timestamps': with_timestamps},
                     'timestamp': datetime.utcnow().isoformat()
                 }
                 send_thinking_step_to_appsync(call_id, message_id, thinking_step, 0)
@@ -915,8 +919,10 @@ def create_current_meeting_transcript_tool(call_id: str, dynamodb_table_name: st
             logger.info(f"Current meeting transcript tool executing: lines={lines}, mode={mode}")
             
             # Fetch full transcript
-            full_transcript = fetch_meeting_transcript(call_id, dynamodb_table_name)
-            
+            full_transcript = fetch_meeting_transcript(
+                call_id, dynamodb_table_name, with_timestamps=with_timestamps
+            )
+                        
             if not full_transcript:
                 result = "No transcript available for current meeting yet."
             elif mode == "full":
@@ -1512,9 +1518,66 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
     except Exception as e:
         logger.error(f"Error sending thinking step to AppSync: {str(e)}")
 
-def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
+def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_id: str = None):
+    """Factory for the tool that reads the current meeting's agenda.
+
+    Offered in every tool scope, the meeting chat's included: the agenda belongs
+    to the meeting, and the people in the meeting chat are the people it is for.
+    It reads only the meeting this invocation is about.
     """
-    Fetch the meeting transcript from DynamoDB
+    from strands import tool
+
+    @tool
+    def get_meeting_agenda() -> str:
+        """Get the agenda of the current meeting.
+
+        Use this when:
+        - Someone asks about the agenda, what is on it, or what is left on it
+        - Someone asks how the meeting is going against the agenda, whether an item
+          has been covered, or what to discuss next
+        - Summarizing the meeting where progress against the agenda matters
+
+        Returns:
+            The agenda items, numbered, with where the agenda came from; or a note
+            that the meeting has no agenda.
+        """
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_use',
+                'tool_name': 'get_meeting_agenda',
+                'tool_input': {},
+                'timestamp': datetime.utcnow().isoformat()
+            }, 0)
+        try:
+            record = meeting_agenda.read_meeting_record(dynamodb.Table(dynamodb_table_name), call_id)
+            result = meeting_agenda.describe_agenda_for_agent(record)
+            success = True
+        except Exception as e:
+            logger.error(f"Error reading the meeting agenda: {str(e)}")
+            result = "The meeting agenda could not be read just now."
+            success = False
+        logger.info(f"Meeting agenda tool for {call_id}: {len(result)} characters")
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_result',
+                'tool_name': 'get_meeting_agenda',
+                'result': result[:200],
+                'success': success,
+                'timestamp': datetime.utcnow().isoformat()
+            }, 1)
+        return result
+
+    return get_meeting_agenda
+
+
+def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timestamps: bool = False) -> str:
+    """
+    Fetch the meeting transcript from DynamoDB.
+
+    With ``with_timestamps`` each line starts with its time from the start of
+    the meeting, as [MM:SS], which is what lets an answer say when something was
+    discussed. Off by default: the transcript handed to the agent as context
+    stays as it was.
     """
     try:
         table = dynamodb.Table(dynamodb_table_name)
@@ -1566,12 +1629,13 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str) -> str:
             speaker = item.get('Speaker', 'Unknown')
             transcript = item.get('Transcript', '')
             channel = item.get('Channel', '')
-            
+            prefix = f"{meeting_agenda.format_elapsed(item.get('StartTime'))} " if with_timestamps else ''
+
             # Format based on channel
             if channel == 'AGENT_ASSISTANT':
-                transcript_parts.append(f"MeetingAssistant: {transcript}")
+                transcript_parts.append(f"{prefix}MeetingAssistant: {transcript}")
             else:
-                transcript_parts.append(f"{speaker}: {transcript}")
+                transcript_parts.append(f"{prefix}{speaker}: {transcript}")
         
         full_transcript = '\n'.join(transcript_parts)
         logger.info(
@@ -1649,8 +1713,8 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
 
 MEETING_CHAT_SCOPE_NOTE = (
     "\n\nThis question was typed in the meeting chat, and your answer is posted there for "
-    "everyone in the meeting to read. Only the current meeting's transcript and web search "
-    "are available for it: do not try any other tool named above, and do not refer to past "
+    "everyone in the meeting to read. Only the current meeting's transcript, its agenda and "
+    "web search are available for it: do not try any other tool named above, and do not refer to past "
     "meetings or documents. Answer briefly in plain sentences."
 )
 
@@ -1660,8 +1724,8 @@ def meeting_chat_tool_scope(event: Dict[str, Any]) -> Tuple[bool, str]:
 
     toolScope 'meeting_chat' is a question typed in the meeting chat (the
     Virtual Participant's `LMA ask`), whose answer everyone in the meeting
-    reads. It is answered from the current meeting's transcript and web search
-    only: the document knowledge base, the MCP servers and the VNC and browser
+    reads. It is answered from the current meeting's transcript, its agenda and
+    web search only: the document knowledge base, the MCP servers and the VNC and browser
     controls are not offered, and the user email is cleared here, whatever the
     event carries, so the meeting-history tools that are scoped to it are not
     offered either.
@@ -1972,7 +2036,18 @@ def handler(event, context):
                 message_id=message_id
             ))
             logger.info("Current meeting transcript tool enabled")
-        
+
+        # The current meeting's agenda. In every scope, the meeting chat's
+        # included: guests in the meeting may read the agenda of the meeting
+        # they are in, as they read its transcript.
+        if dynamodb_table_name:
+            tools.append(create_meeting_agenda_tool(
+                call_id=call_id,
+                dynamodb_table_name=dynamodb_table_name,
+                message_id=message_id
+            ))
+            logger.info("Meeting agenda tool enabled")
+                
         # Add VNC preview control tool (available to all users)
         if APPSYNC_GRAPHQL_URL and not meeting_chat_scope:
             tools.append(create_vnc_preview_control_tool(
@@ -2329,6 +2404,18 @@ Examples:
 - "What did we just discuss?" → current_meeting_transcript(lines=20, mode="recent")
 - "Fact check that statement" → current_meeting_transcript(lines=10, mode="recent")
 
+**For agenda questions and progress checks (USE get_meeting_agenda):**
+- "What's on the agenda?" → get_meeting_agenda()
+- "How are we doing against the agenda?", "What's left on the agenda?", "Have we covered X?"
+  → get_meeting_agenda(), then current_meeting_transcript(mode="full", with_timestamps=True)
+- If the meeting has no agenda, say so plainly. Never invent an agenda.
+- For a progress check, list EVERY agenda item in agenda order, one line each, marked:
+  - Covered: discussed and concluded, with the transcript time(s), e.g. "Budget: covered [04:10-09:30]"
+  - In progress: being discussed now or only partly discussed, with the time it started
+  - Remaining: not discussed yet
+- Mark an item covered only when the transcript shows it was discussed. Mention briefly any
+  substantial topic discussed that is not on the agenda.
+
 **For past meetings queries:**
 - "Last meeting" → recent_meetings_list(limit=1) → meeting_history with CallId
 - "Meetings about X" → meeting_history(query="X")
@@ -2342,6 +2429,7 @@ Examples:
 
 **Decision logic:**
 1. If question mentions "this meeting", "current meeting", "just said", "action items", "summarize" → USE current_meeting_transcript
+   If it mentions the agenda → USE get_meeting_agenda (and current_meeting_transcript with timestamps for progress)
 2. If question is about past meetings → USE meeting_history or recent_meetings_list
 3. If question is general knowledge or current events → USE web_search or answer directly
 4. If ambiguous → DEFAULT to using current_meeting_transcript (most queries are meeting-related)
