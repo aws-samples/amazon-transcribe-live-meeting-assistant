@@ -2,6 +2,7 @@ import { KinesisClient, PutRecordCommand, PutRecordsCommand } from '@aws-sdk/cli
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
 import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
+import { agendaStartFields, type VpAgenda } from './meeting-agenda.js';
 
 export interface TranscriptSegment {
   channel: string;
@@ -78,6 +79,16 @@ const diagnosticsOn = (): boolean =>
 class KinesisStreamManager {
   private kinesisClient: KinesisClient;
   private callId: string;
+
+  /**
+   * The agenda the VP was started or scheduled with, read from its row before
+   * the meeting starts; see meeting-agenda.ts. Null when there is none.
+   */
+  private agenda: VpAgenda | null = null;
+
+  setAgenda(agenda: VpAgenda | null): void {
+    this.agenda = agenda;
+  }
 
   /** The meeting's CallId, so other services (the ASR launcher lease) can key on it. */
   get currentCallId(): string {
@@ -164,6 +175,9 @@ class KinesisStreamManager {
       AccessToken: process.env.USER_ACCESS_TOKEN || '',
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+      // Created with the meeting, so it is there from the first event; nothing
+      // is added when the VP has no agenda.
+      ...agendaStartFields(this.agenda, details.lmaUser),
     };
 
     await this.sendRecord(record);

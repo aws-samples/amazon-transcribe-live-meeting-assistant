@@ -7625,6 +7625,25 @@ Resources:
           $util.qr($input.put("enableVideoRecording", $ctx.args.input.enableVideoRecording))
         #end
 
+        ## Optional meeting agenda, persisted for immediate and scheduled
+        ## meetings alike. The VP container reads it from this row when it
+        ## starts and puts it on the meeting record through its START event,
+        ## so neither launch path has to carry it. The source is decided here,
+        ## not taken from the caller: an IAM caller is the MCP server, anyone
+        ## else is a signed-in user on the Virtual Participant form. Same
+        ## length bound as updateCallAgenda.
+        #if(!$util.isNullOrBlank($ctx.args.input.agenda))
+          #if($ctx.args.input.agenda.length() > 10000)
+            $util.error("The agenda is longer than 10000 characters", "BadRequest")
+          #end
+          $util.qr($input.put("agenda", $ctx.args.input.agenda))
+          #if($ctx.identity.userArn)
+            $util.qr($input.put("agendaSource", "mcp"))
+          #else
+            $util.qr($input.put("agendaSource", "scheduled"))
+          #end
+        #end
+
         {
           "version": "2018-05-29",
           "operation": "PutItem",

@@ -341,12 +341,16 @@ Common parameters for the most-used tools.
 
 - `meetingName`, `meetingPlatform` (Zoom/Teams/Chime/Webex), `meetingId`
   (numeric), `scheduledTime` (ISO 8601), `meetingPassword` (optional)
+- `agenda` (optional) — the meeting agenda, one item per line, for example the
+  agenda from the calendar invite. It is stored on the meeting record when the
+  meeting starts; see [Meeting Agenda](meeting-agenda.md)
 
 ### `start_meeting_now`
 
 - `meetingName`, `meetingPlatform`, `meetingId`, `meetingPassword` (optional)
 - `useStoredZoomCredentials` — default `true`; when the user has stored Zoom
   credentials in LMA, the VP signs in with them rather than joining as a guest
+- `agenda` (optional) — as for `schedule_meeting`
 
 ### `get_virtual_participant_status`
 

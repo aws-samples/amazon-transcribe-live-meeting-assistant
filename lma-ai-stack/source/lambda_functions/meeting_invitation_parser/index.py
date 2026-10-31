@@ -80,6 +80,7 @@ You are a meeting invitation parser. Extract the following information from the 
 - timezone: The timezone (if provided)
 - isRecurring: Boolean indicating if this is a recurring meeting
 - recurrencePattern: Description of recurrence (e.g., "weekly", "every Wednesday") if recurring
+- agenda: The agenda the invitation lists, as a single string with one item per line, in the order given. Only items the invitation actually lists as an agenda (or as topics, items to discuss, or similar); use null if it lists none. Do NOT make up agenda items from the meeting title or anything else.
 
 CRITICAL MEETING ID AND PASSWORD RULES:
 1. If information is not available or cannot be determined, use null for that field
@@ -226,10 +227,31 @@ def calculate_next_occurrence(data):
     return data
 
 
+# Same bound as the createVirtualParticipant and updateCallAgenda resolvers, so an
+# agenda this fills into the form is one the form can submit.
+MAX_AGENDA_CHARS = 10000
+
+
+def clean_agenda(agenda):
+    """The extracted agenda as text, one item per line, or None.
+
+    Asked for as one string, but a model asked for "the agenda items" will
+    sometimes answer with a list, which is the same thing in another shape.
+    Anything else is dropped rather than filled into the form as its repr.
+    """
+    if isinstance(agenda, list):
+        agenda = "\n".join(str(item).strip() for item in agenda if str(item).strip())
+    if not isinstance(agenda, str) or not agenda.strip():
+        return None
+    return agenda.strip()[:MAX_AGENDA_CHARS]
+
+
 def validate_parsed_data(data):
     """Validate and clean parsed meeting data"""
     if not isinstance(data, dict):
         return data
+
+    data["agenda"] = clean_agenda(data.get("agenda"))
 
     # Remove spaces from meeting ID (common in formatted meeting IDs like "961 8750 1703")
     if data.get("meetingId"):

@@ -88,6 +88,9 @@ Variants that work the same way:
 >
 > "If my next call is on Zoom and I have stored Zoom credentials, sign
 > in — otherwise join as a guest."
+>
+> "Join my next meeting and pass along the agenda from the invite."
+> *(the optional `agenda` argument; see [Meeting Agenda](meeting-agenda.md))*
 
 ### Pull action items from the last meeting
 

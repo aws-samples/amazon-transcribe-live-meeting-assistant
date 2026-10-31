@@ -191,6 +191,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 meeting_password=tool_input.get("meetingPassword"),
                 user_id=user_id,
                 is_admin=is_admin,
+                agenda=tool_input.get("agenda"),
             )
 
         elif tool_name == "start_meeting_now":
@@ -203,6 +204,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 is_admin=is_admin,
                 # Default ON; pass useStoredZoomCredentials=false to opt-out.
                 use_stored_zoom_credentials=tool_input.get("useStoredZoomCredentials", True),
+                agenda=tool_input.get("agenda"),
             )
 
         elif tool_name == "get_virtual_participant_status":
@@ -303,6 +305,14 @@ MCP_TOOLS = [
                 "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
                 "scheduledTime": {"type": "string", "description": "ISO 8601 datetime"},
                 "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+                "agenda": {
+                    "type": "string",
+                    "description": (
+                        "Optional meeting agenda, one item per line -- for example "
+                        "the agenda from the calendar invite. It is stored on the "
+                        "meeting record and shown on the meeting's page."
+                    ),
+                },
             },
             "required": ["meetingName", "meetingPlatform", "meetingId", "scheduledTime"],
         },
@@ -330,6 +340,14 @@ MCP_TOOLS = [
                 },
                 "meetingId": {"type": "string", "description": "Meeting ID (numeric ID only)"},
                 "meetingPassword": {"type": "string", "description": "Optional meeting password"},
+                "agenda": {
+                    "type": "string",
+                    "description": (
+                        "Optional meeting agenda, one item per line -- for example "
+                        "the agenda from the calendar invite. It is stored on the "
+                        "meeting record and shown on the meeting's page."
+                    ),
+                },
                 "useStoredZoomCredentials": {
                     "type": "boolean",
                     "description": (

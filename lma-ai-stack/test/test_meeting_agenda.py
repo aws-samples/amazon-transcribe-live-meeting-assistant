@@ -26,6 +26,7 @@ SCHEMA = APPSYNC / "schema.graphql"
 AGENDA_VTL = APPSYNC / "updateCallAgenda.request.vtl"
 SUMMARY_VTL = APPSYNC / "updateCallSummaryText.request.vtl"
 UI_SRC = AI_STACK / "source" / "ui" / "src"
+VP_SRC = AI_STACK.parent / "lma-virtual-participant-stack" / "backend" / "src"
 CALL_FIELDS = (
     AI_STACK
     / "source"
@@ -192,3 +193,62 @@ def test_the_browser_carries_the_agenda_over_a_pipeline_update() -> None:
     assert "...(call.AgendaUpdatedAt" in hook
     for field in AGENDA_FIELDS:
         assert f"{field}: existing?.{field}," in hook
+
+
+# ── carried in from starting or scheduling a Virtual Participant ───────────
+
+
+def test_create_call_accepts_the_agenda_fields(schema_sdl: str) -> None:
+    """createCall writes its whole input, so declaring the fields is what lets a
+    START event create the meeting with its agenda."""
+    create = _block(schema_sdl, "input CreateCallInput")
+    for field in AGENDA_FIELDS:
+        assert f"\t{field}:" in create, f"CreateCallInput does not declare {field}"
+
+
+def test_the_vp_row_declares_its_agenda(schema_sdl: str) -> None:
+    vp = _block(schema_sdl, "type VirtualParticipant ")
+    assert "\tagenda: String" in vp
+    assert "\tagendaSource: String" in vp
+    create_input = _block(schema_sdl, "input CreateVirtualParticipantInput")
+    assert "\tagenda: String" in create_input
+    # The source is decided by the resolver from the caller, never sent.
+    assert "agendaSource" not in create_input
+
+
+def _create_vp_template(resources: dict) -> str:
+    return resources["CreateVirtualParticipantResolver"]["Properties"]["RequestMappingTemplate"]
+
+
+def test_the_vp_row_records_where_its_agenda_came_from(resources: dict) -> None:
+    vtl = _create_vp_template(resources)
+    agenda_block = vtl[vtl.index("isNullOrBlank($ctx.args.input.agenda)") :]
+    agenda_block = agenda_block[: agenda_block.index('"version"')]
+    assert '$util.qr($input.put("agenda", $ctx.args.input.agenda))' in agenda_block
+    # An IAM caller is the MCP server; anyone else used the form.
+    assert "#if($ctx.identity.userArn)" in agenda_block
+    assert '$input.put("agendaSource", "mcp")' in agenda_block
+    assert '$input.put("agendaSource", "scheduled")' in agenda_block
+    assert "length() > 10000" in agenda_block
+
+
+def test_the_vp_reads_its_agenda_from_its_row_and_sends_it_in_start() -> None:
+    status_manager = (VP_SRC / "status-manager.ts").read_text(encoding="utf-8")
+    stream = (VP_SRC / "kinesis-stream.ts").read_text(encoding="utf-8")
+    index = (VP_SRC / "index.ts").read_text(encoding="utf-8")
+    getter = status_manager[status_manager.index("async getAgenda()") :]
+    getter = getter[: getter.index("\n  }\n")]
+    assert "agenda\n            agendaSource" in getter
+    start = stream[stream.index("async sendStartMeeting()") :]
+    start = start[: start.index("await this.sendRecord(record);")]
+    assert "...agendaStartFields(this.agenda, details.lmaUser)," in start
+    # Read before the meeting starts, where the CallId is linked.
+    assert "setAgenda(await statusManager.getAgenda());" in index
+
+
+def test_the_scheduling_form_sends_the_agenda() -> None:
+    form = (
+        UI_SRC / "components" / "virtual-participant-layout" / "VirtualParticipantList.jsx"
+    ).read_text(encoding="utf-8")
+    assert "if (agendaText) vpInput.agenda = agendaText;" in form
+    assert "agenda: data.agenda || prev.agenda," in form

@@ -293,3 +293,29 @@ class TestBedrockRequestShape(unittest.TestCase):
         self.stop_reason = "max_tokens"
         with self.assertRaises(ValueError):
             index.call_bedrock("a prompt")
+
+
+class TestAgenda(unittest.TestCase):
+    """The agenda an invitation lists, filled into the Virtual Participant form."""
+
+    def test_the_prompt_asks_for_the_listed_agenda_and_nothing_invented(self):
+        prompt = index.create_parsing_prompt("Weekly sync")
+        self.assertIn("- agenda:", prompt)
+        self.assertIn("Do NOT make up agenda items", prompt)
+
+    def test_an_agenda_string_is_kept_line_for_line(self):
+        out = index.validate_parsed_data({"agenda": "  Budget\nHiring  "})
+        self.assertEqual(out["agenda"], "Budget\nHiring")
+
+    def test_a_list_answer_becomes_one_item_per_line(self):
+        out = index.validate_parsed_data({"agenda": ["Budget", " ", "Hiring"]})
+        self.assertEqual(out["agenda"], "Budget\nHiring")
+
+    def test_no_agenda_is_none(self):
+        for value in (None, "", "   ", [], 7, {"a": 1}):
+            self.assertIsNone(index.validate_parsed_data({"agenda": value})["agenda"])
+        self.assertIsNone(index.validate_parsed_data({})["agenda"])
+
+    def test_the_agenda_is_bounded_to_what_the_form_can_submit(self):
+        out = index.validate_parsed_data({"agenda": "x" * (index.MAX_AGENDA_CHARS + 10)})
+        self.assertEqual(len(out["agenda"]), index.MAX_AGENDA_CHARS)

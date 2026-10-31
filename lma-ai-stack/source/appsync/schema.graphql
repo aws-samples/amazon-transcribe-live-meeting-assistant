@@ -69,9 +69,10 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# ui/src/components/common/speaker-identities.js for the shape and the
 	# resolution order.
 	SpeakerIdentities: String
-	# The meeting's agenda: plain text, one item per line, written through
-	# updateCallAgenda. Absent on a meeting nobody gave an agenda. See
-	# docs/meeting-agenda.md.
+	# The meeting's agenda: plain text, one item per line. Written through
+	# updateCallAgenda and, for a meeting a Virtual Participant started with an
+	# agenda, at creation through createCall. Absent on a meeting nobody gave an
+	# agenda. See docs/meeting-agenda.md.
 	Agenda: String
 	# Where the stored agenda came from: "ui" for an agenda typed on the meeting
 	# page; "scheduled", "mcp" or "derived" as named by a backend role's write.
@@ -126,6 +127,14 @@ input CreateCallInput {
 	ExpiresAfter: AWSTimestamp
 	Owner: String
 	SharedWith: String
+	# A meeting started by a Virtual Participant carries the agenda given when
+	# it was started or scheduled, so the meeting has it from its first event
+	# rather than from a second write racing the creation. See the Agenda
+	# fields on Call.
+	Agenda: String
+	AgendaSource: String
+	AgendaUpdatedBy: String
+	AgendaUpdatedAt: AWSDateTime
 }
 
 type CreateCallOutput @aws_iam {
@@ -371,6 +380,12 @@ type VirtualParticipant @aws_cognito_user_pools @aws_iam {
 	# to audio. Defaults to true; persisted on the row so the VPScheduler Lambda
 	# can plumb ENABLE_VIDEO_RECORDING to scheduled launches.
 	enableVideoRecording: Boolean
+	# The agenda given when the VP was started or scheduled, and where it came
+	# from ("scheduled" from the LMA form, "mcp" from an MCP client). Read by the
+	# VP container when it starts, which puts it on the meeting record it creates;
+	# neither launch path has to carry it.
+	agenda: String
+	agendaSource: String
 	createdAt: AWSDateTime
 	updatedAt: AWSDateTime
 	CallId: ID
@@ -436,6 +451,11 @@ input CreateVirtualParticipantInput {
 	# scheduled launches can read it; immediate launches also pass it via the
 	# Step Functions input.
 	enableVideoRecording: Boolean
+	# Optional meeting agenda, one item per line (at most 10,000 characters).
+	# Persisted on the row for both immediate and scheduled meetings; the
+	# resolver records its source as "mcp" for an IAM caller and "scheduled"
+	# for a signed-in user.
+	agenda: String
 }
 
 input UpdateVirtualParticipantInput {

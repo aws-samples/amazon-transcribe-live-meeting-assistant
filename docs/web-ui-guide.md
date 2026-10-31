@@ -84,6 +84,8 @@ The **Create Virtual Participant** button opens a modal where you enter meeting 
 
 For the full sign-in flow, join-reliability notes, and operational caveats, see [Zoom Sign-in & Join Reliability](zoom-credentials-and-join-reliability.md).
 
+The modal also has an optional **Agenda** field, one item per line. **Paste Meeting Invitation** fills it from the invitation when the invitation lists an agenda. The agenda is stored with the VP and placed on the meeting record when the meeting starts, for meetings started now and scheduled ones alike. See [Meeting Agenda](meeting-agenda.md).
+
 ### Virtual Participant detail page
 
 Click a VP from the list to open its detail page. The page shows:
