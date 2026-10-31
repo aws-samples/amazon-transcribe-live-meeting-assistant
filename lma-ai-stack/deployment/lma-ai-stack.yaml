@@ -2951,6 +2951,12 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt SpeakerNameResolverFunction.Arn
+            # The automatic agenda pass, queued once a meeting with no agenda
+            # passes its fifth minute.
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt AgendaDeriverFunction.Arn
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
@@ -3023,6 +3029,11 @@ Resources:
             !If [IsTranscriptSummaryEnabled, "true", "false"]
           ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN: !GetAtt AsyncTranscriptSummaryOrchestrator.Arn
           SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
+          # Seconds into a meeting with no agenda at which the transcript is read
+          # once for an agenda somebody stated. 0 turns the automatic pass off;
+          # the Agenda panel's button works either way.
+          AGENDA_DERIVER_ARN: !GetAtt AgendaDeriverFunction.Arn
+          AGENDA_DERIVATION_AFTER_SECONDS: "300"
           ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN: !GetAtt AsyncAgentAssistOrchestrator.Arn
           CALL_DATA_STREAM_NAME: !Ref CallDataStream
           SNS_TOPIC_ARN: !Ref CategorySNSTopic
@@ -4839,6 +4850,177 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/resolveSpeakerNames.js
+
+  # ----------------------------------------------------------------------------
+  # Agenda derivation
+  #
+  # Reads a meeting's transcript for an agenda somebody stated, and stores it
+  # only if one was. Invoked once, asynchronously, by the call event processor
+  # about five minutes into a meeting with no agenda, and on demand from the
+  # Agenda panel's "Derive agenda" button. See docs/meeting-agenda.md.
+  # ----------------------------------------------------------------------------
+  AgendaDeriverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt AgendaDeriverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/agenda_deriver
+      Description: Derives a meeting's agenda from its transcript when one was stated
+      MemorySize: 512
+      # One model call over a bounded transcript, plus the paged transcript read.
+      # The on-demand pass answers an AppSync request, which AppSync abandons at
+      # 30 seconds; the transcript bound in pure.py keeps the call well inside it.
+      Timeout: 60
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
+          # Token usage per pass, for the meeting cost estimate.
+          METERING_TABLE_NAME: !Ref EventSourcingTable
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
+      # Carries lma_metering. Pure Python, so it does not pin this function to an
+      # architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/AgendaDeriverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for a function whose work is re-runnable on demand"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names, an endpoint and a model id"
+    DependsOn:
+      - AgendaDeriverFunctionLogGroup
+
+  AgendaDeriverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/AgendaDeriverFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  AgendaDeriverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: AgendaDeriver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-AgendaDeriver
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The meeting record and its transcript segments. The agenda itself
+              # is written back through AppSync, so open meeting pages update.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+              # The automatic pass's once-per-meeting claim, a conditional write
+              # on the meeting record, and only under the c# partitions.
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "c#*"
+              # Metering records for the meeting cost estimate, only under mtr#.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
+              - Effect: Allow
+                Action:
+                  - appsync:GraphQL
+                Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateCallAgenda"
+              # Scoped as the speaker name resolver scopes the identical call.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncAgendaDeriverLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-AppSyncInvokeAgendaDeriver
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt AgendaDeriverFunction.Arn
+
+  AgendaDeriverLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: AgendaDeriverLambda
+      Description: Lambda function for deriveCallAgenda
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncAgendaDeriverLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt AgendaDeriverFunction.Arn
+
+  DeriveCallAgendaResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AgendaDeriverLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: deriveCallAgenda
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/deriveCallAgenda.js
 
   SummaryRegeneratorFunction:
     Type: AWS::Serverless::Function

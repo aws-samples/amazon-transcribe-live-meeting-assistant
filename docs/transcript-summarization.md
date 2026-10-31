@@ -100,6 +100,7 @@ Examples:
 Each attribute's value contains the prompt template text that instructs the model how to generate that section of the summary.
 
 - Use the `{transcript}` placeholder in your prompt template where the meeting transcript should be inserted.
+- Use the `{agenda}` placeholder where the meeting's [agenda](meeting-agenda.md) should be inserted, as numbered lines. A section whose prompt names `{agenda}` is generated only for a meeting that has an agenda, and left out of the summary of one that does not. The shipped **AGENDA COVERAGE** section uses it; see [Agenda coverage in the summary](meeting-agenda.md#agenda-coverage-in-the-summary).
 - Use `<br>` for newlines within the prompt template.
 
 The edits below are all made on the **Transcript Summary** page, which is at:

@@ -37,6 +37,7 @@ the response reads are the pipeline's own.
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import types
 from pathlib import Path
@@ -1045,3 +1046,68 @@ def test_a_failed_segment_write_is_counted_as_a_failure(schema, emitted, gathere
     assert gathered["total"] > 1, "see test_written_segments_are_counted_and_no_failure_is"
     assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENT_WRITE_FAILED) == 1
     assert metric_names.TRANSCRIPT_SEGMENTS_WRITTEN not in emitted.counts
+
+
+# ── the automatic agenda pass ───────────────────────────────────────────────
+
+
+class RecordingLambda:
+    def __init__(self) -> None:
+        self.invocations: List[Dict[str, Any]] = []
+
+    def invoke(self, **kwargs: Any) -> Dict[str, Any]:
+        self.invocations.append(kwargs)
+        return {}
+
+
+@pytest.fixture
+def agenda_hook(monkeypatch) -> RecordingLambda:
+    hook = RecordingLambda()
+    monkeypatch.setattr(
+        cep, "AGENDA_DERIVER_ARN", "arn:aws:lambda:us-east-1:123456789012:function:d"
+    )
+    monkeypatch.setattr(cep, "AGENDA_DERIVATION_AFTER_SECONDS", 300.0)
+    monkeypatch.setattr(cep, "AGENDA_PASS_QUEUED", set())
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", hook, raising=False)
+    return hook
+
+
+def _segment(end_time: float, partial: bool = False) -> Dict[str, Any]:
+    return {**SEGMENT_EVENT, "StartTime": end_time - 1, "EndTime": end_time, "IsPartial": partial}
+
+
+def _respond(schema: Any) -> QueuedSession:
+    return QueuedSession(
+        schema,
+        segment_path_responses({"addTranscriptSegment": {"CallId": "call-1", "SegmentId": "s1"}}),
+    )
+
+
+def test_the_agenda_pass_is_queued_once_the_meeting_passes_five_minutes(
+    schema, emitted, agenda_hook, monkeypatch
+):
+    process_event(_respond(schema), _segment(120.0), monkeypatch)
+    assert agenda_hook.invocations == []
+    process_event(_respond(schema), _segment(301.0), monkeypatch)
+    process_event(_respond(schema), _segment(320.0), monkeypatch)
+    (invocation,) = agenda_hook.invocations
+    assert invocation["InvocationType"] == "Event"
+    assert json.loads(invocation["Payload"]) == {"CallId": "call-1", "Trigger": "auto"}
+
+
+def test_a_partial_segment_does_not_queue_the_agenda_pass(
+    schema, emitted, agenda_hook, monkeypatch
+):
+    process_event(_respond(schema), _segment(400.0, partial=True), monkeypatch)
+    assert agenda_hook.invocations == []
+
+
+def test_a_failure_to_queue_the_agenda_pass_does_not_fail_the_segment(
+    schema, emitted, agenda_hook, monkeypatch
+):
+    def refuse(**_kwargs: Any) -> Dict[str, Any]:
+        raise RuntimeError("throttled")
+
+    monkeypatch.setattr(agenda_hook, "invoke", refuse)
+    process_event(_respond(schema), _segment(301.0), monkeypatch)
+    assert emitted.counts.get(metric_names.TRANSCRIPT_SEGMENTS_WRITTEN) == 1

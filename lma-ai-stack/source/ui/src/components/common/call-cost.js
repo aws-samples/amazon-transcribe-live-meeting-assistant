@@ -21,6 +21,7 @@ export const CONTEXT_LABELS = {
   MeetingAssistant: 'Meeting assistant',
   Summary: 'Summary',
   SpeakerNaming: 'Speaker naming',
+  AgendaDerivation: 'Agenda derivation',
   Sentiment: 'Sentiment analysis',
   PageAutomation: 'Page automation',
 };

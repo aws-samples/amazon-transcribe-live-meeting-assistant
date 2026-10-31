@@ -37,6 +37,7 @@ COMPAT_COPIES = (
     LAMBDA_FUNCTIONS / "bedrock_summary_lambda" / "bedrock_compat.py",
     LAMBDA_FUNCTIONS / "meeting_invitation_parser" / "bedrock_compat.py",
     LAMBDA_FUNCTIONS / "speaker_name_resolver" / "bedrock_compat.py",
+    LAMBDA_FUNCTIONS / "agenda_deriver" / "bedrock_compat.py",
     REPO / "lma-meetingassist-setup-stack" / "src" / "bedrock_compat.py",
 )
 

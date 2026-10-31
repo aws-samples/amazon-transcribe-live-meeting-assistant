@@ -24,6 +24,7 @@ import resolveSpeakerNames from '../graphql/queries/resolveSpeakerNames';
 import updateCallSummaryText from '../graphql/queries/updateCallSummaryText';
 import regenerateCallSummary from '../graphql/queries/regenerateCallSummary';
 import updateCallAgenda from '../graphql/queries/updateCallAgenda';
+import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
 import { serializeSummaryState } from '../components/common/summary-state';
@@ -639,6 +640,23 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   };
 
   /**
+   * Ask the backend to read a meeting's transcript for a stated agenda.
+   *
+   * Nothing is patched into state here: a found agenda is stored through
+   * updateCallAgenda and arrives through onUpdateCall. Returns the backend's own
+   * answer so the panel can say what happened, including "none was stated".
+   */
+  const sendDeriveCallAgenda = useCallback(async (callId) => {
+    try {
+      const response = await client.graphql({ query: deriveCallAgenda, variables: { input: { CallId: callId } } });
+      return response?.data?.deriveCallAgenda ?? { Success: false, Message: 'no answer from the server' };
+    } catch (error) {
+      logger.error('failed to derive the meeting agenda', error);
+      return { Success: false, Message: 'request failed' };
+    }
+  }, []);
+
+  /**
    * Ask the backend to summarise a meeting again.
    *
    * Nothing is patched into state here: the run outlives the request, and the
@@ -669,6 +687,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     sendUpdateCallSummary,
     sendRegenerateCallSummary,
     sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)

@@ -125,7 +125,8 @@ Interact with the meeting assistant by typing questions or requests:
 
 The meeting's agenda as a numbered list, with where it came from and who last
 changed it. The owner, anyone the meeting is shared with, and an Admin can edit
-it while the meeting runs and after it ends. See
+it while the meeting runs and after it ends, and **Derive agenda** reads the
+transcript for an agenda somebody stated. See
 [Meeting Agenda](meeting-agenda.md).
 
 ### Estimated Cost

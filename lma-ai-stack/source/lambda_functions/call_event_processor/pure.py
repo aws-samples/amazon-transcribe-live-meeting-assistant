@@ -171,3 +171,27 @@ def merge_dicts(d1: Dict[Any, Any], d2: Dict[Any, Any]) -> Dict[Any, Any]:
     new_dict = d1.copy()
     new_dict.update(d2)
     return new_dict
+
+
+def agenda_derivation_due(
+    call_id: Optional[str],
+    end_time: Any,
+    after_seconds: float,
+    already_queued: "set[str]",
+) -> bool:
+    """Whether a final segment should queue the automatic agenda pass.
+
+    True once the meeting's transcript reaches ``after_seconds`` from its start,
+    the first time this execution environment sees that for the meeting. The
+    environment-local set only keeps a busy meeting from queueing a pass per
+    segment; it is not what makes the pass run once. Other environments queue it
+    too, and the deriver's own conditional claim on the meeting record is what
+    lets only one of them reach the model. ``after_seconds`` of 0 or less turns
+    the automatic pass off.
+    """
+    if not call_id or after_seconds <= 0 or call_id in already_queued:
+        return False
+    try:
+        return float(end_time) >= after_seconds
+    except (TypeError, ValueError):
+        return False

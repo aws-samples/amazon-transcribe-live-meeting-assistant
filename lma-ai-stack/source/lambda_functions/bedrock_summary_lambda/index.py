@@ -49,6 +49,17 @@ S3_PREFIX = os.environ["S3_PREFIX"]
 # know it is not being used as a prompt.
 PROMPT_KEY_PATTERN = re.compile(r"^\d+#")
 
+# A prompt that names the meeting's agenda. It is run only for a meeting that has
+# one: the shipped "AGENDA COVERAGE" section reports progress against the agenda,
+# and for a meeting without one there is nothing to report, so the section is
+# left out of the summary rather than generated empty. See docs/meeting-agenda.md.
+AGENDA_PLACEHOLDER = "{agenda}"
+
+# List marks at the start of an agenda line, hidden as the meeting page hides
+# them (ui/src/components/common/agenda.js), so the prompt numbers the items the
+# way the page does.
+AGENDA_LIST_MARK = re.compile(r"^\s*(?:[-*\u2022]|\d{1,3}[.)]|[a-zA-Z][.)])\s+")
+
 # Optional environment variables allow region / endpoint override for bedrock Boto3
 BEDROCK_REGION = (
     os.environ["BEDROCK_REGION_OVERRIDE"]
@@ -210,13 +221,31 @@ def call_bedrock(prompt_data, call_id=None):
     return generated_text
 
 
-def generate_summary(transcript, prompt_override, refresh_configuration=False, call_id=None):
+def numbered_agenda(agenda):
+    """The meeting's agenda as numbered lines, or "" when it has none."""
+    items = []
+    for line in (agenda or "").splitlines() if isinstance(agenda, str) else []:
+        item = AGENDA_LIST_MARK.sub("", line).strip()
+        if item:
+            items.append(item)
+    return "\n".join(f"{number}. {item}" for number, item in enumerate(items, start=1))
+
+
+def generate_summary(
+    transcript, prompt_override, refresh_configuration=False, call_id=None, agenda=None
+):
     # first check to see if this is one prompt, or many prompts as a json
     templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
+    agenda_text = numbered_agenda(agenda)
     result = {}
     for item in templates:
         key = list(item.keys())[0]
         prompt = item[key]
+        if AGENDA_PLACEHOLDER in prompt:
+            if not agenda_text:
+                print(f"Skipping summary section '{key}': the meeting has no agenda.")
+                continue
+            prompt = prompt.replace(AGENDA_PLACEHOLDER, agenda_text)
         prompt = prompt.replace("{transcript}", transcript)
         print("Prompt:", prompt)
         response = call_bedrock(prompt, call_id)
@@ -302,7 +331,13 @@ def handler(event, context):
         # that pressing it uses the prompt templates as they are now. An
         # end-of-meeting run does not, and is served from the cache.
         refresh_configuration = bool(event.get("RefreshConfiguration"))
-        summary = generate_summary(transcript, prompt_override, refresh_configuration, callId)
+        summary = generate_summary(
+            transcript,
+            prompt_override,
+            refresh_configuration,
+            callId,
+            agenda=(metadata or {}).get("Agenda"),
+        )
         if not prompt_override:
             # only write to S3 when using default summary prompt
             write_to_s3(callId, metadata, transcript, summary)

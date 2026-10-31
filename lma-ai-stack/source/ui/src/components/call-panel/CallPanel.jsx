@@ -2008,6 +2008,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     sendUpdateCallSummary,
     sendRegenerateCallSummary,
     sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
   } = useCallsContext();
   // Memoised on the raw string: created in the component body it would be a new
   // object identity every render, and it is a dependency of the effect that
@@ -2566,6 +2567,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
       <AgendaPanel
         item={item}
         onSave={sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined}
+        onDerive={sendDeriveCallAgenda ? () => sendDeriveCallAgenda(item.callId) : undefined}
         readOnly={speakerNamesReadOnly}
       />
 
