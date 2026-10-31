@@ -52,7 +52,7 @@
   },
   "overrides": {
     "ajv@8": "^8.17.1",
-    "node-forge": "^1.4.0",
+    "node-forge": "^1.4.2",
     "rollup@2": "^2.80.0",
     "flatted": "^3.4.2",
     "nth-check": "^2.1.1",
