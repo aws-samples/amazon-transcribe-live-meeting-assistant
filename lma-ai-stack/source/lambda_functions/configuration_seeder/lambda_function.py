@@ -44,6 +44,10 @@ does not hold the section, its edits are read from the previous table and added
 to the profile; once it holds the section -- an empty one included -- nothing is
 read again. The outcome of each is reported as ``SectionAdoption``.
 
+Given the revision bucket, it also makes sure the operator's profile has a
+revision history: on the deployment that introduces history, the profile as it
+stands becomes revision 1. The outcome is reported as ``RevisionHistory``.
+
 CloudFormation re-invokes this on UPDATE only when one of the custom resource's
 properties changes, so the template passes a hash of the shipped content *and*
 of this handler. A property that never changes would mean a resource that is
@@ -540,6 +544,11 @@ def seed(
                 or UNKNOWN_ORIGIN
             )
 
+    # Before the section adoption below, so that on the upgrade that introduces
+    # history the profile as it stood is revision 1 and anything adopted is
+    # recorded after it, rather than the first save doing the recording later.
+    revision_history = start_revision_history(store)
+
     tables = legacy_section_tables or {}
     adoption = {
         legacy.section.name: adopt_legacy_section(
@@ -565,7 +574,35 @@ def seed(
         # the stack publishes, because it is the one that stays true.
         "ProfileOrigin": profile_origin,
         "ActiveProfile": pointer_outcome,
+        # What this run found of the profile's revision history, as
+        # "custom=outcome"; published as the ConfigurationRevisionHistory output.
+        "RevisionHistory": f"{OPERATOR_PROFILE}={revision_history}",
     }
+
+
+def start_revision_history(store: ConfigurationStore) -> str:
+    """Make the operator's profile, as it stands, a recorded revision.
+
+    On the deployment that introduces revision history this records the profile
+    as revision 1; every later run finds it recorded and reports ``present``.
+    See ``ConfigurationStore.ensure_revision_history`` for the other outcomes.
+
+    Never fails the deployment. If the history cannot be written now, the
+    outcome says so, and nothing is lost by waiting: the first save from a
+    configuration page records the profile before replacing it, and is refused
+    rather than made if it cannot.
+    """
+    if not store.keeps_history:
+        return "not-configured"
+    try:
+        return store.ensure_revision_history(OPERATOR_PROFILE)
+    except Exception:  # noqa: BLE001 -- see the docstring; never fail the deploy for this
+        LOGGER.exception(
+            "could not start the revision history of the %s profile; the first save "
+            "records it instead",
+            OPERATOR_PROFILE,
+        )
+        return "not-started"
 
 
 def handler(event: Dict[str, Any], context: Any) -> None:
@@ -591,7 +628,12 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             )
             return
 
-        store = ConfigurationStore(properties["ConfigurationTableName"])
+        store = ConfigurationStore(
+            properties["ConfigurationTableName"],
+            # A property rather than an environment variable, like the table
+            # name, so the resource's own properties say what it writes.
+            revision_bucket=properties.get("ConfigurationBucketName", ""),
+        )
         outcome = seed(
             store,
             domain=properties.get("Domain", "default"),

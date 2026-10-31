@@ -596,3 +596,34 @@ def test_audit_attributes_come_from_the_identity_not_the_request(
 
     assert table.stored_metadata()["UpdatedBy"] == "admin@example.com"
     assert "UpdatedBy" not in table.stored_prompts()
+
+
+def test_a_comment_on_the_save_is_passed_to_the_revision_it_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fresh(monkeypatch)
+    seen: Dict[str, Any] = {}
+
+    def write_section(*_args: Any, **kwargs: Any) -> int:
+        seen.update(kwargs)
+        return 2
+
+    monkeypatch.setattr(index.CONFIG_STORE, "write_section", write_section)
+
+    index.lambda_handler(
+        {
+            "identity": ADMIN_IDENTITY,
+            "info": {"fieldName": "updateLLMPromptTemplate"},
+            "arguments": {
+                "input": {
+                    "LLMPromptTemplateId": "CustomSummaryPromptTemplates",
+                    "TemplateConfig": "{}",
+                    "ExpectedVersion": 1,
+                    "Comment": "why",
+                }
+            },
+        },
+        None,
+    )
+
+    assert seen["comment"] == "why"

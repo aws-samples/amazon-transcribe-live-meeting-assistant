@@ -269,3 +269,21 @@ def test_a_valid_change_to_every_kind_of_key_is_accepted(tables) -> None:
 def test_an_unknown_field_is_refused(tables) -> None:
     with pytest.raises(ValueError):
         invoke("deleteEverything", ADMIN)
+
+
+def test_a_comment_on_the_save_is_passed_to_the_revision_it_records(
+    tables, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: Dict[str, Any] = {}
+
+    def write_section(*_args: Any, **kwargs: Any) -> int:
+        seen.update(kwargs)
+        return 2
+
+    monkeypatch.setattr(index.CONFIG_STORE, "write_section", write_section)
+
+    invoke(
+        "updateCallPricing", ADMIN, input={"Pricing": "{}", "ExpectedVersion": 1, "Comment": "why"}
+    )
+
+    assert seen["comment"] == "why"

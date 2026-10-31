@@ -534,3 +534,28 @@ def test_a_refused_save_is_logged_without_the_previous_saver_s_address(
         save({"streamingEngineMicrovm": True}, expected_version=loaded)
 
     assert "someone-else@example.com" not in capsys.readouterr().out
+
+
+def test_a_comment_on_the_save_is_passed_to_the_revision_it_records(
+    table: FakeConfigurationTable, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: Dict[str, Any] = {}
+
+    def write_section(*_args: Any, **kwargs: Any) -> int:
+        seen.update(kwargs)
+        return 2
+
+    monkeypatch.setattr(index.CONFIG_STORE, "write_section", write_section)
+
+    index.lambda_handler(
+        {
+            "identity": ADMIN_IDENTITY,
+            "arguments": {
+                "input": {"AsrConfigId": "CustomAsrConfig", "ConfigData": "{}", "Comment": "why"}
+            },
+            "info": {"fieldName": "updateAsrConfig"},
+        },
+        None,
+    )
+
+    assert seen["comment"] == "why"

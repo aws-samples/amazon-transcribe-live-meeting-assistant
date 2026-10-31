@@ -788,6 +788,21 @@ Outputs:
       and the next deployment that runs the seeder tries again, and saving the
       settings from their page in the meantime makes that unnecessary.
     Value: !GetAtt SeedConfiguration.SectionAdoption
+  ConfigurationBucketName:
+    Description: >-
+      The S3 bucket holding the bodies of configuration revisions, under
+      config_revisions/<profile>/
+    Value: !Ref ConfigurationBucket
+  ConfigurationRevisionHistory:
+    Description: >-
+      What the latest deployment that ran the configuration seeder found of the
+      configuration profile's revision history, as profile=outcome. 'started'
+      means the profile as it stood was recorded as its first revision, which is
+      what the deployment that introduces history reports; 'present' means it
+      was already recorded. 'not-started' means it could not be recorded at
+      deploy time: nothing is lost, and the first save from a configuration
+      page records it before replacing it, but check the seeder's log.
+    Value: !GetAtt SeedConfiguration.RevisionHistory
   EventSourcingTableName:
     Description:
       The Name for the DynamoDB that is used to store transcriptions and
@@ -3098,9 +3113,10 @@ Resources:
         - AttributeName: Configuration
           KeyType: HASH
       BillingMode: PAY_PER_REQUEST
-      # So a configuration change can be undone to any moment in the window.
-      # Nothing here records revisions yet, which makes recovery the only route
-      # back from a bad save until the revision log lands.
+      # Every save records a revision (bodies in ConfigurationBucket, the index
+      # here), and a revision is the ordinary route back from a bad save. This
+      # is the route back for the table itself, index included, to any moment
+      # in the window.
       PointInTimeRecoverySpecification:
         PointInTimeRecoveryEnabled: true
       SSESpecification:
@@ -3197,6 +3213,7 @@ Resources:
         # same reason as GetEventApiDnsRole and GetCloudFrontPrefixListRole, the
         # other custom resources in this template that trace.
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+        - !Ref ConfigurationRevisionWriteAccess
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-ConfigurationSeeder
           PolicyDocument:
@@ -3243,6 +3260,9 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ConfigurationSeederFunction.Arn
       ConfigurationTableName: !Ref ConfigurationTable
+      # Where revision bodies are kept. On the deployment that introduces
+      # it, the profile as it stands is recorded as revision 1.
+      ConfigurationBucketName: !Ref ConfigurationBucket
       Domain: !Ref Domain
       LegacyPromptTemplateTableName: !Ref LLMPromptTemplateTableName
       # Read once, while the operator's profile holds no Nova Sonic section, to
@@ -3256,6 +3276,128 @@ Resources:
       # processes it changes, and is the only reason CloudFormation re-invokes
       # this resource on a stack update.
       SeedContentHash: !Ref ConfigurationSeedHash
+
+  # Revision bodies for the configuration history: one gzipped object per
+  # revision at config_revisions/<profile>/<nnnnnn>.json.gz, with the metadata
+  # index in ConfigurationTable. The number is allocated exclusively by the
+  # profile's own conditional write, so an object is written once; versioning
+  # keeps a replaced or pruned object recoverable for the window below.
+  ConfigurationBucket:
+    Type: AWS::S3::Bucket
+    # Holds the history of configuration edited from the web UI, which nothing
+    # can reproduce once it is gone; retained on the same terms as the table.
+    DeletionPolicy: !If [ShouldRetainDataOnDelete, Retain, Delete]
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !Ref CustomerManagedEncryptionKeyArn
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      VersioningConfiguration:
+        Status: Enabled
+      LoggingConfiguration:
+        DestinationBucketName: !Ref LoggingBucketName
+        LogFilePrefix: "configuration-bucket-logs/"
+      LifecycleConfiguration:
+        Rules:
+          # No expiry of current objects: how many revisions a profile keeps is
+          # a count, applied by the application, which a lifecycle rule cannot
+          # express. A pruned or replaced object stays recoverable as a
+          # non-current version for 35 days -- the table's point-in-time
+          # recovery window, so a table restored to any moment in it still
+          # finds the bodies its index names.
+          - Id: ExpireReplacedRevisionObjects
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: 35
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+
+  ConfigurationBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ConfigurationBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ConfigurationBucket.Arn
+              - !Sub "${ConfigurationBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+  # Empties and deletes the bucket on stack delete, only when data retention is
+  # disabled; with retention on, the bucket is retained with its contents.
+  RemoveConfigurationBucketOnDelete:
+    Type: Custom::RemoveConfigurationBucketOnDelete
+    Condition: ShouldDeleteDataOnDelete
+    Properties:
+      ServiceToken: !GetAtt BucketDeleteLambda.Arn
+      BucketName: !Ref ConfigurationBucket
+
+  # What every function that writes configuration needs to record its history.
+  # One policy, attached to each of those roles, so that a writer cannot be
+  # given the table without the history: a template test asserts that every
+  # role able to write ConfigurationTable attaches this.
+  ConfigurationRevisionWriteAccess:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Record and read configuration revisions in the configuration bucket and table
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Put for each revision a save records, Get to read one back or to
+          # see whether it is already stored, Delete for what the retention cap
+          # prunes.
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+              - s3:DeleteObject
+            Resource: !Sub "${ConfigurationBucket.Arn}/config_revisions/*"
+          # Without it, S3 answers a read of a missing object with 403 rather
+          # than 404, and a revision that is not there would be indistinguishable
+          # from a permission fault.
+          - Effect: Allow
+            Action:
+              - s3:ListBucket
+            Resource: !GetAtt ConfigurationBucket.Arn
+          # The revision index items, appended to on every save and rewritten
+          # when pruning or labelling; and a profile's revision counters, set in
+          # place when its history starts, without rewriting the profile.
+          - Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:UpdateItem
+            Resource: !GetAtt ConfigurationTable.Arn
+            Condition:
+              ForAllValues:StringLike:
+                "dynamodb:LeadingKeys":
+                  - "ConfigRevIndex#*"
+                  - "Config#*"
+          - Effect: Allow
+            Action:
+              - kms:Decrypt
+              - kms:GenerateDataKey
+            Resource: !Ref CustomerManagedEncryptionKeyArn
+            Condition:
+              StringEquals:
+                "kms:ViaService": !Sub "s3.${AWS::Region}.${AWS::URLSuffix}"
 
   ##########################################################################
   # AppSync
@@ -4191,6 +4333,8 @@ Resources:
       Environment:
         Variables:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
+          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
           ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
@@ -4239,6 +4383,7 @@ Resources:
         - !Ref AWS::NoValue
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Ref ConfigurationRevisionWriteAccess
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-UpdateChatButtonConfig
           PolicyDocument:
@@ -4316,6 +4461,8 @@ Resources:
       Environment:
         Variables:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
+          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
           ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
@@ -4364,6 +4511,7 @@ Resources:
         - !Ref AWS::NoValue
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Ref ConfigurationRevisionWriteAccess
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-UpdateNovaSonicConfig
           PolicyDocument:
@@ -4442,6 +4590,8 @@ Resources:
       Environment:
         Variables:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
+          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
           ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
@@ -4476,6 +4626,7 @@ Resources:
       PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Ref ConfigurationRevisionWriteAccess
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-UpdateAsrConfig
           PolicyDocument:
@@ -4971,6 +5122,8 @@ Resources:
       Environment:
         Variables:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
+          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
           ADMIN_GROUP: "Admin"
       LoggingConfig:
         LogGroup:
@@ -5019,6 +5172,7 @@ Resources:
         - !Ref AWS::NoValue
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Ref ConfigurationRevisionWriteAccess
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-UpdateLLMPromptTemplate
           PolicyDocument:
@@ -5101,6 +5255,8 @@ Resources:
       Environment:
         Variables:
           CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          # Every save records a revision there; see ConfigurationRevisionWriteAccess.
+          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           ADMIN_GROUP: "Admin"
           LOG_LEVEL: !Ref LogLevel
@@ -5151,6 +5307,7 @@ Resources:
         - !Ref AWS::NoValue
       ManagedPolicyArns:
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Ref ConfigurationRevisionWriteAccess
         - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
       Policies:
         - PolicyName: !Sub ${AWS::StackName}-CallCostResolver
@@ -5221,6 +5378,139 @@ Resources:
       ServiceRoleArn: !GetAtt AppSyncCallCostLambdaRole.Arn
       LambdaConfig:
         LambdaFunctionArn: !GetAtt CallCostResolverFunction.Arn
+
+  ##########################################################################
+  # Configuration history: list, read, compare, restore and label the
+  # revisions every configuration save records. See
+  # docs/configuration-store.md.
+  ##########################################################################
+
+  ConfigurationRevisionsResolverFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt ConfigurationRevisionsResolverFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/configuration_revisions_resolver
+      Description: >-
+        Lambda resolver for the configuration history: lists, reads, compares,
+        restores and labels configuration revisions
+      MemorySize: 256
+      Timeout: 30
+      Tracing: Active
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      Environment:
+        Variables:
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+          CONFIGURATION_BUCKET_NAME: !Ref ConfigurationBucket
+          ADMIN_GROUP: "Admin"
+          LOG_LEVEL: !Ref LogLevel
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/ConfigurationRevisionsResolverFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency"
+    # checkov:skip=CKV_AWS_116: "DLQ not required for resolver function"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access"
+    # checkov:skip=CKV_AWS_173: "Environment holds only resource names and a group name"
+    DependsOn:
+      - ConfigurationRevisionsResolverFunctionLogGroup
+      # A restore writes the profile the seeder creates.
+      - SeedConfiguration
+
+  ConfigurationRevisionsResolverFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/ConfigurationRevisionsResolverFunction
+      RetentionInDays:
+        Ref: CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  ConfigurationRevisionsResolverFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: ConfigurationRevisionsResolver Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+            Action:
+              - "sts:AssumeRole"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        - !Ref ConfigurationRevisionWriteAccess
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AWSXRayDaemonWriteAccess"
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-ConfigurationRevisionsResolver
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # PutItem is a restore, which is a conditional write of the
+              # profile like any other save; no DeleteItem.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:PutItem
+                Resource: !GetAtt ConfigurationTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
+
+  AppSyncConfigurationRevisionsLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - !Sub "appsync.${AWS::URLSuffix}"
+      PermissionsBoundary: !If
+        - HasPermissionsBoundary
+        - !Ref PermissionsBoundaryArn
+        - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: lambda
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: !GetAtt ConfigurationRevisionsResolverFunction.Arn
+
+  ConfigurationRevisionsLambdaDataSource:
+    Type: AWS::AppSync::DataSource
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ConfigurationRevisionsLambda
+      Description: Lambda function for the configuration history
+      Type: AWS_LAMBDA
+      ServiceRoleArn: !GetAtt AppSyncConfigurationRevisionsLambdaRole.Arn
+      LambdaConfig:
+        LambdaFunctionArn: !GetAtt ConfigurationRevisionsResolverFunction.Arn
 
   # AppSync Event API for MCP command delivery (separate from GraphQL API)
   AppSyncEventApi:
@@ -6313,6 +6603,74 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/callCostLambda.js
+
+  # The five configuration history fields share one data source and one
+  # resolver body, which forwards only the arguments, the verified identity
+  # and the field name.
+  ListConfigurationRevisionsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Query
+      FieldName: listConfigurationRevisions
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
+
+  GetConfigurationRevisionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Query
+      FieldName: getConfigurationRevision
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
+
+  DiffConfigurationRevisionsResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Query
+      FieldName: diffConfigurationRevisions
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
+
+  RestoreConfigurationRevisionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: restoreConfigurationRevision
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
+
+  LabelConfigurationRevisionResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt ConfigurationRevisionsLambdaDataSource.Name
+      TypeName: Mutation
+      FieldName: labelConfigurationRevision
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/configurationRevisionsLambda.js
 
   SendChatMessageResolver:
     Type: AWS::AppSync::Resolver
@@ -9600,6 +9958,8 @@ Resources:
                   - !Sub "arn:aws:s3:::${WebAppBucket}/*"
                   - !Sub "arn:aws:s3:::${VPProfilesBucket}"
                   - !Sub "arn:aws:s3:::${VPProfilesBucket}/*"
+                  - !GetAtt ConfigurationBucket.Arn
+                  - !Sub "${ConfigurationBucket.Arn}/*"
           PolicyName: deleteBucketS3Policy
 
   BucketDeleteLambda:

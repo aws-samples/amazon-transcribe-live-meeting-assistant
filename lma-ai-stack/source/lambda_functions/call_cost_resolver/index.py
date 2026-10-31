@@ -258,6 +258,8 @@ def update_call_pricing(input_data: Mapping[str, Any], caller: Mapping[str, Any]
         delta,
         updated_by=str(caller["actor"] or caller["subject"] or "unknown"),
         expected_version=int(expected),
+        # Recorded on the revision the save creates; see docs/configuration-store.md.
+        comment=input_data.get("Comment"),
     )
     LOGGER.info("saved the meeting price table as version %d", version)
     return {"Success": True, "Version": version}

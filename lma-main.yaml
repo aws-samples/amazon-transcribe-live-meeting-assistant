@@ -4620,6 +4620,17 @@ Outputs:
       settings from their page in the web UI makes that unnecessary.
     Value: !GetAtt AISTACK.Outputs.ConfigurationSectionAdoption
 
+  ConfigurationRevisionHistory:
+    Description: >-
+      What the latest deployment that ran the configuration seeder found of the
+      configuration profile's revision history, as profile=outcome. 'started' is
+      what the deployment that introduces history reports: the profile as it
+      stood was recorded as its first revision. 'present' means it was already
+      recorded. 'not-started' means it could not be recorded at deploy time;
+      nothing is lost, as the first save from a configuration page records it
+      before replacing it, but the seeder's log says why.
+    Value: !GetAtt AISTACK.Outputs.ConfigurationRevisionHistory
+
   # Both links below point at the shared configuration table. The record's body
   # is a compressed attribute there, so these are for inspecting provenance --
   # who saved a record and when -- rather than for editing: prompts are edited

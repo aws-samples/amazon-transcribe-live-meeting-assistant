@@ -232,6 +232,10 @@ type Mutation @aws_iam {
 	updateLLMPromptTemplate(input: UpdateLLMPromptTemplateInput!): UpdateLLMPromptTemplateOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	# The price table the per-meeting cost estimate is computed with.
 	updateCallPricing(input: UpdateCallPricingInput!): UpdateCallPricingOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The configuration history: every save above records a revision. Restoring
+	# saves an earlier revision's body as a new one, so it is forward-only.
+	restoreConfigurationRevision(input: RestoreConfigurationRevisionInput!): RestoreConfigurationRevisionOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	labelConfigurationRevision(input: LabelConfigurationRevisionInput!): LabelConfigurationRevisionOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	toggleVNCPreview(input: ToggleVNCPreviewInput!): VNCPreviewControl @aws_cognito_user_pools @aws_iam
 	createMicrovmVncToken(vpId: ID!): MicrovmVncToken @aws_cognito_user_pools
 	installMCPServer(input: InstallMCPServerInput!): InstallMCPServerOutput @aws_cognito_user_pools(cognito_groups: ["Admin"])
@@ -299,6 +303,11 @@ type Query @aws_cognito_user_pools
 	getCallCost(CallId: ID!): CallCost @aws_cognito_user_pools @aws_iam
 	# The price table behind those estimates, for the Admin who edits it.
 	getCallPricing: CallPricing @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	# The configuration history, for the Admin group. Profile defaults to
+	# "custom", the profile every configuration page saves into.
+	listConfigurationRevisions(Profile: String): ConfigurationRevisionList @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	getConfigurationRevision(Profile: String, Revision: Int!): ConfigurationRevisionDetail @aws_cognito_user_pools(cognito_groups: ["Admin"])
+	diffConfigurationRevisions(Profile: String, FromRevision: Int!, ToRevision: Int!): ConfigurationRevisionDiff @aws_cognito_user_pools(cognito_groups: ["Admin"])
 	listInstalledMCPServers: [MCPServer] @aws_cognito_user_pools
 	getMCPServer(serverId: ID!): MCPServer @aws_cognito_user_pools
 	listMCPApiKeys: [MCPApiKey] @aws_cognito_user_pools
@@ -919,6 +928,9 @@ input UpdateChatButtonConfigInput {
 	# resolver reads it, and supplying this adds the check against what the
 	# dialog was actually looking at.
 	ExpectedVersion: Int
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateChatButtonConfigOutput @aws_cognito_user_pools @aws_iam {
@@ -947,6 +959,9 @@ input UpdateNovaSonicConfigInput {
 	# resolver reads it, and supplying this adds the check against what the
 	# page was actually looking at.
 	ExpectedVersion: Int
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateNovaSonicConfigOutput @aws_cognito_user_pools @aws_iam {
@@ -981,6 +996,9 @@ input UpdateAsrConfigInput {
 	# resolver reads it, and supplying this adds the check against what the
 	# page was actually looking at.
 	ExpectedVersion: Int
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateAsrConfigOutput @aws_cognito_user_pools @aws_iam {
@@ -1011,6 +1029,9 @@ input UpdateLLMPromptTemplateInput {
 	# resolver reads it, and supplying this adds the check against what the
 	# editor was actually looking at.
 	ExpectedVersion: Int
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
@@ -1018,6 +1039,102 @@ type UpdateLLMPromptTemplateOutput @aws_cognito_user_pools @aws_iam {
 	Success: Boolean!
 	# The version now stored, so the editor can save again without reloading.
 	Version: Int
+}
+
+# Configuration history
+#
+# Every save into the configuration store records a revision of the profile it
+# saves into. See docs/configuration-store.md.
+type ConfigurationRevision @aws_cognito_user_pools {
+	Revision: Int!
+	CreatedAt: String
+	# The saver's email address, or their username where the token carries none:
+	# the same identity the configuration records hold as UpdatedBy.
+	CreatedBy: String
+	# The sections this revision changed relative to the one before it; for the
+	# first revision of a profile, every section it holds. Null when not known.
+	Sections: [String]
+	Comment: String
+	# save, restore, deploy, backfill (the profile as it stood when history
+	# began) or recovered (recorded from the profile after its own save could
+	# not store it).
+	Source: String
+	RestoredFrom: Int
+	Label: String
+	# The profile version the revision was saved as.
+	Version: Int
+	SizeBytes: Int
+	# Whether this revision is the profile's current state.
+	Published: Boolean
+}
+
+type ConfigurationRevisionList @aws_cognito_user_pools {
+	Profile: String!
+	# The profile's current version: what a restore sends as ExpectedVersion.
+	Version: Int
+	LatestRevision: Int
+	PublishedRevision: Int
+	# Newest first.
+	Revisions: [ConfigurationRevision]
+}
+
+type ConfigurationRevisionDetail @aws_cognito_user_pools {
+	Profile: String!
+	Revision: Int!
+	CreatedAt: String
+	CreatedBy: String
+	Sections: [String]
+	Comment: String
+	Source: String
+	RestoredFrom: Int
+	Label: String
+	Version: Int
+	SizeBytes: Int
+	Published: Boolean
+	# The whole profile body this revision holds, as a JSON string.
+	Body: String
+}
+
+type ConfigurationRevisionDiff @aws_cognito_user_pools {
+	Profile: String!
+	FromRevision: Int!
+	ToRevision: Int!
+	# A JSON list of {"Path": [keys...], "Change": "added" | "removed" | "changed",
+	# "Before", "After"}, one per value that differs.
+	Changes: String
+}
+
+input RestoreConfigurationRevisionInput {
+	Profile: String
+	Revision: Int!
+	# The Version listConfigurationRevisions returned. Required: a restore
+	# replaces every section of the profile.
+	ExpectedVersion: Int!
+	Comment: String
+}
+
+type RestoreConfigurationRevisionOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Profile: String
+	Version: Int
+	# The new revision the restore recorded; null when the profile already held
+	# the restored body, so nothing changed.
+	Revision: Int
+	Unchanged: Boolean
+}
+
+input LabelConfigurationRevisionInput {
+	Profile: String
+	Revision: Int!
+	# At most 100 characters. Empty or absent clears the label. A labelled
+	# revision is kept however many revisions follow it.
+	Label: String
+}
+
+type LabelConfigurationRevisionOutput @aws_cognito_user_pools {
+	Success: Boolean!
+	Profile: String
+	Revision: Int
 }
 
 # An estimate of what one meeting cost, built from metering records written
@@ -1087,6 +1204,9 @@ input UpdateCallPricingInput {
 	Pricing: String!
 	# The Version getCallPricing returned; a save against a newer record is refused.
 	ExpectedVersion: Int!
+	# Recorded on the revision this save creates in the configuration history.
+	# Optional; at most 500 characters are kept.
+	Comment: String
 }
 
 type UpdateCallPricingOutput @aws_cognito_user_pools {
