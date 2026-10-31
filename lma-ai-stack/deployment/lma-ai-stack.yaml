@@ -9180,6 +9180,13 @@ Resources:
                       meetingPassword:
                         Type: string
                         Description: "Optional meeting password"
+                      agenda:
+                        Type: string
+                        Description: >-
+                          Optional meeting agenda, one item per line -- for
+                          example the agenda from the calendar invite. It is
+                          stored on the meeting record and shown on the
+                          meeting's page.
                     Required:
                       - meetingName
                       - meetingPlatform
@@ -9217,6 +9224,13 @@ Resources:
                           Default true. When the user has stored Zoom
                           credentials, the VP signs in to Zoom before joining
                           the meeting. Set to false to force a guest join.
+                      agenda:
+                        Type: string
+                        Description: >-
+                          Optional meeting agenda, one item per line -- for
+                          example the agenda from the calendar invite. It is
+                          stored on the meeting record and shown on the
+                          meeting's page.
                     Required:
                       - meetingName
                       - meetingPlatform

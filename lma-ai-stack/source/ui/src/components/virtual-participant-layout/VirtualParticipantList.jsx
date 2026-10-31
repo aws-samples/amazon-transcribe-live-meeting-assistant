@@ -723,7 +723,7 @@ const VirtualParticipantList = () => {
   const meetingIdIsUrl = /^\s*https?:\/\//i.test(createForm.meetingId || '');
 
   // The resolver refuses a longer agenda, so the form does not offer to submit one.
-  const agendaTooLong = (createForm.agenda || '').length > MAX_AGENDA_CHARS;
+  const agendaTooLong = (createForm.agenda || '').trim().length > MAX_AGENDA_CHARS;
 
   // Check if form is ready for immediate execution
   const isFormValidForImmediate = createForm.meetingName && createForm.meetingId && consentChecked && !agendaTooLong;

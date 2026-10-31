@@ -36,7 +36,7 @@ An agenda is limited to 10,000 characters. Saving an empty agenda clears it.
 | Source | How |
 |---|---|
 | **The Virtual Participant form** (`scheduled`) | The **Create Virtual Participant** modal has an optional **Agenda** field. **Paste Meeting Invitation** fills it with the agenda the invitation lists, and leaves it as it was when the invitation lists none: the parser is told to extract an agenda, never to make one up from the title. |
-| **An MCP client** (`mcp`) | The `start_meeting_now` and `schedule_meeting` tools take an optional `agenda` argument — text with one item per line, or a list of items — so an agent such as Amazon Quick can pass the agenda from a calendar invite. See [Amazon Quick MCP setup](amazon-quick-mcp-setup.md#schedule_meeting). |
+| **An MCP client** (`mcp`) | The `start_meeting_now` and `schedule_meeting` tools take an optional `agenda` argument — text with one item per line — so an agent such as Amazon Quick can pass the agenda from a calendar invite. See [Amazon Quick MCP setup](amazon-quick-mcp-setup.md#schedule_meeting). |
 | **The meeting page** (`ui`) | The Agenda panel, below. |
 
 For the first two, the agenda is stored with the Virtual Participant when it is
