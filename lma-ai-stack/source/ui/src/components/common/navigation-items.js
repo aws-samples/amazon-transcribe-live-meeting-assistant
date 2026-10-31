@@ -19,6 +19,7 @@ import {
   ASR_CONFIG_PATH,
   TRANSCRIPT_SUMMARY_PATH,
   USER_MANAGEMENT_PATH,
+  CONFIGURATION_HISTORY_PATH,
   VOICE_ENROLLMENT_PATH,
   DEFAULT_PATH,
 } from '../../routes/constants';
@@ -118,6 +119,11 @@ export const generateNavigationItems = (settings, isAdmin) => {
           type: 'link',
           text: 'Transcript Summary',
           href: `#${TRANSCRIPT_SUMMARY_PATH}`,
+        },
+        {
+          type: 'link',
+          text: 'Configuration History',
+          href: `#${CONFIGURATION_HISTORY_PATH}`,
         },
         {
           type: 'link',

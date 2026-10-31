@@ -725,6 +725,12 @@ class ConfigurationStore:
                     "saved; reload the page and apply the change again"
                 )
             attempts += 1
+            # `current` may come back re-read, but `condition` deliberately
+            # stays the one built from the record the caller read: `body` was
+            # built from that record, so if a save landed in between, a
+            # conditional write below must be refused rather than store a body
+            # made before it. (A whole-body replace offered no version writes
+            # with no condition, as it would without history.)
             _, current = self._start_history(name, current)
         now = self._now()
         next_version = current.version + 1

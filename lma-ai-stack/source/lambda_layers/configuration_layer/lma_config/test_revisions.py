@@ -353,7 +353,7 @@ def test_a_seeded_section_is_recorded_as_a_deployment() -> None:
 
 
 def _profile_saved_before_history(dynamo: FakeDynamo) -> None:
-    """A profile as a release without history left it: no counters at all."""
+    """A profile as a pre-release build of the store, or a writer keeping no history, left it."""
     legacy = ConfigurationStore(TABLE, client=dynamo, now=lambda: "2026-01-01T00:00:00Z")
     legacy.seed_profile(PROFILE, {})
     legacy.write_section(
@@ -467,7 +467,7 @@ def test_numbers_continue_above_the_index_when_the_counters_were_lost() -> None:
     store, dynamo, s3 = build()
     store.seed_profile(PROFILE, {})
     save(store, {"voiceId": "matthew"})
-    # A release that keeps no history rewrites the record without its
+    # A writer that keeps no history rewrites the record without its
     # counters -- code that predates them -- while the index survives.
     del dynamo.items[PROFILE_KEY]["LatestRevision"]
     del dynamo.items[PROFILE_KEY]["PublishedRevision"]
