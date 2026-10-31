@@ -234,8 +234,9 @@ export type DiarizedSegment = {
  * Segments for one Transcribe result, one per recovered speaker turn.
  *
  * Kept here rather than in the Kinesis writer so it can be tested without AWS:
- * the only thing it needs from the caller is how to resolve a roster name at a
- * point in time, which it takes as a function.
+ * the only things it needs from the caller are who the platform showed over a
+ * span of the meeting timeline and how to compose the row's speaker string,
+ * which it takes as functions.
  *
  * Segment ids are keyed on Transcribe's own `ResultId` plus the run index, and
  * deliberately NOT on the speaker name. That is what keeps a partial aligned
@@ -251,14 +252,26 @@ export const buildDiarizedSegments = (
     options: {
         resultId: string;
         timeOffsetSeconds: number;
-        rosterNameAt: (absoluteStart: number) => string;
+        /**
+         * The participant the platform showed for most of an absolute span of
+         * the meeting timeline. Called per word, with the word's own start and
+         * end, so a row is named after who was speaking during its audio.
+         */
+        rosterNameFor: (absoluteStart: number, absoluteEnd: number) => string;
         thresholds?: RunThresholds;
-        nameFor: (rosterName: string, label: string | undefined) => string;
+        /** The row's speaker string, given its participant, voice label and length in seconds. */
+        nameFor: (rosterName: string, label: string | undefined, seconds: number) => string;
         /** True for a partial result: Transcribe labels nothing on one. */
         isPartial?: boolean;
+        /**
+         * False when voice separation is off: a final is then one run, split
+         * only where the participant changes, and no label is read.
+         */
+        useLabels?: boolean;
     },
 ): Record<string, DiarizedSegment> => {
-    const runs = options.isPartial
+    const useLabels = options.useLabels ?? true;
+    const runs = options.isPartial || !useLabels
         ? // Transcribe labels nothing on a partial. Ignoring any label that
           // does arrive makes the one-run-at-index-0 shape hold by
           // construction rather than by trusting the service to keep behaving
@@ -275,30 +288,24 @@ export const buildDiarizedSegments = (
             // A partial is exactly one piece, at index 0, whatever the roster
             // did under it. That is what keeps it aligned with its final.
             //
-            // Splitting a partial by roster broke the alignment, and did so in
-            // the one direction that cannot be recovered. The roster timeline
-            // is not guaranteed to be time-ordered -- an entry is stamped with
-            // the start time of the last item of whichever result was in hand,
-            // and a result ending in punctuation has no time, so the entry
-            // lands at zero -- so a partial could emit r0 AND r1 while the
-            // final emitted only r0. The leftover r1 then sits in the live
+            // Splitting a partial by roster breaks the alignment, in the one
+            // direction that cannot be recovered: the participant changes the
+            // platform reports keep arriving while a result is in progress, so
+            // a partial could emit r0 AND r1 while its final, cut differently,
+            // emitted only r0. The leftover r1 then sits in the live
             // transcript for ever marked in-progress: a duplicate of words the
-            // final already carried, attributed to the wrong participant,
-            // excluded from summaries and absent from the Speakers panel where
-            // it could have been corrected.
+            // final already carried, excluded from summaries and absent from
+            // the Speakers panel where it could have been corrected.
             //
-            // The cost is that the live transcript shows one roster name until
-            // the final arrives, which is the experience the documentation
-            // already describes.
+            // The cost is that the live transcript shows one name -- whoever
+            // the platform showed for most of the partial -- until the final
+            // arrives and is split.
             const segmentId = `${options.resultId}-r0`;
+            const start = firstSpokenTime(run.items, options.timeOffsetSeconds, run.startTime);
+            const end = Math.max(run.endTime + options.timeOffsetSeconds, start);
             segments[segmentId] = {
                 SegmentId: segmentId,
-                Speaker: options.nameFor(
-                    options.rosterNameAt(
-                        firstSpokenTime(run.items, options.timeOffsetSeconds, run.startTime),
-                    ),
-                    run.label,
-                ),
+                Speaker: options.nameFor(options.rosterNameFor(start, end), undefined, end - start),
                 StartTime: run.startTime + options.timeOffsetSeconds,
                 EndTime: run.endTime + options.timeOffsetSeconds,
                 Transcript: runTranscript(run),
@@ -315,11 +322,11 @@ export const buildDiarizedSegments = (
         // right with "Only this segment" on the meeting page; a turn merged
         // under one name cannot be separated at all. Splitting here can only
         // ever ADD boundaries relative to the run structure, never remove one.
-        for (const piece of splitRunByRoster(run, options.timeOffsetSeconds, options.rosterNameAt)) {
+        for (const piece of splitRunByRoster(run, options.timeOffsetSeconds, options.rosterNameFor)) {
             const segmentId = `${options.resultId}-r${pieceIndex}`;
             segments[segmentId] = {
                 SegmentId: segmentId,
-                Speaker: options.nameFor(piece.roster, run.label),
+                Speaker: options.nameFor(piece.roster, run.label, piece.endTime - piece.startTime),
                 StartTime: piece.startTime,
                 EndTime: piece.endTime,
                 Transcript: runTranscript({ ...run, items: piece.items }),
@@ -352,7 +359,7 @@ const unlabelledRun = (run: SpeakerRun): SpeakerRun => {
 const splitRunByRoster = (
     run: SpeakerRun,
     timeOffsetSeconds: number,
-    rosterNameAt: (absoluteStart: number) => string,
+    rosterNameFor: (absoluteStart: number, absoluteEnd: number) => string,
 ): RosterPiece[] => {
     // Where a leading item has no time of its own -- punctuation, or any item
     // Transcribe did not timestamp -- the piece takes the run's first SPOKEN
@@ -367,20 +374,24 @@ const splitRunByRoster = (
         const start = timed ? (item.StartTime as number) + timeOffsetSeconds : anchor;
         const end = timed ? (item.EndTime ?? item.StartTime ?? 0) + timeOffsetSeconds : anchor;
         const current = pieces.length > 0 ? pieces[pieces.length - 1] : undefined;
-        if (current !== undefined && (!timed || rosterNameAt(start) === current.roster)) {
+        if (current !== undefined && !timed) {
             current.items.push(item);
-            if (timed) {
-                current.endTime = Math.max(current.endTime, end);
-            }
             continue;
         }
-        pieces.push({ roster: rosterNameAt(start), items: [item], startTime: start, endTime: end });
+        // Each word goes to whoever the platform showed for most of the word.
+        const roster = rosterNameFor(start, end);
+        if (current !== undefined && roster === current.roster) {
+            current.items.push(item);
+            current.endTime = Math.max(current.endTime, end);
+            continue;
+        }
+        pieces.push({ roster, items: [item], startTime: start, endTime: end });
     }
     if (pieces.length === 0) {
         // Only reachable for a run with no items at all.
         return [
             {
-                roster: rosterNameAt(anchor),
+                roster: rosterNameFor(anchor, anchor),
                 items: run.items,
                 startTime: run.startTime + timeOffsetSeconds,
                 endTime: run.endTime + timeOffsetSeconds,
@@ -412,3 +423,57 @@ const firstSpokenTime = (
     }
     return fallback + timeOffsetSeconds;
 };
+
+/**
+ * Which rows carry Amazon Transcribe's voice label, and so the rule for a
+ * label that disagrees with the meeting platform.
+ *
+ * The row's NAME is always the participant the platform showed during the
+ * row's audio. For remote participants that is exact -- each has their own
+ * roster entry -- while Transcribe's labels on the mixed meeting audio are
+ * not: on a three-person Zoom standup one label coincided with all three
+ * participants. The label is therefore only a hint, and it is kept where it
+ * adds something: telling apart several voices behind ONE participant, such
+ * as a conference room's speakerphone.
+ *
+ * A label is shown under one name only: the participant it has coincided with
+ * for the most speech so far in this Transcribe session. Under any other
+ * participant the row is written with the bare name. So `Sam (spk_3)` and
+ * `Ana (spk_3)` never both appear for the same voice, while a room's voices
+ * -- every one of which coincides mostly with the room -- stay `Room (spk_0)`,
+ * `Room (spk_1)`.
+ *
+ * Labels restart with each Transcribe session, so a new instance is used per
+ * session. A row already written is not renamed if a label's majority later
+ * moves to someone else.
+ */
+export class VoiceLabelNames {
+    private readonly seconds = new Map<string, Map<string, number>>();
+
+    /** The speaker string for one row, recording its speech against the label first. */
+    nameFor(rosterName: string, label: string | undefined, seconds: number): string {
+        if (label === undefined) {
+            return rosterName;
+        }
+        let perName = this.seconds.get(label);
+        if (perName === undefined) {
+            perName = new Map<string, number>();
+            this.seconds.set(label, perName);
+        }
+        perName.set(rosterName, (perName.get(rosterName) ?? 0) + Math.max(seconds, 0));
+        return this.ownerOf(label) === rosterName ? `${rosterName} (${label})` : rosterName;
+    }
+
+    /** The participant a label has coincided with for the most speech; the earliest wins a tie. */
+    ownerOf(label: string): string | undefined {
+        let owner: string | undefined;
+        let most = -1;
+        for (const [name, total] of this.seconds.get(label) ?? []) {
+            if (total > most) {
+                owner = name;
+                most = total;
+            }
+        }
+        return owner;
+    }
+}

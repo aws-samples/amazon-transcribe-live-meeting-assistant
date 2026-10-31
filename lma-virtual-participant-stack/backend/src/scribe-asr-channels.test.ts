@@ -92,10 +92,11 @@ test('the roster lag allowance is wider for the Zoom SDK monitor and can be over
     const saved = process.env.ASR_ROSTER_LAG_SECONDS;
     delete process.env.ASR_ROSTER_LAG_SECONDS;
     try {
-        assert.equal(rosterLagSeconds('ZOOM'), 2.0);
+        assert.equal(rosterLagSeconds('ZOOM', 'sdk'), 2.0);
+        assert.equal(rosterLagSeconds('ZOOM', 'dom'), 0);
         assert.equal(rosterLagSeconds('Teams'), 0.75);
         process.env.ASR_ROSTER_LAG_SECONDS = '1.25';
-        assert.equal(rosterLagSeconds('ZOOM'), 1.25);
+        assert.equal(rosterLagSeconds('ZOOM', 'sdk'), 1.25);
     } finally {
         if (saved === undefined) delete process.env.ASR_ROSTER_LAG_SECONDS;
         else process.env.ASR_ROSTER_LAG_SECONDS = saved;

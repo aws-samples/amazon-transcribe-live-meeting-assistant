@@ -1,8 +1,7 @@
 import { KinesisClient, PutRecordCommand, PutRecordsCommand } from '@aws-sdk/client-kinesis';
 import { defaultProvider } from '@aws-sdk/credential-provider-node';
 import { details } from './details.js';
-import { speakerNameFor } from './asr-microvm-client.js';
-import { buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
+import { VoiceLabelNames, buildDiarizedSegments, type TranscribeItem } from './transcribe-diarization.js';
 
 export interface TranscriptSegment {
   channel: string;
@@ -86,14 +85,19 @@ class KinesisStreamManager {
   }
   private streamName: string;
   
-  // Global speaker tracking (matching Python kds.py)
-  private currentSpeakerName: string | null = null;
-  private speakers: string[] = [];
-  private startTimes: number[] = [];
+  // Who the platform showed over a span of the meeting timeline, supplied by
+  // the transcription service from its roster timeline (roster-timeline.ts).
+  // Undefined, or no lookup at all, means nobody is known yet, and the name
+  // the caller passed is used instead.
+  private rosterLookup: ((absoluteStart: number, absoluteEnd: number) => string | undefined) | null = null;
   // Whether to recover speaker turns from Transcribe's per-item labels. Off
-  // unless the deployment's VP voice-separation switch is on, so a deployment
-  // that has not asked for it keeps exactly today's attribution.
+  // unless the deployment's VP voice-separation switch is on.
   private diarize = false;
+  // Which participant each Transcribe voice label is shown under. Labels
+  // restart with every Transcribe session, and each session has its own
+  // timeline offset, so a new offset starts a new map.
+  private voiceLabels = new VoiceLabelNames();
+  private voiceLabelsOffset: number | null = null;
 
   constructor() {
     // In local test mode, explicitly use default provider which checks credentials file first
@@ -252,10 +256,6 @@ class KinesisStreamManager {
     console.log(`Sent call video recording event to Kinesis.`);
   }
 
-  syncTranscriptSegmentState(speaker: string, transcriptResult: any, timeOffsetSeconds = 0): void {
-    this.processTranscriptionResults(speaker, transcriptResult, timeOffsetSeconds);
-  }
-
   // Returns the highest absolute segment EndTime (seconds) written by this call
   // so the caller can advance the cumulative reconnect offset. Returns
   // timeOffsetSeconds unchanged when nothing was written.
@@ -342,35 +342,24 @@ class KinesisStreamManager {
    */
   setDiarization(enabled: boolean): void {
     this.diarize = enabled === true;
+    // Set once per meeting, so a new meeting starts with no label owners.
+    this.voiceLabels = new VoiceLabelNames();
+    this.voiceLabelsOffset = null;
   }
 
   /**
-   * The roster name in effect at an absolute time.
+   * Name rows after who the platform showed during their audio.
    *
-   * Reuses the timeline the roster bookkeeping already maintains -- speakers[]
-   * paired with startTimes[] -- rather than introducing a second source, so
-   * diarized and undiarized segments name the same participant for the same
-   * moment.
+   * The lookup is keyed on the meeting timeline -- Transcribe's item times plus
+   * the session offset -- and the transcription service records each
+   * participant change on that same clock at the moment the platform reports
+   * it. Rows used to be named from changes stamped at the last word of
+   * whichever result was in hand when the change was noticed, which lands a
+   * partial's latency (most of a second) before the change and gave the
+   * previous speaker's last words to the next one.
    */
-  private rosterNameAt(absoluteStart: number, fallback: string): string {
-    if (this.startTimes.length === 0) {
-      return fallback;
-    }
-    // Upper bound, not the lower bound the undiarized path uses. A roster entry
-    // is pushed with the start time of the word at which the change was
-    // noticed, so an exact tie means "this speaker from here on". Resolving a
-    // tie to the PREVIOUS speaker misattributes only the words at exactly that
-    // timestamp -- but because the entry is stamped from the last item of the
-    // partial in hand, those are the opening words of the new speaker's turn,
-    // which the roster splitter then peels off as a short segment under the
-    // previous participant's name. The undiarized path keeps its lower-bound
-    // search, because changing a shared helper would alter the behaviour every
-    // deployment has today.
-    let index = this.upperBound(this.startTimes, absoluteStart) - 1;
-    if (index < 0) {
-      index = 0;
-    }
-    return this.speakers[index] ?? fallback;
+  setRosterLookup(lookup: ((absoluteStart: number, absoluteEnd: number) => string | undefined) | null): void {
+    this.rosterLookup = lookup;
   }
 
   /**
@@ -427,153 +416,51 @@ class KinesisStreamManager {
   }
 
   /**
-   * One segment per recovered speaker turn, named `roster (spk_N)`.
+   * The rows for one Transcribe result: one per participant turn, and with
+   * voice separation on, one per recovered voice turn within that.
    *
-   * Composes both signals the way the on-demand engine does: the roster says
-   * which participant the platform reports, the voice label says which voice
-   * within it. For a conference room sharing one speakerphone that is the only
-   * thing that separates the people in the room.
+   * Every word is named after the participant the platform showed for most
+   * of the word, and the result is cut where that changes. With voice
+   * separation on, the voice label is kept as a hint under the participant it
+   * mostly coincides with (see VoiceLabelNames).
    *
-   * Segment ids are keyed on Transcribe's own `ResultId` plus the run index,
-   * NOT on the speaker name. That is what keeps a partial aligned with its
-   * final: a partial is always one piece at index 0 and is cleanly replaced by
-   * the final's first piece, while later pieces arrive as new segments. Keying
-   * on anything derived from the label would rename the segment between partial
-   * and final and orphan the partial, which would then sit in the UI for ever
-   * marked in-progress.
+   * Segment ids are keyed on Transcribe's own `ResultId` plus the piece
+   * index, NOT on the speaker name. That is what keeps a partial aligned with
+   * its final: a partial is always one piece at index 0 and is cleanly
+   * replaced by the final's first piece, while later pieces arrive as new
+   * segments. Keying on anything derived from the name would rename the
+   * segment between partial and final and orphan the partial, which would then
+   * sit in the UI for ever marked in-progress.
    */
-  private diarizedSegments(speakerName: string, result: any, timeOffsetSeconds: number): any {
+  private processTranscriptionResults(speakerName: string, result: any, timeOffsetSeconds = 0): any {
     const items: TranscribeItem[] = result.Alternatives?.[0]?.Items ?? [];
     // See fallbackResultId for what it is keyed on and what it does not cover.
     const resultId =
       result.ResultId ?? KinesisStreamManager.fallbackResultId(result, timeOffsetSeconds);
+    if (this.voiceLabelsOffset !== timeOffsetSeconds) {
+      this.voiceLabels = new VoiceLabelNames();
+      this.voiceLabelsOffset = timeOffsetSeconds;
+    }
+    const labels = this.voiceLabels;
     const segments = buildDiarizedSegments(items, {
       resultId,
       timeOffsetSeconds,
-      rosterNameAt: (startTime) => this.rosterNameAt(startTime, speakerName),
-      nameFor: speakerNameFor,
+      rosterNameFor: (start, end) => this.rosterLookup?.(start, end) ?? speakerName,
+      nameFor: this.diarize
+        ? (roster, label, seconds) => labels.nameFor(roster, label, seconds)
+        : (roster) => roster,
       isPartial: KinesisStreamManager.isPartialResult(result),
+      useLabels: this.diarize,
     });
 
     if (diagnosticsOn()) {
-      const labels = Object.values(segments).map((segment) => segment.Speaker);
+      const names = Object.values(segments).map((segment) => segment.Speaker);
       console.log(
         `[DIARIZATION] result=${resultId} partial=${KinesisStreamManager.isPartialResult(result)} ` +
-          `items=${items.length} segments=${labels.length} speakers=${labels.join(',')}`,
+          `items=${items.length} segments=${names.length} speakers=${names.join(',')}`,
       );
     }
     return segments;
-  }
-
-  private processTranscriptionResults(speakerName: string, result: any, timeOffsetSeconds = 0): any {
-    const segments: any = {};
-
-    if (this.currentSpeakerName !== speakerName) {
-      // Start time of new speaker is the start time of the last item in the results.
-      // Store absolute (offset-adjusted) time so ids/ordering stay monotonic across
-      // reconnects — Transcribe resets Item.StartTime to 0 on every (re)connect.
-      this.currentSpeakerName = speakerName;
-      this.speakers.push(speakerName);
-      const lastItem = result.Alternatives[0].Items[result.Alternatives[0].Items.length - 1];
-      this.startTimes.push((lastItem.StartTime ?? 0) + timeOffsetSeconds);
-    }
-
-    if (this.diarize) {
-      // The roster bookkeeping above still runs, because rosterNameAt reads the
-      // timeline it maintains and the non-partial reset below depends on it.
-      const diarized = this.diarizedSegments(speakerName, result, timeOffsetSeconds);
-      if (!KinesisStreamManager.isPartialResult(result)) {
-        this.currentSpeakerName = null;
-        this.speakers = [];
-        this.startTimes = [];
-      }
-      return diarized;
-    }
-
-    const alternative = result.Alternatives[0];
-    for (const item of alternative.Items) {
-      this.addItemToSegment(item, segments, timeOffsetSeconds);
-      if (process.env.DEBUG) {
-        console.log(`DEBUG: Item ${item.StartTime}, ${item.EndTime}, ${item.Content}`);
-        console.log(`DEBUG: Speakers ${this.speakers}`);
-        console.log(`DEBUG: StartTimes ${this.startTimes}`);
-        console.log(`DEBUG: Segments ${JSON.stringify(segments)}`);
-      }
-    }
-    
-    // If it's a non partial result, then re-initialize globals
-    if (!KinesisStreamManager.isPartialResult(result)) {
-      console.log("INFO: Non partial result - Resetting speaker and start times");
-      this.currentSpeakerName = null;
-      this.speakers = [];
-      this.startTimes = [];
-    }
-    
-    return segments;
-  }
-
-  private addItemToSegment(item: any, segments: any, timeOffsetSeconds = 0): any {
-    // startTimes are already absolute (offset-adjusted); compare against the
-    // item's absolute start time so the speaker lookup stays correct.
-    const itemStart = (item.StartTime ?? 0) + timeOffsetSeconds;
-    const itemEnd = (item.EndTime ?? 0) + timeOffsetSeconds;
-    // Find the correct segment index using binary search (matching Python bisect)
-    let segmentIndex = this.binarySearch(this.startTimes, itemStart) - 1;
-    if (segmentIndex < 0) {
-      segmentIndex = 0;
-    }
-
-    const segmentId = `${this.speakers[segmentIndex]}-${this.startTimes[segmentIndex]}`;
-
-    if (!(segmentId in segments)) {
-      segments[segmentId] = {
-        SegmentId: segmentId,
-        Speaker: this.speakers[segmentIndex],
-        StartTime: this.startTimes[segmentIndex],
-        EndTime: itemEnd,
-        Transcript: ''
-      };
-    } else if (item.Type === 'pronunciation') {
-      // Add a space between words
-      segments[segmentId].Transcript += " ";
-    }
-
-    segments[segmentId].EndTime = itemEnd;
-    segments[segmentId].Transcript += item.Content;
-
-    return segments;
-  }
-
-  /** Index of the first element strictly greater than `target` (bisect_right). */
-  private upperBound(arr: number[], target: number): number {
-    let left = 0;
-    let right = arr.length;
-    while (left < right) {
-      const mid = Math.floor((left + right) / 2);
-      if (arr[mid] <= target) {
-        left = mid + 1;
-      } else {
-        right = mid;
-      }
-    }
-    return left;
-  }
-
-  private binarySearch(arr: number[], target: number): number {
-    // JavaScript implementation of Python's bisect.bisect_left
-    let left = 0;
-    let right = arr.length;
-    
-    while (left < right) {
-      const mid = Math.floor((left + right) / 2);
-      if (arr[mid] < target) {
-        left = mid + 1;
-      } else {
-        right = mid;
-      }
-    }
-    
-    return left;
   }
 
   async sendCallCategory(category: string, score?: number): Promise<void> {

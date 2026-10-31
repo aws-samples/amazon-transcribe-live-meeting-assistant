@@ -646,7 +646,9 @@ engine-independent, so it reads the same whether these labels came from here or 
 Amazon Transcribe.
 
 **A Virtual Participant with its voice assistant runs two sessions**, like Stream Audio's
-two channels: meeting audio on `CALLER`, named from the roster by the row's start time
+two channels: meeting audio on `CALLER`, named after the attendee the platform showed
+for most of the row (see
+[How Speaker Names Are Assigned](virtual-participant.md#how-speaker-names-are-assigned))
 and suffixed with the voice id when voice separation is on, and the assistant's own voice
 on `AGENT` under the VP's name, never diarized. Wake phrases are detected on meeting rows
 only, so the assistant cannot wake itself.

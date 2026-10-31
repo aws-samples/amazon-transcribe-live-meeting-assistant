@@ -253,7 +253,7 @@ describe('segments for a result', () => {
         buildDiarizedSegments(items, {
             resultId,
             timeOffsetSeconds: offset,
-            rosterNameAt: () => roster,
+            rosterNameFor: () => roster,
             nameFor,
         });
 
@@ -314,7 +314,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
             resultId: 'res-3',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Conference Room'),
+            rosterNameFor: (start: number) => (start < 10 ? 'Alex' : 'Conference Room'),
             nameFor,
         });
         assert.deepEqual(
@@ -331,7 +331,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
             resultId: 'res-3b',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => (start < 5 ? 'Alex' : 'Conference Room'),
+            rosterNameFor: (start: number) => (start < 5 ? 'Alex' : 'Conference Room'),
             nameFor,
         });
         assert.deepEqual(
@@ -360,7 +360,7 @@ describe('segments for a result', () => {
             {
                 resultId: 'res-4',
                 timeOffsetSeconds: 0,
-                rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Beth'),
+                rosterNameFor: (start: number) => (start < 10 ? 'Alex' : 'Beth'),
                 nameFor,
             },
         );
@@ -379,13 +379,13 @@ describe('segments for a result', () => {
         const merged = buildDiarizedSegments(items, {
             resultId: 'res-5',
             timeOffsetSeconds: 0,
-            rosterNameAt: () => 'Room',
+            rosterNameFor: () => 'Room',
             nameFor,
         });
         const split = buildDiarizedSegments(items, {
             resultId: 'res-5',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => (start < 10 ? 'Alex' : 'Beth'),
+            rosterNameFor: (start: number) => (start < 10 ? 'Alex' : 'Beth'),
             nameFor,
         });
         assert.equal(Object.keys(merged).length, 1);
@@ -403,7 +403,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([...turn('0', 6, 0), ...turn('1', 6, 10)], {
             resultId: 'res-6',
             timeOffsetSeconds: 0,
-            rosterNameAt: () => 'Conference Room',
+            rosterNameFor: () => 'Conference Room',
             nameFor,
             isPartial: true,
         });
@@ -422,7 +422,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments(turn('0', 12, 0), {
             resultId: 'res-7',
             timeOffsetSeconds: 0,
-            rosterNameAt: (start) => (start < 6 ? 'Alex' : 'Beth'),
+            rosterNameFor: (start: number) => (start < 6 ? 'Alex' : 'Beth'),
             nameFor,
             isPartial: true,
         });
@@ -439,7 +439,7 @@ describe('segments for a result', () => {
             {
                 resultId: 'res-8',
                 timeOffsetSeconds: 0,
-                rosterNameAt: (start) => (start < 20 ? 'Alex' : 'Beth'),
+                rosterNameFor: (start: number) => (start < 20 ? 'Alex' : 'Beth'),
                 nameFor,
             },
         );
@@ -462,7 +462,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([punctuation('.')], {
             resultId: 'res-8b',
             timeOffsetSeconds: 5,
-            rosterNameAt: (start) => (start < 5 ? 'Wrong' : 'Right'),
+            rosterNameFor: (start: number) => (start < 5 ? 'Wrong' : 'Right'),
             nameFor,
         });
         assert.equal(Object.keys(segments).length, 1);
@@ -480,7 +480,7 @@ describe('segments for a result', () => {
         const segments = buildDiarizedSegments([punctuation('.')], {
             resultId: 'res-8c',
             timeOffsetSeconds: 300,
-            rosterNameAt: () => 'Room',
+            rosterNameFor: () => 'Room',
             nameFor,
         });
         const [piece] = Object.values(segments);
@@ -512,7 +512,7 @@ describe('segments for a result', () => {
             {
                 resultId: 'res-8d',
                 timeOffsetSeconds: 0,
-                rosterNameAt: (start) => (start < 20 ? 'Alex' : 'Beth'),
+                rosterNameFor: (start: number) => (start < 20 ? 'Alex' : 'Beth'),
                 nameFor,
             },
         );
@@ -561,7 +561,7 @@ describe('an item with no timestamp', () => {
             {
                 resultId: 'res-9',
                 timeOffsetSeconds: 0,
-                rosterNameAt: (start) => (start < 30 ? 'Wrong' : 'Right'),
+                rosterNameFor: (start: number) => (start < 30 ? 'Wrong' : 'Right'),
                 nameFor,
             },
         );
@@ -588,7 +588,7 @@ describe('a partial with nothing timed in it', () => {
             {
                 resultId: 'res-p',
                 timeOffsetSeconds: 300,
-                rosterNameAt: (start) => (start < 339 ? 'Earlier' : 'Now'),
+                rosterNameFor: (start: number) => (start < 339 ? 'Earlier' : 'Now'),
                 nameFor,
                 isPartial: true,
             },
@@ -602,7 +602,7 @@ describe('a partial with nothing timed in it', () => {
         const segments = buildDiarizedSegments([punctuation('.')], {
             resultId: 'res-p2',
             timeOffsetSeconds: 300,
-            rosterNameAt: () => 'Conference Room',
+            rosterNameFor: () => 'Conference Room',
             nameFor,
             isPartial: true,
         });
@@ -623,13 +623,13 @@ describe('the roster is resolved on the meeting timeline, not the session one', 
     // The roster changes at an absolute 310s. Items sit at 5-10s within a
     // session that began at 300s, so they land after the change only if the
     // offset is applied.
-    const rosterNameAt = (start: number) => (start < 310 ? 'Before' : 'After');
+    const rosterNameFor = (start: number) => (start < 310 ? 'Before' : 'After');
 
     it('applies the offset when splitting a final by roster', () => {
         const segments = buildDiarizedSegments(turn('0', 6, 10), {
             resultId: 'res-off1',
             timeOffsetSeconds: 300,
-            rosterNameAt,
+            rosterNameFor,
             nameFor,
         });
         assert.deepEqual(
@@ -645,7 +645,7 @@ describe('the roster is resolved on the meeting timeline, not the session one', 
         const segments = buildDiarizedSegments(unlabelled, {
             resultId: 'res-off2',
             timeOffsetSeconds: 300,
-            rosterNameAt,
+            rosterNameFor,
             nameFor,
             isPartial: true,
         });
@@ -660,7 +660,7 @@ describe('the roster is resolved on the meeting timeline, not the session one', 
         const segments = buildDiarizedSegments([...turn('0', 4, 5), ...turn('0', 4, 15)], {
             resultId: 'res-off3',
             timeOffsetSeconds: 300,
-            rosterNameAt,
+            rosterNameFor,
             nameFor,
         });
         assert.deepEqual(

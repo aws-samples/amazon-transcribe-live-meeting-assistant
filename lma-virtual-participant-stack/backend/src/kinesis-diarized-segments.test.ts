@@ -25,6 +25,8 @@ delete process.env.CALL_DATA_STREAM_NAME;
 
 // eslint-disable-next-line import/first
 import { kinesisStreamManager } from './kinesis-stream.js';
+// eslint-disable-next-line import/first
+import { RosterTimeline } from './roster-timeline.js';
 
 type Record_ = { EventType: string; SegmentId?: string; Speaker?: string; Transcript?: string; StartTime?: number; EndTime?: number; IsPartial?: boolean };
 
@@ -56,10 +58,24 @@ const turn = (label: string | undefined, count: number, from: number) =>
 const manager = kinesisStreamManager as unknown as {
     sendRecord: (record: Record_) => Promise<void>;
     setDiarization: (on: boolean) => void;
-    currentSpeakerName: string | null;
-    speakers: string[];
-    startTimes: number[];
+    setRosterLookup: (lookup: ((start: number, end: number) => string | undefined) | null) => void;
     sendTranscriptSegment: (speaker: string, result: unknown, offset?: number) => Promise<number>;
+};
+
+/**
+ * Feed the writer from a real roster timeline, the way the transcription
+ * service does: each entry is a participant change at the time it was
+ * reported on the meeting timeline.
+ */
+const rosterOf = (changes: Array<[number, string]>, lagSeconds = 0): RosterTimeline => {
+    const timeline = new RosterTimeline(['LMA (user@example.com)']);
+    for (const [at, name] of changes) {
+        timeline.record(at, name);
+    }
+    manager.setRosterLookup((start, end) =>
+        timeline.isEmpty ? undefined : timeline.speakerFor(start, end, lagSeconds),
+    );
+    return timeline;
 };
 
 const emit = async (speaker: string, res: unknown, offset = 0) => {
@@ -73,16 +89,11 @@ beforeEach(() => {
         sent.push(record);
     };
     manager.setDiarization(false);
-    manager.currentSpeakerName = null;
-    manager.speakers = [];
-    manager.startTimes = [];
+    manager.setRosterLookup(null);
 });
 
 describe('with voice separation off', () => {
     it('emits exactly one segment named by the roster alone', async () => {
-        // What every deployment gets today. The id and times come from the last
-        // item's start time, which is odd and long-standing; pinned so the
-        // diarized branch cannot change it by accident.
         const records = await emit('Conference Room', result(turn('0', 6, 0)));
         assert.equal(records.length, 1);
         assert.equal(records[0]?.Speaker, 'Conference Room');
@@ -95,24 +106,23 @@ describe('with voice separation off', () => {
         assert.equal(records[0]?.Speaker, 'Conference Room');
     });
 
-    it('resolves a roster tie to the PREVIOUS speaker, as it does today', async () => {
-        // The diarized path deliberately uses the opposite tie-break, and the
-        // two searches sit next to each other in the writer. Pinned so that
-        // unifying them -- the natural tidy-up to reach for -- cannot silently
-        // change the attribution every deployment has now. If this needs
-        // changing, it is a behaviour change for existing meetings and belongs
-        // in its own commit with its own note, not in a refactor.
-        manager.speakers = ['Alex', 'Beth'];
-        manager.startTimes = [0, 10];
-        manager.currentSpeakerName = 'Beth';
-        const records = await emit('Beth', result(turn(undefined, 4, 10), { isPartial: true }));
-        // The word at exactly 10 goes to Alex and the rest to Beth: a
-        // lower-bound search resolves the tie backwards, which is why the
-        // diarized path uses the upper bound instead.
+    it('names each word after who the platform showed during it, and cuts the row there', async () => {
+        // Both settings name rows the same way; separation only adds the
+        // voice label. The caller's name is not used once the roster knows
+        // anyone, so the name in effect when the result is EMITTED -- Beth,
+        // here -- does not decide the row.
+        rosterOf([[0, 'Alex'], [10, 'Beth']]);
+        const records = await emit('Beth', result(turn('0', 4, 8), { resultId: 'R0' }));
         assert.deepEqual(
-            records.map((record) => record.Speaker),
-            ['Alex', 'Beth'],
+            records.map((record) => [record.SegmentId, record.Speaker]),
+            [['R0-r0', 'Alex'], ['R0-r1', 'Beth']],
         );
+    });
+
+    it('names a partial after who the platform showed for most of it', async () => {
+        rosterOf([[0, 'Alex'], [10.5, 'Beth']]);
+        const records = await emit('Beth', result(turn(undefined, 4, 8), { isPartial: true, resultId: 'R0p' }));
+        assert.deepEqual(records.map((record) => record.Speaker), ['Alex']);
     });
 });
 
@@ -153,46 +163,37 @@ describe('with voice separation on', () => {
         assert.equal(final[0]?.IsPartial, false);
     });
 
-    it('keeps a roster attribution the labels would have merged away', async () => {
+    it('keeps a roster attribution the labels would have merged away, without repeating the label', async () => {
         // Transcribe under-segmenting two remote attendees onto one label is
-        // its normal failure on a downmixed stream. The undiarized path gets
-        // this right because the roster drives the split, so the diarized path
-        // must not lose it.
-        manager.speakers = ['Alex', 'Beth'];
-        manager.startTimes = [0, 10];
-        manager.currentSpeakerName = 'Beth';
+        // its normal failure on a downmixed stream. The roster drives the
+        // split, so the attribution survives; the label stays only with the
+        // participant it has mostly coincided with, so it never appears under
+        // two names.
+        rosterOf([[0, 'Alex'], [10, 'Beth']]);
         const records = await emit(
             'Beth',
-            result([...turn('0', 6, 0), ...turn('0', 6, 10)], { resultId: 'R3' }),
+            result([...turn('0', 6, 0), ...turn('0', 4, 10)], { resultId: 'R3' }),
         );
         assert.deepEqual(
             records.map((record) => record.Speaker),
-            ['Alex (spk_0)', 'Beth (spk_0)'],
+            ['Alex (spk_0)', 'Beth'],
         );
     });
 
     it('names a turn starting exactly at a roster change with the NEW speaker', async () => {
-        // An exact tie used to resolve to the previous speaker, so every turn
-        // after a roster change carried the name of the person before it.
-        manager.speakers = ['Alex', 'Conference Room'];
-        manager.startTimes = [0, 10];
-        manager.currentSpeakerName = 'Conference Room';
+        rosterOf([[0, 'Alex'], [10, 'Conference Room']]);
         const records = await emit('Conference Room', result(turn('0', 6, 10), { resultId: 'R4' }));
         assert.equal(records[0]?.Speaker, 'Conference Room (spk_0)');
     });
 
-    it('resets the roster timeline on a final result', async () => {
-        // The undiarized path resets after its item loop; the diarized branch
-        // returns early and has to do the same, or the timeline grows for the
-        // whole meeting.
-        await emit('Conference Room', result(turn('0', 6, 0), { resultId: 'R5' }));
-        assert.deepEqual(manager.startTimes, []);
-        assert.equal(manager.currentSpeakerName, null);
-    });
-
-    it('keeps the roster timeline across a partial', async () => {
-        await emit('Conference Room', result(turn(undefined, 4, 0), { isPartial: true, resultId: 'R6' }));
-        assert.equal(manager.startTimes.length, 1);
+    it('starts afresh with each Transcribe session, whose labels are new voices', async () => {
+        rosterOf([[0, 'Alex'], [100, 'Beth']]);
+        const first = await emit('Alex', result(turn('0', 6, 0), { resultId: 'S1' }), 0);
+        // The next session numbers its voices from spk_0 again; Beth's spk_0 is
+        // not Alex's, so it is shown with her.
+        const second = await emit('Beth', result(turn('0', 6, 0), { resultId: 'S2' }), 100);
+        assert.equal(first[0]?.Speaker, 'Alex (spk_0)');
+        assert.equal(second[0]?.Speaker, 'Beth (spk_0)');
     });
 
     it('gives two results distinct ids when ResultId is absent', async () => {

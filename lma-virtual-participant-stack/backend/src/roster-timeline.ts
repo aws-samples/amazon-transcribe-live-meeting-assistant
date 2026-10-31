@@ -42,16 +42,44 @@ export class RosterTimeline {
         return lo === 0 ? 'Unknown' : this.names[lo - 1];
     }
 
+    /** True until a participant has been recorded. */
+    get isEmpty(): boolean {
+        return this.times.length === 0;
+    }
+
+    /**
+     * The participant shown for most of [startSec, endSec], with every change
+     * moved back by `lagSeconds` (how late the platform reports a change). A
+     * span no change overlaps -- a zero-length one, or one before the first
+     * entry -- takes the participant in effect at its start, or the first one.
+     *
+     * Called for every word of every Amazon Transcribe result, partials
+     * included, so it searches rather than scanning or copying the timeline.
+     */
     speakerFor(startSec: number, endSec: number, lagSeconds = 0): string {
-        if (this.times.length === 0) {
+        const count = this.times.length;
+        if (count === 0) {
             return 'Unknown';
         }
         const end = Math.max(endSec, startSec);
-        const shifted = this.times.map((time) => time - lagSeconds);
+        const shifted = (i: number): number => this.times[i] - lagSeconds;
+        // Entries up to `inEffect` start at or before the span; only the last
+        // of them can overlap it.
+        let lo = 0;
+        let hi = count;
+        while (lo < hi) {
+            const mid = (lo + hi) >> 1;
+            if (shifted(mid) <= startSec) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        const inEffect = lo - 1;
         const covered = new Map<string, number>();
-        for (let i = 0; i < shifted.length; i += 1) {
-            const from = Math.max(shifted[i], startSec);
-            const to = Math.min(i + 1 < shifted.length ? shifted[i + 1] : Infinity, end);
+        for (let i = Math.max(inEffect, 0); i < count && shifted(i) < end; i += 1) {
+            const from = Math.max(shifted(i), startSec);
+            const to = Math.min(i + 1 < count ? shifted(i + 1) : Infinity, end);
             if (to > from) {
                 covered.set(this.names[i], (covered.get(this.names[i]) ?? 0) + (to - from));
             }
@@ -67,16 +95,6 @@ export class RosterTimeline {
         if (best) {
             return best;
         }
-        let lo = 0;
-        let hi = shifted.length;
-        while (lo < hi) {
-            const mid = (lo + hi) >> 1;
-            if (shifted[mid] <= startSec) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        return lo === 0 ? this.names[0] : this.names[lo - 1];
+        return inEffect < 0 ? this.names[0] : this.names[inEffect];
     }
 }

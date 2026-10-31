@@ -124,7 +124,9 @@ names**, so at `DEBUG` they reach CloudWatch Logs. No transcript text is
 written by this line. Turn the level back down once you have what you need.
 
 Where the two signals disagree, the finer boundary wins: a voice label running
-across a change of platform speaker is split at the change. A turn split in two
+across a change of platform speaker is split at the change, and the platform's
+name is the one each part carries (see
+[How Speaker Names Are Assigned](#how-speaker-names-are-assigned)). A turn split in two
 can be put right with **Only this segment** on the meeting page, which is the
 affordance for a single turn attributed to the wrong voice; a turn merged under
 one name cannot be separated at all. (Renaming on the Speakers panel would not
@@ -133,6 +135,58 @@ not the one that was misattributed.)
 
 The voice assistant's own speech is transcribed on a channel of its own on both
 engines, so it never acquires a voice id.
+
+## How Speaker Names Are Assigned
+
+A participant row is named after **the attendee the meeting platform showed as
+speaking during that row's audio**, not after whoever is showing when the row
+reaches the transcript, which is a second or more later. The Virtual Participant
+notes each change of active speaker on the transcription audio clock at the moment
+the platform reports it, so the change and the words are on the same clock.
+
+- **On Amazon Transcribe** each word goes to the attendee shown for most of that
+  word, and a result is cut into separate rows wherever that changes. A partial
+  (in-progress) row carries the attendee shown for most of it until its final
+  arrives and is cut.
+- **On the [on-demand engine](microvm-asr.md)** the engine has already cut the rows,
+  and each row goes to the attendee shown for most of it.
+- The Virtual Participant's own name is never used for a participant row, and when
+  the platform shows nobody speaking the last attendee shown carries on.
+
+The platform reports a change slightly after it happens, so each change is moved
+back by an allowance before rows are matched to it:
+
+| Platform | Allowance | Why |
+|---|---|---|
+| Zoom, web client | 0 s | The page reports the change as it happens. On a three-person Zoom meeting it showed the Virtual Participant as speaking 0.08–0.36 s (median 0.16 s) after the Virtual Participant's own audio started, and other attendees' changes landed in the pause before their first transcribed word. |
+| Zoom, Meeting SDK | 2 s | The SDK monitor polls every 3 seconds. |
+| Teams, Chime, Webex | 0.75 s | The default for the other platforms. |
+
+The `ASR_ROSTER_LAG_SECONDS` environment variable on the Virtual Participant task
+overrides the allowance for every platform.
+
+**How the voice label combines with the name (Amazon Transcribe).** With voice
+separation on, the name is always the platform's, and Transcribe's voice label is
+kept only as a hint. A label is shown with **one attendee only**: the attendee it
+has coincided with for the most speech so far in the Transcribe session. Under
+anyone else the row carries the bare name. So a room's voices, all of which
+coincide mostly with the room, still read `Conference Room (spk_0)`,
+`Conference Room (spk_1)`. A remote attendee's row that Transcribe happens to label
+with a voice it mostly hears from somebody else reads just `Ana Ruiz`, never
+`Ana Ruiz (spk_3)` next to `Sam Lee (spk_3)`.
+
+The platform's name wins because it is exact for a remote attendee, while
+Transcribe's labels on the mixed meeting audio are not. On the same three-person
+Zoom meeting, one label coincided with all three attendees over the course of the
+meeting. Two consequences are worth knowing:
+
+- Voice labels restart with each Transcribe session, as Transcribe numbers voices
+  afresh after a reconnect.
+- If a label's majority moves to a different attendee during the meeting, rows
+  written before the move keep what they were given. On that meeting, this happened
+  to two of its five labels, once each.
+
+The on-demand engine appends its voice id to the platform's name as before.
 
 ## Supported Platforms
 
@@ -550,7 +604,8 @@ ASR engine instead, from **Configuration ▸ Transcription Engine** (admin only)
 - **The voice assistant is its own channel.** With the assistant enabled, its speech is
   transcribed from a second engine session on the same MicroVM and appears on the `AGENT`
   channel under the VP's own name, never diarized, exactly as Stream Audio separates the
-  microphone from the tab. Meeting rows are attributed to the roster by when they start.
+  microphone from the tab. Meeting rows are named after the attendee the platform showed
+  during them (see [How Speaker Names Are Assigned](#how-speaker-names-are-assigned)).
 - **Pausing keeps the engine session.** The chat pause command stops feeding meeting audio
   but leaves both sessions up, so the resume command continues the same transcript. If the
   engine dies mid-meeting, Amazon Transcribe takes over for the rest of it.
