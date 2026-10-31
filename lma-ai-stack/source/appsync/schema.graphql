@@ -73,9 +73,8 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# updateCallAgenda. Absent on a meeting nobody gave an agenda. See
 	# docs/meeting-agenda.md.
 	Agenda: String
-	# Where the stored agenda came from: "scheduled" (the Virtual Participant
-	# form), "mcp" (an MCP client starting or scheduling a Virtual Participant),
-	# "ui" (typed on the meeting page) or "derived" (read from the transcript).
+	# Where the stored agenda came from: "ui" for an agenda typed on the meeting
+	# page; "scheduled", "mcp" or "derived" as named by a backend role's write.
 	AgendaSource: String
 	# Who last set the agenda -- a username for a person, a fixed label for the
 	# backend -- and when.
@@ -815,8 +814,8 @@ input UpdateCallAgendaInput {
 	# Backend roles only: the label the change is attributed to. A signed-in
 	# user's write is attributed to their username, whatever is sent here.
 	AgendaUpdatedBy: String
-	# When true the write applies only while the meeting has no agenda, so an
-	# automatic pass never replaces one somebody set. Checked in the same
+	# When true the write applies only while the meeting has no agenda, so a
+	# writer filling in a missing agenda never replaces one somebody set. Checked in the same
 	# DynamoDB condition as access, so the check and the write are atomic.
 	OnlyIfUnset: Boolean
 }

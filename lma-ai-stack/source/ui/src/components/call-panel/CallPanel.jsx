@@ -2565,7 +2565,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
       <AgendaPanel
         item={item}
-        onSave={sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text) : undefined}
+        onSave={sendUpdateCallAgenda ? (text) => sendUpdateCallAgenda(item.callId, text, user?.username) : undefined}
         readOnly={speakerNamesReadOnly}
       />
 

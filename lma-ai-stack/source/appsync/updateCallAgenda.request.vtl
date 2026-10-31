@@ -12,14 +12,12 @@
 ##
 ## The provenance fields are decided here rather than taken from the input for a
 ## signed-in user: their write is recorded as source "ui" and attributed to
-## their own username. Only a backend role with IAM credentials names a source
-## (and must), because only the backend carries an agenda in from scheduling or
-## reads one from the transcript.
+## their own username. Only a backend role with IAM credentials names a source,
+## and it must name one of the values listed below.
 ##
 ## OnlyIfUnset makes the write conditional on the meeting having no agenda yet,
-## in the same condition as access. The automatic derivation pass uses it, so an
-## agenda somebody typed while that pass was reading the transcript is never
-## replaced by it.
+## in the same condition as access, so a writer filling in a missing agenda never
+## replaces one somebody set -- however the two writes interleave.
 ##
 ## UpdatedAt is deliberately NOT written here, and not used as a guard, matching
 ## updateSpeakerIdentities and updateCallSummaryText: Call updates fed by the

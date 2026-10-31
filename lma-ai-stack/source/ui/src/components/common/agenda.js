@@ -7,10 +7,9 @@
  * Reading a meeting's agenda.
  *
  * The agenda is stored as plain text, one item per line, because that is what
- * every source produces without translation: a person typing in the Agenda
- * panel, a calendar invite pasted into the scheduling form or passed by an MCP
- * client, and the model that reads one out of the transcript. Rendering it as a
- * list is a matter of splitting those lines, which is all this module does.
+ * a person types and what an agenda copied from an invite or a document already
+ * is. Rendering it as a list is a matter of splitting those lines, which is all
+ * this module does.
  *
  * Bullet and numbering marks are stripped for display so that "1. Budget" and
  * "- Budget" both read as the item "Budget" in a numbered list. The stored text

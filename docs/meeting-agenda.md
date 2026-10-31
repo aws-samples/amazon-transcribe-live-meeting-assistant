@@ -25,7 +25,7 @@ Beside the text the meeting records three things about it:
 
 | Field | Meaning |
 |---|---|
-| `AgendaSource` | Where the agenda came from: `scheduled` (the Virtual Participant form), `mcp` (an MCP client that started or scheduled a Virtual Participant), `ui` (typed on the meeting page) or `derived` (read from the transcript). |
+| `AgendaSource` | Where the agenda came from. An agenda typed on the meeting page is recorded as `ui`. The field also accepts `scheduled`, `mcp` and `derived`, which a backend role writing with IAM credentials must choose between. |
 | `AgendaUpdatedBy` | The username of the person who last set it, or a fixed label when the backend set it. |
 | `AgendaUpdatedAt` | When it was last set. |
 
@@ -39,8 +39,9 @@ saying who last changed it and when. A meeting with no agenda says so.
 
 **Edit** (or **Add agenda** on a meeting without one) opens the text for
 editing, one item per line; **Save agenda** stores it. Editing is available
-while the meeting is running and after it has ended. Nothing in LMA's own
-pipeline overwrites an agenda once somebody has set one.
+while the meeting is running and after it has ended. Unlike the summary, which
+the end-of-meeting pipeline replaces when the meeting ends, a stored agenda is
+replaced only by somebody saving a new one.
 
 ## Who can change it
 

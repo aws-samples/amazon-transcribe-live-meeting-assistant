@@ -7,9 +7,9 @@
  * The meeting's agenda: shown as a numbered list, editable while the meeting
  * runs and after it ends.
  *
- * Editing is offered throughout, unlike the summary, because nothing in the
- * pipeline overwrites an agenda: the only automatic writer is the derivation
- * pass, and it writes only while a meeting has none.
+ * Editing is offered throughout, unlike the summary: the end-of-meeting
+ * pipeline replaces a summary when the meeting ends, and nothing replaces a
+ * stored agenda except somebody saving a new one.
  */
 import React, { useState } from 'react';
 import {

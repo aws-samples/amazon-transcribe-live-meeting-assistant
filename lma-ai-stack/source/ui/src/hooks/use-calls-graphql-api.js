@@ -598,7 +598,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
    * caller's own username whatever the browser sends, so the patch here only
    * anticipates what the subscription will confirm.
    */
-  const sendUpdateCallAgenda = async (callId, agenda) => {
+  const sendUpdateCallAgenda = async (callId, agenda, username) => {
     const AGENDA_FIELDS = ['Agenda', 'AgendaSource', 'AgendaUpdatedBy', 'AgendaUpdatedAt'];
     let previous;
     setCalls((currentCalls) => {
@@ -606,7 +606,13 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
       previous = Object.fromEntries(AGENDA_FIELDS.map((field) => [field, existing?.[field]]));
       return currentCalls.map((c) =>
         c.CallId === callId
-          ? { ...c, Agenda: agenda, AgendaSource: 'ui', AgendaUpdatedAt: new Date().toISOString() }
+          ? {
+              ...c,
+              Agenda: agenda,
+              AgendaSource: 'ui',
+              AgendaUpdatedBy: username ?? c.AgendaUpdatedBy,
+              AgendaUpdatedAt: new Date().toISOString(),
+            }
           : c,
       );
     });

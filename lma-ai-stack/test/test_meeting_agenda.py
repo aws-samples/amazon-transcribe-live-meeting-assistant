@@ -7,9 +7,9 @@ The agenda is one set of fields on the meeting record, written through one
 browser-reachable mutation. What has to hold is spread across the schema, the
 request template, the stack template and the browser, so these tests read all
 four and assert the parts that would fail silently if they drifted: the access
-rule, the provenance a signed-in caller cannot choose, the conditional write the
-automatic pass relies on, and the subscription publish that keeps open pages
-current.
+rule, the provenance a signed-in caller cannot choose, the conditional write
+that keeps a stored agenda from being replaced by a fill-in, and the
+subscription publish that keeps open pages current.
 """
 
 from __future__ import annotations
@@ -140,7 +140,7 @@ def test_a_backend_role_must_name_a_known_source(agenda_vtl: str) -> None:
 
 def test_only_if_unset_is_part_of_the_write_condition(agenda_vtl: str) -> None:
     """Checked in DynamoDB with the write, not read-then-write in a Lambda, so an
-    agenda typed while the automatic pass was running always survives it."""
+    agenda somebody saves always survives a concurrent fill-in."""
     assert "attribute_not_exists(#ExistingAgenda) OR #ExistingAgenda = :noAgenda" in agenda_vtl
     assert "$ctx.args.input.OnlyIfUnset == true" in agenda_vtl
 
@@ -163,7 +163,13 @@ def test_the_agenda_length_is_bounded(agenda_vtl: str) -> None:
 
 @pytest.mark.parametrize(
     "operation",
-    ["getCall.js", "onUpdateCall.js", "updateCallAgenda.js", "updateSpeakerIdentities.js"],
+    [
+        "getCall.js",
+        "onUpdateCall.js",
+        "updateCallAgenda.js",
+        "updateSpeakerIdentities.js",
+        "updateCallSummaryText.js",
+    ],
 )
 def test_the_browser_selects_the_agenda_wherever_it_reads_a_whole_meeting(operation: str) -> None:
     body = (UI_SRC / "graphql" / "queries" / operation).read_text(encoding="utf-8")
