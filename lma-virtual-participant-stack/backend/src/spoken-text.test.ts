@@ -22,8 +22,9 @@
  */
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
+import { ElevenLabsAgent } from './elevenlabs-agent.js';
 import { NovaAgent } from './nova-agent.js';
-import { toSpokenText } from './spoken-text.js';
+import { spokenStrandsAnswer, toSpokenText } from './spoken-text.js';
 
 const MARKUP = /[*#|`[\]]|\n|https?:/;
 
@@ -74,6 +75,38 @@ test('links keep their text and bare URLs keep only their host', () => {
         'See weather.gov for more.',
     );
     assert.equal(toSpokenText('Visit https://example.com/x. Then rain.'), 'Visit example.com. Then rain.');
+});
+
+test('an autolink is read like a bare URL, and an email autolink as the address', () => {
+    assert.equal(toSpokenText('Read <https://www.example.com/docs/guide> first.'), 'Read example.com first.');
+    assert.equal(toSpokenText('Write to <help@example.com> or <mailto:ops@example.com>.'), 'Write to help@example.com or ops@example.com.');
+});
+
+test('with keepUrls, links keep their addresses and bare URLs stay whole', () => {
+    const keep = { keepUrls: true };
+    assert.equal(
+        toSpokenText('See [the guide](https://example.com/guide) or https://example.com/x?y=1.', keep),
+        'See the guide (https://example.com/guide) or https://example.com/x?y=1.',
+    );
+    assert.equal(toSpokenText('[https://example.com](https://example.com)', keep), 'https://example.com');
+    assert.equal(toSpokenText('[](https://example.com/a)', keep), 'https://example.com/a');
+    assert.equal(toSpokenText('Read <https://example.com/a>', keep), 'Read https://example.com/a');
+});
+
+test("a # that belongs to a heading's text is kept", () => {
+    assert.equal(toSpokenText('## Learning C#\nIt is like Java.'), 'Learning C#. It is like Java.');
+    assert.equal(toSpokenText('# Issue #42 status #\nOpen.'), 'Issue #42 status. Open.');
+    assert.equal(toSpokenText('### Summary ###'), 'Summary');
+});
+
+test('a code fence on one line is a code span, and the lines after it are read as usual', () => {
+    assert.equal(
+        toSpokenText('Run ```npm install``` first.\n\n**Then** test.'),
+        'Run npm install first. Then test.',
+    );
+    assert.equal(toSpokenText('```make build```\n- **Done**'), 'make build. Done');
+    // A real fence with an info string still opens a block.
+    assert.equal(toSpokenText('```bash\nnpm test\n```\nAfter.'), 'npm test. After.');
 });
 
 test('formatting tags are removed, other angle brackets are kept', () => {
@@ -151,4 +184,30 @@ test('a response with no answer in it reaches the model as the JSON it was', asy
         await novaWithStrandsAnswer(payload).invokeStrandsAgent({ content: JSON.stringify({ query: 'q' }) }),
         JSON.stringify(payload),
     );
+});
+
+test('the ElevenLabs agent is given the spoken form of a markdown answer too', async () => {
+    const agent = new ElevenLabsAgent({ apiKey: 'test-key', activationMode: 'wake_phrase' } as any) as any;
+    agent.strandsLambdaArn = 'arn:aws:lambda:us-east-1:123456789012:function:STRANDS-test-MeetingAssist';
+    agent.lambdaClient = {
+        send: async () => ({
+            Payload: new TextEncoder().encode(JSON.stringify({
+                message: "Here's the **forecast**:\n\n- **Today:** Sunny ([source](https://weather.gov/x))",
+            })),
+        }),
+    };
+    assert.equal(await agent.invokeStrandsAgent({ query: 'forecast' }), "Here's the forecast: Today: Sunny (source)");
+    agent.lambdaClient = {
+        send: async () => ({ Payload: new TextEncoder().encode(JSON.stringify({ errorMessage: 'Task timed out' })) }),
+    };
+    assert.equal(await agent.invokeStrandsAgent({ query: 'q' }), '{"errorMessage":"Task timed out"}');
+});
+
+test('the shared Strands-answer helper logs only when it changed the answer', () => {
+    const lines: string[] = [];
+    assert.equal(spokenStrandsAnswer({ message: 'Plain.' }, (l) => lines.push(l)), 'Plain.');
+    assert.equal(lines.length, 0);
+    assert.equal(spokenStrandsAnswer({ message: '**Bold**' }, (l) => lines.push(l)), 'Bold');
+    assert.deepEqual(lines, ['Strands answer reduced to spoken text (8 -> 4 chars)']);
+    assert.equal(spokenStrandsAnswer(null), 'null');
 });

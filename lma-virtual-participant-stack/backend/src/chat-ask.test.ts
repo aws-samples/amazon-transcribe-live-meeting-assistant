@@ -148,7 +148,19 @@ test('a markdown answer is posted as plain single-line text', async () => {
     assert.deepEqual(asked, ['what are the action items?']);
     assert.equal(messages.length, 1);
     assert.doesNotMatch(messages[0], /[*#\[\]\n]/);
-    assert.match(messages[0], /^Live Meeting Assistant: Action items\. Alice: send the deck\. Bob: book the room$/);
+    assert.match(
+        messages[0],
+        /^Live Meeting Assistant: Action items\. Alice: send the deck \(https:\/\/example\.com\/deck\)\. Bob: book the room$/,
+    );
+});
+
+test('a chat answer keeps full link addresses, which a reader can follow', async () => {
+    const { a } = answerer('Details at https://docs.example.com/guide/setup#step-2 and <https://example.org/a>.');
+    const [message] = await a.answer(Q('where are the docs?'), 'Carol', 'zoom');
+    assert.equal(
+        message,
+        'Live Meeting Assistant: Details at https://docs.example.com/guide/setup#step-2 and https://example.org/a.',
+    );
 });
 
 test('each sender may ask once per interval, and is told so once', async () => {

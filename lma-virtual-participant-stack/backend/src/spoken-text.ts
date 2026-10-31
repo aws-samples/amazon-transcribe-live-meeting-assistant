@@ -25,7 +25,17 @@
  * The Strands Lambda has no notion of who is asking, so it cannot be asked for
  * a spoken answer instead; the chat keeps its markdown because nothing upstream
  * of the voice assistant changes.
+ *
+ * `LMA ask` answers in the meeting chat use the same conversion to reach plain
+ * single-line text, with `keepUrls`: a reader can follow a link, so a link
+ * keeps its address after its text and a bare URL is left whole.
  */
+
+export interface SpokenTextOptions {
+    /** Keep link addresses, for text that is read rather than spoken: a bare
+     *  URL is left whole, and a link becomes "text (address)". */
+    keepUrls?: boolean;
+}
 
 /** A line that is only a table's header/body separator, e.g. `|---|:--:|`. */
 const TABLE_SEPARATOR = /^\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?$/;
@@ -74,15 +84,32 @@ function stripFormattingTags(text: string): string {
     return current;
 }
 
+/** A link written with its text: the text alone when spoken, and the text with
+ *  its address when the result is to be read. */
+function linkText(text: string, url: string, keepUrls: boolean): string {
+    const address = url.trim().split(/\s+/)[0] ?? '';
+    if (!keepUrls || !address) return text;
+    if (!text.trim() || text.trim() === address) return address;
+    return `${text} (${address})`;
+}
+
 /** Inline markup within one line: links, code, emphasis, HTML tags, bare URLs. */
-function stripInline(text: string): string {
+function stripInline(text: string, options: SpokenTextOptions = {}): string {
+    const keepUrls = options.keepUrls === true;
     return stripFormattingTags(text)
-        // Images and links keep their text; a link whose text is empty keeps nothing.
-        .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+        // Autolinks, <https://...> and <someone@example.com>: the address
+        // itself, which the bare-URL rule below then treats like any other.
+        .replace(/<((?:https?|ftp):\/\/[^\s<>]+)>/gi, '$1')
+        .replace(/<mailto:([^\s<>]+)>/gi, '$1')
+        .replace(/<([^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)>/g, '$1')
+        // Images and links keep their text; a spoken link whose text is empty keeps nothing.
+        .replace(/!\[([^\]]*)\]\(([^)]*)\)/g, (_m, alt: string, url: string) => linkText(alt, url, keepUrls))
+        .replace(/\[([^\]]*)\]\(([^)]*)\)/g, (_m, label: string, url: string) => linkText(label, url, keepUrls))
         // Reference-style links, [text][ref].
         .replace(/\[([^\]]+)\]\[[^\]]*\]/g, '$1')
-        .replace(/`([^`]*)`/g, '$1')
+        // Code spans, delimited by a run of backticks of any length, so that
+        // ```code``` on one line is unwrapped as well as `code`.
+        .replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (_m, _ticks: string, code: string) => code.trim())
         // Bold and italic, asterisk and underscore forms. The underscore forms
         // only at word boundaries, so snake_case identifiers keep their underscores.
         .replace(/\*\*\*([^*]+)\*\*\*/g, '$1')
@@ -96,6 +123,7 @@ function stripInline(text: string): string {
         .replace(/\*{2,}/g, '')
         // Punctuation after a URL ends the sentence, not the URL, so it is kept.
         .replace(/https?:\/\/[^\s)]+/g, (url) => {
+            if (keepUrls) return url;
             const trailing = /[.,;:!?]+$/.exec(url)?.[0] ?? '';
             return hostOf(url.slice(0, url.length - trailing.length)) + trailing;
         })
@@ -111,7 +139,8 @@ function stripInline(text: string): string {
  * normalised: line breaks within a paragraph are spaces, and a sentence
  * boundary is added only between paragraphs that lack one.
  */
-export function toSpokenText(markdown: string): string {
+export function toSpokenText(markdown: string, options: SpokenTextOptions = {}): string {
+    const inline = (text: string) => stripInline(text, options);
     const sentences: string[] = [];
     // A run of prose lines with no blank line between them is one paragraph in
     // markdown, so they are joined before being ended as a sentence.
@@ -131,7 +160,11 @@ export function toSpokenText(markdown: string): string {
         const raw = lines[i];
         const line = raw.trim();
 
-        if (/^(```|~~~)/.test(line)) {
+        // A fence line. Not one that opens with backticks and has a backtick
+        // later in it: an info string cannot contain one, so ```code``` on a
+        // single line is a code span, handled with the rest of the line's
+        // inline markup below.
+        if (/^(```|~~~)/.test(line) && (inFence || !/^`{3,}[^`]*`/.test(line))) {
             flushParagraph();
             inFence = !inFence;
             continue;
@@ -162,7 +195,7 @@ export function toSpokenText(markdown: string): string {
         // outer pipes.
         if (line.startsWith('|') || (line.includes('|') && (nextIsSeparator || tableHeader !== null))) {
             flushParagraph();
-            const cells = tableCells(line).map(stripInline);
+            const cells = tableCells(line).map(inline);
             if (!tableHeader && nextIsSeparator) {
                 tableHeader = cells;
                 continue;
@@ -182,21 +215,23 @@ export function toSpokenText(markdown: string): string {
         }
         tableHeader = null;
 
-        const heading = /^#{1,6}\s+(.*?)\s*#*$/.exec(line);
+        // A closing run of #s is markup only when a space separates it from
+        // the text, so "## Learning C#" keeps its #.
+        const heading = /^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/.exec(line);
         if (heading) {
             flushParagraph();
-            sentences.push(stripInline(heading[1]));
+            sentences.push(inline(heading[1]));
             continue;
         }
 
         const item = /^(?:>\s*)*(?:[-*+•]|\d{1,3}[.)])\s+(.*)$/.exec(line);
         if (item) {
             flushParagraph();
-            sentences.push(stripInline(item[1]));
+            sentences.push(inline(item[1]));
             continue;
         }
 
-        const text = stripInline(line.replace(/^(>\s*)+/, ''));
+        const text = inline(line.replace(/^(>\s*)+/, ''));
         if (text) paragraph.push(text);
     }
     flushParagraph();
@@ -209,4 +244,23 @@ export function toSpokenText(markdown: string): string {
         .join(' ')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+/**
+ * What a voice assistant hands its speech model as the result of a Strands
+ * lookup: the answer the agent wrote, reduced to spoken text, or the whole
+ * response as JSON when there is no written answer in it.
+ *
+ * Shared by the Nova Sonic and ElevenLabs agents, which both speak the result
+ * rather than render it.
+ */
+export function spokenStrandsAnswer(responsePayload: unknown, log: (line: string) => void = console.log): string {
+    const message = (responsePayload as { message?: unknown } | null)?.message;
+    if (!message) return JSON.stringify(responsePayload);
+    if (typeof message !== 'string') return JSON.stringify(message);
+    const spoken = toSpokenText(message);
+    if (spoken !== message) {
+        log(`Strands answer reduced to spoken text (${message.length} -> ${spoken.length} chars)`);
+    }
+    return spoken;
 }
