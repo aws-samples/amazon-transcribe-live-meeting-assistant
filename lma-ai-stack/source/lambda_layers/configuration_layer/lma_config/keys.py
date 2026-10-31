@@ -18,8 +18,8 @@ key:
 ``Config#__active``    The pointer naming the profile in force.
 ``Schema``             The form schema the UI renders. Reserved here; written
                        by the schema-driven editor.
-``ConfigRevIndex#...`` The revision metadata index. Reserved here; written by
-                       the revision work.
+``ConfigRevIndex#...`` A profile's revision index; see
+                       :mod:`lma_config.revisions`.
 ====================== =======================================================
 
 The ``ConfigRevIndex#`` prefix is deliberately *not* under ``Config#``: profile
@@ -52,8 +52,8 @@ ACTIVE_POINTER_KEY = f"{CONFIG_PREFIX}{ACTIVE_POINTER_NAME}"
 # nothing good follows from allowing it.
 RESERVED_PROFILE_NAMES = frozenset({DEFAULT_PROFILE_NAME, ACTIVE_POINTER_NAME, "schema"})
 
-# Profile names appear verbatim inside the partition key, and from the revision
-# work onwards inside an S3 object key as well. Restricting them to this set
+# Profile names appear verbatim inside the partition key, and inside the S3 key
+# of every revision of the profile. Restricting them to this set
 # means a name can never introduce structure into either, so no escaping is
 # needed anywhere a name is used.
 PROFILE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")

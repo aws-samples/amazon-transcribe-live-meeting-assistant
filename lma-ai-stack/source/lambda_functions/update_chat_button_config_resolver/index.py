@@ -213,6 +213,8 @@ def _write(input_data: Dict[str, Any], caller: Dict[str, Any]) -> Dict[str, Any]
         buttons,
         updated_by=caller["actor"],
         expected_version=expected_version,
+        # Recorded on the revision the save creates; see docs/configuration-store.md.
+        comment=input_data.get("Comment"),
     )
     print(f"Successfully updated chat buttons: {len(buttons)} button(s), version={version}")
     return {"ChatButtonConfigId": config_id, "Success": True, "Version": version}

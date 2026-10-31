@@ -160,6 +160,13 @@ ADMIN_ONLY_FIELDS = [
     # The price table behind every meeting's cost estimate.
     ("Mutation", "updateCallPricing"),
     ("Query", "getCallPricing"),
+    # The configuration history: who changed the account-wide configuration and
+    # what it held, and putting an earlier state of it back.
+    ("Query", "listConfigurationRevisions"),
+    ("Query", "getConfigurationRevision"),
+    ("Query", "diffConfigurationRevisions"),
+    ("Mutation", "restoreConfigurationRevision"),
+    ("Mutation", "labelConfigurationRevision"),
 ]
 
 # Reads every signed-in user performs in the course of using the product, so the

@@ -528,6 +528,73 @@ def test_configuration_readers_are_ordered_behind_the_seeder(resources: dict):
     assert len(readers) >= 2, f"only found {len(readers)} functions reading the config table"
 
 
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value]
+
+
+def _roles_writing_the_configuration_table(resources: dict) -> set:
+    """Roles granting dynamodb:PutItem on ConfigurationTable in an inline policy."""
+    writers = set()
+    for name, role in _of_type(resources, "AWS::IAM::Role").items():
+        for policy in role.get("Properties", {}).get("Policies") or []:
+            for statement in _as_list(policy.get("PolicyDocument", {}).get("Statement") or []):
+                actions = _as_list(statement.get("Action") or [])
+                targets = _as_list(statement.get("Resource") or [])
+                if "dynamodb:PutItem" in actions and {
+                    "Fn::GetAtt": "ConfigurationTable.Arn"
+                } in targets:
+                    writers.add(name)
+    return writers
+
+
+def test_every_configuration_writer_records_revisions(resources: dict):
+    """A function that can save configuration must be able to record its history.
+
+    The accessor keeps no history when it is given no bucket, which is right for
+    a reader and wrong for a writer: a writer deployed without the bucket would
+    save configuration that no revision holds. So every role that can write the
+    table attaches the revision policy, and every function using one of those
+    roles is given the bucket -- the seeder as a property of its custom
+    resource, the others as CONFIGURATION_BUCKET_NAME.
+
+    Keyed on the IAM grant rather than a list of names, so a function that
+    starts writing configuration later is caught without anyone remembering it.
+    """
+    writers = _roles_writing_the_configuration_table(resources)
+    # Guards the selector: the seeder, the five page resolvers and the history
+    # resolver itself.
+    assert len(writers) >= 7, f"found only {sorted(writers)}"
+
+    without_policy = {
+        name
+        for name in writers
+        if {"Ref": "ConfigurationRevisionWriteAccess"}
+        not in (resources[name]["Properties"].get("ManagedPolicyArns") or [])
+    }
+    assert not without_policy, (
+        f"these roles can write ConfigurationTable but do not attach "
+        f"ConfigurationRevisionWriteAccess: {sorted(without_policy)}"
+    )
+
+    without_bucket = set()
+    for name, function in _functions(resources).items():
+        role = function.get("Properties", {}).get("Role")
+        if not (isinstance(role, dict) and role.get("Fn::GetAtt", "").split(".")[0] in writers):
+            continue
+        if name == "ConfigurationSeederFunction":
+            given = resources["SeedConfiguration"]["Properties"].get("ConfigurationBucketName")
+        else:
+            variables = function["Properties"].get("Environment", {}).get("Variables") or {}
+            given = variables.get("CONFIGURATION_BUCKET_NAME")
+        if given != {"Ref": "ConfigurationBucket"}:
+            without_bucket.add(name)
+    assert not without_bucket, (
+        f"these functions can write ConfigurationTable but are not given "
+        f"ConfigurationBucket, so their saves would record no revision: "
+        f"{sorted(without_bucket)}"
+    )
+
+
 def test_stateful_resources_set_a_deletion_policy(resources: dict):
     """Otherwise the default applies and the data goes with the stack."""
     without = {

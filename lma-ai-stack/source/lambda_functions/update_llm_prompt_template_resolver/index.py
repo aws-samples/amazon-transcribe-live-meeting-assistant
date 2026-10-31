@@ -230,6 +230,8 @@ def _write(input_data: Dict[str, Any], caller: Dict[str, Any]) -> Dict[str, Any]
         prompts,
         updated_by=caller["actor"],
         expected_version=expected_version,
+        # Recorded on the revision the save creates; see docs/configuration-store.md.
+        comment=input_data.get("Comment"),
     )
     print(
         f"Successfully updated the summary prompt templates: {len(prompts)} prompt(s), "

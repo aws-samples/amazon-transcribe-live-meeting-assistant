@@ -218,6 +218,8 @@ def _write(input_data: Dict[str, Any], caller: Dict[str, Any]) -> Dict[str, Any]
         switches,
         updated_by=caller["actor"],
         expected_version=expected_version,
+        # Recorded on the revision the save creates; see docs/configuration-store.md.
+        comment=input_data.get("Comment"),
     )
     # The switches only. Logging the caller would put the saver's email address
     # into CloudWatch; UpdatedBy on the record is where that is kept.

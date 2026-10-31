@@ -37,12 +37,18 @@ same reason as above: a restored table or a hand-deleted record leaves the slot
 empty on an update too. The adoption is the same conditional write, so it can
 only ever fill an empty slot.
 
-Stores that move into the table after the profile exists cannot use that
-route, because the profile is already there. Each is listed in
-``LEGACY_SECTIONS`` and carried across one section at a time: while the profile
-does not hold the section, its edits are read from the previous table and added
-to the profile; once it holds the section -- an empty one included -- nothing is
-read again. The outcome of each is reported as ``SectionAdoption``.
+Stores that moved into the table after the profile could already exist are
+listed in ``LEGACY_SECTIONS``. When this run creates the profile, their edits
+go into it as it is created. Otherwise each is carried across one section at a
+time: while the profile does not hold the section, its edits are read from the
+previous table and added to the profile; once it holds the section -- an empty
+one included -- nothing is read again. The outcome of each is reported as
+``SectionAdoption``.
+
+Given the revision bucket, it also makes sure the operator's profile has a
+revision history. A profile this run creates starts at revision 1, holding
+everything carried across; a profile that exists with no history yet has its
+state as it stands recorded. The outcome is reported as ``RevisionHistory``.
 
 CloudFormation re-invokes this on UPDATE only when one of the custom resource's
 properties changes, so the template passes a hash of the shipped content *and*
@@ -71,6 +77,7 @@ from lma_config import (  # from the configuration layer
     SUMMARY_PROMPT_TEMPLATES,
     ConcurrentModification,
     ConfigurationStore,
+    RevisionHistoryUnavailable,
     SectionSpec,
     codec,
 )
@@ -474,6 +481,17 @@ def adopt_legacy_section(
             # Something saved the profile in between -- most likely an
             # administrator saving a different page. Read again and decide again.
             continue
+        except RevisionHistoryUnavailable:
+            # The profile's current state could not be recorded, so the store
+            # will not replace it. Not a failed deployment: the section is left
+            # unset, the shipped settings apply, and the next deployment that
+            # runs the seeder tries again, as for an unreadable previous table.
+            LOGGER.exception(
+                "could not add the %s section: the profile's revision history could not "
+                "be written; the next deployment that runs the seeder tries again",
+                legacy.section.name,
+            )
+            return "revision-history-unavailable"
         return outcome if added else "already-present"
     raise ConcurrentModification(
         f"the configuration profile {OPERATOR_PROFILE!r} changed on each of "
@@ -503,6 +521,10 @@ def seed(
     # report and saves a pointless read of the previous table on every
     # deployment that already has a profile.
     existing = store.read_profile(OPERATOR_PROFILE, consistent_read=True)
+    tables = legacy_section_tables or {}
+    # The later stores' outcomes, when this run creates the profile with their
+    # sections already in it; see below.
+    carried: Dict[str, str] = {}
     if existing.exists:
         profile_action = "kept"
         # Read back rather than recomputed. This run cannot tell what an upgrade
@@ -528,9 +550,26 @@ def seed(
             profile_origin = "created-from-previous-table"
         else:
             profile_origin = "created"
-        created = store.seed_profile(OPERATOR_PROFILE, adopted, origin=profile_origin)
+        # The later stores' sections go into the profile as it is created,
+        # rather than being added one write at a time after it. The result is
+        # the same profile, but recorded as one revision: a new deployment, and
+        # an upgrade from a release with no configuration store, start their
+        # history with revision 1 holding the whole configuration as it arrived,
+        # not with one near-empty revision per section.
+        sections = {
+            legacy.section.name: read_legacy_section(
+                legacy, tables.get(legacy.section.name, ""), client=legacy_client
+            )
+            for legacy in LEGACY_SECTIONS
+        }
+        body = dict(adopted)
+        for name, (_outcome, values) in sections.items():
+            if values is not None:
+                body[name] = values
+        created = store.seed_profile(OPERATOR_PROFILE, body, origin=profile_origin)
         if created:
             profile_action = "created"
+            carried = {name: outcome for name, (outcome, _values) in sections.items()}
         else:
             # Lost the race with something else creating it. Whatever that was
             # recorded is the truth; this run's reading of it is not.
@@ -540,9 +579,14 @@ def seed(
                 or UNKNOWN_ORIGIN
             )
 
-    tables = legacy_section_tables or {}
+    # Before the section adoption below, so that a profile whose history has not
+    # started has its state as it stood recorded first, and anything adopted is
+    # recorded after it.
+    revision_history = start_revision_history(store)
+
     adoption = {
-        legacy.section.name: adopt_legacy_section(
+        legacy.section.name: carried.get(legacy.section.name)
+        or adopt_legacy_section(
             store, legacy, tables.get(legacy.section.name, ""), client=legacy_client
         )
         for legacy in LEGACY_SECTIONS
@@ -565,7 +609,35 @@ def seed(
         # the stack publishes, because it is the one that stays true.
         "ProfileOrigin": profile_origin,
         "ActiveProfile": pointer_outcome,
+        # What this run found of the profile's revision history, as
+        # "custom=outcome"; published as the ConfigurationRevisionHistory output.
+        "RevisionHistory": f"{OPERATOR_PROFILE}={revision_history}",
     }
+
+
+def start_revision_history(store: ConfigurationStore) -> str:
+    """Make the operator's profile, as it stands, a recorded revision.
+
+    On the deployment that introduces revision history this records the profile
+    as revision 1; every later run finds it recorded and reports ``present``.
+    See ``ConfigurationStore.ensure_revision_history`` for the other outcomes.
+
+    Never fails the deployment. If the history cannot be written now, the
+    outcome says so, and nothing is lost by waiting: the first save from a
+    configuration page records the profile before replacing it, and is refused
+    rather than made if it cannot.
+    """
+    if not store.keeps_history:
+        return "not-configured"
+    try:
+        return store.ensure_revision_history(OPERATOR_PROFILE)
+    except Exception:  # noqa: BLE001 -- see the docstring; never fail the deploy for this
+        LOGGER.exception(
+            "could not start the revision history of the %s profile; the first save "
+            "records it instead",
+            OPERATOR_PROFILE,
+        )
+        return "not-started"
 
 
 def handler(event: Dict[str, Any], context: Any) -> None:
@@ -591,7 +663,12 @@ def handler(event: Dict[str, Any], context: Any) -> None:
             )
             return
 
-        store = ConfigurationStore(properties["ConfigurationTableName"])
+        store = ConfigurationStore(
+            properties["ConfigurationTableName"],
+            # A property rather than an environment variable, like the table
+            # name, so the resource's own properties say what it writes.
+            revision_bucket=properties.get("ConfigurationBucketName", ""),
+        )
         outcome = seed(
             store,
             domain=properties.get("Domain", "default"),

@@ -48,6 +48,9 @@ for path in (str(HERE), str(LAYER)):
 from botocore.exceptions import ClientError  # noqa: E402
 from lma_config import codec  # noqa: E402
 from lma_config.store import ConfigurationStore  # noqa: E402
+from lma_config.test_revisions import BUCKET as HISTORY_BUCKET  # noqa: E402
+from lma_config.test_revisions import FakeDynamo as HistoryDynamo  # noqa: E402
+from lma_config.test_revisions import FakeS3  # noqa: E402
 
 
 class FakeDynamo:
@@ -499,7 +502,7 @@ def test_a_save_landing_mid_adoption_is_kept_and_the_adoption_retried(seeder, mo
 def test_the_handler_passes_the_previous_nova_sonic_table_through(seeder, monkeypatch) -> None:
     dynamo = FakeDynamo()
     monkeypatch.setattr(
-        seeder, "ConfigurationStore", lambda name: ConfigurationStore(name, client=dynamo)
+        seeder, "ConfigurationStore", lambda name, **_: ConfigurationStore(name, client=dynamo)
     )
     seen: Dict[str, Any] = {}
     real_seed = seeder.seed
@@ -1141,7 +1144,7 @@ def test_adoption_is_skipped_once_a_profile_exists(seeder) -> None:
 def test_a_create_answers_cloudformation_with_success(seeder, monkeypatch) -> None:
     dynamo = FakeDynamo()
     monkeypatch.setattr(
-        seeder, "ConfigurationStore", lambda name: ConfigurationStore(name, client=dynamo)
+        seeder, "ConfigurationStore", lambda name, **_: ConfigurationStore(name, client=dynamo)
     )
     seeder.handler(_event("Create"), _Context())
     assert seeder.recorder.sent[-1]["status"] == "SUCCESS"
@@ -1159,7 +1162,7 @@ def test_every_invocation_reports_the_same_physical_id(seeder, monkeypatch) -> N
     """
     dynamo = FakeDynamo()
     monkeypatch.setattr(
-        seeder, "ConfigurationStore", lambda name: ConfigurationStore(name, client=dynamo)
+        seeder, "ConfigurationStore", lambda name, **_: ConfigurationStore(name, client=dynamo)
     )
     seeder.handler(_event("Create"), _Context())
     seeder.handler(_event("Update"), _Context())
@@ -1181,7 +1184,7 @@ def test_a_failure_is_reported_to_cloudformation_rather_than_timing_out(
 ) -> None:
     """An unanswered custom resource hangs the stack for an hour."""
 
-    def explode(_name):
+    def explode(_name, **_kwargs):
         raise RuntimeError("the table is not there")
 
     monkeypatch.setattr(seeder, "ConfigurationStore", explode)
@@ -1237,3 +1240,192 @@ def test_the_configuration_key_attribute_is_not_the_previous_tables(seeder) -> N
     """Two tables, two key attributes; mixing them reads nothing, silently."""
     assert codec.KEY_ATTRIBUTE == "Configuration"
     assert seeder.LEGACY_KEY_ATTRIBUTE == "LLMPromptTemplateId"
+
+
+# ── revision history ───────────────────────────────────────────────────────
+#
+# These use the accessor's own history-aware fakes rather than the local one
+# above: what they assert is how the seeder drives the accessor's history, so
+# they should fail when that history's storage changes, which a separate fake
+# would not.
+
+
+def build_history_store(dynamo: Any = None, s3: Any = None) -> tuple[ConfigurationStore, Any, Any]:
+    the_dynamo = dynamo if dynamo is not None else HistoryDynamo()
+    the_s3 = s3 if s3 is not None else FakeS3()
+    store = ConfigurationStore(
+        "lma-configuration", client=the_dynamo, revision_bucket=HISTORY_BUCKET, s3_client=the_s3
+    )
+    return store, the_dynamo, the_s3
+
+
+class LegacyTables:
+    """The previous per-store tables, keyed on whatever key attribute each uses."""
+
+    def __init__(self, items: Dict[str, Dict[str, Any]]) -> None:
+        self.items = items
+
+    def get_item(self, **request: Any) -> Dict[str, Any]:
+        key = next(iter(request["Key"].values()))["S"]
+        item = self.items.get(key)
+        return {"Item": item} if item is not None else {}
+
+
+# The tables a deployment always names: CloudFormation passes all three.
+LEGACY_TABLES = {
+    "nova_sonic_config": "old-nova-table",
+    "chat_buttons": "old-chat-table",
+    "asr_engine": "old-asr-table",
+}
+
+
+def test_a_fresh_deployment_starts_its_history_with_one_revision(seeder) -> None:
+    store, _, s3 = build_history_store()
+
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_table_name="old-prompt-table",
+        legacy_client=LegacyTables({}),
+        legacy_section_tables=LEGACY_TABLES,
+    )
+
+    assert outcome["RevisionHistory"] == "custom=present"
+    assert set(adoption(outcome).values()) == {"nothing-to-adopt"}
+    entries = store.list_revisions("custom").entries
+    assert [(entry.revision, entry.source, entry.created_by) for entry in entries] == [
+        (1, "deploy", "cloudformation")
+    ]
+    # The one revision holds every section the seeder recorded.
+    assert s3.envelope(1)["Body"] == store.read_profile("custom").body
+    assert set(s3.envelope(1)["Body"]) == {"nova_sonic_config", "chat_buttons", "asr_engine"}
+
+
+def test_an_upgrade_from_a_release_without_the_store_is_revision_one(seeder) -> None:
+    """The upgrade operators make: from a release with no configuration store."""
+    store, _, s3 = build_history_store()
+    legacy = LegacyTables(
+        {
+            "CustomSummaryPromptTemplates": {
+                "LLMPromptTemplateId": {"S": "CustomSummaryPromptTemplates"},
+                "1#SUMMARY": {"S": "an admin's prompt"},
+            },
+            "CustomNovaSonicConfig": CUSTOMISED_NOVA_SONIC_ITEM,
+        }
+    )
+
+    outcome = seeder.seed(
+        store,
+        domain="default",
+        legacy_table_name="old-prompt-table",
+        legacy_client=legacy,
+        legacy_section_tables=LEGACY_TABLES,
+    )
+
+    assert outcome["RevisionHistory"] == "custom=present"
+    assert outcome["ProfileOrigin"] == "created-from-previous-table"
+    assert adoption(outcome)["nova_sonic_config"] == "adopted-from-previous-table"
+    assert [entry.revision for entry in store.list_revisions("custom").entries] == [1]
+    body = s3.envelope(1)["Body"]
+    assert body["summary_prompt_templates"] == {"1#SUMMARY": "an admin's prompt"}
+    assert body["nova_sonic_config"]["systemPrompt"] == "You are Sam, the team's assistant."
+    # A later deployment adds nothing to the history.
+    again = seeder.seed(
+        store,
+        domain="default",
+        legacy_client=legacy,
+        legacy_section_tables=LEGACY_TABLES,
+    )
+    assert again["RevisionHistory"] == "custom=present"
+    assert set(adoption(again).values()) == {"already-present"}
+    assert [entry.revision for entry in store.list_revisions("custom").entries] == [1]
+
+
+def test_a_profile_with_no_history_yet_is_recorded_as_it_stands(seeder) -> None:
+    """The defensive case: a profile saved by code that kept no history."""
+    dynamo = HistoryDynamo()
+    seeder.seed(ConfigurationStore("lma-configuration", client=dynamo), domain="default")
+    ConfigurationStore("lma-configuration", client=dynamo).write_section(
+        "custom",
+        "summary_prompt_templates",
+        {"1#SUMMARY": "an admin's prompt"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+    store, _, s3 = build_history_store(dynamo=dynamo)
+
+    outcome = seeder.seed(store, domain="default")
+
+    assert outcome["RevisionHistory"] == "custom=started"
+    entry = store.list_revisions("custom").entries[0]
+    assert (entry.revision, entry.source, entry.created_by) == (1, "backfill", "admin@example.com")
+    assert s3.envelope(1)["Body"]["summary_prompt_templates"] == {"1#SUMMARY": "an admin's prompt"}
+    assert seeder.seed(store, domain="default")["RevisionHistory"] == "custom=present"
+
+
+def test_history_that_cannot_be_written_does_not_fail_the_deployment(seeder) -> None:
+    # A profile with no history yet and no Nova Sonic section, so this run both
+    # starts its history and adopts a section -- the two writes that need the
+    # bucket.
+    dynamo = HistoryDynamo()
+    seeder.seed(ConfigurationStore("lma-configuration", client=dynamo), domain="default")
+    legacy = LegacyTables({"CustomNovaSonicConfig": CUSTOMISED_NOVA_SONIC_ITEM})
+    s3 = FakeS3()
+    s3.fail_puts = 99
+    store, _, _ = build_history_store(dynamo=dynamo, s3=s3)
+
+    outcome = seeder.seed(
+        store, domain="default", legacy_client=legacy, legacy_section_tables=NOVA_TABLES
+    )
+
+    assert outcome["RevisionHistory"] == "custom=not-started"
+    assert adoption(outcome)["nova_sonic_config"] == "revision-history-unavailable"
+    assert "nova_sonic_config" not in store.read_profile("custom").body
+
+    # The next deployment, with the bucket writable, completes both.
+    s3.fail_puts = 0
+    retried = seeder.seed(
+        store, domain="default", legacy_client=legacy, legacy_section_tables=NOVA_TABLES
+    )
+    assert retried["RevisionHistory"] == "custom=recovered"
+    assert adoption(retried)["nova_sonic_config"] == "adopted-from-previous-table"
+    assert store.get_revision("custom", 1).entry.source == "recovered"
+    assert store.get_revision("custom", 2).body["nova_sonic_config"]["promptMode"] == "inject"
+
+
+def test_the_handler_answers_success_when_history_cannot_be_written(seeder, monkeypatch) -> None:
+    s3 = FakeS3()
+    s3.fail_puts = 99
+    dynamo = HistoryDynamo()
+    monkeypatch.setattr(
+        seeder,
+        "ConfigurationStore",
+        lambda name, **_: ConfigurationStore(
+            name, client=dynamo, revision_bucket=HISTORY_BUCKET, s3_client=s3
+        ),
+    )
+
+    seeder.handler(_event("Create"), _Context())
+
+    assert seeder.recorder.sent[-1]["status"] == "SUCCESS"
+
+
+def test_a_seeder_given_no_bucket_reports_it(seeder) -> None:
+    store, _ = build_store()
+
+    assert seeder.seed(store, domain="default")["RevisionHistory"] == "custom=not-configured"
+
+
+def test_the_handler_passes_the_revision_bucket_through(seeder, monkeypatch) -> None:
+    seen: Dict[str, Any] = {}
+
+    def capture(name, **kwargs):
+        seen.update(kwargs)
+        return ConfigurationStore(name, client=FakeDynamo())
+
+    monkeypatch.setattr(seeder, "ConfigurationStore", capture)
+    event = _event("Update")
+    event["ResourceProperties"]["ConfigurationBucketName"] = "the-revision-bucket"
+    seeder.handler(event, _Context())
+
+    assert seen["revision_bucket"] == "the-revision-bucket"

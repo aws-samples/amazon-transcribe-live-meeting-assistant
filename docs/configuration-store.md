@@ -19,10 +19,13 @@ its own, for the reason under [Still to come](#still-to-come).
 place, and the **summary prompt templates**, the **Nova Sonic voice assistant
 settings**, the **Meeting Assist chat buttons** and the **ASR engine switches** are
 served from them, alongside the meeting cost estimate's price table, which had no
-earlier store. The SSM settings blob moves later, with the CloudFormation
-parameters; see [Still to come](#still-to-come) for that, for the MCP server
-list, and for the troubleshooting agent's prompt, which shares the summary
-prompts' old table and moves after the configuration UI.
+earlier store. Every save into the store records a revision — who saved it,
+when, which sections it changed, and an optional comment — and an Admin can list,
+compare and restore revisions; see [Revisions and audit](#revisions-and-audit).
+The SSM settings blob moves later, with the CloudFormation parameters; see
+[Still to come](#still-to-come) for that, for the MCP server list, and for the
+troubleshooting agent's prompt, which shares the summary prompts' old table and
+moves after the configuration UI.
 
 ## The table
 
@@ -36,7 +39,7 @@ store holds is distinguished by a prefix on that one key:
 | `Config#<name>` | A profile: an administrator's edits, stored as a *delta* over the baseline. Today there is one, `Config#custom`. |
 | `Config#__active` | A pointer naming the profile in force. |
 | `Schema` | The form schema a configuration UI renders. Reserved; written by a later release. |
-| `ConfigRevIndex#<name>` | Revision metadata. Reserved; written by a later release. |
+| `ConfigRevIndex#<name>` | The revision index of a profile: one small entry per retained revision. See [Revisions and audit](#revisions-and-audit). |
 
 Two details in that layout are load-bearing rather than cosmetic.
 
@@ -49,8 +52,8 @@ name, and the names `default`, `__active` and `schema` — along with anything
 beginning `__` — are refused at write time. A profile that could be created under
 the name `__active` would be a profile that overwrites the pointer. Profile names
 are restricted to `[A-Za-z0-9._-]`, at most 64 characters, because a name appears
-verbatim inside the partition key and, from the revision work onwards, inside an
-S3 object key as well.
+verbatim inside the partition key and inside the S3 key of each of its
+revisions.
 
 ### How a record is stored
 
@@ -72,6 +75,12 @@ is carried forward by every later write. It is what the
 
 `UpdatedBy` and `UpdatedAt` are the audit attributes the existing configuration
 records already carry; they mean the same thing here.
+
+`LatestRevision` and `PublishedRevision` are a profile's revision counters: the
+highest revision number allocated for it, and the revision its body currently
+is. Every write carries them forward, including a write made by code that keeps
+no history, so a number is never handed out twice. See
+[Revisions and audit](#revisions-and-audit).
 
 Reads **auto-detect** the layout. An item with a `Body` attribute is
 decompressed; an item without one is an *inline* record, and its remaining
@@ -264,6 +273,176 @@ reads nothing to build it, such as an import, may opt out.
 The baseline `Config#default` is written unconditionally by design: CloudFormation
 is its only author, and a new release's content has to land.
 
+## Revisions and audit
+
+Every write that changes a profile's body records a **revision**: a numbered,
+immutable copy of the whole profile as it was saved, together with who saved it,
+when, which sections it changed and an optional comment. That covers every route
+into the store: each configuration page's save, `updateCallPricing`, a restore,
+and what the deploy-time seeder writes into a profile. The baseline
+`Config#default` has no history of its own. CloudFormation rewrites it from the
+release, so the release is its history.
+
+### What a revision records
+
+| Field | Meaning |
+|---|---|
+| `Revision` | The revision number, counting up from 1 per profile |
+| `CreatedAt` | When it was saved, ISO-8601 UTC |
+| `CreatedBy` | Who saved it: the same identity the record holds as `UpdatedBy` — the saver's email address, or their Cognito username where the token carries none — taken from the verified token, never from the request. `cloudformation` for what the seeder writes |
+| `Sections` | The sections this revision changed relative to the one before it. For the first revision of a profile, every section it holds |
+| `Comment` | Optional, at most 500 characters. Every configuration save mutation accepts a `Comment` input; the configuration pages do not send one yet, a restore can |
+| `Source` | `save`, `restore`, `deploy` (the seeder), `backfill` (the profile as it stood when history began) or `recovered` (see below) |
+| `RestoredFrom` | For a restore, the revision whose body it restored |
+| `Label` | Optional, at most 100 characters. A labelled revision is never pruned |
+| `Version` | The profile version the revision was saved as |
+
+A save that changes nothing records nothing. Saving a page without editing it,
+or a deployment that finds nothing to add, does not create a revision. Otherwise
+those writes would push real history out of the retention window. "Nothing" is
+compared byte for byte on the stored encoding, so a switch saved as `true` where
+it was `1` is a change.
+
+### Where revisions are kept
+
+- **Bodies** are objects in the AI stack's `ConfigurationBucket` at
+  `config_revisions/<profile>/<nnnnnn>.json.gz`. Each object is a gzipped JSON
+  envelope that holds the profile body and the revision's metadata. The bucket is
+  encrypted with the stack's customer managed key and versioned. Its
+  `DeletionPolicy` follows `EnableDataRetentionOnDelete`, as the table's does. When
+  retention is off, the bucket is emptied and deleted with the stack.
+- **The index** is one item per profile in `ConfigurationTable`,
+  `ConfigRevIndex#<profile>`, holding a list of small entries. Listing a
+  profile's history is one `GetItem` and never a scan. The index repeats what the
+  envelopes hold, so it is a convenience over the objects rather than the only
+  copy of anything.
+- **The counters** `LatestRevision` and `PublishedRevision` sit on the profile
+  record, so one read of a profile tells you which revision it currently is.
+
+A profile name appears verbatim in the object key. That is safe because profile
+names are restricted to `[A-Za-z0-9._-]` and may not start with `__`, so a name
+can never hold a `/`.
+
+### How a save records a revision
+
+One rule holds the design together: **a profile's body is never replaced until
+the revision it is has been recorded.** A save goes through three steps, in
+this order:
+
+1. If the record about to be replaced is not yet a recorded revision, the save
+   records it first. If that fails, the save is refused with nothing written,
+   and the page shows the error. This step handles two cases. One is a profile
+   saved before history began, which is given its first revision number by a
+   conditional write that changes only its counters and is then recorded as
+   `backfill`. The other is a revision whose body did not land when it was
+   saved; it is recorded from the record, which still holds that body, as
+   `recovered`.
+2. The save writes the profile, with the new revision's number allocated in that
+   same conditional write. Only one write can succeed from a given record, so
+   only one save can ever hold a given number. The number is one above both the
+   record's `LatestRevision` and the highest number the index lists, so a number
+   is not reused even where the counters have been lost, as on a record replaced by hand.
+3. The save stores the new revision's body and index entry, then prunes. If
+   this step fails, the save still stands and the failure is logged. The record
+   now holds the body, so the next save records it, as `recovered`, before
+   replacing it.
+
+A body is only ever stored under a number that a committed write allocated. That
+is what keeps two administrators who save at the same moment from storing two
+different bodies under one number. Each such save adds one `GetItem` on the
+index, one `PutObject` and one `UpdateItem` on top of the save's own read and
+write.
+
+A `recovered` revision has the author and time of the record it was recovered
+from, which are those of the save that made it. What that revision changed and
+its comment were in the object that did not land, so they are not known.
+
+### Retention
+
+Each profile keeps its **20** newest revisions. On top of those it always
+keeps the revision that is its current state, every labelled revision, and every
+pinned one. Nothing pins a revision yet; the flag is part of the rule so that
+stamping a meeting with the revision it ran under can rely on it later. The cap
+is a count, which an S3 lifecycle rule cannot express, so the application
+enforces it after each save. A pruned entry leaves the index before its object
+is deleted, so a reader never finds an entry with no body behind it.
+
+A deleted or replaced object stays in the bucket as a non-current version for
+**35 days**, which matches the table's point-in-time recovery window. A table
+restored to any moment in that window therefore still finds the bodies its
+index names. The bucket expires nothing else.
+
+### Restoring, comparing and labelling
+
+These are GraphQL operations for the **Admin** group, pinned on the AppSync field
+and checked again in the resolver Lambda behind it. Each takes a `Profile`, which
+defaults to `custom`, the profile every configuration page saves into.
+
+| Operation | What it does |
+|---|---|
+| `Query.listConfigurationRevisions` | The retained revisions, newest first, plus the profile's current `Version` and counters. The revision that is the current state is always listed, even if its own save could not store it |
+| `Query.getConfigurationRevision(Revision)` | One revision's metadata and its whole body, as a JSON string |
+| `Query.diffConfigurationRevisions(FromRevision, ToRevision)` | Every value that differs between two revisions, as a JSON list of `{"Path", "Change", "Before", "After"}`. `Path` is a list of keys, because keys like `1#SUMMARY` hold separators of their own. Objects are compared key by key; a list or a string is compared as one value |
+| `Mutation.restoreConfigurationRevision(Revision, ExpectedVersion, Comment)` | Saves an earlier revision's body as the profile's current one |
+| `Mutation.labelConfigurationRevision(Revision, Label)` | Sets or clears a revision's label |
+
+**Restore only moves forward.** The restored body is saved as a *new*
+revision, with `Source: restore` and `RestoredFrom` naming the original. The
+counter never rewinds, so the state the restore replaced stays in the history
+and can itself be restored. A restore of the body the profile already holds
+records nothing and reports `Unchanged`.
+
+A restore puts back the **whole profile**, every section in it, because that
+is what a revision is. That includes the sections other pages save. A restore
+needs `ExpectedVersion`, the version `listConfigurationRevisions` returned. Like
+any save, it is refused with a message to reload if the profile has changed
+since. Readers pick up a restore as they pick up any save, which depends on each
+section's tier (see [Three tiers](#three-tiers-declared-per-section)): at once
+for `immediate`, within 30 seconds for `short`, and within five minutes for
+`standard`.
+
+### Upgrading an existing deployment: history starts at revision 1
+
+Nothing to do. On an upgrade from a release with no configuration store, the
+seeder creates the profile and carries every earlier store's edits into it in
+one write (see [Carrying a later store across](#carrying-a-later-store-across)).
+That write is **revision 1**, `Source: deploy`, by `cloudformation`, and it holds
+the configuration exactly as the upgrade left it. A new deployment starts the
+same way, with revision 1 holding the empty profile and empty sections the
+seeder records. Either way the history has one revision, and the
+`ConfigurationRevisionHistory` output reads `custom=present`. Later deployments
+add a revision only when they add something to the profile.
+
+There is one other case, kept for safety: a profile that exists but has no
+revision history yet. That can only be a profile written by a pre-release build
+of the configuration store, or saved by code that keeps no history. The seeder
+records that profile as it stands as its first revision, with `Source: backfill`
+and the author and time of whoever last saved it. Recording it does not count as
+a save, so the profile's version, `UpdatedBy` and `UpdatedAt` stay as they were,
+and a configuration page open at the time is not told that somebody saved it.
+That run reports `custom=started`.
+
+The stack output **`ConfigurationRevisionHistory`** says what the latest
+deployment that ran the seeder found:
+
+| Value | Meaning |
+|---|---|
+| `custom=present` | The profile's current state is a recorded revision. What a new deployment, an upgrade, and every later deployment report |
+| `custom=started` | The profile existed with no history; its state as it stood has been recorded as its first revision |
+| `custom=recovered` | The profile's current revision was not in the bucket, and has been recorded from the profile |
+| `custom=saved-concurrently` | An administrator saved while the seeder ran; that save did the recording |
+| `custom=not-started` | The history could not be written at deploy time. The deployment still succeeds and nothing is lost: the first save from a configuration page records the profile before replacing it, and is refused rather than made if it cannot. A section that the seeder could not add for the same reason is reported as `revision-history-unavailable` in `ConfigurationSectionAdoption`. **Check the seeder's log** (`/<stack>/lambda/ConfigurationSeederFunction`) for why |
+
+**Rolling back** to a release with no configuration store removes
+`ConfigurationBucket` along with `ConfigurationTable`, under the same
+`EnableDataRetentionOnDelete` rule described in
+[Upgrading an existing deployment: the summary prompts](#upgrading-an-existing-deployment-the-summary-prompts):
+retained and orphaned when it is `true`, emptied and deleted when it is `false`.
+The history goes with them. Deploying this release again creates a new table and
+a new bucket, so history starts again at revision 1, holding the configuration
+carried across from the per-store tables. If retention was on, the orphaned
+bucket is where to read the earlier revisions from.
+
 ## Deploy-time seeding
 
 A custom resource, `SeedConfiguration`, backed by
@@ -285,6 +464,11 @@ across the sections of stores that moved in after the profile existed:
 - **One section of `Config#custom` per later store** — added only while the
   profile does not hold that section. See
   [Carrying a later store across](#carrying-a-later-store-across).
+- **The revision history of `Config#custom`** — begun if it has not been, which
+  happens once, on the upgrade that introduces it. The seeder is given the bucket
+  as the `ConfigurationBucketName` property, and reports what it found as
+  `ConfigurationRevisionHistory`. See
+  [Upgrading an existing deployment](#upgrading-an-existing-deployment-history-starts-at-revision-1).
 
 ### Why the content hash exists
 
@@ -311,10 +495,12 @@ every profile untouched.
 ### Carrying a later store across
 
 The summary prompts were adopted by *creating* the profile: when `Config#custom`
-is absent, the seeder fills it from the previous table. That route is closed to
-every store that moves in afterwards, because by then the profile exists on
-every upgraded deployment. So each later store is carried across one **section**
-at a time:
+is absent, the seeder fills it from the previous table. When the seeder creates
+the profile, it puts the later stores' settings into the creating write too.
+That is what happens on a new deployment and on an upgrade from a release with no
+configuration store, and it means the profile's first revision holds the whole
+configuration as it arrived. A profile that already exists cannot be filled that
+way, so on it each later store is carried across one **section** at a time:
 
 - While the profile does not hold the section, the seeder reads the
   administrator's settings from the store's previous table and adds them to the
@@ -344,6 +530,7 @@ published as the **`ConfigurationSectionAdoption`** stack output: one
 | `already-present` | The profile already holds the section. Every run after the first reports this |
 | `previous-table-unreadable` | **Act on this one**, or wait for the next deployment that runs the seeder: the settings were not carried across, and the shipped ones apply until they are. Saving the settings from their page also settles it |
 | `no-previous-table` | The stack was given no previous table, so there is nothing to carry; nothing is recorded |
+| `revision-history-unavailable` | The settings were read but not added, because the profile's current state could not be recorded in its [revision history](#revisions-and-audit) first, and a profile is not changed until it is. The deployment still succeeds, the section is left unset and the shipped settings apply, and the next deployment that runs the seeder tries again. `ConfigurationRevisionHistory` reads `custom=not-started` on the same run; check the seeder's log |
 
 ## What is served from the store today
 
@@ -564,9 +751,8 @@ configuration pages' saves.
 
 | Stage | What it adds |
 |---|---|
-| Revisions and audit | Revision bodies in S3 with metadata in one DynamoDB index item per profile, forward-only restore, pruning that keeps the published and labelled revisions |
 | Import / export | Export as a client-side download; import that always routes into a create-new-profile flow rather than applying in place |
-| Schema-driven UI | A profile table, a form generated from the `Schema` document, a diff against the baseline and per-field "restore default" |
+| Schema-driven UI | A profile table, a form generated from the `Schema` document, a diff against the baseline and per-field "restore default", and a comment field on every save |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waits for the schema-driven UI: today the custom prompt is edited in the DynamoDB console, which is exactly the route a compressed body closes, so moving it first would leave it with no way to edit it |
 | Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
@@ -601,7 +787,9 @@ UI, for the reason given in its row of the table above.
 | Python accessor | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/` |
 | TypeScript accessor | `lma-websocket-transcriber-stack/source/app/src/config/configuration-store.ts` (edit this one) and its copy `lma-virtual-participant-stack/backend/src/configuration-store.ts` |
 | The Virtual Participant's Nova Sonic reader | `lma-virtual-participant-stack/backend/src/nova-sonic-config-loader.ts` |
+| Revision history | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/revisions.py`, driven from `store.py` |
+| History resolver (list, read, compare, restore, label) | `lma-ai-stack/source/lambda_functions/configuration_revisions_resolver/` |
 | Deploy-time seeder | `lma-ai-stack/source/lambda_functions/configuration_seeder/` |
-| Table, layer and custom resource | `lma-ai-stack/deployment/lma-ai-stack.yaml` |
+| Table, bucket, layer, custom resource and the `ConfigurationRevisionWriteAccess` policy every writer attaches | `lma-ai-stack/deployment/lma-ai-stack.yaml` |
 | Content-hash computation | `lib/lma_sdk/lma_sdk/_core/publish.py` |
 | Cross-language contract test | `lma-ai-stack/test/test_configuration_store_contract.py` |

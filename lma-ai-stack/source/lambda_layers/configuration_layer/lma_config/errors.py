@@ -57,3 +57,20 @@ class ConcurrentModification(ConfigurationError):
 
     The write is refused so that the edit the caller did not see is kept.
     """
+
+
+class RevisionNotFound(ConfigurationError):
+    """The revision asked for is not one the profile's history retains.
+
+    Either it was never recorded or the retention cap has since pruned it.
+    """
+
+
+class RevisionHistoryUnavailable(ConfigurationError):
+    """The operation needs the revision history, and it cannot be used.
+
+    Raised when no revision bucket is configured for an operation that reads
+    history, and when the state a save is about to replace cannot be recorded --
+    in which case the save is not made, because a configuration that has been
+    replaced without being recorded is one nobody can get back.
+    """
