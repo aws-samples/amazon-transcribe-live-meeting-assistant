@@ -16,6 +16,10 @@ export default /* GraphQL */ `
       CallSummaryText
       CallSummaryState
       SpeakerIdentities
+      Agenda
+      AgendaSource
+      AgendaUpdatedBy
+      AgendaUpdatedAt
       CreatedAt
       CustomerPhoneNumber
       Status

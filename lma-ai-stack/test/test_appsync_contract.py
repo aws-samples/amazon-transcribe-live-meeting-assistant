@@ -222,6 +222,9 @@ OTHER_FIELDS = [
     # resolver that applies the same rule in `caller_may_edit`.
     ("Mutation", "updateCallSummaryText"),
     ("Mutation", "regenerateCallSummary"),
+    # The agenda of one meeting, under the same owner/share condition as the
+    # summary write.
+    ("Mutation", "updateCallAgenda"),
     ("Mutation", "deleteCall"),
     ("Mutation", "shareCall"),
     ("Mutation", "unshareCall"),

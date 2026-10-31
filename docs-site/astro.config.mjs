@@ -58,6 +58,7 @@ export default defineConfig({
               label: "Transcript Summarization",
               slug: "transcript-summarization",
             },
+            { label: "Meeting Agenda", slug: "meeting-agenda" },
             { label: "Meetings Query Tool", slug: "meetings-query-tool" },
           ],
         },

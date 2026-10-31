@@ -5954,6 +5954,20 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/updateCallSummaryText.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  # Reachable by signed-in users, so it uses a dedicated request template that
+  # writes only the agenda and its provenance fields, and restricts a Cognito
+  # caller to Admin, the meeting owner, or a user it is shared with.
+  UpdateCallAgendaAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      TypeName: Mutation
+      FieldName: updateCallAgenda
+      RequestMappingTemplateS3Location: ../source/appsync/updateCallAgenda.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   AddCallCategoryAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
