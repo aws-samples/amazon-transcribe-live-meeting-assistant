@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/transcription",
+  "title": "Amazon Transcribe",
+  "description": "The Amazon Transcribe options of meetings streamed to the WebSocket transcriber: the Stream Audio page, the browser extension and the desktop app. The defaults are the values the stack was deployed with; a value set here is used instead until it is reset. Amazon Transcribe checks these options when a meeting starts, and a meeting whose options it refuses is not transcribed: a custom vocabulary or language model must already exist in this account and region, language identification cannot be combined with a custom language model, and with language identification redaction is not applied.",
+  "sectionLabel": "Amazon Transcribe",
+  "appliesText": "A saved change applies to streaming meetings that start after the save; a meeting already running keeps the options it started with.",
+  "order": 7,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "languageCode": {
+      "order": 0,
+      "type": "string",
+      "title": "Language",
+      "description": "The language meetings are transcribed in, or identify-language / identify-multiple-languages to identify it from the language options. Default: the TranscribeLanguageCode stack parameter.",
+      "enum": [
+        "identify-language",
+        "identify-multiple-languages",
+        "en-US",
+        "es-US",
+        "en-GB",
+        "fr-CA",
+        "fr-FR",
+        "en-AU",
+        "it-IT",
+        "de-DE",
+        "pt-BR",
+        "ja-JP",
+        "ko-KR",
+        "zh-CN",
+        "hi-IN",
+        "th-TH"
+      ]
+    },
+    "languageOptions": {
+      "order": 1,
+      "type": "string",
+      "title": "Language options",
+      "description": "With language identification, the comma-separated languages a meeting may use, for example \"en-US, es-US\"; more than five is not recommended. Default: the TranscribeLanguageOptions stack parameter.",
+      "maxLength": 200,
+      "pattern": "^( *(en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH) *(, *(en-US|es-US|en-GB|fr-CA|fr-FR|en-AU|it-IT|de-DE|pt-BR|ja-JP|ko-KR|zh-CN|hi-IN|th-TH) *)*)?$"
+    },
+    "preferredLanguage": {
+      "order": 2,
+      "type": "string",
+      "title": "Preferred language",
+      "description": "With language identification, the language to prefer; must be one of the language options. None for no preference. Default: the TranscribePreferredLanguage stack parameter.",
+      "enum": [
+        "None",
+        "en-US",
+        "es-US",
+        "en-GB",
+        "fr-CA",
+        "fr-FR",
+        "en-AU",
+        "it-IT",
+        "de-DE",
+        "pt-BR",
+        "ja-JP",
+        "ko-KR",
+        "zh-CN",
+        "hi-IN",
+        "th-TH"
+      ]
+    },
+    "contentRedactionEnabled": {
+      "order": 3,
+      "type": "boolean",
+      "title": "Redact personal information",
+      "description": "Redact the entity types below from transcripts. Applied only when the language is en-US, en-AU, en-GB or es-US, the languages Amazon Transcribe redacts while streaming. Call Analytics post-call output and the PCA integration, where deployed, follow the IsContentRedactionEnabled stack parameter instead. Default: the IsContentRedactionEnabled stack parameter."
+    },
+    "piiEntityTypes": {
+      "order": 4,
+      "type": "string",
+      "title": "Entity types to redact",
+      "description": "Comma-separated Amazon Transcribe PII entity types, such as NAME,EMAIL,PHONE. Default: the TranscribePiiEntityTypes stack parameter.",
+      "dependsOn": {
+        "field": "contentRedactionEnabled",
+        "value": true
+      },
+      "maxLength": 512,
+      "pattern": "^([A-Z_]+( *, *[A-Z_]+)*)?$"
+    },
+    "customVocabularyName": {
+      "order": 5,
+      "type": "string",
+      "title": "Custom vocabulary",
+      "description": "The name of an Amazon Transcribe custom vocabulary in this account and region, or empty for none. Default: the CustomVocabularyName stack parameter.",
+      "maxLength": 200,
+      "pattern": "^[0-9A-Za-z._-]*$"
+    },
+    "customLanguageModelName": {
+      "order": 6,
+      "type": "string",
+      "title": "Custom language model",
+      "description": "The name of an Amazon Transcribe custom language model in this account and region, matching the language, or empty for none. Default: the CustomLanguageModelName stack parameter.",
+      "maxLength": 200,
+      "pattern": "^[0-9A-Za-z._-]*$"
+    },
+    "showSpeakerLabel": {
+      "order": 7,
+      "type": "boolean",
+      "title": "Identify speakers within a channel by default",
+      "description": "Label the separate voices within one audio channel \"(spk_0)\", \"(spk_1)\" when the client that started the meeting does not choose. The Stream Audio page and the desktop app choose per meeting, which wins. Default: the ShowSpeakerLabel stack parameter."
+    }
+  },
+  "additionalProperties": false
+}

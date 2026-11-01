@@ -215,6 +215,61 @@ Parameters:
       Default Bedrock model the meeting assistant's knowledge bases generate
       answers with, written into the configuration baseline.
 
+  # The Amazon Transcribe options and the audio-recording default. Read by the
+  # WebSocket transcriber, not by anything in this stack; passed here only so
+  # the configuration seeder can write them into the baseline as the defaults
+  # of the Amazon Transcribe and Meeting Recording sections. lma-main.yaml
+  # validates them. Empty, as a standalone deployment of this stack leaves
+  # them, fails the section's schema for the list and switch settings and is not
+  # written, so the transcriber uses its own environment variables for those.
+  # For the language options, entity types, custom vocabulary and custom
+  # language model, empty is a valid value ("none"): it is written, and takes
+  # precedence over the transcriber's variable.
+  TranscribeLanguageCode:
+    Type: String
+    Default: ""
+    Description: Default of the Amazon Transcribe language, written into the configuration baseline.
+
+  TranscribeLanguageOptions:
+    Type: String
+    Default: ""
+    Description: Default of the language-identification options, written into the configuration baseline.
+
+  TranscribePreferredLanguage:
+    Type: String
+    Default: ""
+    Description: Default of the preferred identified language, written into the configuration baseline.
+
+  IsContentRedactionEnabled:
+    Type: String
+    Default: ""
+    Description: Default of whether transcripts are redacted, written into the configuration baseline.
+
+  TranscribePiiEntityTypes:
+    Type: String
+    Default: ""
+    Description: Default of the redacted entity types, written into the configuration baseline.
+
+  CustomVocabularyName:
+    Type: String
+    Default: ""
+    Description: Default of the custom vocabulary, written into the configuration baseline.
+
+  CustomLanguageModelName:
+    Type: String
+    Default: ""
+    Description: Default of the custom language model, written into the configuration baseline.
+
+  ShowSpeakerLabel:
+    Type: String
+    Default: ""
+    Description: Default of the default for speaker partitioning, written into the configuration baseline.
+
+  EnableAudioRecording:
+    Type: String
+    Default: ""
+    Description: Default of whether meeting audio is recorded, written into the configuration baseline.
+
   BedrockModelId:
     Default: "global.anthropic.claude-sonnet-5-5"
     Type: String
@@ -3356,6 +3411,15 @@ Resources:
         MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
         MeetingAssistKnowledgeBaseModelID: !Ref MeetingAssistKnowledgeBaseModelID
         KeyframeTextModelId: !Ref KeyframeTextModelId
+        TranscribeLanguageCode: !Ref TranscribeLanguageCode
+        TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
+        TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
+        IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
+        TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
+        CustomVocabularyName: !Ref CustomVocabularyName
+        CustomLanguageModelName: !Ref CustomLanguageModelName
+        ShowSpeakerLabel: !Ref ShowSpeakerLabel
+        EnableAudioRecording: !Ref EnableAudioRecording
 
   # Revision bodies for the configuration history: one gzipped object per
   # revision at config_revisions/<profile>/<nnnnnn>.json.gz, with the metadata

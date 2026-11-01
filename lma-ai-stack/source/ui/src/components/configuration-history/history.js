@@ -86,6 +86,8 @@ const SECTION_LABELS = {
   asr_engine: 'Transcription engine',
   call_pricing: 'Meeting cost prices',
   language_models: 'Amazon Bedrock models',
+  transcription: 'Amazon Transcribe',
+  recording: 'Meeting recording',
 };
 
 export const sectionLabel = (section) => SECTION_LABELS[section] || section;

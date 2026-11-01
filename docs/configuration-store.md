@@ -186,6 +186,8 @@ Today's sections and their tiers:
 | `asr_engine` | `short` | Read by the WebSocket transcriber at the start of each streaming meeting; 30 seconds keeps a burst of meetings starting together from each doing its own reads, which is the policy that reader has always had. The Virtual Participant reads through the `getAsrConfig` resolver, which caches nothing |
 | `chat_buttons` | `immediate` | Read record by record through the chat panel's resolver, which reads directly and consistently; the Edit Chat Buttons dialog shows the saved buttons straight after a save. The browser holds what it read for the life of the chat panel, as it always has |
 | `call_pricing` | `standard` | Read whenever a meeting's cost estimate is drawn; an estimate priced a few minutes after a price change at the previous price is what [Meeting Cost Estimate](meeting-cost-estimate.md) says happens |
+| `transcription` | `immediate` | Read by the WebSocket transcriber once as each streaming meeting starts, and kept for the meeting's every Transcribe reconnect. Redaction is privacy-bearing, so a save has to reach the very next meeting |
+| `recording` | `immediate` | Read with `transcription`, for the same reason: whether a meeting is recorded is privacy-bearing |
 | `language_models` | `standard` | Read once per summary, answer, agenda pass, naming pass, knowledge-base query or key frame; nobody is waiting on a model change, and the summariser's **Regenerate** drops the cache before reading, as for the prompts |
 
 ### Resolving a read
@@ -320,6 +322,8 @@ so a release cannot ship a default its own save would refuse.
 | `nova_sonic_config` | The eleven settings the voice assistant reads, nothing else; `promptMode`, `endpointingSensitivity` and `meetingMode` from their fixed lists; model and voice ids and the translator fields non-empty and bounded in length |
 | `asr_engine` | The three switches, each `true` or `false`, nothing else |
 | `language_models` | The four model ids, each one of the models its stack parameter allows, nothing else |
+| `transcription` | The nine Amazon Transcribe options: language, preferred language and redaction type from their stack parameters' lists; language options as comma-separated codes from that list; entity types as comma-separated capitalised names; vocabulary and language model names in Amazon Transcribe's character set, empty for none; the two switches `true` or `false` |
+| `recording` | `recordAudio`, `true` or `false`, nothing else |
 | `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
 
 ### The validator
@@ -1097,6 +1101,31 @@ The summariser reads the model once per summary, after its prompt templates, so
 every section of one summary is written by the same model. The troubleshooting
 agent reads it as each run starts.
 
+### The Amazon Transcribe options and the recording default
+
+The `transcription` section holds the nine Amazon Transcribe parameters, and the
+`recording` section `EnableAudioRecording`, for meetings streamed to the
+WebSocket transcriber. The transcriber reads both sections once as each meeting
+starts (`calleventdata/session-settings.ts`), through the TypeScript half's
+`parameterBackedSetting`, which applies the Python half's precedence and type
+rules; each setting falls back to the task's environment variable of the same
+parameter. `lma-ai-stack/test/test_parameter_backed_settings.py` reads the
+transcriber's table of settings and environment variables and holds it to the
+parameter list and to the task definition.
+
+A meeting keeps the options it started with across every reconnect to Amazon
+Transcribe. The schema checks each option alone; the transcriber also makes the
+cross-setting checks the stack makes of the parameters at deploy time (language
+identification with language options, one dialect per language, a preferred
+language among them, no custom vocabulary or language model), and when saved
+options fail one, it logs which and takes the options those checks cover from
+the task's own values, which passed them when the stack deployed; redaction and
+recording keep the saved values. When the table cannot be read, the meeting uses
+the task's values for everything, and the next meeting reads again. Whether a
+named custom vocabulary or language model exists is not checked.
+
+A Virtual Participant reads the parameters' values, as before.
+
 ## Still to come
 
 | Stage | What it adds |
@@ -1135,7 +1164,7 @@ row of the table above.
 | The configuration library | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/presets/` and `presets.py` |
 | The configuration editor in the web UI | `lma-ai-stack/source/ui/src/components/configuration/`: `ConfigurationPage.jsx`, the controls in `fields.jsx`, the rules in `config-model.js` and the validator copy in `schema-validation.js` |
 | Deploy-time seeder | `lma-ai-stack/source/lambda_functions/configuration_seeder/` |
-| Stack parameters that are defaults, and the reader for them | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/parameter_defaults.json` and `parameters.py`; the cross-template test `lma-ai-stack/test/test_parameter_backed_settings.py` |
+| Stack parameters that are defaults, and the reader for them | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/parameter_defaults.json` and `parameters.py`; in TypeScript `parameterBackedSetting` in the shared accessor and the transcriber's `calleventdata/session-settings.ts`; the cross-template test `lma-ai-stack/test/test_parameter_backed_settings.py` |
 | Table, bucket, layer, custom resource and the `ConfigurationRevisionWriteAccess` policy every writer attaches | `lma-ai-stack/deployment/lma-ai-stack.yaml` |
 | Content-hash computation | `lib/lma_sdk/lma_sdk/_core/publish.py` |
 | Cross-language contract test | `lma-ai-stack/test/test_configuration_store_contract.py` |

@@ -65,8 +65,10 @@ Enable it in the client's own settings, independently for each channel:
 | Incoming / system audio | Identify separate speakers in meeting audio | The call has several remote participants |
 | Microphone | Identify separate speakers on my microphone | Several people share one microphone |
 
-Both are off by default. The `ShowSpeakerLabel` CloudFormation parameter sets the
-deployment-wide default for clients that do not send their own choice.
+Both are off by default. For clients that do not send their own choice, the
+deployment-wide default is **Identify speakers within a channel by default** in
+the Amazon Transcribe section of the [Configuration page](configuration-guide.md),
+whose own default is the `ShowSpeakerLabel` CloudFormation parameter.
 
 **Limitations:**
 
@@ -330,6 +332,14 @@ Amazon Transcribe produces two types of transcript results:
 Both types flow through the LMA pipeline. You can configure Lambda hook functions to process only non-partial transcripts if your use case requires stable text (for example, for summarization or integration with external systems).
 
 ## Configuration Parameters
+
+For meetings streamed from the Stream Audio page, the browser extension and the
+desktop app, the language, redaction, custom vocabulary, custom language model and
+speaker-identification default are set in the **Amazon Transcribe** section of the
+[Configuration page](configuration-guide.md), and whether audio is recorded in its
+**Meeting Recording** section, while the stack runs. The CloudFormation parameters
+below are those settings' defaults, and what a Virtual Participant uses. See
+[CloudFormation Parameters](cloudformation-parameters.md) for each one.
 
 | Parameter Name | Description | Default Value |
 |---|---|---|

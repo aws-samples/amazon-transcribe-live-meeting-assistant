@@ -65,6 +65,7 @@ import { normalizeErrorForLogging } from '../utils/common';
 import { stringifyCallMetaData } from '../utils/log-redaction';
 import { noteTranscriptSegment } from '../metrics/session';
 import { meterTranscribeRequest, pcmSeconds } from '../metering';
+import { TranscriptionSettings, getSessionSettings, isRedactionApplied } from './session-settings';
 
 const formatPath = function (path: string) {
     let pathOut = path;
@@ -82,29 +83,10 @@ dotenv.config({ quiet: true });
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 const TRANSCRIBE_API_MODE = process.env['TRANSCRIBE_API_MODE'] || 'standard';
 const isTCAEnabled = TRANSCRIBE_API_MODE === 'analytics';
-const TRANSCRIBE_LANGUAGE_CODE =
-    process.env['TRANSCRIBE_LANGUAGE_CODE'] || 'en-US';
-const TRANSCRIBE_LANGUAGE_OPTIONS =
-    process.env['TRANSCRIBE_LANGUAGE_OPTIONS'] || undefined;
-const TRANSCRIBE_PREFERRED_LANGUAGE =
-    process.env['TRANSCRIBE_PREFERRED_LANGUAGE'] || 'None';
-const CUSTOM_VOCABULARY_NAME =
-    process.env['CUSTOM_VOCABULARY_NAME'] || undefined;
-const CUSTOM_LANGUAGE_MODEL_NAME =
-    process.env['CUSTOM_LANGUAGE_MODEL_NAME'] || undefined;
-const IS_CONTENT_REDACTION_ENABLED =
-    (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
-const CONTENT_REDACTION_TYPE = process.env['CONTENT_REDACTION_TYPE'] || 'PII';
-const TRANSCRIBE_PII_ENTITY_TYPES =
-    process.env['TRANSCRIBE_PII_ENTITY_TYPES'] || undefined;
-// Redaction is only requested for the languages streaming redaction supports, so
-// this is both what is sent and what is billed for.
-const isRedactionApplied =
-    IS_CONTENT_REDACTION_ENABLED &&
-    (TRANSCRIBE_LANGUAGE_CODE === 'en-US' ||
-        TRANSCRIBE_LANGUAGE_CODE === 'en-AU' ||
-        TRANSCRIBE_LANGUAGE_CODE === 'en-GB' ||
-        TRANSCRIBE_LANGUAGE_CODE === 'es-US');
+// The Amazon Transcribe options -- language, redaction, custom vocabulary and
+// language model, the speaker-partitioning default -- are read per meeting from
+// the Amazon Transcribe section of the Configuration page, with this task's
+// environment as the fallback: see session-settings.ts.
 // Every request is a two-channel stream: channel identification on the standard
 // API, two channel definitions on Call Analytics.
 const TRANSCRIBE_CHANNELS = 2;
@@ -116,17 +98,14 @@ const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || null;
 // optional - disable post call analytics output
 const IS_TCA_POST_CALL_ANALYTICS_ENABLED =
     (process.env['IS_TCA_POST_CALL_ANALYTICS_ENABLED'] || 'false') === 'true';
+// Whether Call Analytics' post-call output is redacted: from the
+// IsContentRedactionEnabled stack parameter, which the PCA integration also reads
+// (see where it is used).
+const IS_POST_CALL_REDACTION_ENABLED = (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
 // optional - when redaction is enabled, choose 'redacted' only (dafault), or 'redacted_and_unredacted' for both
 const POST_CALL_CONTENT_REDACTION_OUTPUT =
     process.env['POST_CALL_CONTENT_REDACTION_OUTPUT'] || 'redacted';
 const kdsStreamName = process.env['KINESIS_STREAM_NAME'] || '';
-// Deployment-wide DEFAULT for speaker partitioning (CFN parameter
-// ShowSpeakerLabel), used only when the client sends neither
-// diarizeSystemChannel nor diarizeMicChannel in its START frame. An explicit
-// client flag always wins — see diarizationSettingsFor(). Defaults to false so a
-// deployment that never sets it behaves exactly as it did before the feature.
-const showSpeakerLabelDefault =
-    (process.env['SHOW_SPEAKER_LABEL'] || 'false') === 'true';
 // Minimum size for a run of same-speaker words to be split out as its own
 // transcript segment; both must be cleared. Fitted to real recordings, where the
 // spurious runs were consistently 1-2 words — so the WORD threshold does the
@@ -164,12 +143,15 @@ const transcribeClient = new TranscribeStreamingClient({ region: AWS_REGION });
  * Effective per-channel diarization settings for a call.
  *
  * Precedence: an EXPLICIT client flag always wins. Only when the client sent
- * neither flag do we fall back to the deployment default (CFN ShowSpeakerLabel),
- * applied to both channels. Kept here rather than in diarization.ts because it
- * reads the environment, and diarization.ts must stay env-free so the offline
- * unit tests can import it.
+ * neither flag do we fall back to the deployment default, applied to both
+ * channels: the "Identify speakers within a channel by default" setting of the
+ * Amazon Transcribe section, whose own default is the ShowSpeakerLabel stack
+ * parameter. The caller reads it (see session-settings.ts) and passes it in.
  */
-export const diarizationSettingsFor = (callMetaData: CallMetaData): DiarizationSettings => {
+export const diarizationSettingsFor = (
+    callMetaData: CallMetaData,
+    deploymentDefault: boolean
+): DiarizationSettings => {
     const clientSpecified =
         typeof callMetaData.diarizeSystemChannel === 'boolean' ||
         typeof callMetaData.diarizeMicChannel === 'boolean';
@@ -180,8 +162,8 @@ export const diarizationSettingsFor = (callMetaData: CallMetaData): DiarizationS
         };
     }
     return {
-        diarizeSystemChannel: showSpeakerLabelDefault,
-        diarizeMicChannel: showSpeakerLabelDefault,
+        diarizeSystemChannel: deploymentDefault,
+        diarizeMicChannel: deploymentDefault,
     };
 };
 
@@ -358,15 +340,85 @@ const isStaleSessionError = (error: unknown): boolean => {
     );
 };
 
+/**
+ * Whether Call Analytics' post-call output is asked for redacted: only when the
+ * stack parameter asks for it and the meeting's stream is redacted, since a
+ * redaction output for an unredacted stream is not one Amazon Transcribe takes.
+ */
+export const postCallRedactionOutput = (parameterEnabled: boolean, streamRedacted: boolean): boolean =>
+    parameterEnabled && streamRedacted;
+
+/**
+ * Lays a meeting's Amazon Transcribe options onto a streaming request: the
+ * language or language identification, redaction where it applies, and the
+ * custom vocabulary and language model when one is named.
+ */
+export const applyTranscribeOptions = (
+    tsParams: StartStreamTranscriptionCommandInput | StartCallAnalyticsStreamTranscriptionCommandInput,
+    transcription: TranscriptionSettings
+): void => {
+    const identifying =
+        transcription.languageCode === 'identify-language' ||
+        transcription.languageCode === 'identify-multiple-languages';
+    if (transcription.languageCode === 'identify-language') {
+        (tsParams as StartStreamTranscriptionCommandInput).IdentifyLanguage = true;
+    } else if (transcription.languageCode === 'identify-multiple-languages') {
+        (tsParams as StartStreamTranscriptionCommandInput).IdentifyMultipleLanguages = true;
+    } else {
+        tsParams.LanguageCode = transcription.languageCode as LanguageCode;
+    }
+    if (identifying && transcription.languageOptions) {
+        (tsParams as StartStreamTranscriptionCommandInput).LanguageOptions =
+            transcription.languageOptions.replace(/\s/g, '');
+        if (transcription.preferredLanguage !== 'None') {
+            (tsParams as StartStreamTranscriptionCommandInput).PreferredLanguage =
+                transcription.preferredLanguage as LanguageCode;
+        }
+    }
+
+    if (isRedactionApplied(transcription)) {
+        tsParams.ContentRedactionType = transcription.contentRedactionType as ContentRedactionType;
+        if (transcription.piiEntityTypes) {
+            tsParams.PiiEntityTypes = transcription.piiEntityTypes;
+        }
+    }
+    if (transcription.customVocabularyName) {
+        tsParams.VocabularyName = transcription.customVocabularyName;
+    }
+    if (transcription.customLanguageModelName) {
+        tsParams.LanguageModelName = transcription.customLanguageModelName;
+    }
+};
+
 export const startTranscribe = async (
     socketCallMap: SocketCallData,
     server: FastifyInstance
 ) => {
     const callMetaData = socketCallMap.callMetadata;
     const audioInputStream = socketCallMap.audioInputStream;
-    // Resolved ONCE per call, not per Transcribe session: the settings come from
-    // the START frame and must survive every reconnect unchanged.
-    const diarization = diarizationSettingsFor(callMetaData);
+    // Resolved ONCE per call, not per Transcribe session: a meeting keeps the
+    // options it started with across every reconnect, so a change saved on the
+    // Configuration page mid-meeting cannot change its language or redaction
+    // part way through.
+    const { transcription } = socketCallMap.sessionSettings ?? (await getSessionSettings(server.log));
+    const redactionApplied = isRedactionApplied(transcription);
+    if (transcription.contentRedactionEnabled && !redactionApplied) {
+        // Redaction is privacy-bearing, so a request for it that cannot be met
+        // is said out loud rather than left to a redaction=false further down.
+        server.log.warn(
+            `[TRANSCRIBING]: [${callMetaData.callId}] - Redaction is on, but Amazon Transcribe does not redact ` +
+                `${transcription.languageCode} while streaming (only en-US, en-AU, en-GB and es-US); this meeting ` +
+                'is transcribed without redaction.'
+        );
+    }
+    server.log.info(
+        `[TRANSCRIBING]: [${callMetaData.callId}] - Amazon Transcribe options: language=${transcription.languageCode}` +
+            `, redaction=${redactionApplied}, vocabulary=${transcription.customVocabularyName || 'none'}` +
+            `, languageModel=${transcription.customLanguageModelName || 'none'}`
+    );
+    // Resolved ONCE per call too: the settings come from the START frame, with
+    // the deployment default beneath them, and must survive every reconnect.
+    const diarization = diarizationSettingsFor(callMetaData, transcription.showSpeakerLabel);
     server.log.info(
         `[DIARIZATION]: [${callMetaData.callId}] - Speaker partitioning: system/meeting channel (${CHANNEL_SYSTEM})=${
             diarization.diarizeSystemChannel === true
@@ -435,8 +487,8 @@ export const startTranscribe = async (
                 pcmSeconds(attemptAudioBytes, callMetaData.samplingRate, TRANSCRIBE_CHANNELS),
                 {
                     callAnalytics: isTCAEnabled,
-                    redaction: isRedactionApplied,
-                    customLanguageModel: Boolean(CUSTOM_LANGUAGE_MODEL_NAME),
+                    redaction: redactionApplied,
+                    customLanguageModel: Boolean(transcription.customLanguageModelName),
                     channels: TRANSCRIBE_CHANNELS,
                     logger: server.log,
                 }
@@ -493,9 +545,22 @@ export const startTranscribe = async (
                             OutputLocation: tcaOutputLocation,
                             DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
                         };
-                        if (IS_CONTENT_REDACTION_ENABLED) {
+                        // The post-call output is redacted only when both the
+                        // IsContentRedactionEnabled stack parameter -- which the PCA
+                        // integration reads to choose its folder -- and this
+                        // meeting's own redaction say so: Amazon Transcribe accepts
+                        // a redaction output only for a redacted stream. When the
+                        // two disagree, the output is unredacted and that is said.
+                        if (postCallRedactionOutput(IS_POST_CALL_REDACTION_ENABLED, redactionApplied)) {
                             configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
                                 POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
+                        } else if (IS_POST_CALL_REDACTION_ENABLED) {
+                            server.log.warn(
+                                `[TRANSCRIBING]: [${callMetaData.callId}] - The IsContentRedactionEnabled parameter ` +
+                                    'asks for redacted post-call analytics, but this meeting is not redacted ' +
+                                    '(see the Amazon Transcribe section of the Configuration page); its post-call ' +
+                                    'output is not redacted.'
+                            );
                         }
                     }
                     yield { ConfigurationEvent: configuration_event };
@@ -564,41 +629,7 @@ export const startTranscribe = async (
                 );  
             }
 
-            if (TRANSCRIBE_LANGUAGE_CODE === 'identify-language') {
-                tsParams.IdentifyLanguage = true;
-                if (TRANSCRIBE_LANGUAGE_OPTIONS) {
-                    tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
-                    if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
-                        tsParams.PreferredLanguage =
-                            TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
-                    }
-                }
-            } else if (TRANSCRIBE_LANGUAGE_CODE === 'identify-multiple-languages') {
-                (tsParams as StartStreamTranscriptionCommandInput).IdentifyMultipleLanguages = true;
-                if (TRANSCRIBE_LANGUAGE_OPTIONS) {
-                    tsParams.LanguageOptions = TRANSCRIBE_LANGUAGE_OPTIONS.replace(/\s/g, '');
-                    if (TRANSCRIBE_PREFERRED_LANGUAGE !== 'None') {
-                        tsParams.PreferredLanguage =
-                            TRANSCRIBE_PREFERRED_LANGUAGE as LanguageCode;
-                    }
-                }
-            } else {
-                tsParams.LanguageCode = TRANSCRIBE_LANGUAGE_CODE as LanguageCode;
-            }
-
-            if (isRedactionApplied) {
-                tsParams.ContentRedactionType =
-                    CONTENT_REDACTION_TYPE as ContentRedactionType;
-                if (TRANSCRIBE_PII_ENTITY_TYPES) {
-                    tsParams.PiiEntityTypes = TRANSCRIBE_PII_ENTITY_TYPES;
-                }
-            }
-            if (CUSTOM_VOCABULARY_NAME) {
-                tsParams.VocabularyName = CUSTOM_VOCABULARY_NAME;
-            }
-            if (CUSTOM_LANGUAGE_MODEL_NAME) {
-                tsParams.LanguageModelName = CUSTOM_LANGUAGE_MODEL_NAME;
-            }
+            applyTranscribeOptions(tsParams, transcription);
 
             if (isTCAEnabled) {
                 server.log.debug(
@@ -924,7 +955,8 @@ function recordDiarizationDiagnostics(
             `[DIARIZATION]: [${callMetadata.callId}] - Speaker partitioning is enabled for ${channelId}` +
                 ` but Amazon Transcribe has returned NO speaker labels across ${diag.finals} final` +
                 ' results. Speaker partitioning is not supported for every transcription language —' +
-                ' check TRANSCRIBE_LANGUAGE_CODE. Segments will carry unlabelled speaker names.' +
+                ' check the language in the Amazon Transcribe section of the Configuration page.' +
+                ' Segments will carry unlabelled speaker names.' +
                 ` (runs seen: ${runCount})`
         );
     }

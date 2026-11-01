@@ -475,6 +475,10 @@ def parameter_groups(template: Mapping[str, Any]) -> List[Tuple[str, List[str]]]
 def configuration_defaults() -> Dict[str, Tuple[str, str]]:
     """Parameter name to (section label, setting title), as the page shows them.
 
+    A setting the page does not show -- its schema marks it ``hidden``, because
+    it has one possible value -- is named with "(not shown on the page)", so
+    the reference does not send a reader looking for it.
+
     Read from the configuration layer rather than restated here, so the
     reference cannot call a parameter a Configuration page default that the
     seeder does not write, or miss one that it does.
@@ -486,7 +490,10 @@ def configuration_defaults() -> Dict[str, Tuple[str, str]]:
             (CONFIGURATION_LAYER / "schemas" / f"{entry['section']}.json").read_text("utf-8")
         )
         setting = schema["properties"][entry["setting"]]
-        result[parameter] = (schema["sectionLabel"], setting.get("title", entry["setting"]))
+        title = setting.get("title", entry["setting"])
+        if setting.get("hidden"):
+            title += " (not shown on the page)"
+        result[parameter] = (schema["sectionLabel"], title)
     return result
 
 

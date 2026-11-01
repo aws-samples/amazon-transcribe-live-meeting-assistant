@@ -32,6 +32,10 @@ from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # confi
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
+# The model when neither the configuration nor BEDROCK_MODEL_ID names one; the
+# BedrockModelId parameter's default.
+FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
+
 # grab environment variables
 
 FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ["FETCH_TRANSCRIPT_LAMBDA_ARN"]
@@ -246,7 +250,11 @@ def summary_model_id():
     it shares the prompt templates' cached document rather than adding a read.
     """
     return read_setting(
-        LANGUAGE_MODELS.name, "summaryModelId", env_var="BEDROCK_MODEL_ID", store=CONFIG_STORE
+        LANGUAGE_MODELS.name,
+        "summaryModelId",
+        env_var="BEDROCK_MODEL_ID",
+        default=FALLBACK_MODEL_ID,
+        store=CONFIG_STORE,
     )
 
 

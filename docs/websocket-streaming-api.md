@@ -271,13 +271,15 @@ Sent once at the beginning of a session to initialize the transcription.
 | `toNumber` | `string` | No | `"System Phone"` | Label for the system / meeting. Free-form string. |
 | `samplingRate` | `number` | **Yes** | — | Audio sample rate in Hz. Must match the actual audio being sent. Supported values: `8000` or `16000`. |
 | `activeSpeaker` | `string` | No | Value of `fromNumber` | Name of the currently active speaker on the meeting/remote channel (channel 0). |
-| `diarizeSystemChannel` | `boolean` | No | `ShowSpeakerLabel` CFN parameter | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
-| `diarizeMicChannel` | `boolean` | No | `ShowSpeakerLabel` CFN parameter | Same, for the microphone channel (channel 1). |
+| `diarizeSystemChannel` | `boolean` | No | The deployment default (see below) | Enable Amazon Transcribe speaker partitioning (diarization) on the system / meeting audio channel (channel 0). See [Speaker Identification](#speaker-identification-diarization). |
+| `diarizeMicChannel` | `boolean` | No | The deployment default (see below) | Same, for the microphone channel (channel 1). |
 
 > **Precedence:** if the client sends **either** diarization field, its values are
 > used verbatim (a field left out counts as `false`). Only when **neither** field
-> is present does the server fall back to the deployment-wide `ShowSpeakerLabel`
-> CloudFormation parameter, applied to both channels. Anything other than a JSON
+> is present does the server fall back to the deployment-wide default, applied to
+> both channels: **Identify speakers within a channel by default** in the Amazon
+> Transcribe section of the Configuration page, whose own default is the
+> `ShowSpeakerLabel` CloudFormation parameter. Anything other than a JSON
 > `true` — including the string `"true"` — is treated as `false`.
 
 #### 6.1.2 SPEAKER_CHANGE Message
@@ -841,8 +843,9 @@ These environment variables configure the server and are provided here for refer
 | `USERPOOL_ID` | — | Cognito User Pool ID for JWT verification |
 | `RECORDINGS_BUCKET_NAME` | — | S3 bucket for audio recordings |
 | `RECORDING_FILE_PREFIX` | `lma-audio-recordings/` | S3 key prefix for recordings |
-| `SHOULD_RECORD_CALL` | `false` | Whether to record and upload audio to S3 |
-| `SHOW_SPEAKER_LABEL` | `false` | Default for speaker partitioning (diarization), applied to both channels. Used **only** when a client sends neither `diarizeSystemChannel` nor `diarizeMicChannel`. Set from the `ShowSpeakerLabel` CloudFormation parameter. |
+| `CONFIGURATION_TABLE_NAME` | — | The configuration table. The Amazon Transcribe options and the recording default are read from it as each meeting starts; the variables below are their fallbacks |
+| `SHOULD_RECORD_CALL` | `false` | Whether to record and upload audio to S3, when the Meeting Recording section does not say. Set from the `EnableAudioRecording` CloudFormation parameter |
+| `SHOW_SPEAKER_LABEL` | `false` | Default for speaker partitioning (diarization), applied to both channels, when the Amazon Transcribe section does not say. Used **only** when a client sends neither `diarizeSystemChannel` nor `diarizeMicChannel`. Set from the `ShowSpeakerLabel` CloudFormation parameter. |
 | `DIARIZATION_MIN_RUN_WORDS` | `3` | Minimum same-speaker words for a run to become its own transcript segment. Shorter runs are absorbed into the neighbouring turn. Not set by the CloudFormation template — override on the task definition to re-tune. |
 | `DIARIZATION_MIN_RUN_SECONDS` | `0.5` | Minimum duration, in seconds, for the same. A run must clear **both** thresholds. |
 | `DIARIZATION_MAX_SEGMENT_SECONDS` | `20` | Longest stretch of audio allowed in one in-progress segment. Bounds how long the live transcript can hold an unlabelled block, since Transcribe caps results near 30s and never labels a partial. `0` disables chunking. |

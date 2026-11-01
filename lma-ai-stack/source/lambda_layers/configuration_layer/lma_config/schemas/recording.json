@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/recording",
+  "title": "Meeting recording",
+  "description": "Whether a meeting's audio is recorded when the client that started it does not say. The default is the value the stack was deployed with; a value set here is used instead until it is reset.",
+  "sectionLabel": "Meeting Recording",
+  "appliesText": "A saved change applies to streaming meetings that start after the save.",
+  "order": 8,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "recordAudio": {
+      "order": 0,
+      "type": "boolean",
+      "title": "Record meeting audio",
+      "description": "Record the audio of meetings streamed to the WebSocket transcriber (the Stream Audio page, the browser extension and the desktop app) and store it with the meeting, unless the client says otherwise. Default: the EnableAudioRecording stack parameter."
+    }
+  },
+  "additionalProperties": false
+}

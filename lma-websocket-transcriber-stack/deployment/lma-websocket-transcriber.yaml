@@ -1336,9 +1336,10 @@ Resources:
               Effect: Allow
               Resource: !Ref VoiceEnrollmentSeedsFunctionArn
             - !Ref AWS::NoValue
-          # The Transcription Engine switches, read at meeting start (and
-          # cached for 30 seconds) from the configuration table; the previous
-          # table only as a fallback.
+          # The configuration table, read at meeting start: the Transcription
+          # Engine switches (cached for 30 seconds; the previous table only as
+          # a fallback), and the Amazon Transcribe options and the recording
+          # default (read afresh for every meeting).
           - !If
             - HasConfigurationTable
             - Action: dynamodb:GetItem

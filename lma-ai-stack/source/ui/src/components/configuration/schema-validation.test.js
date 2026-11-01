@@ -58,7 +58,9 @@ describe('schema-validation', () => {
       'chat_buttons',
       'language_models',
       'nova_sonic_config',
+      'recording',
       'summary_prompt_templates',
+      'transcription',
     ]);
   });
 

@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
@@ -104,6 +105,11 @@ def coerce(value_type: str, raw: Any) -> Any:
         if isinstance(raw, int):
             return raw
         text = str(raw).strip()
+        # Digits only, with an optional sign: Python's int() would also take
+        # "1_000", which the TypeScript half's reader does not, and the two have
+        # to agree on what a value is.
+        if not re.fullmatch(r"[+-]?[0-9]+", text):
+            raise ValueError(f"{raw!r} is not an integer")
         return int(text)
     if value_type == "boolean":
         if isinstance(raw, bool):
@@ -156,7 +162,11 @@ def apply_parameter_defaults(baseline: Dict[str, Any], values: Mapping[str, Any]
         try:
             validate_section(entry.section, {entry.setting: value})
         except InvalidConfiguration as error:
-            LOGGER.warning(
+            # An empty value is what a nested stack deployed on its own passes
+            # for a parameter only lma-main.yaml supplies, so it is expected
+            # there and logged quietly; anything else is worth a warning.
+            log = LOGGER.info if values[entry.parameter] in ("", None) else LOGGER.warning
+            log(
                 "the %s parameter's value is not one the %s section accepts (%s); leaving "
                 "%s to the readers' environment variable",
                 entry.parameter,

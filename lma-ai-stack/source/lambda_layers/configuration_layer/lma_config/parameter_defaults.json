@@ -2,5 +2,14 @@
   "BedrockModelId": {"section": "language_models", "setting": "summaryModelId", "type": "string"},
   "MeetingAssistServiceBedrockModelID": {"section": "language_models", "setting": "meetingAssistModelId", "type": "string"},
   "MeetingAssistKnowledgeBaseModelID": {"section": "language_models", "setting": "knowledgeBaseModelId", "type": "string"},
-  "KeyframeTextModelId": {"section": "language_models", "setting": "keyframeTextModelId", "type": "string"}
+  "KeyframeTextModelId": {"section": "language_models", "setting": "keyframeTextModelId", "type": "string"},
+  "TranscribeLanguageCode": {"section": "transcription", "setting": "languageCode", "type": "string"},
+  "TranscribeLanguageOptions": {"section": "transcription", "setting": "languageOptions", "type": "string"},
+  "TranscribePreferredLanguage": {"section": "transcription", "setting": "preferredLanguage", "type": "string"},
+  "IsContentRedactionEnabled": {"section": "transcription", "setting": "contentRedactionEnabled", "type": "boolean"},
+  "TranscribePiiEntityTypes": {"section": "transcription", "setting": "piiEntityTypes", "type": "string"},
+  "CustomVocabularyName": {"section": "transcription", "setting": "customVocabularyName", "type": "string"},
+  "CustomLanguageModelName": {"section": "transcription", "setting": "customLanguageModelName", "type": "string"},
+  "ShowSpeakerLabel": {"section": "transcription", "setting": "showSpeakerLabel", "type": "boolean"},
+  "EnableAudioRecording": {"section": "recording", "setting": "recordAudio", "type": "boolean"}
 }

@@ -260,3 +260,39 @@ LANGUAGE_MODELS = register(
         ),
     )
 )
+
+
+#: The Amazon Transcribe options of a meeting: language or language
+#: identification, redaction, custom vocabulary and language model, and the
+#: default for speaker partitioning. Read by the WebSocket transcriber once per
+#: streaming meeting, at its start, and kept for every reconnect of that
+#: meeting. The baseline holds the values of the stack parameters that used to be
+#: the only way to set them (see parameter_defaults.json).
+#:
+#: Immediate tier, because redaction is privacy-bearing: a saved change to it
+#: has to apply to the very next meeting, with no window in which a cached copy
+#: still says otherwise. The reader runs once per meeting, so the cost is three
+#: reads per meeting start.
+TRANSCRIPTION = register(
+    SectionSpec(
+        name="transcription",
+        cache_tier=CacheTier.IMMEDIATE,
+        description=(
+            "Amazon Transcribe options for streaming meetings: language or language "
+            "identification, content redaction, custom vocabulary and language model, and "
+            "the default for speaker partitioning."
+        ),
+    )
+)
+
+#: Whether a meeting's audio is recorded when the client that started it says
+#: nothing. Read by the WebSocket transcriber at the start of each meeting, with
+#: the transcription options. Immediate tier, for the same reason: whether a
+#: meeting is recorded is privacy-bearing.
+RECORDING = register(
+    SectionSpec(
+        name="recording",
+        cache_tier=CacheTier.IMMEDIATE,
+        description="Whether the audio of a meeting is recorded when its client does not say.",
+    )
+)

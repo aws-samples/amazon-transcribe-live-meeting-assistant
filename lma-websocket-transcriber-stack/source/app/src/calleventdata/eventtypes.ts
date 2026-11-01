@@ -11,6 +11,7 @@ import {
 import stream from 'stream';
 import { WriteStream } from 'fs';
 import type { AsrSessionSet } from './asr-microvm';
+import type { SessionSettings } from './session-settings';
 
 export type Uuid = string;             // UUID as defined by RFC#4122
 
@@ -220,4 +221,10 @@ export type SocketCallData = {
      * that predate the check (defensive; the handler treats that as a denial).
      */
     ownerSub?: string
+    /**
+     * The meeting's Amazon Transcribe options and recording default, read once
+     * from the configuration when it started and kept for its whole life, so
+     * every engine path and every reconnect uses the same values.
+     */
+    sessionSettings?: SessionSettings
 };

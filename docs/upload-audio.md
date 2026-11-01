@@ -136,9 +136,10 @@ API instead of the streaming API.
 - **Presigned URL TTL: 15 minutes.** Start the upload promptly after clicking
   the button; for very large files on slow networks, consider splitting or
   re-running.
-- **Supported languages:** controlled by the `TranscribeLanguageCode`
-  CloudFormation parameter on your LMA stack. Upload jobs use the same default
-  language as live meetings.
+- **Language:** the language chosen for the upload, or `en-US` when none is
+  chosen. An upload does not follow the language set for streaming meetings in
+  the Amazon Transcribe section of the Configuration page, or the
+  `TranscribeLanguageCode` stack parameter.
 - **Pending uploads expire after 7 days.** Files left in
   `lma-uploads-pending/` are auto-cleaned by an S3 lifecycle rule, so a
   failed or abandoned upload will not accumulate storage cost.
