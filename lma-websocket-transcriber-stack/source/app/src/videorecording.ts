@@ -40,6 +40,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { CallMetaData } from './calleventdata/eventtypes';
 import { writeCallVideoRecordingEvent } from './calleventdata/transcribe';
 import { posixifyFilename, normalizeErrorForLogging } from './utils/common';
+import { KeyframeLane, keyframesConfigured } from './videokeyframes';
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 // Partition-aware S3 hostname suffix (amazonaws.com, amazonaws.com.cn, ...),
@@ -199,6 +200,53 @@ export type VideoSession = {
      * bytes rather than treat each part as an independent MP4.
      */
     resumeParts?: boolean;
+    /**
+     * Key frames of this stream (videokeyframes.ts): the decoder the incoming
+     * chunks are also written to. A resumed part keeps feeding the same one; a
+     * fresh encoder session gets a new one.
+     */
+    keyframes?: KeyframeLane;
+};
+
+/**
+ * Starts key frame sampling for the part of the stream that is starting.
+ * `timelineBaseSeconds` is where its presentation time zero falls on the
+ * transcript's clock; `videoOffsetBaseSeconds` where it falls in the muxed
+ * recording, or null when that is not known. Failures are logged by the lane
+ * and leave the session without key frames.
+ */
+const startKeyframes = (
+    session: VideoSession,
+    timelineBaseSeconds: number,
+    videoOffsetBaseSeconds: number | null,
+    server: FastifyInstance
+): void => {
+    if (!keyframesConfigured()) {
+        return;
+    }
+    const lane = new KeyframeLane(
+        {
+            callId: session.callId,
+            timelineBaseSeconds,
+            videoOffsetBaseSeconds,
+            tokens: session.tokens,
+        },
+        server
+    );
+    if (lane.start()) {
+        session.keyframes = lane;
+    }
+};
+
+/** Stops a session's key frame sampling without waiting for it. */
+const stopKeyframes = (session: VideoSession, server: FastifyInstance): void => {
+    const lane = session.keyframes;
+    session.keyframes = undefined;
+    lane?.stop().catch((err) =>
+        server.log.error(
+            `[KEYFRAMES]: [${session.callId}] - Error stopping key frame sampling: ${normalizeErrorForLogging(err)}`
+        )
+    );
 };
 
 // Video sessions by callId. A session outlives its websocket: it is removed
@@ -264,7 +312,8 @@ const muxedFileName = (callId: string): string => {
  */
 export const startVideoSession = (
     callMetaData: CallMetaData,
-    server: FastifyInstance
+    server: FastifyInstance,
+    audioStartedAtMs?: number
 ): VideoSession => {
     const callId = callMetaData.callId;
     let session = videoSessions.get(callId);
@@ -301,6 +350,7 @@ export const startVideoSession = (
             // one fMP4 stream, so the parts must be concatenated BYTE-WISE (not
             // as independent MP4s) — recorded here for the mux.
             session.resumeParts = true;
+            // The bytes continue the stream the current decoder is reading.
             server.log.info(
                 `[START_VIDEO]: [${callId}] - Video stream reconnected (resume); continuing into part ${
                     session.segmentPaths.length + 1
@@ -309,7 +359,14 @@ export const startVideoSession = (
         } else {
             // Fresh client encoder session (e.g. app restarted mid-call): the
             // new part begins with its own fMP4 init segment, so the mux treats
-            // the parts as independent MP4s (concat demuxer).
+            // the parts as independent MP4s (concat demuxer). Its key frames
+            // need a decoder of their own, placed on the transcript's clock by
+            // wall-clock time; their place in the muxed recording, which joins
+            // the parts end to end, is not known.
+            stopKeyframes(session, server);
+            if (audioStartedAtMs !== undefined) {
+                startKeyframes(session, Math.max(0, (Date.now() - audioStartedAtMs) / 1000), null, server);
+            }
             server.log.info(
                 `[START_VIDEO]: [${callId}] - Video stream restarted; starting part ${
                     session.segmentPaths.length + 1
@@ -345,6 +402,11 @@ export const startVideoSession = (
         server.log.info(
             `[START_VIDEO]: [${callId}] - Video recording started (offsetMs=${session.videoTimeOffsetMs})`
         );
+        // The first stream starts videoTimeOffsetMs after the audio, on the
+        // transcript's clock and, because the mux shifts it by the same
+        // offset, in the recording.
+        const base = session.videoTimeOffsetMs / 1000;
+        startKeyframes(session, base, base, server);
     }
 
     const segPath = path.resolve(
@@ -426,6 +488,7 @@ export const writeVideoChunk = (
     // (that is what grows the heap), but we DO surface it once so a slow disk is
     // diagnosable, and the size caps above bound the total outstanding bytes.
     const ok = session.writeStream.write(data);
+    session.keyframes?.write(data);
     if (!ok && !session.backpressureLogged) {
         session.backpressureLogged = true;
         server.log.warn(
@@ -493,6 +556,7 @@ export const endVideoSession = async (
         session.graceTimer = undefined;
     }
     session.videoEnded = true;
+    stopKeyframes(session, server);
     // Await the flush so ffmpeg never reads a truncated last segment.
     const ws = session.writeStream;
     session.writeStream = undefined;
@@ -882,6 +946,7 @@ const cleanupSession = async (
         clearTimeout(session.lifetimeTimer);
         session.lifetimeTimer = undefined;
     }
+    stopKeyframes(session, server);
     // Release this session's share of the global disk budget.
     videoTotalBytes = Math.max(0, videoTotalBytes - session.fileSize);
     session.writeStream?.end();

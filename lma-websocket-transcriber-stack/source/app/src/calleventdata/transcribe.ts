@@ -32,6 +32,7 @@ import {
     CallEndEvent,
     CallRecordingEvent,
     CallVideoRecordingEvent,
+    CallVideoKeyframeEvent,
     AddTranscriptSegmentEvent,
     SocketCallData,
     CallMetaData,
@@ -184,9 +185,21 @@ export const diarizationSettingsFor = (callMetaData: CallMetaData): DiarizationS
     };
 };
 
+/**
+ * Writes one event to the call data stream. Errors are logged and swallowed, so
+ * a lost event never ends a call -- except with `rethrow`, for a caller that has
+ * something to undo when the event was not written (the key frames, see
+ * videokeyframes.ts).
+ */
 export const writeCallEvent = async (
-    callEvent: CallStartEvent | CallEndEvent | CallRecordingEvent | CallVideoRecordingEvent,
-    server: FastifyInstance
+    callEvent:
+        | CallStartEvent
+        | CallEndEvent
+        | CallRecordingEvent
+        | CallVideoRecordingEvent
+        | CallVideoKeyframeEvent,
+    server: FastifyInstance,
+    { rethrow = false }: { rethrow?: boolean } = {}
 ) => {
     const putParams = {
         StreamName: kdsStreamName,
@@ -214,6 +227,9 @@ export const writeCallEvent = async (
                 error
             )} Event: ${stringifyCallMetaData(callEvent)}`
         );
+        if (rethrow) {
+            throw error;
+        }
     }
 };
 

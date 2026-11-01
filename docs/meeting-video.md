@@ -20,11 +20,13 @@ the images are not yet shown in the web UI.
 | Source | Key frames |
 |---|---|
 | **Virtual Participant** | Yes, when **Record meeting video** is on for the Virtual Participant (the toggle in the Create Virtual Participant modal; the deployment default is the `EnableVideoRecording` stack parameter). The VP samples its own meeting display, the same picture its screen recording captures. |
+| **Desktop Capture App** | Yes, when **Also record screen video** is on in the app and the deployment records video (`EnableVideoRecording`). The WebSocket transcriber samples the video the app streams, as it arrives; see [Desktop video](#desktop-video). |
 | **Stream Audio, Browser Extension, Upload Audio** | No. These sources carry no video. |
 
-Sampling follows the meeting's recording: it runs only while the meeting is
-being transcribed, so nothing is captured before the VP is admitted or while the
-meeting is paused from the chat, and nothing at all when video recording is off.
+Sampling follows the meeting's recording: in the Virtual Participant it runs
+only while the meeting is being transcribed, so nothing is captured before the
+VP is admitted or while the meeting is paused from the chat; and nothing at all
+is captured from either source when video recording is off.
 
 ## How a key frame is chosen
 
@@ -104,12 +106,44 @@ a-second recording picture, used 1.8% of a core; it compares each frame only
 with the one before, which is what makes a camera strip or a slow transition
 trip it.
 
+### Desktop video
+
+The desktop capture app sends its screen or window as H.264 at 5 frames a
+second, with a full picture (an H.264 key frame) at least every two seconds. The
+transcriber decodes only those full pictures, as the video arrives, and judges
+each one exactly as the Virtual Participant judges its samples. The app gives no
+screen-share signal — what it captures is whatever the user chose to share with
+LMA — so every picture is judged against the stricter thresholds, except that
+two still pictures in a row (about four seconds) are enough to settle, close to
+the Virtual Participant's three seconds.
+
+Each key frame's time is placed on the transcript's clock from the offset the
+app reports between the start of its audio and the start of its video, which is
+also how the recording is lined up with the audio. If the app restarts its video
+during the meeting, the frames after the restart are placed by the time they
+arrive and have no recording position, because the recording joins the two
+parts end to end.
+
+Measured in the transcriber's own container image limited to 2 vCPUs, with the
+synthetic meeting above recorded as the app sends it (1920 × 1080, 5 fps, 600
+kbps) and streamed in real time:
+
+| | Result |
+|---|---|
+| CPU to decode and judge one video stream | 1.4% of one core |
+| Pictures judged | 134 in 266 seconds (one every two seconds) |
+| Slides captured | 10 of 10 |
+| Frames from the camera gallery | 0 |
+| Document: when shown, and after the scroll stopped | 2 of 2 |
+
 The thresholds and limits are read from environment variables of the Virtual
 Participant process — for example `KEYFRAME_CHANGE_FRACTION`,
 `KEYFRAME_STRICT_CHANGE_FRACTION`, `KEYFRAME_MIN_INTERVAL_MS` and
-`KEYFRAME_MAX_PER_MEETING`; see `keyframe-sampler.ts`. They are not stack
-parameters: they are meant for local runs and calibration, and a value added to
-the task definition by hand is replaced at the next stack update.
+`KEYFRAME_MAX_PER_MEETING`; see `keyframe-sampler.ts` — and, for desktop
+video, of the transcriber (`KEYFRAME_DESKTOP_CHANGE_FRACTION` and the others in
+`videokeyframes.ts`). They are not stack parameters: they are meant for local
+runs and calibration, and a value added to a task definition by hand is replaced
+at the next stack update.
 
 ## What is stored
 
@@ -127,8 +161,8 @@ finds the images. The item has:
 | `Timestamp` | Seconds on the transcript's timeline, the same clock as a transcript segment's start time. |
 | `VideoOffset` | Seconds into the meeting's video recording, for playing the recording from that frame. |
 | `ImageUrl`, `ThumbnailUrl` | The two images. |
-| `Source` | What took the frame: `VIRTUAL_PARTICIPANT`. |
-| `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal. |
+| `Source` | What took the frame: `VIRTUAL_PARTICIPANT` or `DESKTOP_CAPTURE`. |
+| `ShareDetected` | `true` when the frame was taken while the platform showed a share; absent on platforms without the signal and for desktop video. |
 | `ChangeScore` | The part of the picture that differed from the previous key frame. |
 
 ### Retention, access and deletion
