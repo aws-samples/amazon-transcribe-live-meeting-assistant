@@ -362,6 +362,30 @@ def test_handler_accepts_a_caller_the_vp_was_shared_with(
     assert result["vncPassword"] is None
 
 
+@pytest.mark.parametrize(
+    "shared_with,allowed",
+    [
+        ("[carol@x, bob@example.com]", True),
+        ("carol@x,bob@example.com", True),
+        ("carol@x,xbob@example.com", False),
+        ("[bob@example.comx]", False),
+    ],
+)
+def test_handler_compares_shared_with_entries_whole(
+    monkeypatch: pytest.MonkeyPatch, shared_with: str, allowed: bool
+) -> None:
+    _install_stubs(
+        monkeypatch,
+        {"Owner": {"S": "alice@example.com"}, "SharedWith": {"S": shared_with}},
+    )
+    event = {"arguments": {"vpId": VP_ID}, "identity": {"username": "bob@example.com"}}
+    if allowed:
+        assert minter.lambda_handler(event, None)["token"]
+    else:
+        with pytest.raises(Exception):
+            minter.lambda_handler(event, None)
+
+
 def test_handler_requires_an_identity(monkeypatch: pytest.MonkeyPatch) -> None:
     _install_stubs(monkeypatch, {"Owner": {"S": "bob@example.com"}})
     with pytest.raises(Exception, match="Unauthenticated"):

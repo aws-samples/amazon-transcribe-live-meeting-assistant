@@ -144,12 +144,10 @@ def caller_may_edit(meeting, identity):
     shared with. An invocation with no Cognito identity is the backend calling
     itself (the end-of-meeting pass) and is allowed.
 
-    `SharedWith` is read here in Python, so the share list is compared entry by
-    entry in both shapes it is stored in -- the DynamoDB List `shareCall` writes
-    and the comma-separated String on older rows. The templates that express the
-    same rule as a DynamoDB condition use `contains`, which is a whole-element
-    test on the List and a substring test on the String, because a condition
-    expression cannot split a string; this path is the exact one.
+    `SharedWith` is compared entry by entry in every shape it is stored in --
+    the DynamoDB List `shareCall` writes, a string set, and the comma-separated
+    or "[a, b]" String on older rows -- as the templates compare it
+    (authorizeCallWrite.response.vtl reads the entries for the direct writes).
 
     One difference from the templates is deliberate: a caller with no
     `username` falls back to `sub` here, where a VTL condition matches on
@@ -177,7 +175,7 @@ def caller_may_edit(meeting, identity):
         # Whole entries, not a substring of the joined string: the older
         # comma-separated form holds one username per element, and membership is
         # a property of the elements.
-        return username in {entry.strip() for entry in shared_with.split(",")}
+        return username in {entry.strip() for entry in shared_with.strip().strip("[]").split(",")}
     return False
 
 

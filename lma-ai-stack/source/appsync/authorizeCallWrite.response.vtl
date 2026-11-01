@@ -1,0 +1,63 @@
+#if ( $ctx.error )
+  $util.error($ctx.error.message, $ctx.error.type)
+#end
+## Records in the stash how the caller relates to the meeting, for the
+## "SharedWith write condition" block of the write that follows:
+##   owner        -- the caller is the meeting's Owner;
+##   shared-list  -- the caller is an entry of a List or string-set SharedWith;
+##   shared-text  -- the caller is an entry of a String SharedWith, kept in
+##                   sharedWithAsRead so the write can require it unchanged;
+##   none         -- neither, or there is no such meeting.
+## Nothing is refused here: a caller who is neither is refused by the write's
+## condition, with the same error a refused write has always returned.
+#set( $callerAccess = "none" )
+#set( $username = $context.identity.username )
+#if( $context.result )
+  #set( $sharedWithRaw = $util.defaultIfNull($context.result.SharedWith, "") )
+## BEGIN SharedWith entries -- one text in every template that reads SharedWith;
+## test_shared_with_access.py holds the copies to it.
+## Reads $sharedWithRaw into $sharedWithEntries, a list of trimmed, non-empty
+## entries, from every shape SharedWith is stored in: a List (shareCall and
+## shareTranscriptSegment write one), a string set, and a comma-separated or
+## "[a, b]" String (older meeting rows; transcript segments and key frames, which
+## take the meeting's SharedWith as getCall returns it; Virtual Participant rows).
+## Membership is then a comparison of whole entries, as in the Lambda resolvers.
+## Every template sets $sharedWithRaw through $util.defaultIfNull(..., ""): a
+## #set whose value is null leaves the variable as it was, which in a loop
+## would carry one item's SharedWith over to the next.
+#set( $sharedWithEntries = [] )
+#if( $util.isList($sharedWithRaw) )
+  #foreach( $sharedWithEntry in $sharedWithRaw )
+    #if( $util.isString($sharedWithEntry) && !$sharedWithEntry.trim().isEmpty() )
+      $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
+    #end
+  #end
+#elseif( $util.isString($sharedWithRaw) )
+  #set( $sharedWithText = $sharedWithRaw.trim() )
+  #if( $sharedWithText.startsWith("[") )
+    #set( $sharedWithText = $sharedWithText.substring(1) )
+  #end
+  #if( $sharedWithText.endsWith("]") )
+    #set( $sharedWithEnd = $sharedWithText.length() - 1 )
+    #set( $sharedWithText = $sharedWithText.substring(0, $sharedWithEnd) )
+  #end
+  #foreach( $sharedWithEntry in $sharedWithText.split(",") )
+    #if( !$sharedWithEntry.trim().isEmpty() )
+      $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
+    #end
+  #end
+#end
+## END SharedWith entries
+  #if( !$util.isNullOrBlank($username) && $context.result.Owner == $username )
+    #set( $callerAccess = "owner" )
+  #elseif( !$util.isNullOrBlank($username) && $sharedWithEntries.contains($username) )
+    #if( $util.isString($sharedWithRaw) )
+      #set( $callerAccess = "shared-text" )
+      $util.qr( $ctx.stash.put("sharedWithAsRead", $sharedWithRaw) )
+    #else
+      #set( $callerAccess = "shared-list" )
+    #end
+  #end
+#end
+$util.qr( $ctx.stash.put("callerAccess", $callerAccess) )
+{}

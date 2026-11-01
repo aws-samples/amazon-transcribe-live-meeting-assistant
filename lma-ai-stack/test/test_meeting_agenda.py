@@ -110,8 +110,10 @@ def test_the_resolver_uses_the_dedicated_template(resources: dict) -> None:
     resolver = resources["UpdateCallAgendaAppSyncResolver"]["Properties"]
     assert resolver["FieldName"] == "updateCallAgenda"
     assert resolver["TypeName"] == "Mutation"
-    assert resolver["RequestMappingTemplateS3Location"].endswith("updateCallAgenda.request.vtl")
-    assert resolver["ResponseMappingTemplateS3Location"].endswith("dDbPutCondition.response.vtl")
+    write_id = resolver["PipelineConfig"]["Functions"][-1]["Fn::GetAtt"].split(".")[0]
+    write = resources[write_id]["Properties"]
+    assert write["RequestMappingTemplateS3Location"].endswith("updateCallAgenda.request.vtl")
+    assert write["ResponseMappingTemplateS3Location"].endswith("dDbPutCondition.response.vtl")
 
 
 def test_a_signed_in_caller_is_held_to_the_meetings_access_rule(agenda_vtl: str) -> None:
@@ -119,7 +121,7 @@ def test_a_signed_in_caller_is_held_to_the_meetings_access_rule(agenda_vtl: str)
     summary write states it, so the two cannot give different answers about one
     meeting."""
     summary = SUMMARY_VTL.read_text(encoding="utf-8")
-    clause = "#Owner = :caller OR contains(#SharedWith, :caller)"
+    clause = "## BEGIN SharedWith write condition"
     detection = '$context.identity.userArn.contains(":assumed-role/")'
     for source in (agenda_vtl, summary):
         assert clause in source

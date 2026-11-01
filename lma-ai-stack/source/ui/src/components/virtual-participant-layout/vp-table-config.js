@@ -25,6 +25,7 @@ import { Link as RouterLink } from 'react-router-dom';
 
 import { TableHeader } from '../common/table';
 import { exportToExcel } from '../common/download-func';
+import { sharedWithEntries } from '../common/shared-with';
 import { deleteVirtualParticipants } from '../../graphql/queries/virtualParticipantQueries';
 
 const client = generateClient();
@@ -77,13 +78,9 @@ const renderMeetingNameCell = (item) => (
 
 // Render function for shared with cell with smart truncation
 const renderSharedWithCell = (item) => {
-  const sharedWith = item.SharedWith || '';
-  if (!sharedWith) return '-';
-
-  const emails = sharedWith
-    .split(',')
-    .map((email) => email.trim())
-    .filter((email) => email);
+  // A row read from the list carries "a,b"; one updated by a subscription
+  // message carries "[a, b]". Both read as the same entries.
+  const emails = sharedWithEntries(item.SharedWith);
 
   if (emails.length === 0) return '-';
   if (emails.length === 1) return emails[0];
