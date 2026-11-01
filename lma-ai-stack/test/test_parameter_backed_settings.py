@@ -409,6 +409,65 @@ def test_the_transcriber_task_can_read_the_configuration_table() -> None:
     assert "dynamodb:GetItem" in rendered and "${ConfigurationTableName}" in rendered
 
 
+def _module_strings(path: Path) -> Dict[str, str]:
+    """Module-level NAME = "text" assignments of a source file."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    found = {}
+    for node in tree.body:
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            found[node.targets[0].id] = node.value.value
+    return found
+
+
+def _named_defaults() -> List[Any]:
+    """(file, parameter, the fallback a read_setting call names, its value)."""
+    found = []
+    sources = _sources(AI_FUNCTIONS) + _sources(MEETING_ASSIST_SRC)
+    for path in sources:
+        strings = _module_strings(path)
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            keywords = {kw.arg: kw.value for kw in node.keywords}
+            default = keywords.get("default")
+            if name != "read_setting" or not isinstance(default, ast.Name) or default.id not in strings:
+                continue
+            entry = _by_setting()[(_section_name(node.args[0]), node.args[1].value)]
+            found.append(
+                pytest.param(
+                    entry.parameter,
+                    strings[default.id],
+                    id=f"{path.parent.name}/{path.name}:{default.id}",
+                )
+            )
+    return found
+
+
+NAMED_DEFAULTS = _named_defaults()
+
+
+def test_the_named_fallbacks_are_found() -> None:
+    assert len(NAMED_DEFAULTS) >= 6
+
+
+@pytest.mark.parametrize("parameter, fallback", NAMED_DEFAULTS)
+def test_a_readers_last_resort_is_the_parameters_own_default(parameter, fallback) -> None:
+    """A reader that finds neither the page's value nor its variable uses this.
+
+    It is a copy of the template's default, so it is pinned to it: a release that
+    changes the default and not the copy would leave a reader on the old one.
+    """
+    assert fallback == MAIN["Parameters"][parameter]["Default"]
+
+
 @pytest.mark.parametrize("entry", ENTRIES, ids=_ids)
 def test_the_configuration_guide_names_the_parameter_a_default(entry) -> None:
     guide = (REPO_ROOT / "docs" / "configuration-guide.md").read_text(encoding="utf-8")

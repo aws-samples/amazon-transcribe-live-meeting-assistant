@@ -185,7 +185,7 @@ const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 let store: ConfigurationStore | undefined;
 
 /** Exposed for tests: forget the store. */
-export const resetSessionSettingsCache = (): void => {
+export const resetSessionSettingsStore = (): void => {
     store = undefined;
 };
 
@@ -194,7 +194,7 @@ export const useSessionSettingsStore = (replacement: ConfigurationStore): void =
     store = replacement;
 };
 
-/** The settings the deploy-time combination check covers; see transcribeOptionsProblem. */
+/** The settings the deploy-time combination check covers; see transcriptionProblem. */
 const COMBINED_SETTINGS = [
     'languageCode',
     'languageOptions',

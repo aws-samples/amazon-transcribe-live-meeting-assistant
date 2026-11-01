@@ -10,8 +10,8 @@
  * - The Amazon Transcribe and Meeting Recording sections decide; this task's
  *   environment variables, which hold the stack parameters' values, answer for a
  *   setting the sections do not hold, and when the table cannot be read.
- * - A failed read never stops a meeting, and is not retried for every meeting
- *   until the tier's TTL has passed.
+ * - A failed read never stops a meeting: the meeting uses the environment's
+ *   values, and the next meeting reads again.
  * - The options are laid onto the streaming request exactly as the environment
  *   variables used to be: language or identification, redaction only for the
  *   languages Amazon Transcribe redacts, vocabulary and language model when named.
@@ -26,7 +26,7 @@ import type { ConfigurationStore } from '../config/configuration-store';
 import {
     getSessionSettings,
     isRedactionApplied,
-    resetSessionSettingsCache,
+    resetSessionSettingsStore,
     sessionSettingsFrom,
     transcriptionProblem,
     useSessionSettingsStore,
@@ -83,7 +83,7 @@ const fakeStore = (sections: Record<string, Record<string, unknown>> | 'fail') =
 
 test('the environment answers when there is no configuration table', async () => {
     withEnv();
-    resetSessionSettingsCache();
+    resetSessionSettingsStore();
     delete process.env['CONFIGURATION_TABLE_NAME'];
     const settings = await getSessionSettings(log);
     assert.equal(settings.transcription.languageCode, 'en-GB');
