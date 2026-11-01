@@ -20,6 +20,14 @@ describe('sharedWithEntries', () => {
     expect(sharedWithEntries(['a@example.com', ' b@example.com ', ''])).toEqual(['a@example.com', 'b@example.com']);
   });
 
+  it('reads "[", "]" and "," as separators only', () => {
+    expect(sharedWithEntries('[x], b@example.com]')).toEqual(['x', 'b@example.com']);
+    expect(sharedWithEntries('a@example.com][b@example.com')).toEqual(['a@example.com', 'b@example.com']);
+    expect(sharedWithEntries(['a@example.com, b@example.com', '[c@example.com]', 'd@example.com'])).toEqual([
+      'd@example.com',
+    ]);
+  });
+
   it('reads nothing from an empty or absent value', () => {
     expect(sharedWithEntries('')).toEqual([]);
     expect(sharedWithEntries('[]')).toEqual([]);

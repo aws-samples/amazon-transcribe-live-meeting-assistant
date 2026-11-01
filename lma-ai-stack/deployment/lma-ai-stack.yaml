@@ -6633,6 +6633,13 @@ Resources:
       # This VTL uses a local sub so it needs to be kept here
       RequestMappingTemplate: !Sub |-
         #set( $PK = "c#${!ctx.args.input.CallId}" )
+        ## "[", "]" and "," only ever separate SharedWith entries, so a
+        ## recipient containing one is refused rather than stored.
+        #foreach( $recipient in $util.defaultIfNull($ctx.args.input.SharedWith, []) )
+          #if( $recipient && ($recipient.contains("[") || $recipient.contains("]") || $recipient.contains(",")) )
+            $util.error("A SharedWith entry cannot contain '[', ']' or ','", "BadRequest")
+          #end
+        #end
         {
           "version": "2018-05-29",
           "operation": "TransactWriteItems",
@@ -7504,6 +7511,50 @@ Resources:
       FieldName: onUpdateVirtualParticipant
       DataSourceName: !GetAtt SubscriptionDataSource.Name
       CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  # Filtered as onUpdateVirtualParticipant is: a new Virtual Participant reaches
+  # its Owner, the users it is shared with, and Admins.
+  OnCreateVirtualParticipantAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onCreateVirtualParticipant
+      DataSourceName: !GetAtt SubscriptionDataSource.Name
+      CodeS3Location: ../source/appsync/subscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  # The chat messages carry no Owner or SharedWith, so these two subscriptions
+  # read the meeting when they are made and are answered to the people getCall
+  # answers; see chatSubscription.js.
+  OnSendChatMessageAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onSendChatMessage
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/chatSubscription.js
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+
+  OnAddChatTokenAppSyncResolver:
+    Type: AWS::AppSync::Resolver
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      TypeName: Subscription
+      FieldName: onAddChatToken
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/chatSubscription.js
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
@@ -8438,6 +8489,28 @@ Resources:
           $util.qr( $conditionNames.put("#conditionEndReason", "endReason") )
           $util.qr( $conditions.add("attribute_not_exists(#conditionEndReason)") )
         #end
+
+        ## BEGIN Virtual Participant owner condition -- one text in every template
+        ## that has it; test_shared_with_access.py holds the copies to it.
+        ## A signed-in caller who is not an Admin may change a Virtual Participant
+        ## only as its Owner. The rule is added to the write's DynamoDB condition,
+        ## so it is judged on the row as it is when the write happens. Admins, and
+        ## backend roles with IAM credentials (the Virtual Participant task and
+        ## the Lambdas that launch and manage it), are not held to it; a backend
+        ## role is detected as getCall.response.vtl detects it.
+        #set( $vpCallerRestricted = true )
+        #if( $ctx.identity.userArn && $ctx.identity.userArn.contains(":assumed-role/") )
+          #set( $vpCallerRestricted = false )
+        #elseif( $ctx.identity.groups && $ctx.identity.groups.contains("Admin") )
+          #set( $vpCallerRestricted = false )
+        #end
+        #if( $vpCallerRestricted )
+          $util.qr( $conditionNames.put("#conditionOwner", "Owner") )
+          $util.qr( $conditionValues.put(":conditionCaller", $util.dynamodb.toDynamoDB($util.defaultIfNull($ctx.identity.username, ""))) )
+          $util.qr( $conditions.add("#conditionOwner = :conditionCaller") )
+        #end
+        $util.qr( $ctx.stash.put("vpCallerRestricted", $vpCallerRestricted) )
+        ## END Virtual Participant owner condition
 
         #set( $conditionExpression = "" )
         #foreach( $condition in $conditions )
@@ -9874,6 +9947,10 @@ Resources:
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/deleteVirtualParticipants.js
 
+  # Sharing a Virtual Participant is for its owner and Admins, and for backend
+  # roles with IAM credentials; the rule is a condition on the write (see the
+  # "Virtual Participant owner condition" block), so it is judged on the row as
+  # it is when the write happens.
   ShareVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -9883,6 +9960,63 @@ Resources:
       FieldName: shareVirtualParticipant
       DataSourceName: !GetAtt VirtualParticipantDataSource.Name
       RequestMappingTemplate: |
+        ## The row must exist: UpdateItem would otherwise create one.
+        #set( $conditions = ["attribute_exists(#conditionId)"] )
+        #set( $conditionNames = { "#conditionId": "id" } )
+        #set( $conditionValues = {} )
+        ## BEGIN Virtual Participant owner condition -- one text in every template
+        ## that has it; test_shared_with_access.py holds the copies to it.
+        ## A signed-in caller who is not an Admin may change a Virtual Participant
+        ## only as its Owner. The rule is added to the write's DynamoDB condition,
+        ## so it is judged on the row as it is when the write happens. Admins, and
+        ## backend roles with IAM credentials (the Virtual Participant task and
+        ## the Lambdas that launch and manage it), are not held to it; a backend
+        ## role is detected as getCall.response.vtl detects it.
+        #set( $vpCallerRestricted = true )
+        #if( $ctx.identity.userArn && $ctx.identity.userArn.contains(":assumed-role/") )
+          #set( $vpCallerRestricted = false )
+        #elseif( $ctx.identity.groups && $ctx.identity.groups.contains("Admin") )
+          #set( $vpCallerRestricted = false )
+        #end
+        #if( $vpCallerRestricted )
+          $util.qr( $conditionNames.put("#conditionOwner", "Owner") )
+          $util.qr( $conditionValues.put(":conditionCaller", $util.dynamodb.toDynamoDB($util.defaultIfNull($ctx.identity.username, ""))) )
+          $util.qr( $conditions.add("#conditionOwner = :conditionCaller") )
+        #end
+        $util.qr( $ctx.stash.put("vpCallerRestricted", $vpCallerRestricted) )
+        ## END Virtual Participant owner condition
+
+        ## BEGIN SharedWith entries written -- one text in every template that
+        ## has it; test_shared_with_access.py holds the copies to it.
+        ## The recipients as stored: trimmed, without empty or repeated entries,
+        ## joined by ",". "[", "]" and "," only ever separate SharedWith entries,
+        ## so a recipient containing one is refused rather than stored.
+        #set( $sharedWithWritten = [] )
+        #foreach( $recipient in $util.defaultIfNull($ctx.args.input.SharedWith, []) )
+          #set( $recipientText = $util.defaultIfNull($recipient, "").trim() )
+          #if( $recipientText.contains("[") || $recipientText.contains("]") || $recipientText.contains(",") )
+            $util.error("A SharedWith entry cannot contain '[', ']' or ','", "BadRequest")
+          #end
+          #if( !$recipientText.isEmpty() && !$sharedWithWritten.contains($recipientText) )
+            $util.qr( $sharedWithWritten.add($recipientText) )
+          #end
+        #end
+        ## END SharedWith entries written
+        #set( $sharedWithValue = "" )
+        #foreach( $recipient in $sharedWithWritten )
+          #set( $sharedWithValue = "${sharedWithValue}${recipient}" )
+          #if( $foreach.hasNext )
+            #set( $sharedWithValue = "${sharedWithValue}," )
+          #end
+        #end
+
+        #set( $conditionExpression = "" )
+        #foreach( $condition in $conditions )
+          #set( $conditionExpression = "${conditionExpression}${condition}" )
+          #if( $foreach.hasNext )
+            #set( $conditionExpression = "${conditionExpression} AND " )
+          #end
+        #end
         {
           "version": "2018-05-29",
           "operation": "UpdateItem",
@@ -9890,22 +10024,38 @@ Resources:
             "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
           },
           "update": {
-            "expression": "SET SharedWith = :val",
+            "expression": "SET #SharedWith = :val",
+            "expressionNames": { "#SharedWith": "SharedWith" },
             "expressionValues": {
-              ":val": $util.dynamodb.toDynamoDBJson($util.str.join($ctx.args.input.SharedWith, ","))
+              ":val": $util.dynamodb.toDynamoDBJson($sharedWithValue)
             }
+          },
+          "condition": {
+            "expression": "$conditionExpression",
+            "expressionNames": $utils.toJson($conditionNames)
+          #if( !$conditionValues.isEmpty() )
+            ,"expressionValues": $utils.toJson($conditionValues)
+          #end
           }
         }
       ResponseMappingTemplate: |
-        #if($ctx.error)
+        #if( $ctx.error )
+          #if( $ctx.error.type == "DynamoDB:ConditionalCheckFailedException" )
+            #if( $ctx.stash.vpCallerRestricted )
+              $util.error("User $ctx.identity.username is not authorized to change Virtual Participant $ctx.args.input.id", "AuthorizationError")
+            #end
+            $util.error("Virtual Participant $ctx.args.input.id was not found", "NotFound")
+          #end
           $util.error($ctx.error.message, $ctx.error.type)
         #end
+        ## The row as written: its own Owner, and SharedWith as stored.
         $util.toJson({
-          "id": $ctx.args.input.id,
-          "Owner": $ctx.args.input.Owner,
-          "SharedWith": $util.str.join($ctx.args.input.SharedWith, ",")
+          "id": $ctx.result.id,
+          "Owner": $ctx.result.Owner,
+          "SharedWith": $ctx.result.SharedWith
         })
 
+  # Same rule as shareVirtualParticipant.
   UnshareVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -9915,6 +10065,39 @@ Resources:
       FieldName: unshareVirtualParticipant
       DataSourceName: !GetAtt VirtualParticipantDataSource.Name
       RequestMappingTemplate: |
+        ## The row must exist: UpdateItem would otherwise create one.
+        #set( $conditions = ["attribute_exists(#conditionId)"] )
+        #set( $conditionNames = { "#conditionId": "id" } )
+        #set( $conditionValues = {} )
+        ## BEGIN Virtual Participant owner condition -- one text in every template
+        ## that has it; test_shared_with_access.py holds the copies to it.
+        ## A signed-in caller who is not an Admin may change a Virtual Participant
+        ## only as its Owner. The rule is added to the write's DynamoDB condition,
+        ## so it is judged on the row as it is when the write happens. Admins, and
+        ## backend roles with IAM credentials (the Virtual Participant task and
+        ## the Lambdas that launch and manage it), are not held to it; a backend
+        ## role is detected as getCall.response.vtl detects it.
+        #set( $vpCallerRestricted = true )
+        #if( $ctx.identity.userArn && $ctx.identity.userArn.contains(":assumed-role/") )
+          #set( $vpCallerRestricted = false )
+        #elseif( $ctx.identity.groups && $ctx.identity.groups.contains("Admin") )
+          #set( $vpCallerRestricted = false )
+        #end
+        #if( $vpCallerRestricted )
+          $util.qr( $conditionNames.put("#conditionOwner", "Owner") )
+          $util.qr( $conditionValues.put(":conditionCaller", $util.dynamodb.toDynamoDB($util.defaultIfNull($ctx.identity.username, ""))) )
+          $util.qr( $conditions.add("#conditionOwner = :conditionCaller") )
+        #end
+        $util.qr( $ctx.stash.put("vpCallerRestricted", $vpCallerRestricted) )
+        ## END Virtual Participant owner condition
+
+        #set( $conditionExpression = "" )
+        #foreach( $condition in $conditions )
+          #set( $conditionExpression = "${conditionExpression}${condition}" )
+          #if( $foreach.hasNext )
+            #set( $conditionExpression = "${conditionExpression} AND " )
+          #end
+        #end
         {
           "version": "2018-05-29",
           "operation": "UpdateItem",
@@ -9922,14 +10105,28 @@ Resources:
             "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
           },
           "update": {
-            "expression": "SET SharedWith = :val",
+            "expression": "SET #SharedWith = :val",
+            "expressionNames": { "#SharedWith": "SharedWith" },
             "expressionValues": {
               ":val": $util.dynamodb.toDynamoDBJson("")
             }
+          },
+          "condition": {
+            "expression": "$conditionExpression",
+            "expressionNames": $utils.toJson($conditionNames)
+          #if( !$conditionValues.isEmpty() )
+            ,"expressionValues": $utils.toJson($conditionValues)
+          #end
           }
         }
       ResponseMappingTemplate: |
-        #if($ctx.error)
+        #if( $ctx.error )
+          #if( $ctx.error.type == "DynamoDB:ConditionalCheckFailedException" )
+            #if( $ctx.stash.vpCallerRestricted )
+              $util.error("User $ctx.identity.username is not authorized to change Virtual Participant $ctx.args.input.id", "AuthorizationError")
+            #end
+            $util.error("Virtual Participant $ctx.args.input.id was not found", "NotFound")
+          #end
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         $util.toJson({

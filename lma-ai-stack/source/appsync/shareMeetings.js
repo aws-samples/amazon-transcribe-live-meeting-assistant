@@ -17,27 +17,34 @@ export function request(ctx) {
     };
 }
 
+// BEGIN sharedWithEntries -- one text in every resolver that has it;
+// test_shared_with_access.py holds the copies to it.
+// The entries of a SharedWith value, trimmed and non-empty, read as the
+// "SharedWith entries" block of the VTL templates reads them: from a list, a
+// comma-separated string and an "[a, b]" string. "[", "]" and "," only ever
+// separate entries: a string is split at each of them, and a list element that
+// contains one is not an entry.
+function sharedWithEntries(value) {
+    let entries = [];
+    if (Array.isArray(value)) {
+        entries = value.filter(
+            (entry) =>
+                typeof entry === 'string' && !['[', ']', ','].some((separator) => entry.includes(separator)),
+        );
+    } else if (typeof value === 'string') {
+        entries = value.split('[').join(',').split(']').join(',').split(',');
+    }
+    return entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+}
+// END sharedWithEntries
+
 // BEGIN publishedSharedWith -- one text in every resolver that has it;
 // test_shared_with_access.py holds the copies to it.
 // SharedWith as "[a, b]", the form the "SharedWith published" block of the VTL
-// templates gives it, so the filters in subscription.js see one shape. Reads a
-// list, a comma-separated string and an "[a, b]" string; a value with no
-// entries is returned as it is.
+// templates gives it, so the filters in subscription.js see one shape. A value
+// with no entries is returned as it is.
 function publishedSharedWith(value) {
-    let entries = [];
-    if (Array.isArray(value)) {
-        entries = value.filter((entry) => typeof entry === 'string');
-    } else if (typeof value === 'string') {
-        let text = value.trim();
-        if (text.startsWith('[')) {
-            text = text.slice(1);
-        }
-        if (text.endsWith(']')) {
-            text = text.slice(0, -1);
-        }
-        entries = text.split(',');
-    }
-    entries = entries.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+    const entries = sharedWithEntries(value);
     if (entries.length === 0) {
         return value;
     }

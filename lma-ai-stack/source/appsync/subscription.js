@@ -37,16 +37,21 @@ export function response(ctx) {
     // so the caller is an entry exactly when the value is "[caller]", or the
     // caller is followed by ", " at the start, or is between ", " and ", " or
     // ", " and "]". Entries are compared whole, as getCall compares them.
+    // "[", "]" and "," only ever separate entries -- the published form holds
+    // no entry containing one -- so a name containing one is matched as the
+    // Owner only.
     const { username } = ctx.identity;
-    const filter = {
-      or: [
-        { Owner: { eq: username } },
+    const rules = [{ Owner: { eq: username } }];
+    if (typeof username === 'string' && !['[', ']', ','].some((separator) => username.includes(separator))) {
+      rules.push(
         { SharedWith: { eq: `[${username}]` } },
         { SharedWith: { beginsWith: `[${username}, ` } },
         { SharedWith: { contains: `, ${username}, ` } },
         { SharedWith: { contains: `, ${username}]` } },
-      ]
-    };
+      );
+    }
+    const filter = { or: rules };
+    console.debug(`subscription filter: ${JSON.stringify(filter)}`);
     extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));
   }
   return null;
