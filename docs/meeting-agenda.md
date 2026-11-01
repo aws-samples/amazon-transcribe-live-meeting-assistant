@@ -62,7 +62,8 @@ saying who last changed it and when. A meeting with no agenda says so.
 editing, one item per line; **Save agenda** stores it. Editing is available
 while the meeting is running and after it has ended. Unlike the summary, which
 the end-of-meeting pipeline replaces when the meeting ends, a stored agenda is
-replaced only by somebody saving a new one.
+replaced only by somebody saving a new one or pressing **Derive agenda** (which
+asks first); the automatic derivation pass writes only while a meeting has none.
 
 ## Deriving an agenda from the transcript
 
@@ -109,8 +110,8 @@ undone by the next stack update. The **Derive agenda** button works either way.
 
 The button's request is answered within AppSync's 30-second limit in the usual
 case. If the model call takes longer, the panel says it is still reading the
-transcript; the pass finishes on its own, and an agenda it finds appears on the
-page without a reload.
+transcript; the pass usually finishes on its own, and an agenda it finds
+appears on the page without a reload.
 
 ## Agenda coverage in the summary
 

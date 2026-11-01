@@ -147,3 +147,11 @@ def test_the_stored_form_is_one_item_per_line():
     assert pure.has_agenda({"Agenda": " a "}) is True
     assert pure.has_agenda({"Agenda": " "}) is False
     assert pure.has_agenda(None) is False
+
+
+def test_overlapping_channels_read_in_start_order():
+    segments = [
+        {**seg(10, "Long turn."), "EndTime": 30},
+        {**seg(20, "Short one.", speaker="Bob", channel="CALLER"), "EndTime": 22},
+    ]
+    assert pure.build_transcript(segments) == "[00:10] Ann: Long turn.\n[00:20] Bob: Short one."

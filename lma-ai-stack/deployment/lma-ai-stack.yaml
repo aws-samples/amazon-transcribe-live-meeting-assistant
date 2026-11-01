@@ -4872,8 +4872,8 @@ Resources:
       # The on-demand pass answers an AppSync request, which AppSync abandons at
       # 30 seconds. The transcript bound in pure.py keeps the call short, but a
       # reasoning model or Bedrock retries can still outlast that; the function
-      # then finishes on its own, any agenda it finds arrives through
-      # onUpdateCall, and the Agenda panel says so.
+      # then usually finishes on its own within this timeout, any agenda it
+      # finds arrives through onUpdateCall, and the Agenda panel says so.
       Timeout: 60
       Environment:
         Variables:

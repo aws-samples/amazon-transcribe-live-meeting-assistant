@@ -65,7 +65,7 @@ def _seconds(value: Any) -> float:
 
 
 def build_transcript(segments: Iterable[Mapping[str, Any]]) -> str:
-    """Final speech segments in order, one "[MM:SS] Speaker: text" line each,
+    """Final speech segments in start order, one "[MM:SS] Speaker: text" line each,
     cut to MAX_TRANSCRIPT_CHARS from the end."""
     rows = []
     for segment in segments:
@@ -78,7 +78,9 @@ def build_transcript(segments: Iterable[Mapping[str, Any]]) -> str:
         rows.append(
             (_seconds(segment.get("EndTime")), start, segment.get("Speaker") or "Unknown", text)
         )
-    rows.sort(key=lambda row: (row[0], row[1]))
+    # By start time, the time each line shows, so the times read forwards where
+    # two channels overlap.
+    rows.sort(key=lambda row: (row[1], row[0]))
     transcript = "\n".join(
         f"{format_elapsed(start)} {speaker}: {text}" for _end, start, speaker, text in rows
     )
