@@ -39,8 +39,8 @@ stack parameter; see
 | Transcription Engine | Virtual Participant voice separation, which works on Amazon Transcribe, and, where the experimental on-demand speech engine is deployed, which engine transcribes streaming meetings and which transcribes Virtual Participants. Without that engine only the voice separation switch is shown | To meetings that start within 30 seconds of the save or later |
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with | To estimates drawn within about five minutes of the save |
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames | To each summary, answer or key frame started about five minutes after the save or later |
-| Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start within 30 seconds of the save or later |
-| Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start within 30 seconds of the save or later |
+| Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start after the save |
+| Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
 one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
@@ -107,7 +107,13 @@ Some things differ from setting these with the parameters:
   vocabulary or language model. The page cannot check that across settings, so
   the WebSocket transcriber does as each meeting starts: options saved on the
   page that do not fit together are logged, and the meeting is transcribed with
-  the deployment's parameter values until they are corrected.
+  the deployment's parameter values for the language, language options,
+  preferred language, custom vocabulary and custom language model until they are
+  corrected. Redaction and recording keep the values saved on the page.
+- If the WebSocket transcriber cannot read the configuration when a meeting
+  starts, that meeting uses the stack parameters' values for all of these
+  settings, redaction and recording included, and the next meeting reads the
+  configuration again.
 - Nothing checks that a custom vocabulary or language model exists. Amazon
   Transcribe checks when a meeting starts, and a meeting whose vocabulary or
   model it does not recognise is not transcribed, so make sure the name exists

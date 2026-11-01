@@ -44,8 +44,8 @@ const TIERS = {
   asr_engine: 'short',
   call_pricing: 'standard',
   language_models: 'standard',
-  transcription: 'short',
-  recording: 'short',
+  transcription: 'immediate',
+  recording: 'immediate',
 };
 const SECTIONS = readdirSync(SCHEMA_DIR)
   .filter((name) => name.endsWith('.json'))

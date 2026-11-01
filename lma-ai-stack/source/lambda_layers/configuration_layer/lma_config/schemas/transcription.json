@@ -4,7 +4,7 @@
   "title": "Amazon Transcribe",
   "description": "The Amazon Transcribe options of meetings streamed to the WebSocket transcriber: the Stream Audio page, the browser extension and the desktop app. The defaults are the values the stack was deployed with; a value set here is used instead until it is reset. Amazon Transcribe checks these options when a meeting starts, and a meeting whose options it refuses is not transcribed: a custom vocabulary or language model must already exist in this account and region, and language identification cannot be combined with a custom language model or with redaction.",
   "sectionLabel": "Amazon Transcribe",
-  "appliesText": "A saved change applies to streaming meetings that start at least 30 seconds after the save; a meeting already running keeps the options it started with.",
+  "appliesText": "A saved change applies to streaming meetings that start after the save; a meeting already running keeps the options it started with.",
   "order": 7,
   "collapsible": true,
   "defaultExpanded": false,
@@ -77,7 +77,9 @@
       "type": "string",
       "title": "Redaction type",
       "description": "Default: the TranscribeContentRedactionType stack parameter.",
-      "enum": ["PII"],
+      "enum": [
+        "PII"
+      ],
       "hidden": true
     },
     "piiEntityTypes": {
@@ -85,7 +87,10 @@
       "type": "string",
       "title": "Entity types to redact",
       "description": "Comma-separated Amazon Transcribe PII entity types, such as NAME,EMAIL,PHONE. Default: the TranscribePiiEntityTypes stack parameter.",
-      "dependsOn": { "field": "contentRedactionEnabled", "value": true },
+      "dependsOn": {
+        "field": "contentRedactionEnabled",
+        "value": true
+      },
       "maxLength": 512,
       "pattern": "^([A-Z_]+( *, *[A-Z_]+)*)?$"
     },

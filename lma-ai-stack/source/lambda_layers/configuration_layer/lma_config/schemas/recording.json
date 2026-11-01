@@ -4,7 +4,7 @@
   "title": "Meeting recording",
   "description": "Whether a meeting's audio is recorded when the client that started it does not say. The default is the value the stack was deployed with; a value set here is used instead until it is reset.",
   "sectionLabel": "Meeting Recording",
-  "appliesText": "A saved change applies to streaming meetings that start, or end, at least 30 seconds after the save.",
+  "appliesText": "A saved change applies to streaming meetings that start after the save.",
   "order": 8,
   "collapsible": true,
   "defaultExpanded": false,

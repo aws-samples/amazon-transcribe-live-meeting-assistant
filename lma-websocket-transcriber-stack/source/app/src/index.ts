@@ -443,9 +443,12 @@ const onTextMessage = async (
         callMetaData.activeSpeaker =
             callMetaData.activeSpeaker ?? callMetaData?.fromNumber ?? 'unknown';
 
+        // Once per meeting: the engine paths below and every Transcribe
+        // reconnect read these from the call rather than again.
+        const sessionSettings = await getSessionSettings(server.log);
         callMetaData.shouldRecordCall = resolveShouldRecordCall(
             callMetaData.shouldRecordCall,
-            (await getSessionSettings(server.log)).recording.recordAudio
+            sessionSettings.recording.recordAudio
         );
 
         callMetaData.agentId = callMetaData.agentId || randomUUID();
@@ -465,6 +468,7 @@ const onTextMessage = async (
         const highWaterMarkSize = (callMetaData.samplingRate / 10) * 2 * 2;
         const audioInputStream = new BlockStream({ size: highWaterMarkSize });
         const socketCallMap: SocketCallData = {
+            sessionSettings,
             callMetadata: {
                 callId: callMetaData.callId,
                 callEvent: callMetaData.callEvent,
@@ -608,7 +612,7 @@ const onTextMessage = async (
         callMetaData.shouldRecordCall = resolveShouldRecordCall(
             callMetaData.shouldRecordCall,
             socketData.callMetadata.shouldRecordCall ??
-                (await getSessionSettings(server.log)).recording.recordAudio
+                (socketData.sessionSettings ?? (await getSessionSettings(server.log))).recording.recordAudio
         );
         await endCall(ws, socketData, callMetaData);
     }

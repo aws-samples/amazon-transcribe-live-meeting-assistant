@@ -220,8 +220,11 @@ Parameters:
   # the configuration seeder can write them into the baseline as the defaults
   # of the Amazon Transcribe and Meeting Recording sections. lma-main.yaml
   # validates them. Empty, as a standalone deployment of this stack leaves
-  # them, fails the section's schema where a value is required and is not
-  # written; the transcriber then uses its own environment variables.
+  # them, fails the section's schema for the list and switch settings and is not
+  # written, so the transcriber uses its own environment variables for those.
+  # For the language options, entity types, custom vocabulary and custom
+  # language model, empty is a valid value ("none"): it is written, and takes
+  # precedence over the transcriber's variable.
   TranscribeLanguageCode:
     Type: String
     Default: ""

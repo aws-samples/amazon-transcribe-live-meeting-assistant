@@ -610,7 +610,7 @@ Console label: *Content Redaction Type for Transcription*
 
 - **Default:** `PII`
 - **Allowed values:** `PII`
-- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Redaction type**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.
+- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Redaction type (not shown on the page)**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.
 
 Type of content redaction from Amazon Transcribe transcription output. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
 

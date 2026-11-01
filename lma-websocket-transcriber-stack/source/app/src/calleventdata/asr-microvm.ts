@@ -833,7 +833,7 @@ export const startMicrovmAsr = async (
     // microphone" is honoured for real rather than by discarding half the labels.
     // The deployment default beneath the client's choice is the Amazon Transcribe
     // section's speaker-partitioning setting, read as Amazon Transcribe reads it.
-    const { transcription } = await getSessionSettings(server.log);
+    const { transcription } = socketData.sessionSettings ?? (await getSessionSettings(server.log));
     const settings = diarizationSettingsFor(callMetadata, transcription.showSpeakerLabel);
     // Only the person in the meeting knows how many people share their microphone,
     // so the client's count is the only cap; blank means discover.

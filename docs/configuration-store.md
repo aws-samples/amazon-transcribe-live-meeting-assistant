@@ -186,8 +186,8 @@ Today's sections and their tiers:
 | `asr_engine` | `short` | Read by the WebSocket transcriber at the start of each streaming meeting; 30 seconds keeps a burst of meetings starting together from each doing its own reads, which is the policy that reader has always had. The Virtual Participant reads through the `getAsrConfig` resolver, which caches nothing |
 | `chat_buttons` | `immediate` | Read record by record through the chat panel's resolver, which reads directly and consistently; the Edit Chat Buttons dialog shows the saved buttons straight after a save. The browser holds what it read for the life of the chat panel, as it always has |
 | `call_pricing` | `standard` | Read whenever a meeting's cost estimate is drawn; an estimate priced a few minutes after a price change at the previous price is what [Meeting Cost Estimate](meeting-cost-estimate.md) says happens |
-| `transcription` | `short` | Read by the WebSocket transcriber as each streaming meeting starts, beside the `asr_engine` switches and on the same tier, and kept for the meeting's every Transcribe reconnect |
-| `recording` | `short` | Read by the same reader at the start and end of each streaming meeting |
+| `transcription` | `immediate` | Read by the WebSocket transcriber once as each streaming meeting starts, and kept for the meeting's every Transcribe reconnect. Redaction is privacy-bearing, so a save has to reach the very next meeting |
+| `recording` | `immediate` | Read with `transcription`, for the same reason: whether a meeting is recorded is privacy-bearing |
 | `language_models` | `standard` | Read once per summary, answer, agenda pass, naming pass, knowledge-base query or key frame; nobody is waiting on a model change, and the summariser's **Regenerate** drops the cache before reading, as for the prompts |
 
 ### Resolving a read
@@ -1118,9 +1118,11 @@ Transcribe. The schema checks each option alone; the transcriber also makes the
 cross-setting checks the stack makes of the parameters at deploy time (language
 identification with language options, one dialect per language, a preferred
 language among them, no custom vocabulary or language model), and when saved
-options fail one, it logs which and transcribes the meeting with the task's own
-values, which passed that check when the stack deployed. Whether a named custom
-vocabulary or language model exists is not checked.
+options fail one, it logs which and takes the options those checks cover from
+the task's own values, which passed them when the stack deployed; redaction and
+recording keep the saved values. When the table cannot be read, the meeting uses
+the task's values for everything, and the next meeting reads again. Whether a
+named custom vocabulary or language model exists is not checked.
 
 A Virtual Participant reads the parameters' values, as before.
 

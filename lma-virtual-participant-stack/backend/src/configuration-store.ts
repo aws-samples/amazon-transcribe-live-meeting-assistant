@@ -243,22 +243,22 @@ export const ASR_ENGINE = declareSection({
 });
 
 /**
- * The Amazon Transcribe options of a streaming session, read by the transcriber
- * at the start of each meeting. Short, as in the Python half, and for the same
- * reason as the ASR switches read beside them.
+ * The Amazon Transcribe options of a meeting, read by the transcriber at the
+ * start of each one. Immediate, as in the Python half: redaction is
+ * privacy-bearing, so a saved change applies to the very next meeting.
  */
 export const TRANSCRIPTION = declareSection({
     name: 'transcription',
-    cacheTier: 'short',
+    cacheTier: 'immediate',
     description:
         'Amazon Transcribe options for streaming meetings: language or language identification, ' +
         'content redaction, custom vocabulary and language model, and the default for speaker partitioning.',
 });
 
-/** Whether a meeting's audio is recorded when its client does not say. Short, as in the Python half. */
+/** Whether a meeting's audio is recorded when its client does not say. Immediate, as in the Python half. */
 export const RECORDING = declareSection({
     name: 'recording',
-    cacheTier: 'short',
+    cacheTier: 'immediate',
     description: 'Whether the audio of a meeting is recorded when its client does not say.',
 });
 

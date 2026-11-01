@@ -15,10 +15,10 @@
  * the task still carries is what a setting falls back to when the configuration
  * does not hold it or cannot be read.
  *
- * Read once per meeting, when it starts, on the sections' `short` tier: a burst
- * of meetings starting together shares one read, and a change reaches every
- * meeting that starts 30 seconds after it was saved. A meeting keeps what it
- * started with across every Transcribe reconnect.
+ * Read once per meeting, when it starts, on the sections' `immediate` tier:
+ * redaction and recording are privacy-bearing, so every meeting reads them
+ * afresh and a saved change applies to the very next one. A meeting keeps what
+ * it started with across every Transcribe reconnect.
  */
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { FastifyBaseLogger } from 'fastify';
@@ -27,7 +27,6 @@ import {
     ConfigurationStore,
     RECORDING,
     SettingType,
-    TIER_TTL_MS,
     TRANSCRIPTION,
     parameterBackedSetting,
 } from '../config/configuration-store';
@@ -182,63 +181,76 @@ export const isRedactionApplied = (settings: TranscriptionSettings): boolean =>
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 
-/** One per process: the store's cache lives on the instance. */
+/** One per process. Both sections are on the immediate tier, so it caches nothing. */
 let store: ConfigurationStore | undefined;
-/** When a read last failed: the environment answers until the tier's TTL has passed. */
-let failedAt: number | undefined;
 
-/** Exposed for tests: forget the store and any failure. */
+/** Exposed for tests: forget the store. */
 export const resetSessionSettingsCache = (): void => {
     store = undefined;
-    failedAt = undefined;
 };
 
 /** Exposed for tests: read through this store instead of building one. */
 export const useSessionSettingsStore = (replacement: ConfigurationStore): void => {
     store = replacement;
-    failedAt = undefined;
 };
+
+/** The settings the deploy-time combination check covers; see transcribeOptionsProblem. */
+const COMBINED_SETTINGS = [
+    'languageCode',
+    'languageOptions',
+    'preferredLanguage',
+    'customVocabularyName',
+    'customLanguageModelName',
+] as const;
 
 /**
  * The settings for a meeting that is starting.
  *
- * Never throws. A configuration table that cannot be read is logged and the
- * environment answers, and keeps answering for the tier's TTL so that a broken
- * table does not add a failed read to the start of every meeting: losing a
- * meeting's transcript over a settings lookup would be far worse than starting it
- * with the deployment's own values.
+ * Read once per meeting by its caller and kept for the meeting. Both sections
+ * are on the immediate tier, because redaction and recording are privacy-bearing:
+ * every meeting reads them afresh, and a save applies to the very next one.
+ *
+ * Never throws. A configuration table that cannot be read is logged and this
+ * task's environment answers -- the stack parameters' values, redaction and
+ * recording included -- because losing a meeting's transcript over a settings
+ * lookup would be far worse than starting it with the deployment's own values.
+ * The next meeting reads again.
+ *
+ * When the saved options fail the deploy-time combination checks, only the
+ * options those checks cover give way to the environment's, which passed them
+ * when the stack deployed; the page's redaction choices and the rest stand.
  */
 export const getSessionSettings = async (log: FastifyBaseLogger): Promise<SessionSettings> => {
     const tableName = process.env['CONFIGURATION_TABLE_NAME'] || '';
     if (!tableName && !store) {
         return sessionSettingsFrom({}, {});
     }
-    if (failedAt !== undefined && Date.now() - failedAt < TIER_TTL_MS[TRANSCRIPTION.cacheTier]) {
-        return sessionSettingsFrom({}, {});
-    }
+    let transcriptionValues: Record<string, unknown>;
+    let recordingValues: Record<string, unknown>;
     try {
         store = store ?? new ConfigurationStore({ tableName, client: new DynamoDBClient({ region: AWS_REGION }) });
-        const transcription = await store.getSection<Record<string, unknown>>(TRANSCRIPTION);
-        const recording = await store.getSection<Record<string, unknown>>(RECORDING);
-        failedAt = undefined;
-        const settings = sessionSettingsFrom(transcription.values, recording.values);
-        const problem = transcriptionProblem(settings.transcription);
-        if (problem) {
-            // The deployment's own values passed these checks when it deployed,
-            // so a meeting is transcribed with them rather than not at all.
-            log.warn(
-                `[SETTINGS]: the Amazon Transcribe options saved on the Configuration page cannot be used: ${problem}. ` +
-                    'Using the stack parameter values of this deployment until they are corrected.'
-            );
-            return { ...settings, transcription: sessionSettingsFrom({}, {}).transcription };
-        }
-        return settings;
+        transcriptionValues = (await store.getSection<Record<string, unknown>>(TRANSCRIPTION)).values;
+        recordingValues = (await store.getSection<Record<string, unknown>>(RECORDING)).values;
     } catch (error) {
         log.warn(
             '[SETTINGS]: could not read the Amazon Transcribe and recording settings from the configuration ' +
-                `table; using this task's environment: ${normalizeErrorForLogging(error)}`
+                `table; using the stack parameter values of this task, redaction and recording included: ${normalizeErrorForLogging(error)}`
         );
-        failedAt = Date.now();
         return sessionSettingsFrom({}, {});
     }
+    const settings = sessionSettingsFrom(transcriptionValues, recordingValues);
+    const problem = transcriptionProblem(settings.transcription);
+    if (!problem) {
+        return settings;
+    }
+    log.warn(
+        `[SETTINGS]: the Amazon Transcribe options saved on the Configuration page cannot be used: ${problem}. ` +
+            'Using the stack parameter values of this deployment for the language, language options, preferred ' +
+            'language, custom vocabulary and custom language model until they are corrected.'
+    );
+    const withoutCombined = { ...transcriptionValues };
+    for (const name of COMBINED_SETTINGS) {
+        delete withoutCombined[name];
+    }
+    return sessionSettingsFrom(withoutCombined, recordingValues);
 };

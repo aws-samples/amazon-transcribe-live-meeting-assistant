@@ -127,7 +127,7 @@ test('with neither, a request still gets a language, a preference and a redactio
     assert.equal(settings.recording.recordAudio, false);
 });
 
-test('an unreadable table is the environment answer, and is not retried for every meeting', async () => {
+test('an unreadable table is the environment answer, and the next meeting reads again', async () => {
     withEnv();
     warnings.length = 0;
     const { store, reads } = fakeStore('fail');
@@ -136,8 +136,10 @@ test('an unreadable table is the environment answer, and is not retried for ever
     const second = await getSessionSettings(log);
     assert.equal(first.transcription.languageCode, 'en-GB');
     assert.equal(second.transcription.languageCode, 'en-GB');
-    assert.equal(reads.count, 1);
-    assert.equal(warnings.length, 1);
+    // Both sections are privacy-bearing and on the immediate tier: a failure is
+    // not remembered, so the first meeting after the table recovers reads it.
+    assert.equal(reads.count, 2);
+    assert.equal(warnings.length, 2);
 });
 
 test('redaction is applied only for the languages Amazon Transcribe redacts while streaming', () => {
@@ -221,17 +223,27 @@ test('options that cannot be used together are named, as the deploy-time check n
     );
 });
 
-test('saved options that cannot be used together give way to the deployment values', async () => {
+test('saved options that cannot be used together give way, but the page redaction stands', async () => {
     withEnv();
     warnings.length = 0;
     const { store } = fakeStore({
-        transcription: { languageCode: 'identify-language', languageOptions: '', customVocabularyName: '' },
+        transcription: {
+            languageCode: 'identify-language',
+            languageOptions: '',
+            customVocabularyName: '',
+            contentRedactionEnabled: true,
+            piiEntityTypes: 'SSN',
+        },
         recording: { recordAudio: false },
     });
     useSessionSettingsStore(store);
     const settings = await getSessionSettings(log);
+    // The options the combination check covers come from the deployment...
     assert.equal(settings.transcription.languageCode, 'en-GB');
-    // The recording setting is unaffected.
+    assert.equal(settings.transcription.customVocabularyName, 'env-vocabulary');
+    // ...and the page's redaction and recording choices are kept.
+    assert.equal(settings.transcription.contentRedactionEnabled, true);
+    assert.equal(settings.transcription.piiEntityTypes, 'SSN');
     assert.equal(settings.recording.recordAudio, false);
     assert.match(warnings.join('\n'), /cannot be used: identify-language needs language options/);
 });

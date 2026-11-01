@@ -388,7 +388,7 @@ export const startTranscribe = async (
     // options it started with across every reconnect, so a change saved on the
     // Configuration page mid-meeting cannot change its language or redaction
     // part way through.
-    const { transcription } = await getSessionSettings(server.log);
+    const { transcription } = socketCallMap.sessionSettings ?? (await getSessionSettings(server.log));
     const redactionApplied = isRedactionApplied(transcription);
     server.log.info(
         `[TRANSCRIBING]: [${callMetaData.callId}] - Amazon Transcribe options: language=${transcription.languageCode}` +
