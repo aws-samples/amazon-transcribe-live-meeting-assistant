@@ -81,10 +81,7 @@ import troubleshooting_prompt
 from bedrock_compat import accepts_temperature
 from botocore.config import Config as BotoCoreConfig
 
-# pylint: disable=import-error
-from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
-
-# pylint: enable=import-error
+from configuration_settings import read_setting
 from troubleshooting_config import AgentLimits
 from troubleshooting_discovery import classify_log_group
 from troubleshooting_tools import ToolError, TroubleshootingTools
@@ -1061,7 +1058,7 @@ def configured_model_id() -> str:
     function as TROUBLESHOOTING_MODEL_ID and read when the section cannot be.
     """
     return read_setting(
-        LANGUAGE_MODELS.name,
+        "language_models",
         "meetingAssistModelId",
         env_var="TROUBLESHOOTING_MODEL_ID",
         default=FALLBACK_MODEL_ID,

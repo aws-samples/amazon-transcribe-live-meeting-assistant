@@ -1088,7 +1088,10 @@ one of those readers' Bedrock permissions covers all foundation models and
 inference profiles, so a model chosen here never needs a permission the stack
 lacks. The meeting assistant and the troubleshooting agent are in the
 meeting-assist stack, which is given the table's name and the layer's ARN as the
-AI stack's `ConfigurationTableName` and `ConfigurationPythonLayerArn` outputs.
+AI stack's `ConfigurationTableName` and `ConfigurationPythonLayerArn` outputs. That
+template can still be deployed on its own, given neither: its functions then read
+the model parameters' environment variables, as they did before
+(`lma-meetingassist-setup-stack/src/configuration_settings.py`).
 
 The summariser reads the model once per summary, after its prompt templates, so
 every section of one summary is written by the same model. The troubleshooting

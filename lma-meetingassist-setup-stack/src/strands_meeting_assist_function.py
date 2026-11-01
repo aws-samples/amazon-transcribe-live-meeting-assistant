@@ -24,8 +24,7 @@ from bedrock_compat import (
     extract_text,
 )
 import tavily_secret
-# pylint: disable-next=import-error
-from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+from configuration_settings import read_setting
 import call_metering
 import meeting_agenda
 import meeting_frames
@@ -93,7 +92,7 @@ def configured_agent_model_id() -> str:
     request, so a change reaches the assistant within the section's cache tier.
     """
     return read_setting(
-        LANGUAGE_MODELS.name,
+        'language_models',
         'meetingAssistModelId',
         env_var='MODEL_ID',
         default=DEFAULT_AGENT_MODEL_ID,
@@ -107,7 +106,7 @@ def configured_kb_model_id() -> str:
     stack parameter as its default and KB_MODEL_ID as its environment variable.
     """
     return read_setting(
-        LANGUAGE_MODELS.name,
+        'language_models',
         'knowledgeBaseModelId',
         env_var='KB_MODEL_ID',
         default=DEFAULT_KB_MODEL_ID,
@@ -522,8 +521,10 @@ def create_document_search_tool(kb_id: str, kb_region: str, kb_account_id: str, 
         logger.error(
             "document_search is not being offered to the agent: knowledge-base model '%s' "
             "requires custom Orchestration and Generation prompt templates, which LMA does "
-            "not supply. Set the MeetingAssistKnowledgeBaseModelID CloudFormation parameter "
-            "to a model a knowledge base can generate with.",
+            "not supply. Choose a model a knowledge base can generate with as Meeting "
+            "assistant knowledge bases in the Amazon Bedrock Models section of the "
+            "Configuration page, or as the MeetingAssistKnowledgeBaseModelID CloudFormation "
+            "parameter, which is its default.",
             kb_model_id,
         )
         return None
@@ -773,8 +774,10 @@ def create_meeting_history_tool(transcript_kb_id: str, kb_region: str, kb_accoun
         logger.error(
             "meeting_history is not being offered to the agent: knowledge-base model '%s' "
             "requires custom Orchestration and Generation prompt templates, which LMA does "
-            "not supply. Set the MeetingAssistKnowledgeBaseModelID CloudFormation parameter "
-            "to a model a knowledge base can generate with. The recent_meetings_list tool "
+            "not supply. Choose a model a knowledge base can generate with as Meeting "
+            "assistant knowledge bases in the Amazon Bedrock Models section of the "
+            "Configuration page, or as the MeetingAssistKnowledgeBaseModelID CloudFormation "
+            "parameter, which is its default. The recent_meetings_list tool "
             "is unaffected, so chronological listing of past meetings still works.",
             kb_model_id,
         )

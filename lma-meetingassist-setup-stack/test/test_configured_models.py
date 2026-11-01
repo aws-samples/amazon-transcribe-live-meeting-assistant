@@ -78,3 +78,24 @@ def test_with_neither_the_shipped_default_applies(monkeypatch) -> None:
     monkeypatch.delenv("TROUBLESHOOTING_MODEL_ID", raising=False)
     assert assistant.configured_agent_model_id() == assistant.DEFAULT_AGENT_MODEL_ID
     assert troubleshooting.configured_model_id() == troubleshooting.FALLBACK_MODEL_ID
+
+
+def test_without_the_configuration_layer_the_environment_is_read(monkeypatch) -> None:
+    """A standalone deployment of the stack carries no layer, and still runs."""
+    import importlib
+    import sys
+
+    monkeypatch.setitem(sys.modules, "lma_config", None)  # makes the import fail
+    monkeypatch.delitem(sys.modules, "configuration_settings", raising=False)
+    fallback = importlib.import_module("configuration_settings")
+    monkeypatch.setenv("MODEL_ID", "env.agent-model")
+    assert (
+        fallback.read_setting("language_models", "meetingAssistModelId", env_var="MODEL_ID", default="d")
+        == "env.agent-model"
+    )
+    monkeypatch.delenv("MODEL_ID")
+    assert (
+        fallback.read_setting("language_models", "meetingAssistModelId", env_var="MODEL_ID", default="d")
+        == "d"
+    )
+    monkeypatch.delitem(sys.modules, "configuration_settings")

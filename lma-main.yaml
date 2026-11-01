@@ -24,6 +24,10 @@ Parameters:
   MeetingAssistServiceBedrockModelID:
     Type: String
     Default: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    # The Amazon Bedrock Models section of the Configuration page offers
+    # exactly these models (lma_config/schemas/language_models.json in the AI
+    # stack's configuration layer): add or remove a model in both places.
+    # test_parameter_backed_settings.py fails if they differ.
     AllowedValues:
       - "amazon.nova-micro-v1:0"
       - "amazon.nova-lite-v1:0"
@@ -70,6 +74,10 @@ Parameters:
     # knowledge base (us-west-2, 2026-10-21) and nothing is added without one;
     # test_meeting_assist_kb_model.py holds the evidence and fails if this list
     # and that record disagree.
+    # The Amazon Bedrock Models section of the Configuration page offers
+    # exactly these models (lma_config/schemas/language_models.json in the AI
+    # stack's configuration layer): add or remove a model in both places.
+    # test_parameter_backed_settings.py fails if they differ.
     AllowedValues:
       - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
       - "us.anthropic.claude-sonnet-4-6"
@@ -557,6 +565,10 @@ Parameters:
   BedrockModelId:
     Default: "global.anthropic.claude-sonnet-5-5"
     Type: String
+    # The Amazon Bedrock Models section of the Configuration page offers
+    # exactly these models (lma_config/schemas/language_models.json in the AI
+    # stack's configuration layer): add or remove a model in both places.
+    # test_parameter_backed_settings.py fails if they differ.
     AllowedValues:
       - "amazon.nova-micro-v1:0"
       - "amazon.nova-lite-v1:0"
@@ -594,6 +606,10 @@ Parameters:
     # Image-capable models only: the model reads a picture of the shared screen.
     # Kept in step with the parameter of the same name in
     # lma-ai-stack/deployment/lma-ai-stack.yaml, which this value is passed to.
+    # The Amazon Bedrock Models section of the Configuration page offers
+    # exactly these models (lma_config/schemas/language_models.json in the AI
+    # stack's configuration layer): add or remove a model in both places.
+    # test_parameter_backed_settings.py fails if they differ.
     AllowedValues:
       - "amazon.nova-lite-v1:0"
       - "amazon.nova-pro-v1:0"

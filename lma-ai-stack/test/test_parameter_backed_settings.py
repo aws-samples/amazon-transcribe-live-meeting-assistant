@@ -287,13 +287,28 @@ def test_an_ai_stack_reader_can_reach_the_table(function, resource, read) -> Non
 
 @pytest.mark.parametrize("function, resource, read", MEETING_ASSIST_READERS)
 def test_a_meeting_assist_reader_can_reach_the_table(function, resource, read) -> None:
+    """Behind HasConfiguration, which lma-main.yaml's two inputs always satisfy.
+
+    A standalone deployment of the template supplies neither, and its functions
+    then read the parameters' environment variables (configuration_settings.py).
+    """
     properties = resource["Properties"]
     assert properties["Environment"]["Variables"].get("CONFIGURATION_TABLE_NAME") == {
-        "Ref": "ConfigurationTableName"
+        "Fn::If": ["HasConfiguration", {"Ref": "ConfigurationTableName"}, ""]
     }
-    assert {"Ref": "ConfigurationLayerArn"} in properties["Layers"]
+    assert {
+        "Fn::If": ["HasConfiguration", {"Ref": "ConfigurationLayerArn"}, {"Ref": "AWS::NoValue"}]
+    } in properties["Layers"]
     rendered = json.dumps(_role(MEETING_ASSIST, properties)["Properties"]["Policies"], default=str)
     assert "dynamodb:GetItem" in rendered and "${ConfigurationTableName}" in rendered
+
+
+def test_the_meeting_assist_configuration_is_read_only_when_both_inputs_are_given() -> None:
+    condition = MEETING_ASSIST["Conditions"]["HasConfiguration"]
+    rendered = json.dumps(condition)
+    assert "ConfigurationTableName" in rendered and "ConfigurationLayerArn" in rendered
+    for name in ("ConfigurationTableName", "ConfigurationLayerArn"):
+        assert MEETING_ASSIST["Parameters"][name]["Default"] == ""
 
 
 @pytest.mark.parametrize("entry", ENTRIES, ids=_ids)

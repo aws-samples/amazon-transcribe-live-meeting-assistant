@@ -196,16 +196,23 @@ Parameters:
   # Amazon Bedrock models from it per request, so an Admin's change on the
   # Configuration page applies without a stack update; the two model
   # parameters above are the defaults, and the readers' fallback.
+  # Each defaults to empty so a standalone deployment of this template still
+  # creates a stack; the two functions then read the model parameters above
+  # directly, as they did before the models were on the Configuration page.
   ConfigurationTableName:
     Type: String
+    Default: ""
     Description: >-
-      Name of the AI stack's configuration table, which the meeting assistant and
-      the troubleshooting agent read their Amazon Bedrock models from.
+      (Optional) Name of the AI stack's configuration table, which the meeting
+      assistant and the troubleshooting agent read their Amazon Bedrock models
+      from. Supply it together with ConfigurationLayerArn.
 
   ConfigurationLayerArn:
     Type: String
+    Default: ""
     Description: >-
-      ARN of the AI stack's configuration accessor layer.
+      (Optional) ARN of the AI stack's configuration accessor layer. Supply it
+      together with ConfigurationTableName.
 
 Conditions:
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
@@ -253,6 +260,12 @@ Conditions:
   # Metering for the meeting cost estimate is written only when the meeting
   # table is named; a standalone deployment of this template meters nothing.
   HasEventSourcingTable: !Not [!Equals [!Ref EventSourcingTableName, ""]]
+  # The runtime configuration is read only when both the table and the layer
+  # that reads it are supplied, as lma-main.yaml always does.
+  HasConfiguration: !And [
+    !Not [!Equals [!Ref ConfigurationTableName, ""]],
+    !Not [!Equals [!Ref ConfigurationLayerArn, ""]]
+  ]
   # The Strands layer is shared by the two agents in this stack, and either one
   # alone is reason enough to build it. Without this the layer would exist only
   # when the meeting assistant is Strands-backed, and the troubleshooting agent
@@ -358,11 +371,14 @@ Resources:
               # Read-only, on the shared configuration table: the agent's and
               # the knowledge bases' models are read from it. KMSPolicy below
               # covers decrypting it.
-              - Effect: Allow
-                Action:
-                  - "dynamodb:GetItem"
-                Resource:
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
+              - !If
+                - HasConfiguration
+                - Effect: Allow
+                  Action:
+                    - "dynamodb:GetItem"
+                  Resource:
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
+                - !Ref AWS::NoValue
           PolicyName: DynamoDBPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -479,7 +495,7 @@ Resources:
       Layers:
         - !Ref Boto3Layer
         - !Ref StrandsLayer
-        - !Ref ConfigurationLayerArn
+        - !If [HasConfiguration, !Ref ConfigurationLayerArn, !Ref AWS::NoValue]
       Timeout: 300
       MemorySize: 512
       TracingConfig:
@@ -491,7 +507,7 @@ Resources:
           # request reads them from the Amazon Bedrock Models section first.
           MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
           KB_MODEL_ID: !Ref MeetingAssistKnowledgeBaseModelID
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
+          CONFIGURATION_TABLE_NAME: !If [HasConfiguration, !Ref ConfigurationTableName, ""]
           KB_ID: !Ref BedrockKnowledgeBaseId
           KB_REGION: !Ref AWS::Region
           KB_ACCOUNT_ID: !Ref AWS::AccountId
@@ -724,7 +740,10 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
-                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
+                  - !If
+                    - HasConfiguration
+                    - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
+                    - !Ref AWS::NoValue
         # Which components this deployment runs, and which nested stacks it
         # owns. ListStackResources is what lets log-group discovery match this
         # deployment's own nested stacks by name instead of by a prefix that a
@@ -823,7 +842,7 @@ Resources:
       Layers:
         - !Ref Boto3Layer
         - !Ref StrandsLayer
-        - !Ref ConfigurationLayerArn
+        - !If [HasConfiguration, !Ref ConfigurationLayerArn, !Ref AWS::NoValue]
       # Comfortably longer than the agent's own wall-clock budget (240s by
       # default) so the agent reports running out of time rather than being
       # killed mid-answer.
@@ -847,7 +866,7 @@ Resources:
           # cannot be: each run reads the model from the Amazon Bedrock Models
           # section first.
           TROUBLESHOOTING_MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
-          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
+          CONFIGURATION_TABLE_NAME: !If [HasConfiguration, !Ref ConfigurationTableName, ""]
           BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
           BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
       Code: ./src
