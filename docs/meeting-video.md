@@ -134,9 +134,12 @@ in the event-sourcing table (partition key `kf#<CallId>`), with:
   (`TranscriptionExpirationInDays`), and a lifecycle rule on
   `lma-video-keyframes/` deletes the images after the same number of days.
 - **Access.** Key frames are meeting data with the transcript's access rule:
-  they are visible to the meeting's owner, to the people it is shared with, and
-  to administrators. Sharing or unsharing a meeting shares or unshares its key
-  frames with it.
+  `getVideoKeyframes` and `onAddVideoKeyframe` return them to the meeting's
+  owner, to the people it is shared with, and to administrators. Sharing or
+  unsharing a meeting shares or unshares its key frames with it. The images
+  themselves are private objects in the recordings bucket: the stored URLs are
+  plain object addresses, and the web UI's identity has no read access to
+  `lma-video-keyframes/`.
 - **Deletion.** Deleting a meeting deletes its key frames and their images.
 
 ## Reading key frames

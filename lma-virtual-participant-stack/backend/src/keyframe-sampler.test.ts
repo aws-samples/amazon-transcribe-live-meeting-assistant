@@ -120,6 +120,22 @@ test('a frame that could not be saved is captured again while it stays on screen
     assert.equal(h.frames.length, 1);
 });
 
+test('a frame whose event could not be written is captured again', async () => {
+    let fail = true;
+    const h = harness({
+        emit: async (frame) => {
+            if (fail) throw new Error('ProvisionedThroughputExceededException');
+            h.frames.push(frame);
+        },
+    });
+    await h.feed(flat(200), 4);
+    assert.equal(h.frames.length, 0);
+    fail = false;
+    await h.feed(flat(200), 4);
+    assert.equal(h.frames.length, 1);
+    assert.equal(h.sampler.framesEmitted, 1, 'only the frame that was announced is counted');
+});
+
 test('ids sort in time order and keys follow the deletion prefix rule', () => {
     assert.ok(frameIdFor(9.5, 'a') < frameIdFor(10, 'a'));
     assert.ok(frameIdFor(10, 'a') < frameIdFor(100, 'a'));

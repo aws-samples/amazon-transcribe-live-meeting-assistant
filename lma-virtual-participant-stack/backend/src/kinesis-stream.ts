@@ -155,7 +155,12 @@ class KinesisStreamManager {
     }
   }
 
-  private async sendRecord(record: any): Promise<void> {
+  /**
+   * Writes one record. Errors are logged and swallowed, so a lost event never
+   * ends the meeting -- except with `rethrow`, for a caller that has something
+   * to undo when the record was not written (see sendVideoKeyframe).
+   */
+  private async sendRecord(record: any, { rethrow = false }: { rethrow?: boolean } = {}): Promise<void> {
     if (!this.streamName) {
       console.log('Kinesis streaming disabled - would send:', record.EventType);
       return;
@@ -179,6 +184,7 @@ class KinesisStreamManager {
       // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring -- ECMAScript template literals do not interpret util.format specifiers
         console.error(`Error sending ${record.EventType} event to Kinesis:`, error);
       }
+      if (rethrow) throw error;
       // Don't throw error - continue execution like Python version
     }
   }
@@ -293,7 +299,8 @@ class KinesisStreamManager {
   /**
    * ADD_VIDEO_KEYFRAME: one key frame of the meeting display (see
    * keyframe-sampler.ts). The call_event_processor stores it on the meeting and
-   * publishes it on the onAddVideoKeyframe subscription.
+   * publishes it on the onAddVideoKeyframe subscription. Throws when the record
+   * was not written, so the sampler can treat the frame as not saved.
    */
   async sendVideoKeyframe(frame: VideoKeyframeEvent): Promise<void> {
     const record: any = {
@@ -305,7 +312,7 @@ class KinesisStreamManager {
       IdToken: process.env.USER_ID_TOKEN || '',
       RefreshToken: process.env.USER_REFRESH_TOKEN || '',
     };
-    await this.sendRecord(record);
+    await this.sendRecord(record, { rethrow: true });
   }
 
   // Returns the highest absolute segment EndTime (seconds) written by this call
