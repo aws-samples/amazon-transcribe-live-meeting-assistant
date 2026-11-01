@@ -12,13 +12,20 @@ regex/cleanup logic is deterministic, and the handler tests stub the parse step.
 
 import json
 import os
+import sys
 import unittest
+from pathlib import Path
 
 # Set env before import so the module-level Bedrock client construction is cheap
 # and deterministic (the client is built but never invoked in these tests).
 os.environ.setdefault("AWS_REGION", "us-east-1")
 
-import index
+# The configuration layer the deployed function carries, for lma_config.
+LAYER = Path(__file__).resolve().parents[2] / "lambda_layers" / "configuration_layer"
+if str(LAYER) not in sys.path:
+    sys.path.insert(0, str(LAYER))
+
+import index  # noqa: E402
 
 
 class TestWebexMeetingId(unittest.TestCase):
@@ -236,7 +243,7 @@ class TestBedrockRequestShape(unittest.TestCase):
         self.blocks = [{"text": '{"meetingPlatform": "ZOOM"}'}]
         self.stop_reason = "end_turn"
         self._real_bedrock = index.bedrock
-        self._real_model = index.BEDROCK_MODEL_ID
+        self._real_model = os.environ.get("BEDROCK_MODEL_ID")
 
         test_case = self
 
@@ -252,17 +259,20 @@ class TestBedrockRequestShape(unittest.TestCase):
 
     def tearDown(self):
         index.bedrock = self._real_bedrock
-        index.BEDROCK_MODEL_ID = self._real_model
+        if self._real_model is None:
+            os.environ.pop("BEDROCK_MODEL_ID", None)
+        else:
+            os.environ["BEDROCK_MODEL_ID"] = self._real_model
 
     def test_a_temperature_is_sent_to_a_model_that_accepts_one(self):
         """Parsing an invitation is extraction, so the same text should parse alike."""
-        index.BEDROCK_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+        os.environ["BEDROCK_MODEL_ID"] = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
         index.call_bedrock("a prompt")
         self.assertEqual(self.requests[0]["inferenceConfig"]["temperature"], 0)
 
     def test_no_temperature_is_sent_to_a_model_that_rejects_one(self):
         """Claude 5 and later refuse the request rather than ignoring the setting."""
-        index.BEDROCK_MODEL_ID = "global.anthropic.claude-haiku-5-5"
+        os.environ["BEDROCK_MODEL_ID"] = "global.anthropic.claude-haiku-5-5"
         index.call_bedrock("a prompt")
         self.assertNotIn("temperature", self.requests[0]["inferenceConfig"])
 

@@ -17,6 +17,26 @@ from tools.url_helper import get_meeting_url
 
 logger = logging.getLogger()
 
+
+def _configured_model_id() -> str:
+    """The model the transcript knowledge base answers with.
+
+    The summaries' model: the Amazon Bedrock Models section of the Configuration
+    page, whose default is the BedrockModelId stack parameter, passed to this
+    function as BEDROCK_MODEL_ID and read when the section cannot be. Read per
+    search, so a change reaches it within the section's cache tier.
+
+    The configuration layer is imported here rather than at the top of the
+    module because only this tool reads it: the server's other tools, and their
+    tests, load this module without needing the layer.
+    """
+    # pylint: disable-next=import-error,import-outside-toplevel
+    from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+
+    value = read_setting(LANGUAGE_MODELS.name, "summaryModelId", env_var="BEDROCK_MODEL_ID")
+    return (value or "").strip()
+
+
 # Bedrock inference profile prefixes (cross-region routing).
 # Model IDs starting with these prefixes must use an inference-profile ARN,
 # not a foundation-model ARN.
@@ -67,10 +87,10 @@ def execute(
     if not kb_id:
         raise ValueError("Transcript Knowledge Base not configured")
 
-    # Resolve the model ARN. Prefer BEDROCK_MODEL_ID (builds correct ARN type
+    # Resolve the model ARN. Prefer the configured model (builds correct ARN type
     # for both foundation models and inference profiles). Fall back to the
     # legacy pre-built MODEL_ARN for backward compatibility.
-    model_id = os.environ.get("BEDROCK_MODEL_ID", "").strip()
+    model_id = _configured_model_id()
     if model_id:
         region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
         account_id = (

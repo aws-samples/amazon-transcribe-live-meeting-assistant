@@ -64,6 +64,9 @@ REPO = Path(__file__).resolve().parents[2]
 MAIN_TEMPLATE = REPO / "lma-main.yaml"
 MEETINGASSIST_TEMPLATE = REPO / "lma-meetingassist-setup-stack" / "template.yaml"
 FUNCTION_SRC = REPO / "lma-meetingassist-setup-stack" / "src"
+# The AI stack's configuration layer, which the function is deployed with and
+# imports lma_config from.
+CONFIGURATION_LAYER = REPO / "lma-ai-stack" / "source" / "lambda_layers" / "configuration_layer"
 
 AGENT_MODEL_PARAMETER = "MeetingAssistServiceBedrockModelID"
 KB_MODEL_PARAMETER = "MeetingAssistKnowledgeBaseModelID"
@@ -353,6 +356,8 @@ def strands_module(strands_stub):
     os.environ.setdefault("AWS_REGION", "us-east-1")
 
     sys.path.insert(0, str(FUNCTION_SRC))
+    if str(CONFIGURATION_LAYER) not in sys.path:
+        sys.path.append(str(CONFIGURATION_LAYER))
     try:
         spec = importlib.util.spec_from_file_location(
             "lma_strands_meeting_assist",

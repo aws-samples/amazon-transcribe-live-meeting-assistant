@@ -24,10 +24,12 @@ are what this page is about: they are stored in the stack's configuration table,
 an Admin changes them from the web UI, and the change takes effect without a
 deployment.
 
-The runtime settings are grouped into five sections. Each section has a release
-default, which ships with LMA and is updated by later releases, and your changes
-over it. Only what you change is stored, so a setting you never touched keeps
-following the release.
+The runtime settings are grouped into sections. Each section has a default and
+your changes over it. Only what you change is stored, so a setting you never
+touched keeps following its default. For most settings the default ships with
+LMA and is updated by later releases. For some, the default is the value of a
+stack parameter; see
+[Settings whose default is a stack parameter](#settings-whose-default-is-a-stack-parameter).
 
 | Section | What it controls | A saved change applies |
 |---|---|---|
@@ -36,6 +38,7 @@ following the release.
 | Nova Sonic Voice Assistant | The voice assistant's system prompt and prompt mode, model, voice, turn-taking sensitivity, meeting mode and translator settings | To the next meeting the voice assistant joins |
 | Transcription Engine | Virtual Participant voice separation, which works on Amazon Transcribe, and, where the experimental on-demand speech engine is deployed, which engine transcribes streaming meetings and which transcribes Virtual Participants. Without that engine only the voice separation switch is shown | To meetings that start within 30 seconds of the save or later |
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with | To estimates drawn within about five minutes of the save |
+| Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames | To each summary, answer or key frame started about five minutes after the save or later |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
 one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
@@ -45,6 +48,44 @@ the same configuration.
 
 Only members of the **Admin** Cognito group can change any of these. Add someone
 to the group on [User Management](user-management.md) if they need to.
+
+## Settings whose default is a stack parameter
+
+Some settings used to be chosen only with a stack parameter. They are now on the
+Configuration page, and the stack parameter is kept as the setting's
+**default**:
+
+- A new deployment shows the values you gave the parameters, marked as
+  defaults, and uses them until you change them on the page.
+- An existing deployment that is updated keeps the values its parameters had:
+  the stack update writes them into the configuration as the defaults. Nothing
+  needs to be done on upgrade.
+- A value you save on the page takes precedence over the parameter. **Reset to
+  default** puts the parameter's value back.
+- A later stack update that changes the parameter changes the default. That
+  applies wherever the setting has not been changed on the page; where it has,
+  the saved value stays in force until you reset it. If a stack update seems to
+  have had no effect on one of these settings, look for a **Changed** mark on
+  the page.
+
+The parameters are not removed, so existing deploy commands and pipelines that
+pass them keep working. Each one's entry in
+[CloudFormation Parameters](cloudformation-parameters.md) names the setting it
+is the default of.
+
+| Section › setting | Default from |
+|---|---|
+| Amazon Bedrock Models › Summaries and meeting insights | `BedrockModelId` |
+| Amazon Bedrock Models › Meeting assistant | `MeetingAssistServiceBedrockModelID` |
+| Amazon Bedrock Models › Meeting assistant knowledge bases | `MeetingAssistKnowledgeBaseModelID` |
+| Amazon Bedrock Models › Key frame text | `KeyframeTextModelId` |
+
+Two things differ from choosing a model with the parameter. The deployment
+checks that the parameters' models can be invoked while it deploys (unless
+`ModelValidation` is `false`); a model chosen on the page is not checked, so
+enable access to it in the Amazon Bedrock console first. And the page offers
+the same models the parameter does: a model a later release stops offering stays
+in force where it was saved, and the next save of the section asks for another.
 
 ## Using the Configuration page
 

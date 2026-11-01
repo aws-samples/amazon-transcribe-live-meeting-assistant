@@ -9,21 +9,34 @@ import os
 import boto3
 from botocore.config import Config
 
+# pylint: disable=import-error
+from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+
+# pylint: enable=import-error
+
 print("Boto3 version: ", boto3.__version__)
 
 KB_REGION = os.environ.get("KB_REGION") or os.environ["AWS_REGION"]
 KB_ID = os.environ.get("KB_ID")
 KB_ACCOUNT_ID = os.environ.get("KB_ACCOUNT_ID")
 
-# use inference profile for model id and arn as Nova models require the use of inference profiles
-MODEL_ID = os.environ.get("MODEL_ID")
 
-# if model id starts with Anthropic it is the legacy 3.0 models - use the model Id for the ARN
-# else it is an Inference Profile and use the profile's ARN
-if MODEL_ID.startswith("anthropic"):
-    MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}::foundation-model/{MODEL_ID}"
-else:
-    MODEL_ARN = f"arn:aws:bedrock:{KB_REGION}:{KB_ACCOUNT_ID}:inference-profile/{MODEL_ID}"
+def model_arn():
+    """The ARN of the model the knowledge base answers with.
+
+    The model is the summaries' one: the Amazon Bedrock Models section of the
+    Configuration page, whose default is the BedrockModelId stack parameter,
+    passed to this function as MODEL_ID and read when the section cannot be.
+    Read per request, so a change reaches this function within the section's
+    cache tier rather than at its next cold start.
+    """
+    model_id = read_setting(LANGUAGE_MODELS.name, "summaryModelId", env_var="MODEL_ID")
+    # if model id starts with Anthropic it is the legacy 3.0 models - use the model Id for the ARN
+    # else it is an Inference Profile and use the profile's ARN
+    if model_id.startswith("anthropic"):
+        return f"arn:aws:bedrock:{KB_REGION}::foundation-model/{model_id}"
+    return f"arn:aws:bedrock:{KB_REGION}:{KB_ACCOUNT_ID}:inference-profile/{model_id}"
+
 
 KB_CLIENT = boto3.client(
     service_name="bedrock-agent-runtime",
@@ -38,7 +51,7 @@ def get_kb_response(query, userId, isAdminUser, sessionId):
         "retrieveAndGenerateConfiguration": {
             "knowledgeBaseConfiguration": {
                 "knowledgeBaseId": KB_ID,
-                "modelArn": MODEL_ARN,
+                "modelArn": model_arn(),
                 "retrievalConfiguration": {
                     "vectorSearchConfiguration": {
                         "filter": {"equals": {"key": "Owner", "value": userId}}

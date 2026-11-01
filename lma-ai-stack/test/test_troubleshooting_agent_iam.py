@@ -345,16 +345,18 @@ def test_active_tracing_is_matched_by_the_permission_it_needs(
         assert statements_granting(role, action), f"{action} is not granted"
 
 
-def test_the_role_can_read_records_from_two_named_tables_only(
+def test_the_role_can_read_records_from_three_named_tables_only(
     role: Dict[str, Any],
 ) -> None:
+    """The two it diagnoses from, and the configuration table its model is read from."""
     granting = statements_granting(role, "dynamodb:GetItem")
 
     assert len(granting) == 1
     rendered = rendered_resources(granting[0])
-    assert len(rendered) == 2
+    assert len(rendered) == 3
     assert any("${VirtualParticipantTableName}" in r for r in rendered)
     assert any("${LLMPromptTemplateTableName}" in r for r in rendered)
+    assert any("${ConfigurationTableName}" in r for r in rendered)
     assert not any(r.endswith("table/*") for r in rendered)
 
 

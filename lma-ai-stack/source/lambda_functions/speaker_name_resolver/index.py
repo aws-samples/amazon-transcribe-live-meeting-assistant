@@ -39,6 +39,7 @@ from botocore.awsrequest import AWSRequest
 from botocore.config import Config
 
 # pylint: disable=import-error
+from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -51,7 +52,6 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 APPSYNC_GRAPHQL_URL = os.environ["APPSYNC_GRAPHQL_URL"]
-BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION_OVERRIDE") or os.environ["AWS_REGION"]
 
 # Upper bound on turns handed to the model. A long meeting's whole transcript
@@ -204,17 +204,20 @@ def call_bedrock(prompt, call_id=None):
     Temperature 0 where the model accepts it: this is extraction, not writing, and
     two passes over one meeting should agree. Only the text blocks are read -- the
     output is parsed into an identity map, so a reasoning block reaching the parser
-    would corrupt attribution rather than just read oddly.
+    would corrupt attribution rather than just read oddly. The model is the
+    summaries' one: the Amazon Bedrock Models section of the Configuration page,
+    whose default is the BedrockModelId stack parameter.
     """
+    model_id = read_setting(LANGUAGE_MODELS.name, "summaryModelId", env_var="BEDROCK_MODEL_ID")
     response = bedrock.converse(
-        modelId=BEDROCK_MODEL_ID,
+        modelId=model_id,
         messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig=build_inference_config(BEDROCK_MODEL_ID, SPEAKER_NAMING_MAX_TOKENS),
+        inferenceConfig=build_inference_config(model_id, SPEAKER_NAMING_MAX_TOKENS),
     )
     METERING.record(
         call_id,
         "SpeakerNaming",
-        bedrock_service(BEDROCK_MODEL_ID),
+        bedrock_service(model_id),
         bedrock_usage(response.get("usage")),
         region=BEDROCK_REGION if BEDROCK_REGION != os.environ.get("AWS_REGION") else None,
     )

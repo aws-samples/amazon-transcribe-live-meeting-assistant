@@ -46,6 +46,12 @@ from .keys import (
     profile_key,
     validate_profile_name,
 )
+from .parameters import (
+    ParameterDefault,
+    apply_parameter_defaults,
+    parameter_defaults,
+    read_setting,
+)
 from .presets import InvalidPreset, shipped_presets
 from .revisions import (
     DEFAULT_RETAINED_REVISIONS,
@@ -61,6 +67,7 @@ from .sections import (
     ASR_ENGINE,
     CALL_PRICING,
     CHAT_BUTTONS,
+    LANGUAGE_MODELS,
     NOVA_SONIC_CONFIG,
     SUMMARY_PROMPT_TEMPLATES,
     TIER_CONSISTENT_READ,
@@ -94,6 +101,7 @@ __all__ = [
     "DEFAULT_RETAINED_REVISIONS",
     "DEFAULT_PROFILE_NAME",
     "KEY_ATTRIBUTE",
+    "LANGUAGE_MODELS",
     "MAX_COMMENT_LENGTH",
     "MAX_ITEM_BYTES",
     "MAX_LABEL_LENGTH",
@@ -119,6 +127,7 @@ __all__ = [
     "InvalidConfiguration",
     "InvalidPreset",
     "InvalidProfileName",
+    "ParameterDefault",
     "ReservedProfileName",
     "ResolvedDocument",
     "ResolvedSection",
@@ -130,10 +139,13 @@ __all__ = [
     "SaveOutcome",
     "SectionSpec",
     "UnknownConfigurationSection",
+    "apply_parameter_defaults",
     "deep_merge",
     "diff_bodies",
     "is_profile_key",
+    "parameter_defaults",
     "profile_key",
+    "read_setting",
     "register",
     "registered_sections",
     "section_schema",

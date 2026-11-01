@@ -8,11 +8,14 @@
 Three writes, each with different rules about what it may overwrite:
 
 ``Config#default``
-    The deployment baseline, built from the JSON shipped in ``defaults/``.
+    The deployment baseline, built from the JSON shipped in ``defaults/`` and
+    from the values of the stack parameters that are the defaults of runtime
+    settings (the ``ParameterDefaults`` property; see ``lma_config.parameters``).
     Written on create and rewritten on every update this function runs on,
     because it is this deployment's own content and a new release has to land.
     Which updates it runs on is decided by the content hash described at the
-    end of this docstring, not by this function.
+    end of this docstring and by those parameters' values, not by this
+    function.
 
 ``Config#custom``
     The operator's profile. Written **only if it is not there**, so a stack
@@ -79,7 +82,9 @@ from lma_config import (  # from the configuration layer
     ConfigurationStore,
     RevisionHistoryUnavailable,
     SectionSpec,
+    apply_parameter_defaults,
     codec,
+    parameter_defaults,
 )
 
 # pylint: enable=import-error
@@ -181,13 +186,19 @@ def shipped_default_body(domain: str) -> Dict[str, Any]:
     buttons = json.loads((DEFAULTS_DIR / CHAT_BUTTONS_DEFAULTS_FILE).read_text(encoding="utf-8"))
     pricing = json.loads((DEFAULTS_DIR / CALL_PRICING_FILE).read_text(encoding="utf-8"))
     asr_engine = json.loads((DEFAULTS_DIR / ASR_ENGINE_DEFAULTS_FILE).read_text(encoding="utf-8"))
-    return {
+    body: Dict[str, Any] = {
         SUMMARY_PROMPT_TEMPLATES.name: numbered_prompts(prompts),
         NOVA_SONIC_CONFIG.name: nova_sonic,
         CHAT_BUTTONS.name: numbered_prompts(buttons),
         CALL_PRICING.name: pricing,
         ASR_ENGINE.name: asr_engine,
     }
+    # The sections whose defaults are stack parameters ship no content of their
+    # own: `seed` fills them from the parameters' values. Present and empty
+    # here, so the baseline holds every section whatever the template passed.
+    for entry in parameter_defaults():
+        body.setdefault(entry.section, {})
+    return body
 
 
 def align_with_baseline(prompts: Mapping[str, str], baseline: Mapping[str, str]) -> Dict[str, str]:
@@ -506,14 +517,24 @@ def seed(
     legacy_table_name: str = "",
     legacy_client: Any = None,
     legacy_section_tables: Optional[Mapping[str, str]] = None,
+    parameter_values: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, str]:
     """Apply the writes and report what each one did.
 
     ``legacy_section_tables`` maps a section name in :data:`LEGACY_SECTIONS` to
     the previous table holding its edits; ``legacy_client`` reads those as well
-    as the prompt-template table.
+    as the prompt-template table. ``parameter_values`` is the
+    ``ParameterDefaults`` property: stack parameter name to value, for the
+    parameters that are the defaults of runtime settings (see
+    ``lma_config.parameters``).
     """
     baseline = shipped_default_body(domain)
+    # The values of the stack parameters that are the defaults of runtime
+    # settings. They belong in the baseline, not the profile: the baseline is
+    # what the deployment was deployed with, so a stack update that changes a
+    # parameter reaches every setting an administrator has not changed, while
+    # one they have changed, which lives in the profile, keeps winning.
+    applied = apply_parameter_defaults(baseline, parameter_values or {})
     store.write_default(baseline, description=DEFAULT_DESCRIPTION)
 
     # The guard that actually protects an operator's edits is the condition on
@@ -603,6 +624,10 @@ def seed(
         # section unset, so every later run reports it again until it lands.
         "SectionAdoption": ",".join(f"{name}={outcome}" for name, outcome in adoption.items()),
         "Baseline": "written",
+        # Which stack parameters the baseline carries as the defaults of runtime
+        # settings. One missing here is one whose readers fall back to their
+        # environment variable.
+        "ParameterDefaults": ",".join(applied) or "none",
         # What this run did, which is almost always "kept".
         "Profile": profile_action,
         # How the profile came to exist, whenever that was. This is the value
@@ -677,6 +702,7 @@ def handler(event: Dict[str, Any], context: Any) -> None:
                 legacy.section.name: properties.get(legacy.property_name, "")
                 for legacy in LEGACY_SECTIONS
             },
+            parameter_values=properties.get("ParameterDefaults") or {},
         )
         LOGGER.info("seeded the configuration table: %s", outcome)
         cfnresponse.send(event, context, cfnresponse.SUCCESS, outcome, physical_id)

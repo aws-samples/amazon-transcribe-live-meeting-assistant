@@ -564,6 +564,75 @@ def test_the_request_names_the_configured_model_and_a_deterministic_configuratio
     ]
 
 
+def _table_with_models(default_models, custom_models=None):
+    """A configuration table whose records also hold the language_models section."""
+    table = FakeConfigurationTable(ddb_item(**{"1#Summary": "Summarize {transcript}"}), ddb_item())
+    bodies = {DEFAULT_KEY: default_models, "Config#custom": custom_models}
+    for key, models in bodies.items():
+        body = {FakeConfigurationTable.SECTION: {"1#Summary": "Summarize {transcript}"}}
+        if key == "Config#custom":
+            body = {}
+        if models is not None:
+            body["language_models"] = models
+        table.items[key]["Body"] = {"B": codec.encode_body(body)}
+    return table
+
+
+def _install_table(monkeypatch, table):
+    bedrock = FakeBedrock()
+    monkeypatch.setattr(index, "CONFIG_STORE", ConfigurationStore(TABLE_NAME, client=table))
+    monkeypatch.setattr(index, "bedrock", bedrock)
+    monkeypatch.setattr(index.boto3, "client", lambda *_a, **_kw: FakeS3Client())
+    return bedrock
+
+
+def test_the_model_comes_from_the_configuration_when_it_names_one(monkeypatch) -> None:
+    """The parameter's value, as the seeder wrote it into the baseline, is used."""
+    table = _table_with_models({"summaryModelId": "global.anthropic.claude-sonnet-4-6"})
+    bedrock = _install_table(monkeypatch, table)
+    index.generate_summary("T", None)
+    assert {request["modelId"] for request in bedrock.requests} == {
+        "global.anthropic.claude-sonnet-4-6"
+    }
+
+
+def test_an_administrators_model_wins_over_the_parameters(monkeypatch) -> None:
+    table = _table_with_models(
+        {"summaryModelId": "global.anthropic.claude-sonnet-4-6"},
+        {"summaryModelId": "amazon.nova-pro-v1:0"},
+    )
+    bedrock = _install_table(monkeypatch, table)
+    index.generate_summary("T", None)
+    assert bedrock.requests[0]["modelId"] == "amazon.nova-pro-v1:0"
+
+
+def test_without_a_configured_model_the_environment_variable_is_used(monkeypatch) -> None:
+    """A table seeded by a template that predates the section, or not yet seeded."""
+    bedrock = _install_table(monkeypatch, _table_with_models(None))
+    index.generate_summary("T", None)
+    assert bedrock.requests[0]["modelId"] == MODEL_ID
+
+
+def test_regenerate_uses_a_model_saved_moments_before(monkeypatch) -> None:
+    """Regenerate drops the cached configuration, and the model is read after it."""
+    table = _table_with_models({"summaryModelId": "global.anthropic.claude-sonnet-4-6"})
+    bedrock = _install_table(monkeypatch, table)
+    index.generate_summary("T", None)
+    table.items[DEFAULT_KEY]["Body"] = {
+        "B": codec.encode_body(
+            {
+                FakeConfigurationTable.SECTION: {"1#Summary": "Summarize {transcript}"},
+                "language_models": {"summaryModelId": "amazon.nova-pro-v1:0"},
+            }
+        )
+    }
+    index.generate_summary("T", None, refresh_configuration=True)
+    assert [request["modelId"] for request in bedrock.requests] == [
+        "global.anthropic.claude-sonnet-4-6",
+        "amazon.nova-pro-v1:0",
+    ]
+
+
 def test_no_temperature_is_sent_to_a_model_that_rejects_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -572,7 +641,7 @@ def test_no_temperature_is_sent_to_a_model_that_rejects_one(
     Not a quality setting but a hard failure: every summary on a stack configured
     with one of those models would come back as the error string.
     """
-    monkeypatch.setattr(index, "BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
     bedrock, _ = install(monkeypatch)
     index.call_bedrock("a prompt")
     assert bedrock.requests[0]["inferenceConfig"] == {"maxTokens": 4096}
@@ -1063,7 +1132,7 @@ def test_each_summary_section_records_its_token_usage_against_the_meeting(monkey
     for item in metering.items:
         assert item["PK"] == {"S": f"mtr#{CALL_ID}"}
         assert item["Context"] == {"S": "Summary"}
-        assert item["Service"] == {"S": f"bedrock/{index.BEDROCK_MODEL_ID}"}
+        assert item["Service"] == {"S": f"bedrock/{MODEL_ID}"}
         assert item["Usage"]["M"] == {
             "inputTokens": {"N": "1200"},
             "outputTokens": {"N": "80"},

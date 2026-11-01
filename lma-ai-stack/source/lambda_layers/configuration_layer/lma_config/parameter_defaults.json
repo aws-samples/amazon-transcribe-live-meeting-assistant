@@ -1,0 +1,6 @@
+{
+  "BedrockModelId": {"section": "language_models", "setting": "summaryModelId", "type": "string"},
+  "MeetingAssistServiceBedrockModelID": {"section": "language_models", "setting": "meetingAssistModelId", "type": "string"},
+  "MeetingAssistKnowledgeBaseModelID": {"section": "language_models", "setting": "knowledgeBaseModelId", "type": "string"},
+  "KeyframeTextModelId": {"section": "language_models", "setting": "keyframeTextModelId", "type": "string"}
+}

@@ -31,6 +31,9 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 FUNCTION_SRC = REPO / "lma-meetingassist-setup-stack" / "src"
+# The AI stack's configuration layer, which the function is deployed with and
+# imports lma_config from.
+CONFIGURATION_LAYER = REPO / "lma-ai-stack" / "source" / "lambda_layers" / "configuration_layer"
 
 TABLE = "lma-call-events"
 CALL_ID = "call-1"
@@ -46,6 +49,8 @@ def strands_module():
 
     if str(FUNCTION_SRC) not in sys.path:
         sys.path.append(str(FUNCTION_SRC))
+    if str(CONFIGURATION_LAYER) not in sys.path:
+        sys.path.append(str(CONFIGURATION_LAYER))
     spec = importlib.util.spec_from_file_location(
         "lma_strands_meeting_assist_pages",
         FUNCTION_SRC / "strands_meeting_assist_function.py",

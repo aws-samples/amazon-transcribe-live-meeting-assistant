@@ -191,7 +191,29 @@ Parameters:
       - "global.anthropic.claude-sonnet-4-6"
       - "global.anthropic.claude-haiku-5-5"
       - "global.anthropic.claude-sonnet-5-5"
-    Description: Bedrock model that reads the text of each key frame of the shared screen
+    Description: >-
+      Default Bedrock model that reads the text of each key frame of the shared
+      screen. An Admin can change it at run time on the Configuration page.
+
+  # The meeting assistant's two models. Its functions are in the meeting-assist
+  # stack; they are passed here only so the configuration seeder can write them
+  # into the baseline as the defaults of the Amazon Bedrock Models section.
+  # lma-main.yaml validates them against its own AllowedValues. Empty, as a
+  # standalone deployment of this stack leaves them, is not written, and the
+  # readers fall back to their own environment variables.
+  MeetingAssistServiceBedrockModelID:
+    Type: String
+    Default: ""
+    Description: >-
+      Default Bedrock model of the meeting assistant and the troubleshooting
+      agent, written into the configuration baseline.
+
+  MeetingAssistKnowledgeBaseModelID:
+    Type: String
+    Default: ""
+    Description: >-
+      Default Bedrock model the meeting assistant's knowledge bases generate
+      answers with, written into the configuration baseline.
 
   BedrockModelId:
     Default: "global.anthropic.claude-sonnet-5-5"
@@ -225,10 +247,10 @@ Parameters:
       - "global.anthropic.claude-opus-5-5"
 
     Description: >
-      If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list
-      of supported models. Includes Nova models (cost-effective) and Claude 4+ (cutting-edge).
-      Some models require inference profiles.
-      Defaults to 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+      Default Bedrock model for summaries and meeting insights. An Admin can
+      change it at run time on the Configuration page. Includes Nova models
+      (cost-effective) and Claude 4+ (cutting-edge). Some models require
+      inference profiles.
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -788,6 +810,11 @@ Outputs:
       The DynamoDB table holding runtime configuration: the deployment
       baseline, the operator's profiles and the pointer naming the active one
     Value: !Ref ConfigurationTable
+  ConfigurationPythonLayerArn:
+    Description: >-
+      The configuration accessor layer, for the functions in other nested
+      stacks that read runtime configuration
+    Value: !Ref ConfigurationPythonLayer
   ConfigurationProfileOrigin:
     Description: >-
       How this stack's configuration profile came to exist, whenever that was:
@@ -3316,9 +3343,19 @@ Resources:
       LegacyChatButtonConfigTableName: !Ref ChatButtonConfigTableName
       LegacyAsrConfigTableName: !Ref AsrConfigTableName
       # Changes when the shipped configuration content or the code that
-      # processes it changes, and is the only reason CloudFormation re-invokes
-      # this resource on a stack update.
+      # processes it changes, and is one of the two reasons CloudFormation
+      # re-invokes this resource on a stack update.
       SeedContentHash: !Ref ConfigurationSeedHash
+      # The other: the stack parameters that are the defaults of runtime
+      # settings (lma_config/parameter_defaults.json names each one's section
+      # and setting). Written into Config#default, so a stack update that
+      # changes one reaches every setting an Admin has not changed on the
+      # Configuration page. Keyed by the lma-main.yaml parameter name.
+      ParameterDefaults:
+        BedrockModelId: !Ref BedrockModelId
+        MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
+        MeetingAssistKnowledgeBaseModelID: !Ref MeetingAssistKnowledgeBaseModelID
+        KeyframeTextModelId: !Ref KeyframeTextModelId
 
   # Revision bodies for the configuration history: one gzipped object per
   # revision at config_revisions/<profile>/<nnnnnn>.json.gz, with the metadata
@@ -3508,7 +3545,11 @@ Resources:
           KB_ID: !Ref BedrockKnowledgeBaseID
           KB_ACCOUNT_ID: !Ref AWS::AccountId
           KB_REGION: !Ref AWS::Region
+          # The model's default, read when the configuration cannot be.
           MODEL_ID: !Ref BedrockModelId
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/QueryKnowledgeBaseResolverFunction
@@ -3525,6 +3566,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - QueryKnowledgeBaseResolverFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   MeetingInvitationParserFunction:
     Type: AWS::Serverless::Function
@@ -3538,8 +3581,12 @@ Resources:
       Timeout: 60
       Environment:
         Variables:
+          # The model's default, read when the configuration cannot be.
           BEDROCK_MODEL_ID: !Ref BedrockModelId
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup:
           Fn::Sub: /${AWS::StackName}/lambda/MeetingInvitationParserFunction
@@ -3556,6 +3603,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only configuration values like feature flags and non-sensitive settings"
     DependsOn:
       - MeetingInvitationParserFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   MeetingInvitationParserFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -3597,6 +3646,20 @@ Resources:
                   - "bedrock:GetInferenceProfile"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              # Read-only, on the shared configuration table: the model this
+              # function calls is read from its Amazon Bedrock Models section.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                Resource: !GetAtt ConfigurationTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   QueryKnowledgeBaseResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -3643,6 +3706,20 @@ Resources:
                   - "bedrock:GetInferenceProfile"
                 Resource:
                   - !Sub "arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:inference-profile/*"
+              # Read-only, on the shared configuration table: the model this
+              # function calls is read from its Amazon Bedrock Models section.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                Resource: !GetAtt ConfigurationTable.Arn
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   AppSyncLambdaRole:
     Type: AWS::IAM::Role
@@ -4741,13 +4818,15 @@ Resources:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          # The model's default, read when the configuration cannot be.
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           # Token usage per naming pass, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
           METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
-      # Carries lma_metering. Pure Python, so it does not pin this function to an
-      # architecture.
+      # Carries lma_metering and lma_config. Pure Python, so it does not pin this
+      # function to an architecture.
       Layers:
         - !Ref ConfigurationPythonLayer
       LoggingConfig:
@@ -4766,6 +4845,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names, an endpoint and a model id"
     DependsOn:
       - SpeakerNameResolverFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   SpeakerNameResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4815,6 +4896,13 @@ Resources:
                 Action:
                   - appsync:GraphQL
                 Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateSpeakerIdentities"
+              # Read-only, on the shared configuration table: the model is read
+              # from its Amazon Bedrock Models section. The KMS grant below
+              # covers decrypting it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
               # Scoped the same way BedrockSummaryLambda and
               # MeetingInvitationParser scope the identical call, since
               # BedrockModelId may name a foundation model, a custom model or an
@@ -4909,12 +4997,14 @@ Resources:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           RECORDINGS_BUCKET: !Ref S3BucketName
           KEYFRAMES_PREFIX: "lma-video-keyframes/"
+          # The model's default, read when the configuration cannot be.
           KEYFRAME_TEXT_MODEL_ID: !Ref KeyframeTextModelId
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           # Token usage per frame, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
           METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
-      # Carries lma_metering. Pure Python, so it does not pin this function to an
-      # architecture.
+      # Carries lma_metering and lma_config. Pure Python, so it does not pin this
+      # function to an architecture.
       Layers:
         - !Ref ConfigurationPythonLayer
       LoggingConfig:
@@ -4933,6 +5023,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table and bucket names, a prefix and a model id"
     DependsOn:
       - KeyframeTextExtractorFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   KeyframeTextExtractorFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4985,6 +5077,13 @@ Resources:
                 Action:
                   - s3:GetObject
                 Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-video-keyframes/*"
+              # Read-only, on the shared configuration table: the model is read
+              # from its Amazon Bedrock Models section. The KMS grant below
+              # covers decrypting it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
               # Scoped as the agenda deriver scopes the same call.
               - Effect: Allow
                 Action:
@@ -5032,13 +5131,15 @@ Resources:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
+          # The model's default, read when the configuration cannot be.
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           BEDROCK_REGION_OVERRIDE: !Ref AWS::Region
           # Token usage per pass, for the meeting cost estimate.
           METERING_TABLE_NAME: !Ref EventSourcingTable
           METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
-      # Carries lma_metering. Pure Python, so it does not pin this function to an
-      # architecture.
+      # Carries lma_metering and lma_config. Pure Python, so it does not pin this
+      # function to an architecture.
       Layers:
         - !Ref ConfigurationPythonLayer
       LoggingConfig:
@@ -5057,6 +5158,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table names, an endpoint and a model id"
     DependsOn:
       - AgendaDeriverFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   AgendaDeriverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -5115,6 +5218,13 @@ Resources:
                 Action:
                   - appsync:GraphQL
                 Resource: !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/${AppSyncApiEncrypted.ApiId}/types/Mutation/fields/updateCallAgenda"
+              # Read-only, on the shared configuration table: the model is read
+              # from its Amazon Bedrock Models section. The KMS grant below
+              # covers decrypting it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
               # Scoped as the speaker name resolver scopes the identical call.
               - Effect: Allow
                 Action:
@@ -9730,7 +9840,10 @@ Resources:
           RECORDINGS_BUCKET: !Ref S3BucketName
           TRANSCRIPT_PREFIX: !Ref TranscriptFilePrefix
           TRANSCRIPT_KB_ID: !Ref BedrockKnowledgeBaseID
+          # The search tool's model default, read when the configuration
+          # cannot be.
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           AWS_ACCOUNT_ID: !Ref AWS::AccountId
           APPSYNC_GRAPHQL_URL: !GetAtt AppSyncApiEncrypted.GraphQLUrl
           LMA_SETTINGS_PARAMETER: !Ref LMASettingsParameterName
@@ -9742,6 +9855,8 @@ Resources:
           # Group whose members see every meeting in the account rather than
           # only their own. Matches UserManagementFunction.
           ADMIN_GROUP: "Admin"
+      Layers:
+        - !Ref ConfigurationPythonLayer
       LoggingConfig:
         LogGroup: !Ref MCPServerAnalyticsLogGroup
       Policies:
@@ -9806,8 +9921,17 @@ Resources:
                 - secretsmanager:DescribeSecret
               Resource:
                 - !Sub "arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:${LMAStackName}/zoom-credentials/*"
+            # Read-only, on the shared configuration table: the search tool's
+            # model is read from its Amazon Bedrock Models section. The KMS
+            # decrypt this needs is granted above.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource: !GetAtt ConfigurationTable.Arn
     DependsOn:
       - MCPServerAnalyticsLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   # MCP Server Gateway (Native CloudFormation)
   MCPServerGateway:

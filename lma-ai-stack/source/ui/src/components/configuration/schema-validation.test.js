@@ -56,6 +56,7 @@ describe('schema-validation', () => {
       'asr_engine',
       'call_pricing',
       'chat_buttons',
+      'language_models',
       'nova_sonic_config',
       'summary_prompt_templates',
     ]);

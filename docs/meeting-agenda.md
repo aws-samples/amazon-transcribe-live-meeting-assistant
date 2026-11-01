@@ -100,8 +100,10 @@ quote — so an agenda
 made up from the discussion has nothing to point at and is discarded. Both passes read at
 most about the first half hour of conversation, where agendas are stated.
 
-**Model and cost.** Derivation uses the model selected by the **BedrockModelId**
-stack parameter (the one summaries use). Each pass is one model call, recorded
+**Model and cost.** Derivation uses the model summaries use: **Summaries and
+meeting insights** in the Amazon Bedrock Models section of the
+[Configuration page](configuration-guide.md), whose default is the
+**BedrockModelId** stack parameter. Each pass is one model call, recorded
 against the meeting as **Agenda derivation** in its
 [cost estimate](meeting-cost-estimate.md). The automatic pass runs at most once
 per meeting.

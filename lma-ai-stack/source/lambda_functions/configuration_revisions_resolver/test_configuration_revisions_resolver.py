@@ -186,8 +186,10 @@ def test_the_editor_read_serves_every_section_schema_with_its_tier(store) -> Non
         "chat_buttons",
         "asr_engine",
         "call_pricing",
+        "language_models",
     }
     assert sections[SECTION]["CacheTier"] == "immediate"
+    assert sections["language_models"]["CacheTier"] == "standard"
     assert sections[SECTION]["Schema"]["properties"]["voiceId"]["type"] == "string"
     # Only registered sections: the editor renders nothing it cannot validate.
     assert json.loads(result["Default"]) == {SECTION: {"voiceId": "tiffany"}}
