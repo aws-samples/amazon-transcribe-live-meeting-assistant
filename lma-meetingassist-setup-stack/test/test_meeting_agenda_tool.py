@@ -176,3 +176,24 @@ def test_a_failed_read_is_reported_to_the_agent_not_raised(monkeypatch):
     assert _agenda_tool(monkeypatch, BrokenTable())() == (
         "The meeting agenda could not be read just now."
     )
+
+
+def test_timed_lines_read_in_start_order_where_channels_overlap(monkeypatch):
+    """A long turn on one channel ends after a short one on the other began;
+    ordered by start, the times read forwards. Untimed, the order is by end,
+    as it has always been."""
+    segments = [
+        {"Speaker": "Ann", "Transcript": "Long turn.", "Channel": "AGENT", "StartTime": 10, "EndTime": 30},
+        {"Speaker": "Bob", "Transcript": "Short one.", "Channel": "CALLER", "StartTime": 20, "EndTime": 22},
+    ]
+
+    class FakeResource:
+        @staticmethod
+        def Table(_name):  # noqa: N802 - the boto3 resource's own method name
+            return FakeTable(segments)
+
+    monkeypatch.setattr(handler_module, "dynamodb", FakeResource)
+    assert handler_module.fetch_meeting_transcript("c", "t", with_timestamps=True) == (
+        "[00:10] Ann: Long turn.\n[00:20] Bob: Short one."
+    )
+    assert handler_module.fetch_meeting_transcript("c", "t") == "Bob: Short one.\nAnn: Long turn."

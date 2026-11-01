@@ -73,7 +73,9 @@ such a statement in two ways, and stores what it finds with source `derived`.
 **Automatically, once per meeting.** When a meeting that has no agenda passes
 about five minutes of transcript, the transcript so far is read once for a
 stated agenda. If one was stated, it is stored; if not, nothing is stored and
-the meeting is not read again automatically. The pass never replaces an agenda:
+the meeting is not read again automatically. The same holds if the pass fails —
+the model call is throttled, say: it is not retried, and **Derive agenda**
+remains the way to try again. The pass never replaces an agenda:
 it writes only while the meeting still has none, checked in the same database
 operation as the write, so an agenda somebody sets while it runs is kept.
 
