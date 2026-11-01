@@ -250,6 +250,26 @@ describe('renderMarkdownSafe (standalone chat page)', () => {
     expect(paragraph?.getAttribute('style')).toBeNull();
   });
 
+  it('turns a key frame reference into a placeholder the sanitizer keeps', () => {
+    const host = renderToDom(
+      globalThis.withKeyframePlaceholders('The slide:\n\n![Shared screen at 12:30](keyframe:0000750000-ab12cd)'),
+    );
+    const img = host.querySelector('img');
+    expect(img?.getAttribute('data-lma-keyframe')).toBe('0000750000-ab12cd');
+    expect(img?.getAttribute('alt')).toBe('Shared screen at 12:30');
+    expect(img?.getAttribute('src')).toBeNull();
+  });
+
+  it('keeps a key frame placeholder inert whatever its text holds', () => {
+    const host = renderToDom(globalThis.withKeyframePlaceholders('![" onerror="alert(1)](keyframe:f-1)'));
+    const img = host.querySelector('img');
+    expect(img?.getAttribute('onerror')).toBeNull();
+    expect(img?.getAttribute('alt')).toBe('" onerror="alert(1)');
+    // Only the id pattern is a reference; anything else is left to the sanitizer.
+    const other = renderToDom(globalThis.withKeyframePlaceholders('![x](keyframe:bad id)'));
+    expect(other.querySelector('img[data-lma-keyframe]')).toBeNull();
+  });
+
   it('signals to the caller when the sanitizer is unavailable', () => {
     const sanitizer = globalThis.DOMPurify;
     try {

@@ -330,6 +330,17 @@
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
+        /* A frame of the shared screen in an answer (see resolveKeyframes). */
+        img.lma-keyframe {
+            display: block;
+            max-width: 100%;
+            min-height: 40px;
+            margin: 6px 0;
+            border: 1px solid #e9ebed;
+            border-radius: 6px;
+            background: #f2f3f3;
+            cursor: zoom-in;
+        }
     </style>
     <!--
       Vendored locally to avoid an external CDN dependency. Versions are pinned;
@@ -386,6 +397,51 @@
         const PARENT_ORIGIN = window.location.origin;
 
         const isFromParent = (event) => event.origin === PARENT_ORIGIN;
+
+        // Frames of the shared screen in answers. The assistant shows one as
+        // ![alt](keyframe:<FrameId>) (see get_meeting_frames);
+        // withKeyframePlaceholders (js/render-markdown.js) turns each into a
+        // placeholder image carrying the id, and the page signs a link for it
+        // (STRANDS_RESOLVE_KEYFRAMES) through the meeting's access check.
+        const keyframeLinks = new Map();
+
+        function renderAssistantMarkdown(text) {
+            return renderMarkdownSafe(withKeyframePlaceholders(text));
+        }
+
+        function showKeyframe(img, link) {
+            const url = link && (link.image || link.thumbnail);
+            if (!url || !url.startsWith('https://')) return;
+            img.src = url;
+            img.title = 'Open full size';
+            img.onclick = () => window.open(url, '_blank', 'noopener');
+        }
+
+        function resolveKeyframes(root) {
+            if (!root) return;
+            const missing = new Set();
+            root.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                const link = keyframeLinks.get(img.dataset.lmaKeyframe);
+                if (link) showKeyframe(img, link);
+                else missing.add(img.dataset.lmaKeyframe);
+            });
+            if (!missing.size) return;
+            const requestId = `kf-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            const onFrames = (event) => {
+                if (!isFromParent(event) || event.data?.type !== 'STRANDS_KEYFRAMES' || event.data.requestId !== requestId) return;
+                window.removeEventListener('message', onFrames);
+                Object.entries(event.data.frames || {}).forEach(([frameId, link]) => keyframeLinks.set(frameId, link));
+                root.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                    const link = keyframeLinks.get(img.dataset.lmaKeyframe);
+                    if (link) showKeyframe(img, link);
+                });
+            };
+            window.addEventListener('message', onFrames);
+            window.parent.postMessage(
+                { type: 'STRANDS_RESOLVE_KEYFRAMES', requestId, callId, frameIds: [...missing].slice(0, 10) },
+                PARENT_ORIGIN,
+            );
+        }
 
         // Listen for reload message from parent
         window.addEventListener('message', (event) => {
@@ -648,9 +704,10 @@
             messageDiv.className = `message ${type}`;
             
             // Use markdown rendering for assistant messages, plain text for user/error
-            const rendered = type === 'assistant' ? renderMarkdownSafe(text) : null;
+            const rendered = type === 'assistant' ? renderAssistantMarkdown(text) : null;
             if (rendered !== null) {
                 messageDiv.innerHTML = rendered;
+                resolveKeyframes(messageDiv);
             } else {
                 messageDiv.textContent = text;
             }
@@ -797,9 +854,10 @@
                             
                             // Final render with markdown
                             if (accumulatedText) {
-                                const finalHtml = renderMarkdownSafe(accumulatedText);
+                                const finalHtml = renderAssistantMarkdown(accumulatedText);
                                 if (finalHtml !== null) {
                                     streamingMessageDiv.innerHTML = finalHtml;
+                                    resolveKeyframes(streamingMessageDiv);
                                 } else {
                                     streamingMessageDiv.textContent = accumulatedText;
                                 }
@@ -828,9 +886,14 @@
                             accumulatedText += token.Token;
                             
                             // Render markdown incrementally during streaming
-                            const partialHtml = renderMarkdownSafe(accumulatedText);
+                            const partialHtml = renderAssistantMarkdown(accumulatedText);
                             if (partialHtml !== null) {
                                 streamingMessageDiv.innerHTML = partialHtml;
+                                // Frames already resolved keep their picture while the answer streams.
+                                streamingMessageDiv.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                                    const link = keyframeLinks.get(img.dataset.lmaKeyframe);
+                                    if (link) showKeyframe(img, link);
+                                });
                             } else {
                                 streamingMessageDiv.textContent = accumulatedText;
                             }

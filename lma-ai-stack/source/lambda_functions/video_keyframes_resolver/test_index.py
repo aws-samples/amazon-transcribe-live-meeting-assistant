@@ -78,6 +78,10 @@ class FakeDynamo:
         self.queries: List[Dict[str, Any]] = []
 
     def get_item(self, **kwargs):
+        key = kwargs["Key"]
+        if key["PK"]["S"].startswith("kf#"):
+            found = [i for i in self.items if i["PK"] == key["PK"] and i["SK"] == key["SK"]]
+            return {"Item": found[0]} if found else {}
         return {"Item": self.call} if self.call else {}
 
     def query(self, **kwargs):
@@ -231,3 +235,19 @@ def test_a_bucket_whose_name_has_dots_is_recognised(fakes, monkeypatch):
     frame = call(OWNER)["VideoKeyframes"][0]
     assert frame["ImageSignedUrl"] is not None
     assert s3.signed[0] == f"{FOLDER}0000001000-ab12cd.jpg"
+
+
+def test_one_frame_can_be_read_by_its_id_with_its_links(fakes):
+    fakes([item(ms) for ms in (1000, 2000, 3000)])
+    result = call(OWNER, frameId="0000002000-ab12cd")
+    assert [f["Timestamp"] for f in result["VideoKeyframes"]] == [2.0]
+    assert result["VideoKeyframes"][0]["ImageSignedUrl"]
+    assert call(OWNER, frameId="0000009999-ab12cd")["VideoKeyframes"] == []
+    with pytest.raises(index.BadRequestError):
+        call(OWNER, frameId="f#0000002000-ab12cd")
+
+
+def test_a_frame_id_is_still_refused_to_anyone_else(fakes):
+    fakes([item(1000)])
+    with pytest.raises(index.ForbiddenError):
+        call(STRANGER, frameId="0000001000-ab12cd")

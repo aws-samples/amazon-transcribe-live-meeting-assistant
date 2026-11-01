@@ -13,7 +13,7 @@ import json
 import os
 import boto3
 from boto3.dynamodb.conditions import Key, Attr
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 from datetime import datetime
 from bedrock_compat import (
@@ -26,6 +26,7 @@ from bedrock_compat import (
 import tavily_secret
 import call_metering
 import meeting_agenda
+import meeting_frames
 
 # Import MCP server loader
 try:
@@ -1572,6 +1573,151 @@ def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_i
     return get_meeting_agenda
 
 
+def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id: str,
+                               show_inline: bool, message_id: str = None):
+    """Factory for the tool that shows the agent the meeting's shared screen.
+
+    Offered in every tool scope, the meeting chat's included: the frames are
+    pictures of what was shared with everyone in the meeting. ``show_inline``
+    is whether the answer goes to the meeting page's chat, the one place that
+    can display a frame; elsewhere (the meeting chat, the voice assistant) the
+    agent is told to describe frames in words. The pictures go to the model
+    only when it reads images; see meeting_frames.model_accepts_images.
+    """
+    from strands import tool
+
+    send_images = meeting_frames.model_accepts_images(model_id)
+
+    def run_query(document: str, variables: Dict[str, Any]) -> Dict[str, Any]:
+        from gql import gql
+        client = new_appsync_client(APPSYNC_GRAPHQL_URL)
+        return client.execute(gql(document), variable_values=variables)
+
+    @tool
+    def get_meeting_frames(last: int = 1, start_time: str = "", end_time: str = "", at_time: str = "") -> dict:
+        """Get key frames of the meeting's shared screen: the slides, documents and other content
+        that were on screen, each with what was said while it was shown.
+
+        Use this when someone asks about what was shown rather than said:
+        - "What's on this slide?", "Summarize that slide", "Translate the last slide into French"
+        - "Show me the last two slides" (last=2)
+        - "What was on screen at 12:30?" (at_time="12:30")
+        - "What slides did we see between 10:00 and 20:00?" (start_time="10:00", end_time="20:00")
+
+        Args:
+            last: How many of the most recent frames to get (1 to 10). Used when no time is given.
+            start_time: Start of a time range, as MM:SS or H:MM:SS from the start of the meeting.
+            end_time: End of a time range, in the same form.
+            at_time: A moment, in the same form: the frame that was on screen then.
+
+        Returns:
+            Each frame's times and transcript, with the pictures when the model can read them.
+        """
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_use',
+                'tool_name': 'get_meeting_frames',
+                'tool_input': {'last': last, 'start_time': start_time, 'end_time': end_time, 'at_time': at_time},
+                'timestamp': datetime.utcnow().isoformat()
+            }, 0)
+        success = True
+        try:
+            frames = meeting_frames.load_keyframes(run_query, call_id)
+            selected = meeting_frames.select_frames(
+                frames,
+                last=last,
+                start=meeting_frames.parse_meeting_time(start_time),
+                end=meeting_frames.parse_meeting_time(end_time),
+                at=meeting_frames.parse_meeting_time(at_time),
+            )
+            images = {}
+            if send_images:
+                for frame, _ in selected[-meeting_frames.MAX_IMAGES:]:
+                    data = meeting_frames.download_image(frame.get('ImageSignedUrl'))
+                    if data is not None:
+                        images[str(frame.get('FrameId'))] = data
+            segments = query_transcript_items(call_id, dynamodb_table_name) if selected and dynamodb_table_name else []
+            result = meeting_frames.build_tool_result(
+                selected, segments, images,
+                total_frames=len(frames), send_images=send_images, show_inline=show_inline,
+            )
+        except Exception as e:
+            logger.error(f"Error reading the meeting's key frames: {str(e)}")
+            result = {'status': 'error', 'content': [{'text': "The meeting's key frames could not be read just now."}]}
+            success = False
+        sent = meeting_frames.images_in(result)
+        if sent:
+            # The pictures are billed as the model's input tokens, which the
+            # answer's own record counts; this counts how many there were.
+            call_metering.record(
+                call_id, 'MeetingAssistant', f'bedrock/{model_id}', {'images': sent},
+                source='strands-meeting-assist',
+            )
+        logger.info(f"Meeting frames tool for {call_id}: {len(result.get('content', []))} blocks, {sent} image(s)")
+        if call_id and message_id and APPSYNC_GRAPHQL_URL:
+            summary = result['content'][0].get('text', '') if result.get('content') else ''
+            send_thinking_step_to_appsync(call_id, message_id, {
+                'type': 'tool_result',
+                'tool_name': 'get_meeting_frames',
+                'result': f"{sent} picture(s). {summary[:160]}",
+                'success': success,
+                'timestamp': datetime.utcnow().isoformat()
+            }, 1)
+        return result
+
+    return get_meeting_frames
+
+
+def query_transcript_items(call_id: str, dynamodb_table_name: str) -> List[Dict[str, Any]]:
+    """The meeting's final transcript segments (speaker, assistant and caller lines), unsorted.
+
+    Raises on a read failure; fetch_meeting_transcript turns that into an empty
+    transcript.
+    """
+    table = dynamodb.Table(dynamodb_table_name)
+    pk = f'trs#{call_id}'
+
+    # Read every page, not just the first. DynamoDB caps a Query response at
+    # 1 MB of items *read* and applies FilterExpression only afterwards, and
+    # the partial segments excluded here are numerous, so they spend the
+    # budget without appearing in the result: even a moderately long meeting
+    # spans several pages. A single query therefore hands the agent the
+    # opening stretch of the meeting as though it were the whole thing, with
+    # nothing to say otherwise. Mirrors get_transcripts() in
+    # lma-ai-stack/source/lambda_functions/fetch_transcript/index.py.
+    query_args = {
+        'KeyConditionExpression': Key('PK').eq(pk),
+        'FilterExpression': (
+            (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT'))
+            & Attr('IsPartial').eq(False)
+        ),
+    }
+    items = []
+    start_key = None
+    pages = 0
+    while pages < MAX_TRANSCRIPT_PAGES:
+        response = table.query(
+            **query_args,
+            **({'ExclusiveStartKey': start_key} if start_key else {}),
+        )
+        items.extend(response.get('Items', []))
+        pages += 1
+        next_key = response.get('LastEvaluatedKey')
+        if not next_key or next_key == start_key:
+            # A key identical to the one just used would ask for the same page
+            # again forever. Stop rather than spin.
+            break
+        start_key = next_key
+    if pages >= MAX_TRANSCRIPT_PAGES:
+        logger.warning(
+            "Stopped reading the transcript for %s at the %d page limit; "
+            "the transcript handed to the assistant may be incomplete",
+            call_id, MAX_TRANSCRIPT_PAGES,
+        )
+    logger.info(f"Read {len(items)} transcript segments for {call_id} over {pages} page(s)")
+    return items
+
+
 def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timestamps: bool = False) -> str:
     """
     Fetch the meeting transcript from DynamoDB.
@@ -1582,46 +1728,7 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timest
     stays as it was.
     """
     try:
-        table = dynamodb.Table(dynamodb_table_name)
-        pk = f'trs#{call_id}'
-
-        # Read every page, not just the first. DynamoDB caps a Query response at
-        # 1 MB of items *read* and applies FilterExpression only afterwards, and
-        # the partial segments excluded here are numerous, so they spend the
-        # budget without appearing in the result: even a moderately long meeting
-        # spans several pages. A single query therefore hands the agent the
-        # opening stretch of the meeting as though it were the whole thing, with
-        # nothing to say otherwise. Mirrors get_transcripts() in
-        # lma-ai-stack/source/lambda_functions/fetch_transcript/index.py.
-        query_args = {
-            'KeyConditionExpression': Key('PK').eq(pk),
-            'FilterExpression': (
-                (Attr('Channel').eq('AGENT') | Attr('Channel').eq('CALLER') | Attr('Channel').eq('AGENT_ASSISTANT'))
-                & Attr('IsPartial').eq(False)
-            ),
-        }
-        items = []
-        start_key = None
-        pages = 0
-        while pages < MAX_TRANSCRIPT_PAGES:
-            response = table.query(
-                **query_args,
-                **({'ExclusiveStartKey': start_key} if start_key else {}),
-            )
-            items.extend(response.get('Items', []))
-            pages += 1
-            next_key = response.get('LastEvaluatedKey')
-            if not next_key or next_key == start_key:
-                # A key identical to the one just used would ask for the same page
-                # again forever. Stop rather than spin.
-                break
-            start_key = next_key
-        if pages >= MAX_TRANSCRIPT_PAGES:
-            logger.warning(
-                "Stopped reading the transcript for %s at the %d page limit; "
-                "the transcript handed to the assistant may be incomplete",
-                call_id, MAX_TRANSCRIPT_PAGES,
-            )
+        items = query_transcript_items(call_id, dynamodb_table_name)
 
         # Sort by EndTime and format transcript
         # By end time as before; by start time when lines carry their start
@@ -1644,7 +1751,7 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timest
         full_transcript = '\n'.join(transcript_parts)
         logger.info(
             f"Fetched transcript for {call_id}: {len(full_transcript)} characters "
-            f"from {len(items)} segments over {pages} page(s)"
+            f"from {len(items)} segments"
         )
         
         return full_transcript
@@ -1717,9 +1824,10 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
 
 MEETING_CHAT_SCOPE_NOTE = (
     "\n\nThis question was typed in the meeting chat, and your answer is posted there for "
-    "everyone in the meeting to read. Only the current meeting's transcript, its agenda and "
-    "web search are available for it: do not try any other tool named above, and do not refer to past "
-    "meetings or documents. Answer briefly in plain sentences."
+    "everyone in the meeting to read. Only the current meeting's transcript, its agenda, "
+    "the pictures of its shared screen and web search are available for it: do not try any other "
+    "tool named above, and do not refer to past meetings or documents. Answer briefly in plain "
+    "sentences."
 )
 
 
@@ -2051,6 +2159,20 @@ def handler(event, context):
                 message_id=message_id
             ))
             logger.info("Meeting agenda tool enabled")
+
+        # The meeting's shared screen. In every scope, as the agenda: the
+        # frames show what was shared with everyone in the meeting. Frames
+        # can be shown inline only in the meeting page's chat, which is the
+        # caller that subscribes to the answer.
+        if APPSYNC_GRAPHQL_URL and dynamodb_table_name:
+            tools.append(create_meeting_frames_tool(
+                call_id=call_id,
+                dynamodb_table_name=dynamodb_table_name,
+                model_id=model_id,
+                show_inline=bool(subscriber_id) and not meeting_chat_scope,
+                message_id=message_id
+            ))
+            logger.info("Meeting frames tool enabled")
 
         # Add VNC preview control tool (available to all users)
         if APPSYNC_GRAPHQL_URL and not meeting_chat_scope:
@@ -2419,6 +2541,15 @@ Examples:
   - Remaining: not discussed yet
 - Mark an item covered only when the transcript shows it was discussed. Mention briefly any
   substantial topic discussed that is not on the agenda.
+
+**For what was shown on screen (USE get_meeting_frames):**
+- "What's on this slide?", "Summarize that slide" → get_meeting_frames(last=1)
+- "Translate the last slide into French" → get_meeting_frames(last=1), then translate what it shows
+- "Show me the last two slides" → get_meeting_frames(last=2), and include each frame's image markdown
+- "What was on screen at 12:30?" → get_meeting_frames(at_time="12:30")
+- Combine what the frame shows with what was said while it was on screen. Describe content, not
+  people: never identify anyone from a face or a camera tile.
+- If the meeting has no key frames, say so plainly.
 
 **For past meetings queries:**
 - "Last meeting" → recent_meetings_list(limit=1) → meeting_history with CallId

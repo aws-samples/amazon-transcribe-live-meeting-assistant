@@ -39,13 +39,15 @@ ALL_TOOLS = {
     "meeting_history",
     "current_meeting_transcript",
     "get_meeting_agenda",
+    "get_meeting_frames",
     "control_vnc_preview",
     "control_vp_browser",
 }
 
-# The meeting's agenda is offered in the chat scope too: guests in the meeting
-# may read the agenda of the meeting they are in, as they read its transcript.
-CHAT_TOOLS = {"web_search", "current_meeting_transcript", "get_meeting_agenda"}
+# The meeting's agenda and its shared screen are offered in the chat scope too:
+# guests in the meeting may read the agenda of the meeting they are in, and see
+# again what was shared with them, as they read its transcript.
+CHAT_TOOLS = {"web_search", "current_meeting_transcript", "get_meeting_agenda", "get_meeting_frames"}
 
 
 def _named(name: str):
@@ -109,6 +111,7 @@ def built(monkeypatch):
         ("create_meeting_history_tool", "meeting_history"),
         ("create_current_meeting_transcript_tool", "current_meeting_transcript"),
         ("create_meeting_agenda_tool", "get_meeting_agenda"),
+        ("create_meeting_frames_tool", "get_meeting_frames"),
         ("create_vnc_preview_control_tool", "control_vnc_preview"),
         ("create_vp_browser_control_tool", "control_vp_browser"),
     ):
@@ -138,7 +141,7 @@ def built(monkeypatch):
     return run
 
 
-def test_meeting_chat_question_is_given_only_the_transcript_agenda_and_web_search(built):
+def test_meeting_chat_question_is_given_only_the_transcript_agenda_frames_and_web_search(built):
     agent = built({"toolScope": "meeting_chat", "userEmail": "owner@example.com"})
     assert agent["tools"] == CHAT_TOOLS
 
@@ -146,7 +149,9 @@ def test_meeting_chat_question_is_given_only_the_transcript_agenda_and_web_searc
 def test_meeting_chat_question_is_told_which_tools_it_has(built):
     agent = built({"toolScope": "meeting_chat", "userEmail": "owner@example.com"})
     assert agent["system_prompt"].endswith(handler_module.MEETING_CHAT_SCOPE_NOTE)
-    assert "transcript, its agenda and web search" in handler_module.MEETING_CHAT_SCOPE_NOTE
+    assert "transcript, its agenda, the pictures of its shared screen and web search" in (
+        handler_module.MEETING_CHAT_SCOPE_NOTE
+    )
 
 
 def test_other_requests_are_given_every_configured_tool(built):

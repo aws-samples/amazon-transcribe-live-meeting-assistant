@@ -209,6 +209,38 @@ describe('VideoTimeline', () => {
     expect(screen.queryByTitle('Key frame at 0:01')).toBeNull();
   });
 
+  it('ends the paging at an empty page', async () => {
+    const loadFrames = vi
+      .fn()
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(1000)], nextToken: 't1' })
+      .mockResolvedValueOnce({ VideoKeyframes: [], nextToken: 't2' });
+    render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    fireEvent.click(await screen.findByText('Load more'));
+    await waitFor(() => expect(screen.queryByText('Load more')).toBeNull());
+    expect(screen.getByText('(1)')).toBeTruthy();
+  });
+
+  it('asks for the player to be shown only for an explicit play', async () => {
+    const onPlayFrom = vi.fn();
+    const loadFrames = vi.fn().mockResolvedValue({ VideoKeyframes: [frame(30000)], nextToken: null });
+    render(
+      <VideoTimeline
+        callId="m-1"
+        canPlayRecording
+        loadFrames={loadFrames}
+        subscribe={noSubscribe}
+        onPlayFrom={onPlayFrom}
+      />,
+    );
+    fireEvent.click(await screen.findByTitle('Key frame at 0:30'));
+    expect(onPlayFrom).toHaveBeenLastCalledWith(expect.objectContaining({ FrameId: '0000030000-ab12cd' }));
+    expect(onPlayFrom.mock.calls[0]).toHaveLength(1);
+    fireEvent.click(screen.getByText('Play recording from here'));
+    expect(onPlayFrom).toHaveBeenLastCalledWith(expect.objectContaining({ FrameId: '0000030000-ab12cd' }), {
+      reveal: true,
+    });
+  });
+
   it('says so when the frames cannot be loaded', async () => {
     const loadFrames = vi.fn().mockRejectedValue(new Error('Unauthorized'));
     render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);

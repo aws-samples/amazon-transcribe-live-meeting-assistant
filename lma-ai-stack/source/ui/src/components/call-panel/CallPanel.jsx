@@ -84,6 +84,7 @@ import useCallsContext from '../../contexts/calls';
 import { shareModal, deleteModal } from '../common/meeting-controls';
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
+import getVideoKeyframes from '../../graphql/queries/getVideoKeyframes';
 import MCPServersModal from '../mcp-servers';
 
 const client = generateClient();
@@ -2167,11 +2168,41 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     return () => clearTimeout(timer);
   }, [user, userGroups, isAdminUser, item.callId]);
 
+  // The meeting this panel shows, for the chat's requests: read when a request
+  // arrives rather than captured when the handler was installed.
+  const panelCallIdRef = useRef(item.callId);
+  panelCallIdRef.current = item.callId;
+
   // Add message handler for STRANDS iframe requests
   useEffect(() => {
     const handleMessage = async (event) => {
       // Validate message origin for security
       if (event.origin !== window.location.origin) return;
+
+      // Frames of the shared screen the assistant referred to: signed links
+      // for this panel's meeting, through the same access check as the strip.
+      if (event.data && event.data.type === 'STRANDS_RESOLVE_KEYFRAMES') {
+        const frameIds = (Array.isArray(event.data.frameIds) ? event.data.frameIds : [])
+          .filter((id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id))
+          .slice(0, 10);
+        const frames = {};
+        await Promise.all(
+          frameIds.map(async (frameId) => {
+            try {
+              const response = await client.graphql({
+                query: getVideoKeyframes,
+                variables: { callId: panelCallIdRef.current, frameId },
+              });
+              const frame = response?.data?.getVideoKeyframes?.VideoKeyframes?.[0];
+              if (frame) frames[frameId] = { image: frame.ImageSignedUrl, thumbnail: frame.ThumbnailSignedUrl };
+            } catch (error) {
+              logger.debug('could not resolve a key frame for the chat', error);
+            }
+          }),
+        );
+        event.source?.postMessage({ type: 'STRANDS_KEYFRAMES', requestId: event.data.requestId, frames }, event.origin);
+        return;
+      }
 
       // Handle user context request from iframe
       if (event.data && event.data.type === 'STRANDS_REQUEST_USER_CONTEXT') {
@@ -2466,7 +2497,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   const [videoSeekRequest, setVideoSeekRequest] = useState(null);
   const showInTranscript = useCallback((seconds) => setTranscriptScrollRequest({ seconds, at: Date.now() }), []);
   const playRecordingFrom = useCallback(
-    (frame) => setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now() }),
+    (frame, { reveal = false } = {}) =>
+      setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now(), reveal }),
     [],
   );
   const [vpData, setVpData] = useState(null);

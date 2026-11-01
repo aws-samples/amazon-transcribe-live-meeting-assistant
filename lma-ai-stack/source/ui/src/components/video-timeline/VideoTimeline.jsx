@@ -132,10 +132,13 @@ const VideoTimeline = ({
       }
       const ran = await runLoad(async ({ fetchPage, apply }) => {
         const page = await fetchPage({ nextToken: token, afterFrameId: after || null });
-        const applied = apply((shown) => mergeKeyframes(shown, page?.VideoKeyframes || []));
+        const incoming = page?.VideoKeyframes || [];
+        const applied = apply((shown) => mergeKeyframes(shown, incoming));
         // A page of frames after a given one does not move the paging cursor.
+        // An empty page ends the paging: DynamoDB hands back a token for a page
+        // that happened to end on the last frame, and it leads nowhere.
         if (applied && after === null) {
-          nextTokenRef.current = page?.nextToken || null;
+          nextTokenRef.current = (incoming.length && page?.nextToken) || null;
           setNextToken(nextTokenRef.current);
         }
       });
@@ -319,7 +322,11 @@ const VideoTimeline = ({
                 </Button>
               )}
               {canPlayRecording && onPlayFrom && (
-                <Button variant="inline-link" iconName="caret-right-filled" onClick={() => onPlayFrom(selected)}>
+                <Button
+                  variant="inline-link"
+                  iconName="caret-right-filled"
+                  onClick={() => onPlayFrom(selected, { reveal: true })}
+                >
                   Play recording from here
                 </Button>
               )}

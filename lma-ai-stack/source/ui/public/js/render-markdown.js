@@ -134,5 +134,32 @@
     return sanitizer.sanitize(parser.parse(text), SANITIZE_CONFIG);
   }
 
+  // A frame of the meeting's shared screen, as the meeting assistant refers to
+  // one: ![alt](keyframe:<FrameId>). The sanitizer drops a src with that
+  // scheme, so the reference is turned into an image without a src that carries
+  // the id instead; the chat page fills in a signed link once it has one.
+  var KEYFRAME_REF = /!\[([^\]]*)\]\(keyframe:([A-Za-z0-9_-]{1,64})\)/g;
+
+  function escapeAttribute(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  /**
+   * Markdown with each key frame reference replaced by its placeholder image.
+   *
+   * @param {string} text markdown source
+   * @returns {string} the same text, references replaced
+   */
+  function withKeyframePlaceholders(text) {
+    return String(text || '').replace(KEYFRAME_REF, function placeholder(_match, alt, frameId) {
+      return '<img class="lma-keyframe" data-lma-keyframe="' + frameId + '" alt="' + escapeAttribute(alt) + '">';
+    });
+  }
+
   root.renderMarkdownSafe = renderMarkdownSafe;
+  root.withKeyframePlaceholders = withKeyframePlaceholders;
 })(typeof globalThis !== 'undefined' ? globalThis : window);

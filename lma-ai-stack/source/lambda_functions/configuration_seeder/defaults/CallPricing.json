@@ -186,7 +186,8 @@
     "requests",
     "sessions",
     "audioSeconds",
-    "runtimeSeconds"
+    "runtimeSeconds",
+    "images"
   ],
   "notes": {
     "ec2/virtual-participant-host": "The EC2 launch type runs Virtual Participants on hosts that are billed by the hour whether or not a meeting is running, so no share of the host is attributed to one meeting. Runtime is shown for reference.",
