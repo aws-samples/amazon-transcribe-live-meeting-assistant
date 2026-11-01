@@ -406,8 +406,8 @@ def lambda_handler(event, context):
     if data.get("IncludeKeyframes") or data.get("IncludeTimes"):
         keyframes = get_keyframes(callid)
     if data.get("IncludeTimes"):
-        # Before attach_said, which formats segments again and must not
-        # disturb the pairing of segments and lines.
+        # segments and transcripts are in the same order, one line per
+        # segment, as preprocess_transcripts left them.
         response["timedTranscript"] = timed_transcript(segments, transcripts, keyframes)
     if data.get("IncludeKeyframes"):
         response["keyframes"] = attach_said(

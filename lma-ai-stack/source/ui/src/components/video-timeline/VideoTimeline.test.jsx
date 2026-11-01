@@ -331,7 +331,13 @@ describe('VideoTimeline', () => {
       .mockResolvedValueOnce({ VideoKeyframes: [frame(1000)], nextToken: 't1' })
       .mockResolvedValueOnce({ VideoKeyframes: [frame(1000), frame(2000)], nextToken: 't2' })
       .mockResolvedValueOnce({ VideoKeyframes: [frame(3000)], nextToken: null });
-    const printDeck = vi.fn().mockResolvedValue(true);
+    const printDeck = vi.fn().mockResolvedValue(undefined);
+    const tab = { close: vi.fn() };
+    const openDeckTab = vi.fn(() => {
+      // Opened within the click, before any frame is read.
+      expect(loadFrames).toHaveBeenCalledTimes(1);
+      return tab;
+    });
     const chapters = [{ seconds: 1, label: '00:01', title: 'Welcome' }];
     render(
       <VideoTimeline
@@ -340,12 +346,15 @@ describe('VideoTimeline', () => {
         loadFrames={loadFrames}
         subscribe={noSubscribe}
         chapters={chapters}
+        openDeckTab={openDeckTab}
         printDeck={printDeck}
       />,
     );
     fireEvent.click(await screen.findByText('Export slides (PDF)'));
+    expect(openDeckTab).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(printDeck).toHaveBeenCalledTimes(1));
-    const [{ title, frames, chapters: passed }] = printDeck.mock.calls[0];
+    const [passedTab, { title, frames, chapters: passed }] = printDeck.mock.calls[0];
+    expect(passedTab).toBe(tab);
     expect(title).toBe('Weekly sync');
     expect(frames.map((f) => f.Timestamp)).toEqual([1, 2, 3]);
     expect(passed).toBe(chapters);
@@ -354,10 +363,28 @@ describe('VideoTimeline', () => {
 
   it('says so when the browser blocks the deck', async () => {
     const loadFrames = vi.fn().mockResolvedValue({ VideoKeyframes: [frame(1000)], nextToken: null });
-    render(
-      <VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} printDeck={async () => false} />,
-    );
+    render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} openDeckTab={() => null} />);
     fireEvent.click(await screen.findByText('Export slides (PDF)'));
     expect(await screen.findByText(/The browser blocked the new tab/)).toBeTruthy();
+  });
+
+  it('closes the tab when the frames cannot be read for the deck', async () => {
+    const loadFrames = vi
+      .fn()
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(1000)], nextToken: null })
+      .mockRejectedValueOnce(new Error('Throttled'));
+    const tab = { close: vi.fn() };
+    render(
+      <VideoTimeline
+        callId="m-1"
+        loadFrames={loadFrames}
+        subscribe={noSubscribe}
+        openDeckTab={() => tab}
+        printDeck={vi.fn()}
+      />,
+    );
+    fireEvent.click(await screen.findByText('Export slides (PDF)'));
+    expect(await screen.findByText('The key frames could not be exported.')).toBeTruthy();
+    expect(tab.close).toHaveBeenCalledTimes(1);
   });
 });

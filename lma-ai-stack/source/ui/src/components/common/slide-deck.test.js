@@ -11,7 +11,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
-import { buildDeck, printDeck } from './slide-deck';
+import { buildDeck, openDeckTab, printDeck } from './slide-deck';
 
 const frames = [
   { FrameId: 'b', Timestamp: 150, ImageSignedUrl: 'https://signed.example/b.jpg', SlideText: 'Budget\n- Q3' },
@@ -49,18 +49,21 @@ describe('buildDeck', () => {
 });
 
 describe('printDeck', () => {
-  it('opens the deck in a new tab and prints it once the pictures are in', async () => {
+  it('fills the tab opened for it and prints it once the pictures are in', async () => {
     const doc = freshDocument();
     const tab = { document: doc, focus: vi.fn(), print: vi.fn() };
     const open = vi.fn(() => tab);
-    const done = printDeck({ title: 'm', frames }, { open, wait: 50 });
-    doc.querySelectorAll('img').forEach((img) => img.dispatchEvent(new Event('load')));
-    expect(await done).toBe(true);
+    expect(openDeckTab(open)).toBe(tab);
     expect(open).toHaveBeenCalledWith('', '_blank');
+    expect(doc.body.textContent).toBe('Preparing the slides...');
+    const done = printDeck(tab, { title: 'm', frames }, { wait: 50 });
+    expect(doc.body.textContent).not.toContain('Preparing');
+    doc.querySelectorAll('img').forEach((img) => img.dispatchEvent(new Event('load')));
+    await done;
     expect(tab.print).toHaveBeenCalledTimes(1);
   });
 
-  it('says so when the browser blocks the tab', async () => {
-    expect(await printDeck({ title: 'm', frames }, { open: () => null })).toBe(false);
+  it('reports a tab the browser blocked', () => {
+    expect(openDeckTab(() => null)).toBeNull();
   });
 });

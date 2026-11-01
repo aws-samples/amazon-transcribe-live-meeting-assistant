@@ -181,12 +181,12 @@ returned only lines the page reads and took every time from the transcript:
 | Amazon Nova 2 Lite | 5 | 0, 210, 0, 2, 0 | 1,297 / 50 | about $0.0005 |
 | Amazon Nova Lite | 6 | 0, 2, 0, 2, 0 | 1,383 / 96 | about $0.0001 |
 
-An earlier wording of the prompt led Amazon Nova Lite to return 24 chapters and
-Amazon Nova 2 Lite to place four of five chapters at the agenda's mention of
-each topic; the shipped wording, which asks for the line where a topic is
-first discussed and at least two minutes between chapters, gave the results
-above. One synthetic meeting is a small sample, so expect chapter boundaries
-from the smaller models to be less reliable on real meetings.
+The prompt asks for the line where a topic is first discussed (not where an
+agenda mentions it) and for at least two minutes between chapters, because
+without those instructions the smaller models split the meeting into far more
+chapters or placed them at the agenda's mention of each topic. One synthetic
+meeting is a small sample, so expect chapter boundaries from the smaller models
+to be less reliable on real meetings.
 
 ## Exporting the slides
 
@@ -196,7 +196,8 @@ each with its picture at full size (1568 pixels wide), its time, the chapter it
 begins, and its [slide text](#slide-text). It then opens the browser's print
 dialog, where **Save as PDF** saves it. All of the meeting's frames are read
 again for the export, so their links are fresh, and the dialog opens once
-the pictures have loaded.
+the pictures have loaded. The tab opens as soon as the button is selected, and
+shows that the deck is being prepared until then.
 
 The deck is printed by the browser rather than built as a PDF file in the page,
 so any language or script on the slides prints as it shows on screen. A PDF

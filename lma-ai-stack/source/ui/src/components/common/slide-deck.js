@@ -6,9 +6,13 @@
 
 /**
  * The meeting's key frames as a printable deck: one page per frame, landscape,
- * with its time, the chapter it begins (if any) and its text, opened in a new
- * tab with the browser's print dialog, where **Save as PDF** makes the PDF.
- * See docs/meeting-video.md.
+ * with its time, the chapter it begins (if any) and its text, in a new tab with
+ * the browser's print dialog, where **Save as PDF** makes the PDF. See
+ * docs/meeting-video.md.
+ *
+ * The tab is opened by openDeckTab within the click itself: browsers allow a
+ * new tab only while the click still counts as the user's, which an await for
+ * the frames would end. printDeck fills it once the frames are read.
  *
  * Printing through the browser rather than building the PDF here keeps every
  * script and language the slides use (the browser has the fonts; a PDF library
@@ -39,12 +43,26 @@ const element = (doc, tag, className, text) => {
   return el;
 };
 
-/** Fills `doc` with the deck. Returns its images, for the caller to wait on. */
+/**
+ * A new tab for the deck, opened now (call it from the click, before any
+ * await), showing that the deck is being prepared. Null when the browser
+ * blocked it.
+ */
+export const openDeckTab = (open = window.open) => {
+  const tab = open('', '_blank');
+  if (!tab) return null;
+  tab.document.title = 'Preparing the slides';
+  tab.document.body.appendChild(element(tab.document, 'p', null, 'Preparing the slides...'));
+  return tab;
+};
+
+/** Fills `doc` with the deck, replacing what it shows. Returns its images, for the caller to wait on. */
 export const buildDeck = (doc, { title, frames, chapters = [] }) => {
   const ordered = [...(frames || [])].sort((a, b) => Number(a.Timestamp) - Number(b.Timestamp));
   const chapterTitles = chapterTitlesByFrame(chapters, ordered);
   // eslint-disable-next-line no-param-reassign
   doc.title = `${title} - shared screen`;
+  doc.body.replaceChildren();
   doc.head.appendChild(element(doc, 'style', null, DECK_STYLE));
   const cover = element(doc, 'header', 'deck-cover');
   cover.appendChild(element(doc, 'h1', null, title));
@@ -83,21 +101,23 @@ const loaded = (img, wait) =>
   img.complete
     ? Promise.resolve()
     : new Promise((resolve) => {
-        img.addEventListener('load', resolve, { once: true });
-        img.addEventListener('error', resolve, { once: true });
-        setTimeout(resolve, wait);
+        let timer = null;
+        const done = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        img.addEventListener('load', done, { once: true });
+        img.addEventListener('error', done, { once: true });
+        timer = setTimeout(done, wait);
       });
 
 /**
- * Opens the deck in a new tab and, once its pictures have loaded (or after
- * IMAGE_WAIT_MS), the print dialog. False when the browser blocked the tab.
+ * Fills a tab from openDeckTab with the deck and, once its pictures have
+ * loaded (or after IMAGE_WAIT_MS), opens the print dialog.
  */
-export const printDeck = async ({ title, frames, chapters }, { open = window.open, wait = IMAGE_WAIT_MS } = {}) => {
-  const tab = open('', '_blank');
-  if (!tab) return false;
+export const printDeck = async (tab, { title, frames, chapters }, { wait = IMAGE_WAIT_MS } = {}) => {
   const images = buildDeck(tab.document, { title, frames, chapters });
   await Promise.all(images.map((img) => loaded(img, wait)));
   tab.focus();
   tab.print();
-  return true;
 };

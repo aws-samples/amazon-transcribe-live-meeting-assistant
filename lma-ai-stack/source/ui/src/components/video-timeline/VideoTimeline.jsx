@@ -33,7 +33,7 @@ import getVideoKeyframes from '../../graphql/queries/getVideoKeyframes';
 import onAddVideoKeyframe from '../../graphql/queries/onAddVideoKeyframe';
 import { formatFrameTime, frameMatches, matchSnippet, mergeKeyframes } from '../common/video-keyframes';
 import { chapterTitlesByFrame } from '../common/chapters';
-import { printDeck as defaultPrintDeck } from '../common/slide-deck';
+import { openDeckTab as defaultOpenDeckTab, printDeck as defaultPrintDeck } from '../common/slide-deck';
 import './VideoTimeline.css';
 
 const logger = new ConsoleLogger('VideoTimeline');
@@ -74,6 +74,7 @@ const VideoTimeline = ({
   title = '',
   loadFrames = defaultLoadFrames,
   subscribe = defaultSubscribe,
+  openDeckTab = defaultOpenDeckTab,
   printDeck = defaultPrintDeck,
 }) => {
   const [frames, setFrames] = useState([]);
@@ -281,10 +282,19 @@ const VideoTimeline = ({
 
   const chapterTitles = useMemo(() => chapterTitlesByFrame(chapters, frames), [chapters, frames]);
 
-  /** Every frame, read fresh (for links that last the print), then the deck. */
+  /**
+   * Every frame, read fresh (for links that last the print), then the deck. The
+   * tab is opened first, within the click: a browser blocks one opened after
+   * the frames have been awaited.
+   */
   const exportDeck = async () => {
-    setExporting(true);
     setExportError(null);
+    const tab = openDeckTab();
+    if (!tab) {
+      setExportError('The browser blocked the new tab. Allow pop-ups for this site and try again.');
+      return;
+    }
+    setExporting(true);
     try {
       let all = [];
       let token = null;
@@ -297,10 +307,10 @@ const VideoTimeline = ({
         token = (incoming.length && page?.nextToken) || null;
         pages += 1;
       } while (token && pages < MAX_EXPORT_PAGES);
-      const opened = await printDeck({ title: title || callId, frames: all, chapters });
-      if (!opened) setExportError('The browser blocked the new tab. Allow pop-ups for this site and try again.');
+      await printDeck(tab, { title: title || callId, frames: all, chapters });
     } catch (e) {
       logger.error('could not export the key frames', e);
+      tab.close();
       setExportError('The key frames could not be exported.');
     } finally {
       setExporting(false);
@@ -477,6 +487,7 @@ VideoTimeline.propTypes = {
   title: PropTypes.string,
   loadFrames: PropTypes.func,
   subscribe: PropTypes.func,
+  openDeckTab: PropTypes.func,
   printDeck: PropTypes.func,
 };
 
