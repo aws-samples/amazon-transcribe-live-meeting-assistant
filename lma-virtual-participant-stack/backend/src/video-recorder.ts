@@ -60,6 +60,7 @@ class VideoRecorder {
   private chunkWatcher: ReturnType<typeof setInterval> | null = null;
   private lastChunkIndex: number = -1;
   private _isRecording: boolean = false;
+  private _startedAtMs: number | null = null;
 
   constructor() {
     this.s3Client = new S3Client({ region: REGION });
@@ -68,6 +69,15 @@ class VideoRecorder {
   /** Whether video recording is currently active. */
   get isRecording(): boolean {
     return this._isRecording;
+  }
+
+  /**
+   * Wall-clock time FFmpeg was started, or null when nothing is recording.
+   * The recording's own timeline starts here, so a moment's position in the
+   * recording is its wall-clock time minus this (used for key frames).
+   */
+  get startedAtMs(): number | null {
+    return this._isRecording ? this._startedAtMs : null;
   }
 
   /** The recordings bucket, resolved at call time so details reflects env. */
@@ -210,6 +220,7 @@ class VideoRecorder {
 
     // Launch FFmpeg
     this.ffmpegProcess = spawn('ffmpeg', ffmpegArgs);
+    this._startedAtMs = Date.now();
 
     this.ffmpegProcess.on('error', (error: Error) => {
       console.error(`[VideoRecorder] FFmpeg error: ${error.message}`);

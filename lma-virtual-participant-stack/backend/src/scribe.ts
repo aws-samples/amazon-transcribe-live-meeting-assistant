@@ -1424,6 +1424,23 @@ export class TranscriptionService {
             : this.rosterTimeline.speakerFor(startSec, endSec, rosterLagSeconds());
     }
 
+    /**
+     * Whether the meeting is being transcribed right now: transcription has
+     * started and the meeting is not paused from chat. Key frames are only
+     * sampled while this holds, so the timeline covers what the transcript does.
+     */
+    get transcribingLive(): boolean {
+        return this.isTranscribing && details.start;
+    }
+
+    /**
+     * Current position on the transcript timeline, in seconds, so other
+     * captures (key frames) carry times on the same clock as the segments.
+     */
+    timelineSeconds(): number {
+        return this.transcriptClockSeconds();
+    }
+
     /** Current position on the transcript timeline, in seconds, for whichever engine is running. */
     private transcriptClockSeconds(): number {
         if (this.meetingSession) {

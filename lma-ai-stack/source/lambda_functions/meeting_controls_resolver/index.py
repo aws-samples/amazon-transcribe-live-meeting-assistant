@@ -35,6 +35,9 @@ LCA_CALL_EVENTS_TABLE = environ["LCA_CALL_EVENTS_TABLE"]
 S3_BUCKET_NAME = environ["S3_BUCKET_NAME"]
 S3_RECORDINGS_PREFIX = environ["S3_RECORDINGS_PREFIX"]
 S3_TRANSCRIPTS_PREFIX = environ["S3_TRANSCRIPTS_PREFIX"]
+# Key frames of the shared screen (docs/meeting-video.md): images under this
+# prefix, one folder per meeting, and items under PK kf#<CallId>.
+S3_KEYFRAMES_PREFIX = environ.get("S3_KEYFRAMES_PREFIX", "lma-video-keyframes/")
 VP_TABLE_NAME = environ.get("VP_TABLE_NAME")
 VP_TASK_REGISTRY_TABLE_NAME = environ.get("VP_TASK_REGISTRY_TABLE_NAME")
 KINESIS_STREAM_NAME = environ.get("KINESIS_STREAM_NAME")
@@ -248,6 +251,7 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
                 transcript_segment["SK"],
                 new_recipients,
             )
+        share_keyframes(callid, new_recipients)
 
         input = {
             "CallId": callid,
@@ -304,6 +308,62 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
         raise
     else:
         return
+
+
+def _keyframe_keys(callid):
+    """The PK/SK of every key frame stored for the meeting."""
+    kwargs = {
+        "KeyConditionExpression": "PK = :pk",
+        "ExpressionAttributeValues": {":pk": f"kf#{callid}"},
+        "ProjectionExpression": "PK, SK",
+    }
+    while True:
+        response = ddbTable.query(**kwargs)
+        yield from response.get("Items", [])
+        last = response.get("LastEvaluatedKey")
+        if not last:
+            return
+        kwargs["ExclusiveStartKey"] = last
+
+
+def share_keyframes(callid, new_recipients):
+    """Give the meeting's key frames the meeting's new SharedWith.
+
+    Key frames follow the transcript's access rule, so they are shared and
+    unshared with it. Written directly rather than through AppSync: there is no
+    mutation for it, and this function already updates items in the table.
+    """
+    updated = 0
+    for key in _keyframe_keys(callid):
+        if new_recipients:
+            ddbTable.update_item(
+                Key=key,
+                UpdateExpression="SET SharedWith = :val",
+                ExpressionAttributeValues={":val": new_recipients},
+            )
+        else:
+            ddbTable.update_item(Key=key, UpdateExpression="REMOVE SharedWith")
+        updated += 1
+    return updated
+
+
+def delete_keyframes(callid):
+    """Delete the meeting's key frames: their items and their images.
+
+    The images are found by the meeting's folder, which the producers name with
+    the same posixify rule as posixify_filename. The trailing slash keeps one
+    meeting's prefix from matching another whose id merely begins the same way.
+    """
+    deleted = 0
+    for key in _keyframe_keys(callid):
+        ddbTable.delete_item(Key={"PK": key["PK"], "SK": key["SK"]})
+        deleted += 1
+    images = _batch_delete_prefix(
+        S3_BUCKET_NAME, f"{S3_KEYFRAMES_PREFIX}{posixify_filename(callid)}/"
+    )
+    if deleted or images:
+        logger.info("Deleted %d key frame(s) and %d image(s) for %s", deleted, images, callid)
+    return deleted
 
 
 def update_transcript_segment(appsync_session, schema, PK, SK, new_recipients):
@@ -427,7 +487,8 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
         #  3. Fetch call details (needed to preserve SharedWith on deleteCall)
         #  4. S3 prefix deletion
         #  5. Deletion of the meeting's metering records (PK mtr#<CallId>)
-        with ThreadPoolExecutor(max_workers=5) as pool:
+        #  6. Deletion of the meeting's key frames (PK kf#<CallId>, and images)
+        with ThreadPoolExecutor(max_workers=6) as pool:
             vp_future = pool.submit(cleanup_virtual_participants, callid)
             segments_future = pool.submit(
                 _delete_all_transcript_segments, appsync_session, schema, callid
@@ -436,6 +497,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             # S3 cleanup is independent of AppSync/DDB state, so start it now.
             s3_future = pool.submit(delete_recordings_transcripts, callid)
             metering_future = pool.submit(delete_metering_records, callid)
+            keyframes_future = pool.submit(delete_keyframes, callid)
 
             # Surface any exception from the parallel preparation steps.
             vp_future.result()
@@ -443,6 +505,7 @@ def delete_meeting(appsync_session, schema, callid, listPK, listSK, owner):
             details_result = details_future.result()
             s3_future.result()
             metering_future.result()
+            keyframes_future.result()
 
         shared_with = (
             details_result.get("getCall", {}).get("SharedWith") if details_result else None

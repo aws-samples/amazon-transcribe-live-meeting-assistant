@@ -14,6 +14,26 @@ export interface TranscriptSegment {
   speaker?: string;
 } 
 
+/** The fields of an ADD_VIDEO_KEYFRAME event other than its envelope. */
+export interface VideoKeyframeEvent {
+  /** Sortable id: the timeline position in milliseconds, zero-padded, plus a suffix. */
+  FrameId: string;
+  /** Seconds on the transcript timeline (the clock of the segments' StartTime). */
+  Timestamp: number;
+  /** Seconds into the meeting's video recording, or null when there is none. */
+  VideoOffset: number | null;
+  /** HTTPS S3 URLs, in the shape the UI presigns (as for recordings). */
+  ImageUrl: string;
+  ThumbnailUrl: string;
+  Width: number;
+  Height: number;
+  Source: 'VIRTUAL_PARTICIPANT' | 'DESKTOP_CAPTURE';
+  /** Whether the platform showed a screen share; null where it gives no signal. */
+  ShareDetected: boolean | null;
+  /** Fraction of the picture that differs from the previous key frame. */
+  ChangeScore: number;
+}
+
 export interface CallMetaData {
   callId: string;
   customerPhoneNumber?: string;
@@ -268,6 +288,25 @@ class KinesisStreamManager {
 
     await this.sendRecord(record);
     console.log(`Sent call video recording event to Kinesis.`);
+  }
+
+  /**
+   * ADD_VIDEO_KEYFRAME: one key frame of the meeting display (see
+   * keyframe-sampler.ts). The call_event_processor stores it on the meeting and
+   * publishes it to the meeting page. The desktop capture path in the WebSocket
+   * transcriber sends the same shape.
+   */
+  async sendVideoKeyframe(frame: VideoKeyframeEvent): Promise<void> {
+    const record: any = {
+      EventType: 'ADD_VIDEO_KEYFRAME',
+      CallId: this.callId,
+      ...frame,
+      CreatedAt: new Date().toISOString(),
+      AccessToken: process.env.USER_ACCESS_TOKEN || '',
+      IdToken: process.env.USER_ID_TOKEN || '',
+      RefreshToken: process.env.USER_REFRESH_TOKEN || '',
+    };
+    await this.sendRecord(record);
   }
 
   // Returns the highest absolute segment EndTime (seconds) written by this call

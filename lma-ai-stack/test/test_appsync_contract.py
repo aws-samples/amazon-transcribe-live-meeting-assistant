@@ -212,6 +212,7 @@ OTHER_FIELDS = [
     ("Mutation", "addIssuesDetected"),
     ("Mutation", "addCallSummaryText"),
     ("Mutation", "addTranscriptSegment"),
+    ("Mutation", "addVideoKeyframe"),
     ("Mutation", "addChatToken"),
     # One meeting at a time, authorized per meeting by the resolver against its
     # owner and share list rather than by group.
@@ -266,6 +267,8 @@ OTHER_FIELDS = [
     ("Query", "voiceEnrollmentTerms"),
     ("Query", "getTranscriptSegments"),
     ("Query", "getTranscriptSegmentsWithSentiment"),
+    # One meeting's key frames, under getTranscriptSegments' owner/share rule.
+    ("Query", "getVideoKeyframes"),
     ("Query", "listCallsDateRange"),
     ("Query", "getCallCount"),
     ("Query", "queryKnowledgeBase"),

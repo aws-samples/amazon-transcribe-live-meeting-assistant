@@ -20,6 +20,7 @@ from .response import (
 )
 from .transcript_segment_fields import transcript_segment_fields
 from .transcript_segment_sentiment_fields import transcript_segment_sentiment_fields
+from .video_keyframe_fields import video_keyframe_fields
 
 __all__ = [
     "GraphQLResponseError",
@@ -36,4 +37,5 @@ __all__ = [
     "traceback_frames",
     "transcript_segment_fields",
     "transcript_segment_sentiment_fields",
+    "video_keyframe_fields",
 ]

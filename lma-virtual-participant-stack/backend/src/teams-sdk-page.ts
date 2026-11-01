@@ -94,6 +94,23 @@ w.__lmaCallState = () => {
     return { page: state.page || 'none', callState: (state.call && state.call.state) || 'None' };
 };
 
+// Whether a remote participant is sharing their screen or a PowerPoint Live
+// deck, read by screen-share-probe.ts to decide when key frames are sampled.
+// Both fields are kept by the adapter's stateful layer; the stream check covers
+// a build that has not set them yet.
+w.__lmaScreenShareActive = () => {
+    const state = getState();
+    const call = state && state.call;
+    if (!call) return false;
+    if (call.screenShareRemoteParticipant || call.contentSharingRemoteParticipant) return true;
+    for (const p of Object.values(call.remoteParticipants || {}) as any[]) {
+        for (const s of Object.values((p && p.videoStreams) || {}) as any[]) {
+            if (s && s.mediaStreamType === 'ScreenSharing' && s.isAvailable) return true;
+        }
+    }
+    return false;
+};
+
 w.__lmaParticipantCount = () => {
     const state = getState();
     if (!state || !state.call || !state.call.remoteParticipants) return -1;

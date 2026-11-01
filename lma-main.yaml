@@ -2808,6 +2808,13 @@ Resources:
             Status: Enabled
             Prefix: "lma-transcripts/"
             ExpirationInDays: !Ref TranscriptionExpirationInDays
+          # Key frames of the shared screen (docs/meeting-video.md). Their items
+          # carry the transcript's DynamoDB TTL, so the images are kept exactly
+          # as long, and the timeline never shows a frame whose image is gone.
+          - Id: VideoKeyframeRetention
+            Status: Enabled
+            Prefix: "lma-video-keyframes/"
+            ExpirationInDays: !Ref TranscriptionExpirationInDays
           - Id: PendingUploadCleanup
             Status: Enabled
             Prefix: "lma-uploads-pending/"
