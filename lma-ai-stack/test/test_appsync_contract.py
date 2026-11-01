@@ -267,7 +267,7 @@ OTHER_FIELDS = [
     ("Query", "voiceEnrollmentTerms"),
     ("Query", "getTranscriptSegments"),
     ("Query", "getTranscriptSegmentsWithSentiment"),
-    # One meeting's key frames, under getTranscriptSegments' owner/share rule.
+    # One meeting's key frames, authorized in the resolver by getCall's rule.
     ("Query", "getVideoKeyframes"),
     ("Query", "listCallsDateRange"),
     ("Query", "getCallCount"),

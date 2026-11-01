@@ -55,6 +55,8 @@ import CallCostPanel from './CallCostPanel';
 
 import RecordingPlayer from '../recording-player';
 import VideoPlayer from '../video-player';
+import VideoTimeline from '../video-timeline';
+import { recordingSecondsFor, scrollTranscriptToTime } from '../common/video-keyframes';
 import useSettingsContext from '../../contexts/settings';
 
 import { DONE_STATUS, IN_PROGRESS_STATUS } from '../common/get-recording-status';
@@ -96,7 +98,7 @@ const MAXIMUM_RETRY_DELAY = 1000;
 const PAUSE_TO_MERGE_IN_SECONDS = 1;
 
 /* eslint-disable react/prop-types, react/destructuring-assignment */
-const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
+const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds, videoSeekRequest }) => {
   const { calls } = useCallsContext();
   const props = {
     calls,
@@ -194,7 +196,7 @@ const CallAttributes = ({ item, setToolsOpen, getCallDetailsFromCallIds }) => {
               <Box margin={{ bottom: 'xxxs' }} color="text-label">
                 <strong>Recording Video</strong>
               </Box>
-              <VideoPlayer videoRecordingUrl={item.videoRecordingUrl} />
+              <VideoPlayer videoRecordingUrl={item.videoRecordingUrl} seekRequest={videoSeekRequest} />
             </div>
           </SpaceBetween>
         )}
@@ -846,6 +848,7 @@ const CallInProgressTranscript = ({
   item,
   callTranscriptPerCallId,
   autoScroll,
+  scrollRequest,
   translateClient,
   targetLanguage,
   agentTranscript,
@@ -1071,15 +1074,18 @@ const CallInProgressTranscript = ({
           && (s.channel !== 'AGENT_VOICETONE')
           && (s.channel !== 'CALLER_VOICETONE')
           && (s.channel !== 'CHAT_ASSISTANT')
-          && <TranscriptSegment
-            key={`${s.segmentId}-${s.createdAt}`}
-            segment={s}
-            translateCache={translateCache}
-            enableSentimentAnalysis={enableSentimentAnalysis}
-            participantName={item.callerPhoneNumber}
-            onRenameSpeaker={onRenameSpeaker}
-            readOnly={readOnly}
-          />
+          && (
+            <div key={`${s.segmentId}-${s.createdAt}`} data-start-time={s.startTime}>
+              <TranscriptSegment
+                segment={s}
+                translateCache={translateCache}
+                enableSentimentAnalysis={enableSentimentAnalysis}
+                participantName={item.callerPhoneNumber}
+                onRenameSpeaker={onRenameSpeaker}
+                readOnly={readOnly}
+              />
+            </div>
+          )
         ),
       );
 
@@ -1130,6 +1136,14 @@ const CallInProgressTranscript = ({
     readOnly,
     onRenameSpeaker,
   ]);
+
+  // Move to the segment at a requested time (a key frame was selected), and
+  // pause following the live end so the transcript stays there.
+  useEffect(() => {
+    if (!scrollRequest) return;
+    const row = scrollTranscriptToTime(containerRef.current, scrollRequest.seconds);
+    if (row && item.recordingStatusLabel === IN_PROGRESS_STATUS) setUserHasScrolled(true);
+  }, [scrollRequest]);
 
   useEffect(() => {
     // prettier-ignore
@@ -1682,6 +1696,7 @@ const getTranscriptContent = ({
   item,
   callTranscriptPerCallId,
   autoScroll,
+  scrollRequest,
   translateClient,
   targetLanguage,
   agentTranscript,
@@ -1701,6 +1716,7 @@ const getTranscriptContent = ({
           item={item}
           callTranscriptPerCallId={callTranscriptPerCallId}
           autoScroll={autoScroll}
+          scrollRequest={scrollRequest}
           translateClient={translateClient}
           targetLanguage={targetLanguage}
           agentTranscript={agentTranscript}
@@ -1730,6 +1746,7 @@ const CallTranscriptContainer = ({
   speakerIdentities,
   onRenameSpeaker,
   readOnly,
+  scrollRequest,
 }) => {
   // defaults to auto scroll when call is in progress
   const [autoScroll, setAutoScroll] = useState(item.recordingStatusLabel === IN_PROGRESS_STATUS);
@@ -1846,6 +1863,7 @@ const CallTranscriptContainer = ({
           item,
           callTranscriptPerCallId,
           autoScroll,
+          scrollRequest,
           translateClient,
           targetLanguage,
           agentTranscript,
@@ -2441,6 +2459,16 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
   // VNC Preview state at CallPanel level
   const [showVNCPreview, setShowVNCPreview] = useState(false);
+
+  // Requests from the key frame strip: move the transcript to a time, and
+  // play the recording from a time. `at` makes a repeated request distinct.
+  const [transcriptScrollRequest, setTranscriptScrollRequest] = useState(null);
+  const [videoSeekRequest, setVideoSeekRequest] = useState(null);
+  const showInTranscript = useCallback((seconds) => setTranscriptScrollRequest({ seconds, at: Date.now() }), []);
+  const playRecordingFrom = useCallback(
+    (frame) => setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now() }),
+    [],
+  );
   const [vpData, setVpData] = useState(null);
   const [loadingVP, setLoadingVP] = useState(false);
 
@@ -2535,7 +2563,12 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
 
   return (
     <SpaceBetween size="s">
-      <CallAttributes item={item} setToolsOpen={setToolsOpen} getCallDetailsFromCallIds={getCallDetailsFromCallIds} />
+      <CallAttributes
+        item={item}
+        setToolsOpen={setToolsOpen}
+        getCallDetailsFromCallIds={getCallDetailsFromCallIds}
+        videoSeekRequest={videoSeekRequest}
+      />
 
       {/* Show VNC Preview in place of Summary during active meeting if VP is available */}
       {showVNCPreview && vpData && vpData.vncReady && item.recordingStatusLabel === IN_PROGRESS_STATUS ? (
@@ -2563,6 +2596,15 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
           readOnly={speakerNamesReadOnly}
         />
       )}
+
+      <VideoTimeline
+        key={item.callId}
+        callId={item.callId}
+        isLive={item.recordingStatusLabel === IN_PROGRESS_STATUS}
+        canPlayRecording={Boolean(item.videoRecordingUrl) && item.recordingStatusLabel !== IN_PROGRESS_STATUS}
+        onShowInTranscript={showInTranscript}
+        onPlayFrom={playRecordingFrom}
+      />
 
       <AgendaPanel
         item={item}
@@ -2626,6 +2668,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
         speakerIdentities={speakerIdentities}
         onRenameSpeaker={handleRenameSpeaker}
         readOnly={speakerNamesReadOnly}
+        scrollRequest={transcriptScrollRequest}
       />
     </SpaceBetween>
   );

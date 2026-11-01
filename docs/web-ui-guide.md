@@ -121,6 +121,14 @@ Interact with the meeting assistant by typing questions or requests:
 - Multiple sections based on configured prompt templates
 - Copy to clipboard support for easy sharing
 
+### Shared Screen
+
+For a meeting whose video is recorded, a strip of thumbnails of the shared
+screen: one for each slide, page or view, with the time it went up, growing
+while the meeting runs. Selecting one shows it large and moves the transcript
+to that time; after the meeting it also plays the video recording from there.
+See [Meeting Video and Key Frames](meeting-video.md#on-the-meeting-page).
+
 ### Agenda
 
 The meeting's agenda as a numbered list, with where it came from and who last

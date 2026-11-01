@@ -303,10 +303,12 @@ type Query @aws_cognito_user_pools
 	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools
 	getTranscriptSegments(callId: ID!, isPartial: Boolean): TranscriptSegmentList
 	getTranscriptSegmentsWithSentiment(callId: ID!): TranscriptSegmentsWithSentimentList
-	# The meeting's key frames in time order, a page at a time. Visible to the
-	# meeting's owner, the people it is shared with, and admins -- the same rule
-	# as getTranscriptSegments.
-	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String): VideoKeyframeList
+	# The meeting's key frames in time order, a page at a time, with short-lived
+	# signed links to their images. Answered to the callers getCall answers: the
+	# meeting's owner, the people it is shared with, admins and backend roles.
+	# afterFrameId returns only the frames after that one, for a page that
+	# already has the earlier ones.
+	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID): VideoKeyframeList
 	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
 	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
     queryKnowledgeBase(input: String!, sessionId: String): String
@@ -714,6 +716,10 @@ type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
 	ChangeScore: Float
 	Owner: String
 	SharedWith: String
+	# Signed links to the two images, valid for an hour, filled in only by
+	# getVideoKeyframes.
+	ImageSignedUrl: String
+	ThumbnailSignedUrl: String
 }
 
 type VideoKeyframeList @aws_cognito_user_pools

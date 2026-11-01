@@ -70,6 +70,9 @@ test('showinfo lines give the frame number, time and size', () => {
     assert.deepEqual(parseShowinfo(showinfo(3, 6.4, '1280x720')), { n: 3, ptsSeconds: 6.4, width: 1280, height: 720 });
     assert.equal(parseShowinfo('[Parsed_showinfo_0 @ 0x5581]   color_range:tv color_space:bt709'), null);
     assert.equal(parseShowinfo('frame=   10 fps=0.5 q=-0.0 size=N/A time=00:00:20.00'), null);
+    // A frame without a time is still a frame, so the pairing stays in step.
+    const noTime = parseShowinfo('[Parsed_showinfo_0 @ 0x1] n:   4 pts:NOPTS pts_time:NOPTS pos:1 fmt:yuv420p sar:1/1 s:640x360 i:P');
+    assert.ok(noTime && Number.isNaN(noTime.ptsSeconds) && noTime.n === 4 && noTime.width === 640);
 });
 
 test('a settled picture is kept once, with both clocks offset from the stream start', async () => {
