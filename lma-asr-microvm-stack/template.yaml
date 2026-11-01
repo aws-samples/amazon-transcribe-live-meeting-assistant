@@ -131,7 +131,8 @@ Parameters:
     Description: >-
       Retain the ASR config table when the stack is deleted. It holds the
       runtime switches as they were stored before they moved into the
-      configuration table, which the configuration seeder carries across.
+      configuration table, which the configuration seeder carries across and
+      the WebSocket transcriber reads as a fallback.
 
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
@@ -814,7 +815,7 @@ Outputs:
     Value: !GetAtt AsrImageSource.MinSegmentMs
 
   AsrConfigTableName:
-    Description: Runtime ASR switches as stored before the configuration table; read by the configuration seeder.
+    Description: Runtime ASR switches as stored before the configuration table; read by the configuration seeder, and by the WebSocket transcriber as a fallback.
     Value: !Ref AsrConfigTable
 
   AsrConfigTableArn:

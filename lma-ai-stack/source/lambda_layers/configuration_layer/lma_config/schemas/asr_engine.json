@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/asr_engine",
   "title": "Transcription engine",
-  "description": "Which engine transcribes each kind of meeting, and whether a Virtual Participant separates the voices behind one attendee.",
+  "description": "Whether a Virtual Participant separates the voices behind one attendee and, where the on-demand speech engine is deployed, which engine transcribes each kind of meeting.",
   "sectionLabel": "Transcription Engine",
   "appliesText": "A saved change applies to meetings that start at least 30 seconds after the save; a meeting already running keeps its settings.",
   "order": 4,

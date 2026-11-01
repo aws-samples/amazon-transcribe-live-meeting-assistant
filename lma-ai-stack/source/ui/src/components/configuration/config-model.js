@@ -365,7 +365,8 @@ export const exportDocument = ({ sections, defaults, values, profile, revision, 
  * that could not be used, and, as [section, setting] pairs, the settings in it
  * that this deployment does not offer. Those are left out, as the form leaves
  * them out of what it shows: each keeps the value it has in `current`, or the
- * default. Throws, with a message to show, for a file that is not an export.
+ * default. `current` is expected to hold each section's full effective values,
+ * as the page's edits do, so a saved value is kept rather than reverted. Throws, with a message to show, for a file that is not an export.
  */
 export const readExport = (text, sections, defaults, settings = {}, current = {}) => {
   let parsed;
