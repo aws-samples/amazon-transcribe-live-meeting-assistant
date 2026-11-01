@@ -472,7 +472,7 @@ def test_the_handler_asks_for_a_re_read_only_when_the_invoke_does(
     monkeypatch.setattr(
         index,
         "generate_summary",
-        lambda transcript, override, refresh=False, call_id=None, agenda=None: (
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, **_: (
             seen.append(refresh) or "a summary"
         ),
     )
@@ -1117,7 +1117,7 @@ def test_the_handler_passes_the_meetings_own_agenda(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(
         index,
         "generate_summary",
-        lambda transcript, override, refresh=False, call_id=None, agenda=None: (
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, **_: (
             seen.append(agenda) or "a summary"
         ),
     )
@@ -1197,3 +1197,127 @@ def test_a_meeting_without_key_frames_keeps_its_transcript_document_as_it_was(mo
     _, s3 = install(monkeypatch)
     index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
     assert s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"] == TRANSCRIPT
+
+
+# --------------------------------------------------------------------------
+# The slides presented section
+# --------------------------------------------------------------------------
+
+SLIDES_PROMPT = "Slides:<br>{slides}"
+SAID = [
+    {**KEYFRAMES[0], "Said": "Bob: the budget is fine"},
+    {**KEYFRAMES[2], "Said": ""},
+]
+
+
+def test_a_prompt_naming_the_slides_gets_each_frame_with_its_picture_text_and_speech(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch, templates=ddb_item(**{"1#Slides Presented": SLIDES_PROMPT}), custom=ddb_item()
+    )
+    index.generate_summary("THE TRANSCRIPT", None, keyframes=SAID)
+    (prompt,) = prompts_sent(bedrock)
+    assert "Time: [00:30]\nImage: ![Slide at 00:30](keyframe:0000030000-ab12cd)" in prompt
+    assert "Agenda item 1: Budget\n- Q3 numbers" in prompt
+    assert "Bob: the budget is fine" in prompt
+    assert "![Slide at 1:02:05](keyframe:0003725000-ab12cd)" in prompt
+    assert "(nothing)" in prompt
+    # The transcript is not part of this prompt unless the prompt names it.
+    assert "THE TRANSCRIPT" not in prompt
+
+
+def test_a_meeting_with_nothing_shared_gets_no_slides_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Slides Presented": SLIDES_PROMPT}),
+        custom=ddb_item(),
+    )
+    for keyframes in (None, [], [{"FrameId": "not an id!", "Timestamp": 1}]):
+        bedrock.requests.clear()
+        index.generate_summary("T", None, keyframes=keyframes)
+        assert prompts_sent(bedrock) == ["S T"]
+
+
+def test_the_handler_passes_the_meetings_key_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False, call_id=None, agenda=None, keyframes=None: (
+            seen.append(keyframes) or "a summary"
+        ),
+    )
+    client = FakeLambdaClient()
+    client.payload["keyframes"] = SAID
+    install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "p"}),
+        custom=ddb_item(),
+        lambda_client=client,
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert seen == [SAID]
+
+
+def test_slide_text_and_speech_are_bounded_and_the_briefest_frames_left_out() -> None:
+    frames = [
+        {
+            "FrameId": f"f{n}",
+            "Timestamp": float(n * 10 + (5 if n % 2 else 0)),
+            "SlideText": "x" * 5000,
+        }
+        for n in range(index.MAX_SLIDES + 10)
+    ]
+    text = index.slides_for_prompt(frames)
+    assert text.count("<slide>") == index.MAX_SLIDES
+    assert "x" * index.MAX_SLIDE_TEXT_CHARS + " [...]" in text
+    assert "x" * (index.MAX_SLIDE_TEXT_CHARS + 1) not in text
+    # The last frame stays: it was on screen until the end.
+    assert f"keyframe:f{index.MAX_SLIDES + 9})" in text
+    # Kept in time order.
+    ids = [
+        int(line.split("keyframe:f")[1].rstrip(")"))
+        for line in text.splitlines()
+        if "keyframe:" in line
+    ]
+    assert ids == sorted(ids)
+
+
+def test_text_inserted_for_the_slides_is_not_read_as_another_placeholder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch, templates=ddb_item(**{"1#Slides": SLIDES_PROMPT}), custom=ddb_item()
+    )
+    index.generate_summary(
+        "T",
+        None,
+        keyframes=[{"FrameId": "f1", "Timestamp": 1, "SlideText": "{transcript} {agenda}"}],
+    )
+    (prompt,) = prompts_sent(bedrock)
+    assert "{transcript} {agenda}" in prompt
+
+
+def test_the_knowledge_base_summary_names_its_pictures_in_words(monkeypatch):
+    _, s3 = install(monkeypatch)
+    summary = json.dumps(
+        {"SLIDES PRESENTED": "**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)"}
+    )
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, summary)
+    body = json.loads(s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-SUMMARY.txt"]["Body"])
+    assert body["SLIDES PRESENTED"] == "**[00:30] Budget**\n\n(Slide at 00:30)"
+
+
+def test_the_shipped_slides_section_names_the_slides_and_asks_for_the_pictures_unchanged() -> None:
+    shipped = json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text(encoding="utf-8")
+    )
+    prompt = shipped["SLIDES PRESENTED"]
+    assert "{slides}" in prompt and "{transcript}" not in prompt
+    assert "copied exactly" in prompt
+    assert "never identify" in prompt

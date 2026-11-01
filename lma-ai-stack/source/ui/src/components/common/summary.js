@@ -3,6 +3,14 @@
  * This file is licensed under the MIT License.
  * See the LICENSE file in the project root for full license information.
  */
+// A picture of a key frame in a summary (the "Slides presented" section), which
+// the meeting page shows as the frame itself; see SummaryMarkdown.jsx.
+const KEYFRAME_IMAGE = /!\[([^\]\n]*)\]\(keyframe:[A-Za-z0-9_-]{1,64}\)/g;
+
+/** A summary's key-frame pictures as their alt text, for text that leaves the page. */
+export const keyframeImagesAsText = (text) =>
+  typeof text === 'string' ? text.replace(KEYFRAME_IMAGE, (_match, alt) => `(${alt})`) : text;
+
 export const getTextOnlySummary = (callSummaryText) => {
   if (!callSummaryText) {
     return 'Not available';
@@ -68,7 +76,7 @@ export const getEmailFormattedSummary = (callSummaryText) => {
   }
   // CRLF is the line ending a mail body takes; normalise to LF first so a text
   // that already uses CRLF does not end up with doubled carriage returns.
-  const body = summary.replace(/\*\*/g, '').replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
+  const body = keyframeImagesAsText(summary).replace(/\*\*/g, '').replace(/\r\n/g, '\n').replace(/\n/g, '\r\n');
   return encodeURIComponent(body);
 };
 
@@ -76,7 +84,8 @@ export const getTextFileFormattedSummary = (callSummaryText) => {
   if (!callSummaryText) {
     return 'Not available';
   }
-  let summary = callSummaryText;
+  // The copy, the text file and the Word document cannot show a key frame.
+  let summary = keyframeImagesAsText(callSummaryText);
   try {
     const jsonSummary = JSON.parse(summary);
     summary = '';
@@ -85,7 +94,7 @@ export const getTextFileFormattedSummary = (callSummaryText) => {
       summary = summary.replace(/\*\*/g, '');
     });
   } catch (e) {
-    return callSummaryText;
+    return keyframeImagesAsText(callSummaryText);
   }
   return summary;
 };

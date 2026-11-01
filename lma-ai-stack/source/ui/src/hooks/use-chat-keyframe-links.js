@@ -21,14 +21,15 @@ const logger = new ConsoleLogger('useChatKeyframeLinks');
 const FRAME_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_FRAMES = 10;
 
-const defaultLoadFrame = async (callId, frameId) => {
+/** One frame of a meeting, with its signed links, or null; used by the chat and the summary. */
+export const loadKeyframe = async (callId, frameId) => {
   const client = generateClient();
   const response = await client.graphql({ query: getVideoKeyframes, variables: { callId, frameId } });
   return response?.data?.getVideoKeyframes?.VideoKeyframes?.[0] || null;
 };
 
 /** The links for one request's frame ids, by id; frames that cannot be read are left out. */
-export const resolveChatKeyframes = async (callId, frameIds, loadFrame = defaultLoadFrame) => {
+export const resolveChatKeyframes = async (callId, frameIds, loadFrame = loadKeyframe) => {
   const ids = (Array.isArray(frameIds) ? frameIds : [])
     .filter((id) => typeof id === 'string' && FRAME_ID.test(id))
     .slice(0, MAX_FRAMES);
@@ -46,7 +47,7 @@ export const resolveChatKeyframes = async (callId, frameIds, loadFrame = default
   return frames;
 };
 
-const useChatKeyframeLinks = (callId, loadFrame = defaultLoadFrame) => {
+const useChatKeyframeLinks = (callId, loadFrame = loadKeyframe) => {
   // Read when a request arrives, so a page reused for another meeting answers
   // for the meeting it shows now.
   const callIdRef = useRef(callId);

@@ -40,6 +40,7 @@ import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
 import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
+import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
 import mapCallsAttributes from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
@@ -63,7 +64,7 @@ const piiTypesSplitRegEx = new RegExp(`\\[(${COMPREHEND_PII_TYPES.join('|')})\\]
 const EmbedSummaryPanel = ({ item }) => (
   <Container header={<Header variant="h4">Meeting Summary</Header>}>
     <TextContent color="gray">
-      <ReactMarkdown rehypePlugins={markdownRehypePlugins}>{getMarkdownSummary(item.callSummaryText)}</ReactMarkdown>
+      <SummaryMarkdown callId={item.callId}>{getMarkdownSummary(item.callSummaryText)}</SummaryMarkdown>
     </TextContent>
   </Container>
 );

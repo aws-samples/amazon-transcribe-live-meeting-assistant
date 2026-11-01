@@ -1002,3 +1002,42 @@ def test_key_frames_are_returned_in_time_order_only_when_asked_for(monkeypatch):
     assert "keyframes" not in response
     response, _ = run(monkeypatch, items=[], IncludeKeyframes=True)
     assert response["keyframes"] == []
+
+
+def test_each_key_frame_carries_what_was_said_while_it_was_on_screen(monkeypatch):
+    """A segment belongs to the frame on screen when it began; none before the first frame."""
+    install(
+        monkeypatch,
+        items=[
+            segment("before any slide", 10, StartTime=Decimal("5")),
+            segment("the budget is fine", 40, StartTime=Decimal("31")),
+            segment("hiring starts in May", 101, StartTime=Decimal("96"), channel="AGENT"),
+            segment("ends after the slide changed", 97, StartTime=Decimal("90")),
+            segment("questions", 300),
+        ],
+    )
+    monkeypatch.setattr(
+        index,
+        "get_keyframes",
+        lambda callid: [
+            {"FrameId": "1", "Timestamp": 30.0, "SlideText": "Budget"},
+            {"FrameId": "2", "Timestamp": 95.5, "SlideText": "Hiring"},
+        ],
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeKeyframes": True}, None)
+    said = {frame["FrameId"]: frame["Said"] for frame in response["keyframes"]}
+    assert said == {
+        "1": "the budget is fine\nends after the slide changed",
+        "2": "hiring starts in May\nquestions",
+    }
+    # The transcript itself is unchanged by the frames.
+    assert response["transcript"].startswith("\nbefore any slide")
+
+
+def test_a_frame_with_nothing_said_has_empty_said(monkeypatch):
+    install(monkeypatch, items=[segment("early", 2, StartTime=Decimal("1"))])
+    monkeypatch.setattr(
+        index, "get_keyframes", lambda callid: [{"FrameId": "1", "Timestamp": 50.0}]
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeKeyframes": True}, None)
+    assert response["keyframes"] == [{"FrameId": "1", "Timestamp": 50.0, "Said": ""}]
