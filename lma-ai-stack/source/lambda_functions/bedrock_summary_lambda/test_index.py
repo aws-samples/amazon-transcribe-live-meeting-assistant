@@ -472,7 +472,7 @@ def test_the_handler_asks_for_a_re_read_only_when_the_invoke_does(
     monkeypatch.setattr(
         index,
         "generate_summary",
-        lambda transcript, override, refresh=False, call_id=None: (
+        lambda transcript, override, refresh=False, call_id=None, agenda=None: (
             seen.append(refresh) or "a summary"
         ),
     )
@@ -1067,3 +1067,98 @@ def test_each_summary_section_records_its_token_usage_against_the_meeting(monkey
             "outputTokens": {"N": "80"},
             "requests": {"N": "1"},
         }
+
+
+# --------------------------------------------------------------------------
+# The agenda coverage section
+# --------------------------------------------------------------------------
+
+AGENDA_PROMPT = "Agenda:<br>{agenda}<br>Transcript:<br>{transcript}"
+
+
+def test_a_prompt_naming_the_agenda_is_sent_with_it_numbered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "S {transcript}", "2#Agenda Coverage": AGENDA_PROMPT}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, agenda="- Budget\n\n2) Hiring")
+    assert prompts_sent(bedrock) == ["S T", "Agenda:\n1. Budget\n2. Hiring\nTranscript:\nT"]
+
+
+def test_a_meeting_without_an_agenda_gets_no_agenda_section(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Left out, not generated empty: there is nothing to report against."""
+    bedrock, _ = install(
+        monkeypatch,
+        bedrock=FakeBedrock(texts=["one", "two"]),
+        templates=ddb_item(
+            **{
+                "1#Summary": "S {transcript}",
+                "2#Agenda Coverage": AGENDA_PROMPT,
+                "3#Actions": "A {transcript}",
+            }
+        ),
+        custom=ddb_item(),
+    )
+    for agenda in (None, "", "  \n "):
+        bedrock.requests.clear()
+        result = json.loads(index.generate_summary("T", None, agenda=agenda))
+        assert prompts_sent(bedrock) == ["S T", "A T"]
+        assert "Agenda Coverage" not in result
+
+
+def test_the_handler_passes_the_meetings_own_agenda(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = []
+    monkeypatch.setattr(
+        index,
+        "generate_summary",
+        lambda transcript, override, refresh=False, call_id=None, agenda=None: (
+            seen.append(agenda) or "a summary"
+        ),
+    )
+    install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Summary": "p"}),
+        custom=ddb_item(),
+        lambda_client=FakeLambdaClient(metadata={**METADATA, "Agenda": "Budget"}),
+    )
+    index.handler({"CallId": CALL_ID}, None)
+    assert seen == ["Budget"]
+
+
+def test_the_shipped_agenda_section_names_the_agenda_and_the_transcript() -> None:
+    shipped = json.loads(
+        (
+            HERE.parent / "configuration_seeder" / "defaults" / "LLMPromptSummaryTemplate.json"
+        ).read_text(encoding="utf-8")
+    )
+    prompt = shipped["AGENDA COVERAGE"]
+    assert "{agenda}" in prompt and "{transcript}" in prompt
+    for status in ("Covered", "Partly covered", "Not covered"):
+        assert status in prompt
+    # Read by a summariser that predates the agenda, the placeholder is left as
+    # it is; the prompt says what to answer then rather than inventing items.
+    assert "No agenda was set for this meeting." in prompt
+
+
+def test_the_agenda_is_split_on_line_breaks_only_as_the_page_does() -> None:
+    assert (
+        index.numbered_agenda("Budget\u2028review\r\nHiring") == "1. Budget\u2028review\n2. Hiring"
+    )
+    assert index.numbered_agenda(None) == ""
+
+
+def test_text_inserted_for_one_placeholder_is_not_read_as_the_other(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bedrock, _ = install(
+        monkeypatch,
+        templates=ddb_item(**{"1#Agenda Coverage": AGENDA_PROMPT}),
+        custom=ddb_item(),
+    )
+    index.generate_summary("T", None, agenda="{transcript}")
+    assert prompts_sent(bedrock) == ["Agenda:\n1. {transcript}\nTranscript:\nT"]

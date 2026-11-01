@@ -74,8 +74,9 @@ type Call implements DynamoDbBase @aws_cognito_user_pools
 	# agenda, at creation through createCall. Absent on a meeting nobody gave an
 	# agenda. See docs/meeting-agenda.md.
 	Agenda: String
-	# Where the stored agenda came from: "ui" for an agenda typed on the meeting
-	# page; "scheduled", "mcp" or "derived" as named by a backend role's write.
+	# Where the stored agenda came from: "scheduled" (the Virtual Participant
+	# form), "mcp" (an MCP client starting or scheduling a Virtual Participant),
+	# "ui" (typed on the meeting page) or "derived" (read from the transcript).
 	AgendaSource: String
 	# Who last set the agenda -- a username for a person, a fixed label for the
 	# backend -- and when.
@@ -219,6 +220,7 @@ type Mutation @aws_iam {
 	resolveSpeakerNames(input: ResolveSpeakerNamesInput!): ResolveSpeakerNamesOutput @aws_cognito_user_pools @aws_iam
 	updateCallSummaryText(input: UpdateCallSummaryTextInput!): Call @aws_cognito_user_pools @aws_iam
 	updateCallAgenda(input: UpdateCallAgendaInput!): Call @aws_cognito_user_pools @aws_iam
+	deriveCallAgenda(input: DeriveCallAgendaInput!): DeriveCallAgendaOutput @aws_cognito_user_pools @aws_iam
 	regenerateCallSummary(input: RegenerateCallSummaryInput!): RegenerateCallSummaryOutput @aws_cognito_user_pools @aws_iam
 	grantVoiceConsent: VoiceEnrollmentResult @aws_cognito_user_pools
 	enrolMyVoice(input: EnrolMyVoiceInput!): VoiceEnrollmentResult @aws_cognito_user_pools
@@ -840,6 +842,21 @@ input UpdateCallAgendaInput {
 	OnlyIfUnset: Boolean
 }
 
+input DeriveCallAgendaInput {
+	CallId: ID!
+}
+
+# The outcome of reading a meeting's transcript for a stated agenda. A found
+# agenda is not in this response: it is stored through updateCallAgenda and
+# arrives through onUpdateCall like any other agenda change.
+type DeriveCallAgendaOutput @aws_cognito_user_pools
+@aws_iam {
+	Success: Boolean
+	Message: String
+	# True when an agenda was found and stored.
+	Derived: Boolean
+}
+
 input RegenerateCallSummaryInput {
 	CallId: ID!
 }
@@ -1223,7 +1240,8 @@ type CallCost @aws_cognito_user_pools @aws_iam {
 
 type CallCostContextTotal @aws_cognito_user_pools @aws_iam {
 	# What the usage was for: Transcription, VirtualParticipant, VoiceAssistant,
-	# MeetingAssistant, Summary, SpeakerNaming, Sentiment, PageAutomation.
+	# MeetingAssistant, Summary, SpeakerNaming, AgendaDerivation, Sentiment,
+	# PageAutomation.
 	Context: String
 	Cost: Float
 }

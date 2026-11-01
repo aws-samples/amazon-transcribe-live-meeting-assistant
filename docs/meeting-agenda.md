@@ -25,7 +25,7 @@ Beside the text the meeting records three things about it:
 
 | Field | Meaning |
 |---|---|
-| `AgendaSource` | Where the agenda came from: `scheduled` (given on the Virtual Participant form), `mcp` (passed by an MCP client that started or scheduled a Virtual Participant) or `ui` (typed on the meeting page). The API also accepts `derived` from a backend role. |
+| `AgendaSource` | Where the agenda came from: `scheduled` (given on the Virtual Participant form), `mcp` (passed by an MCP client that started or scheduled a Virtual Participant), `ui` (typed on the meeting page) or `derived` (read from the transcript). |
 | `AgendaUpdatedBy` | The username of the person who last set it, or a fixed label when the backend set it. |
 | `AgendaUpdatedAt` | When it was last set. |
 
@@ -38,6 +38,7 @@ An agenda is limited to 10,000 characters. Saving an empty agenda clears it.
 | **The Virtual Participant form** (`scheduled`) | The **Create Virtual Participant** modal has an optional **Agenda** field. **Paste Meeting Invitation** fills it with the agenda the invitation lists, and leaves it as it was when the invitation lists none: the parser is told to extract an agenda, never to make one up from the title. |
 | **An MCP client** (`mcp`) | The `start_meeting_now` and `schedule_meeting` tools take an optional `agenda` argument — text with one item per line — so an agent such as Amazon Quick can pass the agenda from a calendar invite. See [Amazon Quick MCP setup](amazon-quick-mcp-setup.md#schedule_meeting). |
 | **The meeting page** (`ui`) | The Agenda panel, below. |
+| **The transcript** (`derived`) | An agenda somebody stated in the meeting, read from the transcript automatically about five minutes in, or when **Derive agenda** is pressed. See [Deriving an agenda from the transcript](#deriving-an-agenda-from-the-transcript). |
 
 For the first two, the agenda is stored with the Virtual Participant when it is
 started or scheduled. When the Virtual Participant starts, it reads the agenda
@@ -61,7 +62,74 @@ saying who last changed it and when. A meeting with no agenda says so.
 editing, one item per line; **Save agenda** stores it. Editing is available
 while the meeting is running and after it has ended. Unlike the summary, which
 the end-of-meeting pipeline replaces when the meeting ends, a stored agenda is
-replaced only by somebody saving a new one.
+replaced only by somebody saving a new one or pressing **Derive agenda** (which
+asks first); the automatic derivation pass writes only while a meeting has none.
+
+## Deriving an agenda from the transcript
+
+Meetings often open with somebody saying what they will cover — "we have three
+things today: the budget, hiring and the Q3 plan". LMA reads the transcript for
+such a statement in two ways, and stores what it finds with source `derived`.
+
+**Automatically, once per meeting.** When a meeting that has no agenda passes
+about five minutes of transcript, the transcript so far is read once for a
+stated agenda. If one was stated, it is stored; if not, nothing is stored and
+the meeting is not read again automatically. For an uploaded recording, whose
+segments arrive in a burst, the pass can run before the whole opening has been
+stored, so it may read less than five minutes. The same holds if the pass fails —
+the model call is throttled, say: it is not retried, and **Derive agenda**
+remains the way to try again. The pass never replaces an agenda:
+it writes only while the meeting still has none, checked in the same database
+operation as the write, so an agenda somebody sets while it runs is kept.
+
+**On demand, with Derive agenda.** The Agenda panel's **Derive agenda** button
+reads the transcript again — useful when the agenda was stated later than five
+minutes in, or after the meeting. It is available to the same people who can
+edit the agenda. If the meeting already has an agenda that somebody gave (on the
+Virtual Participant form, through an MCP client or on the page), the panel asks
+before replacing it; if no agenda turns out to have been stated, the current one
+is kept. The panel then says what happened, including "no agenda was stated in
+the meeting".
+
+**Only a stated agenda is stored.** The model is asked whether an agenda was
+stated, for its items, and for the words it was stated in, and is told that
+topics which merely come up are not an agenda. Its answer is accepted only if
+those quoted words are actually in the transcript, and each item is kept only
+if it is drawn from them — at least half of its content words appear in the
+quote — so an agenda
+made up from the discussion has nothing to point at and is discarded. Both passes read at
+most about the first half hour of conversation, where agendas are stated.
+
+**Model and cost.** Derivation uses the model selected by the **BedrockModelId**
+stack parameter (the one summaries use). Each pass is one model call, recorded
+against the meeting as **Agenda derivation** in its
+[cost estimate](meeting-cost-estimate.md). The automatic pass runs at most once
+per meeting.
+
+**Changing or turning off the automatic pass.** The Call Event Processor
+function's `AGENDA_DERIVATION_AFTER_SECONDS` environment variable sets how far
+into a meeting the automatic pass runs (300 seconds by default); `0` turns it
+off. It is set by the stack, so a change made on the function directly is
+undone by the next stack update. The **Derive agenda** button works either way.
+
+The button's request is answered within AppSync's 30-second limit in the usual
+case. If the model call takes longer, the panel says it is still reading the
+transcript; the pass usually finishes on its own, and an agenda it finds
+appears on the page without a reload.
+
+## Agenda coverage in the summary
+
+When a meeting has an agenda, its summary includes an **AGENDA COVERAGE**
+section: one line per agenda item, in agenda order, marked **Covered**,
+**Partly covered** or **Not covered**, with a few words on what was discussed
+or decided. A meeting without an agenda has no such section; it is left out
+rather than generated empty.
+
+The section is one of the shipped summary prompts, so deployments that have not
+removed it get it, after an upgrade too. Its prompt names the agenda with the
+`{agenda}` placeholder, and any prompt of your own can do the same; see
+[Customizing Prompts](transcript-summarization.md#customizing-prompts). To turn
+the section off, set its prompt to `NONE` on the **Transcript Summary** page.
 
 ## Asking the assistant about the agenda
 
@@ -71,7 +139,9 @@ assistant reads the agenda and the transcript with its times, and lists every
 item in agenda order, one line each, as **covered** (with the times it was
 discussed), **in progress** or **remaining**, noting briefly any substantial
 topic discussed that is not on the agenda. When the meeting has no agenda it
-says so instead of making one up.
+says so instead of making one up. The tool gives the assistant the agenda's
+items and where the agenda came from, but not who last changed it, because the
+voice assistant's and the meeting chat's answers reach everyone in the meeting.
 
 The same question can be asked three ways:
 
@@ -87,8 +157,7 @@ The same question can be asked three ways:
   in the meeting chat is answered from the current meeting's transcript, its
   agenda and web search only, and the answer is posted in the chat for
   everyone. **Guests may read the agenda of the meeting they are in** this way,
-  just as they can ask about its transcript. The answer gives the agenda's
-  items and where the agenda came from, but not who last changed it.
+  just as they can ask about its transcript.
 
 ## Who can change it
 

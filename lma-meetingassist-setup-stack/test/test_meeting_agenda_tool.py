@@ -47,7 +47,9 @@ def test_the_agenda_is_described_with_its_items_and_provenance():
     assert text.splitlines()[1:] == ["1. Introductions", "2. Budget", "3. Hiring"]
     assert "3 items" in text
     assert "Virtual Participant" in text
-    assert "alice@example.com" in text
+    # Answers reach everyone in the meeting; the editor's username is not one
+    # of the things they need.
+    assert "alice@example.com" not in text
 
 
 def test_a_meeting_without_an_agenda_is_said_to_have_none():
@@ -133,21 +135,6 @@ def test_the_prompt_guides_a_progress_check_with_transcript_times():
     assert "Never invent an agenda" in prompt
 
 
-def test_the_meeting_chat_answer_does_not_name_the_last_editor():
-    """Everyone in the meeting reads a chat answer; the editor's username,
-    commonly an email address, is left out of it."""
-    record = {
-        "Agenda": "Budget",
-        "AgendaSource": "ui",
-        "AgendaUpdatedBy": "alice@example.com",
-        "AgendaUpdatedAt": "2026-10-31T10:00:00Z",
-    }
-    text = meeting_agenda.describe_agenda_for_agent(record, include_editor=False)
-    assert "alice@example.com" not in text
-    assert "set on the meeting page" in text
-    assert "1. Budget" in text
-
-
 def test_items_split_on_line_breaks_only_as_the_page_does():
     assert meeting_agenda.parse_agenda_items("Budget\u2028review\r\nHiring") == [
         "Budget\u2028review",
@@ -155,7 +142,7 @@ def test_items_split_on_line_breaks_only_as_the_page_does():
     ]
 
 
-def _agenda_tool(monkeypatch, table, include_editor=True):
+def _agenda_tool(monkeypatch, table):
     import sys  # noqa: PLC0415
     import types  # noqa: PLC0415
 
@@ -170,15 +157,14 @@ def _agenda_tool(monkeypatch, table, include_editor=True):
 
     monkeypatch.setattr(handler_module, "dynamodb", FakeResource)
     monkeypatch.setattr(handler_module, "APPSYNC_GRAPHQL_URL", "")
-    return handler_module.create_meeting_agenda_tool(
-        call_id="call-1", dynamodb_table_name="events", include_editor=include_editor
-    )
+    return handler_module.create_meeting_agenda_tool(call_id="call-1", dynamodb_table_name="events")
 
 
-def test_the_tool_reads_the_meeting_and_leaves_the_editor_out_in_the_chat(monkeypatch):
+def test_the_tool_reads_the_meeting_and_never_names_the_last_editor(monkeypatch):
     record = {"Agenda": "Budget", "AgendaUpdatedBy": "alice@example.com", "AgendaUpdatedAt": "t"}
-    assert "alice@example.com" in _agenda_tool(monkeypatch, FakeTable(record))()
-    assert "alice@example.com" not in _agenda_tool(monkeypatch, FakeTable(record), False)()
+    text = _agenda_tool(monkeypatch, FakeTable(record))()
+    assert "1. Budget" in text
+    assert "alice@example.com" not in text
 
 
 def test_a_failed_read_is_reported_to_the_agent_not_raised(monkeypatch):
@@ -190,3 +176,24 @@ def test_a_failed_read_is_reported_to_the_agent_not_raised(monkeypatch):
     assert _agenda_tool(monkeypatch, BrokenTable())() == (
         "The meeting agenda could not be read just now."
     )
+
+
+def test_timed_lines_read_in_start_order_where_channels_overlap(monkeypatch):
+    """A long turn on one channel ends after a short one on the other began;
+    ordered by start, the times read forwards. Untimed, the order is by end,
+    as it has always been."""
+    segments = [
+        {"Speaker": "Ann", "Transcript": "Long turn.", "Channel": "AGENT", "StartTime": 10, "EndTime": 30},
+        {"Speaker": "Bob", "Transcript": "Short one.", "Channel": "CALLER", "StartTime": 20, "EndTime": 22},
+    ]
+
+    class FakeResource:
+        @staticmethod
+        def Table(_name):  # noqa: N802 - the boto3 resource's own method name
+            return FakeTable(segments)
+
+    monkeypatch.setattr(handler_module, "dynamodb", FakeResource)
+    assert handler_module.fetch_meeting_transcript("c", "t", with_timestamps=True) == (
+        "[00:10] Ann: Long turn.\n[00:20] Bob: Short one."
+    )
+    assert handler_module.fetch_meeting_transcript("c", "t") == "Bob: Short one.\nAnn: Long turn."

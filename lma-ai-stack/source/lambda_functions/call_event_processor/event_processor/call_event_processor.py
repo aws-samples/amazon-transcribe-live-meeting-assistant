@@ -53,6 +53,8 @@ from pure import (  # noqa: E402
     SentimentByPeriodEntry,
     SentimentEntry,
     SentimentPerChannel,
+    agenda_derivation_after_seconds,
+    agenda_derivation_due,
     convert_keys_to_uppercamelcase,
     get_sentiment_per_quarter,
     matches_wake_phrase,
@@ -91,6 +93,15 @@ POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN = getenv(
 
 ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN = getenv("ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN", "")
 SPEAKER_NAME_RESOLVER_ARN = getenv("SPEAKER_NAME_RESOLVER_ARN", "")
+# The automatic agenda pass: a meeting with no agenda is read once, about this
+# far in, for an agenda somebody stated. 0 turns it off. See agenda_deriver.
+AGENDA_DERIVER_ARN = getenv("AGENDA_DERIVER_ARN", "")
+AGENDA_DERIVATION_AFTER_SECONDS = agenda_derivation_after_seconds(
+    getenv("AGENDA_DERIVATION_AFTER_SECONDS", "300")
+)
+# Meetings this execution environment has already queued the pass for; see
+# agenda_derivation_due for why this is not what makes the pass run once.
+AGENDA_PASS_QUEUED: set = set()
 IS_TRANSCRIPT_SUMMARY_ENABLED = getenv("IS_TRANSCRIPT_SUMMARY_ENABLED", "false").lower() == "true"
 
 ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN = getenv("ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN", "")
@@ -102,6 +113,7 @@ if (
     TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN
     or ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN
     or SPEAKER_NAME_RESOLVER_ARN
+    or AGENDA_DERIVER_ARN
     or ASYNC_AGENT_ASSIST_ORCHESTRATOR_ARN
     or START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN
     or POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN
@@ -1204,6 +1216,36 @@ def invoke_transcript_lambda_hook(message: Dict[str, Any]):
     return message
 
 
+def queue_agenda_derivation(call_id: str) -> None:
+    """Queue the automatic agenda pass for a meeting, fire-and-forget.
+
+    Asynchronous for the reason the end-of-meeting speaker-naming invoke is: a
+    synchronous one would hold up every other record in the batch, live segments
+    for other meetings included, for the length of a model call. The deriver
+    decides for itself whether the pass is still wanted -- the meeting may have
+    an agenda, or another environment may already have run it -- so queueing it
+    a few times over costs only a conditional write each. A failure to queue is
+    logged and the segment processed regardless: an agenda is an enhancement.
+    """
+    # Bounded: a warm environment sees meeting after meeting. Forgetting them
+    # all costs at most a repeat queue each, which the deriver's claim absorbs.
+    if len(AGENDA_PASS_QUEUED) >= 5000:
+        AGENDA_PASS_QUEUED.clear()
+    AGENDA_PASS_QUEUED.add(call_id)
+    try:
+        LAMBDA_HOOK_CLIENT.invoke(
+            FunctionName=AGENDA_DERIVER_ARN,
+            InvocationType="Event",
+            Payload=json.dumps({"CallId": call_id, "Trigger": "auto"}),
+        )
+        LOGGER.debug("Queued the automatic agenda pass", extra=dict(call_id=call_id))
+    except Exception:  # pylint: disable=broad-except
+        LOGGER.exception(
+            "Could not queue the automatic agenda pass; continuing",
+            extra=dict(call_id=call_id),
+        )
+
+
 async def get_call_details(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -1682,6 +1724,17 @@ async def execute_process_event_api_mutation(
                         appsync_session=appsync_session,
                     )
                 )
+            if (
+                AGENDA_DERIVER_ARN
+                and not normalized_message["IsPartial"]
+                and agenda_derivation_due(
+                    normalized_message.get("CallId"),
+                    normalized_message.get("EndTime"),
+                    AGENDA_DERIVATION_AFTER_SECONDS,
+                    AGENDA_PASS_QUEUED,
+                )
+            ):
+                queue_agenda_derivation(normalized_message["CallId"])
             if (
                 IS_LAMBDA_AGENT_ASSIST_ENABLED
                 and (

@@ -24,11 +24,21 @@ import resolveSpeakerNames from '../graphql/queries/resolveSpeakerNames';
 import updateCallSummaryText from '../graphql/queries/updateCallSummaryText';
 import regenerateCallSummary from '../graphql/queries/regenerateCallSummary';
 import updateCallAgenda from '../graphql/queries/updateCallAgenda';
+import deriveCallAgenda from '../graphql/queries/deriveCallAgenda';
 
 import { DEFAULT_DATE_RANGE_HOURS, hoursToDateRange } from '../components/call-list/calls-table-config';
 import { serializeSummaryState } from '../components/common/summary-state';
 
 const client = generateClient();
+
+/**
+ * Whether a GraphQL request failed because AppSync stopped waiting for the
+ * resolver -- its 30-second limit -- rather than because it was refused.
+ * AppSync reports that as errorType "ExecutionTimeout" with the message
+ * "Execution timed out."; both are checked, since the type is not always set.
+ */
+export const isRequestTimeout = (error) =>
+  (error?.errors || []).some((e) => /timeout/i.test(e?.errorType || '') || /timed out/i.test(e?.message || ''));
 const logger = new ConsoleLogger('useCallsGraphQlApi');
 
 // Matches the `limit` used server-side by the ListCallsGsiResolver.  One
@@ -639,6 +649,28 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
   };
 
   /**
+   * Ask the backend to read a meeting's transcript for a stated agenda.
+   *
+   * Nothing is patched into state here: a found agenda is stored through
+   * updateCallAgenda and arrives through onUpdateCall. Returns the backend's own
+   * answer so the panel can say what happened, including "none was stated".
+   */
+  const sendDeriveCallAgenda = useCallback(async (callId) => {
+    try {
+      const response = await client.graphql({ query: deriveCallAgenda, variables: { input: { CallId: callId } } });
+      return response?.data?.deriveCallAgenda ?? { Success: false, Message: 'no answer from the server' };
+    } catch (error) {
+      logger.error('failed to derive the meeting agenda', error);
+      // A timeout is not a refusal: a pass that outlasts AppSync's limit still
+      // finishes, so the panel is told the result may yet arrive. Any other
+      // failure -- refused, unreachable, an error in the resolver -- is one.
+      return isRequestTimeout(error)
+        ? { Success: false, Message: 'the request timed out', NoAnswer: true }
+        : { Success: false, Message: 'could not derive an agenda' };
+    }
+  }, []);
+
+  /**
    * Ask the backend to summarise a meeting again.
    *
    * Nothing is patched into state here: the run outlives the request, and the
@@ -669,6 +701,7 @@ const useCallsGraphQlApi = ({ initialDateRange } = {}) => {
     sendUpdateCallSummary,
     sendRegenerateCallSummary,
     sendUpdateCallAgenda,
+    sendDeriveCallAgenda,
     setIsCallsListLoading,
     setLiveTranscriptCallId,
     // New date-range-based API (replaces setPeriodsToLoad/periodsToLoad)

@@ -225,6 +225,8 @@ OTHER_FIELDS = [
     # The agenda of one meeting, under the same owner/share condition as the
     # summary write.
     ("Mutation", "updateCallAgenda"),
+    # Lambda resolver applying the same rule in `caller_may_edit`.
+    ("Mutation", "deriveCallAgenda"),
     ("Mutation", "deleteCall"),
     ("Mutation", "shareCall"),
     ("Mutation", "unshareCall"),

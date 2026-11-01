@@ -15,6 +15,7 @@ subscription publish that keeps open pages current.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
 import pytest
@@ -294,3 +295,73 @@ def test_both_mcp_endpoints_offer_the_agenda_argument(resources: dict, tool: str
     assert "agenda" not in gateway.get("Required", [])
     assert "agenda" not in api_key.get("required", [])
     assert set(gateway["Properties"]) == set(api_key["properties"])
+
+
+# ── derivation from the transcript ──────────────────────────────────────────
+
+
+def test_the_derive_mutation_reaches_the_deriver_with_the_callers_identity(
+    resources: dict, schema_sdl: str
+) -> None:
+    line = next(line for line in schema_sdl.splitlines() if "deriveCallAgenda(" in line)
+    assert "@aws_cognito_user_pools" in line and "@aws_iam" in line
+    resolver = resources["DeriveCallAgendaResolver"]["Properties"]
+    assert resolver["FieldName"] == "deriveCallAgenda"
+    assert resolver["CodeS3Location"].endswith("deriveCallAgenda.js")
+    source = resources["AgendaDeriverLambdaDataSource"]["Properties"]
+    assert source["LambdaConfig"]["LambdaFunctionArn"] == {
+        "Fn::GetAtt": "AgendaDeriverFunction.Arn"
+    }
+    js = (APPSYNC / "deriveCallAgenda.js").read_text(encoding="utf-8")
+    assert "payload: { arguments: ctx.arguments, identity: ctx.identity }" in js
+
+
+def _deriver_statements(resources: dict) -> list:
+    role = resources["AgendaDeriverFunctionExecutionRole"]["Properties"]
+    return role["Policies"][0]["PolicyDocument"]["Statement"]
+
+
+def test_the_deriver_writes_the_record_only_for_its_claim_and_metering(resources: dict) -> None:
+    """The agenda itself goes through AppSync; the two direct writes are each
+    held to their own partitions."""
+    leading = {}
+    for statement in _deriver_statements(resources):
+        actions = statement["Action"] if isinstance(statement["Action"], list) else [statement["Action"]]
+        for action in actions:
+            if action in ("dynamodb:UpdateItem", "dynamodb:PutItem"):
+                leading[action] = statement["Condition"]["ForAllValues:StringLike"][
+                    "dynamodb:LeadingKeys"
+                ]
+    assert leading == {"dynamodb:UpdateItem": ["c#*"], "dynamodb:PutItem": ["mtr#*"]}
+    graphql = [s for s in _deriver_statements(resources) if "appsync:GraphQL" in s["Action"]]
+    assert len(graphql) == 1
+    assert graphql[0]["Resource"]["Fn::Sub"].endswith("/types/Mutation/fields/updateCallAgenda")
+
+
+def test_the_event_processor_queues_the_automatic_pass(resources: dict) -> None:
+    function = resources["CallEventProcessorFunction"]["Properties"]
+    env = function["Environment"]["Variables"]
+    assert env["AGENDA_DERIVER_ARN"] == {"Fn::GetAtt": "AgendaDeriverFunction.Arn"}
+    assert env["AGENDA_DERIVATION_AFTER_SECONDS"] == "300"
+
+
+def test_derivation_is_metered_under_its_own_context() -> None:
+    records = (
+        AI_STACK / "source" / "lambda_layers" / "configuration_layer" / "lma_metering" / "records.py"
+    ).read_text(encoding="utf-8")
+    assert '    "AgendaDerivation",\n' in records
+    labels = (UI_SRC / "components" / "common" / "call-cost.js").read_text(encoding="utf-8")
+    assert "AgendaDerivation: 'Agenda derivation'," in labels
+
+
+def test_the_summary_ships_an_agenda_coverage_section_in_both_copies() -> None:
+    copies = [
+        AI_STACK / "source" / "lambda_functions" / "configuration_seeder" / "defaults",
+        AI_STACK.parent / "lma-llm-template-setup-stack" / "source" / "lambda_functions",
+    ]
+    prompts = [
+        json.loads((d / "LLMPromptSummaryTemplate.json").read_text(encoding="utf-8"))["AGENDA COVERAGE"]
+        for d in copies
+    ]
+    assert prompts[0] == prompts[1]
+    assert "{agenda}" in prompts[0]

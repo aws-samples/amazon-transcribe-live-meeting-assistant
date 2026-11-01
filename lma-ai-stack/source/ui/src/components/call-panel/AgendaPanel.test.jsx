@@ -7,7 +7,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 
-import AgendaPanel from './AgendaPanel';
+import AgendaPanel, { deriveStatus } from './AgendaPanel';
 
 const ITEM = {
   callId: 'c1',
@@ -68,5 +68,53 @@ describe('AgendaPanel', () => {
   it('offers no edit control when the context supplies no writer', () => {
     render(<AgendaPanel item={ITEM} readOnly={false} />);
     expect(screen.queryByRole('button', { name: /Edit/ })).toBeNull();
+  });
+
+  it('derives straight away when there is no agenda, and says what it found', async () => {
+    const onDerive = vi.fn().mockResolvedValue({ Success: true, Derived: false, Message: 'no agenda was stated' });
+    render(<AgendaPanel item={{ callId: 'c1' }} onSave={vi.fn()} onDerive={onDerive} readOnly={false} />);
+    fireEvent.click(screen.getByRole('button', { name: /Derive agenda/ }));
+    await waitFor(() => expect(onDerive).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText('no agenda was stated')).toBeTruthy();
+  });
+
+  it('asks before replacing an agenda somebody gave, and keeps it on "Keep it"', async () => {
+    const onDerive = vi.fn().mockResolvedValue({ Success: true, Derived: true });
+    render(<AgendaPanel item={ITEM} onSave={vi.fn()} onDerive={onDerive} readOnly={false} />);
+    fireEvent.click(screen.getByRole('button', { name: /Derive agenda/ }));
+    expect(onDerive).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Keep it/ }));
+    expect(onDerive).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /Derive agenda/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Replace$/ }));
+    await waitFor(() => expect(onDerive).toHaveBeenCalledTimes(1));
+  });
+
+  it('re-derives a derived agenda without asking', async () => {
+    const onDerive = vi.fn().mockResolvedValue({ Success: true, Derived: true });
+    render(
+      <AgendaPanel item={{ ...ITEM, agendaSource: 'derived' }} onSave={vi.fn()} onDerive={onDerive} readOnly={false} />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /Derive agenda/ }));
+    await waitFor(() => expect(onDerive).toHaveBeenCalledTimes(1));
+  });
+
+  it('offers no Derive control to a viewer without write access', () => {
+    render(<AgendaPanel item={ITEM} onSave={vi.fn()} onDerive={vi.fn()} readOnly />);
+    expect(screen.queryByRole('button', { name: /Derive agenda/ })).toBeNull();
+  });
+
+  it('describes each outcome of a derivation', () => {
+    expect(deriveStatus({ Success: true, Derived: true }).type).toBe('success');
+    expect(deriveStatus({ Success: true, Derived: false, Message: 'none' })).toEqual({ type: 'info', text: 'none' });
+    expect(deriveStatus({ Success: false, Message: 'not permitted' })).toEqual({
+      type: 'error',
+      text: 'not permitted',
+    });
+    expect(deriveStatus(undefined).type).toBe('error');
+    expect(deriveStatus({ Success: false, NoAnswer: true })).toEqual({
+      type: 'info',
+      text: 'Still reading the transcript; a stated agenda will appear here when found',
+    });
   });
 });

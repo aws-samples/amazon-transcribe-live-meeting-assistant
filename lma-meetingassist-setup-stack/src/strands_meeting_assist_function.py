@@ -1518,14 +1518,13 @@ def send_thinking_step_to_appsync(call_id: str, message_id: str, thinking_step: 
     except Exception as e:
         logger.error(f"Error sending thinking step to AppSync: {str(e)}")
 
-def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_id: str = None,
-                               include_editor: bool = True):
+def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_id: str = None):
     """Factory for the tool that reads the current meeting's agenda.
 
     Offered in every tool scope, the meeting chat's included: the agenda belongs
     to the meeting, and the people in the meeting chat are the people it is for.
-    It reads only the meeting this invocation is about. ``include_editor`` is
-    off in the meeting chat, whose answers everyone reads; see
+    It reads only the meeting this invocation is about, and returns its items
+    and source but not who last changed it; see
     meeting_agenda.describe_agenda_for_agent.
     """
     from strands import tool
@@ -1553,7 +1552,7 @@ def create_meeting_agenda_tool(call_id: str, dynamodb_table_name: str, message_i
             }, 0)
         try:
             record = meeting_agenda.read_meeting_record(dynamodb.Table(dynamodb_table_name), call_id)
-            result = meeting_agenda.describe_agenda_for_agent(record, include_editor=include_editor)
+            result = meeting_agenda.describe_agenda_for_agent(record)
             success = True
         except Exception as e:
             logger.error(f"Error reading the meeting agenda: {str(e)}")
@@ -1625,7 +1624,9 @@ def fetch_meeting_transcript(call_id: str, dynamodb_table_name: str, with_timest
             )
 
         # Sort by EndTime and format transcript
-        items = sorted(items, key=lambda x: x.get('EndTime', 0))
+        # By end time as before; by start time when lines carry their start
+        # times, so the times read in order where two channels overlap.
+        items = sorted(items, key=lambda x: x.get('StartTime' if with_timestamps else 'EndTime', 0))
 
         transcript_parts = []
         for item in items:
@@ -2047,8 +2048,7 @@ def handler(event, context):
             tools.append(create_meeting_agenda_tool(
                 call_id=call_id,
                 dynamodb_table_name=dynamodb_table_name,
-                message_id=message_id,
-                include_editor=not meeting_chat_scope
+                message_id=message_id
             ))
             logger.info("Meeting agenda tool enabled")
 

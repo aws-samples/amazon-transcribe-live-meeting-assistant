@@ -67,15 +67,14 @@ def format_elapsed(seconds: Any) -> str:
     return f"[{minutes:02d}:{secs:02d}]"
 
 
-def describe_agenda_for_agent(
-    meeting: Optional[Mapping[str, Any]], include_editor: bool = True
-) -> str:
+def describe_agenda_for_agent(meeting: Optional[Mapping[str, Any]]) -> str:
     """The text the get_meeting_agenda tool returns for a meeting record.
 
-    ``include_editor`` adds who last changed the agenda and when. It is off for a
-    question typed in the meeting chat, whose answer everyone in the meeting
-    reads: the editor is recorded by username, which is commonly an email
-    address, and nothing about the agenda's items needs it.
+    Who last changed the agenda is not included. Answers reach everyone in the
+    meeting -- the voice assistant speaks them and the meeting chat posts them --
+    and the editor is recorded by username, which is commonly an email address;
+    nothing about the agenda's items needs it. The meeting page shows it to the
+    people who can open the meeting.
     """
     items = parse_agenda_items((meeting or {}).get("Agenda"))
     if not items:
@@ -84,10 +83,6 @@ def describe_agenda_for_agent(
     provenance: List[str] = []
     if source:
         provenance.append(source)
-    if include_editor and meeting.get("AgendaUpdatedBy") and meeting.get("AgendaUpdatedAt"):
-        provenance.append(
-            f"last updated by {meeting['AgendaUpdatedBy']} at {meeting['AgendaUpdatedAt']}"
-        )
     header = f"Meeting agenda ({len(items)} item{'s' if len(items) != 1 else ''}"
     header += f"; {'; '.join(provenance)})" if provenance else ")"
     lines = [header + ":"]
@@ -96,14 +91,14 @@ def describe_agenda_for_agent(
 
 
 def read_meeting_record(table: Any, call_id: str) -> Optional[Dict[str, Any]]:
-    """The agenda fields of one meeting record, or None if there is no such meeting.
+    """The agenda and its source from one meeting record, or None if there is no such meeting.
 
     ``table`` is a boto3 DynamoDB Table resource for the event-sourcing table,
     where the meeting record is stored under ``c#<CallId>``.
     """
     response = table.get_item(
         Key={"PK": f"c#{call_id}", "SK": f"c#{call_id}"},
-        ProjectionExpression="#agenda, AgendaSource, AgendaUpdatedBy, AgendaUpdatedAt",
+        ProjectionExpression="#agenda, AgendaSource",
         ExpressionAttributeNames={"#agenda": "Agenda"},
     )
     return response.get("Item")

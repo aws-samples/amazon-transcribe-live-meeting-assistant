@@ -88,6 +88,7 @@ CONTEXTS = (
     "MeetingAssistant",
     "Summary",
     "SpeakerNaming",
+    "AgendaDerivation",
     "Sentiment",
     "PageAutomation",
 )
