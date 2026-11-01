@@ -1335,6 +1335,7 @@ Metadata:
         Parameters:
           - EnableOperationalAlarms
           - TranscribeConcurrentStreamAlarmThreshold
+          - LogLevel
       - Label:
           default: Security Configuration
         Parameters:
@@ -1344,14 +1345,16 @@ Metadata:
         Parameters:
           - ModelValidation
     ParameterLabels:
+      BedrockModelId:
+        default: Bedrock Model ID for Summaries and Meeting Insights
       KeyframeTextModelId:
         default: Bedrock Model ID for Reading Key Frames of the Shared Screen
-      CallAudioProcessor:
-        default: Call Audio Processor
-      ChimeVoiceToneAnalysis:
-        default: Chime Voice Tone Analysis
-      CustomVoiceConnectorId:
-        default: Amazon Chime SDK Voice Connector ID (existing)
+      EnableAudioRecording:
+        default: Record Meeting Audio
+      EnableVideoRecording:
+        default: Record Meeting Video
+      LogLevel:
+        default: Log Level
       AdminEmail:
         default: Admin Email Address
       AllowedSignUpEmailDomain:

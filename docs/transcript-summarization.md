@@ -68,7 +68,7 @@ Both controls are available to a meeting's **owner**, a user the meeting has bee
 
 ## BEDROCK Option (Default)
 
-The BEDROCK option uses the selected Amazon Bedrock foundation model (default: Claude Haiku 4.5) to generate meeting summaries from prompt templates. Set the model with the **BedrockModelId** parameter; see [CloudFormation Parameters](cloudformation-parameters.md#end-of-call-summary) for the full list of choices and what the Claude 5 generation costs.
+The BEDROCK option uses the selected Amazon Bedrock foundation model (default: Claude Sonnet 5.5) to generate meeting summaries from prompt templates. Set the model with the **BedrockModelId** parameter; see [CloudFormation Parameters](cloudformation-parameters.md#choosing-amazon-bedrock-models) for the full list of choices and what the Claude 5 generation costs.
 
 ### Prompt Template Storage
 

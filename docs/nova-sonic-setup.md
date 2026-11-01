@@ -37,7 +37,7 @@ This guide walks you through setting up the AWS Nova Sonic 2 voice assistant wit
    only the voice assistant's model calls go there. Everything else — the
    transcript store, the meeting assistant, the Nova Sonic configuration you set in
    the LMA UI — stays in the stack's own region. See
-   [CloudFormation Parameters](cloudformation-parameters.md#voice-assistant).
+   [CloudFormation Parameters](cloudformation-parameters.md#meeting-assist-voice-assistant).
 
 ### 1.2 Enable Model Access
 
