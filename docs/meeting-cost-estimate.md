@@ -155,6 +155,12 @@ price table replace a list rather than merging into it, so a custom
 
 ### Changing a price
 
+An Admin can change prices in the **Meeting Cost Prices** section of
+**Configuration ▸ Configuration** (`/#/configuration/settings?section=call_pricing`),
+where each price that differs from the shipped one is marked and can be reset; see
+the [Configuration Guide](configuration-guide.md). The same changes can be made
+through the API:
+
 The price table is the `call_pricing` section of the
 [unified configuration store](configuration-store.md). The shipped table is part of
 the baseline record, so a release that updates a price reaches every deployment on

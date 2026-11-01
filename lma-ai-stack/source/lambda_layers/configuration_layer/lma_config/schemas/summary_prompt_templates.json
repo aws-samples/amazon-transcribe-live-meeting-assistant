@@ -4,6 +4,7 @@
   "title": "Transcript summary prompts",
   "description": "The prompts behind each section of an end-of-meeting summary. Each section has a title and a prompt; the number in front of the title orders the sections of the summary. Use {transcript} where the meeting transcript goes. Turning a shipped section off stores it as NONE, which the summarizer skips.",
   "sectionLabel": "Transcript Summary",
+  "appliesText": "A saved change applies to summaries generated within about five minutes of the save; Regenerate on a meeting page uses it at once.",
   "order": 1,
   "collapsible": true,
   "defaultExpanded": true,

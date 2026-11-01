@@ -4,6 +4,7 @@
   "title": "Transcription engine",
   "description": "Which engine transcribes each kind of meeting. The on-demand speech engine is experimental: English only, with transcript quality below Amazon Transcribe.",
   "sectionLabel": "Transcription Engine (experimental)",
+  "appliesText": "A saved change applies to meetings that start at least 30 seconds after the save; a meeting already running keeps its engine.",
   "order": 4,
   "collapsible": true,
   "defaultExpanded": false,

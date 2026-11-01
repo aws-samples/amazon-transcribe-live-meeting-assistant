@@ -221,7 +221,7 @@ CHAT_BUTTONS = register(
 #: The price table the per-meeting cost estimate is computed with: US dollars per
 #: unit for each metered service, a base region and per-region differences. Read
 #: by the cost resolver whenever a meeting's estimate is drawn, and edited by an
-#: administrator through the pricing API. See docs/meeting-cost-estimate.md.
+#: administrator on the Configuration page or through the pricing API. See docs/meeting-cost-estimate.md.
 #:
 #: Standard tier: an estimate drawn a few minutes after a price edit using the
 #: previous price is what the documentation says happens, and nothing about a

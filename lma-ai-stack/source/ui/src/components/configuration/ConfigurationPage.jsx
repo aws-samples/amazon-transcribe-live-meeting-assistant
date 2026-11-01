@@ -131,7 +131,8 @@ export const ConfigurationContent = () => {
   );
   const problemCount = Object.values(problems).reduce((total, list) => total + list.length, 0);
 
-  // Leaving with unsaved changes asks first.
+  // Closing or reloading the page with unsaved changes asks first. Following
+  // View history asks too; other navigation inside the app does not.
   useEffect(() => {
     if (!dirty) return undefined;
     const warn = (event) => {
@@ -149,6 +150,13 @@ export const ConfigurationContent = () => {
     scrolled.current = true;
     document.getElementById(sectionElementId(focus))?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
   }, [focus, doc]);
+
+  const confirmLeaving = (event) => {
+    // eslint-disable-next-line no-alert -- the browser's own prompt, as for closing the page
+    if (dirty && !window.confirm('Leave the Configuration page? Your unsaved changes will be lost.')) {
+      event.preventDefault();
+    }
+  };
 
   const setSection = (name) => (values) => setEdits((current) => ({ ...current, [name]: values }));
 
@@ -188,7 +196,9 @@ export const ConfigurationContent = () => {
       const timing = [...new Set(changed.map((section) => appliesText(section.tier, section.schema)))].join(' ');
       let text;
       if (outcome.Unchanged) {
-        text = 'Nothing was saved: the configuration already holds these values.';
+        text = `Nothing was saved: the configuration already holds these values${
+          label.trim() ? ', so there is no new revision to label' : ''
+        }.`;
       } else if (labelProblem) {
         text = `Saved as revision ${outcome.Revision}, but the label could not be set: ${labelProblem}`;
       } else {
@@ -278,7 +288,9 @@ export const ConfigurationContent = () => {
         }
         actions={
           <SpaceBetween direction="horizontal" size="xs">
-            <Button href={`#${CONFIGURATION_HISTORY_PATH}`}>View history</Button>
+            <Button href={`#${CONFIGURATION_HISTORY_PATH}`} onFollow={confirmLeaving}>
+              View history
+            </Button>
             <Button iconName="refresh" onClick={load} disabled={loading || saving} ariaLabel="Reload" />
             <Button onClick={() => setEdits(loaded)} disabled={!dirty || saving}>
               Discard changes
@@ -320,7 +332,13 @@ export const ConfigurationContent = () => {
           type={status.type}
           dismissible
           onDismiss={() => setStatus(null)}
-          action={status.revision ? <Button href={`#${CONFIGURATION_HISTORY_PATH}`}>View history</Button> : undefined}
+          action={
+            status.revision ? (
+              <Button href={`#${CONFIGURATION_HISTORY_PATH}`} onFollow={confirmLeaving}>
+                View history
+              </Button>
+            ) : undefined
+          }
         >
           {status.text}
         </Alert>
