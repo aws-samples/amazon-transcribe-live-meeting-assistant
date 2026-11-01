@@ -85,6 +85,8 @@ const createVirtualParticipant = /* GraphQL */ `
       meetingPlatform
       meetingId
       status
+      Owner
+      SharedWith
       createdAt
     }
   }

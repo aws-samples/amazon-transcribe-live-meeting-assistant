@@ -110,6 +110,8 @@ def execute(
             isScheduled
             status
             owner
+            Owner
+            SharedWith
             createdAt
         }
     }

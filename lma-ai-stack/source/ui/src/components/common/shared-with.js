@@ -15,17 +15,23 @@
  * checks compare them.
  */
 
-/** The trimmed, non-empty entries of a SharedWith value. */
+/**
+ * The trimmed, non-empty entries of a SharedWith value. "[", "]" and "," only
+ * ever separate entries, as in the API: a string is split at each of them, and
+ * a list element that contains one is not an entry.
+ */
+const SEPARATORS = ['[', ']', ','];
+
 export const sharedWithEntries = (value) => {
   if (Array.isArray(value)) {
-    return value.filter((entry) => typeof entry === 'string' && entry.trim()).map((entry) => entry.trim());
+    return value
+      .filter((entry) => typeof entry === 'string' && !SEPARATORS.some((separator) => entry.includes(separator)))
+      .map((entry) => entry.trim())
+      .filter((entry) => entry);
   }
   if (typeof value !== 'string') return [];
-  let text = value.trim();
-  if (text.startsWith('[')) text = text.slice(1);
-  if (text.endsWith(']')) text = text.slice(0, -1);
-  return text
-    .split(',')
+  return value
+    .split(/[[\],]/)
     .map((entry) => entry.trim())
     .filter((entry) => entry);
 };

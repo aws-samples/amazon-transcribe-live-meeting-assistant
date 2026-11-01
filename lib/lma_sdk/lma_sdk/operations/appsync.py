@@ -11,7 +11,7 @@ Usage::
 
     result = client.appsync.graphql(
         query="mutation Create($i: CreateVirtualParticipantInput!) "
-              "{ createVirtualParticipant(input: $i) { id status } }",
+              "{ createVirtualParticipant(input: $i) { id status Owner SharedWith } }",
         variables={"i": {...}},
     )
     vp_id = result["createVirtualParticipant"]["id"]

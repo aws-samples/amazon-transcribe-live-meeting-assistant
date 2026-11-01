@@ -351,3 +351,380 @@ def test_an_unshared_virtual_participant_keeps_its_empty_value(client) -> None:
         {"result": {"statusCode": 200, "body": body}, "arguments": {}},
     )
     assert output["SharedWith"] == ""
+
+
+# ── transcript segments with sentiment ──────────────────────────────────────
+
+
+@pytest.mark.parametrize("shape,caller,identity,expected", CASES)
+def test_segments_with_sentiment_are_answered_to_exactly_the_people_the_meeting_is_for(
+    client, shape: str, caller: str, identity: dict, expected: bool
+) -> None:
+    items = [{"PK": "trs#c1", "SK": "1", "Owner": OWNER, "SharedWith": SHAPES[shape]}]
+    response = _evaluate(
+        client,
+        "getTranscriptSegmentsWithSentiment.response.vtl",
+        {"result": {"items": items, "nextToken": None}, "identity": identity},
+    )
+    segments = json.loads(response["evaluationResult"])["TranscriptSegmentsWithSentiment"]
+    assert len(segments) == (1 if expected else 0)
+
+
+def test_segments_with_sentiment_are_answered_to_a_backend_role(client) -> None:
+    items = [{"PK": "trs#c1", "SK": "1", "Owner": OWNER}]
+    response = _evaluate(
+        client,
+        "getTranscriptSegmentsWithSentiment.response.vtl",
+        {"result": {"items": items, "nextToken": None}, "identity": BACKEND},
+    )
+    assert len(json.loads(response["evaluationResult"])["TranscriptSegmentsWithSentiment"]) == 1
+
+
+# ── "[", "]" and "," only separate entries ──────────────────────────────────
+
+# Values whose text holds the listed user's name next to separators, and
+# whether the listed user is an entry of them.
+SEPARATOR_SHAPES = [
+    ([f"{OTHER_LISTED}, {LISTED}"], False),
+    ([f"[{LISTED}]"], False),
+    ([f"{LISTED}]", OTHER_LISTED], False),
+    ([f"x], {LISTED}", LISTED], True),
+    (f"[x], {LISTED}]", True),
+    (f"{OTHER_LISTED}][{LISTED}", True),
+    (f"[[{LISTED}]]", True),
+]
+
+
+@pytest.mark.parametrize("value,expected", SEPARATOR_SHAPES)
+def test_an_entry_never_holds_a_separator(client, value, expected: bool) -> None:
+    """getCall, the published form and the subscription filter agree on who is
+    an entry, however the separators fall."""
+    listed = COGNITO["listed"][0]
+    result = {"CallId": "c1", "Owner": OWNER, "SharedWith": value}
+    response = _evaluate(client, "getCall.response.vtl", {"result": result, "identity": listed})
+    assert _allowed(response) is expected
+    published = json.loads(
+        _evaluate(client, "dDbPutCondition.response.vtl", {"result": result, "identity": BACKEND})[
+            "evaluationResult"
+        ]
+    )["SharedWith"]
+    published_js = _evaluate_js(
+        client, "shareMeetings.js", {"result": {"SharedWith": value}, "arguments": {}}
+    )["SharedWith"]
+    assert published_js == published
+    rules = _subscription_filter(client, listed)
+    assert _filter_matches(rules, {"Owner": OWNER, "SharedWith": published}) is expected
+
+
+# ── what subscription.js filters on ─────────────────────────────────────────
+
+
+def _subscription_filter(client, identity: dict):
+    """The filter subscription.js sets for this caller, read from the line it
+    logs; None when it sets none."""
+    response = client.evaluate_code(
+        runtime={"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
+        code=(APPSYNC / "subscription.js").read_text(encoding="utf-8"),
+        context=json.dumps(
+            {
+                "identity": identity,
+                "info": {
+                    "fieldName": "onUpdateCall",
+                    "parentTypeName": "Subscription",
+                    "selectionSetGraphQL": "",
+                    "selectionSetList": ["Owner", "SharedWith"],
+                    "variables": {},
+                },
+            }
+        ),
+        function="response",
+    )
+    assert not response.get("error"), response
+    marker = "subscription filter: "
+    for line in response.get("logs", []):
+        if marker in line:
+            logged = json.loads(line[line.index('"', line.index(": ")) :])
+            return json.loads(logged[len(marker) :])
+    return None
+
+
+def _filter_matches(rules: dict, message: dict) -> bool:
+    """AppSync's string operators: eq is equality, beginsWith a prefix test and
+    contains a substring test."""
+    for rule in rules["or"]:
+        ((field, condition),) = rule.items()
+        ((op, operand),) = condition.items()
+        value = message.get(field)
+        if not isinstance(value, str):
+            continue
+        if op == "eq" and value == operand:
+            return True
+        if op == "beginsWith" and value.startswith(operand):
+            return True
+        if op == "contains" and operand in value:
+            return True
+    return False
+
+
+SUBSCRIBERS = {
+    "owner": (COGNITO["owner"][0], True),
+    "listed": (COGNITO["listed"][0], True),
+    "other": (COGNITO["other"][0], False),
+    "suffix-of-entry": (COGNITO["suffix-of-entry"][0], False),
+    "prefix-of-entry": (COGNITO["prefix-of-entry"][0], False),
+    "spans-two-entries": (COGNITO["spans-two-entries"][0], False),
+    "holds-a-separator": ({"username": f"{OTHER_LISTED}, {LISTED}", "groups": []}, False),
+}
+
+
+@pytest.mark.parametrize("caller", list(SUBSCRIBERS))
+@pytest.mark.parametrize(
+    "published",
+    [f"[{LISTED}]", f"[{LISTED}, {OTHER_LISTED}]", f"[{OTHER_LISTED}, {LISTED}]"],
+)
+def test_a_subscriber_receives_exactly_the_messages_meant_for_them(
+    client, caller: str, published: str
+) -> None:
+    identity, expected = SUBSCRIBERS[caller]
+    rules = _subscription_filter(client, identity)
+    assert _filter_matches(rules, {"Owner": OWNER, "SharedWith": published}) is expected
+
+
+def test_a_name_holding_a_separator_is_matched_as_the_owner_only(client) -> None:
+    rules = _subscription_filter(client, {"username": f"[{LISTED}", "groups": []})
+    assert rules == {"or": [{"Owner": {"eq": f"[{LISTED}"}}]}
+
+
+def test_an_admin_subscription_is_not_filtered(client) -> None:
+    assert _subscription_filter(client, COGNITO["admin"][0]) is None
+
+
+# ── the meeting assistant chat subscriptions ────────────────────────────────
+
+
+def _evaluate_chat(client, function: str, context: dict) -> dict:
+    return client.evaluate_code(
+        runtime={"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
+        code=(APPSYNC / "chatSubscription.js").read_text(encoding="utf-8"),
+        context=json.dumps(context),
+        function=function,
+    )
+
+
+@pytest.mark.parametrize("shape,caller,identity,expected", CASES)
+def test_a_chat_subscription_is_answered_to_exactly_the_people_the_meeting_is_for(
+    client, shape: str, caller: str, identity: dict, expected: bool
+) -> None:
+    arguments = {"CallId": "c1", "MessageId": "m1"}
+    request = _evaluate_chat(client, "request", {"arguments": arguments, "identity": identity})
+    assert not request.get("error"), request
+    if caller == "admin":
+        # Answered without reading the meeting.
+        assert json.loads(request["evaluationResult"]) is None
+        return
+    assert json.loads(request["evaluationResult"]) == {
+        "operation": "GetItem",
+        "key": {"PK": {"S": "c#c1"}, "SK": {"S": "c#c1"}},
+        "consistentRead": True,
+    }
+    meeting = {"PK": "c#c1", "SK": "c#c1", "Owner": OWNER, "SharedWith": SHAPES[shape]}
+    response = _evaluate_chat(
+        client, "response", {"arguments": arguments, "identity": identity, "result": meeting}
+    )
+    assert (not response.get("error")) is expected, response
+
+
+def test_a_chat_subscription_is_answered_to_a_backend_role(client) -> None:
+    request = _evaluate_chat(
+        client, "request", {"arguments": {"CallId": "c1", "MessageId": "m1"}, "identity": BACKEND}
+    )
+    assert not request.get("error") and json.loads(request["evaluationResult"]) is None
+
+
+def test_a_chat_subscription_to_a_missing_meeting_is_refused(client) -> None:
+    response = _evaluate_chat(
+        client,
+        "response",
+        {"arguments": {"CallId": "c1"}, "identity": COGNITO["owner"][0], "result": None},
+    )
+    assert response.get("error")
+
+
+def test_a_signed_in_chat_subscriber_names_the_meeting(client) -> None:
+    request = _evaluate_chat(client, "request", {"arguments": {}, "identity": COGNITO["owner"][0]})
+    assert request.get("error")
+
+
+# ── Virtual Participant writes ──────────────────────────────────────────────
+
+
+def _inline(field: str, key: str) -> str:
+    import yaml  # imported here so the module collects without PyYAML when skipped
+    from test_shared_with_access import TEMPLATE, _CfnLoader, _resolver_for
+
+    resources = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    template = _resolver_for(resources, "Mutation", field)[key]
+    if isinstance(template, dict):
+        # shareCall's template is an Fn::Sub: substitute it as CloudFormation would.
+        template = template["Fn::Sub"].replace("${EventSourcingTable}", "events")
+        template = template.replace("${!", "${")
+    return template
+
+
+def _evaluate_inline(client, field: str, key: str, context: dict) -> dict:
+    return client.evaluate_mapping_template(
+        template=_inline(field, key), context=json.dumps(context)
+    )
+
+
+VP_INPUTS = {
+    "shareVirtualParticipant": {"id": "vp1", "SharedWith": [LISTED, OTHER_LISTED]},
+    "unshareVirtualParticipant": {"id": "vp1", "SharedWith": [LISTED]},
+    "updateVirtualParticipant": {"id": "vp1", "status": "JOINING"},
+}
+# Whether the caller is held to the row's Owner.
+VP_CALLERS = {
+    "owner": (COGNITO["owner"][0], True),
+    "listed": (COGNITO["listed"][0], True),
+    "other": (COGNITO["other"][0], True),
+    "admin": (COGNITO["admin"][0], False),
+    "backend": (BACKEND, False),
+}
+
+
+@pytest.mark.parametrize("caller", list(VP_CALLERS))
+@pytest.mark.parametrize("field", list(VP_INPUTS))
+def test_a_virtual_participant_write_is_conditioned_on_its_owner(
+    client, field: str, caller: str
+) -> None:
+    """A signed-in caller who is not an Admin writes only a row whose Owner is
+    them: for a user the row is shared with, as for anyone else, the condition
+    fails. Admins and backend roles are not held to it."""
+    identity, restricted = VP_CALLERS[caller]
+    response = _evaluate_inline(
+        client,
+        field,
+        "RequestMappingTemplate",
+        {"arguments": {"input": VP_INPUTS[field]}, "identity": identity},
+    )
+    assert not response.get("error"), response
+    condition = json.loads(response["evaluationResult"]).get("condition")
+    if field != "updateVirtualParticipant":
+        assert condition["expression"].startswith("attribute_exists(#conditionId)")
+        assert condition["expressionNames"]["#conditionId"] == "id"
+    if restricted:
+        assert "#conditionOwner = :conditionCaller" in condition["expression"]
+        assert condition["expressionNames"]["#conditionOwner"] == "Owner"
+        assert condition["expressionValues"][":conditionCaller"] == {"S": identity["username"]}
+    else:
+        assert condition is None or "#conditionOwner" not in condition["expression"]
+    assert json.loads(response["stash"])["vpCallerRestricted"] is restricted
+
+
+def test_the_owner_condition_is_anded_with_the_status_condition(client) -> None:
+    response = _evaluate_inline(
+        client,
+        "updateVirtualParticipant",
+        "RequestMappingTemplate",
+        {
+            "arguments": {"input": VP_INPUTS["updateVirtualParticipant"]},
+            "identity": COGNITO["owner"][0],
+        },
+    )
+    condition = json.loads(response["evaluationResult"])["condition"]
+    assert condition["expression"] == (
+        "attribute_not_exists(#conditionEndReason) AND #conditionOwner = :conditionCaller"
+    )
+
+
+def test_a_virtual_participant_is_shared_with_its_entries_as_stored(client) -> None:
+    recipients = [f" {LISTED} ", "", LISTED, OTHER_LISTED]
+    response = _evaluate_inline(
+        client,
+        "shareVirtualParticipant",
+        "RequestMappingTemplate",
+        {
+            "arguments": {"input": {"id": "vp1", "SharedWith": recipients}},
+            "identity": COGNITO["owner"][0],
+        },
+    )
+    update = json.loads(response["evaluationResult"])["update"]
+    assert update["expressionValues"][":val"] == {"S": f"{LISTED},{OTHER_LISTED}"}
+
+
+@pytest.mark.parametrize("recipient", [f"[{LISTED}", f"{LISTED}]", f"{OTHER_LISTED}, {LISTED}"])
+@pytest.mark.parametrize("field", ["shareVirtualParticipant", "shareCall"])
+def test_a_recipient_holding_a_separator_is_refused(client, field: str, recipient: str) -> None:
+    inputs = {
+        "shareVirtualParticipant": {"id": "vp1", "SharedWith": [OTHER_LISTED, recipient]},
+        "shareCall": {
+            "CallId": "c1",
+            "ListPK": "l",
+            "ListSK": "s",
+            "SharedWith": [OTHER_LISTED, recipient],
+        },
+    }
+    response = _evaluate_inline(
+        client,
+        field,
+        "RequestMappingTemplate",
+        {"arguments": {"input": inputs[field]}, "identity": BACKEND},
+    )
+    assert response.get("error"), response
+    assert "cannot contain" in response["error"]["message"]
+
+
+@pytest.mark.parametrize("shared_with", [[LISTED], None])
+def test_a_meeting_is_shared_with_plain_recipients(client, shared_with) -> None:
+    response = _evaluate_inline(
+        client,
+        "shareCall",
+        "RequestMappingTemplate",
+        {
+            "arguments": {
+                "input": {"CallId": "c1", "ListPK": "l", "ListSK": "s", "SharedWith": shared_with}
+            },
+            "identity": BACKEND,
+        },
+    )
+    assert not response.get("error"), response
+
+
+@pytest.mark.parametrize("field", ["shareVirtualParticipant", "unshareVirtualParticipant"])
+@pytest.mark.parametrize("restricted,expected", [(True, "not authorized"), (False, "not found")])
+def test_a_refused_virtual_participant_share_says_why(
+    client, field: str, restricted: bool, expected: str
+) -> None:
+    response = _evaluate_inline(
+        client,
+        field,
+        "ResponseMappingTemplate",
+        {
+            "arguments": {"input": VP_INPUTS[field]},
+            "identity": COGNITO["other"][0],
+            "stash": {"vpCallerRestricted": restricted},
+            "error": {
+                "message": "The conditional request failed",
+                "type": "DynamoDB:ConditionalCheckFailedException",
+            },
+        },
+    )
+    assert expected in response["error"]["message"]
+
+
+def test_a_shared_virtual_participant_answers_with_the_row_as_written(client) -> None:
+    response = _evaluate_inline(
+        client,
+        "shareVirtualParticipant",
+        "ResponseMappingTemplate",
+        {
+            "arguments": {"input": {"id": "vp1", "SharedWith": [LISTED], "Owner": "someone"}},
+            "identity": COGNITO["owner"][0],
+            "result": {"id": "vp1", "Owner": OWNER, "SharedWith": LISTED},
+        },
+    )
+    assert json.loads(response["evaluationResult"]) == {
+        "id": "vp1",
+        "Owner": OWNER,
+        "SharedWith": LISTED,
+    }

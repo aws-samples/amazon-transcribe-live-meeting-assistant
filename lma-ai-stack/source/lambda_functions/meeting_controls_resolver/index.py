@@ -273,9 +273,15 @@ def verify_permissions(event):
 # Share Meetings
 
 
+# One recipient of a share: an email address. "[" and "]" only ever separate
+# SharedWith entries (as "," does, which already separates the recipients), so
+# a recipient containing either is not an address that can be stored.
+RECIPIENT_PATTERN = re.compile(r"[^@\[\]]+@[^@\[\]]+\.[^@\[\]]+")
+
+
 def share_meetings(calls, owner, recipients):
     if recipients and not all(
-        re.match(r"[^@]+@[^@]+\.[^@]+", email) for email in recipients.split(",")
+        RECIPIENT_PATTERN.fullmatch(email.strip()) for email in recipients.split(",")
     ):
         return {"Result": "Invalid email address provided"}
 

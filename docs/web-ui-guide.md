@@ -73,7 +73,7 @@ The Virtual Participant section of the UI has two views.
 
 ### Virtual Participant List
 
-The **Virtual Participants** sidebar entry opens a list of your in-flight and recent VPs, with status, owner, meeting platform, and meeting name. New VPs appear in the list **without a page refresh** — the list subscribes to `onCreateVirtualParticipant` GraphQL events.
+The **Virtual Participants** sidebar entry opens a list of your in-flight and recent VPs, with status, owner, meeting platform, and meeting name. New VPs appear in the list **without a page refresh** — the list subscribes to `onCreateVirtualParticipant` GraphQL events. Those events, like the list itself, show a VP to its owner, the users it is shared with, and Admins.
 
 ### Create Virtual Participant modal
 

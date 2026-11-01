@@ -40,6 +40,7 @@ SCHEMA = APPSYNC / "schema.graphql"
 ENTRIES_TEMPLATES = [
     "getCall.response.vtl",
     "getTranscriptSegments.response.vtl",
+    "getTranscriptSegmentsWithSentiment.response.vtl",
     "getVirtualParticipant.response.vtl",
     "listVirtualParticipants.response.vtl",
     "authorizeCallWrite.response.vtl",
@@ -55,6 +56,7 @@ PUBLISHING_TEMPLATES = [
     "updateVirtualParticipant.response.vtl",
 ]
 PUBLISHING_JS = ["shareMeetings.js", "endVirtualParticipant.js"]
+ENTRIES_JS = [*PUBLISHING_JS, "chatSubscription.js"]
 WRITE_TEMPLATES = [
     "updateSpeakerIdentities.request.vtl",
     "updateCallSummaryText.request.vtl",
@@ -114,12 +116,21 @@ def test_each_shared_block_has_one_text(title: str, files: list) -> None:
         assert block == first, f"{name}: the {title!r} block has drifted from {files[0]}"
 
 
-def test_the_published_form_has_one_text_in_the_js_resolvers() -> None:
-    blocks = [
-        _block(_read(name), "// BEGIN publishedSharedWith", "// END publishedSharedWith")
-        for name in PUBLISHING_JS
-    ]
-    assert blocks[0] == blocks[1]
+@pytest.mark.parametrize(
+    "title,files",
+    [("sharedWithEntries", ENTRIES_JS), ("publishedSharedWith", PUBLISHING_JS)],
+)
+def test_each_js_block_has_one_text(title: str, files: list) -> None:
+    blocks = [_block(_read(name), f"// BEGIN {title}", f"// END {title}") for name in files]
+    assert all(block == blocks[0] for block in blocks), title
+
+
+def test_every_js_resolver_that_has_a_block_is_listed_here() -> None:
+    for title, files in (("sharedWithEntries", ENTRIES_JS), ("publishedSharedWith", PUBLISHING_JS)):
+        having = sorted(
+            p.name for p in APPSYNC.glob("*.js") if f"// BEGIN {title}" in p.read_text()
+        )
+        assert having == sorted(files), title
 
 
 def test_every_template_that_has_a_block_is_listed_here() -> None:
@@ -140,9 +151,21 @@ def test_the_entries_block_reads_every_stored_shape() -> None:
     block = _vtl_block(ENTRIES_TEMPLATES[0], "SharedWith entries")
     assert "$util.isList($sharedWithRaw)" in block  # a List, and a string set as AppSync reads it
     assert "$util.isString($sharedWithRaw)" in block
-    assert '.startsWith("[")' in block and '.endsWith("]")' in block
     assert '.split(",")' in block
     assert ".trim()" in block
+
+
+def test_brackets_and_commas_only_separate_entries() -> None:
+    """A String is split at every "[", "]" and ","; a List element holding one
+    is not an entry. So no entry contains a separator, in the VTL read and in
+    the JS one."""
+    block = _vtl_block(ENTRIES_TEMPLATES[0], "SharedWith entries")
+    assert '$sharedWithRaw.replace("[", ",").replace("]", ",")' in block
+    for separator in ("[", "]", ","):
+        assert f'!$sharedWithEntry.contains("{separator}")' in block
+    js = _block(_read(ENTRIES_JS[0]), "// BEGIN sharedWithEntries", "// END sharedWithEntries")
+    assert "value.split('[').join(',').split(']').join(',').split(',')" in js
+    assert "['[', ']', ','].some((separator) => entry.includes(separator))" in js
 
 
 @pytest.mark.parametrize("name", ENTRIES_TEMPLATES)
@@ -163,6 +186,7 @@ def test_each_item_is_read_on_its_own_shared_with(name: str) -> None:
     [
         "getCall.response.vtl",
         "getTranscriptSegments.response.vtl",
+        "getTranscriptSegmentsWithSentiment.response.vtl",
         "getVirtualParticipant.response.vtl",
         "listVirtualParticipants.response.vtl",
         "authorizeCallWrite.response.vtl",
@@ -349,6 +373,11 @@ def test_every_mutation_a_filtered_subscription_receives_publishes_shared_with(
                 # SharedWith and reaches the owner and Admins alone.
                 assert "SharedWith" not in _read("createCall.response.vtl")
                 continue
+            if mutation == "createVirtualParticipant":
+                # A new row is shared with nobody, so its message reaches the
+                # owner and Admins alone.
+                assert '$util.qr($input.put("SharedWith", ""))' in props["RequestMappingTemplate"]
+                continue
             assert _publishes(resources, props), f"{mutation} (published to {subscription})"
             checked.append(mutation)
     # The set is large; make sure the parse found it rather than nothing.
@@ -361,6 +390,22 @@ def test_every_mutation_a_filtered_subscription_receives_publishes_shared_with(
         assert mutation in checked
     for mutation in ("deleteCall", "updateVirtualParticipant", "endVirtualParticipant"):
         assert mutation in checked
+
+
+def test_every_subscription_has_a_resolver(resources: dict) -> None:
+    """A subscription field without a resolver is sent every message published
+    to it, so each one has a resolver that decides who receives them."""
+    schema = SCHEMA.read_text(encoding="utf-8")
+    subscriptions = _subscriptions(schema)
+    assert "onCreateVirtualParticipant" in subscriptions and "onAddChatToken" in subscriptions
+    missing = [s for s in subscriptions if _resolver_for(resources, "Subscription", s) is None]
+    assert missing == []
+
+
+def test_new_virtual_participants_are_filtered_as_updates_are(resources: dict) -> None:
+    for field in ("onCreateVirtualParticipant", "onUpdateVirtualParticipant"):
+        resolver = _resolver_for(resources, "Subscription", field)
+        assert resolver["CodeS3Location"].endswith("/subscription.js"), field
 
 
 # ── the filter against the published form ───────────────────────────────────
@@ -420,3 +465,135 @@ def test_the_filter_matches_a_whole_entry_of_the_published_form(
 
 def test_the_filter_keeps_the_owner_rule() -> None:
     assert "{ Owner: { eq: username } }" in _read("subscription.js")
+
+
+def test_the_filter_matches_a_name_holding_a_separator_as_the_owner_only() -> None:
+    """No published entry holds "[", "]" or ",", so the SharedWith rules are
+    set only for a name without one."""
+    text = _read("subscription.js")
+    guard = "!['[', ']', ','].some((separator) => username.includes(separator))"
+    assert guard in text
+    assert text.index(guard) < text.index("{ SharedWith: { eq:")
+
+
+# ── the meeting assistant chat subscriptions ────────────────────────────────
+
+
+@pytest.mark.parametrize("field", ["onSendChatMessage", "onAddChatToken"])
+def test_a_chat_subscription_reads_the_meeting_it_names(resources: dict, field: str) -> None:
+    resolver = _resolver_for(resources, "Subscription", field)
+    assert resolver["CodeS3Location"].endswith("/chatSubscription.js")
+    # The meeting table, which getCall reads.
+    get_call = _resolver_for(resources, "Query", "getCall")
+    assert resolver["DataSourceName"] == get_call["DataSourceName"]
+    code = _read("chatSubscription.js")
+    assert "operation: 'GetItem'" in code
+    assert "const key = `c#${callId}`;" in code
+    assert (
+        "meeting.Owner === username || sharedWithEntries(meeting.SharedWith).includes(username)"
+        in code
+    )
+
+
+# ── Virtual Participant writes ──────────────────────────────────────────────
+
+VP_OWNER_WRITES = [
+    "shareVirtualParticipant",
+    "unshareVirtualParticipant",
+    "updateVirtualParticipant",
+]
+
+
+def _request_template(resources: dict, field: str) -> str:
+    props = _resolver_for(resources, "Mutation", field)
+    assert props, field
+    return props["RequestMappingTemplate"]
+
+
+def test_each_virtual_participant_write_has_the_owner_condition(resources: dict) -> None:
+    title = "Virtual Participant owner condition"
+    blocks = [
+        _block(_request_template(resources, f), f"## BEGIN {title}", f"## END {title}")
+        for f in VP_OWNER_WRITES
+    ]
+    assert all(block == blocks[0] for block in blocks)
+    block = blocks[0]
+    assert '$ctx.identity.userArn.contains(":assumed-role/")' in block
+    assert '$ctx.identity.groups.contains("Admin")' in block
+    assert '$util.qr( $conditions.add("#conditionOwner = :conditionCaller") )' in block
+    assert '$util.qr( $conditionNames.put("#conditionOwner", "Owner") )' in block
+
+
+@pytest.mark.parametrize("field", VP_OWNER_WRITES)
+def test_a_virtual_participant_write_carries_its_conditions(resources: dict, field: str) -> None:
+    template = _request_template(resources, field)
+    assert '"expression": "$conditionExpression"' in template
+    assert template.index("## END Virtual Participant owner condition") < template.index(
+        '#set( $conditionExpression = "" )'
+    )
+    if field != "updateVirtualParticipant":
+        # UpdateItem creates a missing row; sharing one is refused instead.
+        assert '#set( $conditions = ["attribute_exists(#conditionId)"] )' in template
+
+
+def test_a_virtual_participant_is_shared_with_entries_free_of_separators(resources: dict) -> None:
+    template = _request_template(resources, "shareVirtualParticipant")
+    block = _block(
+        template, "## BEGIN SharedWith entries written", "## END SharedWith entries written"
+    )
+    assert (
+        '$recipientText.contains("[") || $recipientText.contains("]") || '
+        '$recipientText.contains(",")'
+    ) in block
+    assert "BadRequest" in block
+
+
+def test_a_meeting_is_shared_with_entries_free_of_separators(resources: dict) -> None:
+    template = _request_template(resources, "shareCall")
+    if isinstance(template, dict):
+        template = template["Fn::Sub"]
+    assert (
+        '$recipient.contains("[") || $recipient.contains("]") || $recipient.contains(",")'
+    ) in template
+    assert template.index("BadRequest") < template.index('"TransactWriteItems"')
+
+
+# ── what a new Virtual Participant's message carries ────────────────────────
+
+REPO = AI_STACK.parent
+SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts"}
+SKIPPED_PARTS = {"node_modules", "dist", "build", ".aws-sam"}
+
+
+def _create_vp_selections() -> list:
+    """(path, selection set) of every createVirtualParticipant mutation the
+    repository sends. A subscription message carries only the fields the
+    mutation selected, and the onCreateVirtualParticipant filter reads Owner."""
+    found = []
+    for directory in ("lma-ai-stack/source", "lib", "lma-virtual-participant-stack", "utilities"):
+        for path in (REPO / directory).rglob("*"):
+            if path.suffix not in SOURCE_SUFFIXES or SKIPPED_PARTS & set(path.parts):
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for match in re.finditer(r"createVirtualParticipant\(input: \$\w+\)\s*\{", text):
+                depth, end = 1, match.end()
+                while depth:
+                    depth += {"{": 1, "}": -1}.get(text[end], 0)
+                    end += 1
+                found.append((path.relative_to(REPO).as_posix(), text[match.end() : end - 1]))
+    return found
+
+
+def test_every_virtual_participant_create_selects_owner_and_shared_with() -> None:
+    selections = _create_vp_selections()
+    paths = {path for path, _ in selections}
+    for expected in (
+        "lma-ai-stack/source/lambda_functions/mcp_analytics/tools/schedule_meeting.py",
+        "lma-ai-stack/source/lambda_functions/mcp_analytics/tools/start_meeting_now.py",
+        "lma-ai-stack/source/ui/src/components/virtual-participant-layout/VirtualParticipantList.jsx",
+        "lib/lma_sdk/lma_sdk/operations/virtual_participant.py",
+    ):
+        assert expected in paths, expected
+    for path, selection in selections:
+        fields = set(re.findall(r"\b\w+\b", selection))
+        assert {"Owner", "SharedWith"} <= fields, path

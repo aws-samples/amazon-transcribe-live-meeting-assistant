@@ -17,6 +17,9 @@
 ## shareTranscriptSegment write one), a string set, and a comma-separated or
 ## "[a, b]" String (older meeting rows; transcript segments and key frames, which
 ## take the meeting's SharedWith as getCall returns it; Virtual Participant rows).
+## "[", "]" and "," only ever separate entries: a String is split at each of
+## them, and a List element that contains one is not an entry, so no entry holds
+## a separator and the "[a, b]" form subscription.js matches is unambiguous.
 ## Membership is then a comparison of whole entries, as in the Lambda resolvers.
 ## Every template sets $sharedWithRaw through $util.defaultIfNull(..., ""): a
 ## #set whose value is null leaves the variable as it was, which in a loop
@@ -24,19 +27,14 @@
 #set( $sharedWithEntries = [] )
 #if( $util.isList($sharedWithRaw) )
   #foreach( $sharedWithEntry in $sharedWithRaw )
-    #if( $util.isString($sharedWithEntry) && !$sharedWithEntry.trim().isEmpty() )
+    #if( $util.isString($sharedWithEntry) && !$sharedWithEntry.trim().isEmpty()
+        && !$sharedWithEntry.contains("[") && !$sharedWithEntry.contains("]")
+        && !$sharedWithEntry.contains(",") )
       $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
     #end
   #end
 #elseif( $util.isString($sharedWithRaw) )
-  #set( $sharedWithText = $sharedWithRaw.trim() )
-  #if( $sharedWithText.startsWith("[") )
-    #set( $sharedWithText = $sharedWithText.substring(1) )
-  #end
-  #if( $sharedWithText.endsWith("]") )
-    #set( $sharedWithEnd = $sharedWithText.length() - 1 )
-    #set( $sharedWithText = $sharedWithText.substring(0, $sharedWithEnd) )
-  #end
+  #set( $sharedWithText = $sharedWithRaw.replace("[", ",").replace("]", ",") )
   #foreach( $sharedWithEntry in $sharedWithText.split(",") )
     #if( !$sharedWithEntry.trim().isEmpty() )
       $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )

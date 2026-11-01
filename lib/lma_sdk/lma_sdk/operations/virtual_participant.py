@@ -62,6 +62,7 @@ mutation CreateVirtualParticipant($input: CreateVirtualParticipantInput!) {
     updatedAt
     owner
     Owner
+    SharedWith
     CallId
     vncEndpoint
     vncPort
