@@ -7,7 +7,6 @@
   "TranscribeLanguageOptions": {"section": "transcription", "setting": "languageOptions", "type": "string"},
   "TranscribePreferredLanguage": {"section": "transcription", "setting": "preferredLanguage", "type": "string"},
   "IsContentRedactionEnabled": {"section": "transcription", "setting": "contentRedactionEnabled", "type": "boolean"},
-  "TranscribeContentRedactionType": {"section": "transcription", "setting": "contentRedactionType", "type": "string"},
   "TranscribePiiEntityTypes": {"section": "transcription", "setting": "piiEntityTypes", "type": "string"},
   "CustomVocabularyName": {"section": "transcription", "setting": "customVocabularyName", "type": "string"},
   "CustomLanguageModelName": {"section": "transcription", "setting": "customLanguageModelName", "type": "string"},

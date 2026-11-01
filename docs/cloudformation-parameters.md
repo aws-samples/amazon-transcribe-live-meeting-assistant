@@ -59,8 +59,8 @@ The template declares 91 parameters.
 | Kind | Parameters | What changing one does |
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Configuration page default | 14 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
-| Read at run time | 17 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
+| Configuration page default | 13 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
+| Read at run time | 18 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
 | Deployment check | 1 | Read only while the stack is deployed, by a check that runs before anything else is created. |
 | No effect | 1 | Declared by the template and read by nothing. Kept so that existing deploy commands and pipelines that pass it keep working. |
@@ -548,7 +548,7 @@ Comma-separated list of OAuth callback URLs for MCP clients. Default includes Qu
 | [`TranscribeLanguageCode`](#transcribelanguagecode) | `en-US` | Configuration page default |
 | [`TranscribeLanguageOptions`](#transcribelanguageoptions) | `en-US, es-US` | Configuration page default |
 | [`TranscribePreferredLanguage`](#transcribepreferredlanguage) | `None` | Configuration page default |
-| [`TranscribeContentRedactionType`](#transcribecontentredactiontype) | `PII` | Configuration page default |
+| [`TranscribeContentRedactionType`](#transcribecontentredactiontype) | `PII` | Read at run time |
 | [`ShowSpeakerLabel`](#showspeakerlabel) | `false` | Configuration page default |
 | [`TranscribePiiEntityTypes`](#transcribepiientitytypes) | `BANK_ACCOUNT_NUMBER,BANK_ROUTING,CREDIT_DEBIT_NUMBER,CREDIT_DEBIT_CVV,CREDIT_DEBIT_EXPIRY,PIN,EMAIL,ADDRESS,NAME,PHONE,SSN` | Configuration page default |
 | [`CustomVocabularyName`](#customvocabularyname) | (empty) | Configuration page default |
@@ -610,9 +610,9 @@ Console label: *Content Redaction Type for Transcription*
 
 - **Default:** `PII`
 - **Allowed values:** `PII`
-- **Kind:** Configuration page default. Configuration page: **Amazon Transcribe › Redaction type (not shown on the page)**. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.
+- **Kind:** Read at run time. Read by the WebSocket transcriber for each streaming session, and by the Virtual Participant when it starts.
 
-Type of content redaction from Amazon Transcribe transcription output. This is the default; an Admin can change it at run time on the Configuration page (Amazon Transcribe section), which takes precedence for streaming meetings.
+Type of content redaction from Amazon Transcribe transcription output.
 
 ### `ShowSpeakerLabel`
 

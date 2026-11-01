@@ -73,12 +73,13 @@ interface SettingSource {
  * lma-ai-stack/test/test_parameter_backed_settings.py reads this table and holds
  * it to parameter_defaults.json and to this task's environment.
  */
-export const TRANSCRIPTION_SETTINGS: Readonly<Record<keyof TranscriptionSettings, SettingSource>> = {
+export const TRANSCRIPTION_SETTINGS: Readonly<
+    Record<Exclude<keyof TranscriptionSettings, 'contentRedactionType'>, SettingSource>
+> = {
     languageCode: { envVar: 'TRANSCRIBE_LANGUAGE_CODE', type: 'string' },
     languageOptions: { envVar: 'TRANSCRIBE_LANGUAGE_OPTIONS', type: 'string' },
     preferredLanguage: { envVar: 'TRANSCRIBE_PREFERRED_LANGUAGE', type: 'string' },
     contentRedactionEnabled: { envVar: 'IS_CONTENT_REDACTION_ENABLED', type: 'boolean' },
-    contentRedactionType: { envVar: 'CONTENT_REDACTION_TYPE', type: 'string' },
     piiEntityTypes: { envVar: 'TRANSCRIBE_PII_ENTITY_TYPES', type: 'string' },
     customVocabularyName: { envVar: 'CUSTOM_VOCABULARY_NAME', type: 'string' },
     customLanguageModelName: { envVar: 'CUSTOM_LANGUAGE_MODEL_NAME', type: 'string' },
@@ -90,7 +91,7 @@ export const RECORDING_SETTINGS: Readonly<Record<keyof RecordingSettings, Settin
     recordAudio: { envVar: 'SHOULD_RECORD_CALL', type: 'boolean' },
 };
 
-const text = (values: Record<string, unknown>, name: keyof TranscriptionSettings): string =>
+const text = (values: Record<string, unknown>, name: keyof typeof TRANSCRIPTION_SETTINGS): string =>
     parameterBackedSetting(values, name, 'string', process.env[TRANSCRIPTION_SETTINGS[name].envVar], '');
 
 const flag = (
@@ -118,7 +119,9 @@ export const sessionSettingsFrom = (
             TRANSCRIPTION_SETTINGS.contentRedactionEnabled,
             'contentRedactionEnabled'
         ),
-        contentRedactionType: text(transcription, 'contentRedactionType') || 'PII',
+        // A stack parameter only: PII is the one value it allows, so there is
+        // nothing for the page to choose.
+        contentRedactionType: process.env['CONTENT_REDACTION_TYPE'] || 'PII',
         piiEntityTypes: text(transcription, 'piiEntityTypes'),
         customVocabularyName: text(transcription, 'customVocabularyName'),
         customLanguageModelName: text(transcription, 'customLanguageModelName'),

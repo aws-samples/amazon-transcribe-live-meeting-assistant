@@ -72,18 +72,8 @@
       "title": "Redact personal information",
       "description": "Redact the entity types below from transcripts. Applied only when the language is en-US, en-AU, en-GB or es-US, the languages Amazon Transcribe redacts while streaming. Call Analytics post-call output and the PCA integration, where deployed, follow the IsContentRedactionEnabled stack parameter instead. Default: the IsContentRedactionEnabled stack parameter."
     },
-    "contentRedactionType": {
-      "order": 4,
-      "type": "string",
-      "title": "Redaction type",
-      "description": "Default: the TranscribeContentRedactionType stack parameter.",
-      "enum": [
-        "PII"
-      ],
-      "hidden": true
-    },
     "piiEntityTypes": {
-      "order": 5,
+      "order": 4,
       "type": "string",
       "title": "Entity types to redact",
       "description": "Comma-separated Amazon Transcribe PII entity types, such as NAME,EMAIL,PHONE. Default: the TranscribePiiEntityTypes stack parameter.",
@@ -95,7 +85,7 @@
       "pattern": "^([A-Z_]+( *, *[A-Z_]+)*)?$"
     },
     "customVocabularyName": {
-      "order": 6,
+      "order": 5,
       "type": "string",
       "title": "Custom vocabulary",
       "description": "The name of an Amazon Transcribe custom vocabulary in this account and region, or empty for none. Default: the CustomVocabularyName stack parameter.",
@@ -103,7 +93,7 @@
       "pattern": "^[0-9A-Za-z._-]*$"
     },
     "customLanguageModelName": {
-      "order": 7,
+      "order": 6,
       "type": "string",
       "title": "Custom language model",
       "description": "The name of an Amazon Transcribe custom language model in this account and region, matching the language, or empty for none. Default: the CustomLanguageModelName stack parameter.",
@@ -111,7 +101,7 @@
       "pattern": "^[0-9A-Za-z._-]*$"
     },
     "showSpeakerLabel": {
-      "order": 8,
+      "order": 7,
       "type": "boolean",
       "title": "Identify speakers within a channel by default",
       "description": "Label the separate voices within one audio channel \"(spk_0)\", \"(spk_1)\" when the client that started the meeting does not choose. The Stream Audio page and the desktop app choose per meeting, which wins. Default: the ShowSpeakerLabel stack parameter."

@@ -91,7 +91,6 @@ const DEFAULTS = {
     languageOptions: 'en-US, es-US',
     preferredLanguage: 'None',
     contentRedactionEnabled: false,
-    contentRedactionType: 'PII',
     piiEntityTypes: 'NAME,EMAIL',
     customVocabularyName: '',
     customLanguageModelName: '',
@@ -281,13 +280,12 @@ describe('ConfigurationContent', () => {
     });
   });
 
-  it('shows the redacted entity types only while redaction is on, and never the one-value redaction type', async () => {
+  it('shows the redacted entity types only while redaction is on', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor();
     openSection(await screen.findByText('Amazon Transcribe'));
     const transcribe = section('Amazon Transcribe');
     expect(within(transcribe).getAllByText('Custom vocabulary').length).toBeGreaterThan(0);
-    expect(within(transcribe).queryByText('Redaction type')).toBeNull();
     expect(within(transcribe).queryByText('Entity types to redact')).toBeNull();
     fireEvent.click(within(transcribe).getByRole('checkbox', { name: /Redact personal information/ }));
     expect(within(transcribe).getAllByText('Entity types to redact').length).toBeGreaterThan(0);

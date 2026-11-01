@@ -245,11 +245,6 @@ Parameters:
     Default: ""
     Description: Default of whether transcripts are redacted, written into the configuration baseline.
 
-  TranscribeContentRedactionType:
-    Type: String
-    Default: ""
-    Description: Default of the redaction type, written into the configuration baseline.
-
   TranscribePiiEntityTypes:
     Type: String
     Default: ""
@@ -3420,7 +3415,6 @@ Resources:
         TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
         TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
-        TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName

@@ -341,6 +341,14 @@ const isStaleSessionError = (error: unknown): boolean => {
 };
 
 /**
+ * Whether Call Analytics' post-call output is asked for redacted: only when the
+ * stack parameter asks for it and the meeting's stream is redacted, since a
+ * redaction output for an unredacted stream is not one Amazon Transcribe takes.
+ */
+export const postCallRedactionOutput = (parameterEnabled: boolean, streamRedacted: boolean): boolean =>
+    parameterEnabled && streamRedacted;
+
+/**
  * Lays a meeting's Amazon Transcribe options onto a streaming request: the
  * language or language identification, redaction where it applies, and the
  * custom vocabulary and language model when one is named.
@@ -537,13 +545,22 @@ export const startTranscribe = async (
                             OutputLocation: tcaOutputLocation,
                             DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
                         };
-                        // The post-call output follows the IsContentRedactionEnabled
-                        // stack parameter rather than the page, because that
-                        // parameter is also what the PCA integration reads to choose
-                        // its folder, and the two have to agree.
-                        if (IS_POST_CALL_REDACTION_ENABLED) {
+                        // The post-call output is redacted only when both the
+                        // IsContentRedactionEnabled stack parameter -- which the PCA
+                        // integration reads to choose its folder -- and this
+                        // meeting's own redaction say so: Amazon Transcribe accepts
+                        // a redaction output only for a redacted stream. When the
+                        // two disagree, the output is unredacted and that is said.
+                        if (postCallRedactionOutput(IS_POST_CALL_REDACTION_ENABLED, redactionApplied)) {
                             configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
                                 POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
+                        } else if (IS_POST_CALL_REDACTION_ENABLED) {
+                            server.log.warn(
+                                `[TRANSCRIBING]: [${callMetaData.callId}] - The IsContentRedactionEnabled parameter ` +
+                                    'asks for redacted post-call analytics, but this meeting is not redacted ' +
+                                    '(see the Amazon Transcribe section of the Configuration page); its post-call ' +
+                                    'output is not redacted.'
+                            );
                         }
                     }
                     yield { ConfigurationEvent: configuration_event };

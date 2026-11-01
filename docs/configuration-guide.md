@@ -85,7 +85,6 @@ is the default of.
 | Amazon Transcribe › Language options | `TranscribeLanguageOptions` |
 | Amazon Transcribe › Preferred language | `TranscribePreferredLanguage` |
 | Amazon Transcribe › Redact personal information | `IsContentRedactionEnabled` |
-| Amazon Transcribe › Redaction type (not shown; `PII` is the only value) | `TranscribeContentRedactionType` |
 | Amazon Transcribe › Entity types to redact | `TranscribePiiEntityTypes` |
 | Amazon Transcribe › Custom vocabulary | `CustomVocabularyName` |
 | Amazon Transcribe › Custom language model | `CustomLanguageModelName` |

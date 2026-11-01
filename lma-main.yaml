@@ -355,8 +355,6 @@ Parameters:
     Default: PII
     Description: >-
       Type of content redaction from Amazon Transcribe transcription output.
-      This is the default; an Admin can change it at run time on the Configuration page (Amazon
-      Transcribe section), which takes precedence for streaming meetings.
     AllowedValues:
       - PII
 
@@ -3272,7 +3270,6 @@ Resources:
         TranscribeLanguageOptions: !Ref TranscribeLanguageOptions
         TranscribePreferredLanguage: !Ref TranscribePreferredLanguage
         IsContentRedactionEnabled: !Ref IsContentRedactionEnabled
-        TranscribeContentRedactionType: !Ref TranscribeContentRedactionType
         TranscribePiiEntityTypes: !Ref TranscribePiiEntityTypes
         CustomVocabularyName: !Ref CustomVocabularyName
         CustomLanguageModelName: !Ref CustomLanguageModelName
