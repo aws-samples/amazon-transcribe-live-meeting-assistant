@@ -262,13 +262,31 @@ const VideoTimeline = ({
 
   const selected = frames.find((f) => f.FrameId === selectedId);
   const searching = Boolean(search.trim());
-  const shown = useMemo(() => (searching ? frames.filter((f) => frameMatches(f, search)) : frames), [frames, search]);
+  const shown = useMemo(
+    () => (search.trim() ? frames.filter((f) => frameMatches(f, search)) : frames),
+    [frames, search],
+  );
 
   // A search covers the whole meeting: the pages not loaded yet are loaded,
-  // one after another, while it is typed.
+  // one after another, while it is typed. A page that fails stops it; Load
+  // more tries again.
   useEffect(() => {
-    if (searching && nextToken && !loading) loadPage({ token: nextToken });
-  }, [searching, nextToken, loading, loadPage]);
+    if (searching && nextToken && !loading && !error) loadPage({ token: nextToken });
+  }, [searching, nextToken, loading, error, loadPage]);
+
+  // A frame's text is read a few seconds after the frame is stored, so a frame
+  // shown before then has none yet. Starting a search reads the frames shown
+  // again, once, when any of them is still without its text.
+  const searchStartedRef = useRef(false);
+  useEffect(() => {
+    if (!searching) {
+      searchStartedRef.current = false;
+      return;
+    }
+    if (searchStartedRef.current) return;
+    searchStartedRef.current = true;
+    if (framesRef.current.some((f) => typeof f.SlideText !== 'string')) refreshShown();
+  }, [searching, refreshShown]);
 
   if (loaded && !frames.length && !error) {
     // Nothing to show: a meeting without video, or before its first frame.
@@ -331,7 +349,7 @@ const VideoTimeline = ({
           <div ref={sentinelRef} className="video-timeline-sentinel" />
           {loading && <Spinner />}
         </div>
-        {nextToken && !loading && !searching && (
+        {nextToken && !loading && (!searching || error) && (
           <Button variant="inline-link" onClick={() => loadPage({ token: nextToken })}>
             Load more
           </Button>

@@ -263,4 +263,38 @@ describe('VideoTimeline', () => {
     render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
     expect(await screen.findByText('The key frames could not be loaded.')).toBeTruthy();
   });
+  it('stops paging a search at a page that fails, and offers to try again', async () => {
+    const loadFrames = vi
+      .fn()
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(1000, { SlideText: 'Roadmap' })], nextToken: 't1' })
+      .mockRejectedValueOnce(new Error('Throttled'))
+      .mockResolvedValue({ VideoKeyframes: [frame(2000, { SlideText: 'Hiring plan' })], nextToken: null });
+    const { container } = render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    await screen.findByTitle('Key frame at 0:01');
+    fireEvent.change(container.querySelector('input'), { target: { value: 'hiring' } });
+    expect(await screen.findByText('The key frames could not be loaded.')).toBeTruthy();
+    await new Promise((r) => {
+      setTimeout(r, 50);
+    });
+    expect(loadFrames).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByText('Load more'));
+    expect(await screen.findByText('Hiring plan')).toBeTruthy();
+  });
+
+  it('reads the shown frames again when a search starts and one has no text yet', async () => {
+    const loadFrames = vi
+      .fn()
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(1000)], nextToken: null })
+      .mockResolvedValueOnce({ VideoKeyframes: [frame(1000, { SlideText: 'Hiring plan' })], nextToken: null });
+    const { container } = render(<VideoTimeline callId="m-1" loadFrames={loadFrames} subscribe={noSubscribe} />);
+    await screen.findByTitle('Key frame at 0:01');
+    const input = container.querySelector('input');
+    fireEvent.change(input, { target: { value: 'hiring' } });
+    expect(await screen.findByText('Hiring plan')).toBeTruthy();
+    fireEvent.change(input, { target: { value: 'hiring p' } });
+    await new Promise((r) => {
+      setTimeout(r, 50);
+    });
+    expect(loadFrames).toHaveBeenCalledTimes(2);
+  });
 });

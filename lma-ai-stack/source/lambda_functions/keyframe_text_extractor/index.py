@@ -16,8 +16,10 @@ every word, and the model also says what a chart shows, for a tenth of the
 price per frame (docs/meeting-video.md, "Slide text").
 
 Idempotent: a frame that already has its text is left alone, so a redelivered
-event costs nothing. Every failure is logged and ends the invocation; the frame
-then simply has no text, which the readers handle.
+event costs nothing. Every failure is logged and ends the invocation without
+an error, and the function's asynchronous invoke allows no retries, so a model
+call is never repeated; the frame then simply has no text, which the readers
+handle.
 """
 
 from __future__ import annotations
@@ -57,10 +59,11 @@ MAX_IMAGE_BYTES = 3_500_000
 CLIENT_CONFIG = Config(retries={"mode": "adaptive", "max_attempts": 3})
 DYNAMODB = boto3.client("dynamodb", config=CLIENT_CONFIG)
 S3 = boto3.client("s3", config=CLIENT_CONFIG)
+# As the agenda deriver and the summarizer: inference profiles throttle in bursts.
 BEDROCK = boto3.client(
     "bedrock-runtime",
     region_name=REGION,
-    config=Config(retries={"mode": "adaptive", "max_attempts": 10}),
+    config=Config(retries={"mode": "adaptive", "max_attempts": 50}),
 )
 METERING = MeteringWriter(source="keyframe-text-extractor")
 
@@ -105,11 +108,15 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         )
         return {"status": "skipped", "reason": "image outside the meeting's folder"}
 
-    stored = DYNAMODB.get_item(
-        TableName=EVENT_SOURCING_TABLE,
-        Key=frame_key(call_id, frame_id),
-        ProjectionExpression="SlideText",
-    ).get("Item")
+    try:
+        stored = DYNAMODB.get_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key=frame_key(call_id, frame_id),
+            ProjectionExpression="SlideText",
+        ).get("Item")
+    except ClientError as error:
+        LOGGER.error("Could not read key frame %s: %s", frame_id, error.response["Error"]["Code"])
+        return {"status": "failed", "reason": "frame unreadable"}
     if stored is None:
         LOGGER.info(
             "Key frame %s is not stored (deleted, or not yet written); nothing to do", frame_id
@@ -138,6 +145,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             "The model could not read key frame %s: %s", frame_id, error.response["Error"]["Code"]
         )
         return {"status": "failed", "reason": "model error"}
+    except ValueError as error:
+        # extract_text: an answer with no text in it (a reasoning model that
+        # spent its whole budget, for one).
+        LOGGER.error("The model gave no text for key frame %s: %s", frame_id, error)
+        return {"status": "failed", "reason": "no answer"}
 
     try:
         DYNAMODB.update_item(
@@ -155,6 +167,11 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
     except ClientError as error:
         if error.response["Error"]["Code"] == "ConditionalCheckFailedException":
             return {"status": "skipped", "reason": "frame deleted"}
-        raise
+        LOGGER.error(
+            "Could not store the text of key frame %s: %s",
+            frame_id,
+            error.response["Error"]["Code"],
+        )
+        return {"status": "failed", "reason": "not stored"}
     LOGGER.info("Read key frame %s of %s: %d characters", frame_id, call_id, len(text))
     return {"status": "read", "characters": len(text)}

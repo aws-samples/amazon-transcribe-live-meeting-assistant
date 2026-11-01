@@ -189,10 +189,14 @@ def get_transcripts(callId):
         InvocationType="RequestResponse",
         Payload=json.dumps(payload),
     )
-    print("Lambda response:", response)
     transcript_data = response["Payload"].read().decode()
     transcript_json = json.loads(transcript_data)
-    print("Transcript JSON:", transcript_json)
+    # The shape, not the content: everything here is meeting content, the text
+    # of the shared screen included.
+    print(
+        f"Fetched transcript: {len(transcript_json.get('transcript') or '')} characters, "
+        f"{len(transcript_json.get('keyframes') or [])} key frame(s)"
+    )
     return transcript_json
 
 

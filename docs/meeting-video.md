@@ -35,8 +35,10 @@ went up.
 - **Find text on the shared screen** filters the strip to the frames whose
   [slide text](#slide-text) holds every word typed, in any order, ignoring case
   and accents, with the line that matched under each thumbnail. It searches the
-  whole meeting: the frames not loaded yet are loaded first. A selected frame
-  shows its text under the picture.
+  whole meeting: the frames not loaded yet are loaded first, and the frames
+  shown are read again if any of them was loaded before its text was read
+  (the text follows its frame by a few seconds). A selected frame shows its
+  text under the picture.
 
 The pictures are shown through links signed by the server for whoever opened
 the page, after the same access check as the transcript, and they last an

@@ -88,13 +88,14 @@ class FakeS3:
 
 
 class FakeBedrock:
-    def __init__(self, answer="Agenda item 2: Support\n- pipeline budget"):
+    def __init__(self, answer="Agenda item 2: Support\n- pipeline budget", content=None):
         self.answer, self.calls = answer, []
+        self.content = [{"text": answer}] if content is None else content
 
     def converse(self, **kwargs):
         self.calls.append(kwargs)
         return {
-            "output": {"message": {"content": [{"text": self.answer}]}},
+            "output": {"message": {"content": self.content}},
             "usage": {"inputTokens": 2144, "outputTokens": 30},
             "stopReason": "end_turn",
         }
@@ -180,6 +181,35 @@ def test_failures_end_the_invocation_without_raising(fakes):
     dynamo, *_ = fakes(s3=FakeS3(error=err))
     assert index.handler(dict(EVENT), None) == {"status": "failed", "reason": "image unreadable"}
     assert dynamo.updates == []
+
+
+def test_an_answer_with_no_text_ends_the_invocation_without_raising(fakes):
+    dynamo, *_ = fakes(bedrock=FakeBedrock(content=[{"reasoningContent": {"reasoningText": {}}}]))
+    assert index.handler(dict(EVENT), None) == {"status": "failed", "reason": "no answer"}
+    assert dynamo.updates == []
+
+
+def test_table_errors_end_the_invocation_without_raising(fakes):
+    dynamo, *_ = fakes()
+    throttled = ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": "x"}}, "UpdateItem"
+    )
+
+    def slow(**_kwargs):
+        raise throttled
+
+    dynamo.update_item = slow
+    assert index.handler(dict(EVENT), None) == {"status": "failed", "reason": "not stored"}
+    dynamo.get_item = slow
+    assert index.handler(dict(EVENT), None) == {"status": "failed", "reason": "frame unreadable"}
+
+
+def test_the_function_is_not_retried_after_a_failure():
+    template = (HERE.parents[2] / "deployment" / "lma-ai-stack.yaml").read_text(encoding="utf-8")
+    block = template.split("  KeyframeTextExtractorFunction:\n", 1)[1].split(
+        "\n  KeyframeTextExtractorFunctionLogGroup:", 1
+    )[0]
+    assert "EventInvokeConfig:\n        MaximumRetryAttempts: 0" in block
 
 
 def test_a_frame_deleted_meanwhile_is_left_deleted(fakes):

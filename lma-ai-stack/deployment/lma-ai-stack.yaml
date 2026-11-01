@@ -4881,12 +4881,11 @@ Resources:
       CodeS3Location: ../source/appsync/resolveSpeakerNames.js
 
   # ----------------------------------------------------------------------------
-  # Agenda derivation
+  # Key frame text
   #
-  # Reads a meeting's transcript for an agenda somebody stated, and stores it
-  # only if one was. Invoked once, asynchronously, by the call event processor
-  # about five minutes into a meeting with no agenda, and on demand from the
-  # Agenda panel's "Derive agenda" button. See docs/meeting-agenda.md.
+  # Reads the text of each key frame of the shared screen once, and stores it
+  # with the frame. Invoked asynchronously by the call event processor after it
+  # stores a frame. See docs/meeting-video.md.
   # ----------------------------------------------------------------------------
   KeyframeTextExtractorFunction:
     Type: AWS::Serverless::Function
@@ -4899,6 +4898,10 @@ Resources:
       MemorySize: 512
       # One image read and one model call.
       Timeout: 60
+      # A frame whose text could not be read keeps none; the function is not
+      # run again for it, so a model call is never repeated and metered twice.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
       Environment:
         Variables:
           EVENT_SOURCING_TABLE: !Ref EventSourcingTable
@@ -4999,6 +5002,14 @@ Resources:
                   StringEquals:
                     "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
+  # ----------------------------------------------------------------------------
+  # Agenda derivation
+  #
+  # Reads a meeting's transcript for an agenda somebody stated, and stores it
+  # only if one was. Invoked once, asynchronously, by the call event processor
+  # about five minutes into a meeting with no agenda, and on demand from the
+  # Agenda panel's "Derive agenda" button. See docs/meeting-agenda.md.
+  # ----------------------------------------------------------------------------
   AgendaDeriverFunction:
     Type: AWS::Serverless::Function
     Properties:
