@@ -606,18 +606,21 @@ stream is billed for its duration, the same as one mono stream. Without a voice
 assistant the VP sends one mono stream of the meeting audio. The S3 audio recording is
 always the mix of both, as is the video recording's audio track.
 
+**Virtual Participant voice separation**, in the **Transcription Engine** section of
+**Configuration ▸ Configuration** (admin only), is on every deployment. It asks for
+per-voice labels, on either engine (on the on-demand engine, where its model bundle has
+speaker identification), so several people behind one attendee tile (a conference room,
+a shared screen playing a recording) come out as `Name (spk_0)`, `Name (spk_1)`. Off by
+default: speaker names come from the meeting roster, which is the better label for a
+normal attendee. See [Several people behind one attendee](#several-people-behind-one-attendee).
+
 A deployment with
-`EnableMicrovmAsr=true` can move Virtual Participants onto the on-demand MicroVM
-ASR engine instead, from the **Transcription Engine** section of **Configuration ▸ Configuration** (admin only):
+`EnableMicrovmAsr=true` can also move Virtual Participants onto the on-demand MicroVM
+ASR engine instead, from the same section, which then also shows the engine choices:
 
 - **Virtual Participants: engine** chooses the engine for every VP that starts after the
   change. The VP acquires and releases its own MicroVM, and falls back to Amazon
   Transcribe when none can be acquired.
-- **Virtual Participant voice separation** asks for per-voice labels, on either engine
-  (on the on-demand engine, where its model bundle has speaker identification), so several people behind one attendee tile (a conference room, a shared screen
-  playing a recording) come out as `Name (spk_0)`, `Name (spk_1)`. Off by default:
-  speaker names come from the meeting roster, which is the better label for a normal
-  attendee.
 - **The voice assistant is its own channel.** With the assistant enabled, its speech is
   transcribed from a second engine session on the same MicroVM and appears on the `AGENT`
   channel under the VP's own name, never diarized, exactly as Stream Audio separates the

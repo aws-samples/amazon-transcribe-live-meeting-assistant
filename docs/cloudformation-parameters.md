@@ -199,8 +199,8 @@ There are deliberately no parameters for supplying a model URL: every model is a
 curated entry in the ASR stack's `catalog.json` with its checksum pinned and, for a
 speaker model, its operating point measured with `scripts/calibrate.py`. The three
 runtime switches (engine for streaming meetings, engine for Virtual Participants, Virtual
-Participant voice separation) live on the Transcription Engine admin page and take effect on the
-next meeting with no stack update.
+Participant voice separation) live in the Transcription Engine section of the Configuration page and
+take effect on the next meeting with no stack update.
 
 ## Voice Enrollment
 

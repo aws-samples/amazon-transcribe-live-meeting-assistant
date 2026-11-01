@@ -190,9 +190,9 @@ ASR_ENGINE = register(
         name="asr_engine",
         cache_tier=CacheTier.SHORT,
         description=(
-            "On-demand ASR engine switches: whether streaming meetings and Virtual "
-            "Participants use it, and whether Virtual Participants ask it for "
-            "per-voice labels."
+            "Transcription engine switches: whether streaming meetings and Virtual "
+            "Participants use the on-demand engine, and whether a Virtual Participant "
+            "separates the voices behind one attendee, on either engine."
         ),
     )
 )

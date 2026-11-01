@@ -129,7 +129,8 @@ The section is one of the shipped summary prompts, so deployments that have not
 removed it get it, after an upgrade too. Its prompt names the agenda with the
 `{agenda}` placeholder, and any prompt of your own can do the same; see
 [Customizing Prompts](transcript-summarization.md#customizing-prompts). To turn
-the section off, set its prompt to `NONE` on the **Transcript Summary** page.
+the section off, set its prompt to `NONE` in the **Transcript Summary** section of
+**Configuration ▸ Configuration**.
 
 ## Asking the assistant about the agenda
 

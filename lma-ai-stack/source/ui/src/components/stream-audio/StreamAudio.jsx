@@ -91,8 +91,9 @@ const StreamAudio = ({ mode: modeProp = undefined }) => {
   // Distinct from AsrDiarizationAvailable, which is also false for a
   // transcription-only bundle.
   const asrEngineAvailable = `${settings?.AsrEngineAvailable}` === 'true';
-  // Which engine transcribes streaming meetings is a deployment setting on the ASR
-  // Config page, not a per-meeting choice. It is read live from the config table so
+  // Which engine transcribes streaming meetings is a deployment setting in the
+  // Transcription Engine section of the Configuration page, not a per-meeting
+  // choice. It is read live through getAsrConfig so
   // this form follows what an admin has set: the capture sample rate and the
   // speaker-count field below depend on it.
   const [asrEngineDefault, setAsrEngineDefault] = useState('transcribe');

@@ -33,6 +33,7 @@ import {
   effectiveSection,
   exportDocument,
   isAvailable,
+  isPresetOffered,
   readExport,
   rebaseSection,
   storedSection,
@@ -201,7 +202,7 @@ export const ConfigurationContent = () => {
   const importConfiguration = async (file) => {
     if (!file) return;
     try {
-      const { values, skipped } = readExport(await file.text(), sections, doc.defaults);
+      const { values, skipped, withheld } = readExport(await file.text(), sections, doc.defaults, settings, edits);
       setEdits((current) => ({ ...current, ...values }));
       setComment((current) => current || `Imported from ${file.name}`.slice(0, MAX_COMMENT_LENGTH));
       const names = sections.filter((section) => values[section.name]).map(sectionLabel);
@@ -211,9 +212,17 @@ export const ConfigurationContent = () => {
       const notes = [
         replacedEdits ? 'It replaced unsaved edits you had made in those sections.' : '',
         skipped.length ? `Not used, because this deployment has no such section: ${skipped.join(', ')}.` : '',
+        withheld.length
+          ? `Not used, because this deployment does not offer them: ${withheld
+              .map(([name, key]) => {
+                const section = sections.find((candidate) => candidate.name === name);
+                return `${sectionLabel(section)} › ${section.schema.properties?.[key]?.title || key}`;
+              })
+              .join(', ')}.`
+          : '',
       ].filter(Boolean);
       setStatus({
-        type: skipped.length || replacedEdits ? 'warning' : 'info',
+        type: skipped.length || withheld.length || replacedEdits ? 'warning' : 'info',
         text: [
           `Loaded ${names.join(', ') || 'nothing'} from ${file.name}.`,
           'Nothing is saved yet: review the marked changes, then save.',
@@ -409,8 +418,8 @@ export const ConfigurationContent = () => {
                         items: doc.presets.map((entry) => ({
                           id: `preset:${entry.Id}`,
                           text: entry.Title,
-                          disabled: presetSections(entry).every(({ section }) => !section),
-                          disabledReason: 'This deployment has none of the sections it changes.',
+                          disabled: !isPresetOffered(entry, sections, settings),
+                          disabledReason: 'It sets something this deployment does not include.',
                         })),
                       },
                     ]

@@ -36,7 +36,7 @@ LMA uses two roles:
 
 | Role       | Cognito group | Permissions                                                                                                  |
 |------------|---------------|--------------------------------------------------------------------------------------------------------------|
-| **Admin** | `Admin`       | Full access: all meeting features **and** admin-only pages (User Management, MCP Servers, Nova Sonic, Transcript Summary). |
+| **Admin** | `Admin`       | Full access: all meeting features **and** admin-only pages (User Management, MCP Servers, Configuration, Configuration History). |
 | **User**  | *(none)*      | Standard access: Meetings List, Meetings Query, Stream Audio, Virtual Participant, MCP API Keys. No admin pages. |
 
 > The `Admin` Cognito group is created by `lma-cognito-stack`. Membership determines the role. A user that is not in any group is a regular `User`.

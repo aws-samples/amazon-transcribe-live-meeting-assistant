@@ -23,7 +23,19 @@ const NovaSonicNotice = () =>
     </Alert>
   );
 
+// Without the on-demand engine every meeting is transcribed by Amazon
+// Transcribe, so the section shows only the voice separation switch, which
+// that engine honours too, and says where the engine choices went.
 const AsrEngineNotice = ({ settings = {} }) => {
+  if (`${settings?.AsrEngineAvailable}` !== 'true') {
+    return (
+      <Alert type="info" header="Every meeting is transcribed by Amazon Transcribe">
+        The on-demand speech engine is not deployed, so the choice of engine for each kind of meeting is not shown.
+        Virtual Participant voice separation works on Amazon Transcribe. To evaluate the experimental on-demand engine,
+        set EnableMicrovmAsr to true on the main stack; Amazon Transcribe remains the recommended engine.
+      </Alert>
+    );
+  }
   const diarization = `${settings?.AsrDiarizationAvailable}` === 'true';
   return (
     <>
@@ -50,6 +62,7 @@ const AsrEngineNotice = ({ settings = {} }) => {
 };
 
 const SETTINGS = PropTypes.shape({
+  AsrEngineAvailable: PropTypes.oneOfType([PropTypes.string, PropTypes.bool]),
   AsrDiarizationAvailable: PropTypes.oneOfType([PropTypes.string, PropTypes.bool]),
   AsrModelBundleName: PropTypes.string,
   AsrModelBundleId: PropTypes.string,
@@ -59,11 +72,9 @@ AsrEngineNotice.propTypes = { settings: SETTINGS };
 
 // Why a section a link asked for is not shown, where its schema's
 // availableWhen does not hold in this deployment.
-export const UNAVAILABLE_REASONS = {
-  asr_engine:
-    'The on-demand speech engine is not deployed. To evaluate it, set EnableMicrovmAsr to true on the main ' +
-    'stack; Amazon Transcribe remains the recommended engine.',
-};
+// No shipped section is withheld today; the asr_engine section hides only its
+// engine choices instead (see AsrEngineNotice).
+export const UNAVAILABLE_REASONS = {};
 
 const NOTICES = {
   nova_sonic_config: NovaSonicNotice,

@@ -34,7 +34,7 @@ following the release.
 | Transcript Summary | The sections of the end-of-meeting summary and the prompt behind each | To summaries generated within about five minutes of the save. **Regenerate** on a meeting page uses it at once |
 | Meeting Assist Chat Buttons | The quick-action buttons in the chat panel. A saved list replaces the shipped buttons as a whole | At once, to chat panels opened after the save |
 | Nova Sonic Voice Assistant | The voice assistant's system prompt and prompt mode, model, voice, turn-taking sensitivity, meeting mode and translator settings | To the next meeting the voice assistant joins |
-| Transcription Engine (experimental) | Which engine transcribes streaming meetings and Virtual Participants, and Virtual Participant voice separation. Shown only when the on-demand speech engine is deployed | To meetings that start within 30 seconds of the save or later |
+| Transcription Engine | Virtual Participant voice separation, which works on Amazon Transcribe, and, where the experimental on-demand speech engine is deployed, which engine transcribes streaming meetings and which transcribes Virtual Participants. Without that engine only the voice separation switch is shown | To meetings that start within 30 seconds of the save or later |
 | Meeting Cost Prices | The unit prices the per-meeting [cost estimate](meeting-cost-estimate.md) is computed with | To estimates drawn within about five minutes of the save |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
@@ -142,7 +142,9 @@ select **Save changes**.
   staging deployment, onto the page. Because the file holds changes rather than
   whole settings, importing it into a deployment of a later release keeps that
   release's defaults for everything the file does not change. A section the file
-  holds that this deployment does not have is listed and left out. The save
+  holds that this deployment does not have is listed and left out, and so is a
+  setting the page does not show here, such as the engine choices on a deployment
+  without the on-demand speech engine, which keeps its current value. The save
   comment is filled in with the file's name; change it if you like.
 - **Apply a preset** applies one of the configurations LMA ships:
   - **Healthcare summary** — the summary sections of the healthcare prompt domain,
@@ -150,7 +152,8 @@ select **Save changes**.
   - **Translator voice assistant** — Nova Sonic's Translator meeting mode between
     English and Spanish;
   - **On-demand speech engine with voice separation** — offered only where the
-    engine is deployed.
+    engine is deployed. A preset is offered only where the deployment has every
+    setting it changes.
 
   The dialog says which sections a preset changes, and whether it replaces a
   section or changes only the settings it names.

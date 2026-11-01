@@ -23,6 +23,7 @@ import {
   getAt,
   hasAt,
   isAvailable,
+  isPresetOffered,
   isShown,
   memberSchema,
   mergeDelta,
@@ -279,6 +280,25 @@ describe('presets, export and import', () => {
     expect(applyPresetSection(schema, {}, {}, change, { Thing: 'true' })).toEqual({ a: true, b: true });
   });
 
+  it('offers a preset only where the deployment has every section and setting it names', () => {
+    const engine = { setting: 'AsrEngineAvailable', value: 'true' };
+    const sections = [
+      { name: 'asr_engine', schema: { ...MERGE, properties: { engine: { availableWhen: engine }, separate: {} } } },
+    ];
+    const both = { Sections: { asr_engine: { mode: 'merge', values: { engine: true, separate: true } } } };
+    const separateOnly = { Sections: { asr_engine: { mode: 'merge', values: { separate: true } } } };
+    const elsewhere = { Sections: { not_here: { mode: 'merge', values: {} } } };
+    expect(isPresetOffered(both, sections, { AsrEngineAvailable: 'true' })).toBe(true);
+    // Applying it here would change only the one setting it could, which is not what it says it does.
+    expect(isPresetOffered(both, sections, {})).toBe(false);
+    expect(isPresetOffered(separateOnly, sections, {})).toBe(true);
+    expect(isPresetOffered(elsewhere, sections, {})).toBe(false);
+    const withheld = [
+      { name: 'asr_engine', schema: { ...MERGE, availableWhen: engine, properties: { separate: {} } } },
+    ];
+    expect(isPresetOffered(separateOnly, withheld, {})).toBe(false);
+  });
+
   it('replaces a section, turning off every shipped entry the preset does not name', () => {
     const replaced = replacedSection(PROMPTS, DEFAULTS.summary_prompt_templates, { '1#SUMMARY': 's', '3#SOAP': 'p' });
     expect(replaced).toEqual({ '1#SUMMARY': 's', '2#ACTIONS': 'NONE', '3#SOAP': 'p' });
@@ -310,6 +330,25 @@ describe('presets, export and import', () => {
     const imported = readExport(JSON.stringify(document), SECTIONS, DEFAULTS);
     expect(imported.values).toEqual(values);
     expect(imported.skipped).toEqual([]);
+  });
+
+  it('leaves out an imported setting this deployment does not offer, keeping its value here', () => {
+    const engine = { setting: 'AsrEngineAvailable', value: 'true' };
+    const sections = [
+      { name: 'asr_engine', schema: { ...MERGE, properties: { engine: { availableWhen: engine }, separate: {} } } },
+    ];
+    const defaults = { asr_engine: { engine: false, separate: false } };
+    const file = JSON.stringify({
+      format: 'lma-configuration-profile',
+      formatVersion: 1,
+      sections: { asr_engine: { engine: true, separate: true } },
+    });
+    const here = readExport(file, sections, defaults, {}, { asr_engine: { engine: false, separate: false } });
+    expect(here.values).toEqual({ asr_engine: { engine: false, separate: true } });
+    expect(here.withheld).toEqual([['asr_engine', 'engine']]);
+    const withEngine = readExport(file, sections, defaults, { AsrEngineAvailable: 'true' });
+    expect(withEngine.values).toEqual({ asr_engine: { engine: true, separate: true } });
+    expect(withEngine.withheld).toEqual([]);
   });
 
   it('reports a section the deployment does not have, and refuses a file that is not an export', () => {

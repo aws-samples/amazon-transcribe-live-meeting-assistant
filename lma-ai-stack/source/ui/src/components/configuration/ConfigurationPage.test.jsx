@@ -87,7 +87,7 @@ const PRESETS = [
   },
 ];
 
-const answer = ({ version = 4, custom = {} } = {}) => ({
+const answer = ({ version = 4, custom = {}, sections = SECTIONS } = {}) => ({
   data: {
     getConfiguration: {
       Profile: 'custom',
@@ -96,7 +96,7 @@ const answer = ({ version = 4, custom = {} } = {}) => ({
       UpdatedBy: 'someone@example.com',
       UpdatedAt: '2026-10-31T10:00:00Z',
       PublishedRevision: 9,
-      Sections: JSON.stringify(SECTIONS),
+      Sections: JSON.stringify(sections),
       Default: JSON.stringify(DEFAULTS),
       Custom: JSON.stringify(custom),
       Presets: JSON.stringify(PRESETS),
@@ -135,18 +135,49 @@ describe('ConfigurationContent', () => {
     graphqlMock.mockReset();
   });
 
-  it('renders one section per schema, and the transcription engine only where it is deployed', async () => {
+  it('renders one section per schema, with engine choices only where the on-demand engine is deployed', async () => {
     graphqlMock.mockResolvedValue(answer());
     const { unmount } = renderEditor();
     await screen.findByText('Transcript Summary');
     expect(screen.getByText('Meeting Assist Chat Buttons')).toBeTruthy();
     expect(screen.getByText('Nova Sonic Voice Assistant')).toBeTruthy();
     expect(screen.getByText('Meeting Cost Prices')).toBeTruthy();
-    expect(screen.queryByText('Transcription Engine (experimental)')).toBeNull();
+    // Voice separation works on Amazon Transcribe, so a deployment without the
+    // on-demand engine still has the section, with only that switch in it.
+    openSection('Transcription Engine');
+    const transcribeOnly = section('Transcription Engine');
+    expect(within(transcribeOnly).getByText('Virtual Participant voice separation')).toBeTruthy();
+    expect(within(transcribeOnly).queryByText('Virtual Participants')).toBeNull();
+    expect(within(transcribeOnly).queryByText('Stream Audio, Chrome extension and Desktop Capture')).toBeNull();
+    expect(within(transcribeOnly).getByText('Every meeting is transcribed by Amazon Transcribe')).toBeTruthy();
+    expect(within(transcribeOnly).queryByText(/Experimental/)).toBeNull();
     unmount();
 
     renderEditor({ settings: { AsrEngineAvailable: 'true' } });
-    expect(await screen.findByText('Transcription Engine (experimental)')).toBeTruthy();
+    openSection(await screen.findByText('Transcription Engine'));
+    const withEngine = section('Transcription Engine');
+    expect(within(withEngine).getByText('Virtual Participants')).toBeTruthy();
+    expect(within(withEngine).getByText('Stream Audio, Chrome extension and Desktop Capture')).toBeTruthy();
+    expect(within(withEngine).getByText('Virtual Participant voice separation')).toBeTruthy();
+    expect(within(withEngine).getByText(/Experimental/)).toBeTruthy();
+    expect(within(withEngine).queryByText('Every meeting is transcribed by Amazon Transcribe')).toBeNull();
+  });
+
+  it('saves Virtual Participant voice separation on a deployment without the on-demand engine', async () => {
+    graphqlMock.mockResolvedValueOnce(answer());
+    renderEditor();
+    openSection(await screen.findByText('Transcription Engine'));
+    const engine = section('Transcription Engine');
+    fireEvent.click(within(engine).getByRole('checkbox'));
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    // Only the switch changed; the hidden engine choices keep following the defaults.
+    expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
+      asr_engine: { diarizeVirtualParticipant: true },
+    });
   });
 
   it('marks a changed value, and saves only that section, as a delta, against the loaded version', async () => {
@@ -320,12 +351,23 @@ describe('ConfigurationContent', () => {
   });
 
   it('says why a section a link asked for is not shown', async () => {
+    // No shipped section is withheld today, so the test withholds one.
+    const withheld = SECTIONS.map((entry) =>
+      entry.Name === 'call_pricing'
+        ? { ...entry, Schema: { ...entry.Schema, availableWhen: { setting: 'PricingAvailable', value: 'true' } } }
+        : entry,
+    );
+    graphqlMock.mockResolvedValueOnce(answer({ sections: withheld }));
+    renderEditor({ route: '/configuration/settings?section=call_pricing' });
+    expect(await screen.findByText('Meeting Cost Prices is not available in this deployment')).toBeTruthy();
+    expect(screen.getByText(/depends on a part of LMA this deployment does not include/)).toBeTruthy();
+  });
+
+  it('opens the Transcription Engine section from a link on a deployment without the on-demand engine', async () => {
     graphqlMock.mockResolvedValueOnce(answer());
     renderEditor({ route: '/configuration/settings?section=asr_engine' });
-    expect(
-      await screen.findByText('Transcription Engine (experimental) is not available in this deployment'),
-    ).toBeTruthy();
-    expect(screen.getByText(/set EnableMicrovmAsr to true/)).toBeTruthy();
+    expect(await screen.findByText('Virtual Participant voice separation')).toBeTruthy();
+    expect(screen.queryByText(/is not available in this deployment/)).toBeNull();
   });
 
   it('reorders the chat buttons, renumbering them from one, and stores the list whole', async () => {
