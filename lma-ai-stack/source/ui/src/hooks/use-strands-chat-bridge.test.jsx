@@ -106,6 +106,33 @@ describe('useStrandsChatBridge', () => {
     expect(unsubscribe).toHaveBeenCalled();
   });
 
+  it("closes an answer's token stream once its final token has been passed on", async () => {
+    let observer;
+    const unsubscribe = vi.fn();
+    const client = fakeClient(() => ({
+      subscribe: (o) => {
+        observer = o;
+        return { unsubscribe };
+      },
+    }));
+    const source = { postMessage: vi.fn() };
+    hook = renderHook(() => useStrandsChatBridge('c-1', { client }));
+    ask(source, { type: 'STRANDS_SETUP_TOKEN_SUBSCRIPTION', callId: 'c-1', messageId: 'msg-1' });
+    await waitFor(() => expect(observer).toBeDefined());
+    observer.next({ data: { onAddChatToken: { MessageId: 'msg-1', Token: 'Hi', IsComplete: false } } });
+    expect(unsubscribe).not.toHaveBeenCalled();
+    const last = { MessageId: 'msg-1', Token: '', IsComplete: true };
+    observer.next({ data: { onAddChatToken: last } });
+    expect(source.postMessage).toHaveBeenLastCalledWith(
+      { type: 'STRANDS_TOKEN_MESSAGE', token: last },
+      window.location.origin,
+    );
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    hook.unmount();
+    hook = null;
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
   it('answers the button request with the buttons in force', async () => {
     const client = fakeClient(async () => ({
       data: {

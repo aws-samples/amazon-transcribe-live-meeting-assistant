@@ -128,7 +128,8 @@ const useStrandsChatBridge = (callId, { client } = {}) => {
 
   useEffect(() => {
     const gql = clientRef.current;
-    const subscriptions = [];
+    // The answers still streaming; closed when the host goes away.
+    const subscriptions = new Set();
 
     const handleMessage = async (event) => {
       if (event.origin !== window.location.origin) return;
@@ -204,16 +205,32 @@ const useStrandsChatBridge = (callId, { client } = {}) => {
         }
       } else if (data.type === 'STRANDS_SETUP_TOKEN_SUBSCRIPTION') {
         try {
-          const subscription = gql
+          let subscription = null;
+          let finished = false;
+          const close = () => {
+            finished = true;
+            if (!subscription) return;
+            subscription.unsubscribe?.();
+            subscriptions.delete(subscription);
+          };
+          subscription = gql
             .graphql({ query: ON_ADD_CHAT_TOKEN, variables: { callId: data.callId, messageId: data.messageId } })
             .subscribe({
               next: (message) => {
                 const token = message?.data?.onAddChatToken;
-                if (token) reply({ type: 'STRANDS_TOKEN_MESSAGE', token });
+                if (!token) return;
+                reply({ type: 'STRANDS_TOKEN_MESSAGE', token });
+                // One subscription per answer: close it once the answer is complete.
+                if (token.IsComplete) close();
               },
               error: (error) => logger.error('Token subscription error', error),
             });
-          subscriptions.push(subscription);
+          if (finished) {
+            // The final token arrived before subscribe() returned.
+            subscription.unsubscribe?.();
+          } else {
+            subscriptions.add(subscription);
+          }
         } catch (error) {
           logger.error('Failed to set up token subscription', error);
         }
