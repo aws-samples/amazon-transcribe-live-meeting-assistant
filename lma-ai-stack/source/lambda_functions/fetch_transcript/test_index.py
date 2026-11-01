@@ -1041,3 +1041,20 @@ def test_a_frame_with_nothing_said_has_empty_said(monkeypatch):
     )
     response = index.lambda_handler({"CallId": CALL_ID, "IncludeKeyframes": True}, None)
     assert response["keyframes"] == [{"FrameId": "1", "Timestamp": 50.0, "Said": ""}]
+
+
+def test_what_was_said_is_bounded_per_frame(monkeypatch):
+    install(
+        monkeypatch,
+        items=[segment("word " * 200, n + 1, StartTime=Decimal(str(n))) for n in range(40)],
+    )
+    monkeypatch.setattr(
+        index,
+        "get_keyframes",
+        lambda callid: [{"FrameId": "1", "Timestamp": 0.0}, {"FrameId": "2", "Timestamp": 39.0}],
+    )
+    response = index.lambda_handler({"CallId": CALL_ID, "IncludeKeyframes": True}, None)
+    first, last = response["keyframes"]
+    assert len(first["Said"]) == index.MAX_SAID_CHARS
+    assert first["Said"].startswith("word word")
+    assert 0 < len(last["Said"]) <= index.MAX_SAID_CHARS

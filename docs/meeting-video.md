@@ -83,9 +83,11 @@ the meeting under **Slide text** in its [cost estimate](meeting-cost-estimate.md
 A meeting with key frames gets a **SLIDES PRESENTED** section in its
 [summary](transcript-summarization.md): one entry per slide, in the order shown,
 with the time it went up, its title, its thumbnail and a sentence or two on what
-was said while it was on screen. Consecutive frames of one slide (the same
-slide twice, or a slide built up point by point) become one entry, and frames
-with nothing on them, such as an empty desktop, are left out. A meeting without
+was said while it was on screen. The prompt asks the model to merge
+consecutive frames of one slide (the same slide twice, or a slide built up
+point by point) into one entry, and to leave out frames with nothing on them,
+such as an empty desktop; how well it does so depends on the model (see the
+measurements below). A meeting without
 key frames gets no such section, as a meeting without an agenda gets no agenda
 section.
 
@@ -101,7 +103,7 @@ How it is built:
   exactly. The transcript itself is not sent with this section. At most 60
   frames are listed (past that, the ones on screen for the shortest time are
   left out), with each frame's text cut at 1,500 characters and its speech at
-  3,000.
+  3,000 (the fetch-transcript function sends no more than that).
 - The meeting page and the embeddable summary panel show each picture
   reference as the frame's thumbnail, read through `getVideoKeyframes` for that
   meeting with the same access check as the strip; selecting it opens the full

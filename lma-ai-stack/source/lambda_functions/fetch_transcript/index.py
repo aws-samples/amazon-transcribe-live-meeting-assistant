@@ -147,6 +147,12 @@ def segment_start(row):
         return 0.0
 
 
+#: What one frame's "Said" holds at most, the start of what was said; the
+#: summary uses no more than this of it (MAX_SAID_CHARS there), and the bound
+#: keeps the response well inside a synchronous invoke's 6 MB.
+MAX_SAID_CHARS = 3000
+
+
 def attach_said(frames, segments, condense, include_speaker, metadata):
     """Give each frame "Said": the transcript spoken while it was on screen.
 
@@ -165,9 +171,8 @@ def attach_said(frames, segments, condense, include_speaker, metadata):
         if index >= 0:
             by_frame[index].append(row)
     for frame, rows in zip(frames, by_frame):
-        frame["Said"] = "".join(
-            preprocess_transcripts(rows, condense, include_speaker, metadata)
-        ).strip()
+        said = "".join(preprocess_transcripts(rows, condense, include_speaker, metadata)).strip()
+        frame["Said"] = said[:MAX_SAID_CHARS]
     return frames
 
 

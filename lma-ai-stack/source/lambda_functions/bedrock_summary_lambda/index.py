@@ -67,6 +67,7 @@ PLACEHOLDERS = re.compile(r"\{transcript\}|\{agenda\}|\{slides\}")
 #: time are left out, since a slide that was presented stayed up.
 MAX_SLIDES = 60
 MAX_SLIDE_TEXT_CHARS = 1500
+# fetch_transcript sends no more than this of each frame's speech either.
 MAX_SAID_CHARS = 3000
 
 # A key frame's id as the resolver and the meeting page accept it.
