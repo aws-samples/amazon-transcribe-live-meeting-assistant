@@ -1,0 +1,6 @@
+# Extra Python deps for the opt-in desktop video test (test_desktop_video.py),
+# on top of requirements.txt. Kept separate so the default and scheduled runs do
+# not download an ffmpeg they never use. Install with:
+#   .venv/bin/pip install -r integ-tests/requirements.txt -r integ-tests/requirements-video.txt
+pillow>=10.1          # renders the slides (ImageFont.load_default(size=...) needs 10.1)
+imageio-ffmpeg>=0.5   # a static ffmpeg with libx264; LMA_TEST_FFMPEG or ffmpeg on PATH is used first

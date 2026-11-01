@@ -81,6 +81,7 @@ Stack resolution order: `--stack-name` / `STACK=` → `$LMA_STACK_NAME` → `LMA
 | `test_ws_stream_connects` *(opt-in)* | stream audio over the live `wss://.../api/v1/ws` and stay OPEN | **@fastify/websocket 11 upgrade ordering (the WS 500 regression)** |
 | `test_vp_registry_lifecycle` | VP create → get → list → end via AppSync (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP actually joins a real meeting and leaves `INITIALIZING` | **@zoom/meetingsdk 4→6** |
+| `test_desktop_video.py` *(opt-in, `LMA_TEST_DESKTOP_VIDEO=1`)* | a narrated synthetic slideshow streamed as the desktop capture app streams it → one key frame per slide, at the right times, with both images in S3; the meeting assistant reads the last slide | desktop video key frames and the assistant's shared-screen tool |
 
 `test_vp_live_join` is marked `live` and **skipped** unless `--vp-meeting-id`
 (`MEETING_ID=`) is provided.
@@ -124,3 +125,61 @@ enrolling needs the on-demand engine, because that is what computes speaker
 embeddings. It skips cleanly on a deployment without the feature, which is the
 default. Self-cleaning: it withdraws at the end, which deletes the voiceprint it
 created.
+
+## Desktop video key frames
+
+`test_desktop_video.py` streams a short narrated slideshow into the stack the
+way the desktop capture app does, and checks that the transcriber keeps one key
+frame per slide. It is opt-in, because it takes about two minutes and calls
+Polly and Bedrock:
+
+```bash
+.venv/bin/pip install -r integ-tests/requirements.txt -r integ-tests/requirements-video.txt
+AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
+    make integ-tests STACK=lma-integtest1 LMA_TEST_DESKTOP_VIDEO=1
+
+# Only this file:
+AWS_PROFILE=default LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user LMA_TEST_DESKTOP_VIDEO=1 \
+    .venv/bin/python -m pytest integ-tests/test_desktop_video.py --stack-name lma-integtest1 -s
+```
+
+`desktop_video_probe.py` builds the media and does the streaming:
+
+- **Slides.** Five 1920 × 1080 slides with large, distinct text, rendered with
+  Pillow, each held eight seconds. Polly (Matthew, neural) narrates each one on
+  the left (meeting) channel; the microphone channel is silent. The last slide,
+  "Launch codename: BLUE HERON / Ship date: March 14", is never spoken, so an
+  answer that quotes it can only come from the stored picture.
+- **Encoding.** As `VideoCapture.swift` and `VideoCapture.cs` encode: H.264 Main
+  at 5 fps and about 1.5 Mbit/s, a key frame every two seconds, as a fragmented
+  MP4 (init segment, then one `moof`/`mdat` fragment per two seconds). The ffmpeg
+  is `LMA_TEST_FFMPEG`, else `ffmpeg` on PATH, else the one `imageio-ffmpeg`
+  bundles; it needs libx264.
+- **Streaming.** The narration goes over the Stream Audio socket in real time,
+  as `ws_stream_probe.py` sends it. Half a second in, a second socket to the
+  same endpoint, with the same token, sends `START_VIDEO` with
+  `videoTimeOffsetMs: 1000`, then each fragment when the app's encoder would
+  have finished it (the init segment with the first), then `END_VIDEO`, as
+  `VideoSocket.swift` and `VideoSocket.cs` do. The audio `END` follows.
+
+What it asserts:
+
+| Test | Asserts |
+|------|---------|
+| `test_desktop_video_streams_alongside_audio` | both sockets stayed open until their end events, every fragment was sent, and the meeting has transcript segments |
+| `test_desktop_video_keeps_one_key_frame_per_slide` | exactly five `kf#<CallId>` items, all `Source=DESKTOP_CAPTURE`, timestamps strictly increasing and each within 2.5 s of its slide's start on the transcript's clock (1, 9, 17, 25 and 33 s with the current narration), each with a `VideoOffset` |
+| `test_desktop_video_key_frame_images_are_stored` | both JPEGs of every frame exist in the recordings bucket, under `lma-video-keyframes/<meeting>/` |
+| `test_assistant_reads_the_last_slide` | invokes `STRANDS-<stack>-MeetingAssist` with "What did the last slide say?" and expects "heron" in the answer. Skips when the deployed function's package has no `meeting_frames.py` (the shared-screen tool) |
+
+With the flag set, a missing dependency, ffmpeg or test user fails the run
+rather than skipping. Without it the four tests are reported as skipped,
+including under `make integ-tests-nightly`, because they carry the
+`optional_feature` marker. Zero key frames usually means the transcriber image
+predates desktop key frames or the stack has `EnableVideoRecording=false`.
+
+The meeting (`desktop-video-probe-<UTC time>`) is not deleted: it expires with
+the deployment's transcript retention, and its Shared screen strip can be
+looked at on the meeting page. To build only the media, for a look at the slides
+and the fragment sizes, without a stack:
+`AWS_PROFILE=default python integ-tests/desktop_video_probe.py --region us-west-2 --media-only /tmp/slides`
+(this calls Polly).
