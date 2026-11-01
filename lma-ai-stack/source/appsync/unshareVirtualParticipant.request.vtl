@@ -93,7 +93,14 @@ $util.qr( $conditionNames.put("#conditionSharedWith", "SharedWith") )
   $util.qr( $conditions.add("attribute_not_exists(#conditionSharedWith)") )
 #else
   $util.qr( $conditionValues.put(":conditionSharedWithAsRead", $util.dynamodb.toDynamoDB($ctx.stash.sharedWithAsRead)) )
-  $util.qr( $conditions.add("#conditionSharedWith = :conditionSharedWithAsRead") )
+  #if( $util.isList($ctx.stash.sharedWithAsRead) && !$ctx.stash.sharedWithAsRead.isEmpty() )
+    ## AppSync reads a List and a string set alike as a list, so a list read
+    ## is compared as either.
+    $util.qr( $conditionValues.put(":conditionSharedWithAsReadSet", $util.dynamodb.toStringSet($ctx.stash.sharedWithAsRead)) )
+    $util.qr( $conditions.add("(#conditionSharedWith = :conditionSharedWithAsRead OR #conditionSharedWith = :conditionSharedWithAsReadSet)") )
+  #else
+    $util.qr( $conditions.add("#conditionSharedWith = :conditionSharedWithAsRead") )
+  #end
 #end
 
 #set( $conditionExpression = "" )

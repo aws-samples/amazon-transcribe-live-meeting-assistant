@@ -885,8 +885,18 @@ def test_unsharing_removes_only_the_entries_named(client, as_read, removed, kept
     condition = request["condition"]
     assert "#conditionSharedWith = :conditionSharedWithAsRead" in condition["expression"]
     assert condition["expressionNames"]["#conditionSharedWith"] == "SharedWith"
-    expected = {"L": [{"S": v} for v in as_read]} if isinstance(as_read, list) else {"S": as_read}
-    assert condition["expressionValues"][":conditionSharedWithAsRead"] == expected
+    values = condition["expressionValues"]
+    if isinstance(as_read, list):
+        # A List and a string set are read alike, so either is accepted.
+        assert values[":conditionSharedWithAsRead"] == {"L": [{"S": v} for v in as_read]}
+        assert values[":conditionSharedWithAsReadSet"] == {"SS": as_read}
+        assert (
+            "(#conditionSharedWith = :conditionSharedWithAsRead OR "
+            "#conditionSharedWith = :conditionSharedWithAsReadSet)"
+        ) in condition["expression"]
+    else:
+        assert values[":conditionSharedWithAsRead"] == {"S": as_read}
+        assert ":conditionSharedWithAsReadSet" not in values
 
 
 @pytest.mark.parametrize("identity", [COGNITO["owner"][0], COGNITO["admin"][0], BACKEND])

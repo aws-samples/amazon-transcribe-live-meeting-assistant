@@ -10196,6 +10196,10 @@ Resources:
       ResponseMappingTemplate: |
         #if( $ctx.error )
           #if( $ctx.error.type == "DynamoDB:ConditionalCheckFailedException" )
+            ## A signed-in caller who is not an Admin is refused unless the row
+            ## read was theirs, and so also when no row was found, as
+            ## shareVirtualParticipant answers such a caller. Only Admins and
+            ## backend roles are told that a row was not found.
             #if( $ctx.stash.vpCallerRestricted && $ctx.stash.vpOwnerAsRead != $ctx.identity.username )
               $util.error("User $ctx.identity.username is not authorized to change Virtual Participant $ctx.args.input.id", "AuthorizationError")
             #end
