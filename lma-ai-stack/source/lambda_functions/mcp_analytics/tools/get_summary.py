@@ -9,6 +9,7 @@ Retrieve AI-generated meeting summary from DynamoDB
 
 import logging
 import os
+import re
 from typing import Any, Dict
 
 import boto3
@@ -16,6 +17,17 @@ import boto3
 from tools.url_helper import get_meeting_url
 
 logger = logging.getLogger()
+
+# A picture of a key frame in a summary, which only the meeting page can show;
+# an MCP client gets its alt text (docs/meeting-video.md).
+KEYFRAME_IMAGE = re.compile(r"!\[([^\]\n]*)\]\(keyframe:[A-Za-z0-9_-]{1,64}\)")
+
+
+def keyframe_images_as_text(text: Any) -> Any:
+    """A summary's key-frame pictures as their alt text."""
+    if not isinstance(text, str):
+        return text
+    return KEYFRAME_IMAGE.sub(lambda match: f"({match.group(1)})", text)
 
 
 def execute(
@@ -71,8 +83,8 @@ def execute(
             "participants": meeting.get("Participants", []),
             "owner": meeting.get("Owner", meeting.get("AgentId", "")),
             "status": meeting.get("Status", "UNKNOWN"),
-            "summary": meeting.get(
-                "CallSummaryText", meeting.get("Summary", "No summary available")
+            "summary": keyframe_images_as_text(
+                meeting.get("CallSummaryText", meeting.get("Summary", "No summary available"))
             ),
         }
 

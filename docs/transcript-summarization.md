@@ -101,6 +101,7 @@ Each attribute's value contains the prompt template text that instructs the mode
 
 - Use the `{transcript}` placeholder in your prompt template where the meeting transcript should be inserted.
 - Use the `{agenda}` placeholder where the meeting's [agenda](meeting-agenda.md) should be inserted, as numbered lines. A section whose prompt names `{agenda}` is generated only for a meeting that has an agenda, and left out of the summary of one that does not. The shipped **AGENDA COVERAGE** section uses it; see [Agenda coverage in the summary](meeting-agenda.md#agenda-coverage-in-the-summary).
+- Use the `{slides}` placeholder where the meeting's slides should be inserted: each [key frame of the shared screen](meeting-video.md) with its time, a picture reference, its text and what was said while it was on screen. A section whose prompt names `{slides}` is generated only for a meeting that has key frames. The shipped **SLIDES PRESENTED** section uses it; see [Slides presented in the summary](meeting-video.md#slides-presented-in-the-summary).
 - Use `<br>` for newlines within the prompt template.
 
 The edits below are all made on the **Transcript Summary** page, which is at:

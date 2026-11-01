@@ -85,6 +85,7 @@ import { shareModal, deleteModal } from '../common/meeting-controls';
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
 import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
+import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
 import MCPServersModal from '../mcp-servers';
 
 const client = generateClient();
@@ -513,9 +514,7 @@ export const CallSummary = ({ item, onSave, onRegenerate, readOnly }) => {
                   <div>
                     {/* eslint-disable-next-line react/no-array-index-key */}
                     <TextContent color="gray">
-                      <ReactMarkdown rehypePlugins={markdownRehypePlugins}>
-                        {getMarkdownSummary(item.callSummaryText)}
-                      </ReactMarkdown>
+                      <SummaryMarkdown callId={item.callId}>{getMarkdownSummary(item.callSummaryText)}</SummaryMarkdown>
                     </TextContent>
                   </div>
                 </div>

@@ -20,6 +20,7 @@ import {
   getMarkdownSummary,
   getTextFileFormattedSummary,
   getTextOnlySummary,
+  keyframeImagesAsText,
 } from './summary';
 
 const SECTIONED = JSON.stringify({
@@ -77,5 +78,32 @@ describe('the other formatters still read a hand-edited summary as itself', () =
     expect(getMarkdownSummary(HAND_EDITED)).toBe(HAND_EDITED);
     expect(getTextOnlySummary(HAND_EDITED)).toBe(HAND_EDITED);
     expect(getTextFileFormattedSummary(HAND_EDITED)).toBe(HAND_EDITED);
+  });
+});
+
+describe('a summary with pictures of the shared screen', () => {
+  const SLIDES = JSON.stringify({
+    'SLIDES PRESENTED': '**[00:30] Budget**\n\n![Slide at 00:30](keyframe:0000030000-ab12cd)\n\nBob covered Q3.',
+  });
+
+  it('names each picture in words wherever the summary leaves the page', () => {
+    expect(getTextFileFormattedSummary(SLIDES)).toBe(
+      'SLIDES PRESENTED\n\n[00:30] Budget\n\n(Slide at 00:30)\n\nBob covered Q3.\n\n',
+    );
+    expect(decodeURIComponent(getEmailFormattedSummary(SLIDES))).toContain('(Slide at 00:30)');
+    expect(decodeURIComponent(getEmailFormattedSummary(SLIDES))).not.toContain('keyframe:');
+    const edited = 'Notes\n\n![Slide at 01:00](keyframe:f1)';
+    expect(getTextFileFormattedSummary(edited)).toBe('Notes\n\n(Slide at 01:00)');
+    // The meetings list's preview and popover.
+    expect(getTextOnlySummary(edited)).toBe('Notes\n\n(Slide at 01:00)');
+    expect(getTextOnlySummary(JSON.stringify({ SUMMARY: 'See ![Slide at 00:30](keyframe:f2)' }))).toBe(
+      'See (Slide at 00:30)',
+    );
+  });
+
+  it('keeps the pictures for the page, and leaves other images and links alone', () => {
+    expect(getMarkdownSummary(SLIDES)).toContain('![Slide at 00:30](keyframe:0000030000-ab12cd)');
+    const other = '![chart](https://example.com/c.png) [keyframe:x](keyframe:x)';
+    expect(keyframeImagesAsText(other)).toBe(other);
   });
 });

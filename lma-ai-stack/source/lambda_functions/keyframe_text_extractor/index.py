@@ -16,10 +16,10 @@ every word, and the model also says what a chart shows, for a tenth of the
 price per frame (docs/meeting-video.md, "Slide text").
 
 Idempotent: a frame that already has its text is left alone, so a redelivered
-event costs nothing. Every failure is logged and ends the invocation without
-an error, and the function's asynchronous invoke allows no retries, so a model
-call is never repeated; the frame then simply has no text, which the readers
-handle.
+event costs nothing. An AWS error or an answer with no text is logged and ends
+the invocation without an error; anything else ends it with one. Either way the
+function's asynchronous invoke allows no retries, so a model call is never
+repeated, and the frame simply has no text, which the readers handle.
 """
 
 from __future__ import annotations

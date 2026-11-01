@@ -3,6 +3,7 @@
 # See the LICENSE file in the project root for full license information.
 
 #
+import bisect
 import json
 import logging
 import os
@@ -135,6 +136,44 @@ def get_keyframes(callid):
             break
         start_key = next_key
     return sorted(frames, key=lambda f: f["Timestamp"])
+
+
+def segment_start(row):
+    """When a segment began, in seconds on the meeting's clock (its end if it has no start)."""
+    value = row.get("StartTime", row.get("EndTime"))
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+#: What one frame's "Said" holds at most, the start of what was said; the
+#: summary uses no more than this of it (MAX_SAID_CHARS there), and the bound
+#: keeps the response well inside a synchronous invoke's 6 MB.
+MAX_SAID_CHARS = 3000
+
+
+def attach_said(frames, segments, condense, include_speaker, metadata):
+    """Give each frame "Said": the transcript spoken while it was on screen.
+
+    A frame is on screen from its Timestamp until the next frame's, and the last
+    one until the end of the meeting; a segment belongs to the frame on screen
+    when it began. The lines are formatted as the transcript is, speaker names
+    included, so the summary's "Slides presented" section can say what was
+    said about each slide (docs/meeting-video.md).
+    """
+    starts = [frame["Timestamp"] for frame in frames]
+    by_frame = [[] for _ in frames]
+    for row in segments:
+        # The last frame that went up at or before the segment began (frames
+        # are in time order); none before the first frame.
+        index = bisect.bisect_right(starts, segment_start(row)) - 1
+        if index >= 0:
+            by_frame[index].append(row)
+    for frame, rows in zip(frames, by_frame):
+        said = "".join(preprocess_transcripts(rows, condense, include_speaker, metadata)).strip()
+        frame["Said"] = said[:MAX_SAID_CHARS]
+    return frames
 
 
 # Trailing voice id the transcriber appends when speaker separation is on, e.g.
@@ -316,12 +355,14 @@ def lambda_handler(event, context):
     # Read the meeting row before assembling the text: it carries the speaker
     # identity map that turns a stored voice id into a name.
     metadata = get_call_metadata(callid)
-    transcripts = get_transcripts(callid)
-    transcripts = preprocess_transcripts(transcripts, preProcess, includeSpeaker, metadata)
+    segments = get_transcripts(callid)
+    transcripts = preprocess_transcripts(segments, preProcess, includeSpeaker, metadata)
     transcript_string = "".join(transcripts)
     response = {"transcript": transcript_string, "metadata": metadata}
     if data.get("IncludeKeyframes"):
-        response["keyframes"] = get_keyframes(callid)
+        response["keyframes"] = attach_said(
+            get_keyframes(callid), segments, preProcess, includeSpeaker, metadata
+        )
     # Log the shape of the response rather than the response. Everything this
     # function returns is meeting content, and the counts are what is actually
     # useful when diagnosing a short or empty transcript.

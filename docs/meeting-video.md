@@ -78,6 +78,62 @@ Every method read every word; the model costs a tenth of Textract and also says
 what a chart shows, which Textract does not. The text read is metered against
 the meeting under **Slide text** in its [cost estimate](meeting-cost-estimate.md).
 
+## Slides presented in the summary
+
+A meeting with key frames gets a **SLIDES PRESENTED** section in its
+[summary](transcript-summarization.md): one entry per slide, in the order shown,
+with the time it went up, its title, its thumbnail and a sentence or two on what
+was said while it was on screen. The prompt asks the model to merge
+consecutive frames of one slide (the same slide twice, or a slide built up
+point by point) into one entry, and to leave out frames with nothing on them,
+such as an empty desktop; how well it does so depends on the model (see the
+measurements below). A meeting without
+key frames gets no such section, as a meeting without an agenda gets no agenda
+section.
+
+How it is built:
+
+- The fetch-transcript function gives each key frame **what was said** while it
+  was on screen: the transcript segments that began between it and the next
+  frame, with the speaker names the transcript shows.
+- The section's prompt names the `{slides}` placeholder, which the summarizer
+  fills with each frame's time, its picture reference
+  (`![Slide at 12:30](keyframe:<FrameId>)`), its [slide text](#slide-text) and
+  what was said, and the prompt asks the model to copy the picture reference
+  exactly. The transcript itself is not sent with this section. At most 60
+  frames are listed (past that, the ones on screen for the shortest time are
+  left out), with each frame's text cut at 1,500 characters and its speech at
+  3,000 (the fetch-transcript function sends no more than that).
+- The meeting page and the embeddable summary panel show each picture
+  reference as the frame's thumbnail, read through `getVideoKeyframes` for that
+  meeting with the same access check as the strip; selecting it opens the full
+  picture. A frame that cannot be read, because the meeting's retention has
+  removed it, shows as its alt text. Copy, download, Word, email, the meetings
+  list's summary preview and the MCP `get_meeting_summary` tool show the alt
+  text too, and so does the summary document for the meeting-history knowledge
+  base.
+
+The section is a prompt in the `summary_prompt_templates` section like any
+other, so it can be edited, replaced or removed (set it to `NONE`) on the
+**Transcript Summary** page. A prompt of your own can use `{slides}` as well.
+
+Measured with the shipped prompt on the synthetic meeting (14 key frames: ten
+slides, one of them taken twice, and three pages of a document), every model
+copied every picture reference exactly, and none copied the `Image:` label
+with it:
+
+| Model | Entries | Input / output tokens | Cost for the section |
+|---|---|---|---|
+| Claude Sonnet 5.5 (the stack's default summary model) | 11 | 2,895 / 1,001 | about $0.016 |
+| Claude Haiku 4.5 | 13 | 1,943 / 816 | about $0.006 |
+| Amazon Nova 2 Lite | 11 | 1,753 / 598 | about $0.002 |
+| Amazon Nova Lite | 13 | 1,893 / 757 | about $0.0003 |
+
+A reasonable count is 11 to 13, depending on whether the three document pages
+are taken as one item or three, with the repeated slide merged; every result
+falls in that range. The cost is metered with the rest of the
+summary, under **Summary**.
+
 ## Asking the assistant about the shared screen
 
 The meeting assistant has a `get_meeting_frames` tool that reads the key frames

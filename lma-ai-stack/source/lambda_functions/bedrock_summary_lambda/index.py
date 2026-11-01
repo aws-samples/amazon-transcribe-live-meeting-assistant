@@ -54,7 +54,29 @@ PROMPT_KEY_PATTERN = re.compile(r"^\d+#")
 # and for a meeting without one there is nothing to report, so the section is
 # left out of the summary rather than generated empty. See docs/meeting-agenda.md.
 AGENDA_PLACEHOLDER = "{agenda}"
-PLACEHOLDERS = re.compile(r"\{transcript\}|\{agenda\}")
+
+# A prompt that names the slides shown in the meeting: each key frame of the
+# shared screen with its time, its picture reference, its text and what was said
+# while it was up. Run only for a meeting that has key frames, as the agenda
+# section is run only for a meeting that has an agenda. See docs/meeting-video.md.
+SLIDES_PLACEHOLDER = "{slides}"
+PLACEHOLDERS = re.compile(r"\{transcript\}|\{agenda\}|\{slides\}")
+
+#: Bounds on what one meeting's slides add to the prompt. A meeting keeps at
+#: most 1,000 frames; past MAX_SLIDES, the frames on screen for the shortest
+#: time are left out, since a slide that was presented stayed up.
+MAX_SLIDES = 60
+MAX_SLIDE_TEXT_CHARS = 1500
+# fetch_transcript sends no more than this of each frame's speech either.
+MAX_SAID_CHARS = 3000
+
+# A key frame's id as the resolver and the meeting page accept it.
+FRAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+# A picture of a key frame in a summary, `![alt](keyframe:<FrameId>)`, which
+# the meeting page shows as the frame's thumbnail. Elsewhere -- the knowledge
+# base document here, the downloads in the page -- it becomes its alt text.
+KEYFRAME_IMAGE = re.compile(r"!\[([^\]\n]*)\]\(keyframe:[A-Za-z0-9_-]{1,64}\)")
 
 # List marks at the start of an agenda line, hidden as the meeting page hides
 # them (ui/src/components/common/agenda.js), so the prompt numbers the items the
@@ -241,12 +263,64 @@ def numbered_agenda(agenda):
     return "\n".join(f"{number}. {item}" for number, item in enumerate(items, start=1))
 
 
+def clip(text, limit):
+    """Text cut to at most `limit` characters, marked where it was cut."""
+    text = (text or "").strip() if isinstance(text, str) else ""
+    return text if len(text) <= limit else text[:limit].rstrip() + " [...]"
+
+
+def slides_for_prompt(keyframes):
+    """The meeting's key frames as the {slides} text, or "" when it has none.
+
+    Each entry carries the picture as ready-made markdown, which the prompt
+    asks the model to copy unchanged, so the summary refers to the frame by its
+    real id rather than one the model wrote.
+    """
+    frames = [
+        frame
+        for frame in keyframes or []
+        if isinstance(frame, dict) and FRAME_ID.match(str(frame.get("FrameId") or ""))
+    ]
+    if len(frames) > MAX_SLIDES:
+        shown_for = {}
+        for position, frame in enumerate(frames):
+            following = frames[position + 1] if position + 1 < len(frames) else None
+            shown_for[id(frame)] = (
+                float(following.get("Timestamp") or 0) - float(frame.get("Timestamp") or 0)
+                if following
+                else float("inf")
+            )
+        kept = {id(f) for f in sorted(frames, key=lambda f: -shown_for[id(f)])[:MAX_SLIDES]}
+        print(f"Slides: listing the {MAX_SLIDES} longest shown of {len(frames)} key frames")
+        frames = [frame for frame in frames if id(frame) in kept]
+    entries = []
+    for frame in frames:
+        time = format_elapsed(frame.get("Timestamp"))
+        text = clip(frame.get("SlideText"), MAX_SLIDE_TEXT_CHARS) or "(none read)"
+        said = clip(frame.get("Said"), MAX_SAID_CHARS) or "(nothing)"
+        entries.append(
+            "<slide>\n"
+            f"Time: {time}\n"
+            f"Image: ![Slide at {time[1:-1]}](keyframe:{frame['FrameId']})\n"
+            f"Text on screen:\n{text}\n"
+            f"Said while it was on screen:\n{said}\n"
+            "</slide>"
+        )
+    return "\n".join(entries)
+
+
 def generate_summary(
-    transcript, prompt_override, refresh_configuration=False, call_id=None, agenda=None
+    transcript,
+    prompt_override,
+    refresh_configuration=False,
+    call_id=None,
+    agenda=None,
+    keyframes=None,
 ):
     # first check to see if this is one prompt, or many prompts as a json
     templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
     agenda_text = numbered_agenda(agenda)
+    slides_text = None
     result = {}
     for item in templates:
         key = list(item.keys())[0]
@@ -255,9 +329,19 @@ def generate_summary(
             if not agenda_text:
                 print(f"Skipping summary section '{key}': the meeting has no agenda.")
                 continue
-        # Both placeholders in one pass, so text inserted for one -- an agenda
-        # line that reads "{transcript}", say -- is never read as the other.
-        values = {"{transcript}": transcript, AGENDA_PLACEHOLDER: agenda_text}
+        if SLIDES_PLACEHOLDER in prompt:
+            if slides_text is None:
+                slides_text = slides_for_prompt(keyframes)
+            if not slides_text:
+                print(f"Skipping summary section '{key}': nothing was shared on screen.")
+                continue
+        # All placeholders in one pass, so text inserted for one -- an agenda
+        # line that reads "{transcript}", say -- is never read as another.
+        values = {
+            "{transcript}": transcript,
+            AGENDA_PLACEHOLDER: agenda_text,
+            SLIDES_PLACEHOLDER: slides_text or "",
+        }
         prompt = PLACEHOLDERS.sub(lambda match: values[match.group(0)], prompt)
         print("Prompt:", prompt)
         response = call_bedrock(prompt, call_id)
@@ -295,8 +379,13 @@ def getKBMetadata(metadata):
     return json.dumps(kbMetadata)
 
 
+def keyframe_images_as_text(text):
+    """A summary's key-frame pictures as their alt text, for a reader that cannot show them."""
+    return KEYFRAME_IMAGE.sub(lambda match: f"({match.group(1)})", text)
+
+
 def format_summary(summary, metadata):
-    summary_dict = json.loads(summary)
+    summary_dict = json.loads(keyframe_images_as_text(summary))
     summary_dict["MEETING NAME"] = metadata["CallId"]
     summary_dict["MEETING DATE AND TIME"] = metadata["CreatedAt"]
     summary_dict["MEETING DURATION (SECONDS)"] = int(
@@ -380,6 +469,7 @@ def handler(event, context):
             refresh_configuration,
             callId,
             agenda=(metadata or {}).get("Agenda"),
+            keyframes=transcript_json.get("keyframes"),
         )
         if not prompt_override:
             # only write to S3 when using default summary prompt
