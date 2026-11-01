@@ -70,7 +70,7 @@ def authorize_vp_access(dynamodb, table_name: str, vp_id: str, identity: dict, l
     # "Not authorized", because both lookups silently returned empty.
     owner = vp.get("Owner", {}).get("S", "") or vp.get("owner", {}).get("S", "")
     shared_raw = vp.get("SharedWith", {}).get("S", "")
-    shared = {v.strip() for v in shared_raw.split(",") if v.strip()}
+    shared = {v.strip() for v in shared_raw.strip().strip("[]").split(",") if v.strip()}
 
     # Admins may view any VP, matching the subscription filter's group check.
     is_admin = "Admin" in caller_groups(identity)
