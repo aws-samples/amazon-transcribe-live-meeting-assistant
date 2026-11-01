@@ -96,6 +96,33 @@ def _get_caller_identity(event):
     }
 
 
+# BEGIN shared_with_entries -- one text in every Lambda that reads SharedWith;
+# lma-ai-stack/test/test_shared_with_access.py holds the copies to it.
+# The entries of a SharedWith value, read as the AppSync resolvers read them
+# (the "SharedWith entries" VTL block and sharedWithEntries in the JS
+# resolvers): a list, tuple or set holds one entry per string element, and a
+# string -- comma-separated or "[a, b]" -- is split at every "[", "]" and ",".
+# Those three characters only ever separate entries, so a list element that
+# contains one is not an entry. Entries are trimmed and empty ones dropped;
+# membership is then a comparison of whole entries.
+def shared_with_entries(value: object) -> list:
+    """The trimmed, non-empty entries of a SharedWith value."""
+    if isinstance(value, str):
+        parts = value.replace("[", ",").replace("]", ",").split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        parts = [
+            part
+            for part in value
+            if isinstance(part, str) and not any(separator in part for separator in "[],")
+        ]
+    else:
+        return []
+    return [part.strip() for part in parts if part.strip()]
+
+
+# END shared_with_entries
+
+
 def _call_visible_to(caller, detail_item):
     """Match the previous listCalls.response.vtl filter: allow if caller is
     owner or listed in SharedWith. Admins see everything.
@@ -104,16 +131,10 @@ def _call_visible_to(caller, detail_item):
         return True
 
     owner = detail_item.get("Owner") or ""
-    shared_with_raw = detail_item.get("SharedWith")
     # Every stored shape, compared whole entry by entry as getCall compares them:
     # the List shareCall writes, a string set (a Python set here), and the
     # comma-separated or "[a, b]" String of older rows.
-    shared_with = []
-    if isinstance(shared_with_raw, str):
-        entries = shared_with_raw.strip().strip("[]").split(",")
-        shared_with = [s.strip() for s in entries if s.strip()]
-    elif isinstance(shared_with_raw, (list, set, tuple)):
-        shared_with = [str(s).strip() for s in shared_with_raw if s]
+    shared_with = shared_with_entries(detail_item.get("SharedWith"))
 
     identities = {i for i in (caller["username"], caller["email"]) if i}
     if owner in identities:

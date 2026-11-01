@@ -7476,18 +7476,60 @@ Resources:
         #end
         $utils.toJson($context.result)
 
+  # The VNC preview of a meeting is opened and closed for the people getCall
+  # answers for that meeting -- its owner, the users it is shared with, Admins --
+  # and for backend roles with IAM credentials (the meeting assistant's VNC
+  # preview tool). toggleVNCPreview is a pipeline: MeetingAccessAppSyncFunction
+  # reads the meeting and refuses anyone else (see meetingAccess.js), and
+  # ToggleVNCPreviewAppSyncFunction then records the event. onVNCPreviewToggle
+  # applies the same rule to subscribers.
+  MeetingAccessAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: MeetingAccess
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/meetingAccess.js
+
+  ToggleVNCPreviewAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ToggleVNCPreviewWrite
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      Runtime:
+        Name: APPSYNC_JS
+        RuntimeVersion: 1.0.0
+      CodeS3Location: ../source/appsync/toggleVNCPreview.js
+
   ToggleVNCPreviewResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: toggleVNCPreview
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt MeetingAccessAppSyncFunction.FunctionId
+          - !GetAtt ToggleVNCPreviewAppSyncFunction.FunctionId
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
-      CodeS3Location: ../source/appsync/toggleVNCPreview.js
+      Code: |
+        export function request() {
+          return {};
+        }
+
+        export function response(ctx) {
+          return ctx.prev.result;
+        }
 
   OnVNCPreviewToggleResolver:
     Type: AWS::AppSync::Resolver
@@ -7496,8 +7538,8 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Subscription
       FieldName: onVNCPreviewToggle
-      DataSourceName: !GetAtt SubscriptionDataSource.Name
-      CodeS3Location: ../source/appsync/onVNCPreviewToggle.js
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      CodeS3Location: ../source/appsync/meetingAccess.js
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
@@ -7532,7 +7574,7 @@ Resources:
 
   # The chat messages carry no Owner or SharedWith, so these two subscriptions
   # read the meeting when they are made and are answered to the people getCall
-  # answers; see chatSubscription.js.
+  # answers; see meetingAccess.js.
   OnSendChatMessageAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -7541,7 +7583,7 @@ Resources:
       TypeName: Subscription
       FieldName: onSendChatMessage
       DataSourceName: !GetAtt AppSyncDataSource.Name
-      CodeS3Location: ../source/appsync/chatSubscription.js
+      CodeS3Location: ../source/appsync/meetingAccess.js
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
@@ -7554,7 +7596,7 @@ Resources:
       TypeName: Subscription
       FieldName: onAddChatToken
       DataSourceName: !GetAtt AppSyncDataSource.Name
-      CodeS3Location: ../source/appsync/chatSubscription.js
+      CodeS3Location: ../source/appsync/meetingAccess.js
       Runtime:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
@@ -8543,6 +8585,9 @@ Resources:
         }
       ResponseMappingTemplateS3Location: ../source/appsync/updateVirtualParticipant.response.vtl
 
+  # Acknowledging a failure is for the Virtual Participant's owner and Admins
+  # (the field is for signed-in users only), on the same "Virtual Participant
+  # owner condition" as sharing it.
   AcknowledgeVPFailureResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -8555,6 +8600,39 @@ Resources:
         ## Sets userAcknowledgedFailure=true on the VP row so the running
         ## container can short-circuit its post-FAILED grace-period wait
         ## and tear down the ALB/VNC mapping immediately.
+        ## The row must exist: UpdateItem would otherwise create one.
+        #set( $conditions = ["attribute_exists(#conditionId)"] )
+        #set( $conditionNames = { "#conditionId": "id" } )
+        #set( $conditionValues = {} )
+        ## BEGIN Virtual Participant owner condition -- one text in every template
+        ## that has it; test_shared_with_access.py holds the copies to it.
+        ## A signed-in caller who is not an Admin may change a Virtual Participant
+        ## only as its Owner. The rule is added to the write's DynamoDB condition,
+        ## so it is judged on the row as it is when the write happens. Admins, and
+        ## backend roles with IAM credentials (the Virtual Participant task and
+        ## the Lambdas that launch and manage it), are not held to it; a backend
+        ## role is detected as getCall.response.vtl detects it.
+        #set( $vpCallerRestricted = true )
+        #if( $ctx.identity.userArn && $ctx.identity.userArn.contains(":assumed-role/") )
+          #set( $vpCallerRestricted = false )
+        #elseif( $ctx.identity.groups && $ctx.identity.groups.contains("Admin") )
+          #set( $vpCallerRestricted = false )
+        #end
+        #if( $vpCallerRestricted )
+          $util.qr( $conditionNames.put("#conditionOwner", "Owner") )
+          $util.qr( $conditionValues.put(":conditionCaller", $util.dynamodb.toDynamoDB($util.defaultIfNull($ctx.identity.username, ""))) )
+          $util.qr( $conditions.add("#conditionOwner = :conditionCaller") )
+        #end
+        $util.qr( $ctx.stash.put("vpCallerRestricted", $vpCallerRestricted) )
+        ## END Virtual Participant owner condition
+
+        #set( $conditionExpression = "" )
+        #foreach( $condition in $conditions )
+          #set( $conditionExpression = "${conditionExpression}${condition}" )
+          #if( $foreach.hasNext )
+            #set( $conditionExpression = "${conditionExpression} AND " )
+          #end
+        #end
         {
           "version": "2018-05-29",
           "operation": "UpdateItem",
@@ -8571,10 +8649,23 @@ Resources:
               ":uack": $util.dynamodb.toDynamoDBJson(true),
               ":updatedAt": $util.dynamodb.toDynamoDBJson($util.time.nowISO8601())
             }
+          },
+          "condition": {
+            "expression": "$conditionExpression",
+            "expressionNames": $utils.toJson($conditionNames)
+          #if( !$conditionValues.isEmpty() )
+            ,"expressionValues": $utils.toJson($conditionValues)
+          #end
           }
         }
       ResponseMappingTemplate: |
-        #if($ctx.error)
+        #if( $ctx.error )
+          #if( $ctx.error.type == "DynamoDB:ConditionalCheckFailedException" )
+            #if( $ctx.stash.vpCallerRestricted )
+              $util.error("User $ctx.identity.username is not authorized to change Virtual Participant $ctx.args.virtualParticipantId", "AuthorizationError")
+            #end
+            $util.error("Virtual Participant $ctx.args.virtualParticipantId was not found", "NotFound")
+          #end
           $util.error($ctx.error.message, $ctx.error.type)
         #end
         true
@@ -10055,7 +10146,72 @@ Resources:
           "SharedWith": $ctx.result.SharedWith
         })
 
-  # Same rule as shareVirtualParticipant.
+  # Same rule as shareVirtualParticipant. Unsharing removes the entries named
+  # and keeps the others, so it is a pipeline: the row is read, and the write
+  # (unshareVirtualParticipant.request.vtl) stores what remains, on condition
+  # that SharedWith is still as read.
+  ReadVirtualParticipantSharingAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: ReadVirtualParticipantSharing
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplate: |
+        {
+          "version": "2018-05-29",
+          "operation": "GetItem",
+          "key": {
+            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+          },
+          "consistentRead": true
+        }
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        ## What the write needs from the row: whether it exists, its Owner (to
+        ## say why a refused write was refused) and its SharedWith as read.
+        #if( $ctx.result )
+          $util.qr( $ctx.stash.put("vpFound", true) )
+          $util.qr( $ctx.stash.put("vpOwnerAsRead", $util.defaultIfNull($ctx.result.Owner, "")) )
+          #if( !$util.isNull($ctx.result.SharedWith) )
+            $util.qr( $ctx.stash.put("sharedWithAsRead", $ctx.result.SharedWith) )
+          #end
+        #else
+          $util.qr( $ctx.stash.put("vpFound", false) )
+        #end
+        {}
+
+  UnshareVirtualParticipantAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UnshareVirtualParticipantWrite
+      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/unshareVirtualParticipant.request.vtl
+      ResponseMappingTemplate: |
+        #if( $ctx.error )
+          #if( $ctx.error.type == "DynamoDB:ConditionalCheckFailedException" )
+            #if( $ctx.stash.vpCallerRestricted && $ctx.stash.vpOwnerAsRead != $ctx.identity.username )
+              $util.error("User $ctx.identity.username is not authorized to change Virtual Participant $ctx.args.input.id", "AuthorizationError")
+            #end
+            #if( !$ctx.stash.vpFound )
+              $util.error("Virtual Participant $ctx.args.input.id was not found", "NotFound")
+            #end
+            $util.error("The sharing of Virtual Participant $ctx.args.input.id changed while it was being updated; try again", "ConflictError")
+          #end
+          $util.error($ctx.error.message, $ctx.error.type)
+        #end
+        ## The entries removed, as the input named them.
+        $util.toJson({
+          "id": $ctx.args.input.id,
+          "SharedWith": $ctx.args.input.SharedWith
+        })
+
   UnshareVirtualParticipantResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
@@ -10063,76 +10219,13 @@ Resources:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       TypeName: Mutation
       FieldName: unshareVirtualParticipant
-      DataSourceName: !GetAtt VirtualParticipantDataSource.Name
-      RequestMappingTemplate: |
-        ## The row must exist: UpdateItem would otherwise create one.
-        #set( $conditions = ["attribute_exists(#conditionId)"] )
-        #set( $conditionNames = { "#conditionId": "id" } )
-        #set( $conditionValues = {} )
-        ## BEGIN Virtual Participant owner condition -- one text in every template
-        ## that has it; test_shared_with_access.py holds the copies to it.
-        ## A signed-in caller who is not an Admin may change a Virtual Participant
-        ## only as its Owner. The rule is added to the write's DynamoDB condition,
-        ## so it is judged on the row as it is when the write happens. Admins, and
-        ## backend roles with IAM credentials (the Virtual Participant task and
-        ## the Lambdas that launch and manage it), are not held to it; a backend
-        ## role is detected as getCall.response.vtl detects it.
-        #set( $vpCallerRestricted = true )
-        #if( $ctx.identity.userArn && $ctx.identity.userArn.contains(":assumed-role/") )
-          #set( $vpCallerRestricted = false )
-        #elseif( $ctx.identity.groups && $ctx.identity.groups.contains("Admin") )
-          #set( $vpCallerRestricted = false )
-        #end
-        #if( $vpCallerRestricted )
-          $util.qr( $conditionNames.put("#conditionOwner", "Owner") )
-          $util.qr( $conditionValues.put(":conditionCaller", $util.dynamodb.toDynamoDB($util.defaultIfNull($ctx.identity.username, ""))) )
-          $util.qr( $conditions.add("#conditionOwner = :conditionCaller") )
-        #end
-        $util.qr( $ctx.stash.put("vpCallerRestricted", $vpCallerRestricted) )
-        ## END Virtual Participant owner condition
-
-        #set( $conditionExpression = "" )
-        #foreach( $condition in $conditions )
-          #set( $conditionExpression = "${conditionExpression}${condition}" )
-          #if( $foreach.hasNext )
-            #set( $conditionExpression = "${conditionExpression} AND " )
-          #end
-        #end
-        {
-          "version": "2018-05-29",
-          "operation": "UpdateItem",
-          "key": {
-            "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
-          },
-          "update": {
-            "expression": "SET #SharedWith = :val",
-            "expressionNames": { "#SharedWith": "SharedWith" },
-            "expressionValues": {
-              ":val": $util.dynamodb.toDynamoDBJson("")
-            }
-          },
-          "condition": {
-            "expression": "$conditionExpression",
-            "expressionNames": $utils.toJson($conditionNames)
-          #if( !$conditionValues.isEmpty() )
-            ,"expressionValues": $utils.toJson($conditionValues)
-          #end
-          }
-        }
-      ResponseMappingTemplate: |
-        #if( $ctx.error )
-          #if( $ctx.error.type == "DynamoDB:ConditionalCheckFailedException" )
-            #if( $ctx.stash.vpCallerRestricted )
-              $util.error("User $ctx.identity.username is not authorized to change Virtual Participant $ctx.args.input.id", "AuthorizationError")
-            #end
-            $util.error("Virtual Participant $ctx.args.input.id was not found", "NotFound")
-          #end
-          $util.error($ctx.error.message, $ctx.error.type)
-        #end
-        $util.toJson({
-          "id": $ctx.args.input.id,
-          "SharedWith": $ctx.args.input.SharedWith
-        })
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt ReadVirtualParticipantSharingAppSyncFunction.FunctionId
+          - !GetAtt UnshareVirtualParticipantAppSyncFunction.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
 
 
   ##########################################################################

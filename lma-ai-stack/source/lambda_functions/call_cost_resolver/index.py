@@ -105,12 +105,31 @@ def _caller(event: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _shared_with(raw: Any) -> set:
-    if isinstance(raw, str):
-        return {s.strip() for s in raw.strip("[]").split(",") if s.strip()}
-    if isinstance(raw, (list, tuple, set)):
-        return {str(s).strip() for s in raw if s}
-    return set()
+# BEGIN shared_with_entries -- one text in every Lambda that reads SharedWith;
+# lma-ai-stack/test/test_shared_with_access.py holds the copies to it.
+# The entries of a SharedWith value, read as the AppSync resolvers read them
+# (the "SharedWith entries" VTL block and sharedWithEntries in the JS
+# resolvers): a list, tuple or set holds one entry per string element, and a
+# string -- comma-separated or "[a, b]" -- is split at every "[", "]" and ",".
+# Those three characters only ever separate entries, so a list element that
+# contains one is not an entry. Entries are trimmed and empty ones dropped;
+# membership is then a comparison of whole entries.
+def shared_with_entries(value: object) -> list:
+    """The trimmed, non-empty entries of a SharedWith value."""
+    if isinstance(value, str):
+        parts = value.replace("[", ",").replace("]", ",").split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        parts = [
+            part
+            for part in value
+            if isinstance(part, str) and not any(separator in part for separator in "[],")
+        ]
+    else:
+        return []
+    return [part.strip() for part in parts if part.strip()]
+
+
+# END shared_with_entries
 
 
 def _require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
@@ -134,7 +153,7 @@ def _require_call_access(caller: Mapping[str, Any], call_id: str) -> None:
     item = response.get("Item") or {}
     owner = (item.get("Owner") or {}).get("S", "")
     shared_raw = item.get("SharedWith") or {}
-    shared = _shared_with(
+    shared = shared_with_entries(
         shared_raw.get("S") or shared_raw.get("SS") or [v.get("S") for v in shared_raw.get("L", [])]
     )
     username = caller["username"]

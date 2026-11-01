@@ -20,6 +20,33 @@ record's own ``Owner`` / ``SharedWith`` attributes.
 from __future__ import annotations
 
 
+# BEGIN shared_with_entries -- one text in every Lambda that reads SharedWith;
+# lma-ai-stack/test/test_shared_with_access.py holds the copies to it.
+# The entries of a SharedWith value, read as the AppSync resolvers read them
+# (the "SharedWith entries" VTL block and sharedWithEntries in the JS
+# resolvers): a list, tuple or set holds one entry per string element, and a
+# string -- comma-separated or "[a, b]" -- is split at every "[", "]" and ",".
+# Those three characters only ever separate entries, so a list element that
+# contains one is not an entry. Entries are trimmed and empty ones dropped;
+# membership is then a comparison of whole entries.
+def shared_with_entries(value: object) -> list:
+    """The trimmed, non-empty entries of a SharedWith value."""
+    if isinstance(value, str):
+        parts = value.replace("[", ",").replace("]", ",").split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        parts = [
+            part
+            for part in value
+            if isinstance(part, str) and not any(separator in part for separator in "[],")
+        ]
+    else:
+        return []
+    return [part.strip() for part in parts if part.strip()]
+
+
+# END shared_with_entries
+
+
 def caller_identity(identity: dict) -> str:
     """The caller's identity string, or "" when AppSync supplied none.
 
@@ -65,12 +92,18 @@ def authorize_vp_access(dynamodb, table_name: str, vp_id: str, identity: dict, l
     # Field names and semantics match the canonical subscription filter in
     # source/appsync/subscription.js: Owner (capital O) equals identity.username,
     # or identity.username is a whole entry of SharedWith, as the VTL access
-    # checks compare it. SharedWith is a comma-ish String, not a List --
-    # reading it as a List (and "owner" lowercase) made every request fail
-    # "Not authorized", because both lookups silently returned empty.
+    # checks compare it. A Virtual Participant row stores SharedWith as a
+    # comma-separated String (and "Owner" with a capital O); a List or string
+    # set is read too, through the same shared_with_entries rule.
     owner = vp.get("Owner", {}).get("S", "") or vp.get("owner", {}).get("S", "")
-    shared_raw = vp.get("SharedWith", {}).get("S", "")
-    shared = {v.strip() for v in shared_raw.strip().strip("[]").split(",") if v.strip()}
+    shared_raw = vp.get("SharedWith") or {}
+    shared = set(
+        shared_with_entries(
+            shared_raw.get("S")
+            or shared_raw.get("SS")
+            or [v.get("S") for v in shared_raw.get("L", [])]
+        )
+    )
 
     # Admins may view any VP, matching the subscription filter's group check.
     is_admin = "Admin" in caller_groups(identity)
