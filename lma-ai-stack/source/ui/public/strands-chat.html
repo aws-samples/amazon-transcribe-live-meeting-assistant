@@ -330,6 +330,22 @@
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
+        /* The full-size view of a frame (see openKeyframeOverlay). */
+        .lma-keyframe-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.75);
+            cursor: zoom-out;
+        }
+        .lma-keyframe-overlay img {
+            max-width: 96vw;
+            max-height: 96vh;
+            border-radius: 4px;
+        }
         /* A frame of the shared screen in an answer (see resolveKeyframes). */
         img.lma-keyframe {
             display: block;
@@ -416,11 +432,34 @@
             return renderMarkdownSafe(withKeyframePlaceholders(text));
         }
 
+        // The full-size picture is shown in this frame: the page frames it with
+        // a sandbox that allows no popups, so window.open would be dropped.
+        function openKeyframeOverlay(url, alt) {
+            const overlay = document.createElement('div');
+            overlay.className = 'lma-keyframe-overlay';
+            overlay.setAttribute('role', 'dialog');
+            overlay.setAttribute('aria-label', alt || 'Shared screen');
+            const big = document.createElement('img');
+            big.src = url;
+            big.alt = alt || '';
+            overlay.appendChild(big);
+            const close = () => {
+                overlay.remove();
+                document.removeEventListener('keydown', onKey);
+            };
+            const onKey = (event) => {
+                if (event.key === 'Escape') close();
+            };
+            overlay.addEventListener('click', close);
+            document.addEventListener('keydown', onKey);
+            document.body.appendChild(overlay);
+        }
+
         function showKeyframe(img, link) {
             const url = link && (link.image || link.thumbnail);
             if (!url || !url.startsWith('https://')) return;
             img.src = url;
-            img.title = 'Open full size';
+            img.title = 'Show full size';
             // An expired or failed link is fetched again, once.
             img.onerror = () => {
                 if (img.dataset.lmaRetried) return;
@@ -431,7 +470,7 @@
             };
             img.onclick = () => {
                 const current = freshLink(img.dataset.lmaKeyframe);
-                if (current) window.open(current.image || current.thumbnail, '_blank', 'noopener');
+                if (current) openKeyframeOverlay(current.image || current.thumbnail, img.alt);
                 else resolveKeyframes(img.parentElement);
             };
         }

@@ -307,7 +307,8 @@ type Query @aws_cognito_user_pools
 	# signed links to their images. Answered to the callers getCall answers: the
 	# meeting's owner, the people it is shared with, admins and backend roles.
 	# afterFrameId returns only the frames after that one, for a page that
-	# already has the earlier ones; frameId returns just that frame.
+	# already has the earlier ones; frameId returns just that frame, and with
+	# it limit, nextToken and afterFrameId are not used.
 	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String, afterFrameId: ID, frameId: ID): VideoKeyframeList
 	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
 	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
