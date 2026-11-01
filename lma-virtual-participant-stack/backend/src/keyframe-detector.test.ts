@@ -135,7 +135,7 @@ test('returning to a slide that was the last one kept is not a new frame', () =>
     assert.deepEqual(results, [false, false, false, false]);
 });
 
-test('pause forgets motion history, so a resumed share has to settle again', () => {
+test('after a pause a resumed share has to settle again', () => {
     const d = detector();
     const s1 = slide(1);
     const s2 = slide(2);

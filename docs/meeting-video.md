@@ -12,7 +12,8 @@ the shared screen each time it changes to something new and holds still — each
 slide of a deck, each page of a document, each new view of an application. Key
 frames are stored on the meeting beside the transcript, with times on the
 transcript's clock, so they can be lined up with what was said while each one
-was on screen. They are read through the AppSync API, described below.
+was on screen. The frames are listed through the AppSync API, described below;
+the images are not yet shown in the web UI.
 
 ## Which meetings have key frames
 
@@ -115,7 +116,10 @@ the task definition by hand is replaced at the next stack update.
 Each key frame is two JPEG images in the recordings bucket, under
 `lma-video-keyframes/<meeting>/` — a large one (1568 pixels wide) for reading the
 slide and a thumbnail (320 pixels wide) for lists — and an item on the meeting
-in the event-sourcing table (partition key `kf#<CallId>`), with:
+in the event-sourcing table (partition key `kf#<CallId>`). `<meeting>` is the
+CallId with every character other than letters, digits, `_` and `.` replaced by
+`_` and any leading and trailing `_` removed, which is how meeting deletion
+finds the images. The item has:
 
 | Field | Meaning |
 |---|---|
@@ -191,12 +195,9 @@ that uploads its own images can send the same event:
 
 `Timestamp`, both URLs (HTTPS), a known `Source` and a `FrameId` of at most 64
 characters are required; an event without them is logged and dropped, not
-retried. The meeting must
-already exist. Owner and sharing are taken from the meeting, and expiry from
-the deployment's transcript retention, not from the event. `<meeting>` is the CallId with every character other than letters,
-digits, `_` and `.` replaced by `_` and any leading and trailing `_` removed,
-which is how meeting deletion finds the
-images.
+retried. The meeting must already exist. Owner and sharing are taken from the
+meeting, and expiry from the deployment's transcript retention, not from the
+event.
 
 ## What key frames are not used for
 

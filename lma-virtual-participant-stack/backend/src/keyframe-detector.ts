@@ -207,11 +207,13 @@ export class KeyframeDetector {
     }
 
     /**
-     * Forget the motion history, keeping the last kept frame. Called when
-     * sampling pauses (the share stopped, the meeting was paused), so the
-     * first samples after it resumes are judged on their own rather than
-     * against a picture from before the gap. The last kept frame is kept so a
-     * share that resumes on the same slide is not captured twice.
+     * Forget the previous sample and the settle count, keeping the last kept
+     * frame and the motion mask. Called when sampling pauses (the share
+     * stopped, the meeting was paused), so the first samples after it resumes
+     * have to settle again rather than continue a run from before the gap. The
+     * last kept frame is kept so a share that resumes on the same slide is not
+     * captured twice; the mask is kept because the camera tiles beside a share
+     * are usually where they were.
      */
     pause(): void {
         this.previous = null;
