@@ -88,6 +88,7 @@ const createVirtualParticipant = /* GraphQL */ `
       updatedAt
       owner
       Owner
+      SharedWith
       CallId
       vncEndpoint
       vncPort

@@ -556,3 +556,44 @@ def test_a_meeting_is_shared_with_entries_free_of_separators(resources: dict) ->
         '$recipient.contains("[") || $recipient.contains("]") || $recipient.contains(",")'
     ) in template
     assert template.index("BadRequest") < template.index('"TransactWriteItems"')
+
+
+# ── what a new Virtual Participant's message carries ────────────────────────
+
+REPO = AI_STACK.parent
+SOURCE_SUFFIXES = {".py", ".js", ".jsx", ".ts"}
+SKIPPED_PARTS = {"node_modules", "dist", "build", ".aws-sam"}
+
+
+def _create_vp_selections() -> list:
+    """(path, selection set) of every createVirtualParticipant mutation the
+    repository sends. A subscription message carries only the fields the
+    mutation selected, and the onCreateVirtualParticipant filter reads Owner."""
+    found = []
+    for directory in ("lma-ai-stack/source", "lib", "lma-virtual-participant-stack", "utilities"):
+        for path in (REPO / directory).rglob("*"):
+            if path.suffix not in SOURCE_SUFFIXES or SKIPPED_PARTS & set(path.parts):
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore")
+            for match in re.finditer(r"createVirtualParticipant\(input: \$\w+\)\s*\{", text):
+                depth, end = 1, match.end()
+                while depth:
+                    depth += {"{": 1, "}": -1}.get(text[end], 0)
+                    end += 1
+                found.append((path.relative_to(REPO).as_posix(), text[match.end() : end - 1]))
+    return found
+
+
+def test_every_virtual_participant_create_selects_owner_and_shared_with() -> None:
+    selections = _create_vp_selections()
+    paths = {path for path, _ in selections}
+    for expected in (
+        "lma-ai-stack/source/lambda_functions/mcp_analytics/tools/schedule_meeting.py",
+        "lma-ai-stack/source/lambda_functions/mcp_analytics/tools/start_meeting_now.py",
+        "lma-ai-stack/source/ui/src/components/virtual-participant-layout/VirtualParticipantList.jsx",
+        "lib/lma_sdk/lma_sdk/operations/virtual_participant.py",
+    ):
+        assert expected in paths, expected
+    for path, selection in selections:
+        fields = set(re.findall(r"\b\w+\b", selection))
+        assert {"Owner", "SharedWith"} <= fields, path

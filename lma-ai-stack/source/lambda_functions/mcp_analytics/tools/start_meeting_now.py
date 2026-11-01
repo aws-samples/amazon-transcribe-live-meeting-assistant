@@ -87,6 +87,8 @@ def execute(
             meetingPassword
             status
             owner
+            Owner
+            SharedWith
             createdAt
             CallId
             vncEndpoint
