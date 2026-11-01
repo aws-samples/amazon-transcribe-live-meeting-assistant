@@ -1075,6 +1075,19 @@ def test_the_voice_enrollment_test_is_marked_as_an_optional_feature() -> None:
     )
 
 
+def test_the_desktop_video_tests_are_opt_in_optional_features() -> None:
+    """They need LMA_TEST_DESKTOP_VIDEO=1 and a stack that keeps desktop key frames.
+
+    Without the marker, the scheduled run's --no-skips would turn their opt-in
+    skip into a failure every night.
+    """
+    import test_desktop_video
+
+    names = [m.name for m in test_desktop_video.pytestmark]
+    assert "optional_feature" in names, names
+    assert "skipif" in names, names
+
+
 def test_every_marker_used_in_the_suite_is_registered() -> None:
     """An unregistered marker is silently ignored, so the exemption would lapse."""
     registered = (Path(__file__).resolve().parent / "pytest.ini").read_text()

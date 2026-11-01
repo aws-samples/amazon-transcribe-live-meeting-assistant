@@ -8,7 +8,8 @@ Stream Audio socket, H.264 fragmented MP4 over the app's second, video-only
 socket — and then checks what the stack stored: one key frame per slide, in
 order and at the slide's time on the transcript's clock, with both images in
 the recordings bucket. When the deployed meeting assistant has the shared-screen
-tool, it also asks "What did the last slide say?" and expects the answer to
+tool (``meeting_frames.py``, added by pull request #891 and not yet in this
+tree), it also asks "What did the last slide say?" and expects the answer to
 quote the last slide, whose text is never spoken. See desktop_video_probe.py.
 
 Opt-in. It runs only with ``LMA_TEST_DESKTOP_VIDEO=1``, because it takes about
@@ -37,7 +38,8 @@ import pytest
 
 ENABLED = os.environ.get("LMA_TEST_DESKTOP_VIDEO", "") not in ("", "0", "false")
 # A slide's frame is stamped when the picture first appeared, which is the
-# key frame at the slide change; allow one key frame interval either way.
+# key frame at the slide change; allow one key frame interval (2 s) either way,
+# plus half a second for the video socket opening after the audio.
 TIMESTAMP_TOLERANCE_SECONDS = 2.5
 QUESTION = "What did the last slide say?"
 
@@ -146,12 +148,13 @@ def test_assistant_reads_the_last_slide(run: dict, client) -> None:
     )
 
     if not assistant_has_frames_tool(client.stack_name, client.region):
+        # Skips even when opted in: the tool ships separately (#891), and a
+        # stack without it has nothing for this test to ask.
         pytest.skip("the deployed meeting assistant has no shared-screen tool (meeting_frames.py)")
     assert len(run["keyframes"]) == len(run["slides"]), (
         f"not asking: the slides were not all kept ({_frame_summary(run)})"
     )
-    answer = ask_assistant(client.stack_name, run["call_id"], run["username"], run["table"],
-                           QUESTION, client.region)
+    answer = ask_assistant(client.stack_name, run["call_id"], run["table"], QUESTION, client.region)
     assert not answer["function_error"], answer["response"]
     text = answer["message"]
     assert text, f"the assistant returned no message: {answer['response']}"

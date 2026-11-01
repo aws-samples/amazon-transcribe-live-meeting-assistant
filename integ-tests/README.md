@@ -169,13 +169,15 @@ What it asserts:
 | `test_desktop_video_streams_alongside_audio` | both sockets stayed open until their end events, every fragment was sent, and the meeting has transcript segments |
 | `test_desktop_video_keeps_one_key_frame_per_slide` | exactly five `kf#<CallId>` items, all `Source=DESKTOP_CAPTURE`, timestamps strictly increasing and each within 2.5 s of its slide's start on the transcript's clock (1, 9, 17, 25 and 33 s with the current narration), each with a `VideoOffset` |
 | `test_desktop_video_key_frame_images_are_stored` | both JPEGs of every frame exist in the recordings bucket, under `lma-video-keyframes/<meeting>/` |
-| `test_assistant_reads_the_last_slide` | invokes `STRANDS-<stack>-MeetingAssist` with "What did the last slide say?" and expects "heron" in the answer. Skips when the deployed function's package has no `meeting_frames.py` (the shared-screen tool) |
+| `test_assistant_reads_the_last_slide` | invokes `STRANDS-<stack>-MeetingAssist` with "What did the last slide say?" and expects "heron" in the answer. Skips, even with the flag, when the deployed function's package has no `meeting_frames.py`: the shared-screen tool comes with pull request #891, which is not merged yet |
 
 With the flag set, a missing dependency, ffmpeg or test user fails the run
 rather than skipping. Without it the four tests are reported as skipped,
 including under `make integ-tests-nightly`, because they carry the
 `optional_feature` marker. Zero key frames usually means the transcriber image
 predates desktop key frames or the stack has `EnableVideoRecording=false`.
+`--media-only` (below) prints the key frame times of the generated video, which
+are where the slides should land, offset by one second.
 
 The meeting (`desktop-video-probe-<UTC time>`) is not deleted: it expires with
 the deployment's transcript retention, and its Shared screen strip can be

@@ -14,10 +14,11 @@ What it does, in order:
    segment, then one ``moof``/``mdat`` fragment per two-second group of pictures).
 3. Opens a Stream Audio session over the transcriber WebSocket as the Cognito
    test user and streams the narration in real time, exactly as
-   ``ws_stream_probe.py`` does. One second in, it opens the second, video-only
+   ``ws_stream_probe.py`` does. Half a second in, it opens the second, video-only
    socket the app uses (``VideoSocket.swift`` / ``VideoSocket.cs``): the same
    endpoint and token, a ``START_VIDEO`` text frame carrying the call id and
-   ``videoTimeOffsetMs``, each fMP4 fragment as a binary frame at the moment the
+   ``videoTimeOffsetMs`` (one second: the first frame is one second into the
+   audio), each fMP4 fragment as a binary frame at the moment the
    app's encoder would have finished it, then ``END_VIDEO``.
 4. Ends the audio session and reads back what was stored: the meeting row,
    transcript segments, the key frame items (``kf#<CallId>``) and both images of
@@ -353,27 +354,33 @@ async def _stream(ws_ep: str, tokens: dict, call_id: str, agent_id: str, media: 
             # how far into the audio its first frame is.
             await asyncio.sleep(LEAD_SECONDS / 2)
             async with websockets.connect(url, max_size=None, open_timeout=25) as video_ws:
-                await video_ws.send(json.dumps({
-                    "callEvent": "START_VIDEO", "callId": call_id,
-                    "videoTimeOffsetMs": int(LEAD_SECONDS * 1000),
-                }))
-                init, frags = media.fragments[0], media.fragments[1:]
-                for i, frag in enumerate(frags):
-                    # A fragment is delivered once its two seconds have been
-                    # captured; the init segment arrives with the first one.
-                    due = t0 + LEAD_SECONDS + (i + 1) * KEYFRAME_SECONDS
-                    delay = due - time.monotonic()
-                    if delay > 0:
-                        await asyncio.sleep(delay)
-                    if i == 0:
-                        await video_ws.send(init)
-                        observed["video_bytes"] += len(init)
-                    await video_ws.send(frag)
-                    observed["fragments_sent"] += 1
-                    observed["video_bytes"] += len(frag)
-                observed["video_state"] = video_ws.state.name
-                await video_ws.send(json.dumps({"callEvent": "END_VIDEO", "callId": call_id}))
-                await asyncio.sleep(1.0)
+                try:
+                    await video_ws.send(json.dumps({
+                        "callEvent": "START_VIDEO", "callId": call_id,
+                        "videoTimeOffsetMs": int(LEAD_SECONDS * 1000),
+                    }))
+                    init, frags = media.fragments[0], media.fragments[1:]
+                    for i, frag in enumerate(frags):
+                        # A fragment is delivered once its two seconds have been
+                        # captured; the init segment arrives with the first one.
+                        due = t0 + LEAD_SECONDS + (i + 1) * KEYFRAME_SECONDS
+                        delay = due - time.monotonic()
+                        if delay > 0:
+                            await asyncio.sleep(delay)
+                        if i == 0:
+                            await video_ws.send(init)
+                            observed["video_bytes"] += len(init)
+                        await video_ws.send(frag)
+                        observed["fragments_sent"] += 1
+                        observed["video_bytes"] += len(frag)
+                    observed["video_state"] = video_ws.state.name
+                    await video_ws.send(json.dumps({"callEvent": "END_VIDEO", "callId": call_id}))
+                    await asyncio.sleep(1.0)
+                except websockets.ConnectionClosed:
+                    # The server closed the video socket early. Record how, and
+                    # let the audio carry on, so the test can report the close
+                    # code rather than error out of the fixture.
+                    observed["video_state"] = video_ws.state.name
             observed["video_close"] = video_ws.close_code
 
         await asyncio.gather(audio(), video())
@@ -471,7 +478,7 @@ def run_probe(stack_name: str, region: str | None = None, media: Media | None = 
     observed = asyncio.run(_stream(outs["LMAWebsocketEndpoint"], tokens, call_id, username, media))
 
     result: dict = {
-        "call_id": call_id, "username": username, "table": table,
+        "call_id": call_id, "table": table,
         "recordings_bucket": outs.get("RecordingsS3Bucket"),
         "slides": [s.title for s in media.slides],
         "expected_timestamps": media.expected_timestamps(),
@@ -517,9 +524,15 @@ def assistant_has_frames_tool(stack_name: str, region: str | None = None) -> boo
     return any(Path(n).name == "meeting_frames.py" for n in package.namelist())
 
 
-def ask_assistant(stack_name: str, call_id: str, user_email: str, table: str,
+def ask_assistant(stack_name: str, call_id: str, table: str,
                   question: str, region: str | None = None) -> dict:
+    """Ask the meeting assistant about the meeting, as the test user who owns it."""
     from botocore.config import Config
+
+    credentials = cognito_test_user.resolve(region)
+    if credentials is None:
+        raise cognito_test_user.CredentialsUnavailable(cognito_test_user.describe_sources())
+    user_email = credentials[0]
 
     lam = boto3.Session(region_name=region).client(
         "lambda", config=Config(read_timeout=310, retries={"max_attempts": 0}))
@@ -560,7 +573,7 @@ def main(argv: list[str]) -> int:
     res = run_probe(args.stack, region=args.region)
     print(json.dumps(res, indent=2, default=str))
     if assistant_has_frames_tool(args.stack, args.region):
-        ans = ask_assistant(args.stack, res["call_id"], res["username"], res["table"],
+        ans = ask_assistant(args.stack, res["call_id"], res["table"],
                             "What did the last slide say?", args.region)
         print(json.dumps(ans, indent=2, default=str))
     return 0
