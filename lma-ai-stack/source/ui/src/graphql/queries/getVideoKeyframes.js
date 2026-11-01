@@ -5,8 +5,14 @@
  */
 
 export default /* GraphQL */ `
-  query GetVideoKeyframes($callId: ID!, $limit: Int, $nextToken: String, $afterFrameId: ID) {
-    getVideoKeyframes(callId: $callId, limit: $limit, nextToken: $nextToken, afterFrameId: $afterFrameId) {
+  query GetVideoKeyframes($callId: ID!, $limit: Int, $nextToken: String, $afterFrameId: ID, $frameId: ID) {
+    getVideoKeyframes(
+      callId: $callId
+      limit: $limit
+      nextToken: $nextToken
+      afterFrameId: $afterFrameId
+      frameId: $frameId
+    ) {
       VideoKeyframes {
         CallId
         FrameId

@@ -85,7 +85,7 @@ key the price table is looked up by.
 | Summary | `bedrock/<model id>` | `inputTokens`, `outputTokens`, cache units | Meeting summary Lambda | The `usage` block of each Converse call — one per summary section. A regeneration runs every section again and is recorded again. |
 | SpeakerNaming | `bedrock/<model id>` | as above | Speaker name resolver | Each naming pass's model call. |
 | AgendaDerivation | `bedrock/<model id>` | as above | Agenda deriver | The model call of each pass that read the transcript for a stated agenda: the automatic one, at most once per meeting, and each press of **Derive agenda**. See [Meeting Agenda](meeting-agenda.md#deriving-an-agenda-from-the-transcript). |
-| MeetingAssistant | `bedrock/<model id>` | as above | Strands meeting assistant | The tokens the Strands SDK accumulated over every model call one answer took (an answer that uses tools is several calls), whether asked from the chat panel, by wake phrase or by the voice assistant. |
+| MeetingAssistant | `bedrock/<model id>` | as above | Strands meeting assistant | The tokens the Strands SDK accumulated over every model call one answer took (an answer that uses tools is several calls), whether asked from the chat panel, by wake phrase or by the voice assistant. When the answer looked at the shared screen, a second record counts the `images` sent; they are billed as the input tokens already counted, so the count is shown and not priced. See [Meeting Video and Key Frames](meeting-video.md#asking-the-assistant-about-the-shared-screen). |
 | VoiceAssistant | `bedrock/amazon.nova-2-sonic-v1:0` | `speechInputTokens`, `speechOutputTokens`, `textInputTokens`, `textOutputTokens` | Virtual Participant | The deltas of Nova Sonic's own `usageEvent`s, written every five minutes and when the assistant stops. Recorded in the region Nova Sonic ran in, which `AmazonNovaSonicRegion` can make different from the stack's. |
 | VirtualParticipant | `fargate/x86_64`, `fargate/arm64` | `vcpuSeconds`, `gbSeconds` | Virtual Participant | The task's vCPU and memory (from the ECS task metadata endpoint) multiplied by how long the process ran, with Fargate's one-minute minimum. Image pull and task start-up before the process starts are not included. |
 | VirtualParticipant | `lambda-microvm/arm64` | `vcpuSeconds`, `gbSeconds` | Virtual Participant | The MicroVM image's 4 GiB (2 vCPUs) multiplied by how long the process ran. |
@@ -146,6 +146,11 @@ must match a price entry exactly, and its unit must be named in that entry. Noth
 is guessed from a similar-looking entry. A line with no price is reported as
 unpriced, shown without a cost, left out of every total and counted in
 `UnpricedCount`. A plausible wrong number is worse than a visible gap.
+
+A unit named in `nonChargeableUnits` (the `images` the meeting assistant sends,
+for example) is shown with no cost and is not counted as unpriced. Changes to the
+price table replace a list rather than merging into it, so a custom
+`nonChargeableUnits` must list every such unit, `images` included.
 
 ### Changing a price
 

@@ -330,6 +330,33 @@
             border-radius: 50%;
             animation: spin 1s linear infinite;
         }
+        /* The full-size view of a frame (see openKeyframeOverlay). */
+        .lma-keyframe-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(0, 0, 0, 0.75);
+            cursor: zoom-out;
+        }
+        .lma-keyframe-overlay img {
+            max-width: 96vw;
+            max-height: 96vh;
+            border-radius: 4px;
+        }
+        /* A frame of the shared screen in an answer (see resolveKeyframes). */
+        img.lma-keyframe {
+            display: block;
+            max-width: 100%;
+            min-height: 40px;
+            margin: 6px 0;
+            border: 1px solid #e9ebed;
+            border-radius: 6px;
+            background: #f2f3f3;
+            cursor: zoom-in;
+        }
     </style>
     <!--
       Vendored locally to avoid an external CDN dependency. Versions are pinned;
@@ -386,6 +413,99 @@
         const PARENT_ORIGIN = window.location.origin;
 
         const isFromParent = (event) => event.origin === PARENT_ORIGIN;
+
+        // Frames of the shared screen in answers. The assistant shows one as
+        // ![alt](keyframe:<FrameId>) (see get_meeting_frames);
+        // withKeyframePlaceholders (js/render-markdown.js) turns each into a
+        // placeholder image carrying the id, and the page signs a link for it
+        // (STRANDS_RESOLVE_KEYFRAMES) through the meeting's access check.
+        // Signed links last an hour; one fetched more than this long ago is
+        // fetched again rather than shown.
+        const KEYFRAME_LINK_MS = 50 * 60 * 1000;
+        const keyframeLinks = new Map();
+        const freshLink = (frameId) => {
+            const link = keyframeLinks.get(frameId);
+            return link && Date.now() - link.fetchedAt < KEYFRAME_LINK_MS ? link : null;
+        };
+
+        function renderAssistantMarkdown(text) {
+            return renderMarkdownSafe(withKeyframePlaceholders(text));
+        }
+
+        // The full-size picture is shown in this frame: the page frames it with
+        // a sandbox that allows no popups, so window.open would be dropped.
+        function openKeyframeOverlay(url, alt) {
+            const overlay = document.createElement('div');
+            overlay.className = 'lma-keyframe-overlay';
+            overlay.setAttribute('role', 'dialog');
+            overlay.setAttribute('aria-label', alt || 'Shared screen');
+            const big = document.createElement('img');
+            big.src = url;
+            big.alt = alt || '';
+            overlay.appendChild(big);
+            const close = () => {
+                overlay.remove();
+                document.removeEventListener('keydown', onKey);
+            };
+            const onKey = (event) => {
+                if (event.key === 'Escape') close();
+            };
+            overlay.addEventListener('click', close);
+            document.addEventListener('keydown', onKey);
+            document.body.appendChild(overlay);
+        }
+
+        function showKeyframe(img, link) {
+            const url = link && (link.image || link.thumbnail);
+            if (!url || !url.startsWith('https://')) return;
+            img.src = url;
+            img.title = 'Show full size';
+            // An expired or failed link is fetched again, once.
+            img.onerror = () => {
+                if (img.dataset.lmaRetried) return;
+                img.dataset.lmaRetried = '1';
+                keyframeLinks.delete(img.dataset.lmaKeyframe);
+                img.removeAttribute('src');
+                resolveKeyframes(img.parentElement);
+            };
+            img.onclick = () => {
+                const current = freshLink(img.dataset.lmaKeyframe);
+                if (current) openKeyframeOverlay(current.image || current.thumbnail, img.alt);
+                else resolveKeyframes(img.parentElement);
+            };
+        }
+
+        function resolveKeyframes(root) {
+            if (!root) return;
+            const missing = new Set();
+            root.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                const link = freshLink(img.dataset.lmaKeyframe);
+                if (link) showKeyframe(img, link);
+                else missing.add(img.dataset.lmaKeyframe);
+            });
+            if (!missing.size) return;
+            const requestId = `kf-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            // A page that does not answer leaves the placeholders with their
+            // text, and no listener behind.
+            const giveUp = setTimeout(() => window.removeEventListener('message', onFrames), 30000);
+            const onFrames = (event) => {
+                if (!isFromParent(event) || event.data?.type !== 'STRANDS_KEYFRAMES' || event.data.requestId !== requestId) return;
+                clearTimeout(giveUp);
+                window.removeEventListener('message', onFrames);
+                const fetchedAt = Date.now();
+                Object.entries(event.data.frames || {}).forEach(([frameId, link]) =>
+                    keyframeLinks.set(frameId, { ...link, fetchedAt }));
+                root.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                    const link = freshLink(img.dataset.lmaKeyframe);
+                    if (link) showKeyframe(img, link);
+                });
+            };
+            window.addEventListener('message', onFrames);
+            window.parent.postMessage(
+                { type: 'STRANDS_RESOLVE_KEYFRAMES', requestId, callId, frameIds: [...missing].slice(0, 10) },
+                PARENT_ORIGIN,
+            );
+        }
 
         // Listen for reload message from parent
         window.addEventListener('message', (event) => {
@@ -648,9 +768,10 @@
             messageDiv.className = `message ${type}`;
             
             // Use markdown rendering for assistant messages, plain text for user/error
-            const rendered = type === 'assistant' ? renderMarkdownSafe(text) : null;
+            const rendered = type === 'assistant' ? renderAssistantMarkdown(text) : null;
             if (rendered !== null) {
                 messageDiv.innerHTML = rendered;
+                resolveKeyframes(messageDiv);
             } else {
                 messageDiv.textContent = text;
             }
@@ -797,9 +918,10 @@
                             
                             // Final render with markdown
                             if (accumulatedText) {
-                                const finalHtml = renderMarkdownSafe(accumulatedText);
+                                const finalHtml = renderAssistantMarkdown(accumulatedText);
                                 if (finalHtml !== null) {
                                     streamingMessageDiv.innerHTML = finalHtml;
+                                    resolveKeyframes(streamingMessageDiv);
                                 } else {
                                     streamingMessageDiv.textContent = accumulatedText;
                                 }
@@ -828,9 +950,14 @@
                             accumulatedText += token.Token;
                             
                             // Render markdown incrementally during streaming
-                            const partialHtml = renderMarkdownSafe(accumulatedText);
+                            const partialHtml = renderAssistantMarkdown(accumulatedText);
                             if (partialHtml !== null) {
                                 streamingMessageDiv.innerHTML = partialHtml;
+                                // Frames already resolved keep their picture while the answer streams.
+                                streamingMessageDiv.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
+                                    const link = freshLink(img.dataset.lmaKeyframe);
+                                    if (link) showKeyframe(img, link);
+                                });
                             } else {
                                 streamingMessageDiv.textContent = accumulatedText;
                             }

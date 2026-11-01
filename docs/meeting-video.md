@@ -38,6 +38,46 @@ the page, after the same access check as the transcript, and they last an
 hour; the strip renews them when one has expired. A meeting without key frames
 shows no section at all.
 
+## Asking the assistant about the shared screen
+
+The meeting assistant has a `get_meeting_frames` tool that reads the key frames
+a question is about — the last few, those in a time range, or the one on screen
+at a moment — each with what was said while it was on screen. For example:
+
+- "Summarize that slide." / "What's on this slide?"
+- "Translate the last slide into French."
+- "Show me the last two slides."
+- "What was on screen at 12:30?" / "Which slides did we see between 10:00 and 20:00?"
+
+The pictures go to the model as images when it reads them, which every model the
+stack offers does except Amazon Nova Micro; with Nova Micro the assistant gets
+the times and the transcript only, and says it could not read the slide. At most
+four pictures are sent with one tool call, and at most ten frames are listed.
+The assistant is told to describe what a frame shows and never to identify
+people from their faces.
+
+Where the answer appears decides how frames are shown:
+
+| Where the question was asked | Frames in the answer |
+|---|---|
+| The meeting page's chat panel | Shown as pictures in the answer; selecting one shows it full size over the chat. The answer refers to a frame by its id and the page fetches a signed link for it through `getVideoKeyframes`, with the same access check as the strip. |
+| The meeting chat (`LMA ask`, the Virtual Participant) | Described in words. Everyone in the meeting reads the answer, and the frames show what was shared with them. |
+| The voice assistant | Described in words, and spoken. |
+| The wake phrase (an answer written into the transcript) | Described in words. |
+
+**Cost.** A picture is billed as the model's input tokens, so it is included in
+the Meeting Assistant line of the meeting's
+[cost estimate](meeting-cost-estimate.md), and the number of pictures sent is
+listed beside it as an `images` count. Measured with one 1568 × 882 key frame on
+Bedrock:
+
+| Model | Input tokens one picture adds |
+|---|---|
+| Claude Haiku 4.5 | 1,564 |
+| Amazon Nova Lite | 2,114 |
+| Amazon Nova 2 Lite | 232 |
+| Amazon Nova Micro | none: the model does not accept images |
+
 ## Which meetings have key frames
 
 | Source | Key frames |
@@ -210,7 +250,7 @@ The AppSync API has a query and a subscription:
 
 ```graphql
 query {
-  getVideoKeyframes(callId: "<CallId>", limit: 100, nextToken: null, afterFrameId: null) {
+  getVideoKeyframes(callId: "<CallId>", limit: 100, nextToken: null, afterFrameId: null, frameId: null) {
     VideoKeyframes { FrameId Timestamp VideoOffset ShareDetected ThumbnailSignedUrl ImageSignedUrl }
     nextToken
   }
@@ -226,7 +266,9 @@ subscription {
 The query returns frames in time order, up to 500 at a time (100 by default),
 with `ThumbnailSignedUrl` and `ImageSignedUrl` filled in; `afterFrameId` returns
 only the frames after the one given, which is how the meeting page fetches a
-frame the subscription announced. The subscription carries no signed links. As
+frame the subscription announced. `frameId` returns just that frame, and with it
+`limit`, `nextToken` and `afterFrameId` are not used; it is how a chat answer's
+picture is resolved. The subscription carries no signed links. As
 with `onAddTranscriptSegment`, its selection must include `Owner` and
 `SharedWith`.
 

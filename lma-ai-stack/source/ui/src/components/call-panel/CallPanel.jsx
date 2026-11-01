@@ -84,6 +84,7 @@ import useCallsContext from '../../contexts/calls';
 import { shareModal, deleteModal } from '../common/meeting-controls';
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
+import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
 import MCPServersModal from '../mcp-servers';
 
 const client = generateClient();
@@ -2167,6 +2168,9 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
     return () => clearTimeout(timer);
   }, [user, userGroups, isAdminUser, item.callId]);
 
+  // Frames of the shared screen the chat's answers refer to.
+  useChatKeyframeLinks(item.callId);
+
   // Add message handler for STRANDS iframe requests
   useEffect(() => {
     const handleMessage = async (event) => {
@@ -2466,7 +2470,8 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   const [videoSeekRequest, setVideoSeekRequest] = useState(null);
   const showInTranscript = useCallback((seconds) => setTranscriptScrollRequest({ seconds, at: Date.now() }), []);
   const playRecordingFrom = useCallback(
-    (frame) => setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now() }),
+    (frame, { reveal = false } = {}) =>
+      setVideoSeekRequest({ seconds: recordingSecondsFor(frame), at: Date.now(), reveal }),
     [],
   );
   const [vpData, setVpData] = useState(null);

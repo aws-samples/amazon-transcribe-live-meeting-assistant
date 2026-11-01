@@ -39,6 +39,7 @@ import markdownRehypePlugins from '../common/markdown-plugins';
 import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
+import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
 import mapCallsAttributes from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
 import { CallPanel } from '../call-panel/CallPanel';
@@ -76,6 +77,8 @@ EmbedSummaryPanel.propTypes = {
  * Standalone chat panel - renders just the Meeting Assist Bot iframe.
  */
 const EmbedChatPanel = ({ item }) => {
+  // Frames of the shared screen the chat's answers refer to, as on the meeting page.
+  useChatKeyframeLinks(item.callId);
   // Note: encodeURIComponent is required because callId may contain characters like '+'
   // which URLSearchParams.get() would otherwise decode as a space.
   const iframeSrc = `/strands-chat.html?callId=${encodeURIComponent(item.callId)}`;

@@ -54,7 +54,9 @@ _DESERIALIZER = TypeDeserializer()
 
 #: Units that are counted for the reader but never billed on their own, used
 #: when the price table does not name its own list.
-DEFAULT_NON_CHARGEABLE_UNITS = ("requests", "sessions", "audioSeconds", "runtimeSeconds")
+#: ``images`` counts the pictures the meeting assistant sent a model; they are
+#: billed as the model's input tokens, which the same answer's record carries.
+DEFAULT_NON_CHARGEABLE_UNITS = ("requests", "sessions", "audioSeconds", "runtimeSeconds", "images")
 
 
 def prices_for_region(pricing: Mapping[str, Any], region: str) -> Tuple[Dict[str, Any], bool]:

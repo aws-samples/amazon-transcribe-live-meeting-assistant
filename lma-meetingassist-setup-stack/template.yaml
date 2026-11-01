@@ -394,16 +394,19 @@ Resources:
                 Action:
                   - "appsync:GraphQL"
                 Resource:
-                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
-                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/toggleVNCPreview"
-                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/executeMCPCommand"
-                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/publishMCPResult"
-                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Query/fields/getMCPCommand"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/addChatToken"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/toggleVNCPreview"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/executeMCPCommand"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Mutation/fields/publishMCPResult"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Query/fields/getMCPCommand"
+                  # get_meeting_frames: the meeting's key frames, with signed
+                  # links to their images (docs/meeting-video.md).
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/types/Query/fields/getVideoKeyframes"
               - Effect: Allow
                 Action:
                   - "appsync:EventPublish"
                 Resource:
-                  - !Sub "arn:aws:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/channelNamespace/mcp-commands"
+                  - !Sub "arn:${AWS::Partition}:appsync:${AWS::Region}:${AWS::AccountId}:apis/*/channelNamespace/mcp-commands"
           PolicyName: AppSyncGraphQLPolicy
         - PolicyName: InlinePolicy
           PolicyDocument:

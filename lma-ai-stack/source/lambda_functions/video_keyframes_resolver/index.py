@@ -14,6 +14,9 @@ them signs a GET for each image, so the people who can read the transcript can
 see the pictures without the browser's identity being given read access to the
 bucket. See docs/meeting-video.md.
 
+``frameId`` returns that one frame: the meeting page's chat uses it to show a
+frame the assistant referred to.
+
 A link is signed only for an object in this deployment's recordings bucket under
 the meeting's own key-frame folder, the folder meeting deletion removes; a
 stored URL pointing anywhere else is returned unsigned.
@@ -33,6 +36,8 @@ from urllib.parse import unquote, urlparse
 import boto3
 from botocore.config import Config as BotoCoreConfig
 
+# Stdlib logging rather than aws_lambda_powertools: this function carries no
+# layer and uses the runtime's own boto3.
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
@@ -257,6 +262,15 @@ def get_video_keyframes(arguments: Mapping[str, Any]) -> Dict[str, Any]:
     after = arguments.get("afterFrameId")
     if after is not None and (not isinstance(after, str) or not FRAME_ID.match(after)):
         raise BadRequestError("afterFrameId is not a frame id")
+    frame_id = arguments.get("frameId")
+    if frame_id is not None:
+        if not isinstance(frame_id, str) or not FRAME_ID.match(frame_id):
+            raise BadRequestError("frameId is not a frame id")
+        found = DYNAMODB.get_item(
+            TableName=EVENT_SOURCING_TABLE,
+            Key={"PK": {"S": f"kf#{call_id}"}, "SK": {"S": f"f#{frame_id}"}},
+        ).get("Item")
+        return {"VideoKeyframes": [to_keyframe(found, call_id)] if found else [], "nextToken": None}
 
     query: Dict[str, Any] = {
         "TableName": EVENT_SOURCING_TABLE,

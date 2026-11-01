@@ -47,6 +47,7 @@ const UNIT_LABELS = {
   units: '100-character units',
   requests: 'requests',
   sessions: 'sessions',
+  images: 'images',
 };
 
 export const unitLabel = (unit) => UNIT_LABELS[unit] || unit;
