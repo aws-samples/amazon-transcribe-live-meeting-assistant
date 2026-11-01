@@ -4,6 +4,7 @@
   "title": "Meeting Assist chat buttons",
   "description": "The quick-action buttons in the Meeting Assist chat panel. Each button has a label and the prompt it sends. A saved list replaces the shipped buttons as a whole; while nothing is saved, the shipped buttons apply.",
   "sectionLabel": "Meeting Assist Chat Buttons",
+  "appliesText": "A saved change applies to chat panels opened after the save.",
   "order": 2,
   "collapsible": true,
   "defaultExpanded": false,

@@ -12,9 +12,9 @@ const header = <h2>Configuration History</h2>;
 const content = (
   <>
     <p>
-      The configuration pages — Transcript Summary, Nova Sonic, Transcription Engine and the chat buttons — and the
-      meeting cost prices set through the pricing API all save into one configuration. Every save records a revision of
-      the whole of it: who saved it, when, and which parts it changed.
+      The Configuration page and the pages for single parts of it — Transcript Summary, Nova Sonic, Transcription Engine
+      and the chat buttons — all save into one configuration, which also holds the meeting cost prices. Every save
+      records a revision of the whole of it: who saved it, when, which parts it changed, and its comment.
     </p>
     <h3>Restoring</h3>
     <p>
@@ -24,8 +24,9 @@ const content = (
     </p>
     <h3>What is kept</h3>
     <p>
-      The 20 most recent revisions, plus the current one and any that are labelled. A deployment that brings nothing new
-      records nothing, so it does not push your history out.
+      The 20 most recent revisions, plus the current one and any that are labelled. Select a revision and choose{' '}
+      <b>Label</b> to keep it however many saves follow. A deployment that brings nothing new records nothing, so it
+      does not push your history out.
     </p>
     <h3>Documentation</h3>
     <ul>

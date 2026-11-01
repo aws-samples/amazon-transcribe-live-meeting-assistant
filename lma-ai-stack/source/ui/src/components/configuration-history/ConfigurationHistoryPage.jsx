@@ -12,6 +12,7 @@ import {
   Button,
   FormField,
   Header,
+  Input,
   Modal,
   SpaceBetween,
   Spinner,
@@ -22,10 +23,12 @@ import {
 import AdminOnly from '../common/AdminOnly';
 import { isConflict } from '../common/config-conflict';
 import {
+  MAX_LABEL_LENGTH,
   PROFILE,
   comparisonPair,
   diffRevisionsQuery,
   getRevisionQuery,
+  labelRevisionMutation,
   listRevisionsQuery,
   parseChanges,
   pathText,
@@ -80,9 +83,10 @@ export const ConfigurationHistoryContent = () => {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState(null);
   const [selected, setSelected] = useState([]);
-  // One open dialog at a time: { kind: 'view' | 'compare' | 'restore', ... }.
+  // One open dialog at a time: { kind: 'view' | 'compare' | 'restore' | 'label', ... }.
   const [dialog, setDialog] = useState(null);
   const [comment, setComment] = useState('');
+  const [label, setLabel] = useState('');
   // A restore failure other than a conflict is shown inside the dialog, which
   // stays open so the admin can retry without typing the comment again.
   const [dialogError, setDialogError] = useState(null);
@@ -183,6 +187,36 @@ export const ConfigurationHistoryContent = () => {
     }
   };
 
+  const openLabel = () => {
+    setLabel(selected[0].Label || '');
+    setDialogError(null);
+    setDialog({ kind: 'label', revision: selected[0].Revision });
+  };
+
+  // Labelling changes nothing in the configuration, so it needs no version: it
+  // only marks a revision, and a labelled one is kept however many follow it.
+  const saveLabel = async () => {
+    const { revision } = dialog;
+    const text = label.trim();
+    setBusy(true);
+    try {
+      await client.graphql({
+        query: labelRevisionMutation,
+        variables: { input: { Profile: PROFILE, Revision: revision, Label: text || null } },
+      });
+      setStatus({
+        type: 'success',
+        text: text ? `Labelled revision ${revision} "${text}".` : `Removed the label from revision ${revision}.`,
+      });
+      setDialog(null);
+      await load();
+    } catch (err) {
+      setDialogError(`Could not label revision ${revision}: ${errorText(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const entries = listing?.Revisions || [];
   const one = selected.length === 1 ? selected[0] : null;
 
@@ -215,7 +249,7 @@ export const ConfigurationHistoryContent = () => {
             counter={loading ? undefined : `(${entries.length})`}
             description={
               'Every save from a configuration page records a revision of the whole configuration. ' +
-              'Select one to view or restore it, or two to compare them.'
+              'Select one to view, label or restore it, or two to compare them.'
             }
             actions={
               <SpaceBetween direction="horizontal" size="xs">
@@ -225,6 +259,9 @@ export const ConfigurationHistoryContent = () => {
                 </Button>
                 <Button onClick={compare} disabled={!comparisonPair(selected) || busy}>
                   Compare
+                </Button>
+                <Button onClick={openLabel} disabled={!one || busy}>
+                  Label
                 </Button>
                 <Button variant="primary" onClick={openRestore} disabled={!one || one.Published || busy}>
                   Restore
@@ -283,13 +320,48 @@ export const ConfigurationHistoryContent = () => {
         <SpaceBetween size="m">
           {dialogError && <Alert type="error">{dialogError}</Alert>}
           <Box>
-            The whole configuration is replaced by the one this revision holds: the settings of every configuration page
-            — summary prompts, Nova Sonic, chat buttons and transcription engine — and the meeting cost prices set
-            through the pricing API. The restore is recorded as a new revision, so the configuration it replaces stays
-            in the history and can be restored in turn.
+            The whole configuration is replaced by the one this revision holds: every section of it — summary prompts,
+            Nova Sonic, chat buttons, transcription engine and meeting cost prices. The restore is recorded as a new
+            revision, so the configuration it replaces stays in the history and can be restored in turn.
           </Box>
           <FormField label="Comment" description="Optional. Recorded with the new revision.">
             <Textarea value={comment} onChange={({ detail }) => setComment(detail.value)} rows={2} />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
+
+      <Modal
+        visible={dialog?.kind === 'label'}
+        onDismiss={() => !busy && setDialog(null)}
+        header={`Label revision ${dialog?.revision}`}
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setDialog(null)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button variant="primary" onClick={saveLabel} loading={busy}>
+                Save label
+              </Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {dialogError && <Alert type="error">{dialogError}</Alert>}
+          <FormField
+            label="Label"
+            description={
+              'A labelled revision is kept however many revisions follow it. Leave the label empty to remove it, ' +
+              'and the revision is then kept only while it is one of the 20 most recent.'
+            }
+            constraintText={`${label.length}/${MAX_LABEL_LENGTH} characters`}
+          >
+            <Input
+              value={label}
+              ariaLabel="Label"
+              onChange={({ detail }) => setLabel(detail.value.slice(0, MAX_LABEL_LENGTH))}
+            />
           </FormField>
         </SpaceBetween>
       </Modal>

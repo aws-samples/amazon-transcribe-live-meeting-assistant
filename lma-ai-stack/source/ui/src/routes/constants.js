@@ -17,6 +17,8 @@ export const ASR_CONFIG_PATH = '/configuration/asr';
 export const TRANSCRIPT_SUMMARY_PATH = '/configuration/transcript-summary';
 export const USER_MANAGEMENT_PATH = '/configuration/user-management';
 export const CONFIGURATION_HISTORY_PATH = '/configuration/history';
+// The schema-driven editor for every section of the runtime configuration.
+export const CONFIGURATION_PATH = '/configuration/settings';
 export const DEFAULT_PATH = CALLS_PATH;
 export const EMBED_PATH = '/embed';
 // The enrollment portal. Top-level rather than under /configuration, because

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "lma:configuration/call_pricing",
   "title": "Meeting cost prices",
-  "description": "The unit prices the per-meeting cost estimate is computed with, in US dollars per unit. A price you change is kept over the shipped one; every price you leave alone keeps coming from the release, so a later release's price updates still reach it. A saved change shows in estimates within about five minutes.",
+  "description": "The unit prices the per-meeting cost estimate is computed with, in US dollars per unit. A price you change is kept over the shipped one; every price you leave alone keeps coming from the release, so a later release's price updates still reach it.",
   "sectionLabel": "Meeting Cost Prices",
   "order": 5,
   "collapsible": true,
