@@ -12,6 +12,7 @@ never be stored is dropped without reading or writing anything.
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from pathlib import Path
@@ -85,3 +86,53 @@ def test_the_handler_drops_an_event_that_can_never_be_stored(schema):  # noqa: F
     assert result == {"ok": False, "Dropped": True}
     assert session.queries == [], "nothing is read or written for it"
     assert any("cannot be stored" in m for m in cep.LOGGER.at_level("ERROR"))
+
+
+def test_a_stored_frame_has_its_text_read_once_stored(schema, monkeypatch):  # noqa: F811
+    invoked = []
+    monkeypatch.setattr(
+        cep, "KEYFRAME_TEXT_EXTRACTOR_ARN", "arn:aws:lambda:us-east-1:123456789012:function:x"
+    )
+    monkeypatch.setattr(
+        cep,
+        "LAMBDA_HOOK_CLIENT",
+        type("C", (), {"invoke": lambda self, **kw: invoked.append(kw)})(),
+        raising=False,
+    )
+    session = SequenceSession(
+        schema,
+        [
+            {"getCall": {"CallId": EVENT["CallId"], "Owner": "o", "SharedWith": None}},
+            {"addVideoKeyframe": {"CallId": EVENT["CallId"], "FrameId": EVENT["FrameId"]}},
+        ],
+    )
+    run(cep.execute_add_video_keyframe_mutation(message=dict(EVENT), appsync_session=session))
+    assert len(invoked) == 1
+    assert invoked[0]["InvocationType"] == "Event"
+    payload = json.loads(invoked[0]["Payload"])
+    assert payload == {
+        "CallId": EVENT["CallId"],
+        "FrameId": EVENT["FrameId"],
+        "ImageUrl": EVENT["ImageUrl"],
+    }
+
+
+def test_a_failed_queue_does_not_fail_the_frame(schema, monkeypatch):  # noqa: F811
+    def boom(self, **_kw):
+        raise RuntimeError("throttled")
+
+    monkeypatch.setattr(
+        cep, "KEYFRAME_TEXT_EXTRACTOR_ARN", "arn:aws:lambda:us-east-1:123456789012:function:x"
+    )
+    monkeypatch.setattr(cep, "LAMBDA_HOOK_CLIENT", type("C", (), {"invoke": boom})(), raising=False)
+    session = SequenceSession(
+        schema,
+        [
+            {"getCall": {"CallId": EVENT["CallId"], "Owner": "o", "SharedWith": None}},
+            {"addVideoKeyframe": {"CallId": EVENT["CallId"], "FrameId": EVENT["FrameId"]}},
+        ],
+    )
+    result = run(
+        cep.execute_add_video_keyframe_mutation(message=dict(EVENT), appsync_session=session)
+    )
+    assert result == {"addVideoKeyframe": {"CallId": EVENT["CallId"], "FrameId": EVENT["FrameId"]}}

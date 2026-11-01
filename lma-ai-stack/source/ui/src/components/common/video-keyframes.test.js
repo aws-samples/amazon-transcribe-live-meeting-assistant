@@ -8,6 +8,8 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   HIGHLIGHT_CLASS,
   formatFrameTime,
+  frameMatches,
+  matchSnippet,
   mergeKeyframes,
   recordingSecondsFor,
   scrollTranscriptToTime,
@@ -102,5 +104,24 @@ describe('scrollTranscriptToTime', () => {
     expect(scrollTranscriptToTime(transcript([]), 5)).toBeNull();
     expect(scrollTranscriptToTime(transcript([0, 10]), NaN)).toBeNull();
     expect(scrollTranscriptToTime(null, 5)).toBeNull();
+  });
+});
+
+describe('searching slide text', () => {
+  const slide = { SlideText: 'Agenda item 2: Support\n- Résumé review and quarterly pipeline budget' };
+
+  it('matches every word in any order, ignoring case and accents', () => {
+    expect(frameMatches(slide, 'pipeline RESUME')).toBe(true);
+    expect(frameMatches(slide, 'pipeline hiring')).toBe(false);
+    expect(frameMatches(slide, '   ')).toBe(true);
+    expect(frameMatches({}, 'anything')).toBe(false);
+  });
+
+  it('gives the line that matched, shortened around the match', () => {
+    expect(matchSnippet(slide, 'support')).toBe('Agenda item 2: Support');
+    const snippet = matchSnippet(slide, 'budget', 20);
+    expect(snippet).toContain('budget');
+    expect(snippet.startsWith('…')).toBe(true);
+    expect(matchSnippet(slide, 'nothing')).toBe('');
   });
 });

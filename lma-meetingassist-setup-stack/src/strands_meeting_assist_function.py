@@ -1594,9 +1594,10 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
         return client.execute(gql(document), variable_values=variables)
 
     @tool
-    def get_meeting_frames(last: int = 1, start_time: str = "", end_time: str = "", at_time: str = "") -> dict:
+    def get_meeting_frames(last: int = 1, start_time: str = "", end_time: str = "", at_time: str = "",
+                           look_at_pictures: bool = False) -> dict:
         """Get key frames of the meeting's shared screen: the slides, documents and other content
-        that were on screen, each with what was said while it was shown.
+        that were on screen, each with the text on it and what was said while it was shown.
 
         Use this when someone asks about what was shown rather than said:
         - "What's on this slide?", "Summarize that slide", "Translate the last slide into French"
@@ -1609,15 +1610,18 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
             start_time: Start of a time range, as MM:SS or H:MM:SS from the start of the meeting.
             end_time: End of a time range, in the same form.
             at_time: A moment, in the same form: the frame that was on screen then.
+            look_at_pictures: Also send the pictures. Use it only when the question needs the
+                picture itself (a chart, a diagram, a layout, an image); the text is usually enough.
 
         Returns:
-            Each frame's times and transcript, with the pictures when the model can read them.
+            Each frame's times, text and transcript, with pictures where needed.
         """
         if call_id and message_id and APPSYNC_GRAPHQL_URL:
             send_thinking_step_to_appsync(call_id, message_id, {
                 'type': 'tool_use',
                 'tool_name': 'get_meeting_frames',
-                'tool_input': {'last': last, 'start_time': start_time, 'end_time': end_time, 'at_time': at_time},
+                'tool_input': {'last': last, 'start_time': start_time, 'end_time': end_time,
+                               'at_time': at_time, 'look_at_pictures': look_at_pictures},
                 'timestamp': datetime.utcnow().isoformat()
             }, 0)
         success = True
@@ -1632,7 +1636,10 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
                 at=at_seconds,
             )
             images = {}
-            for frame in meeting_frames.frames_for_pictures(selected, send_images=send_images):
+            for frame in meeting_frames.frames_for_pictures(
+                selected, send_images=send_images,
+                wants=lambda f: meeting_frames.needs_picture(f, look_at_pictures),
+            ):
                 data = meeting_frames.download_image(frame.get('ImageSignedUrl'))
                 if data is not None:
                     images[str(frame.get('FrameId'))] = data
@@ -1647,7 +1654,7 @@ def create_meeting_frames_tool(call_id: str, dynamodb_table_name: str, model_id:
             result = meeting_frames.build_tool_result(
                 selected, segments, images,
                 total_frames=len(frames), send_images=send_images, show_inline=show_inline,
-                at_time=at_seconds,
+                at_time=at_seconds, look=look_at_pictures,
                 first_frame_at=min(
                     (float(f['Timestamp']) for f in frames if isinstance(f.get('Timestamp'), (int, float))),
                     default=None,
@@ -2557,7 +2564,8 @@ Examples:
 
 **For what was shown on screen (USE get_meeting_frames):**
 - "What's on this slide?", "Summarize that slide" → get_meeting_frames(last=1)
-- "Translate the last slide into French" → get_meeting_frames(last=1), then translate what it shows
+- "Translate the last slide into French" → get_meeting_frames(last=1), then translate its text
+- "What does that chart show?" → get_meeting_frames(last=1, look_at_pictures=True)
 - "Show me the last two slides" → get_meeting_frames(last=2), and include each frame's image markdown
   when the tool gives one (it does only where the answer can show pictures)
 - "What was on screen at 12:30?" → get_meeting_frames(at_time="12:30")

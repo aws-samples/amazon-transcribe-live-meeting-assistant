@@ -965,3 +965,40 @@ def test_the_response_log_does_not_carry_the_transcript(
     assert "Fetch Transcript response:" in logged
     assert "acquisition closes" not in logged
     assert "Bob Strahan" not in logged
+
+
+# --------------------------------------------------------------------------
+# Key frames of the shared screen
+# --------------------------------------------------------------------------
+
+
+def test_key_frames_are_returned_in_time_order_only_when_asked_for(monkeypatch):
+    frames = [
+        {
+            "PK": f"kf#{CALL_ID}",
+            "SK": "f#2",
+            "FrameId": "2",
+            "Timestamp": Decimal("95.5"),
+            "SlideText": "Hiring",
+        },
+        {
+            "PK": f"kf#{CALL_ID}",
+            "SK": "f#1",
+            "FrameId": "1",
+            "Timestamp": Decimal("30"),
+            "SlideText": "Budget",
+        },
+    ]
+    table = install(monkeypatch, items=frames)
+    assert index.get_keyframes(CALL_ID) == [
+        {"FrameId": "1", "Timestamp": 30.0, "SlideText": "Budget"},
+        {"FrameId": "2", "Timestamp": 95.5, "SlideText": "Hiring"},
+    ]
+    assert (
+        table.queries[0]["KeyConditionExpression"].get_expression()["values"][1] == f"kf#{CALL_ID}"
+    )
+
+    response, _ = run(monkeypatch, items=[])
+    assert "keyframes" not in response
+    response, _ = run(monkeypatch, items=[], IncludeKeyframes=True)
+    assert response["keyframes"] == []

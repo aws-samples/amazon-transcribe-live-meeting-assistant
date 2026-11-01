@@ -812,6 +812,7 @@ def test_the_transcript_request_names_the_call_and_asks_for_speaker_labels(
         "CallId": CALL_ID,
         "ProcessTranscript": False,
         "IncludeSpeaker": True,
+        "IncludeKeyframes": True,
     }
 
 
@@ -1162,3 +1163,37 @@ def test_text_inserted_for_one_placeholder_is_not_read_as_the_other(
     )
     index.generate_summary("T", None, agenda="{transcript}")
     assert prompts_sent(bedrock) == ["Agenda:\n1. {transcript}\nTranscript:\nT"]
+
+
+# --------------------------------------------------------------------------
+# The shared screen in the knowledge base document
+# --------------------------------------------------------------------------
+
+KEYFRAMES = [
+    {
+        "FrameId": "0000030000-ab12cd",
+        "Timestamp": 30.0,
+        "SlideText": "Agenda item 1: Budget\n- Q3 numbers",
+    },
+    {"FrameId": "0000095000-ab12cd", "Timestamp": 95.0, "SlideText": ""},
+    {"FrameId": "0003725000-ab12cd", "Timestamp": 3725.0, "SlideText": "Hiring plan"},
+    {"FrameId": "0003800000-ab12cd", "Timestamp": 3800.0},
+]
+
+
+def test_the_transcript_document_includes_the_text_of_the_shared_screen(monkeypatch):
+    _, s3 = install(monkeypatch)
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}', KEYFRAMES)
+    body = s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"]
+    assert body.startswith(TRANSCRIPT)
+    assert "SHARED SCREEN" in body
+    assert "[00:30] Agenda item 1: Budget\n- Q3 numbers" in body
+    assert "[1:02:05] Hiring plan" in body
+    # Frames with no text, or none read yet, add nothing.
+    assert body.count("[") == 2
+
+
+def test_a_meeting_without_key_frames_keeps_its_transcript_document_as_it_was(monkeypatch):
+    _, s3 = install(monkeypatch)
+    index.write_to_s3(CALL_ID, METADATA, TRANSCRIPT, '{"SUMMARY": "x"}')
+    assert s3.objects[f"{index.S3_PREFIX}{SAFE_CALL_ID}-TRANSCRIPT.txt"]["Body"] == TRANSCRIPT

@@ -100,6 +100,43 @@ def get_transcripts(callid):
     return items
 
 
+#: Upper bound on Query pages for one meeting's key frames; a meeting keeps at
+#: most 1,000, which is a few pages.
+MAX_KEYFRAME_PAGES = 20
+
+
+def get_keyframes(callid):
+    """The meeting's key frames of the shared screen, in time order: id, time and text.
+
+    Only the fields a document about the meeting needs; the images stay where
+    they are. See docs/meeting-video.md.
+    """
+    frames = []
+    start_key = None
+    for _ in range(MAX_KEYFRAME_PAGES):
+        query_args = {
+            "KeyConditionExpression": Key("PK").eq("kf#" + callid),
+            "ProjectionExpression": "FrameId, #t, SlideText",
+            "ExpressionAttributeNames": {"#t": "Timestamp"},
+        }
+        if start_key:
+            query_args["ExclusiveStartKey"] = start_key
+        response = ddbTable.query(**query_args)
+        for item in response.get("Items", []):
+            frames.append(
+                {
+                    "FrameId": item.get("FrameId"),
+                    "Timestamp": float(item.get("Timestamp", 0)),
+                    "SlideText": item.get("SlideText"),
+                }
+            )
+        next_key = response.get("LastEvaluatedKey")
+        if not next_key or next_key == start_key:
+            break
+        start_key = next_key
+    return sorted(frames, key=lambda f: f["Timestamp"])
+
+
 # Trailing voice id the transcriber appends when speaker separation is on, e.g.
 # 'Other Participant (spk_0)'. Mirrors splitDiarizationLabel in the UI.
 DIARIZATION_LABEL = re.compile(r"^(.*?)(\s*\(spk_\d+\))$")
@@ -283,6 +320,8 @@ def lambda_handler(event, context):
     transcripts = preprocess_transcripts(transcripts, preProcess, includeSpeaker, metadata)
     transcript_string = "".join(transcripts)
     response = {"transcript": transcript_string, "metadata": metadata}
+    if data.get("IncludeKeyframes"):
+        response["keyframes"] = get_keyframes(callid)
     # Log the shape of the response rather than the response. Everything this
     # function returns is meeting content, and the counts are what is actually
     # useful when diagnosing a short or empty transcript.

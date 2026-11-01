@@ -583,6 +583,34 @@ Parameters:
       more per meeting than Claude 4.5 at the same size.
       Defaults to 'global.anthropic.claude-sonnet-5-5'
 
+  KeyframeTextModelId:
+    Type: String
+    Default: "amazon.nova-lite-v1:0"
+    # Image-capable models only: the model reads a picture of the shared screen.
+    # Kept in step with the parameter of the same name in
+    # lma-ai-stack/deployment/lma-ai-stack.yaml, which this value is passed to.
+    AllowedValues:
+      - "amazon.nova-lite-v1:0"
+      - "amazon.nova-pro-v1:0"
+      - "us.amazon.nova-premier-v1:0"
+      - "global.amazon.nova-2-lite-v1:0"
+      - "us.amazon.nova-2-lite-v1:0"
+      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "us.anthropic.claude-sonnet-4-6"
+      - "us.anthropic.claude-haiku-5-5"
+      - "us.anthropic.claude-sonnet-5-5"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "global.anthropic.claude-sonnet-4-6"
+      - "global.anthropic.claude-haiku-5-5"
+      - "global.anthropic.claude-sonnet-5-5"
+    Description: >-
+      Bedrock model that reads the text of each key frame of the shared screen,
+      once, when the frame is stored (docs/meeting-video.md). The text is what
+      the meeting assistant reads first, what the meeting page searches, and
+      what the meeting-history knowledge base indexes. Amazon Nova Lite read
+      every word of the measured frames at about $0.0002 a frame.
+
   EndOfCallLambdaHookFunctionArn:
     Default: ""
     Type: String
@@ -1266,6 +1294,7 @@ Metadata:
           - TranscriptLambdaHookFunctionNonPartialOnly
           - EndOfCallTranscriptSummary
           - BedrockModelId
+          - KeyframeTextModelId
           - EndOfCallLambdaHookFunctionArn
           - StartOfCallLambdaHookFunctionArn
           - PostCallSummaryLambdaHookFunctionArn
@@ -1315,6 +1344,8 @@ Metadata:
         Parameters:
           - ModelValidation
     ParameterLabels:
+      KeyframeTextModelId:
+        default: Bedrock Model ID for Reading Key Frames of the Shared Screen
       CallAudioProcessor:
         default: Call Audio Processor
       ChimeVoiceToneAnalysis:
@@ -2283,6 +2314,7 @@ Resources:
         - !Ref MeetingAssistKnowledgeBaseModelID
         - "amazon.titan-embed-text-v2:0" # Meeting Assistant Bedrock KB embeddings
         - !Ref BedrockModelId # Meeting summarization
+        - !Ref KeyframeTextModelId # Text of the shared screen's key frames
 
   ##########################################################################
   # Resources shared by multiple nested stacks
@@ -3181,6 +3213,7 @@ Resources:
         TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         BedrockModelId: !Ref BedrockModelId
+        KeyframeTextModelId: !Ref KeyframeTextModelId
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn

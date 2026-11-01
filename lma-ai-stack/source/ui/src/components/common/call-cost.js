@@ -22,6 +22,7 @@ export const CONTEXT_LABELS = {
   Summary: 'Summary',
   SpeakerNaming: 'Speaker naming',
   AgendaDerivation: 'Agenda derivation',
+  SlideText: 'Slide text',
   Sentiment: 'Sentiment analysis',
   PageAutomation: 'Page automation',
 };

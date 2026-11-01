@@ -715,6 +715,9 @@ type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
 	ShareDetected: Boolean
 	# Fraction of the picture that differed from the previous key frame.
 	ChangeScore: Float
+	# The text on the frame, read once by a vision model after it is stored;
+	# empty when it holds none, absent until it has been read.
+	SlideText: String
 	Owner: String
 	SharedWith: String
 	# Signed links to the two images, valid for an hour, filled in only by

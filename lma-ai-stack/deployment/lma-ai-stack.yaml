@@ -171,6 +171,28 @@ Parameters:
       list (BedrockModelId). The LAMBDA option requires you to provide a function
       ARN below.
 
+  KeyframeTextModelId:
+    Type: String
+    Default: "amazon.nova-lite-v1:0"
+    # Kept in step with the parameter of the same name in lma-main.yaml, which
+    # passes its value through.
+    AllowedValues:
+      - "amazon.nova-lite-v1:0"
+      - "amazon.nova-pro-v1:0"
+      - "us.amazon.nova-premier-v1:0"
+      - "global.amazon.nova-2-lite-v1:0"
+      - "us.amazon.nova-2-lite-v1:0"
+      - "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "us.anthropic.claude-sonnet-4-6"
+      - "us.anthropic.claude-haiku-5-5"
+      - "us.anthropic.claude-sonnet-5-5"
+      - "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+      - "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+      - "global.anthropic.claude-sonnet-4-6"
+      - "global.anthropic.claude-haiku-5-5"
+      - "global.anthropic.claude-sonnet-5-5"
+    Description: Bedrock model that reads the text of each key frame of the shared screen
+
   BedrockModelId:
     Default: "global.anthropic.claude-sonnet-5-5"
     Type: String
@@ -2957,6 +2979,11 @@ Resources:
               Action:
                 - lambda:InvokeFunction
               Resource: !GetAtt AgendaDeriverFunction.Arn
+            # The text of each key frame, read once it is stored.
+            - Effect: Allow
+              Action:
+                - lambda:InvokeFunction
+              Resource: !GetAtt KeyframeTextExtractorFunction.Arn
             - Effect: Allow
               Action:
                 - lambda:InvokeFunction
@@ -3030,6 +3057,8 @@ Resources:
           ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN: !GetAtt AsyncTranscriptSummaryOrchestrator.Arn
           SPEAKER_NAME_RESOLVER_ARN: !GetAtt SpeakerNameResolverFunction.Arn
           AGENDA_DERIVER_ARN: !GetAtt AgendaDeriverFunction.Arn
+          # Reads the text of each key frame once it is stored.
+          KEYFRAME_TEXT_EXTRACTOR_ARN: !GetAtt KeyframeTextExtractorFunction.Arn
           # Seconds into a meeting with no agenda at which the transcript is read
           # once for an agenda somebody stated. 0 turns the automatic pass off;
           # the Agenda panel's button works either way.
@@ -4850,6 +4879,128 @@ Resources:
         Name: APPSYNC_JS
         RuntimeVersion: 1.0.0
       CodeS3Location: ../source/appsync/resolveSpeakerNames.js
+
+  # ----------------------------------------------------------------------------
+  # Key frame text
+  #
+  # Reads the text of each key frame of the shared screen once, and stores it
+  # with the frame. Invoked asynchronously by the call event processor after it
+  # stores a frame. See docs/meeting-video.md.
+  # ----------------------------------------------------------------------------
+  KeyframeTextExtractorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Role: !GetAtt KeyframeTextExtractorFunctionExecutionRole.Arn
+      Runtime: python3.12
+      CodeUri: ../source/lambda_functions/keyframe_text_extractor
+      Description: Reads the text of a key frame of the shared screen once, and stores it with the frame
+      MemorySize: 512
+      # One image read and one model call.
+      Timeout: 60
+      # A frame whose text could not be read keeps none; the function is not
+      # run again for it, so a model call is never repeated and metered twice.
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+      Environment:
+        Variables:
+          EVENT_SOURCING_TABLE: !Ref EventSourcingTable
+          RECORDINGS_BUCKET: !Ref S3BucketName
+          KEYFRAMES_PREFIX: "lma-video-keyframes/"
+          KEYFRAME_TEXT_MODEL_ID: !Ref KeyframeTextModelId
+          # Token usage per frame, for the meeting cost estimate.
+          METERING_TABLE_NAME: !Ref EventSourcingTable
+          METERING_EXPIRATION_DAYS: !Ref MeetingRecordExpirationInDays
+      # Carries lma_metering. Pure Python, so it does not pin this function to an
+      # architecture.
+      Layers:
+        - !Ref ConfigurationPythonLayer
+      LoggingConfig:
+        LogGroup:
+          Fn::Sub: /${AWS::StackName}/lambda/KeyframeTextExtractorFunction
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: Customer can use VPC if desired
+          - id: W92
+            reason: Customer can choose reserved concurrency based on their requirement.
+    # checkov:skip=CKV_AWS_115: "Function does not require reserved concurrency as it scales based on demand"
+    # checkov:skip=CKV_AWS_116: "DLQ not required: a frame without its text is handled by every reader"
+    # checkov:skip=CKV_AWS_117: "Function does not require VPC access as it only interacts with AWS services via APIs"
+    # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data - only table and bucket names, a prefix and a model id"
+    DependsOn:
+      - KeyframeTextExtractorFunctionLogGroup
+
+  KeyframeTextExtractorFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        Fn::Sub: /${AWS::StackName}/lambda/KeyframeTextExtractorFunction
+      RetentionInDays: !Ref CloudWatchLogsExpirationInDays
+      KmsKeyId: !Ref CustomerManagedEncryptionKeyArn
+
+  KeyframeTextExtractorFunctionExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: KeyframeTextExtractor Function Lambda Role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: sts:AssumeRole
+            Principal:
+              Service: !Sub "lambda.${AWS::URLSuffix}"
+      PermissionsBoundary: !If [HasPermissionsBoundary, !Ref PermissionsBoundaryArn, !Ref AWS::NoValue]
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-KeyframeTextExtractor
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              # The key frame items: read whether the text is there, and store it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "kf#*"
+              # Metering records for the meeting cost estimate, only under mtr#.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                Resource: !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${EventSourcingTable}"
+                Condition:
+                  ForAllValues:StringLike:
+                    "dynamodb:LeadingKeys":
+                      - "mtr#*"
+              # The key frame images and nothing else in the bucket.
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${S3BucketName}/lma-video-keyframes/*"
+              # Scoped as the agenda deriver scopes the same call.
+              - Effect: Allow
+                Action:
+                  - bedrock:InvokeModel
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:bedrock:*::foundation-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:custom-model/*"
+                  - !Sub "arn:${AWS::Partition}:bedrock:*:${AWS::AccountId}:inference-profile/*"
+              - Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:Encrypt
+                  - kms:GenerateDataKey
+                  - kms:DescribeKey
+                Resource: !Ref CustomerManagedEncryptionKeyArn
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
 
   # ----------------------------------------------------------------------------
   # Agenda derivation

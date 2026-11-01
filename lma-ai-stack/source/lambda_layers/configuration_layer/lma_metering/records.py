@@ -89,6 +89,7 @@ CONTEXTS = (
     "Summary",
     "SpeakerNaming",
     "AgendaDerivation",
+    "SlideText",
     "Sentiment",
     "PageAutomation",
 )

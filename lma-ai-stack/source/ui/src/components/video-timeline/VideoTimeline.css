@@ -64,3 +64,19 @@
   border-radius: 6px;
   border: 1px solid #e9ebed;
 }
+
+.video-timeline-snippet {
+  width: 160px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #5f6b7a;
+  text-align: left;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.video-timeline-slide-text {
+  white-space: pre-wrap;
+}

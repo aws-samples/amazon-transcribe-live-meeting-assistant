@@ -308,3 +308,53 @@ def test_transcript_times_read_from_dynamodb_as_decimals_are_used():
     ]
     text = meeting_frames.transcript_between(segments, 240, 600)
     assert text == "[04:10] Bob: On this slide."
+
+# ── slide text first ────────────────────────────────────────────────────────
+
+
+def with_text(f: Dict[str, Any], text: str) -> Dict[str, Any]:
+    return {**f, "SlideText": text}
+
+
+def test_a_frame_whose_text_was_read_is_given_as_text_without_its_picture():
+    selected = meeting_frames.select_frames([with_text(frame(30), "Agenda item 2: Support")], last=1)
+    result = result_for(selected)
+    assert "Text on it:\nAgenda item 2: Support" in texts(result)
+    assert meeting_frames.images_in(result) == 0
+
+
+def test_the_picture_is_sent_when_asked_to_look_or_when_the_text_is_missing():
+    framed = [with_text(frame(30), "Revenue by quarter"), frame(90)]
+    pictures = {"0000030000-ab12cd": b"a", "0000090000-ab12cd": b"b"}
+    looked = meeting_frames.build_tool_result(
+        meeting_frames.select_frames(framed, last=2), [], pictures,
+        total_frames=2, send_images=True, show_inline=False, look=True,
+    )
+    assert meeting_frames.images_in(looked) == 2
+    unread = meeting_frames.build_tool_result(
+        meeting_frames.select_frames(framed, last=2), [], pictures,
+        total_frames=2, send_images=True, show_inline=False,
+    )
+    assert meeting_frames.images_in(unread) == 1, "only the frame whose text has not been read"
+    assert "Its text has not been read yet." in texts(unread)
+
+
+def test_a_frame_with_no_text_says_so():
+    result = result_for(meeting_frames.select_frames([with_text(frame(30), "")], last=1))
+    assert "It has no readable text." in texts(result)
+
+
+def test_the_tool_downloads_only_the_pictures_it_sends(tool, monkeypatch):
+    monkeypatch.setattr(
+        handler_module.meeting_frames, "load_keyframes",
+        lambda _run, _cid: [with_text(f, "text") for f in FRAMES],
+    )
+    downloads: List[str] = []
+    monkeypatch.setattr(
+        handler_module.meeting_frames, "download_image", lambda url: downloads.append(url) or b"x"
+    )
+    get_meeting_frames, metered = tool()
+    assert meeting_frames.images_in(get_meeting_frames(last=2)) == 0
+    assert downloads == [] and metered == []
+    assert meeting_frames.images_in(get_meeting_frames(last=2, look_at_pictures=True)) == 2
+    assert len(downloads) == 2
