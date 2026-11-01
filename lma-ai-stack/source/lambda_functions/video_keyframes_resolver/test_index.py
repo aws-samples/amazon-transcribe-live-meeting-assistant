@@ -170,6 +170,8 @@ def test_both_images_get_signed_links_and_the_fields_keep_their_types(fakes):
         url("lma-video-keyframes/Another_meeting/f.jpg"),  # another meeting's folder
         url("lma-audio-recordings/Weekly_sync___2026_11_01.wav"),  # another prefix
         url(f"{FOLDER}f.jpg", bucket="someone-elses-bucket"),  # another bucket
+        url(f"{FOLDER}f.jpg", bucket="rec-bucket-2"),  # a bucket whose name begins the same
+        url(f"{FOLDER}f.jpg", bucket="rec"),  # a prefix of this bucket's name
         url(f"{FOLDER}../../lma-audio-recordings/x.wav"),
         "http://rec-bucket.s3.us-east-1.amazonaws.com/" + FOLDER + "f.jpg",
         "s3://rec-bucket/" + FOLDER + "f.jpg",
@@ -220,3 +222,12 @@ def test_the_limit_is_capped(fakes):
     call(OWNER, limit=0)
     call(OWNER)
     assert [q["Limit"] for q in dynamo.queries] == [index.MAX_LIMIT, 1, index.DEFAULT_LIMIT]
+
+
+def test_a_bucket_whose_name_has_dots_is_recognised(fakes, monkeypatch):
+    monkeypatch.setattr(index, "RECORDINGS_BUCKET", "lma.recordings.example")
+    dotted = url(f"{FOLDER}0000001000-ab12cd.jpg", bucket="lma.recordings.example")
+    _, s3 = fakes([item(1000, image=dotted)])
+    frame = call(OWNER)["VideoKeyframes"][0]
+    assert frame["ImageSignedUrl"] is not None
+    assert s3.signed[0] == f"{FOLDER}0000001000-ab12cd.jpg"

@@ -27,7 +27,7 @@ import json
 import logging
 import os
 import re
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Literal, Mapping, Optional
 from urllib.parse import unquote, urlparse
 
 import boto3
@@ -39,18 +39,6 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 CLIENT_CONFIG = BotoCoreConfig(retries={"mode": "adaptive", "max_attempts": 3})
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 DYNAMODB = boto3.client("dynamodb", config=CLIENT_CONFIG)
-# SigV4 and the regional virtual-hosted endpoint, so the links work in every
-# region and match the bucket's own address.
-S3 = boto3.client(
-    "s3",
-    region_name=REGION,
-    config=BotoCoreConfig(
-        signature_version="s3v4",
-        s3={"addressing_style": "virtual"},
-        retries={"mode": "adaptive", "max_attempts": 3},
-    ),
-)
-
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 RECORDINGS_BUCKET = os.environ.get("RECORDINGS_BUCKET", "")
 KEYFRAMES_PREFIX = os.environ.get("KEYFRAMES_PREFIX", "lma-video-keyframes/")
@@ -60,6 +48,24 @@ LINK_SECONDS = int(os.environ.get("LINK_SECONDS", "3600"))
 DEFAULT_LIMIT = 100
 MAX_LIMIT = 500
 FRAME_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _s3_client(addressing_style: Literal["virtual", "path"]) -> Any:
+    """SigV4 links on the deployment's regional endpoint, in its partition."""
+    return boto3.client(
+        "s3",
+        region_name=REGION,
+        config=BotoCoreConfig(
+            signature_version="s3v4",
+            s3={"addressing_style": addressing_style, "us_east_1_regional_endpoint": "regional"},
+            retries={"mode": "adaptive", "max_attempts": 3},
+        ),
+    )
+
+
+# Virtual-hosted links, except for a bucket whose name has dots: that name does
+# not match S3's TLS certificate as a host name, so its links are path-style.
+S3 = _s3_client("path" if "." in RECORDINGS_BUCKET else "virtual")
 
 
 class ForbiddenError(Exception):
@@ -143,7 +149,9 @@ def object_key(url: Any, call_id: str) -> Optional[str]:
     parsed = urlparse(url)
     if parsed.scheme != "https" or not parsed.hostname:
         return None
-    if parsed.hostname.split(".", 1)[0] != RECORDINGS_BUCKET:
+    # The whole bucket name, which may itself contain dots, ahead of the S3
+    # host: https://<bucket>.s3.<region>.<suffix>/<key>, as the producers write.
+    if not parsed.hostname.startswith(f"{RECORDINGS_BUCKET}.s3."):
         return None
     key = unquote(parsed.path.lstrip("/"))
     folder = f"{KEYFRAMES_PREFIX}{posixify_filename(call_id)}/"

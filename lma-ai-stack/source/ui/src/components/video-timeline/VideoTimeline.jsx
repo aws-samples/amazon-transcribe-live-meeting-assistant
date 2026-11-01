@@ -155,6 +155,7 @@ const VideoTimeline = ({
    * where it was.
    */
   const refreshShown = useCallback(async () => {
+    // Returns whether it ran: not when another load was in flight.
     const shown = framesRef.current.length;
     const ran = await runLoad(async ({ fetchPage, apply, current }) => {
       let token = null;
@@ -176,6 +177,7 @@ const VideoTimeline = ({
       const last = framesRef.current[framesRef.current.length - 1];
       loadPage({ after: last?.FrameId || '' });
     }
+    return ran;
   }, [runLoad, loadPage]);
 
   // First page, and a fresh start when the meeting changes.
@@ -240,10 +242,12 @@ const VideoTimeline = ({
 
   // A signed link has expired (or failed): renew what is shown, not too often.
   const onImageError = () => {
-    const now = Date.now();
-    if (now - lastReloadRef.current < RELOAD_AFTER_MS) return;
-    lastReloadRef.current = now;
-    refreshShown();
+    if (Date.now() - lastReloadRef.current < RELOAD_AFTER_MS) return;
+    // Counted from a renewal that ran: one skipped because a page was loading
+    // leaves the next failing image free to try again.
+    refreshShown().then((ran) => {
+      if (ran) lastReloadRef.current = Date.now();
+    });
   };
 
   const select = (frame) => {
