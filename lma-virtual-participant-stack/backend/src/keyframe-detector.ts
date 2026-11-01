@@ -67,8 +67,19 @@ export interface KeyframeDetectorConfig {
     motionCount?: number;
 }
 
+/** A kept frame, as the detector holds it; handed back to forget() if it could not be saved. */
+export interface KeptFrame {
+    readonly frame: Uint8Array;
+    readonly atMs: number;
+}
+
+/** Kept frames remembered, so undoing one restores the one before it. */
+const KEPT_HISTORY = 8;
+
 export interface KeyframeDecision {
     keep: boolean;
+    /** The frame that was kept, when `keep` is true. */
+    kept?: KeptFrame;
     /** Fraction of cells that differ from the last kept frame (1 when none was kept yet). */
     changeFraction: number;
     /**
@@ -104,11 +115,8 @@ const popcount8 = (v: number): number => {
 export class KeyframeDetector {
     private readonly config: KeyframeDetectorConfig;
     private previous: Uint8Array | null = null;
-    private lastKept: Uint8Array | null = null;
-    private lastKeptAtMs: number | null = null;
-    /** The reference before the most recent keep, so forgetLastKept can restore it. */
-    private priorKept: Uint8Array | null = null;
-    private priorKeptAtMs: number | null = null;
+    /** The most recent kept frames, newest last; the newest is the reference. */
+    private kept: KeptFrame[] = [];
     private stillSamples = 0;
     private stillSinceMs = 0;
     /** Per cell, one bit per recent sample: whether the cell changed from the sample before. */
@@ -157,8 +165,9 @@ export class KeyframeDetector {
         // With nothing kept yet, everything that holds still is new. Counting
         // the moving cells as well would keep a wall of moving cameras as the
         // meeting's first "slide", because the mask makes it look still.
-        const change = this.lastKept
-            ? changedFraction(current, this.lastKept, pixelDelta, this.moving)
+        const reference = this.kept.length ? this.kept[this.kept.length - 1] : null;
+        const change = reference
+            ? changedFraction(current, reference.frame, pixelDelta, this.moving)
             : 1 - this.movingFraction;
         if (this.previous) {
             for (let i = 0; i < current.length; i++) {
@@ -170,28 +179,30 @@ export class KeyframeDetector {
         this.previous = current;
 
         const settled = this.stillSamples >= thresholds.settleSamples;
-        const spaced = this.lastKeptAtMs === null || nowMs - this.lastKeptAtMs >= this.config.minIntervalMs;
+        const spaced = reference === null || nowMs - reference.atMs >= this.config.minIntervalMs;
         const quiet = this.movingFraction <= thresholds.maxMovingFraction;
         const keep = settled && spaced && quiet && change >= thresholds.changeFraction;
-        if (keep) {
-            this.priorKept = this.lastKept;
-            this.priorKeptAtMs = this.lastKeptAtMs;
-            this.lastKept = current;
-            this.lastKeptAtMs = nowMs;
+        if (!keep) {
+            return { keep, changeFraction: change, firstSeenMs: this.stillSinceMs };
         }
-        return { keep, changeFraction: change, firstSeenMs: this.stillSinceMs };
+        const kept: KeptFrame = { frame: current, atMs: nowMs };
+        this.kept.push(kept);
+        if (this.kept.length > KEPT_HISTORY) this.kept.shift();
+        return { keep, kept, changeFraction: change, firstSeenMs: this.stillSinceMs };
     }
 
     /**
-     * Undo the most recent keep, for a frame that could not be saved. The
-     * picture stops being the reference, so if it is still on screen it is
-     * kept again once it has settled, instead of counting as already captured.
+     * Undo a keep, for a frame that could not be saved. The picture stops
+     * being a reference, so if it is still on screen it is kept again once it
+     * has settled, instead of counting as already captured; the frame kept
+     * before it becomes the reference again. Undoing is by identity, so two
+     * undos in either order -- a frame skipped while another was being saved,
+     * then that one failing -- each remove exactly their own frame.
      */
-    forgetLastKept(): void {
-        this.lastKept = this.priorKept;
-        this.lastKeptAtMs = this.priorKeptAtMs;
-        this.priorKept = null;
-        this.priorKeptAtMs = null;
+    forget(kept: KeptFrame): void {
+        const index = this.kept.indexOf(kept);
+        if (index === -1) return;
+        this.kept.splice(index, 1);
         this.stillSamples = 0;
     }
 

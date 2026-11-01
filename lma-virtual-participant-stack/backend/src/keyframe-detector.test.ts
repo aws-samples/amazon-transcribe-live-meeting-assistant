@@ -185,17 +185,35 @@ test('the strict thresholds need a longer and stiller settle', () => {
     assert.deepEqual(results, [false, false, false, true]);
 });
 
-test('forgetting the last keep makes the same picture new again, and restores the one before', () => {
+test('forgetting a keep makes the same picture new again, and restores the one before', () => {
     const d = detector();
     const s1 = slide(1);
     const s2 = slide(2);
     [0, 1000, 2000].forEach((t) => d.push(s1, t, SHARE)); // s1 kept
-    [9000, 10000, 11000].forEach((t) => d.push(s2, t, SHARE)); // s2 kept
-    d.forgetLastKept(); // s2 was not saved
+    const second = [9000, 10000, 11000].map((t) => d.push(s2, t, SHARE))[2];
+    assert.ok(second.kept, 's2 kept');
+    d.forget(second.kept!); // s2 was not saved
     const again = [12000, 13000, 14000].map((t) => d.push(s2, t, SHARE));
     // The settle count starts again: two more still samples.
     assert.deepEqual(again.map((r) => r.keep), [false, true, false], 'kept again after settling, once');
     assert.ok(again[1].changeFraction > SHARE.changeFraction, 'judged against s1, the frame before');
+});
+
+test('undoing two keeps in either order removes exactly those two', () => {
+    const d = detector();
+    const [s1, s2, s3] = [slide(1), slide(2), slide(3)];
+    const keep = (s: Uint8Array, t0: number) => [t0, t0 + 1000, t0 + 2000].map((t) => d.push(s, t, SHARE))[2].kept!;
+    keep(s1, 0);
+    const k2 = keep(s2, 10000);
+    const k3 = keep(s3, 20000);
+    d.forget(k3); // skipped while k2 was being saved
+    d.forget(k2); // then k2 failed
+    d.forget(k2); // a repeated undo does nothing
+    // s1 is the reference again: s1 on screen is not new, s2 is.
+    const onS1 = [30000, 31000, 32000].map((t) => d.push(s1, t, SHARE).keep);
+    assert.deepEqual(onS1, [false, false, false]);
+    const onS2 = [40000, 41000, 42000].map((t) => d.push(s2, t, SHARE).keep);
+    assert.deepEqual(onS2, [false, false, true]);
 });
 
 test('a sample of the wrong size is rejected', () => {

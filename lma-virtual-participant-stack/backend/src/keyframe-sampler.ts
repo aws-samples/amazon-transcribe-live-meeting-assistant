@@ -311,7 +311,7 @@ export class KeyframeSampler {
             // runs; the picture is given back to the detector so it is judged
             // again once the capture in progress is done.
             this.skippedWhileCapturing++;
-            this.detector.forgetLastKept();
+            if (decision.kept) this.detector.forget(decision.kept);
             return;
         }
         // The frame is stamped with when its picture first appeared, on both clocks.
@@ -320,11 +320,12 @@ export class KeyframeSampler {
         const recordingStart = options.recordingStartedAtMs();
         const videoOffset = recordingStart === null ? null : Math.max(0, (decision.firstSeenMs - recordingStart) / 1000);
         const shareDetected = options.shareActive ? true : null;
+        const kept = decision.kept;
         this.capturing = this.capture(options, timestamp, videoOffset, shareDetected, decision.changeFraction)
             .catch((err) => {
                 // Not saved, so not the reference either: a slide still on
                 // screen is captured on the next settle rather than lost.
-                this.detector.forgetLastKept();
+                if (kept) this.detector.forget(kept);
                 console.error(`[Keyframes] Key frame not saved: ${err?.message || err}`);
             })
             .finally(() => {

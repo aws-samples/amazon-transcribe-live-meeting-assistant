@@ -820,21 +820,21 @@ const main = async (): Promise<void> => {
             stopDeviceSpecs();
         } catch { /* never block cleanup */ }
 
+        // Stop key frame sampling before transcription, which sends the END
+        // event, so a frame being captured is announced while the meeting is
+        // still open; in its own try so a failure cannot leave its FFmpeg
+        // process and share poll running.
+        try {
+            await keyframeSampler.stop();
+        } catch (keyframeError) {
+            console.error('Error stopping key frame sampling:', keyframeError);
+        }
+
         try {
             // Stop transcription service
             await transcriptionService.stopTranscription();
         } catch (error) {
             console.error('Error stopping transcription:', error);
-        }
-
-        // Stop key frame sampling before anything else in the recording
-        // teardown, in its own try so a failure there cannot leave its FFmpeg
-        // process and share poll running, and so a frame being captured is
-        // announced before the END event.
-        try {
-            await keyframeSampler.stop();
-        } catch (keyframeError) {
-            console.error('Error stopping key frame sampling:', keyframeError);
         }
 
         try {
