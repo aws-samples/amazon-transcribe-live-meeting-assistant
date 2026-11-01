@@ -289,7 +289,7 @@ describe('ConfigurationContent', () => {
     expect(within(transcribe).getAllByText('Custom vocabulary').length).toBeGreaterThan(0);
     expect(within(transcribe).queryByText('Redaction type')).toBeNull();
     expect(within(transcribe).queryByText('Entity types to redact')).toBeNull();
-    fireEvent.click(within(transcribe).getAllByRole('checkbox')[0]);
+    fireEvent.click(within(transcribe).getByRole('checkbox', { name: /Redact personal information/ }));
     expect(within(transcribe).getAllByText('Entity types to redact').length).toBeGreaterThan(0);
   });
 

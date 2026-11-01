@@ -98,8 +98,9 @@ const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || null;
 // optional - disable post call analytics output
 const IS_TCA_POST_CALL_ANALYTICS_ENABLED =
     (process.env['IS_TCA_POST_CALL_ANALYTICS_ENABLED'] || 'false') === 'true';
-// Whether Call Analytics' post-call output is redacted: the stack parameter's
-// value, which the PCA integration reads too (see where it is used).
+// Whether Call Analytics' post-call output is redacted: from the
+// IsContentRedactionEnabled stack parameter, which the PCA integration also reads
+// (see where it is used).
 const IS_POST_CALL_REDACTION_ENABLED = (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
 // optional - when redaction is enabled, choose 'redacted' only (dafault), or 'redacted_and_unredacted' for both
 const POST_CALL_CONTENT_REDACTION_OUTPUT =
@@ -536,10 +537,10 @@ export const startTranscribe = async (
                             OutputLocation: tcaOutputLocation,
                             DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
                         };
-                        // The post-call output follows this task's own redaction
-                        // variable, the stack parameter's value, rather than the
-                        // page: the PCA integration chooses which folder to read
-                        // from that same variable, and the two have to agree.
+                        // The post-call output follows the IsContentRedactionEnabled
+                        // stack parameter rather than the page, because that
+                        // parameter is also what the PCA integration reads to choose
+                        // its folder, and the two have to agree.
                         if (IS_POST_CALL_REDACTION_ENABLED) {
                             configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
                                 POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
