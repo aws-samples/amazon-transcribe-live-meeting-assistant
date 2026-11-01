@@ -528,6 +528,28 @@ def test_configuration_readers_are_ordered_behind_the_seeder(resources: dict):
     assert len(readers) >= 2, f"only found {len(readers)} functions reading the config table"
 
 
+def test_the_asr_engine_resolvers_exist_without_the_on_demand_engine(resources: dict):
+    """getAsrConfig is how a Virtual Participant reads its voice separation switch.
+
+    That switch is honoured on Amazon Transcribe as well, so a deployment without
+    the on-demand engine still needs the read; with no resolver attached AppSync
+    answers the field with null and the VP reads the switch as off.
+    """
+    chain = [
+        "UpdateAsrConfigResolverFunction",
+        "UpdateAsrConfigResolverFunctionLogGroup",
+        "UpdateAsrConfigResolverFunctionExecutionRole",
+        "AppSyncUpdateAsrConfigLambdaRole",
+        "UpdateAsrConfigLambdaDataSource",
+        "GetAsrConfigResolver",
+        "UpdateAsrConfigResolver",
+    ]
+    conditional = {
+        name: resources[name].get("Condition") for name in chain if resources[name].get("Condition")
+    }
+    assert not conditional, f"these are created only under a condition: {conditional}"
+
+
 def _as_list(value) -> list:
     return value if isinstance(value, list) else [value]
 

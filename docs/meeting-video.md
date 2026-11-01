@@ -119,7 +119,7 @@ How it is built:
 
 The section is a prompt in the `summary_prompt_templates` section like any
 other, so it can be edited, replaced or removed (set it to `NONE`) on the
-**Transcript Summary** page. A prompt of your own can use `{slides}` as well.
+**Transcript Summary** section of **Configuration ▸ Configuration**. A prompt of your own can use `{slides}` as well.
 
 Measured with the shipped prompt on the synthetic meeting (14 key frames: ten
 slides, one of them taken twice, and three pages of a document), every model

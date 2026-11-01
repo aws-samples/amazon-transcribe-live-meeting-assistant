@@ -33,6 +33,7 @@ import {
   effectiveSection,
   exportDocument,
   isAvailable,
+  isPresetOffered,
   readExport,
   rebaseSection,
   storedSection,
@@ -409,8 +410,8 @@ export const ConfigurationContent = () => {
                         items: doc.presets.map((entry) => ({
                           id: `preset:${entry.Id}`,
                           text: entry.Title,
-                          disabled: presetSections(entry).every(({ section }) => !section),
-                          disabledReason: 'This deployment has none of the sections it changes.',
+                          disabled: !isPresetOffered(entry, sections, settings),
+                          disabledReason: 'It sets something this deployment does not include.',
                         })),
                       },
                     ]

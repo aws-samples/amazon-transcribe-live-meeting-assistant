@@ -413,9 +413,10 @@ each from the schema's properties and annotations: a select for an `enum`, a
 long text box for `format: textarea`, suggestions for `examples`, a number field,
 a switch or a pair of radio buttons for a boolean, a list editor for an `array`,
 an editable map for an object whose members are named by the administrator, and
-a list of entries for `numberedKeys`. A section whose `availableWhen` setting
+a list of entries for `numberedKeys`. A section or a field whose `availableWhen` setting
 does not hold is not shown, and a field whose `dependsOn` does not hold is
-hidden. A section can open by itself from a link:
+hidden. A preset is offered only where every section and top-level setting it
+names is shown. A section can open by itself from a link:
 `/#/configuration/settings?section=<name>`.
 
 What it edits is each section's **effective** values — the baseline with the
@@ -994,7 +995,10 @@ Participant asks for per-voice labels — are the `asr_engine` section.
   30 seconds, so a table that cannot be read does not add a failed read to the
   start of every meeting.
 - `Query.getAsrConfig` and `Mutation.updateAsrConfig` are served by one Lambda
-  resolver, created, as before, only when the on-demand engine is deployed. The
+  resolver, created on every deployment: the Virtual Participant reads its voice
+  separation switch through it, and that switch applies on Amazon Transcribe too.
+  On a deployment without the on-demand engine the Configuration page shows only
+  that switch in the section, since the engine choices have nothing to select. The
   read stays open to every signed-in user and to IAM — the Stream Audio and
   Upload Audio forms read it, and the Virtual Participant reads its two switches
   with SigV4 — and answers with the *effective* switches plus `Version`. The

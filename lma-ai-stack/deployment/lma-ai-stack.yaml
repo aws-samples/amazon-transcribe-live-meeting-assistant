@@ -441,8 +441,9 @@ Parameters:
       The table the MicroVM ASR engine's runtime switches were stored in before
       they moved into the configuration table; read by the configuration seeder
       only, to carry them across on upgrade. Empty when that engine is not
-      deployed, in which case the Configuration page offers no Transcription
-      Engine section and its resolvers are not created.
+      deployed. The getAsrConfig and updateAsrConfig resolvers are created
+      either way: the Virtual Participant reads its voice separation switch
+      through them on Amazon Transcribe too.
 
   AsrConfigTableArn:
     Type: String
@@ -4611,12 +4612,15 @@ Resources:
         LambdaFunctionArn: !GetAtt UpdateNovaSonicConfigResolverFunction.Arn
 
   ##########################################################################
-  # ASR runtime config (MicroVM ASR engine) - Lambda, IAM, DataSources
+  # ASR runtime config (the asr_engine section) - Lambda, IAM, DataSources
+  #
+  # Created whether or not the on-demand engine is deployed: the Virtual
+  # Participant reads its voice separation switch through getAsrConfig on
+  # Amazon Transcribe as well.
   ##########################################################################
 
   UpdateAsrConfigResolverFunction:
     Type: AWS::Serverless::Function
-    Condition: HasAsrConfigTable
     Properties:
       Handler: index.lambda_handler
       Role: !GetAtt UpdateAsrConfigResolverFunctionExecutionRole.Arn
@@ -4646,7 +4650,6 @@ Resources:
 
   UpdateAsrConfigResolverFunctionLogGroup:
     Type: AWS::Logs::LogGroup
-    Condition: HasAsrConfigTable
     Properties:
       LogGroupName:
         Fn::Sub: /${AWS::StackName}/lambda/UpdateAsrConfigResolverFunction
@@ -4655,7 +4658,6 @@ Resources:
 
   UpdateAsrConfigResolverFunctionExecutionRole:
     Type: AWS::IAM::Role
-    Condition: HasAsrConfigTable
     Properties:
       Description: UpdateAsrConfigResolver Function Lambda Role
       AssumeRolePolicyDocument:
@@ -4693,7 +4695,6 @@ Resources:
 
   AppSyncUpdateAsrConfigLambdaRole:
     Type: AWS::IAM::Role
-    Condition: HasAsrConfigTable
     Properties:
       AssumeRolePolicyDocument:
         Version: 2012-10-17
@@ -5354,7 +5355,6 @@ Resources:
 
   UpdateAsrConfigLambdaDataSource:
     Type: AWS::AppSync::DataSource
-    Condition: HasAsrConfigTable
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
       Name: UpdateAsrConfigLambda
@@ -5372,7 +5372,6 @@ Resources:
   # the shipped ones -- all off -- as before.
   GetAsrConfigResolver:
     Type: AWS::AppSync::Resolver
-    Condition: HasAsrConfigTable
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
@@ -5405,7 +5404,6 @@ Resources:
 
   UpdateAsrConfigResolver:
     Type: AWS::AppSync::Resolver
-    Condition: HasAsrConfigTable
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId

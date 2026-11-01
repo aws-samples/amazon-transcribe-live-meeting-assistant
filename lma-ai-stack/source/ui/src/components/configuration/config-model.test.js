@@ -23,6 +23,7 @@ import {
   getAt,
   hasAt,
   isAvailable,
+  isPresetOffered,
   isShown,
   memberSchema,
   mergeDelta,
@@ -277,6 +278,25 @@ describe('presets, export and import', () => {
     const change = { mode: 'merge', values: { a: true, b: true } };
     expect(applyPresetSection(schema, {}, {}, change, {})).toEqual({ a: true });
     expect(applyPresetSection(schema, {}, {}, change, { Thing: 'true' })).toEqual({ a: true, b: true });
+  });
+
+  it('offers a preset only where the deployment has every section and setting it names', () => {
+    const engine = { setting: 'AsrEngineAvailable', value: 'true' };
+    const sections = [
+      { name: 'asr_engine', schema: { ...MERGE, properties: { engine: { availableWhen: engine }, separate: {} } } },
+    ];
+    const both = { Sections: { asr_engine: { mode: 'merge', values: { engine: true, separate: true } } } };
+    const separateOnly = { Sections: { asr_engine: { mode: 'merge', values: { separate: true } } } };
+    const elsewhere = { Sections: { not_here: { mode: 'merge', values: {} } } };
+    expect(isPresetOffered(both, sections, { AsrEngineAvailable: 'true' })).toBe(true);
+    // Applying it here would change only the one setting it could, which is not what it says it does.
+    expect(isPresetOffered(both, sections, {})).toBe(false);
+    expect(isPresetOffered(separateOnly, sections, {})).toBe(true);
+    expect(isPresetOffered(elsewhere, sections, {})).toBe(false);
+    const withheld = [
+      { name: 'asr_engine', schema: { ...MERGE, availableWhen: engine, properties: { separate: {} } } },
+    ];
+    expect(isPresetOffered(separateOnly, withheld, {})).toBe(false);
   });
 
   it('replaces a section, turning off every shipped entry the preset does not name', () => {

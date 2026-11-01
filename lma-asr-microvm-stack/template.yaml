@@ -130,8 +130,8 @@ Parameters:
       - "false"
     Description: >-
       Retain the ASR config table when the stack is deleted. It holds the
-      diarization operating point tuned from the web UI's ASR Config page,
-      including any calibration the deployment measured for itself.
+      runtime switches as they were stored before they moved into the
+      configuration table, which the configuration seeder carries across.
 
 Conditions:
   ShouldRetainDataOnDelete: !Equals [!Ref EnableDataRetentionOnDelete, "true"]
@@ -814,7 +814,7 @@ Outputs:
     Value: !GetAtt AsrImageSource.MinSegmentMs
 
   AsrConfigTableName:
-    Description: Runtime ASR configuration table, edited from the Transcription Engine admin page.
+    Description: Runtime ASR switches as stored before the configuration table; read by the configuration seeder.
     Value: !Ref AsrConfigTable
 
   AsrConfigTableArn:

@@ -326,8 +326,8 @@ Parameters:
     Type: String
     Default: ""
     Description: >-
-      (Optional) The table the three switches the Transcription Engine admin page
-      edits (streaming-meetings engine, Virtual Participant engine, Virtual
+      (Optional) The table the three switches the Transcription Engine section
+      of the Configuration page edits (streaming-meetings engine, Virtual Participant engine, Virtual
       Participant voice separation) were stored in before they moved into the
       configuration table. Read only as a fallback, when ConfigurationTableName
       holds no shipped ASR switches or cannot be read. Empty when the on-demand
@@ -1910,7 +1910,8 @@ Resources:
         AsrModelBundleName: !Ref AsrModelBundleName
         # Whether the on-demand engine is deployed AT ALL, as distinct from
         # AsrDiarizationAvailable (which is also false for a transcription-only
-        # bundle). The Configuration page's Transcription Engine section shows it, and the Stream Audio form only
+        # bundle). The Configuration page's Transcription Engine section shows its engine choices only when it
+        # is true (Virtual Participant voice separation is shown either way), and the Stream Audio form only
         # reads the streaming-engine switch when it is true.
         AsrEngineAvailable: !If [ShouldEnableMicrovmAsr, "true", "false"]
         # Whether this deployment has voice enrollment at all. The UI offers

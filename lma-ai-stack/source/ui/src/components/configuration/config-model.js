@@ -317,6 +317,19 @@ export const replacedSection = (schema, defaults, values) => {
   return result;
 };
 
+/**
+ * Whether this deployment offers everything a preset sets: each section it
+ * names, and each top-level setting in those sections. A preset is applied
+ * whole or not at all, so one that moves meetings onto an engine this
+ * deployment lacks is not offered for the one setting it could still change.
+ */
+export const isPresetOffered = (preset, sections, settings) =>
+  Object.entries(preset?.Sections || {}).every(([name, change]) => {
+    const section = (sections || []).find((candidate) => candidate.name === name);
+    if (!section || !isAvailable(section.schema, settings)) return false;
+    return Object.keys(change?.values || {}).every((key) => isAvailable(section.schema?.properties?.[key], settings));
+  });
+
 /** What applying one section of a preset makes of the section as it stands. */
 export const applyPresetSection = (schema, defaults, current, change, settings) => {
   const values = offered(schema, change.values, settings);
