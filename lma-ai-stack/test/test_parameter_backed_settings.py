@@ -482,7 +482,7 @@ VP_TABLE_ENTRY = re.compile(
 
 #: The modules that read these variables when they are imported, and so must
 #: import stack-settings.js before anything else.
-VP_IMPORT_TIME_READERS = ("details.ts", "voice-assistant.ts", "simli-avatar.ts")
+VP_IMPORT_TIME_READERS = ("details.ts", "voice-assistant.ts", "simli-avatar.ts", "scribe.ts")
 
 
 def _vp_entries() -> List[Tuple[str, str, str, str]]:

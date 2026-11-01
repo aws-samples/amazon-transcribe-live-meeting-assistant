@@ -1143,7 +1143,7 @@ of its task, and many places read them. So rather than change those places,
 `stack-settings.ts` in the Virtual Participant reads the three sections once as
 it starts and sets each variable the configuration holds a value for, leaving
 the others as the task was started. Some of the readers run when their module
-is imported (`details.ts`, `voice-assistant.ts`, `simli-avatar.ts`); each imports
+is imported (`details.ts`, `voice-assistant.ts`, `simli-avatar.ts`, `scribe.ts`); each imports
 `stack-settings.ts` first, and that module's top-level `await` makes the ES module
 loader finish the read before their own evaluation starts. On both launch paths
 the process starts when the meeting does, so what is applied is what is saved at

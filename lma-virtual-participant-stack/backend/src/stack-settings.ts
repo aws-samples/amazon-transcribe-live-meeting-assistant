@@ -24,8 +24,9 @@
  * task was started with, which is the parameter's.
  *
  * Some of those readers run when their module is imported: `details.ts` builds
- * the meeting details, and `voice-assistant.ts` and `simli-avatar.ts` build their
- * singletons. Each of them imports this module, whose top-level `await` makes
+ * the meeting details, and `voice-assistant.ts`, `simli-avatar.ts` and
+ * `scribe.ts` build their singletons (the transcription service reads the wake
+ * phrases as it is constructed). Each of them imports this module first, whose top-level `await` makes
  * ES module evaluation finish this read before theirs starts. On both launch
  * paths the process starts when the meeting does -- an ECS task at task start, a
  * MicroVM's app when its run payload arrives -- so what is applied is what is
