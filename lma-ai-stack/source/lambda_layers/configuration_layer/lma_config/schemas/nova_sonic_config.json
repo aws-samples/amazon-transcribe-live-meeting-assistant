@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/nova_sonic_config",
+  "title": "Nova Sonic voice assistant",
+  "description": "How the Nova Sonic voice assistant speaks and behaves in a meeting. A saved change applies to the next meeting the voice assistant joins.",
+  "sectionLabel": "Nova Sonic Voice Assistant",
+  "order": 3,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "systemPrompt": {
+      "order": 0,
+      "type": "string",
+      "title": "System prompt",
+      "description": "How the assistant introduces itself and answers. The prompt mode decides how this combines with the shipped prompt.",
+      "format": "textarea",
+      "rows": 4
+    },
+    "promptMode": {
+      "order": 1,
+      "type": "string",
+      "title": "Prompt mode",
+      "enum": ["base", "inject", "replace"],
+      "enumLabels": {
+        "base": "Base: use the shipped prompt",
+        "inject": "Inject: add this prompt to the shipped one",
+        "replace": "Replace: use this prompt instead of the shipped one"
+      }
+    },
+    "modelId": {
+      "order": 2,
+      "type": "string",
+      "title": "Model ID",
+      "description": "The Amazon Bedrock speech-to-speech model.",
+      "examples": ["amazon.nova-2-sonic-v1:0", "amazon.nova-sonic-v1:0"],
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "voiceId": {
+      "order": 3,
+      "type": "string",
+      "title": "Voice ID",
+      "description": "The voice the assistant speaks with.",
+      "examples": ["tiffany", "matthew", "amy"],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "endpointingSensitivity": {
+      "order": 4,
+      "type": "string",
+      "title": "Endpointing sensitivity",
+      "description": "How quickly the assistant decides a speaker has finished. HIGH answers soonest.",
+      "enum": ["LOW", "MEDIUM", "HIGH"]
+    },
+    "meetingMode": {
+      "order": 5,
+      "type": "string",
+      "title": "Meeting mode",
+      "description": "Group and Translator take effect only when the Virtual Participant is deployed with its voice assistant activation mode set to always_active.",
+      "enum": ["normal", "group", "translator"],
+      "enumLabels": {
+        "normal": "Normal",
+        "group": "Group meeting",
+        "translator": "Translator"
+      }
+    },
+    "translatorLanguageA": {
+      "order": 6,
+      "type": "string",
+      "title": "Translator language A",
+      "dependsOn": { "field": "meetingMode", "value": "translator" },
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "translatorLanguageB": {
+      "order": 7,
+      "type": "string",
+      "title": "Translator language B",
+      "dependsOn": { "field": "meetingMode", "value": "translator" },
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "translatorMutePhrases": {
+      "order": 8,
+      "type": "string",
+      "title": "Mute trigger phrases",
+      "description": "Comma-separated phrases that pause translation when spoken.",
+      "dependsOn": { "field": "meetingMode", "value": "translator" },
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "translatorUnmutePhrases": {
+      "order": 9,
+      "type": "string",
+      "title": "Unmute trigger phrases",
+      "description": "Comma-separated phrases that resume translation when spoken.",
+      "dependsOn": { "field": "meetingMode", "value": "translator" },
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "groupMeetingMode": {
+      "order": 10,
+      "type": "boolean",
+      "title": "Group meeting mode (legacy)",
+      "description": "Read only when no meeting mode is set. Set the meeting mode instead.",
+      "hidden": true
+    }
+  },
+  "additionalProperties": false
+}

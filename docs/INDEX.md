@@ -79,7 +79,8 @@ title: "LMA Documentation"
 ### Administration
 
 - [CloudFormation Parameters Reference](cloudformation-parameters.md) — Complete reference of all stack parameters by category
-- [Unified Configuration Store](configuration-store.md) — The shared runtime-configuration table: its key layout, the compressed record body, the three caching tiers a section can declare, conditional saves, the revision history every save records, and deploy-time seeding
+- [Configuration Guide](configuration-guide.md) — For administrators: which settings can be changed from the web UI without redeploying, where, when a saved change applies, and what to do when a save is refused
+- [Unified Configuration Store](configuration-store.md) — The shared runtime-configuration table: its key layout, the compressed record body, the three caching tiers a section can declare, conditional saves, the section schemas every save is checked against, the revision history every save records, and deploy-time seeding
 - [Stack Updates & Upgrades](stack-updates-and-upgrades.md) — Updating existing stacks, template URLs, version migration notes
 - [Well-Architected Framework Assessment](well-architected.md) — Assessment of LMA against the six pillars of the AWS Well-Architected Framework
 - [Meeting Cost Estimate](meeting-cost-estimate.md) — The itemised estimate of what each meeting cost: what is metered and how, the price table and where its prices come from, changing a price, and what the estimate leaves out

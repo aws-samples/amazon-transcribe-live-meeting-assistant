@@ -3,11 +3,21 @@
 # This file is licensed under the MIT License.
 # See the LICENSE file in the project root for full license information.
 
-"""AppSync resolver for the configuration history.
+"""AppSync resolver for the configuration editor and the configuration history.
 
-Every save into the configuration store records a revision (see
-``docs/configuration-store.md``). This function serves the five fields that
-read and act on that history, dispatching on the field name AppSync reports:
+Serves the two fields the schema-driven configuration editor is built on, and
+the five that read and act on the history every save records (see
+``docs/configuration-store.md``), dispatching on the field name AppSync reports:
+
+``Query.getConfiguration(Profile)``
+    Everything the editor needs in one read: each section's schema and cache
+    tier, the shipped baseline, the profile's stored delta, and the profile's
+    version, which is what a save sends back.
+
+``Mutation.updateConfiguration(input)``
+    Save the sections the editor changed, together, as one revision. Each is
+    checked against its schema before anything is written, and the save is
+    conditional on the version the editor loaded.
 
 ``Query.listConfigurationRevisions(Profile)``
     The retained revisions, newest first: who saved each, when, which sections
@@ -30,7 +40,7 @@ read and act on that history, dispatching on the field name AppSync reports:
     Label a revision, or clear its label. A labelled revision is kept however
     many revisions follow it.
 
-All five are for the **Admin** group: on the AppSync field, and re-checked here.
+All seven are for the **Admin** group: on the AppSync field, and re-checked here.
 The profile defaults to ``custom``, the one profile every configuration page
 saves into.
 """
@@ -46,8 +56,11 @@ from typing import Any, Dict, Mapping
 from lma_config import (  # from the configuration layer
     ConcurrentModification,
     ConfigurationStore,
+    InvalidConfiguration,
     RevisionEntry,
     RevisionNotFound,
+    registered_sections,
+    section_schemas,
     validate_profile_name,
 )
 
@@ -62,16 +75,27 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 ADMIN_GROUP = os.environ.get("ADMIN_GROUP", "Admin")
 DEFAULT_PROFILE = "custom"
 
+GET_CONFIGURATION_FIELD = "getConfiguration"
+UPDATE_CONFIGURATION_FIELD = "updateConfiguration"
 LIST_FIELD = "listConfigurationRevisions"
 GET_FIELD = "getConfigurationRevision"
 DIFF_FIELD = "diffConfigurationRevisions"
 RESTORE_FIELD = "restoreConfigurationRevision"
 LABEL_FIELD = "labelConfigurationRevision"
-FIELDS = (LIST_FIELD, GET_FIELD, DIFF_FIELD, RESTORE_FIELD, LABEL_FIELD)
+FIELDS = (
+    GET_CONFIGURATION_FIELD,
+    UPDATE_CONFIGURATION_FIELD,
+    LIST_FIELD,
+    GET_FIELD,
+    DIFF_FIELD,
+    RESTORE_FIELD,
+    LABEL_FIELD,
+)
 
 # Built once per container. Every read here is a fresh, consistent one: the
-# history is read through `list_revisions` and `get_revision`, which never use
-# the store's section cache.
+# editor reads the records through `read_profile`, and the history through
+# `list_revisions` and `get_revision`, none of which use the store's section
+# cache.
 CONFIG_STORE = ConfigurationStore()
 
 
@@ -110,12 +134,10 @@ def _caller(event: Mapping[str, Any]) -> Dict[str, Any]:
 
 def _require_admin(caller: Mapping[str, Any]) -> None:
     if not caller["is_admin"]:
-        LOGGER.info(
-            "refused a configuration history request to %s", caller["subject"] or "(no subject)"
-        )
+        LOGGER.info("refused a configuration request to %s", caller["subject"] or "(no subject)")
         raise ForbiddenError(
-            f"Unauthorized: only members of the {ADMIN_GROUP} group can read or restore "
-            "the configuration history"
+            f"Unauthorized: only members of the {ADMIN_GROUP} group can read or change "
+            "the configuration and its history"
         )
 
 
@@ -151,6 +173,92 @@ def _entry_shape(entry: RevisionEntry, published: Any) -> Dict[str, Any]:
         "Version": entry.version,
         "SizeBytes": entry.size_bytes,
         "Published": entry.revision == published,
+    }
+
+
+def _registered_only(body: Mapping[str, Any]) -> Dict[str, Any]:
+    """The sections of a body the store knows, so the editor renders nothing else."""
+    known = registered_sections()
+    return {name: values for name, values in body.items() if name in known}
+
+
+def get_configuration(arguments: Mapping[str, Any]) -> Dict[str, Any]:
+    """The editor's read: schemas, baseline, the profile's delta and its version.
+
+    Read from the stored records with consistent reads, never from the section
+    cache, so the editor shows what is stored and a save is checked against
+    the version it replaces.
+    """
+    profile = _profile(arguments)
+    baseline = CONFIG_STORE.read_profile("default", consistent_read=True)
+    head = CONFIG_STORE.read_profile(profile, consistent_read=True)
+    specs = registered_sections()
+    sections = [
+        {
+            "Name": name,
+            # So the editor can say when a saved change takes effect.
+            "CacheTier": specs[name].cache_tier.value,
+            "Schema": schema,
+        }
+        for name, schema in section_schemas().items()
+    ]
+    return {
+        "Profile": profile,
+        "Exists": head.exists,
+        "Version": head.version,
+        "UpdatedBy": head.updated_by or None,
+        "UpdatedAt": head.updated_at or None,
+        "PublishedRevision": head.published_revision,
+        "Sections": json.dumps(sections, sort_keys=True),
+        "Default": json.dumps(_registered_only(baseline.body), sort_keys=True),
+        "Custom": json.dumps(_registered_only(head.body), sort_keys=True),
+    }
+
+
+def update_configuration(
+    input_data: Mapping[str, Any], caller: Mapping[str, Any]
+) -> Dict[str, Any]:
+    """The editor's save: every changed section, in one write and one revision."""
+    profile = _profile(input_data)
+    expected = input_data.get("ExpectedVersion")
+    if isinstance(expected, bool) or not isinstance(expected, int):
+        # Required, as for a restore: the editor sends whole sections, so a save
+        # made from a stale read would replace what was saved since.
+        raise ValueError("ExpectedVersion is required: send the Version getConfiguration returned")
+    raw = input_data.get("Sections")
+    try:
+        sections = json.loads(raw) if isinstance(raw, str) else raw
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Sections is not valid JSON: {error}") from error
+    if not isinstance(sections, dict) or not sections:
+        raise ValueError("Sections must be a JSON object naming at least one section")
+    unknown = sorted(name for name in sections if name not in registered_sections())
+    if unknown:
+        raise InvalidConfiguration([f"{name}: is not a configuration section" for name in unknown])
+    # The editor saves into a profile that exists. Creating one is a different
+    # operation, with its own name to choose, and is not offered here.
+    if not CONFIG_STORE.read_profile(profile, consistent_read=True).exists:
+        raise ValueError(f"there is no configuration profile named {profile!r}")
+    outcome = CONFIG_STORE.write_sections(
+        profile,
+        sections,
+        updated_by=caller["actor"],
+        expected_version=expected,
+        comment=input_data.get("Comment"),
+    )
+    LOGGER.info(
+        "saved %s of %s as %s (version %d)",
+        ", ".join(sorted(sections)),
+        profile,
+        f"revision {outcome.revision}" if outcome.revision else "no new revision",
+        outcome.version,
+    )
+    return {
+        "Success": True,
+        "Profile": profile,
+        "Version": outcome.version,
+        "Revision": outcome.revision,
+        "Unchanged": outcome.revision is None,
     }
 
 
@@ -241,6 +349,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     _require_admin(caller)
     arguments = event.get("arguments") or {}
     try:
+        if field == GET_CONFIGURATION_FIELD:
+            return get_configuration(arguments)
+        if field == UPDATE_CONFIGURATION_FIELD:
+            return update_configuration(arguments.get("input") or {}, caller)
         if field == LIST_FIELD:
             return list_revisions(arguments)
         if field == GET_FIELD:
@@ -254,7 +366,13 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # The prefix the configuration pages match on to tell the admin to
         # reload. The message names whoever saved the profile, which belongs in
         # the answer to the admin, not in CloudWatch.
-        LOGGER.info("refused a restore against a superseded profile")
+        LOGGER.info("refused a %s against a superseded profile", field)
         raise Exception(f"Conflict: {error}") from error  # pylint: disable=broad-exception-raised
+    except InvalidConfiguration as error:
+        # The prefix a configuration editor is to match on, to show a value's
+        # problems beside the save rather than as a failure to try again. Only
+        # schema refusals carry it. (A registered section that ships no schema is
+        # a packaging fault, not caught here, and reaches the client as itself.)
+        raise Exception(f"Invalid: {error}") from error  # pylint: disable=broad-exception-raised
     except RevisionNotFound as error:
         raise Exception(f"Not found: {error}") from error  # pylint: disable=broad-exception-raised

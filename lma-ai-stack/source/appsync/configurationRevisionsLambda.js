@@ -6,11 +6,13 @@
 import { util } from '@aws-appsync/utils';
 
 /**
- * Forwards the five configuration history fields -- listConfigurationRevisions,
- * getConfigurationRevision, diffConfigurationRevisions,
- * restoreConfigurationRevision and labelConfigurationRevision -- to the history
- * resolver Lambda: the arguments, the verified identity and the field name,
- * which is what the Lambda dispatches on and what its Admin check reads.
+ * Forwards the configuration editor's two fields -- getConfiguration and
+ * updateConfiguration -- and the five configuration history fields --
+ * listConfigurationRevisions, getConfigurationRevision,
+ * diffConfigurationRevisions, restoreConfigurationRevision and
+ * labelConfigurationRevision -- to the configuration resolver Lambda: the
+ * arguments, the verified identity and the field name, which is what the
+ * Lambda dispatches on and what its Admin check reads.
  * @param {import('@aws-appsync/utils').Context} ctx the context
  * @returns {import('@aws-appsync/utils').LambdaRequest} the request
  */

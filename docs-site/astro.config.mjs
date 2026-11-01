@@ -148,6 +148,14 @@ export default defineConfig({
               slug: "cloudformation-parameters",
             },
             {
+              label: "Configuration Guide",
+              slug: "configuration-guide",
+            },
+            {
+              label: "Unified Configuration Store",
+              slug: "configuration-store",
+            },
+            {
               label: "Stack Updates & Upgrades",
               slug: "stack-updates-and-upgrades",
             },

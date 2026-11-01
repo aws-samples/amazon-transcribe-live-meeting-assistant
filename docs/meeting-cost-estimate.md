@@ -170,8 +170,14 @@ profile and keep winning over the baseline:
   `{"regions": {"default": {"transcribe/streaming": {"seconds": 0.00012}}}}` for a
   negotiated Transcribe rate. `"{}"` returns every price to the shipped value. The
   save replaces all of the Admin's earlier price changes with this object, so
-  include every change that should stay. A price that is not a non-negative number,
-  or a key the table does not have, is refused. `ExpectedVersion` is required, and a
+  include every change that should stay. The save is checked against the
+  `call_pricing` section's [schema](configuration-store.md#section-schemas-and-validation)
+  and refused as a whole, naming each problem, if a price is not a finite,
+  non-negative number, a region, service or unit name is not in the form the table
+  uses (a region is `default` or a code such as `us-east-1`, a service is
+  `<service>/<api-or-model>`, a unit is a word such as `inputTokens`), `currency`
+  is anything but `USD`, `pricesAsOf` is not a `YYYY-MM-DD` date, or a key is one
+  the table does not have. `ExpectedVersion` is required, and a
   save against a version another Admin has since saved is refused rather than
   overwriting their change.
   The version is that of the whole `custom` profile, which the Transcript Summary

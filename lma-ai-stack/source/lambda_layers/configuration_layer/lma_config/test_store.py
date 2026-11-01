@@ -40,6 +40,7 @@ from lma_config.errors import (
     ConcurrentModification,
     ConfigurationError,
     ConfigurationTableNotConfigured,
+    InvalidConfiguration,
     ReservedProfileName,
     UnknownConfigurationSection,
 )
@@ -642,7 +643,7 @@ def test_a_repeated_deployment_leaves_the_active_pointer_where_an_operator_put_i
 # ── saving one section of a profile ────────────────────────────────────────
 
 
-def test_saving_one_section_leaves_the_others_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_saving_one_section_leaves_the_others_alone() -> None:
     """The failure this method exists to prevent, and it is a silent one.
 
     One record holds every section an operator has changed. A page that
@@ -651,13 +652,12 @@ def test_saving_one_section_leaves_the_others_alone(monkeypatch: pytest.MonkeyPa
     the day a second store moves in, because nothing fails: the other page just
     reads the baseline and shows the shipped values back.
     """
-    _register_for_this_test(monkeypatch, "other_page", CacheTier.SHORT)
     store, dynamo, _ = build()
     seed(store)
     store.write_section(
         "custom",
-        "other_page",
-        {"engine": "microvm"},
+        "asr_engine",
+        {"streamingEngineMicrovm": True},
         updated_by="admin@example.com",
         expected_version=1,
     )
@@ -670,10 +670,10 @@ def test_saving_one_section_leaves_the_others_alone(monkeypatch: pytest.MonkeyPa
     )
 
     assert dynamo.body("Config#custom") == {
-        "other_page": {"engine": "microvm"},
+        "asr_engine": {"streamingEngineMicrovm": True},
         "summary_prompt_templates": {"1#SUMMARY": "my prompt"},
     }
-    assert store.get_section("other_page").values == {"engine": "microvm"}
+    assert store.get_section("asr_engine").values == {"streamingEngineMicrovm": True}
 
 
 def test_saving_a_section_replaces_it_rather_than_merging_its_keys() -> None:
@@ -711,6 +711,108 @@ def test_saving_an_unregistered_section_is_refused() -> None:
             expected_version=1,
         )
     assert not dynamo.puts(), "a refused section still reached DynamoDB"
+
+
+def test_a_section_that_does_not_match_its_schema_is_refused_before_anything_is_read() -> None:
+    store, dynamo, _ = build()
+    seed(store)
+    dynamo.requests.clear()
+    with pytest.raises(InvalidConfiguration) as raised:
+        store.write_section(
+            "custom",
+            "nova_sonic_config",
+            {"endpointingSensitivity": "EXTREME"},
+            updated_by="admin@example.com",
+            expected_version=1,
+        )
+    assert raised.value.problems == [
+        'nova_sonic_config › endpointingSensitivity: must be one of "LOW", "MEDIUM", "HIGH"; '
+        'got "EXTREME"'
+    ]
+    assert not dynamo.requests, "a refused save still reached DynamoDB"
+
+
+def test_saving_several_sections_is_one_write_and_leaves_the_others_alone() -> None:
+    store, dynamo, _ = build()
+    seed(store)
+    store.write_section(
+        "custom",
+        "summary_prompt_templates",
+        {"1#SUMMARY": "mine"},
+        updated_by="admin@example.com",
+        expected_version=1,
+    )
+    dynamo.requests.clear()
+    outcome = store.write_sections(
+        "custom",
+        {
+            "asr_engine": {"streamingEngineMicrovm": True},
+            "nova_sonic_config": {"voiceId": "matthew"},
+        },
+        updated_by="admin@example.com",
+        expected_version=2,
+    )
+    assert outcome.version == 3
+    assert len(dynamo.puts()) == 1
+    assert dynamo.body("Config#custom") == {
+        "summary_prompt_templates": {"1#SUMMARY": "mine"},
+        "asr_engine": {"streamingEngineMicrovm": True},
+        "nova_sonic_config": {"voiceId": "matthew"},
+    }
+
+
+def test_one_invalid_section_refuses_the_whole_save_and_reports_every_problem() -> None:
+    store, dynamo, _ = build()
+    seed(store)
+    dynamo.requests.clear()
+    with pytest.raises(InvalidConfiguration) as raised:
+        store.write_sections(
+            "custom",
+            {
+                "asr_engine": {"streamingEngineMicrovm": "yes"},
+                "nova_sonic_config": {"voiceId": "matthew"},
+                "call_pricing": {"regions": {"default": {"transcribe/streaming": {"seconds": -1}}}},
+            },
+            updated_by="admin@example.com",
+            expected_version=1,
+        )
+    assert raised.value.problems == [
+        "asr_engine › streamingEngineMicrovm: must be true or false; got text",
+        "call_pricing › regions › default › transcribe/streaming › seconds: "
+        "must be at least 0; got -1",
+    ]
+    assert not dynamo.requests
+
+
+def test_replacing_a_whole_profile_checks_every_section_in_it() -> None:
+    store, dynamo, _ = build()
+    seed(store)
+    dynamo.requests.clear()
+    with pytest.raises(InvalidConfiguration):
+        store.write_profile(
+            "custom",
+            {"chat_buttons": {"Summarize": "no number in front"}},
+            updated_by="admin@example.com",
+            expected_version=1,
+        )
+    with pytest.raises(UnknownConfigurationSection):
+        store.write_profile(
+            "custom", {"not_a_section": {}}, updated_by="admin@example.com", expected_version=1
+        )
+    assert not dynamo.puts()
+
+
+def test_the_seeder_is_not_held_to_the_schema() -> None:
+    """What it adopts was accepted when it was first saved.
+
+    Refusing it would turn a deployment into a failure. A restore is covered in
+    test_revisions.py.
+    """
+    store, dynamo, _ = build()
+    store.write_default(DEFAULT_BODY)
+    assert store.seed_profile("custom", {"nova_sonic_config": {"promptMode": "legacy-value"}})
+    assert store.seed_section("custom", "asr_engine", {"streamingEngineMicrovm": "true"})
+    assert dynamo.body("Config#custom")["asr_engine"] == {"streamingEngineMicrovm": "true"}
 
 
 def test_saving_a_section_is_conditional_like_any_other_save() -> None:
