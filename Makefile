@@ -57,12 +57,14 @@ PYTHON_LINE_LENGTH := 100
 RUFF_VERSION := $(shell sed -n 's/^ruff==//p' $(ASR_SOURCE_DIR)/requirements-dev.txt)
 # Everything `lint-python` fixes and `lint-python-check` checks. The Lambda
 # layers are included because their code is imported by most of the functions.
-# Nothing else under scripts/ is included: those files predate this and
-# reformatting them here would make an unrelated diff.
+# The rest of scripts/ is not included: those files predate this and
+# reformatting them here would make an unrelated diff. The parameter reference
+# generator was written to this lint, so it is named.
 PYTHON_LINT_PATHS := \
 	$(CURDIR)/$(LAMBDA_FUNCTIONS_DIR) \
 	$(CURDIR)/$(LAMBDA_LAYERS_DIR) \
-	$(CURDIR)/scripts/pr_review
+	$(CURDIR)/scripts/pr_review \
+	$(CURDIR)/scripts/cloudformation_parameters_doc.py
 
 # CloudFormation templates to validate
 CFN_TEMPLATES := \
