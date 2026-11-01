@@ -22,6 +22,7 @@ title: "Virtual Participant"
 - [VNC Preview](#vnc-preview)
   - [How a viewer is authorized](#how-a-viewer-is-authorized)
     - [Known limitations](#known-limitations)
+  - [Opening the preview from the meeting assistant, and closing a failed session](#opening-the-preview-from-the-meeting-assistant-and-closing-a-failed-session)
 - [Launch Types](#launch-types)
   - [MicroVM launch type (default)](#microvm-launch-type-default)
 - [EC2 Instance Types](#ec2-instance-types)
@@ -491,6 +492,21 @@ certificate matching the origin's domain name, and one cannot be issued for an
 `*.elb.amazonaws.com` name. Moving the load balancer behind a **CloudFront VPC origin** is
 the change that removes this along with the public DNS name, and is the recommended
 direction for this path.
+
+### Opening the preview from the meeting assistant, and closing a failed session
+
+The meeting assistant can open or close the VNC preview on a meeting page; it does so
+through the `toggleVNCPreview` mutation, which the meeting page receives through the
+`onVNCPreviewToggle` subscription. Both apply the rule the meeting page itself applies:
+they are answered for the meeting's owner, the users it is shared with, members of the
+`Admin` group, and backend roles with IAM credentials such as the meeting assistant.
+
+When a Virtual Participant fails to join, its live browser stays available for up to 10
+minutes so the failure can be inspected. The **Got it — close Virtual Participant
+session** button closes it sooner, through the `acknowledgeVPFailure` mutation. The button
+is shown to the Virtual Participant's owner and to members of the `Admin` group, the
+callers the mutation accepts; anyone else it is shared with sees the session close on its
+own.
 
 ## Launch Types
 

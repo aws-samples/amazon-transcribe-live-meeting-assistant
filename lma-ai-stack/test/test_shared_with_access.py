@@ -18,6 +18,9 @@ whole entries, in one of four shared blocks:
 * "SharedWith write condition" (VTL) -- the condition of the three meeting
   writes signed-in users reach, after authorizeCallWrite has read the meeting.
 
+The Python Lambdas that read SharedWith copy one function, `shared_with_entries`,
+which reads it on the same rule.
+
 The tests here hold each block to one text, check that every resolver that
 should use one does, and check the subscription filter against the published
 form. The templates' behaviour is evaluated by AppSync itself in
@@ -48,6 +51,7 @@ ENTRIES_TEMPLATES = [
     "deleteCall.response.vtl",
     "addVideoKeyframe.response.vtl",
     "updateVirtualParticipant.response.vtl",
+    "unshareVirtualParticipant.request.vtl",
 ]
 PUBLISHING_TEMPLATES = [
     "dDbPutCondition.response.vtl",
@@ -56,7 +60,7 @@ PUBLISHING_TEMPLATES = [
     "updateVirtualParticipant.response.vtl",
 ]
 PUBLISHING_JS = ["shareMeetings.js", "endVirtualParticipant.js"]
-ENTRIES_JS = [*PUBLISHING_JS, "chatSubscription.js"]
+ENTRIES_JS = [*PUBLISHING_JS, "meetingAccess.js"]
 WRITE_TEMPLATES = [
     "updateSpeakerIdentities.request.vtl",
     "updateCallSummaryText.request.vtl",
@@ -476,22 +480,44 @@ def test_the_filter_matches_a_name_holding_a_separator_as_the_owner_only() -> No
     assert text.index(guard) < text.index("{ SharedWith: { eq:")
 
 
-# ── the meeting assistant chat subscriptions ────────────────────────────────
+# ── subscriptions and writes answered by the getCall rule ───────────────────
 
 
-@pytest.mark.parametrize("field", ["onSendChatMessage", "onAddChatToken"])
-def test_a_chat_subscription_reads_the_meeting_it_names(resources: dict, field: str) -> None:
+@pytest.mark.parametrize("field", ["onSendChatMessage", "onAddChatToken", "onVNCPreviewToggle"])
+def test_a_subscription_without_shared_with_reads_the_meeting_it_names(
+    resources: dict, field: str
+) -> None:
     resolver = _resolver_for(resources, "Subscription", field)
-    assert resolver["CodeS3Location"].endswith("/chatSubscription.js")
+    assert resolver["CodeS3Location"].endswith("/meetingAccess.js")
     # The meeting table, which getCall reads.
     get_call = _resolver_for(resources, "Query", "getCall")
     assert resolver["DataSourceName"] == get_call["DataSourceName"]
-    code = _read("chatSubscription.js")
+    code = _read("meetingAccess.js")
     assert "operation: 'GetItem'" in code
     assert "const key = `c#${callId}`;" in code
     assert (
         "meeting.Owner === username || sharedWithEntries(meeting.SharedWith).includes(username)"
         in code
+    )
+
+
+def test_a_vnc_preview_toggle_is_written_after_the_meeting_access_check(resources: dict) -> None:
+    resolver = _resolver_for(resources, "Mutation", "toggleVNCPreview")
+    assert resolver["Kind"] == "PIPELINE"
+    assert resolver["PipelineConfig"]["Functions"] == [
+        {"Fn::GetAtt": "MeetingAccessAppSyncFunction.FunctionId"},
+        {"Fn::GetAtt": "ToggleVNCPreviewAppSyncFunction.FunctionId"},
+    ]
+    assert "return ctx.prev.result;" in resolver["Code"]
+    check = resources["MeetingAccessAppSyncFunction"]["Properties"]
+    write = resources["ToggleVNCPreviewAppSyncFunction"]["Properties"]
+    assert check["CodeS3Location"].endswith("/meetingAccess.js")
+    assert write["CodeS3Location"].endswith("/toggleVNCPreview.js")
+    get_call = _resolver_for(resources, "Query", "getCall")
+    assert check["DataSourceName"] == get_call["DataSourceName"]
+    # The mutation names the meeting in its input.
+    assert "ctx.args.CallId || (ctx.args.input && ctx.args.input.CallId)" in _read(
+        "meetingAccess.js"
     )
 
 
@@ -501,13 +527,32 @@ VP_OWNER_WRITES = [
     "shareVirtualParticipant",
     "unshareVirtualParticipant",
     "updateVirtualParticipant",
+    "acknowledgeVPFailure",
 ]
 
 
-def _request_template(resources: dict, field: str) -> str:
+def _write_props(resources: dict, field: str) -> dict:
+    """The properties of the resolver, or of the last function of a pipeline
+    resolver, which is the one that writes."""
     props = _resolver_for(resources, "Mutation", field)
     assert props, field
+    if props.get("Kind") == "PIPELINE":
+        last_id = props["PipelineConfig"]["Functions"][-1]["Fn::GetAtt"].split(".")[0]
+        props = resources[last_id]["Properties"]
+    return props
+
+
+def _request_template(resources: dict, field: str) -> str:
+    props = _write_props(resources, field)
+    location = props.get("RequestMappingTemplateS3Location")
+    if location:
+        return _read(Path(location).name)
     return props["RequestMappingTemplate"]
+
+
+def _response_template(resources: dict, field: str) -> str:
+    props = _write_props(resources, field)
+    return props["ResponseMappingTemplate"]
 
 
 def test_each_virtual_participant_write_has_the_owner_condition(resources: dict) -> None:
@@ -534,6 +579,39 @@ def test_a_virtual_participant_write_carries_its_conditions(resources: dict, fie
     if field != "updateVirtualParticipant":
         # UpdateItem creates a missing row; sharing one is refused instead.
         assert '#set( $conditions = ["attribute_exists(#conditionId)"] )' in template
+
+
+@pytest.mark.parametrize("field", [f for f in VP_OWNER_WRITES if f != "updateVirtualParticipant"])
+def test_a_refused_virtual_participant_write_says_why(resources: dict, field: str) -> None:
+    response = _response_template(resources, field)
+    assert '$ctx.error.type == "DynamoDB:ConditionalCheckFailedException"' in response
+    assert "is not authorized to change Virtual Participant" in response
+    assert "was not found" in response
+
+
+def test_unsharing_reads_the_row_before_writing_what_remains(resources: dict) -> None:
+    resolver = _resolver_for(resources, "Mutation", "unshareVirtualParticipant")
+    assert resolver["Kind"] == "PIPELINE"
+    assert resolver["PipelineConfig"]["Functions"] == [
+        {"Fn::GetAtt": "ReadVirtualParticipantSharingAppSyncFunction.FunctionId"},
+        {"Fn::GetAtt": "UnshareVirtualParticipantAppSyncFunction.FunctionId"},
+    ]
+    read = resources["ReadVirtualParticipantSharingAppSyncFunction"]["Properties"]
+    write = resources["UnshareVirtualParticipantAppSyncFunction"]["Properties"]
+    assert read["DataSourceName"] == write["DataSourceName"]
+    assert '"operation": "GetItem"' in read["RequestMappingTemplate"]
+    assert '"consistentRead": true' in read["RequestMappingTemplate"]
+    assert (
+        '$ctx.stash.put("sharedWithAsRead", $ctx.result.SharedWith)'
+        in (read["ResponseMappingTemplate"])
+    )
+    template = _request_template(resources, "unshareVirtualParticipant")
+    assert '#set( $sharedWithRaw = $util.defaultIfNull($ctx.stash.sharedWithAsRead, "") )' in (
+        template
+    )
+    assert "!$sharedWithRemoved.contains($sharedWithEntry)" in template
+    assert '"#conditionSharedWith = :conditionSharedWithAsRead"' in template
+    assert '"attribute_not_exists(#conditionSharedWith)"' in template
 
 
 def test_a_virtual_participant_is_shared_with_entries_free_of_separators(resources: dict) -> None:
@@ -597,3 +675,120 @@ def test_every_virtual_participant_create_selects_owner_and_shared_with() -> Non
     for path, selection in selections:
         fields = set(re.findall(r"\b\w+\b", selection))
         assert {"Owner", "SharedWith"} <= fields, path
+
+
+# ── the Python Lambdas that read SharedWith ─────────────────────────────────
+
+LAMBDA_FUNCTIONS = AI_STACK / "source" / "lambda_functions"
+PYTHON_READERS = [
+    "agenda_deriver/index.py",
+    "call_cost_resolver/index.py",
+    "list_calls_gsi_resolver/index.py",
+    "mcp_analytics/tools/get_virtual_participant_status.py",
+    "meeting_controls_resolver/index.py",
+    "microvm_vnc_token/vp_access.py",
+    "speaker_name_resolver/index.py",
+    "summary_regenerator/index.py",
+    "video_keyframes_resolver/index.py",
+    "vnc_edge_token/vp_access.py",
+]
+PY_BEGIN = "# BEGIN shared_with_entries"
+PY_END = "# END shared_with_entries"
+
+
+def _python_block(rel: str) -> str:
+    return _block((LAMBDA_FUNCTIONS / rel).read_text(encoding="utf-8"), PY_BEGIN, PY_END)
+
+
+def _lambda_sources() -> list:
+    return [
+        p
+        for p in LAMBDA_FUNCTIONS.rglob("*.py")
+        if not p.name.startswith("test_") and not SKIPPED_PARTS & set(p.parts)
+    ]
+
+
+def test_each_python_reader_has_one_text() -> None:
+    """Each Lambda is packaged on its own, so the rule is copied into each one
+    that reads SharedWith; the copies are held to one text."""
+    blocks = {rel: _python_block(rel) for rel in PYTHON_READERS}
+    first = blocks[PYTHON_READERS[0]]
+    for rel, block in blocks.items():
+        assert block == first, f"{rel}: shared_with_entries has drifted from {PYTHON_READERS[0]}"
+
+
+def test_every_python_reader_is_listed_here() -> None:
+    having = sorted(
+        p.relative_to(LAMBDA_FUNCTIONS).as_posix()
+        for p in _lambda_sources()
+        if PY_BEGIN in p.read_text(encoding="utf-8")
+    )
+    assert having == sorted(PYTHON_READERS)
+
+
+def test_no_lambda_splits_shared_with_outside_the_shared_rule() -> None:
+    """The ad hoc forms the shared rule stands in for appear nowhere else."""
+    for path in _lambda_sources():
+        text = path.read_text(encoding="utf-8")
+        if PY_BEGIN in text:
+            text = text.replace(_block(text, PY_BEGIN, PY_END), "")
+        for form in ('.strip("[]")', '[1:-1].split(","', 'shared.split(",")'):
+            assert form not in text, (path.relative_to(LAMBDA_FUNCTIONS).as_posix(), form)
+
+
+@pytest.fixture(scope="module")
+def shared_with_entries():
+    namespace: dict = {}
+    exec(_python_block(PYTHON_READERS[0]), namespace)  # noqa: S102 - the repository's own source
+    return namespace["shared_with_entries"]
+
+
+LISTED = "bob@example.com"
+OTHER_LISTED = "alice@example.com"
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ([OTHER_LISTED, LISTED], [OTHER_LISTED, LISTED]),
+        ((f" {LISTED} ",), [LISTED]),
+        (f"{OTHER_LISTED},{LISTED}", [OTHER_LISTED, LISTED]),
+        (f"{OTHER_LISTED}, {LISTED}", [OTHER_LISTED, LISTED]),
+        (f"[{OTHER_LISTED}, {LISTED}]", [OTHER_LISTED, LISTED]),
+        (f"[{LISTED}]", [LISTED]),
+        (LISTED, [LISTED]),
+        ("", []),
+        ("[]", []),
+        (None, []),
+        ({"S": LISTED}, []),
+        ([LISTED, None, 7, ""], [LISTED]),
+    ],
+)
+def test_the_python_rule_reads_every_stored_shape(shared_with_entries, value, expected) -> None:
+    assert shared_with_entries(value) == expected
+
+
+def test_the_python_rule_reads_a_string_set(shared_with_entries) -> None:
+    assert sorted(shared_with_entries({OTHER_LISTED, LISTED})) == [OTHER_LISTED, LISTED]
+
+
+# The values test_shared_with_access_evaluated.py evaluates getCall against,
+# with whether the listed user is an entry: the Python rule agrees with it.
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ([f"{OTHER_LISTED}, {LISTED}"], False),
+        ([f"[{LISTED}]"], False),
+        ([f"{LISTED}]", OTHER_LISTED], False),
+        ([f"x], {LISTED}", LISTED], True),
+        (f"[x], {LISTED}]", True),
+        (f"{OTHER_LISTED}][{LISTED}", True),
+        (f"[[{LISTED}]]", True),
+    ],
+)
+def test_the_python_rule_never_reads_a_separator_into_an_entry(
+    shared_with_entries, value, expected: bool
+) -> None:
+    entries = shared_with_entries(value)
+    assert (LISTED in entries) is expected
+    assert not any(separator in entry for entry in entries for separator in "[],")

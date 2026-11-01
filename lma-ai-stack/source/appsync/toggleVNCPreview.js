@@ -1,8 +1,14 @@
+/*
+ * Copyright (c) 2025 Amazon.com
+ * This file is licensed under the MIT License.
+ * See the LICENSE file in the project root for full license information.
+ */
 import { util } from '@aws-appsync/utils';
 
 /**
- * Request handler for toggleVNCPreview mutation
- * Stores VNC preview control events in DynamoDB
+ * Request handler for the write of the toggleVNCPreview pipeline.
+ * Stores VNC preview control events in DynamoDB. It runs after meetingAccess.js
+ * has accepted the caller for the meeting named by input.CallId.
  * Supports both Cognito User Pools and IAM authentication
  */
 export function request(ctx) {

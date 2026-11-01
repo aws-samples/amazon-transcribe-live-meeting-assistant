@@ -279,6 +279,33 @@ def verify_permissions(event):
 RECIPIENT_PATTERN = re.compile(r"[^@\[\]]+@[^@\[\]]+\.[^@\[\]]+")
 
 
+# BEGIN shared_with_entries -- one text in every Lambda that reads SharedWith;
+# lma-ai-stack/test/test_shared_with_access.py holds the copies to it.
+# The entries of a SharedWith value, read as the AppSync resolvers read them
+# (the "SharedWith entries" VTL block and sharedWithEntries in the JS
+# resolvers): a list, tuple or set holds one entry per string element, and a
+# string -- comma-separated or "[a, b]" -- is split at every "[", "]" and ",".
+# Those three characters only ever separate entries, so a list element that
+# contains one is not an entry. Entries are trimmed and empty ones dropped;
+# membership is then a comparison of whole entries.
+def shared_with_entries(value: object) -> list:
+    """The trimmed, non-empty entries of a SharedWith value."""
+    if isinstance(value, str):
+        parts = value.replace("[", ",").replace("]", ",").split(",")
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        parts = [
+            part
+            for part in value
+            if isinstance(part, str) and not any(separator in part for separator in "[],")
+        ]
+    else:
+        return []
+    return [part.strip() for part in parts if part.strip()]
+
+
+# END shared_with_entries
+
+
 def share_meetings(calls, owner, recipients):
     if recipients and not all(
         RECIPIENT_PATTERN.fullmatch(email.strip()) for email in recipients.split(",")
@@ -334,8 +361,7 @@ def share_meeting(appsync_session, schema, callid, listPK, listSK, recipients, o
         result = get_call_details(appsync_session, schema, callid)
         shared_with = result.get("getCall").get("SharedWith")
 
-        if shared_with:
-            shared_with = [recipient.strip() for recipient in shared_with[1:-1].split(",")]
+        shared_with = shared_with_entries(shared_with)
 
         if shared_with and new_recipients:
             unshare_list = list(set(shared_with) - set(new_recipients))

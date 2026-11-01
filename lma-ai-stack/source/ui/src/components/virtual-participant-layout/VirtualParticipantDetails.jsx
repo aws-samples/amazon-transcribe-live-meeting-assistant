@@ -22,6 +22,7 @@ import {
   Flashbar,
 } from '@cloudscape-design/components';
 import useAppContext from '../../contexts/app';
+import useUserGroups from '../../hooks/use-user-groups';
 import useSettingsContext from '../../contexts/settings';
 import StatusTimeline from './StatusTimeline';
 import VNCViewer from './VNCViewer';
@@ -424,6 +425,7 @@ const ErrorTroubleshooting = ({
   vpId = null,
   vncReady = false,
   userAcknowledgedFailure = false,
+  canAcknowledge = false,
 }) => {
   const [acking, setAcking] = useState(false);
   const [ackError, setAckError] = useState(null);
@@ -432,7 +434,7 @@ const ErrorTroubleshooting = ({
   if (status !== 'FAILED') return null;
 
   const acknowledged = !!userAcknowledgedFailure || ackedLocal;
-  const showAckButton = !!vpId && !!vncReady && !acknowledged;
+  const showLiveBrowserNote = !!vpId && !!vncReady && !acknowledged;
 
   const handleAcknowledge = async () => {
     setAcking(true);
@@ -523,21 +525,29 @@ const ErrorTroubleshooting = ({
             {getErrorSolution()}
           </SpaceBetween>
         </Alert>
-        {showAckButton && (
+        {showLiveBrowserNote && (
           <Alert type="info">
             <SpaceBetween direction="vertical" size="s">
               <div>
                 The live browser above is still available so you can inspect what tripped up the join (e.g. a CAPTCHA,
                 an unexpected dialog, or a stuck page).
               </div>
-              <div>
-                Click <strong>Got it — close Virtual Participant session</strong> when you&apos;re done. The session
-                will close automatically after 10 minutes.
-              </div>
-              {ackError && <div style={{ color: '#d13212' }}>{ackError}</div>}
-              <Button onClick={handleAcknowledge} loading={acking} variant="primary">
-                Got it — close Virtual Participant session
-              </Button>
+              {canAcknowledge ? (
+                <>
+                  <div>
+                    Click <strong>Got it — close Virtual Participant session</strong> when you&apos;re done. The session
+                    will close automatically after 10 minutes.
+                  </div>
+                  {ackError && <div style={{ color: '#d13212' }}>{ackError}</div>}
+                  <Button onClick={handleAcknowledge} loading={acking} variant="primary">
+                    Got it — close Virtual Participant session
+                  </Button>
+                </>
+              ) : (
+                <div>
+                  The session will close automatically after 10 minutes, or sooner when its owner or an Admin closes it.
+                </div>
+              )}
             </SpaceBetween>
           </Alert>
         )}
@@ -563,6 +573,9 @@ ErrorTroubleshooting.propTypes = {
   vpId: PropTypes.string,
   vncReady: PropTypes.bool,
   userAcknowledgedFailure: PropTypes.bool,
+  // Whether the caller may acknowledge the failure: the Virtual Participant's
+  // owner or an Admin, as the acknowledgeVPFailure mutation requires.
+  canAcknowledge: PropTypes.bool,
 };
 
 const ActionButtons = ({ vpDetails, onRefresh, onEnd, onCancelSchedule }) => {
@@ -616,7 +629,8 @@ ActionButtons.propTypes = {
 const VirtualParticipantDetails = () => {
   const { vpId } = useParams();
   const navigate = useNavigate();
-  const { authState } = useAppContext();
+  const { authState, user } = useAppContext();
+  const { isAdmin } = useUserGroups();
   // Deployment hosting mode (FARGATE | EC2) so startup status copy matches the
   // actual launch type instead of always describing EC2 host-slot behavior.
   const { settings } = useSettingsContext() || {};
@@ -1020,6 +1034,7 @@ const VirtualParticipantDetails = () => {
         vpId={vpId}
         vncReady={vpDetails.vncReady}
         userAcknowledgedFailure={vpDetails.userAcknowledgedFailure}
+        canAcknowledge={isAdmin || (!!user?.username && vpDetails.Owner === user.username)}
       />
 
       {/* Basic Status Timeline for basic schema */}

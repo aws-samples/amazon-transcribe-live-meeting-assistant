@@ -499,23 +499,33 @@ def test_an_admin_subscription_is_not_filtered(client) -> None:
     assert _subscription_filter(client, COGNITO["admin"][0]) is None
 
 
-# ── the meeting assistant chat subscriptions ────────────────────────────────
+# ── meetingAccess.js: chat and VNC preview subscriptions, VNC preview toggle ──
 
 
 def _evaluate_chat(client, function: str, context: dict) -> dict:
     return client.evaluate_code(
         runtime={"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
-        code=(APPSYNC / "chatSubscription.js").read_text(encoding="utf-8"),
+        code=(APPSYNC / "meetingAccess.js").read_text(encoding="utf-8"),
         context=json.dumps(context),
         function=function,
     )
 
 
+# The arguments of each operation meetingAccess.js answers: the subscriptions
+# name the meeting as CallId, the toggleVNCPreview mutation as input.CallId.
+MEETING_ACCESS_ARGUMENTS = {
+    "onSendChatMessage": {"CallId": "c1", "MessageId": "m1"},
+    "onVNCPreviewToggle": {"CallId": "c1"},
+    "toggleVNCPreview": {"input": {"CallId": "c1", "Show": True}},
+}
+
+
+@pytest.mark.parametrize("operation", list(MEETING_ACCESS_ARGUMENTS))
 @pytest.mark.parametrize("shape,caller,identity,expected", CASES)
-def test_a_chat_subscription_is_answered_to_exactly_the_people_the_meeting_is_for(
-    client, shape: str, caller: str, identity: dict, expected: bool
+def test_a_meeting_access_check_answers_exactly_the_people_the_meeting_is_for(
+    client, shape: str, caller: str, identity: dict, expected: bool, operation: str
 ) -> None:
-    arguments = {"CallId": "c1", "MessageId": "m1"}
+    arguments = MEETING_ACCESS_ARGUMENTS[operation]
     request = _evaluate_chat(client, "request", {"arguments": arguments, "identity": identity})
     assert not request.get("error"), request
     if caller == "admin":
@@ -534,11 +544,51 @@ def test_a_chat_subscription_is_answered_to_exactly_the_people_the_meeting_is_fo
     assert (not response.get("error")) is expected, response
 
 
-def test_a_chat_subscription_is_answered_to_a_backend_role(client) -> None:
+@pytest.mark.parametrize("operation", list(MEETING_ACCESS_ARGUMENTS))
+def test_a_meeting_access_check_answers_a_backend_role(client, operation: str) -> None:
     request = _evaluate_chat(
-        client, "request", {"arguments": {"CallId": "c1", "MessageId": "m1"}, "identity": BACKEND}
+        client,
+        "request",
+        {"arguments": MEETING_ACCESS_ARGUMENTS[operation], "identity": BACKEND},
     )
     assert not request.get("error") and json.loads(request["evaluationResult"]) is None
+
+
+def test_a_vnc_preview_toggle_is_recorded_for_the_meeting(client) -> None:
+    response = client.evaluate_code(
+        runtime={"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
+        code=(APPSYNC / "toggleVNCPreview.js").read_text(encoding="utf-8"),
+        context=json.dumps(
+            {
+                "arguments": MEETING_ACCESS_ARGUMENTS["toggleVNCPreview"],
+                "identity": BACKEND,
+                "prev": {"result": None},
+            }
+        ),
+        function="request",
+    )
+    assert not response.get("error"), response
+    request = json.loads(response["evaluationResult"])
+    assert request["operation"] == "PutItem"
+    assert request["key"]["PK"] == {"S": "vnc#c1"}
+    assert request["attributeValues"]["Action"] == {"S": "open"}
+
+
+def test_the_vnc_preview_pipeline_answers_with_the_recorded_event(client) -> None:
+    import yaml  # imported here so the module collects without PyYAML when skipped
+    from test_shared_with_access import TEMPLATE, _CfnLoader, _resolver_for
+
+    resources = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    code = _resolver_for(resources, "Mutation", "toggleVNCPreview")["Code"]
+    event = {"CallId": "c1", "Action": "open", "Success": True}
+    response = client.evaluate_code(
+        runtime={"name": "APPSYNC_JS", "runtimeVersion": "1.0.0"},
+        code=code,
+        context=json.dumps({"arguments": {}, "prev": {"result": event}}),
+        function="response",
+    )
+    assert not response.get("error"), response
+    assert json.loads(response["evaluationResult"]) == event
 
 
 def test_a_chat_subscription_to_a_missing_meeting_is_refused(client) -> None:
@@ -559,11 +609,21 @@ def test_a_signed_in_chat_subscriber_names_the_meeting(client) -> None:
 
 
 def _inline(field: str, key: str) -> str:
+    """The write's request or response template; for a pipeline, its last
+    function's."""
     import yaml  # imported here so the module collects without PyYAML when skipped
-    from test_shared_with_access import TEMPLATE, _CfnLoader, _resolver_for
+    from test_shared_with_access import (
+        TEMPLATE,
+        _CfnLoader,
+        _request_template,
+        _response_template,
+    )
 
     resources = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
-    template = _resolver_for(resources, "Mutation", field)[key]
+    if key == "RequestMappingTemplate":
+        template = _request_template(resources, field)
+    else:
+        template = _response_template(resources, field)
     if isinstance(template, dict):
         # shareCall's template is an Fn::Sub: substitute it as CloudFormation would.
         template = template["Fn::Sub"].replace("${EventSourcingTable}", "events")
@@ -581,7 +641,16 @@ VP_INPUTS = {
     "shareVirtualParticipant": {"id": "vp1", "SharedWith": [LISTED, OTHER_LISTED]},
     "unshareVirtualParticipant": {"id": "vp1", "SharedWith": [LISTED]},
     "updateVirtualParticipant": {"id": "vp1", "status": "JOINING"},
+    "acknowledgeVPFailure": None,
 }
+
+
+def _vp_arguments(field: str) -> dict:
+    if field == "acknowledgeVPFailure":
+        return {"virtualParticipantId": "vp1"}
+    return {"input": VP_INPUTS[field]}
+
+
 # Whether the caller is held to the row's Owner.
 VP_CALLERS = {
     "owner": (COGNITO["owner"][0], True),
@@ -605,7 +674,7 @@ def test_a_virtual_participant_write_is_conditioned_on_its_owner(
         client,
         field,
         "RequestMappingTemplate",
-        {"arguments": {"input": VP_INPUTS[field]}, "identity": identity},
+        {"arguments": _vp_arguments(field), "identity": identity},
     )
     assert not response.get("error"), response
     condition = json.loads(response["evaluationResult"]).get("condition")
@@ -690,7 +759,9 @@ def test_a_meeting_is_shared_with_plain_recipients(client, shared_with) -> None:
     assert not response.get("error"), response
 
 
-@pytest.mark.parametrize("field", ["shareVirtualParticipant", "unshareVirtualParticipant"])
+@pytest.mark.parametrize(
+    "field", ["shareVirtualParticipant", "unshareVirtualParticipant", "acknowledgeVPFailure"]
+)
 @pytest.mark.parametrize("restricted,expected", [(True, "not authorized"), (False, "not found")])
 def test_a_refused_virtual_participant_share_says_why(
     client, field: str, restricted: bool, expected: str
@@ -700,7 +771,7 @@ def test_a_refused_virtual_participant_share_says_why(
         field,
         "ResponseMappingTemplate",
         {
-            "arguments": {"input": VP_INPUTS[field]},
+            "arguments": _vp_arguments(field),
             "identity": COGNITO["other"][0],
             "stash": {"vpCallerRestricted": restricted},
             "error": {
@@ -728,3 +799,164 @@ def test_a_shared_virtual_participant_answers_with_the_row_as_written(client) ->
         "Owner": OWNER,
         "SharedWith": LISTED,
     }
+
+
+def test_an_acknowledged_failure_answers_true(client) -> None:
+    response = _evaluate_inline(
+        client,
+        "acknowledgeVPFailure",
+        "ResponseMappingTemplate",
+        {
+            "arguments": _vp_arguments("acknowledgeVPFailure"),
+            "identity": COGNITO["owner"][0],
+            "result": {"id": "vp1", "userAcknowledgedFailure": True},
+        },
+    )
+    assert not response.get("error"), response
+    assert json.loads(response["evaluationResult"]) is True
+
+
+# ── unsharing a Virtual Participant ─────────────────────────────────────────
+
+
+def _unshare_read(client, row) -> dict:
+    """The stash the read function leaves for the write."""
+    import yaml  # imported here so the module collects without PyYAML when skipped
+    from test_shared_with_access import TEMPLATE, _CfnLoader
+
+    resources = yaml.load(TEMPLATE.read_text(encoding="utf-8"), Loader=_CfnLoader)["Resources"]
+    function = resources["ReadVirtualParticipantSharingAppSyncFunction"]["Properties"]
+    request = client.evaluate_mapping_template(
+        template=function["RequestMappingTemplate"],
+        context=json.dumps({"arguments": {"input": {"id": "vp1", "SharedWith": [LISTED]}}}),
+    )
+    assert json.loads(request["evaluationResult"])["key"] == {"id": {"S": "vp1"}}
+    response = client.evaluate_mapping_template(
+        template=function["ResponseMappingTemplate"], context=json.dumps({"result": row})
+    )
+    assert not response.get("error"), response
+    return json.loads(response["stash"])
+
+
+def test_the_read_before_unsharing_records_the_row(client) -> None:
+    stash = _unshare_read(client, {"id": "vp1", "Owner": OWNER, "SharedWith": "a,b"})
+    assert stash == {"vpFound": True, "vpOwnerAsRead": OWNER, "sharedWithAsRead": "a,b"}
+    assert _unshare_read(client, {"id": "vp1", "Owner": OWNER}) == {
+        "vpFound": True,
+        "vpOwnerAsRead": OWNER,
+    }
+    assert _unshare_read(client, None) == {"vpFound": False}
+
+
+def _unshare_write(client, removed, stash: dict, identity=None) -> dict:
+    response = _evaluate_inline(
+        client,
+        "unshareVirtualParticipant",
+        "RequestMappingTemplate",
+        {
+            "arguments": {"input": {"id": "vp1", "SharedWith": removed}},
+            "identity": identity or COGNITO["owner"][0],
+            "stash": stash,
+        },
+    )
+    assert not response.get("error"), response
+    return json.loads(response["evaluationResult"])
+
+
+CAROL = "carol@example.com"
+
+
+@pytest.mark.parametrize(
+    "as_read,removed,kept",
+    [
+        (f"{OTHER_LISTED},{LISTED},{CAROL}", [LISTED], f"{OTHER_LISTED},{CAROL}"),
+        (f"[{OTHER_LISTED}, {LISTED}]", [f" {LISTED} "], OTHER_LISTED),
+        ([OTHER_LISTED, LISTED], [LISTED, CAROL], OTHER_LISTED),
+        (f"{OTHER_LISTED},{LISTED}", [OTHER_LISTED, LISTED], ""),
+        (f"{OTHER_LISTED},{OTHER_LISTED},{LISTED}", [CAROL], f"{OTHER_LISTED},{LISTED}"),
+        (f"{OTHER_LISTED},{LISTED}", [], f"{OTHER_LISTED},{LISTED}"),
+        # Part of an entry is not the entry.
+        (f"{OTHER_LISTED},{LISTED}", ["ob@example.com"], f"{OTHER_LISTED},{LISTED}"),
+    ],
+)
+def test_unsharing_removes_only_the_entries_named(client, as_read, removed, kept: str) -> None:
+    request = _unshare_write(client, removed, {"vpFound": True, "sharedWithAsRead": as_read})
+    assert request["update"]["expressionValues"][":val"] == {"S": kept}
+    condition = request["condition"]
+    assert "#conditionSharedWith = :conditionSharedWithAsRead" in condition["expression"]
+    assert condition["expressionNames"]["#conditionSharedWith"] == "SharedWith"
+    values = condition["expressionValues"]
+    if isinstance(as_read, list):
+        # A List and a string set are read alike, so either is accepted.
+        assert values[":conditionSharedWithAsRead"] == {"L": [{"S": v} for v in as_read]}
+        assert values[":conditionSharedWithAsReadSet"] == {"SS": as_read}
+        assert (
+            "(#conditionSharedWith = :conditionSharedWithAsRead OR "
+            "#conditionSharedWith = :conditionSharedWithAsReadSet)"
+        ) in condition["expression"]
+    else:
+        assert values[":conditionSharedWithAsRead"] == {"S": as_read}
+        assert ":conditionSharedWithAsReadSet" not in values
+
+
+@pytest.mark.parametrize("identity", [COGNITO["owner"][0], COGNITO["admin"][0], BACKEND])
+def test_unsharing_a_row_without_shared_with_requires_it_still_absent(client, identity) -> None:
+    request = _unshare_write(client, [LISTED], {"vpFound": True}, identity)
+    assert request["update"]["expressionValues"][":val"] == {"S": ""}
+    condition = request["condition"]
+    assert condition["expression"].startswith("attribute_exists(#conditionId)")
+    assert "attribute_not_exists(#conditionSharedWith)" in condition["expression"]
+    if identity is COGNITO["owner"][0]:
+        assert "#conditionOwner = :conditionCaller" in condition["expression"]
+    else:
+        assert "#conditionOwner" not in condition["expression"]
+        assert "expressionValues" not in condition
+
+
+def _unshare_refusal(client, stash: dict, identity: dict) -> str:
+    response = _evaluate_inline(
+        client,
+        "unshareVirtualParticipant",
+        "ResponseMappingTemplate",
+        {
+            "arguments": {"input": {"id": "vp1", "SharedWith": [LISTED]}},
+            "identity": identity,
+            "stash": stash,
+            "error": {
+                "message": "The conditional request failed",
+                "type": "DynamoDB:ConditionalCheckFailedException",
+            },
+        },
+    )
+    return response["error"]["message"]
+
+
+def test_a_refused_unshare_says_why(client) -> None:
+    found = {"vpFound": True, "vpOwnerAsRead": OWNER}
+    listed, owner = COGNITO["listed"][0], COGNITO["owner"][0]
+    assert "not authorized" in _unshare_refusal(
+        client, {**found, "vpCallerRestricted": True}, listed
+    )
+    assert "changed while it was being updated" in _unshare_refusal(
+        client, {**found, "vpCallerRestricted": True}, owner
+    )
+    assert "changed while it was being updated" in _unshare_refusal(
+        client, {**found, "vpCallerRestricted": False}, COGNITO["admin"][0]
+    )
+    assert "not found" in _unshare_refusal(
+        client, {"vpFound": False, "vpCallerRestricted": False}, BACKEND
+    )
+
+
+def test_an_unshare_answers_with_the_entries_removed(client) -> None:
+    response = _evaluate_inline(
+        client,
+        "unshareVirtualParticipant",
+        "ResponseMappingTemplate",
+        {
+            "arguments": {"input": {"id": "vp1", "SharedWith": [LISTED]}},
+            "identity": COGNITO["owner"][0],
+            "result": {"id": "vp1", "SharedWith": OTHER_LISTED},
+        },
+    )
+    assert json.loads(response["evaluationResult"]) == {"id": "vp1", "SharedWith": [LISTED]}

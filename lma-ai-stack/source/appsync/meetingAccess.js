@@ -6,16 +6,22 @@
 import { util } from '@aws-appsync/utils';
 
 /**
- * Subscription resolver for onSendChatMessage and onAddChatToken.
+ * The getCall access rule for an operation that names a meeting by CallId:
+ * the operation is answered to a signed-in caller who is an Admin, the
+ * meeting's owner or an entry of its SharedWith, and to a backend role with
+ * IAM credentials. Anyone else is refused.
  *
- * Neither message carries the meeting's Owner or SharedWith, so they cannot be
- * filtered on them as subscription.js filters meeting messages. Instead the
- * subscription itself is answered to the people getCall answers: a signed-in
- * caller who is an Admin, the meeting's owner or an entry of its SharedWith,
- * and a backend role with IAM credentials. The meeting is read when the
- * subscription is made; messages then reach it through the CallId argument,
- * which AppSync applies as a filter. A signed-in caller who is not an Admin has
- * to name the meeting.
+ * Used as the resolver of the subscriptions whose messages carry no Owner or
+ * SharedWith, so they cannot be filtered on them as subscription.js filters
+ * meeting messages -- onSendChatMessage, onAddChatToken and onVNCPreviewToggle.
+ * The meeting is read when the subscription is made; messages then reach it
+ * through the CallId argument, which AppSync applies as a filter.
+ *
+ * Also the first function of the toggleVNCPreview pipeline, which names the
+ * meeting as input.CallId: the write that follows runs only for a caller
+ * accepted here.
+ *
+ * A signed-in caller who is not an Admin has to name the meeting.
  */
 
 // A Lambda calling with IAM credentials arrives as an assumed role; a signed-in
@@ -36,7 +42,8 @@ export function request(ctx) {
     if (isBackendRole(ctx.identity) || isAdmin(ctx.identity)) {
         runtime.earlyReturn(null);
     }
-    const callId = ctx.args.CallId;
+    // A subscription names the meeting as an argument; a mutation in its input.
+    const callId = ctx.args.CallId || (ctx.args.input && ctx.args.input.CallId);
     if (!callId) {
         util.unauthorized();
     }
@@ -71,7 +78,8 @@ function sharedWithEntries(value) {
 
 /**
  * @param {import('@aws-appsync/utils').Context} ctx the context
- * @returns {*} null: a subscription resolver returns no data
+ * @returns {*} null: a subscription resolver returns no data, and the pipeline
+ *   function that follows in toggleVNCPreview reads its own arguments
  */
 export function response(ctx) {
     if (ctx.error) {

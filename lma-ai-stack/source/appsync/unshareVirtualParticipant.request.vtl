@@ -1,0 +1,133 @@
+## Second function of the unshareVirtualParticipant pipeline: removes the
+## entries named in input.SharedWith from the Virtual Participant's SharedWith
+## and keeps every other entry. ReadVirtualParticipantSharingAppSyncFunction has
+## read the row into the stash; the write is conditioned on the row existing, on
+## the "Virtual Participant owner condition", and on SharedWith being as it was
+## read.
+#set( $conditions = ["attribute_exists(#conditionId)"] )
+#set( $conditionNames = { "#conditionId": "id" } )
+#set( $conditionValues = {} )
+## BEGIN Virtual Participant owner condition -- one text in every template
+## that has it; test_shared_with_access.py holds the copies to it.
+## A signed-in caller who is not an Admin may change a Virtual Participant
+## only as its Owner. The rule is added to the write's DynamoDB condition,
+## so it is judged on the row as it is when the write happens. Admins, and
+## backend roles with IAM credentials (the Virtual Participant task and
+## the Lambdas that launch and manage it), are not held to it; a backend
+## role is detected as getCall.response.vtl detects it.
+#set( $vpCallerRestricted = true )
+#if( $ctx.identity.userArn && $ctx.identity.userArn.contains(":assumed-role/") )
+  #set( $vpCallerRestricted = false )
+#elseif( $ctx.identity.groups && $ctx.identity.groups.contains("Admin") )
+  #set( $vpCallerRestricted = false )
+#end
+#if( $vpCallerRestricted )
+  $util.qr( $conditionNames.put("#conditionOwner", "Owner") )
+  $util.qr( $conditionValues.put(":conditionCaller", $util.dynamodb.toDynamoDB($util.defaultIfNull($ctx.identity.username, ""))) )
+  $util.qr( $conditions.add("#conditionOwner = :conditionCaller") )
+#end
+$util.qr( $ctx.stash.put("vpCallerRestricted", $vpCallerRestricted) )
+## END Virtual Participant owner condition
+
+#set( $sharedWithRaw = $util.defaultIfNull($ctx.stash.sharedWithAsRead, "") )
+## BEGIN SharedWith entries -- one text in every template that reads SharedWith;
+## test_shared_with_access.py holds the copies to it.
+## Reads $sharedWithRaw into $sharedWithEntries, a list of trimmed, non-empty
+## entries, from every shape SharedWith is stored in: a List (shareCall and
+## shareTranscriptSegment write one), a string set, and a comma-separated or
+## "[a, b]" String (older meeting rows; transcript segments and key frames, which
+## take the meeting's SharedWith as getCall returns it; Virtual Participant rows).
+## "[", "]" and "," only ever separate entries: a String is split at each of
+## them, and a List element that contains one is not an entry, so no entry holds
+## a separator and the "[a, b]" form subscription.js matches is unambiguous.
+## Membership is then a comparison of whole entries, as in the Lambda resolvers.
+## Every template sets $sharedWithRaw through $util.defaultIfNull(..., ""): a
+## #set whose value is null leaves the variable as it was, which in a loop
+## would carry one item's SharedWith over to the next.
+#set( $sharedWithEntries = [] )
+#if( $util.isList($sharedWithRaw) )
+  #foreach( $sharedWithEntry in $sharedWithRaw )
+    #if( $util.isString($sharedWithEntry) && !$sharedWithEntry.trim().isEmpty()
+        && !$sharedWithEntry.contains("[") && !$sharedWithEntry.contains("]")
+        && !$sharedWithEntry.contains(",") )
+      $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
+    #end
+  #end
+#elseif( $util.isString($sharedWithRaw) )
+  #set( $sharedWithText = $sharedWithRaw.replace("[", ",").replace("]", ",") )
+  #foreach( $sharedWithEntry in $sharedWithText.split(",") )
+    #if( !$sharedWithEntry.trim().isEmpty() )
+      $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
+    #end
+  #end
+#end
+## END SharedWith entries
+## The entries named in input.SharedWith, trimmed.
+#set( $sharedWithRemoved = [] )
+#foreach( $recipient in $util.defaultIfNull($ctx.args.input.SharedWith, []) )
+  #set( $recipientText = $util.defaultIfNull($recipient, "").trim() )
+  #if( !$recipientText.isEmpty() )
+    $util.qr( $sharedWithRemoved.add($recipientText) )
+  #end
+#end
+## The entries kept, without repeats, joined by "," as shareVirtualParticipant
+## stores them.
+#set( $sharedWithKept = [] )
+#foreach( $sharedWithEntry in $sharedWithEntries )
+  #if( !$sharedWithRemoved.contains($sharedWithEntry) && !$sharedWithKept.contains($sharedWithEntry) )
+    $util.qr( $sharedWithKept.add($sharedWithEntry) )
+  #end
+#end
+#set( $sharedWithValue = "" )
+#foreach( $recipient in $sharedWithKept )
+  #set( $sharedWithValue = "${sharedWithValue}${recipient}" )
+  #if( $foreach.hasNext )
+    #set( $sharedWithValue = "${sharedWithValue}," )
+  #end
+#end
+
+## SharedWith must still be as it was read, so an entry added in the meantime
+## is not dropped by this write.
+$util.qr( $conditionNames.put("#conditionSharedWith", "SharedWith") )
+#if( $util.isNull($ctx.stash.sharedWithAsRead) )
+  $util.qr( $conditions.add("attribute_not_exists(#conditionSharedWith)") )
+#else
+  $util.qr( $conditionValues.put(":conditionSharedWithAsRead", $util.dynamodb.toDynamoDB($ctx.stash.sharedWithAsRead)) )
+  #if( $util.isList($ctx.stash.sharedWithAsRead) && !$ctx.stash.sharedWithAsRead.isEmpty() )
+    ## AppSync reads a List and a string set alike as a list, so a list read
+    ## is compared as either.
+    $util.qr( $conditionValues.put(":conditionSharedWithAsReadSet", $util.dynamodb.toStringSet($ctx.stash.sharedWithAsRead)) )
+    $util.qr( $conditions.add("(#conditionSharedWith = :conditionSharedWithAsRead OR #conditionSharedWith = :conditionSharedWithAsReadSet)") )
+  #else
+    $util.qr( $conditions.add("#conditionSharedWith = :conditionSharedWithAsRead") )
+  #end
+#end
+
+#set( $conditionExpression = "" )
+#foreach( $condition in $conditions )
+  #set( $conditionExpression = "${conditionExpression}${condition}" )
+  #if( $foreach.hasNext )
+    #set( $conditionExpression = "${conditionExpression} AND " )
+  #end
+#end
+{
+  "version": "2018-05-29",
+  "operation": "UpdateItem",
+  "key": {
+    "id": $util.dynamodb.toDynamoDBJson($ctx.args.input.id)
+  },
+  "update": {
+    "expression": "SET #SharedWith = :val",
+    "expressionNames": { "#SharedWith": "SharedWith" },
+    "expressionValues": {
+      ":val": $util.dynamodb.toDynamoDBJson($sharedWithValue)
+    }
+  },
+  "condition": {
+    "expression": "$conditionExpression",
+    "expressionNames": $utils.toJson($conditionNames)
+  #if( !$conditionValues.isEmpty() )
+    ,"expressionValues": $utils.toJson($conditionValues)
+  #end
+  }
+}
