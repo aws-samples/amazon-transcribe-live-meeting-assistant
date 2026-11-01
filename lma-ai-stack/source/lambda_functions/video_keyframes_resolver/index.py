@@ -37,7 +37,7 @@ import boto3
 from botocore.config import Config as BotoCoreConfig
 
 # Stdlib logging rather than aws_lambda_powertools: this function carries no
-# layer, and boto3 is the runtime's own (as in call_cost_resolver).
+# layer and uses the runtime's own boto3.
 LOGGER = logging.getLogger()
 LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 

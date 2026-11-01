@@ -403,7 +403,14 @@
         // withKeyframePlaceholders (js/render-markdown.js) turns each into a
         // placeholder image carrying the id, and the page signs a link for it
         // (STRANDS_RESOLVE_KEYFRAMES) through the meeting's access check.
+        // Signed links last an hour; one fetched more than this long ago is
+        // fetched again rather than shown.
+        const KEYFRAME_LINK_MS = 50 * 60 * 1000;
         const keyframeLinks = new Map();
+        const freshLink = (frameId) => {
+            const link = keyframeLinks.get(frameId);
+            return link && Date.now() - link.fetchedAt < KEYFRAME_LINK_MS ? link : null;
+        };
 
         function renderAssistantMarkdown(text) {
             return renderMarkdownSafe(withKeyframePlaceholders(text));
@@ -414,14 +421,26 @@
             if (!url || !url.startsWith('https://')) return;
             img.src = url;
             img.title = 'Open full size';
-            img.onclick = () => window.open(url, '_blank', 'noopener');
+            // An expired or failed link is fetched again, once.
+            img.onerror = () => {
+                if (img.dataset.lmaRetried) return;
+                img.dataset.lmaRetried = '1';
+                keyframeLinks.delete(img.dataset.lmaKeyframe);
+                img.removeAttribute('src');
+                resolveKeyframes(img.parentElement);
+            };
+            img.onclick = () => {
+                const current = freshLink(img.dataset.lmaKeyframe);
+                if (current) window.open(current.image || current.thumbnail, '_blank', 'noopener');
+                else resolveKeyframes(img.parentElement);
+            };
         }
 
         function resolveKeyframes(root) {
             if (!root) return;
             const missing = new Set();
             root.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
-                const link = keyframeLinks.get(img.dataset.lmaKeyframe);
+                const link = freshLink(img.dataset.lmaKeyframe);
                 if (link) showKeyframe(img, link);
                 else missing.add(img.dataset.lmaKeyframe);
             });
@@ -430,9 +449,11 @@
             const onFrames = (event) => {
                 if (!isFromParent(event) || event.data?.type !== 'STRANDS_KEYFRAMES' || event.data.requestId !== requestId) return;
                 window.removeEventListener('message', onFrames);
-                Object.entries(event.data.frames || {}).forEach(([frameId, link]) => keyframeLinks.set(frameId, link));
+                const fetchedAt = Date.now();
+                Object.entries(event.data.frames || {}).forEach(([frameId, link]) =>
+                    keyframeLinks.set(frameId, { ...link, fetchedAt }));
                 root.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
-                    const link = keyframeLinks.get(img.dataset.lmaKeyframe);
+                    const link = freshLink(img.dataset.lmaKeyframe);
                     if (link) showKeyframe(img, link);
                 });
             };
@@ -891,7 +912,7 @@
                                 streamingMessageDiv.innerHTML = partialHtml;
                                 // Frames already resolved keep their picture while the answer streams.
                                 streamingMessageDiv.querySelectorAll('img[data-lma-keyframe]').forEach((img) => {
-                                    const link = keyframeLinks.get(img.dataset.lmaKeyframe);
+                                    const link = freshLink(img.dataset.lmaKeyframe);
                                     if (link) showKeyframe(img, link);
                                 });
                             } else {

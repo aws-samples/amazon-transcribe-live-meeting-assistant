@@ -280,3 +280,16 @@ def test_a_moment_before_anything_was_shared_is_said_to_be_one():
         total_frames=4, send_images=False, show_inline=False, at_time=100,
     )
     assert "Nothing had been shared" not in texts(later)
+
+
+
+def test_transcript_times_read_from_dynamodb_as_decimals_are_used():
+    from decimal import Decimal
+
+    segments = [
+        {"StartTime": Decimal("250.5"), "Speaker": "Bob", "Channel": "CALLER", "Transcript": "On this slide."},
+        {"StartTime": Decimal("31"), "Speaker": "Alice", "Channel": "CALLER", "Transcript": "Earlier."},
+        {"StartTime": None, "Speaker": "X", "Channel": "CALLER", "Transcript": "No time."},
+    ]
+    text = meeting_frames.transcript_between(segments, 240, 600)
+    assert text == "[04:10] Bob: On this slide."

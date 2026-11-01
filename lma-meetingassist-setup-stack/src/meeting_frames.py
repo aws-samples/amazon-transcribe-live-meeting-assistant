@@ -143,9 +143,16 @@ def transcript_between(
 ) -> str:
     """What was said between two times, one "[MM:SS] Speaker: text" line per segment."""
     lines: List[str] = []
-    for seg in sorted(segments, key=lambda s: s.get("StartTime") or 0):
-        t = seg.get("StartTime")
-        if not isinstance(t, (int, float)) or t < start or (end is not None and t >= end):
+    timed: List[Tuple[float, Mapping[str, Any]]] = []
+    for seg in segments:
+        # Coerced, not type-checked: segments read through the DynamoDB resource
+        # API carry their times as Decimal.
+        try:
+            timed.append((float(seg.get("StartTime")), seg))
+        except (TypeError, ValueError):
+            continue
+    for t, seg in sorted(timed, key=lambda pair: pair[0]):
+        if t < start or (end is not None and t >= end):
             continue
         speaker = "MeetingAssistant" if seg.get("Channel") == "AGENT_ASSISTANT" else seg.get("Speaker") or "Unknown"
         lines.append(f"[{format_time(t)}] {speaker}: {seg.get('Transcript', '')}")
