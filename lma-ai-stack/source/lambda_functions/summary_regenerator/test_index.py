@@ -251,10 +251,10 @@ def test_an_identity_with_no_username_is_refused_on_a_meeting_with_no_owner(
 
 
 # Every shape `SharedWith` is stored in, against one caller, with the answer
-# `caller_may_edit` gives. The same shapes and answers are what
-# authorizeCallWrite.response.vtl and the write condition after it give for the
-# direct summary write; test_shared_with_access.py in lma-ai-stack/test holds
-# the templates to the same table.
+# `caller_may_edit` gives. authorizeCallWrite.response.vtl and the write
+# condition after it give the same answers for the direct summary write;
+# lma-ai-stack/test/test_shared_with_access_evaluated.py evaluates the templates
+# against equivalent cases of its own.
 SHARED_WITH_CASES = [
     # (stored SharedWith, caller, allowed)
     ({"L": [{"S": "friend@example.com"}]}, "friend@example.com", True),

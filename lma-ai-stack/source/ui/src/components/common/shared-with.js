@@ -6,11 +6,12 @@
 /**
  * Reading a meeting's or Virtual Participant's SharedWith.
  *
- * The API returns SharedWith as a string, in one of two shapes: "[a, b]" for a
- * meeting (and for any value carried by a subscription message), and "a,b" for
- * a Virtual Participant row. Both read as the same list of entries, and
- * membership is a comparison of whole entries, as the API's own access checks
- * compare them.
+ * The API returns SharedWith as a string, in one of two shapes. A subscription
+ * message always carries "[a, b]". A query returns the value as stored: "[a, b]"
+ * for a meeting shared through the app, "a,b" (or "a, b") for an older meeting
+ * row and for a Virtual Participant row. Both read as the same list of entries,
+ * and membership is a comparison of whole entries, as the API's own access
+ * checks compare them.
  */
 
 /** The trimmed, non-empty entries of a SharedWith value. */

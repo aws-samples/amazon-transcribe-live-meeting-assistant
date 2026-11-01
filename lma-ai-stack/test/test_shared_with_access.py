@@ -199,10 +199,14 @@ def test_the_only_subscription_filter_using_contains_reads_a_list() -> None:
     unshare_output = schema[schema.index("type UnshareCallOutput") :]
     unshare_output = unshare_output[: unshare_output.index("\n}")]
     assert re.search(r"SharedWith:\s*\[String!\]", unshare_output)
+    # Any `contains` on SharedWith other than subscription.js's delimited
+    # patterns (", <name>, " and ", <name>]"), however the operand is spelled.
+    bare_contains = re.compile(r"SharedWith\s*:\s*\{\s*contains\s*:(?!\s*`, )")
+    found = []
     for path in APPSYNC.glob("*.js"):
-        text = path.read_text(encoding="utf-8")
-        if "SharedWith: { contains: ctx.identity.username }" in text:
-            assert path.name == "unshareCallSubscription.js", path.name
+        if bare_contains.search(path.read_text(encoding="utf-8")):
+            found.append(path.name)
+    assert found == ["unshareCallSubscription.js"], found
 
 
 # ── the three writes signed-in users reach ──────────────────────────────────

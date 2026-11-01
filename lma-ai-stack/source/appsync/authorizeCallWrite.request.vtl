@@ -5,6 +5,10 @@
 ## every shape SharedWith is stored in. A DynamoDB condition alone cannot split a
 ## String into entries, so the entries are read here and the write's condition
 ## re-checks what was found; see authorizeCallWrite.response.vtl.
+##
+## The read runs for every caller, Admins and backend roles included, although
+## only a signed-in non-Admin caller's condition uses what it records: one
+## pipeline for every caller keeps the stash the write reads always present.
 {
   "version" : "2018-05-29",
   "operation" : "GetItem",
