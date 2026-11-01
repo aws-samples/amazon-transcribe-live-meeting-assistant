@@ -113,7 +113,8 @@ replacing their change. The page then offers two ways on:
 
 - **Reload and keep my changes** loads what they saved and applies your changes
   over it. Settings you both changed now hold your value, and the page lists
-  them so you can check them. Nothing is saved until you select **Save changes**
+  them so you can check them. The chat buttons count as one setting: if the
+  other save changed them, your whole list is kept. Nothing is saved until you select **Save changes**
   again.
 - **Discard my changes and reload** shows the configuration as it is now saved.
 

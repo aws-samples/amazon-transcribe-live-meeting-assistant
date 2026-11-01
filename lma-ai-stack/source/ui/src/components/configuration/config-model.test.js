@@ -13,6 +13,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  appliesText,
   canRemoveEntry,
   changedCount,
   changesBetween,
@@ -29,6 +30,7 @@ import {
   numberedEntries,
   orderedProperties,
   rebase,
+  rebaseSection,
   removeAt,
   renameEntry,
   renumbered,
@@ -101,6 +103,13 @@ describe('a section and the baseline', () => {
   });
 });
 
+describe('when a saved change applies', () => {
+  it('comes from the cache tier, unless the schema says it more exactly', () => {
+    expect(appliesText('short')).toBe('A saved change applies within 30 seconds.');
+    expect(appliesText('immediate', { appliesText: 'At the next meeting.' })).toBe('At the next meeting.');
+  });
+});
+
 describe('numbered keys', () => {
   it('lists entries in their numbered order', () => {
     const entries = numberedEntries({ '10#Z': 'z', '2#B': 'b', '1#A': 'a', Version: 3 });
@@ -127,6 +136,15 @@ describe('numbered keys', () => {
     const renamed = renameEntry(PROMPTS, defaults, { '1#SUMMARY': 'mine' }, '1#SUMMARY', 'OVERVIEW');
     expect(renamed).toEqual({ '1#SUMMARY': 'NONE', '1#OVERVIEW': 'mine' });
     expect(storedSection(PROMPTS, defaults, renamed)).toEqual({ '1#SUMMARY': 'NONE', '1#OVERVIEW': 'mine' });
+  });
+
+  it('renames an entry back to the shipped title it was renamed from, turning that one back on', () => {
+    const defaults = { '1#SUMMARY': 'shipped' };
+    expect(
+      renameEntry(PROMPTS, defaults, { '1#SUMMARY': 'NONE', '1#OVERVIEW': 'mine' }, '1#OVERVIEW', 'SUMMARY'),
+    ).toEqual({
+      '1#SUMMARY': 'mine',
+    });
   });
 
   it('renames an added entry, or one in a replace list, by moving it', () => {
@@ -201,6 +219,18 @@ describe('keeping your changes when someone else saved first', () => {
 
   it('is not a conflict when both made the same change', () => {
     expect(rebase({ a: 1 }, { a: 2 }, { a: 2 }).conflicts).toEqual([]);
+  });
+
+  it('keeps a replace list whole when the other save changed it, and names the section', () => {
+    // They reordered the buttons; you edited one. Merging by key would list A twice.
+    const result = rebaseSection(
+      REPLACE,
+      { '1#A': 'a', '2#B': 'b' },
+      { '1#A': 'mine', '2#B': 'b' },
+      { '1#B': 'b', '2#A': 'a' },
+    );
+    expect(result).toEqual({ merged: { '1#A': 'mine', '2#B': 'b' }, conflicts: [[]] });
+    expect(rebaseSection(REPLACE, { '1#A': 'a' }, { '1#A': 'x' }, { '1#A': 'a' }).conflicts).toEqual([]);
   });
 
   it('re-applies a removal', () => {

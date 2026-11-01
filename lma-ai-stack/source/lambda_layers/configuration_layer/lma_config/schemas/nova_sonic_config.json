@@ -4,6 +4,7 @@
   "title": "Nova Sonic voice assistant",
   "description": "How the Nova Sonic voice assistant speaks and behaves in a meeting.",
   "sectionLabel": "Nova Sonic Voice Assistant",
+  "appliesText": "A saved change applies to the next meeting the voice assistant joins; a meeting it is already in keeps the settings it started with.",
   "order": 3,
   "collapsible": true,
   "defaultExpanded": false,

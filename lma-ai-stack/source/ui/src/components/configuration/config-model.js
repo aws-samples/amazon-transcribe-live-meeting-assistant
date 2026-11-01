@@ -239,7 +239,8 @@ const TIER_TEXT = {
   standard: 'A saved change applies within about five minutes.',
 };
 
-export const appliesText = (tier) => TIER_TEXT[tier] || '';
+// A section's schema can say it more exactly, as `appliesText`.
+export const appliesText = (tier, schema = undefined) => schema?.appliesText || TIER_TEXT[tier] || '';
 
 // ── keeping your changes when someone else saved first ─────────────────────
 
@@ -276,4 +277,18 @@ export const rebase = (base, mine, theirs) => {
     merged = change.removed ? removeAt(merged, change.path) : setAt(merged, change.path, change.value);
   });
   return { merged, conflicts };
+};
+
+/**
+ * `rebase` for one section. A "replace" section is compared and stored as a
+ * whole, and reordering it renumbers every key, so merging it key by key could
+ * duplicate an entry or bring back one the other save removed. When the other
+ * save changed it, yours is kept whole and the section itself is the conflict.
+ */
+export const rebaseSection = (schema, base, mine, theirs) => {
+  if (!isReplace(schema)) return rebase(base, mine, theirs);
+  return {
+    merged: clone(mine),
+    conflicts: deepEqual(theirs, base) || deepEqual(theirs, mine) ? [] : [[]],
+  };
 };

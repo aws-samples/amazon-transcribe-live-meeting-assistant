@@ -429,9 +429,14 @@ Its rules, in `lma-ai-stack/source/ui/src/components/configuration/config-model.
 - **Only sections that changed are sent**, each as its complete delta, in one
   `updateConfiguration`, so the save is one revision.
 - **"Differs from default" is marked on every value**, with a badge and a rule
-  beside it, and every such value has **Reset to default**, which puts back the
-  shipped value or, for an entry the release does not ship, removes it. Each
-  section also has **Reset section to defaults** and **Undo changes**.
+  beside it. A changed shipped value has **Reset to default**, which puts back
+  the shipped value; an entry the release does not ship has **Remove** instead.
+  In a `replace` list such as the chat buttons, which is compared as a whole,
+  entries have no reset of their own. Each section also has **Reset section to
+  defaults** and **Undo changes**. The section heading says when a saved change
+  applies: from the cache tier, or from the schema's `appliesText` where the tier
+  alone would mislead — the voice assistant reads its settings as it starts, so a
+  meeting already running keeps the ones it started with.
 - **A shipped entry of a `merge` map cannot be removed**, because leaving it out
   of the delta would let the baseline supply it again. It can be reset; and where
   the schema declares a `disabledValue` — the summary prompts' `NONE` — it can be
@@ -447,7 +452,10 @@ Its rules, in `lma-ai-stack/source/ui/src/components/configuration/config-model.
   reads the profile again, re-applies each of the administrator's changes — a
   value set or a key removed, relative to what the page loaded — over what is
   now saved, and lists every setting both saves changed, which now holds the
-  administrator's value. Nothing is saved until they save again.
+  administrator's value. A `replace` section is taken as one value, because a
+  reorder renumbers every key: if the other save changed it, the
+  administrator's whole list is kept and the section is listed. Nothing is saved
+  until they save again.
 - **Every save asks for an optional comment and label**, recorded on the revision
   the save creates; the label is set with `labelConfigurationRevision` straight
   after the save.

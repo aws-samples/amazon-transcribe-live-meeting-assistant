@@ -99,6 +99,9 @@ UI_ANNOTATIONS = frozenset(
         "format",
         "rows",
         "widget",
+        # When a saved change takes effect, where the section's cache tier alone
+        # would not say it: the voice assistant reads its settings as it starts.
+        "appliesText",
         "hidden",
         # Show a field only while another field of the same object has a value.
         "dependsOn",

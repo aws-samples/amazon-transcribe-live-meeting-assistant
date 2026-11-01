@@ -29,8 +29,9 @@ const content = (
     </p>
     <h3>When a change applies</h3>
     <p>
-      Each section says so: at once for the Nova Sonic settings and chat buttons, within 30 seconds for the
-      transcription engine, and within about five minutes for the summary prompts and the meeting cost prices.
+      Each section says so: Nova Sonic settings at the next meeting the voice assistant joins, chat buttons in chat
+      panels opened after the save, the transcription engine within 30 seconds, and the summary prompts and meeting cost
+      prices within about five minutes.
     </p>
     <h3>Documentation</h3>
     <ul>

@@ -31,7 +31,7 @@ const ConfigurationSection = ({
   const dirty = !deepEqual(values, loaded);
   const differing = changedCount(defaults, values);
   const isDefault = deepEqual(values, defaults);
-  const description = [schema.description, appliesText(tier)].filter(Boolean).join(' ');
+  const description = [schema.description, appliesText(tier, schema)].filter(Boolean).join(' ');
   return (
     <div id={sectionElementId(name)}>
       <ExpandableSection

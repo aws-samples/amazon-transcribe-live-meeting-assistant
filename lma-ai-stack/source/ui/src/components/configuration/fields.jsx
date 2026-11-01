@@ -328,6 +328,7 @@ const ListField = ({ schema, path, label }) => {
         addButtonText={`Add ${(schema.itemLabel || 'item').toLowerCase()}`}
         removeButtonText="Remove"
         disableAddButton={readOnly}
+        isItemRemovable={() => !readOnly}
         empty="Nothing listed."
       />
     </FieldFrame>
@@ -531,10 +532,16 @@ ObjectFields.propTypes = {
 // on every keystroke: the label is part of the entry's key, and renaming a
 // shipped entry turns the old key off, which should happen once.
 const EntryLabel = ({ entry, label, existing, onRename }) => {
-  const { readOnly } = useSection();
+  const { readOnly, values } = useSection();
   const [draft, setDraft] = useState(entry.label);
   const [error, setError] = useState(null);
-  useEffect(() => setDraft(entry.label), [entry.label]);
+  // Also on any change to the section, so Undo changes and Discard changes
+  // take a half-typed label back too. Typing elsewhere first leaves this field,
+  // which applies what was typed.
+  useEffect(() => {
+    setDraft(entry.label);
+    setError(null);
+  }, [entry.label, values]);
   const commit = () => {
     const next = draft.trim();
     if (next === entry.label) {
@@ -590,7 +597,11 @@ const NumberedMap = ({ schema, path }) => {
   const valueSchema = memberSchema(schema, entries[0]?.key || '1#x');
   const keyLabel = schema.keyLabel || 'Label';
   const itemLabel = schema.itemLabel || 'Entry';
-  const keys = entries.map((entry) => entry.key);
+  // The keys a label cannot be changed to. A shipped entry that is turned off
+  // is not one of them: renaming an entry back to it turns it back on.
+  const keys = entries
+    .filter((entry) => schema.disabledValue === undefined || entry.value !== schema.disabledValue)
+    .map((entry) => entry.key);
   const unique = (base) => {
     const labels = new Set(entries.map((entry) => entry.label));
     let label = base;

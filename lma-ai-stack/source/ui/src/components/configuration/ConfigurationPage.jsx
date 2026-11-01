@@ -30,7 +30,7 @@ import {
   deepEqual,
   effectiveSection,
   isAvailable,
-  rebase,
+  rebaseSection,
   storedSection,
 } from './config-model';
 import {
@@ -185,7 +185,7 @@ export const ConfigurationContent = () => {
           labelProblem = errorText(err);
         }
       }
-      const timing = [...new Set(changed.map((section) => appliesText(section.tier)))].join(' ');
+      const timing = [...new Set(changed.map((section) => appliesText(section.tier, section.schema)))].join(' ');
       let text;
       if (outcome.Unchanged) {
         text = 'Nothing was saved: the configuration already holds these values.';
@@ -225,9 +225,16 @@ export const ConfigurationContent = () => {
       const next = { ...theirs };
       const overlaps = [];
       changed.forEach((section) => {
-        const { merged, conflicts } = rebase(loaded[section.name], edits[section.name], theirs[section.name]);
+        const { merged, conflicts } = rebaseSection(
+          section.schema,
+          loaded[section.name],
+          edits[section.name],
+          theirs[section.name],
+        );
         next[section.name] = merged;
-        conflicts.forEach((path) => overlaps.push(`${sectionLabel(section)} › ${formatPath(path)}`));
+        conflicts.forEach((path) =>
+          overlaps.push(path.length ? `${sectionLabel(section)} › ${formatPath(path)}` : sectionLabel(section)),
+        );
       });
       setDoc(parsed);
       setLoaded(theirs);
@@ -368,6 +375,7 @@ export const ConfigurationContent = () => {
                 <li key={section.name}>
                   {`${sectionLabel(section)}: ${count} ${count === 1 ? 'setting' : 'settings'}. ${appliesText(
                     section.tier,
+                    section.schema,
                   )}`}
                 </li>
               );
