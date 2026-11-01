@@ -255,6 +255,20 @@ def test_an_admin_and_a_shared_user_may_derive(world):
     assert press({"username": "x@example.com", "groups": ["Admin"]})["Success"] is True
 
 
+@pytest.mark.parametrize(
+    "shared_with,caller,allowed",
+    [
+        ("[a@example.com, b@example.com]", "b@example.com", True),
+        ("[b@example.com]", "b@example.com", True),
+        ("[a@example.com, xb@example.com]", "b@example.com", False),
+        ("a@example.com,b@example.comx", "b@example.com", False),
+    ],
+)
+def test_shared_with_entries_are_compared_whole(world, shared_with, caller, allowed):
+    world(meeting=meeting_row(SharedWith=shared_with))
+    assert press({"username": caller, "groups": []})["Success"] is allowed
+
+
 def test_an_empty_transcript_costs_nothing(world):
     state = world(segments=[])
     assert press()["Message"] == "nothing has been said in the meeting yet"

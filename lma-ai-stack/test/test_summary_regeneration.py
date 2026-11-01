@@ -211,16 +211,22 @@ def test_the_summary_write_has_its_own_request_template(resources: dict) -> None
     it. This field is written from a browser."""
     resolver = resources["UpdateCallSummaryTextAppSyncResolver"]["Properties"]
     assert resolver["FieldName"] == "updateCallSummaryText"
-    assert resolver["RequestMappingTemplateS3Location"].endswith(
+    write_id = resolver["PipelineConfig"]["Functions"][-1]["Fn::GetAtt"].split(".")[0]
+    assert resources[write_id]["Properties"]["RequestMappingTemplateS3Location"].endswith(
         "updateCallSummaryText.request.vtl"
     )
+
+
+# The block every signed-in meeting write states its condition in; its one text
+# across the three templates is held in test_shared_with_access.py.
+WRITE_CONDITION = "## BEGIN SharedWith write condition"
 
 
 def test_the_summary_write_restricts_a_signed_in_caller(summary_vtl: str) -> None:
     """Admin, the meeting's owner, or a user it has been shared with -- the same
     rule getCall applies on the way out, expressed as a DynamoDB condition so
     the check and the write are one operation."""
-    assert "#Owner = :caller OR contains(#SharedWith, :caller)" in summary_vtl
+    assert WRITE_CONDITION in summary_vtl
     assert 'groups.contains("Admin")' in summary_vtl
     assert '"condition"' in summary_vtl
 
@@ -231,10 +237,9 @@ def test_the_summary_write_states_the_rule_exactly_as_the_identity_write_does(
     """Two templates drifting apart would leave two different answers to the
     same question about the same meeting."""
     identities = IDENTITIES_VTL.read_text(encoding="utf-8")
-    clause = "#Owner = :caller OR contains(#SharedWith, :caller)"
     detection = '$context.identity.userArn.contains(":assumed-role/")'
     for source in (summary_vtl, identities):
-        assert clause in source
+        assert WRITE_CONDITION in source
         assert detection in source
 
 
@@ -259,16 +264,14 @@ def test_the_two_lambdas_apply_one_access_rule_line_for_line() -> None:
 
 
 def test_the_share_list_rule_is_stated_where_each_path_applies_it(summary_vtl: str) -> None:
-    """Both paths say what `SharedWith` shape their test is exact for.
+    """Both paths say how they read `SharedWith`.
 
-    `contains` in a DynamoDB condition is a whole-element test on the List form
-    `shareCall` writes and a substring test on the legacy comma-separated String,
-    which a condition expression cannot split; the Lambda reads the attribute in
-    Python and compares entry by entry in both. The fixture table covering the
-    Python side is `SHARED_WITH_CASES` in the regenerator's own test file. What
-    is pinned here is that neither place claims an exactness it does not have.
+    The template's condition follows authorizeCallWrite, which reads the
+    entries of every stored shape; the Lambda reads the attribute in Python and
+    compares entry by entry. The fixture table covering the Python side is
+    `SHARED_WITH_CASES` in the regenerator's own test file.
     """
-    assert "cannot split a string" in summary_vtl
+    assert "authorizeCallWrite" in summary_vtl
     for name in ("summary_regenerator", "speaker_name_resolver"):
         source = (AI_STACK / "source" / "lambda_functions" / name / "index.py").read_text(
             encoding="utf-8"

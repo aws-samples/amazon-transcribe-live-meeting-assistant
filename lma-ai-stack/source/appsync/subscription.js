@@ -31,10 +31,20 @@ export function response(ctx) {
   const { groups } = ctx.identity;
   if((groups === undefined) || !ctx.identity.groups.includes("Admin")) {
     console.debug(`Setting subscription filter with Owner or User that have been give access`);
+    // Every mutation published to a subscription using this resolver sends
+    // SharedWith as "[a, b]" (see the "SharedWith published" block in
+    // dDbPutCondition.response.vtl, and shareMeetings.js / endVirtualParticipant.js),
+    // so the caller is an entry exactly when the value is "[caller]", or the
+    // caller is followed by ", " at the start, or is between ", " and ", " or
+    // ", " and "]". Entries are compared whole, as getCall compares them.
+    const { username } = ctx.identity;
     const filter = {
       or: [
-        { Owner: { eq: ctx.identity.username } },
-        { SharedWith: { contains: ctx.identity.username } }
+        { Owner: { eq: username } },
+        { SharedWith: { eq: `[${username}]` } },
+        { SharedWith: { beginsWith: `[${username}, ` } },
+        { SharedWith: { contains: `, ${username}, ` } },
+        { SharedWith: { contains: `, ${username}]` } },
       ]
     };
     extensions.setSubscriptionFilter(util.transform.toSubscriptionFilter(filter));

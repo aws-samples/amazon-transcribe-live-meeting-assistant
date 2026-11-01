@@ -8,7 +8,10 @@
 ## And a browser caller has to be held to the same access rule the read path
 ## applies in getCall.response.vtl -- Admin, the meeting's owner, or a user it
 ## has been shared with -- which is expressed below as a DynamoDB condition so
-## the check and the write are one atomic operation.
+## the check and the write are one atomic operation. This is the second function
+## of a pipeline; the first, authorizeCallWrite, reads the meeting so the
+## condition can compare SharedWith's entries whole in every shape it is stored
+## in.
 ##
 ## The provenance fields are decided here rather than taken from the input for a
 ## signed-in user: their write is recorded as source "ui" and attributed to
@@ -60,14 +63,38 @@
 #set( $conditionValues = {} )
 #set( $condition = "attribute_exists(#PK)" )
 
-## `contains` over #SharedWith covers both shapes this attribute is stored in;
-## see updateCallSummaryText.request.vtl for the semantics of each.
+## The same rule as updateCallSummaryText.request.vtl, in the same words.
+## BEGIN SharedWith write condition -- one text in every template that has it;
+## test_shared_with_access.py holds the copies to it.
+## A signed-in caller who is not an Admin may write as the meeting's owner or as
+## an entry of its SharedWith. authorizeCallWrite, the function before this one,
+## read the meeting and recorded in the stash which of the two the caller is;
+## the condition below re-states that finding atomically with the write, so a
+## meeting re-shared or re-owned in between is judged as it is at the write:
+##   owner        -- #Owner is still the caller;
+##   shared-list  -- SharedWith is still a List or string set holding the caller
+##                   as an element (on those two types `contains` compares
+##                   whole elements);
+##   shared-text  -- SharedWith is still the exact String that was read, whose
+##                   entries include the caller.
+## Any other caller is held to #Owner = :caller, which fails for them.
 #if( $isCognitoUser && !$context.identity.groups.contains("Admin") )
   $util.qr( $conditionNames.put("#Owner", "Owner") )
-  $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )
   $util.qr( $conditionValues.put(":caller", $util.dynamodb.toDynamoDB($context.identity.username)) )
-  #set( $condition = "${condition} AND (#Owner = :caller OR contains(#SharedWith, :caller))" )
+  #if( $ctx.stash.callerAccess == "shared-list" )
+    $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )
+    $util.qr( $conditionValues.put(":sharedWithList", $util.dynamodb.toDynamoDB("L")) )
+    $util.qr( $conditionValues.put(":sharedWithSet", $util.dynamodb.toDynamoDB("SS")) )
+    #set( $condition = "${condition} AND (#Owner = :caller OR ((attribute_type(#SharedWith, :sharedWithList) OR attribute_type(#SharedWith, :sharedWithSet)) AND contains(#SharedWith, :caller)))" )
+  #elseif( $ctx.stash.callerAccess == "shared-text" )
+    $util.qr( $conditionNames.put("#SharedWith", "SharedWith") )
+    $util.qr( $conditionValues.put(":sharedWithAsRead", $util.dynamodb.toDynamoDB($ctx.stash.sharedWithAsRead)) )
+    #set( $condition = "${condition} AND (#Owner = :caller OR #SharedWith = :sharedWithAsRead)" )
+  #else
+    #set( $condition = "${condition} AND #Owner = :caller" )
+  #end
 #end
+## END SharedWith write condition
 
 #if( $ctx.args.input.OnlyIfUnset == true )
   ## Its own placeholder rather than #Agenda: the update and the condition each

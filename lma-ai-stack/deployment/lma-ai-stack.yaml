@@ -6402,49 +6402,111 @@ Resources:
       RequestMappingTemplateS3Location: ../source/appsync/updateCall.request.vtl
       ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
 
+  # The three meeting writes below are reachable by signed-in users, and each is
+  # a pipeline of two functions: AuthorizeCallWriteAppSyncFunction reads the
+  # meeting's Owner and SharedWith, and the write's DynamoDB condition then holds
+  # a Cognito caller to Admin, the meeting owner, or an entry of its SharedWith,
+  # compared whole in every shape SharedWith is stored in. A condition alone
+  # cannot split a String into entries, which is why the read comes first.
+  AuthorizeCallWriteAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: AuthorizeCallWrite
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/authorizeCallWrite.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/authorizeCallWrite.response.vtl
+
   # Unlike its neighbours this one is reachable by signed-in users, so it uses a
   # dedicated request template that writes only SpeakerIdentities and restricts a
   # Cognito caller to Admin, the meeting owner, or a user it is shared with.
+  UpdateSpeakerIdentitiesAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UpdateSpeakerIdentitiesWrite
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/updateSpeakerIdentities.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   UpdateSpeakerIdentitiesAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: updateSpeakerIdentities
-      RequestMappingTemplateS3Location: ../source/appsync/updateSpeakerIdentities.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt AuthorizeCallWriteAppSyncFunction.FunctionId
+          - !GetAtt UpdateSpeakerIdentitiesAppSyncFunction.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
 
   # Also reachable by signed-in users, so it uses a dedicated request template
   # that writes only the summary text and the state object beside it, and
   # restricts a Cognito caller to Admin, the meeting owner, or a user it is
   # shared with. Distinct from addCallSummaryText, which the Kinesis pipeline
   # writes the end-of-meeting summary through and which is IAM-only.
+  UpdateCallSummaryTextAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UpdateCallSummaryTextWrite
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/updateCallSummaryText.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   UpdateCallSummaryTextAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: updateCallSummaryText
-      RequestMappingTemplateS3Location: ../source/appsync/updateCallSummaryText.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt AuthorizeCallWriteAppSyncFunction.FunctionId
+          - !GetAtt UpdateCallSummaryTextAppSyncFunction.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
 
   # Reachable by signed-in users, so it uses a dedicated request template that
   # writes only the agenda and its provenance fields, and restricts a Cognito
   # caller to Admin, the meeting owner, or a user it is shared with.
+  UpdateCallAgendaAppSyncFunction:
+    Type: AWS::AppSync::FunctionConfiguration
+    DependsOn: AppSyncSchema
+    Properties:
+      ApiId: !GetAtt AppSyncApiEncrypted.ApiId
+      Name: UpdateCallAgendaWrite
+      DataSourceName: !GetAtt AppSyncDataSource.Name
+      FunctionVersion: "2018-05-29"
+      RequestMappingTemplateS3Location: ../source/appsync/updateCallAgenda.request.vtl
+      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+
   UpdateCallAgendaAppSyncResolver:
     Type: AWS::AppSync::Resolver
     DependsOn: AppSyncSchema
     Properties:
       ApiId: !GetAtt AppSyncApiEncrypted.ApiId
-      DataSourceName: !GetAtt AppSyncDataSource.Name
       TypeName: Mutation
       FieldName: updateCallAgenda
-      RequestMappingTemplateS3Location: ../source/appsync/updateCallAgenda.request.vtl
-      ResponseMappingTemplateS3Location: ../source/appsync/dDbPutCondition.response.vtl
+      Kind: PIPELINE
+      PipelineConfig:
+        Functions:
+          - !GetAtt AuthorizeCallWriteAppSyncFunction.FunctionId
+          - !GetAtt UpdateCallAgendaAppSyncFunction.FunctionId
+      RequestMappingTemplate: "{}"
+      ResponseMappingTemplate: "$util.toJson($ctx.result)"
 
   AddCallCategoryAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -6510,7 +6572,7 @@ Resources:
       TypeName: Mutation
       FieldName: addVideoKeyframe
       RequestMappingTemplateS3Location: ../source/appsync/addVideoKeyframe.request.vtl
-      ResponseMappingTemplate: "$util.toJson($context.result)"
+      ResponseMappingTemplateS3Location: ../source/appsync/addVideoKeyframe.response.vtl
 
   DeleteTranscriptSegmentAppSyncResolver:
     Type: AWS::AppSync::Resolver
@@ -8406,11 +8468,7 @@ Resources:
           }
         #end
         }
-      ResponseMappingTemplate: |
-        #if($ctx.error)
-          $util.error($ctx.error.message, $ctx.error.type)
-        #end
-        $util.toJson($ctx.result)
+      ResponseMappingTemplateS3Location: ../source/appsync/updateVirtualParticipant.response.vtl
 
   AcknowledgeVPFailureResolver:
     Type: AWS::AppSync::Resolver

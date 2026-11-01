@@ -176,7 +176,7 @@ def caller_may_edit(meeting, identity):
     if isinstance(shared_with, (list, set)):
         return username in shared_with
     if isinstance(shared_with, str):
-        return username in {entry.strip() for entry in shared_with.split(",")}
+        return username in {entry.strip() for entry in shared_with.strip().strip("[]").split(",")}
     return False
 
 

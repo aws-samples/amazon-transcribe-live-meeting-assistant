@@ -578,17 +578,53 @@ def test_a_user_does_not_see_another_users_meetings(install) -> None:
 
 @pytest.mark.parametrize(
     "shared_with",
-    [BOB, f"carol@example.com, {BOB}", [ALICE, BOB], ["", BOB]],
-    ids=["single-string", "comma-separated", "list", "list-with-blank"],
+    [
+        BOB,
+        f"carol@example.com, {BOB}",
+        f"[carol@example.com, {BOB}]",
+        f"[{BOB}]",
+        [ALICE, BOB],
+        ["", BOB],
+        {ALICE, BOB},
+    ],
+    ids=[
+        "single-string",
+        "comma-separated",
+        "bracketed-string",
+        "bracketed-single",
+        "list",
+        "list-with-blank",
+        "string-set",
+    ],
 )
 def test_a_meeting_shared_with_the_caller_is_visible(install, shared_with) -> None:
-    """SharedWith is stored as a list now and as a comma string on older rows."""
+    """SharedWith is read as a list, a string set, and a comma-separated or
+    bracketed string."""
     install(
         [list_row("shared", RANGE_END)],
         [detail_row("shared", owner=ALICE, SharedWith=shared_with)],
     )
     result = index.handler(event(limit=10), None)
     assert [c["CallId"] for c in result["Calls"]] == ["shared"]
+
+
+@pytest.mark.parametrize(
+    "shared_with",
+    [
+        f"x{BOB}",
+        f"{BOB}x",
+        f"[x{BOB}, carol@example.com]",
+        f"carol@example.com,{BOB}x",
+        [f"x{BOB}"],
+    ],
+    ids=["prefixed", "suffixed", "bracketed-prefixed", "comma-suffixed", "list-prefixed"],
+)
+def test_an_entry_that_only_contains_the_callers_name_is_not_a_match(install, shared_with) -> None:
+    install(
+        [list_row("shared", RANGE_END)],
+        [detail_row("shared", owner=ALICE, SharedWith=shared_with)],
+    )
+    assert index.handler(event(limit=10), None)["Calls"] == []
 
 
 def test_sharing_with_someone_else_does_not_widen_visibility(install) -> None:

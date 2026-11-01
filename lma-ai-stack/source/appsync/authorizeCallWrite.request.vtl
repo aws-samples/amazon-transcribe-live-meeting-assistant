@@ -1,0 +1,16 @@
+## First function of the updateSpeakerIdentities, updateCallSummaryText and
+## updateCallAgenda pipelines: read the meeting's Owner and SharedWith, so the
+## write that follows can hold a signed-in caller to the access rule getCall
+## applies -- Admin, the meeting's owner, or an entry of its SharedWith -- in
+## every shape SharedWith is stored in. A DynamoDB condition alone cannot split a
+## String into entries, so the entries are read here and the write's condition
+## re-checks what was found; see authorizeCallWrite.response.vtl.
+{
+  "version" : "2018-05-29",
+  "operation" : "GetItem",
+  "key": {
+    "PK": $util.dynamodb.toDynamoDBJson("c#${ctx.args.input.CallId}"),
+    "SK": $util.dynamodb.toDynamoDBJson("c#${ctx.args.input.CallId}")
+  },
+  "consistentRead": true
+}

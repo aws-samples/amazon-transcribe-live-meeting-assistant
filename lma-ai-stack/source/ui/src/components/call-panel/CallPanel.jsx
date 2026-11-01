@@ -87,6 +87,7 @@ import { shareModal, deleteModal } from '../common/meeting-controls';
 import VNCViewer from '../virtual-participant-layout/VNCViewer';
 import { listVirtualParticipants, onUpdateVirtualParticipant } from '../../graphql/queries/virtualParticipantQueries';
 import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
+import { isSharedWith } from '../common/shared-with';
 import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
 import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
 import MCPServersModal from '../mcp-servers';
@@ -2062,7 +2063,7 @@ export const CallPanel = ({ item, callTranscriptPerCallId, setToolsOpen, getCall
   // transcript's inline rename, the summary controls and the Agenda panel so
   // all four agree.
   const speakerNamesReadOnly =
-    !isAdminUser && item.owner !== user?.username && !item.sharedWith?.includes(user?.username);
+    !isAdminUser && item.owner !== user?.username && !isSharedWith(item.sharedWith, user?.username);
 
   /**
    * Apply a rename made from a transcript segment.

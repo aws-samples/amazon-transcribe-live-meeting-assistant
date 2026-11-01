@@ -4,22 +4,55 @@
 
 ## This resolver can be invoked by either a Lambda function with IAM authentication
 ## or a User authenticated using Cognito. The Lambda function gets unrestricted access
-## to all the call records stored in the DynamoDB to perform the backend operations in the 
-## Call Event Processor function. 
+## to all the call records stored in the DynamoDB to perform the backend operations in the
+## Call Event Processor function.
 
 #set($isCognitoUser = true)
 #if($context.identity.userArn && $context.identity.userArn.contains(":assumed-role/"))
   #set($isCognitoUser = false)
 #end
 
+#set( $sharedWithRaw = $context.result.SharedWith )
+## BEGIN SharedWith entries -- one text in every template that reads SharedWith;
+## test_shared_with_access.py holds the copies to it.
+## Reads $sharedWithRaw into $sharedWithEntries, a list of trimmed, non-empty
+## entries, from every shape SharedWith is stored in: a List (shareCall and
+## shareTranscriptSegment write one), a string set, and a comma-separated or
+## "[a, b]" String (older meeting rows; transcript segments and key frames, which
+## take the meeting's SharedWith as getCall returns it; Virtual Participant rows).
+## Membership is then a comparison of whole entries, as in the Lambda resolvers.
+#set( $sharedWithEntries = [] )
+#if( $util.isList($sharedWithRaw) )
+  #foreach( $sharedWithEntry in $sharedWithRaw )
+    #if( $util.isString($sharedWithEntry) && !$sharedWithEntry.trim().isEmpty() )
+      $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
+    #end
+  #end
+#elseif( $util.isString($sharedWithRaw) )
+  #set( $sharedWithText = $sharedWithRaw.trim() )
+  #if( $sharedWithText.startsWith("[") )
+    #set( $sharedWithText = $sharedWithText.substring(1) )
+  #end
+  #if( $sharedWithText.endsWith("]") )
+    #set( $sharedWithEnd = $sharedWithText.length() - 1 )
+    #set( $sharedWithText = $sharedWithText.substring(0, $sharedWithEnd) )
+  #end
+  #foreach( $sharedWithEntry in $sharedWithText.split(",") )
+    #if( !$sharedWithEntry.trim().isEmpty() )
+      $util.qr( $sharedWithEntries.add($sharedWithEntry.trim()) )
+    #end
+  #end
+#end
+## END SharedWith entries
+
 ## If this record isn't being requested by Lambda or any of the authorized users
 ## (Admin, meeting owner or user that the meeting has been shared with) throw
 ## an unauthorized exception.
 
-#if($isCognitoUser 
+#if($isCognitoUser
     && !$context.identity.groups.contains("Admin")
     && $context.result.Owner != $context.identity.username
-    && !$context.result.SharedWith.contains($context.identity.username))
+    && !$sharedWithEntries.contains($context.identity.username))
       $util.error("User $context.identity.username is not authorized", "AuthorizationError")
 #else
   $utils.toJson($context.result)

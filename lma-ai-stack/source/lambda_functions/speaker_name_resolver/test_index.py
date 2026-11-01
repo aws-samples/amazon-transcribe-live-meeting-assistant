@@ -439,7 +439,12 @@ def test_an_admin_may_run_a_pass_on_any_meeting(monkeypatch: pytest.MonkeyPatch)
 def test_a_user_the_meeting_is_shared_with_may_run_a_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    for shared_with in ({"L": [{"S": "friend@example.com"}]}, {"S": "a@b.com,friend@example.com"}):
+    for shared_with in (
+        {"L": [{"S": "friend@example.com"}]},
+        {"SS": ["a@b.com", "friend@example.com"]},
+        {"S": "a@b.com,friend@example.com"},
+        {"S": "[a@b.com, friend@example.com]"},
+    ):
         shared = {**MEETING_ROW, "SharedWith": shared_with}
         _, _, written = install(monkeypatch, meeting=shared)
         event = {

@@ -105,11 +105,14 @@ def _call_visible_to(caller, detail_item):
 
     owner = detail_item.get("Owner") or ""
     shared_with_raw = detail_item.get("SharedWith")
-    # Legacy rows may store SharedWith as comma-separated string.
+    # Every stored shape, compared whole entry by entry as getCall compares them:
+    # the List shareCall writes, a string set (a Python set here), and the
+    # comma-separated or "[a, b]" String of older rows.
     shared_with = []
     if isinstance(shared_with_raw, str):
-        shared_with = [s.strip() for s in shared_with_raw.split(",") if s.strip()]
-    elif isinstance(shared_with_raw, list):
+        entries = shared_with_raw.strip().strip("[]").split(",")
+        shared_with = [s.strip() for s in entries if s.strip()]
+    elif isinstance(shared_with_raw, (list, set, tuple)):
         shared_with = [str(s).strip() for s in shared_with_raw if s]
 
     identities = {i for i in (caller["username"], caller["email"]) if i}
