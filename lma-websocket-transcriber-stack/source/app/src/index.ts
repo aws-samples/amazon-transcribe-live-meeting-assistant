@@ -566,7 +566,11 @@ const onTextMessage = async (
             ws.close(1008, 'not authorized for callId');
             return;
         }
-        const session = startVideoSession(callMetaData, server);
+        const session = startVideoSession(
+            callMetaData,
+            server,
+            audioSession.startStreamTime.getTime()
+        );
         videoSocketMap.set(ws, session);
     } else if (callMetaData.callEvent === 'END_VIDEO') {
         const session = videoSocketMap.get(ws);

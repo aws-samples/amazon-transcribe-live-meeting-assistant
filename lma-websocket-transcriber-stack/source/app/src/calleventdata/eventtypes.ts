@@ -20,6 +20,7 @@ export type EventType =
     | 'UPDATE_AGENT' // optional
     | 'ADD_S3_RECORDING_URL'  // optional
     | 'ADD_S3_VIDEO_RECORDING_URL' // optional
+    | 'ADD_VIDEO_KEYFRAME' // optional
     | 'ADD_CALL_CATEGORY' // optional
     | 'END'; // required
 
@@ -58,6 +59,24 @@ export type CallRecordingEvent = CallEventBase<'ADD_S3_RECORDING_URL'> & {
 // call_event_processor -> updateVideoRecordingUrl pipeline consumes it as-is.
 export type CallVideoRecordingEvent = CallEventBase<'ADD_S3_VIDEO_RECORDING_URL'> & {
     VideoRecordingUrl: string,
+    AccessToken?: string,
+    IdToken?: string,
+    RefreshToken?: string,
+};
+
+// One key frame of the desktop capture app's video (see videokeyframes.ts). The
+// Virtual Participant sends the same fields; see docs/meeting-video.md.
+export type CallVideoKeyframeEvent = CallEventBase<'ADD_VIDEO_KEYFRAME'> & {
+    FrameId: string,
+    Timestamp: number,
+    VideoOffset: number | null,
+    ImageUrl: string,
+    ThumbnailUrl: string,
+    Width: number,
+    Height: number,
+    Source: 'DESKTOP_CAPTURE',
+    ShareDetected: null,
+    ChangeScore: number,
     AccessToken?: string,
     IdToken?: string,
     RefreshToken?: string,

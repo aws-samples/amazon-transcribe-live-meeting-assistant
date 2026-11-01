@@ -331,7 +331,8 @@ def share_keyframes(callid, new_recipients):
 
     Key frames follow the transcript's access rule, so they are shared and
     unshared with it. Written directly rather than through AppSync: there is no
-    mutation for it, and this function already updates items in the table.
+    mutation for it, and the function's role already allows UpdateItem on the
+    table.
     """
     updated = 0
     for key in _keyframe_keys(callid):

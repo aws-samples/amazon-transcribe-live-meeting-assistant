@@ -110,6 +110,10 @@ audio into a single **MP4** at the end of the call, saved to the LMA recordings
 bucket, and shown in the call detail page's **Recording Video** player — the
 same place Virtual Participant recordings appear. Capture runs at ~5 fps and up
 to 1080p, which keeps CPU and bandwidth modest while staying legible for slides.
+While the video arrives, the transcriber also keeps a **key frame** each time
+the picture changes to something new and holds still — each slide, each page —
+and stores it on the meeting; see
+[Meeting Video and Key Frames](meeting-video.md#desktop-video).
 
 When screen video is enabled, the one-time consent gate and the live recording
 view both show a **"Screen video is ON"** notice, since screen contents are more
