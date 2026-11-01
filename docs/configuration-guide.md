@@ -118,6 +118,10 @@ Some things differ from setting these with the parameters:
   Transcribe checks when a meeting starts, and a meeting whose vocabulary or
   model it does not recognise is not transcribed, so make sure the name exists
   in this account and region, and matches the language, before saving it.
+- Two optional transcriber features outside the default deployment, Call
+  Analytics' post-call output and the PCA integration, follow the
+  `IsContentRedactionEnabled` parameter rather than the page, because they have
+  to agree with each other about where redacted output goes.
 - The page offers the same choices the parameter does. A model a later release
   stops offering stays in force where it was saved, and the next save of the
   section asks for another.

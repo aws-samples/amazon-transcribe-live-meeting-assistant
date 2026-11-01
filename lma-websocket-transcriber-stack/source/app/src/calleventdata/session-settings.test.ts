@@ -65,17 +65,17 @@ const withEnv = (overrides: Record<string, string | undefined> = {}): void => {
     }
 };
 
-/** A store answering each section from `sections`, or failing every read. */
+/** A store answering the resolved document from `sections`, or failing every read. */
 const fakeStore = (sections: Record<string, Record<string, unknown>> | 'fail') => {
     const reads = { count: 0 };
     const store = {
-        getSection: async (spec: { name: string }) => {
+        getDocument: async (consistentRead: boolean) => {
             reads.count += 1;
+            assert.equal(consistentRead, true, 'the immediate-tier sections are read consistently');
             if (sections === 'fail') {
                 throw new Error('AccessDeniedException');
             }
-            const values = sections[spec.name] ?? {};
-            return { values, baselineValues: values, profileValues: {} };
+            return { body: sections, baselineBody: sections, profileBody: {} };
         },
     } as unknown as ConfigurationStore;
     return { store, reads };

@@ -181,6 +181,14 @@ export const isRedactionApplied = (settings: TranscriptionSettings): boolean =>
 
 const AWS_REGION = process.env['AWS_REGION'] || 'us-east-1';
 
+/** A section of a resolved body, or an empty object when it holds something else. */
+const sectionOf = (body: Record<string, unknown>, name: string): Record<string, unknown> => {
+    const value = body[name];
+    return value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : {};
+};
+
 /** One per process. Both sections are on the immediate tier, so it caches nothing. */
 let store: ConfigurationStore | undefined;
 
@@ -229,8 +237,13 @@ export const getSessionSettings = async (log: FastifyBaseLogger): Promise<Sessio
     let recordingValues: Record<string, unknown>;
     try {
         store = store ?? new ConfigurationStore({ tableName, client: new DynamoDBClient({ region: AWS_REGION }) });
-        transcriptionValues = (await store.getSection<Record<string, unknown>>(TRANSCRIPTION)).values;
-        recordingValues = (await store.getSection<Record<string, unknown>>(RECORDING)).values;
+        // Both sections are on the immediate tier, so they are taken from one
+        // consistent read of the resolved document: three GetItems rather than
+        // the six two getSection calls would make, and one saved state rather
+        // than two that a save between them could split.
+        const document = await store.getDocument(true);
+        transcriptionValues = sectionOf(document.body, TRANSCRIPTION.name);
+        recordingValues = sectionOf(document.body, RECORDING.name);
     } catch (error) {
         log.warn(
             '[SETTINGS]: could not read the Amazon Transcribe and recording settings from the configuration ' +

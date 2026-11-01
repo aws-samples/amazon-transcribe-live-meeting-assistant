@@ -98,6 +98,9 @@ const RECORDINGS_BUCKET_NAME = process.env['RECORDINGS_BUCKET_NAME'] || null;
 // optional - disable post call analytics output
 const IS_TCA_POST_CALL_ANALYTICS_ENABLED =
     (process.env['IS_TCA_POST_CALL_ANALYTICS_ENABLED'] || 'false') === 'true';
+// Whether Call Analytics' post-call output is redacted: the stack parameter's
+// value, which the PCA integration reads too (see where it is used).
+const IS_POST_CALL_REDACTION_ENABLED = (process.env['IS_CONTENT_REDACTION_ENABLED'] || '') === 'true';
 // optional - when redaction is enabled, choose 'redacted' only (dafault), or 'redacted_and_unredacted' for both
 const POST_CALL_CONTENT_REDACTION_OUTPUT =
     process.env['POST_CALL_CONTENT_REDACTION_OUTPUT'] || 'redacted';
@@ -390,6 +393,15 @@ export const startTranscribe = async (
     // part way through.
     const { transcription } = socketCallMap.sessionSettings ?? (await getSessionSettings(server.log));
     const redactionApplied = isRedactionApplied(transcription);
+    if (transcription.contentRedactionEnabled && !redactionApplied) {
+        // Redaction is privacy-bearing, so a request for it that cannot be met
+        // is said out loud rather than left to a redaction=false further down.
+        server.log.warn(
+            `[TRANSCRIBING]: [${callMetaData.callId}] - Redaction is on, but Amazon Transcribe does not redact ` +
+                `${transcription.languageCode} while streaming (only en-US, en-AU, en-GB and es-US); this meeting ` +
+                'is transcribed without redaction.'
+        );
+    }
     server.log.info(
         `[TRANSCRIBING]: [${callMetaData.callId}] - Amazon Transcribe options: language=${transcription.languageCode}` +
             `, redaction=${redactionApplied}, vocabulary=${transcription.customVocabularyName || 'none'}` +
@@ -524,7 +536,11 @@ export const startTranscribe = async (
                             OutputLocation: tcaOutputLocation,
                             DataAccessRoleArn: TCA_DATA_ACCESS_ROLE_ARN,
                         };
-                        if (redactionApplied) {
+                        // The post-call output follows this task's own redaction
+                        // variable, the stack parameter's value, rather than the
+                        // page: the PCA integration chooses which folder to read
+                        // from that same variable, and the two have to agree.
+                        if (IS_POST_CALL_REDACTION_ENABLED) {
                             configuration_event.PostCallAnalyticsSettings.ContentRedactionOutput =
                                 POST_CALL_CONTENT_REDACTION_OUTPUT as ContentRedactionOutput;
                         }
