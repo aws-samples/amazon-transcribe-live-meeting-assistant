@@ -40,6 +40,7 @@ import useSettingsContext from '../../contexts/settings';
 import { CallsContext } from '../../contexts/calls';
 import useCallsGraphQlApi from '../../hooks/use-calls-graphql-api';
 import useChatKeyframeLinks from '../../hooks/use-chat-keyframe-links';
+import useStrandsChatBridge from '../../hooks/use-strands-chat-bridge';
 import SummaryMarkdown from '../summary-markdown/SummaryMarkdown';
 import mapCallsAttributes from '../common/map-call-attributes';
 import { IN_PROGRESS_STATUS } from '../common/get-recording-status';
@@ -78,7 +79,10 @@ EmbedSummaryPanel.propTypes = {
  * Standalone chat panel - renders just the Meeting Assist Bot iframe.
  */
 const EmbedChatPanel = ({ item }) => {
-  // Frames of the shared screen the chat's answers refer to, as on the meeting page.
+  // The chat frame asks its host page to run every request (answers, streamed
+  // tokens, buttons, user context, frames of the shared screen); these are the
+  // same two hooks the meeting page's CallPanel answers it with.
+  useStrandsChatBridge(item.callId);
   useChatKeyframeLinks(item.callId);
   // Note: encodeURIComponent is required because callId may contain characters like '+'
   // which URLSearchParams.get() would otherwise decode as a space.
@@ -840,4 +844,5 @@ EmbedCallDetails.propTypes = {
   sendToParent: PropTypes.func.isRequired,
 };
 
+export { EmbedChatPanel };
 export default EmbedCallDetails;
