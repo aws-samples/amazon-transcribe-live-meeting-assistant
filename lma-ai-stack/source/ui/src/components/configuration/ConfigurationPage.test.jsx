@@ -43,6 +43,7 @@ const TIERS = {
   nova_sonic_config: 'immediate',
   asr_engine: 'short',
   call_pricing: 'standard',
+  language_models: 'standard',
 };
 const SECTIONS = readdirSync(SCHEMA_DIR)
   .filter((name) => name.endsWith('.json'))
@@ -75,6 +76,13 @@ const DEFAULTS = {
     baseRegion: 'us-east-1',
     regions: { default: { 'transcribe/streaming': { seconds: 0.0001667 } } },
     pricedRegions: ['us-east-1'],
+  },
+  // What the seeder writes from the stack parameters that are these defaults.
+  language_models: {
+    summaryModelId: 'global.anthropic.claude-sonnet-5-5',
+    meetingAssistModelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+    knowledgeBaseModelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0',
+    keyframeTextModelId: 'amazon.nova-lite-v1:0',
   },
 };
 
@@ -233,6 +241,29 @@ describe('ConfigurationContent', () => {
     await screen.findByText(/Saved as revision/);
     expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
       nova_sonic_config: {},
+    });
+  });
+
+  it('shows the deployed models as the defaults, marks a changed one, and resets it to the deployed one', async () => {
+    graphqlMock.mockResolvedValueOnce(
+      answer({ custom: { language_models: { summaryModelId: 'global.anthropic.claude-haiku-4-5-20251001-v1:0' } } }),
+    );
+    renderEditor();
+    openSection(await screen.findByText('Amazon Bedrock Models'));
+    const models = section('Amazon Bedrock Models');
+    expect(within(models).getAllByText('Summaries and meeting insights').length).toBeGreaterThan(0);
+    expect(within(models).getAllByText('Key frame text').length).toBeGreaterThan(0);
+    expect(within(models).getAllByText('Changed')).toHaveLength(1);
+    fireEvent.click(within(models).getByText('Reset to default'));
+    expect(within(models).queryByText('Changed')).toBeNull();
+    fireEvent.click(pageButton('Save changes'));
+    const dialog = await screen.findByRole('dialog', { name: /Save the configuration/ });
+    graphqlMock.mockResolvedValueOnce(saved()).mockResolvedValueOnce(answer({ version: 5 }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Saved as revision/);
+    // Reset stores an empty section, so the stack parameter's value applies again.
+    expect(JSON.parse(callsOf('UpdateConfiguration')[0][0].variables.input.Sections)).toEqual({
+      language_models: {},
     });
   });
 

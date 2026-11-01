@@ -85,6 +85,7 @@ const SECTION_LABELS = {
   chat_buttons: 'Chat buttons',
   asr_engine: 'Transcription engine',
   call_pricing: 'Meeting cost prices',
+  language_models: 'Amazon Bedrock models',
 };
 
 export const sectionLabel = (section) => SECTION_LABELS[section] || section;

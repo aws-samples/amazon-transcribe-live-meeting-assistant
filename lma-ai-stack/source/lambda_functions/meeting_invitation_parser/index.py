@@ -12,17 +12,22 @@ import boto3
 from bedrock_compat import INVITATION_PARSER_MAX_TOKENS, build_inference_config, extract_text
 from botocore.config import Config
 
+# pylint: disable=import-error
+from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+
+# pylint: enable=import-error
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Environment variables
 #
-# BEDROCK_MODEL_ID is always supplied by the template, which passes the stack's
-# BedrockModelId parameter through; the literal below is reached only by a local
-# invocation that sets no environment, so it tracks the parameter's own default.
-BEDROCK_MODEL_ID = os.environ.get(
-    "BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-)
+# The model is the summaries' one: the Amazon Bedrock Models section of the
+# Configuration page, whose default is the BedrockModelId stack parameter. The
+# template also passes that parameter as BEDROCK_MODEL_ID, read when the section
+# cannot be; the literal below is reached only by a local invocation that sets
+# no environment, so it tracks the parameter's own default.
+FALLBACK_MODEL_ID = "global.anthropic.claude-sonnet-5-5"
 BEDROCK_REGION = os.environ.get(
     "BEDROCK_REGION_OVERRIDE", os.environ.get("AWS_REGION", "us-east-1")
 )
@@ -46,7 +51,12 @@ def get_generated_text(response):
 
 def call_bedrock(prompt_data):
     """Call Bedrock to parse meeting invitation"""
-    modelId = BEDROCK_MODEL_ID
+    modelId = read_setting(
+        LANGUAGE_MODELS.name,
+        "summaryModelId",
+        env_var="BEDROCK_MODEL_ID",
+        default=FALLBACK_MODEL_ID,
+    )
     logger.info(f"Bedrock request - ModelId: {modelId}")
 
     message = {"role": "user", "content": [{"text": prompt_data}]}

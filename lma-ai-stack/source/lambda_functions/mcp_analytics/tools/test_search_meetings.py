@@ -4,13 +4,22 @@ Verifies that inference profile IDs get the correct ARN path.
 """
 
 import os
+import sys
 import unittest
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("TRANSCRIPT_KB_ID", "test-kb-id")
 
-import search_meetings
+# The configuration layer the deployed function carries, for lma_config.
+LAYER = Path(__file__).resolve().parents[3] / "lambda_layers" / "configuration_layer"
+if str(LAYER) not in sys.path:
+    sys.path.insert(0, str(LAYER))
+
+import search_meetings  # noqa: E402
+from lma_config import parameters  # noqa: E402
 
 REGION = "us-west-2"
 ACCOUNT = "123456789012"
@@ -143,6 +152,23 @@ class TestExecuteResolvesArn(unittest.TestCase):
                     ],
                     legacy_arn,
                 )
+
+    def test_the_configured_model_wins_over_the_environment_variable(self):
+        """The Amazon Bedrock Models section, when it names a model, is used."""
+
+        class _Store:
+            def get_section(self, _name):
+                return SimpleNamespace(values={"summaryModelId": "us.amazon.nova-pro-v1:0"})
+
+        with patch.object(parameters, "_SHARED_STORE", _Store()):
+            model_arn = self._run(
+                {
+                    "BEDROCK_MODEL_ID": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+                    "AWS_REGION": "us-west-2",
+                    "AWS_ACCOUNT_ID": "123456789012",
+                }
+            )
+        self.assertTrue(model_arn.endswith(":inference-profile/us.amazon.nova-pro-v1:0"))
 
     def test_missing_model_raises(self):
         """When neither BEDROCK_MODEL_ID nor MODEL_ARN is set, raise a clear error."""

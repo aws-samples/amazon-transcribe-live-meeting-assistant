@@ -36,3 +36,16 @@ SOURCE_DIR = Path(__file__).resolve().parent.parent / "src"
 
 if str(SOURCE_DIR) not in sys.path:
     sys.path.insert(0, str(SOURCE_DIR))
+
+#: The AI stack's configuration layer, which the meeting assistant and the
+#: troubleshooting agent are deployed with, for the model they read.
+CONFIGURATION_LAYER = (
+    Path(__file__).resolve().parents[2]
+    / "lma-ai-stack"
+    / "source"
+    / "lambda_layers"
+    / "configuration_layer"
+)
+
+if str(CONFIGURATION_LAYER) not in sys.path:
+    sys.path.insert(0, str(CONFIGURATION_LAYER))

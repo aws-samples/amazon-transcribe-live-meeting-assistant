@@ -16,7 +16,12 @@ from bedrock_compat import SUMMARY_MAX_TOKENS, build_inference_config, extract_t
 from botocore.config import Config
 
 # pylint: disable=import-error
-from lma_config import SUMMARY_PROMPT_TEMPLATES, ConfigurationStore  # configuration layer
+from lma_config import (  # configuration layer
+    LANGUAGE_MODELS,
+    SUMMARY_PROMPT_TEMPLATES,
+    ConfigurationStore,
+    read_setting,
+)
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -29,8 +34,6 @@ logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 # grab environment variables
 
-# use inference profile for model id as Nova models require the use of inference profiles
-BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 FETCH_TRANSCRIPT_LAMBDA_ARN = os.environ["FETCH_TRANSCRIPT_LAMBDA_ARN"]
 PROCESS_TRANSCRIPT = os.getenv("PROCESS_TRANSCRIPT", "False") == "True"
 S3_BUCKET_NAME = os.environ["S3_BUCKET_NAME"]
@@ -234,8 +237,21 @@ def get_generated_text(response):
     return extract_text(response)
 
 
-def call_bedrock(prompt_data, call_id=None):
-    modelId = BEDROCK_MODEL_ID
+def summary_model_id():
+    """The model summaries are written with.
+
+    The Amazon Bedrock Models section of the Configuration page, whose default is
+    the BedrockModelId stack parameter; that parameter's environment variable
+    when the section cannot be read. Read through the summariser's own store, so
+    it shares the prompt templates' cached document rather than adding a read.
+    """
+    return read_setting(
+        LANGUAGE_MODELS.name, "summaryModelId", env_var="BEDROCK_MODEL_ID", store=CONFIG_STORE
+    )
+
+
+def call_bedrock(prompt_data, call_id=None, model_id=None):
+    modelId = model_id or summary_model_id()
     print("Bedrock request - ModelId", modelId)
     message = {"role": "user", "content": [{"text": prompt_data}]}
 
@@ -327,6 +343,11 @@ def generate_summary(
 ):
     # first check to see if this is one prompt, or many prompts as a json
     templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
+    # Once per summary, after the templates, so every section of one summary is
+    # written by the same model even if the cached configuration expires part
+    # way through, and a Regenerate -- which dropped the cache above -- uses the
+    # model as it is now saved.
+    model_id = summary_model_id()
     agenda_text = numbered_agenda(agenda)
     slides_text = None
     result = {}
@@ -356,7 +377,7 @@ def generate_summary(
         }
         prompt = PLACEHOLDERS.sub(lambda match: values[match.group(0)], prompt)
         print("Prompt:", prompt)
-        response = call_bedrock(prompt, call_id)
+        response = call_bedrock(prompt, call_id, model_id)
         print("API Response:", response)
         result[key] = response
     if len(result.keys()) == 1:

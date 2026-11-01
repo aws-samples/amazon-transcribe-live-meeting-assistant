@@ -27,6 +27,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -82,8 +83,24 @@ NO_EFFECT = Kind(
     "Declared by the template and read by nothing. Kept so that existing deploy "
     "commands and pipelines that pass it keep working.",
 )
+CONFIGURATION_DEFAULT = Kind(
+    "Configuration page default",
+    "The default of a setting an Admin can change on the web UI's Configuration "
+    "page while the stack runs; see the [Configuration Guide](configuration-guide.md). "
+    "The stack writes the parameter's value into the configuration as that "
+    "setting's default, so a stack update that changes it applies wherever the "
+    "setting has not been changed on the page. A value saved on the page takes "
+    "precedence until it is reset to the default there.",
+)
 
-KINDS = (RESOURCE, RUNTIME, CREDENTIAL, DEPLOY_CHECK, NO_EFFECT)
+KINDS = (RESOURCE, CONFIGURATION_DEFAULT, RUNTIME, CREDENTIAL, DEPLOY_CHECK, NO_EFFECT)
+
+#: The configuration layer, whose parameter_defaults.json names the parameters
+#: that are the defaults of Configuration page settings, and whose section
+#: schemas name those settings as the page shows them.
+CONFIGURATION_LAYER = (
+    REPO_ROOT / "lma-ai-stack" / "source" / "lambda_layers" / "configuration_layer" / "lma_config"
+)
 
 
 class Classification(NamedTuple):
@@ -452,6 +469,40 @@ def parameter_groups(template: Mapping[str, Any]) -> List[Tuple[str, List[str]]]
     return groups
 
 
+# ── the parameters that are Configuration page defaults ─────────────────────
+
+
+def configuration_defaults() -> Dict[str, Tuple[str, str]]:
+    """Parameter name to (section label, setting title), as the page shows them.
+
+    Read from the configuration layer rather than restated here, so the
+    reference cannot call a parameter a Configuration page default that the
+    seeder does not write, or miss one that it does.
+    """
+    mapping = json.loads((CONFIGURATION_LAYER / "parameter_defaults.json").read_text("utf-8"))
+    result = {}
+    for parameter, entry in mapping.items():
+        schema = json.loads(
+            (CONFIGURATION_LAYER / "schemas" / f"{entry['section']}.json").read_text("utf-8")
+        )
+        setting = schema["properties"][entry["setting"]]
+        result[parameter] = (schema["sectionLabel"], setting.get("title", entry["setting"]))
+    return result
+
+
+def classification_of(name: str, defaults: Mapping[str, Tuple[str, str]]) -> Classification:
+    """The classification the reference shows: CLASSIFICATION's, unless the
+    parameter is the default of a Configuration page setting."""
+    classification = CLASSIFICATION[name]
+    if name not in defaults:
+        return classification
+    section, setting = defaults[name]
+    return Classification(
+        CONFIGURATION_DEFAULT,
+        f"Configuration page: **{section} › {setting}**. {classification.note}",
+    )
+
+
 # ── rendering ────────────────────────────────────────────────────────────────
 
 
@@ -512,11 +563,12 @@ def render_reference(template: Mapping[str, Any]) -> str:
         .get("ParameterLabels", {})
     )
     groups = parameter_groups(template)
+    defaults = configuration_defaults()
     lines: List[str] = [BEGIN_MARKER, ""]
 
     counts = {kind.label: 0 for kind in KINDS}
     for name in declared:
-        counts[CLASSIFICATION[name].kind.label] += 1
+        counts[classification_of(name, defaults).kind.label] += 1
     lines += [
         f"The template declares {len(declared)} parameters.",
         "",
@@ -532,12 +584,12 @@ def render_reference(template: Mapping[str, Any]) -> str:
             spec = declared[name]
             lines.append(
                 f"| [`{name}`](#{anchor(name)}) | {_cell(describe_default(spec))} | "
-                f"{CLASSIFICATION[name].kind.label} |"
+                f"{classification_of(name, defaults).kind.label} |"
             )
         lines.append("")
         for name in names:
             spec = declared[name]
-            classification = CLASSIFICATION[name]
+            classification = classification_of(name, defaults)
             label = labels.get(name, {}).get("default")
             lines += [f"### `{name}`", ""]
             if label:
@@ -571,6 +623,19 @@ def classification_problems(template: Mapping[str, Any]) -> List[str]:
         f"CLASSIFICATION names {name}, which lma-main.yaml does not declare"
         for name in sorted(set(CLASSIFICATION) - declared)
     ]
+    # A setting an Admin changes at run time is one only code reads, so its
+    # parameter must have been classified as read at run time. Anything else
+    # means the parameter also reaches a resource, which the page cannot change.
+    for name in sorted(configuration_defaults()):
+        if name not in declared:
+            problems.append(
+                f"parameter_defaults.json names {name}, which lma-main.yaml does not declare"
+            )
+        elif name in CLASSIFICATION and CLASSIFICATION[name].kind is not RUNTIME:
+            problems.append(
+                f"{name} is the default of a Configuration page setting, but CLASSIFICATION "
+                f"says it is {CLASSIFICATION[name].kind.label!r}, not {RUNTIME.label!r}"
+            )
     return problems
 
 

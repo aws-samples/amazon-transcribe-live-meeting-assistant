@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "lma:configuration/language_models",
+  "title": "Amazon Bedrock models",
+  "description": "The Amazon Bedrock model each feature uses. The defaults are the models the stack was deployed with; a model chosen here is used instead until it is reset. Enable access to a model in the Amazon Bedrock console before choosing it: this page does not check access, and a feature whose model cannot be invoked reports the error when it runs.",
+  "sectionLabel": "Amazon Bedrock Models",
+  "appliesText": "A saved change applies within about five minutes, to each summary, answer or key frame started after that; one already under way finishes with the model it started with.",
+  "order": 6,
+  "collapsible": true,
+  "defaultExpanded": false,
+  "mergeStrategy": "merge",
+  "type": "object",
+  "properties": {
+    "summaryModelId": {
+      "order": 0,
+      "type": "string",
+      "title": "Summaries and meeting insights",
+      "description": "Writes the end-of-meeting summary, reads pasted meeting invitations, names speakers from what they say, derives the agenda, and answers questions over past meeting transcripts. Default: the BedrockModelId stack parameter.",
+      "enum": [
+        "amazon.nova-micro-v1:0",
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-pro-v1:0",
+        "us.amazon.nova-premier-v1:0",
+        "global.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-2-lite-v1:0",
+        "us.anthropic.claude-opus-4-20250514-v1:0",
+        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-opus-4-6-v1",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-sonnet-5-5",
+        "us.anthropic.claude-opus-5-5",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "global.anthropic.claude-sonnet-4-6",
+        "global.anthropic.claude-opus-4-6-v1",
+        "global.anthropic.claude-haiku-5-5",
+        "global.anthropic.claude-sonnet-5-5",
+        "global.anthropic.claude-opus-5-5"
+      ]
+    },
+    "meetingAssistModelId": {
+      "order": 1,
+      "type": "string",
+      "title": "Meeting assistant",
+      "description": "Answers in the meeting assistant chat, for the voice assistant's lookups and for questions typed in the meeting chat, and runs the troubleshooting agent. It answers mid-meeting, so time to the first word matters more here than for summaries. Default: the MeetingAssistServiceBedrockModelID stack parameter.",
+      "enum": [
+        "amazon.nova-micro-v1:0",
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-pro-v1:0",
+        "us.amazon.nova-premier-v1:0",
+        "global.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-2-lite-v1:0",
+        "us.anthropic.claude-opus-4-20250514-v1:0",
+        "us.anthropic.claude-opus-4-1-20250805-v1:0",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-opus-4-6-v1",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-sonnet-5-5",
+        "us.anthropic.claude-opus-5-5",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "global.anthropic.claude-sonnet-4-6",
+        "global.anthropic.claude-opus-4-6-v1",
+        "global.anthropic.claude-haiku-5-5",
+        "global.anthropic.claude-sonnet-5-5",
+        "global.anthropic.claude-opus-5-5"
+      ]
+    },
+    "knowledgeBaseModelId": {
+      "order": 2,
+      "type": "string",
+      "title": "Meeting assistant knowledge bases",
+      "description": "Writes the answer the document-search and past-meeting-search tools return from what they retrieve. Only models verified to work with a Bedrock knowledge base are offered. Default: the MeetingAssistKnowledgeBaseModelID stack parameter.",
+      "enum": [
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-opus-4-6-v1",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "global.anthropic.claude-sonnet-4-6",
+        "global.anthropic.claude-opus-4-6-v1"
+      ]
+    },
+    "keyframeTextModelId": {
+      "order": 3,
+      "type": "string",
+      "title": "Key frame text",
+      "description": "Reads the text of each key frame of the shared screen, once, when the frame is stored. Image-capable models only. Default: the KeyframeTextModelId stack parameter.",
+      "enum": [
+        "amazon.nova-lite-v1:0",
+        "amazon.nova-pro-v1:0",
+        "us.amazon.nova-premier-v1:0",
+        "global.amazon.nova-2-lite-v1:0",
+        "us.amazon.nova-2-lite-v1:0",
+        "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "us.anthropic.claude-sonnet-4-6",
+        "us.anthropic.claude-haiku-5-5",
+        "us.anthropic.claude-sonnet-5-5",
+        "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        "global.anthropic.claude-sonnet-4-6",
+        "global.anthropic.claude-haiku-5-5",
+        "global.anthropic.claude-sonnet-5-5"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

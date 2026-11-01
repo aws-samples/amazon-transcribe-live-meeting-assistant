@@ -75,6 +75,10 @@ def test_every_parameter_is_classified_and_nothing_else_is(template) -> None:
 
 
 def test_the_generated_reference_is_current(template, page) -> None:
+    if DOCGEN.classification_problems(template):
+        # Rendering needs every parameter classified; the test above names what
+        # is missing, which is clearer than the KeyError rendering would raise.
+        pytest.skip("the classification is incomplete; see the test above")
     assert DOCGEN.render_page(page, template) == page, (
         "docs/cloudformation-parameters.md is out of date with lma-main.yaml; run "
         "python3 scripts/cloudformation_parameters_doc.py and commit the result"
@@ -124,7 +128,9 @@ def test_every_link_into_the_page_names_a_heading_it_has(page) -> None:
     """Headings come from the template's group labels, so a relabel moves anchors.
 
     Every Markdown file in the repository is searched, the CHANGELOG included,
-    because a link there breaks just as silently as one in the docs.
+    because a link there breaks just as silently as one in the docs. Only Markdown
+    is searched: no template description or UI text links into this page, and one
+    that did would not be checked here.
     """
     anchors = {_slug(line.lstrip("#")) for line in page.splitlines() if re.match(r"^#{1,6} ", line)}
     broken = []

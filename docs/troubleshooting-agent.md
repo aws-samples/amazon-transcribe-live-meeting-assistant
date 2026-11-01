@@ -308,9 +308,12 @@ whether the invocation was what capped it.
 Insights bills by bytes scanned, and the Virtual Participant's container log
 group is the highest-volume stream in the solution.
 
-The agent uses the same Bedrock model as the Meeting Assistant
-(`MeetingAssistServiceBedrockModelID`), so selecting a stronger model there
-gives a stronger diagnosis. Its token usage is logged at the end of every run.
+The agent uses the same Bedrock model as the Meeting Assistant — the
+**Meeting assistant** model in the Amazon Bedrock Models section of the
+Configuration page, whose default is the `MeetingAssistServiceBedrockModelID`
+stack parameter — so selecting a stronger model there gives a stronger
+diagnosis. Each run reads the model as it starts. Its token usage is logged at
+the end of every run.
 
 ## Guardrails and what it will not say
 

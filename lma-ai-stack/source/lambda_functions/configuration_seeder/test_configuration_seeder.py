@@ -157,7 +157,11 @@ def test_the_baseline_document_holds_the_shipped_prompts_under_its_section(seede
         "chat_buttons",
         "call_pricing",
         "asr_engine",
+        # Filled from the stack parameters by `seed`; see the tests under
+        # "the stack parameters that are defaults".
+        "language_models",
     }
+    assert body["language_models"] == {}
     assert set(body["summary_prompt_templates"]) == {
         "1#SUMMARY",
         "2#DETAILS",
@@ -1150,6 +1154,102 @@ def test_adoption_is_skipped_once_a_profile_exists(seeder) -> None:
     seeder.seed(store, domain="default", legacy_table_name="old-table", legacy_client=legacy)
     assert dynamo.body("Config#custom")["summary_prompt_templates"]["1#SUMMARY"] == (
         "written after the upgrade"
+    )
+
+
+# ── the stack parameters that are defaults ─────────────────────────────────
+
+MODEL_PARAMETERS = {
+    "BedrockModelId": "global.anthropic.claude-sonnet-5-5",
+    "MeetingAssistServiceBedrockModelID": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+    "MeetingAssistKnowledgeBaseModelID": "global.anthropic.claude-sonnet-4-6",
+    "KeyframeTextModelId": "amazon.nova-lite-v1:0",
+}
+
+
+def test_the_stack_parameters_are_written_into_the_baseline(seeder) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default", parameter_values=MODEL_PARAMETERS)
+    assert dynamo.body("Config#default")["language_models"] == {
+        "summaryModelId": "global.anthropic.claude-sonnet-5-5",
+        "meetingAssistModelId": "global.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "knowledgeBaseModelId": "global.anthropic.claude-sonnet-4-6",
+        "keyframeTextModelId": "amazon.nova-lite-v1:0",
+    }
+    assert outcome["ParameterDefaults"].split(",") == list(MODEL_PARAMETERS)
+    # The profile is an administrator's. A parameter value is the deployment's
+    # default, so it never lands there.
+    assert "language_models" not in dynamo.body("Config#custom")
+
+
+def test_an_existing_deployment_keeps_its_parameter_values_on_upgrade(seeder) -> None:
+    """The upgrade path: a stack that set the parameters reads the same values after."""
+    store, _dynamo = build_store()
+    seeder.seed(store, domain="default")  # a release before the parameters moved
+    seeder.seed(
+        store, domain="default", parameter_values={"BedrockModelId": "amazon.nova-pro-v1:0"}
+    )
+    store.invalidate()
+    assert store.get_section("language_models").values == {"summaryModelId": "amazon.nova-pro-v1:0"}
+
+
+def test_an_administrators_choice_wins_over_the_parameter(seeder) -> None:
+    store, _dynamo = build_store()
+    seeder.seed(store, domain="default", parameter_values=MODEL_PARAMETERS)
+    store.write_section(
+        "custom",
+        "language_models",
+        {"summaryModelId": "amazon.nova-pro-v1:0"},
+        updated_by="admin@example.com",
+        expected_version=None,
+    )
+    # A later stack update that changes the parameter changes the baseline, and
+    # the administrator's choice still wins over it.
+    seeder.seed(
+        store,
+        domain="default",
+        parameter_values={**MODEL_PARAMETERS, "BedrockModelId": "us.anthropic.claude-sonnet-4-6"},
+    )
+    store.invalidate()
+    resolved = store.get_section("language_models").values
+    assert resolved["summaryModelId"] == "amazon.nova-pro-v1:0"
+    assert resolved["keyframeTextModelId"] == "amazon.nova-lite-v1:0"
+
+
+def test_a_parameter_change_reaches_every_setting_nobody_changed(seeder) -> None:
+    store, dynamo = build_store()
+    seeder.seed(store, domain="default", parameter_values=MODEL_PARAMETERS)
+    seeder.seed(
+        store,
+        domain="default",
+        parameter_values={**MODEL_PARAMETERS, "KeyframeTextModelId": "amazon.nova-pro-v1:0"},
+    )
+    assert dynamo.body("Config#default")["language_models"]["keyframeTextModelId"] == (
+        "amazon.nova-pro-v1:0"
+    )
+
+
+def test_without_the_property_the_section_is_empty_and_readers_use_their_environment(
+    seeder,
+) -> None:
+    store, dynamo = build_store()
+    outcome = seeder.seed(store, domain="default")
+    assert dynamo.body("Config#default")["language_models"] == {}
+    assert outcome["ParameterDefaults"] == "none"
+
+
+def test_the_handler_passes_the_parameter_defaults_through(seeder, monkeypatch) -> None:
+    dynamo = FakeDynamo()
+    monkeypatch.setattr(
+        seeder, "ConfigurationStore", lambda name, **_: ConfigurationStore(name, client=dynamo)
+    )
+    event = _event("Update")
+    event["ResourceProperties"]["ParameterDefaults"] = dict(MODEL_PARAMETERS)
+    seeder.handler(event, _Context())
+    assert seeder.recorder.sent[-1]["status"] == "SUCCESS"
+    assert (
+        dynamo.body("Config#default")["language_models"]["summaryModelId"]
+        == (MODEL_PARAMETERS["BedrockModelId"])
     )
 
 

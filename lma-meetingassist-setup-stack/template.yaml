@@ -191,6 +191,22 @@ Parameters:
       records the token usage of each answer there, under the meeting's mtr#
       partition, for the meeting cost estimate.
 
+  # The AI stack's runtime configuration: the table, and the accessor layer that
+  # reads it. The meeting assistant and the troubleshooting agent read their
+  # Amazon Bedrock models from it per request, so an Admin's change on the
+  # Configuration page applies without a stack update; the two model
+  # parameters above are the defaults, and the readers' fallback.
+  ConfigurationTableName:
+    Type: String
+    Description: >-
+      Name of the AI stack's configuration table, which the meeting assistant and
+      the troubleshooting agent read their Amazon Bedrock models from.
+
+  ConfigurationLayerArn:
+    Type: String
+    Description: >-
+      ARN of the AI stack's configuration accessor layer.
+
 Conditions:
   ShouldUseStrandsBedrock: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK"]
   ShouldUseStrandsBedrockWithKBCreate: !Equals [!Ref MeetingAssistService, "STRANDS_BEDROCK_WITH_KB (Create)"]
@@ -339,6 +355,14 @@ Resources:
                   - "dynamodb:UpdateItem"
                 Resource:
                   - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${MCPServersTableName}"
+              # Read-only, on the shared configuration table: the agent's and
+              # the knowledge bases' models are read from it. KMSPolicy below
+              # covers decrypting it.
+              - Effect: Allow
+                Action:
+                  - "dynamodb:GetItem"
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
           PolicyName: DynamoDBPolicy
         - PolicyDocument:
             Version: 2012-10-17
@@ -455,6 +479,7 @@ Resources:
       Layers:
         - !Ref Boto3Layer
         - !Ref StrandsLayer
+        - !Ref ConfigurationLayerArn
       Timeout: 300
       MemorySize: 512
       TracingConfig:
@@ -462,8 +487,11 @@ Resources:
       Environment:
         Variables:
           FETCH_TRANSCRIPT_FUNCTION_ARN: !Ref FetchTranscriptFunctionArn
+          # The models' defaults, read when the configuration cannot be: each
+          # request reads them from the Amazon Bedrock Models section first.
           MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
           KB_MODEL_ID: !Ref MeetingAssistKnowledgeBaseModelID
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           KB_ID: !Ref BedrockKnowledgeBaseId
           KB_REGION: !Ref AWS::Region
           KB_ACCOUNT_ID: !Ref AWS::AccountId
@@ -684,7 +712,9 @@ Resources:
                   - "logs:GetQueryResults"
                   - "logs:StopQuery"
                 Resource: "*"
-        # The two records the agent reads, by table, rather than table/*.
+        # The records the agent reads, by table, rather than table/*: the two
+        # it diagnoses from, and the configuration table its model is read
+        # from.
         - PolicyName: DiagnosticRecordReadPolicy
           PolicyDocument:
             Version: "2012-10-17"
@@ -694,6 +724,7 @@ Resources:
                 Resource:
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${VirtualParticipantTableName}"
                   - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${LLMPromptTemplateTableName}"
+                  - !Sub "arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${ConfigurationTableName}"
         # Which components this deployment runs, and which nested stacks it
         # owns. ListStackResources is what lets log-group discovery match this
         # deployment's own nested stacks by name instead of by a prefix that a
@@ -792,6 +823,7 @@ Resources:
       Layers:
         - !Ref Boto3Layer
         - !Ref StrandsLayer
+        - !Ref ConfigurationLayerArn
       # Comfortably longer than the agent's own wall-clock budget (240s by
       # default) so the agent reports running out of time rather than being
       # killed mid-answer.
@@ -811,8 +843,11 @@ Resources:
           APPSYNC_API_ID: !Ref AppSyncApiId
           # Tracks the meeting assistant's model so a deployment that selected a
           # stronger model gets a stronger diagnosis, without adding a
-          # parameter of its own.
+          # parameter of its own. The default, read when the configuration
+          # cannot be: each run reads the model from the Amazon Bedrock Models
+          # section first.
           TROUBLESHOOTING_MODEL_ID: !Ref MeetingAssistServiceBedrockModelID
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTableName
           BEDROCK_GUARDRAIL_ID: !Ref BedrockGuardrailId
           BEDROCK_GUARDRAIL_VERSION: !Ref BedrockGuardrailVersion
       Code: ./src

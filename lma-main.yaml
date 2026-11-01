@@ -51,6 +51,8 @@ Parameters:
       and Claude 4+ models (cutting-edge). Some models require inference profiles. The Claude 5
       generation reasons before it answers, which raises answer quality but also raises output
       token use several-fold, so it costs more per meeting than Claude 4.5 at the same size.
+      This is the default; an Admin can change it at run time on the Configuration
+      page (Amazon Bedrock Models section), which takes precedence.
 
   MeetingAssistKnowledgeBaseModelID:
     Type: String
@@ -84,6 +86,8 @@ Parameters:
       base can generate with a model is a property of that model, so only models verified against
       a live knowledge base are offered here. Enable access to the model you pick in the Amazon
       Bedrock console for your region.
+      This is the default; an Admin can change it at run time on the Configuration
+      page (Amazon Bedrock Models section), which takes precedence.
 
   TavilyApiKey:
     Type: String
@@ -581,7 +585,8 @@ Parameters:
       Some models require inference profiles. The Claude 5 generation reasons before it answers,
       which raises summary quality but also raises output token use several-fold, so it costs
       more per meeting than Claude 4.5 at the same size.
-      Defaults to 'global.anthropic.claude-sonnet-5-5'
+      This is the default; an Admin can change it at run time on the Configuration
+      page (Amazon Bedrock Models section), which takes precedence.
 
   KeyframeTextModelId:
     Type: String
@@ -610,6 +615,8 @@ Parameters:
       the meeting assistant reads first, what the meeting page searches, and
       what the meeting-history knowledge base indexes. Amazon Nova Lite read
       every word of the measured frames at about $0.0002 a frame.
+      This is the default; an Admin can change it at run time on the Configuration
+      page (Amazon Bedrock Models section), which takes precedence.
 
   EndOfCallLambdaHookFunctionArn:
     Default: ""
@@ -3217,6 +3224,11 @@ Resources:
         EndOfCallTranscriptSummary: !Ref EndOfCallTranscriptSummary
         BedrockModelId: !Ref BedrockModelId
         KeyframeTextModelId: !Ref KeyframeTextModelId
+        # Not used by any resource of the AI stack: passed so that its
+        # configuration seeder writes them into the baseline as the defaults of
+        # the Amazon Bedrock Models section, which the meeting assistant reads.
+        MeetingAssistServiceBedrockModelID: !Ref MeetingAssistServiceBedrockModelID
+        MeetingAssistKnowledgeBaseModelID: !Ref MeetingAssistKnowledgeBaseModelID
         EndOfCallLambdaHookFunctionArn: !Ref EndOfCallLambdaHookFunctionArn
         StartOfCallLambdaHookFunctionArn: !Ref StartOfCallLambdaHookFunctionArn
         PostCallSummaryLambdaHookFunctionArn: !Ref PostCallSummaryLambdaHookFunctionArn
@@ -3383,6 +3395,10 @@ Resources:
         # Where the meeting assistant records each answer's token usage for the
         # meeting cost estimate.
         EventSourcingTableName: !GetAtt AISTACK.Outputs.EventSourcingTableName
+        # Where the meeting assistant and the troubleshooting agent read their
+        # Amazon Bedrock models, and the layer that reads it.
+        ConfigurationTableName: !GetAtt AISTACK.Outputs.ConfigurationTableName
+        ConfigurationLayerArn: !GetAtt AISTACK.Outputs.ConfigurationPythonLayerArn
         # Threaded through so this nested stack's IAM roles carry the
         # deployment's permissions boundary, as the other nested stacks' do.
         PermissionsBoundaryArn: !Ref PermissionsBoundaryArn

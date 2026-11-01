@@ -24,6 +24,8 @@ from bedrock_compat import (
     extract_text,
 )
 import tavily_secret
+# pylint: disable-next=import-error
+from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
 import call_metering
 import meeting_agenda
 import meeting_frames
@@ -78,6 +80,39 @@ AGENT_TEMPERATURE = 0.3
 # Fallback for KB_MODEL_ID, reached only by a deployment whose environment does not
 # set it. Tracks the default of the MeetingAssistKnowledgeBaseModelID parameter.
 DEFAULT_KB_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+# Likewise for MODEL_ID and the MeetingAssistServiceBedrockModelID parameter.
+DEFAULT_AGENT_MODEL_ID = 'global.anthropic.claude-haiku-4-5-20251001-v1:0'
+
+
+def configured_agent_model_id() -> str:
+    """The model the assistant answers with.
+
+    The Amazon Bedrock Models section of the Configuration page, whose default is
+    the MeetingAssistServiceBedrockModelID stack parameter; that parameter's
+    environment variable (MODEL_ID) when the section cannot be read. Read per
+    request, so a change reaches the assistant within the section's cache tier.
+    """
+    return read_setting(
+        LANGUAGE_MODELS.name,
+        'meetingAssistModelId',
+        env_var='MODEL_ID',
+        default=DEFAULT_AGENT_MODEL_ID,
+    )
+
+
+def configured_kb_model_id() -> str:
+    """The model the knowledge-base tools generate with.
+
+    As configured_agent_model_id(), with the MeetingAssistKnowledgeBaseModelID
+    stack parameter as its default and KB_MODEL_ID as its environment variable.
+    """
+    return read_setting(
+        LANGUAGE_MODELS.name,
+        'knowledgeBaseModelId',
+        env_var='KB_MODEL_ID',
+        default=DEFAULT_KB_MODEL_ID,
+    )
+
 
 # Claude generation from which a model is assumed to require custom prompt
 # templates. This is a default for ids nobody has checked, not the boundary: see
@@ -1807,7 +1842,7 @@ def query_knowledge_base(user_input: str, call_id: str) -> str:
         if not kb_id:
             return ""
 
-        kb_model_id = os.environ.get('KB_MODEL_ID', DEFAULT_KB_MODEL_ID)
+        kb_model_id = configured_kb_model_id()
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID')
 
@@ -1965,10 +2000,10 @@ def handler(event, context):
         transcript_kb_id = os.environ.get('TRANSCRIPT_KB_ID', '')
         kb_region = os.environ.get('KB_REGION', os.environ.get('AWS_REGION'))
         kb_account_id = os.environ.get('KB_ACCOUNT_ID', '')
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+        model_id = configured_agent_model_id()
         # The model the knowledge bases generate with, which is deliberately
         # separate from the agent's: see kb_model_supports_retrieve_and_generate().
-        kb_model_id = os.environ.get('KB_MODEL_ID', DEFAULT_KB_MODEL_ID)
+        kb_model_id = configured_kb_model_id()
         # Whether the web search tool is available is decided from the secret's
         # ARN alone, so a deployment without a Tavily API key makes no Secrets
         # Manager call. The key itself is read inside the tool, on the first
@@ -2613,7 +2648,7 @@ def fallback_bedrock_response(transcript: str, user_input: str, call_id: str) ->
     """
     try:
         bedrock_client = boto3.client('bedrock-runtime')
-        model_id = os.environ.get('MODEL_ID', 'global.anthropic.claude-haiku-4-5-20251001-v1:0')
+        model_id = configured_agent_model_id()
         
         # Prepare the prompt
         prompt = f"""You are an AI assistant helping during a meeting.

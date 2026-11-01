@@ -5,7 +5,8 @@
 
 Invoked asynchronously by the call event processor for each key frame it stores
 (docs/meeting-video.md). The frame's large image is read from the recordings
-bucket and given to a vision model (KEYFRAME_TEXT_MODEL_ID), which transcribes
+bucket and given to a vision model (the Key frame text model of the
+Configuration page's Amazon Bedrock Models section), which transcribes
 the readable text and notes any chart or picture in a line; the result is
 stored on the frame as ``SlideText``. The meeting assistant reads it before it
 looks at a picture, the meeting page searches it, and the meeting's document in
@@ -36,6 +37,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
+from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -48,7 +50,9 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 EVENT_SOURCING_TABLE = os.environ.get("EVENT_SOURCING_TABLE", "")
 RECORDINGS_BUCKET = os.environ.get("RECORDINGS_BUCKET", "")
 KEYFRAMES_PREFIX = os.environ.get("KEYFRAMES_PREFIX", "lma-video-keyframes/")
-MODEL_ID = os.environ.get("KEYFRAME_TEXT_MODEL_ID", "amazon.nova-lite-v1:0")
+#: The model used when neither the configuration nor KEYFRAME_TEXT_MODEL_ID
+#: names one; the KeyframeTextModelId parameter's default.
+FALLBACK_MODEL_ID = "amazon.nova-lite-v1:0"
 REGION = os.environ.get("AWS_REGION", "us-east-1")
 
 #: Room for a dense page of text and a line about a chart.
@@ -72,10 +76,25 @@ def frame_key(call_id: str, frame_id: str) -> Dict[str, Any]:
     return {"PK": {"S": f"kf#{call_id}"}, "SK": {"S": f"f#{frame_id}"}}
 
 
-def read_text(image: bytes, call_id: str) -> str:
+def model_id() -> str:
+    """The model that reads key frames.
+
+    The Amazon Bedrock Models section of the Configuration page, whose default is
+    the KeyframeTextModelId stack parameter; that parameter's environment
+    variable when the section cannot be read.
+    """
+    return read_setting(
+        LANGUAGE_MODELS.name,
+        "keyframeTextModelId",
+        env_var="KEYFRAME_TEXT_MODEL_ID",
+        default=FALLBACK_MODEL_ID,
+    )
+
+
+def read_text(image: bytes, call_id: str, model: str) -> str:
     """The frame's text, from the model, metered against the meeting."""
     response = BEDROCK.converse(
-        modelId=MODEL_ID,
+        modelId=model,
         messages=[
             {
                 "role": "user",
@@ -85,10 +104,10 @@ def read_text(image: bytes, call_id: str) -> str:
                 ],
             }
         ],
-        inferenceConfig=build_inference_config(MODEL_ID, MAX_OUTPUT_TOKENS),
+        inferenceConfig=build_inference_config(model, MAX_OUTPUT_TOKENS),
     )
     METERING.record(
-        call_id, "SlideText", bedrock_service(MODEL_ID), bedrock_usage(response.get("usage"))
+        call_id, "SlideText", bedrock_service(model), bedrock_usage(response.get("usage"))
     )
     return pure.clean_text(extract_text(response))
 
@@ -139,7 +158,8 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
         return {"status": "skipped", "reason": "image too large"}
 
     try:
-        text = read_text(body, call_id)
+        model = model_id()
+        text = read_text(body, call_id, model)
     except ClientError as error:
         LOGGER.error(
             "The model could not read key frame %s: %s", frame_id, error.response["Error"]["Code"]
@@ -160,7 +180,7 @@ def handler(event: Dict[str, Any], _context: Any) -> Dict[str, Any]:
             ConditionExpression="attribute_exists(PK)",
             ExpressionAttributeValues={
                 ":t": {"S": text},
-                ":m": {"S": MODEL_ID},
+                ":m": {"S": model},
                 ":u": {"S": datetime.now(timezone.utc).isoformat()},
             },
         )

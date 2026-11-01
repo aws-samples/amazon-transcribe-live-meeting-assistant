@@ -38,6 +38,7 @@ from botocore.config import Config
 from botocore.exceptions import ClientError
 
 # pylint: disable=import-error
+from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
 from lma_metering import MeteringWriter, bedrock_service, bedrock_usage  # configuration layer
 
 # pylint: enable=import-error
@@ -49,7 +50,6 @@ LOGGER.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 EVENT_SOURCING_TABLE = os.environ["EVENT_SOURCING_TABLE"]
 APPSYNC_GRAPHQL_URL = os.environ["APPSYNC_GRAPHQL_URL"]
-BEDROCK_MODEL_ID = os.environ["BEDROCK_MODEL_ID"]
 BEDROCK_REGION = os.environ.get("BEDROCK_REGION_OVERRIDE") or os.environ["AWS_REGION"]
 
 # Same page cap and reasoning as FetchTranscript: a table that keeps handing back
@@ -233,17 +233,20 @@ def call_bedrock(prompt, call_id):
     """One model call, metered against the meeting.
 
     Temperature 0 where the model accepts it: this is extraction. Sized like a
-    summary section, which reads a transcript of the same order.
+    summary section, which reads a transcript of the same order. The model is the
+    summaries' one: the Amazon Bedrock Models section of the Configuration page,
+    whose default is the BedrockModelId stack parameter.
     """
+    model_id = read_setting(LANGUAGE_MODELS.name, "summaryModelId", env_var="BEDROCK_MODEL_ID")
     response = bedrock.converse(
-        modelId=BEDROCK_MODEL_ID,
+        modelId=model_id,
         messages=[{"role": "user", "content": [{"text": prompt}]}],
-        inferenceConfig=build_inference_config(BEDROCK_MODEL_ID, SUMMARY_MAX_TOKENS),
+        inferenceConfig=build_inference_config(model_id, SUMMARY_MAX_TOKENS),
     )
     METERING.record(
         call_id,
         "AgendaDerivation",
-        bedrock_service(BEDROCK_MODEL_ID),
+        bedrock_service(model_id),
         bedrock_usage(response.get("usage")),
         region=BEDROCK_REGION if BEDROCK_REGION != os.environ.get("AWS_REGION") else None,
     )

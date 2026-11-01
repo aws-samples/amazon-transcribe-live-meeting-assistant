@@ -80,6 +80,11 @@ import boto3
 import troubleshooting_prompt
 from bedrock_compat import accepts_temperature
 from botocore.config import Config as BotoCoreConfig
+
+# pylint: disable=import-error
+from lma_config import LANGUAGE_MODELS, read_setting  # configuration layer
+
+# pylint: enable=import-error
 from troubleshooting_config import AgentLimits
 from troubleshooting_discovery import classify_log_group
 from troubleshooting_tools import ToolError, TroubleshootingTools
@@ -97,9 +102,9 @@ APPSYNC_GRAPHQL_URL = os.environ.get("APPSYNC_GRAPHQL_URL", "")
 #: group /aws/appsync/apis/<apiId>, and is the same value the IAM grant
 #: for that group is scoped to.
 APPSYNC_API_ID = os.environ.get("APPSYNC_API_ID", "")
-MODEL_ID = os.environ.get(
-    "TROUBLESHOOTING_MODEL_ID", "global.anthropic.claude-haiku-4-5-20251001-v1:0"
-)
+#: The model when neither the configuration nor TROUBLESHOOTING_MODEL_ID names
+#: one; the MeetingAssistServiceBedrockModelID parameter's default.
+FALLBACK_MODEL_ID = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 BEDROCK_GUARDRAIL_ID = os.environ.get("BEDROCK_GUARDRAIL_ID", "").strip()
 BEDROCK_GUARDRAIL_VERSION = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "").strip()
 
@@ -1048,8 +1053,24 @@ def remaining_seconds(context: Any) -> Optional[float]:
         return None
 
 
+def configured_model_id() -> str:
+    """The model the agent runs on: the meeting assistant's.
+
+    The Amazon Bedrock Models section of the Configuration page, whose default is
+    the MeetingAssistServiceBedrockModelID stack parameter, passed to this
+    function as TROUBLESHOOTING_MODEL_ID and read when the section cannot be.
+    """
+    return read_setting(
+        LANGUAGE_MODELS.name,
+        "meetingAssistModelId",
+        env_var="TROUBLESHOOTING_MODEL_ID",
+        default=FALLBACK_MODEL_ID,
+    )
+
+
 def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     """Diagnose one question and return the answer with its run metadata."""
+    model_id = configured_model_id()
     limits = AgentLimits()
     budget = RunBudget(limits, remaining_seconds=remaining_seconds(context))
     logger.info(
@@ -1077,7 +1098,7 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
     from strands.models import BedrockModel
 
     model_kwargs: Dict[str, Any] = {
-        "model_id": MODEL_ID,
+        "model_id": model_id,
         "max_tokens": limits.max_output_tokens,
         # The project's aggressive Bedrock retry profile, passed explicitly:
         # BedrockModel builds its own client, so a config left on the module
@@ -1088,7 +1109,7 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         "boto_client_config": BEDROCK_CONFIG,
         **get_guardrail_config(),
     }
-    if accepts_temperature(MODEL_ID):
+    if accepts_temperature(model_id):
         model_kwargs["temperature"] = AGENT_TEMPERATURE
 
     hook = ThinkingStepHookProvider(
@@ -1129,13 +1150,13 @@ def run_diagnosis(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
         # record of what a diagnosis cost, so they have to be in the line.
         logger.info(
             "troubleshooting run finished: model=%s budget=%s",
-            MODEL_ID,
+            model_id,
             json.dumps(budget.as_dict()),
         )
 
     return {
         "answer": answer,
-        "modelId": MODEL_ID,
+        "modelId": model_id,
         "usage": budget.as_dict(),
         "truncated": budget.stopped_because is not None,
     }

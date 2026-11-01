@@ -256,7 +256,7 @@ def test_a_temperature_is_sent_to_a_model_that_accepts_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Naming is extraction, so two passes over one meeting should agree."""
-    monkeypatch.setattr(index, "BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
     _, bedrock, _ = install(monkeypatch)
     index.handler({"CallId": CALL_ID}, None)
     assert bedrock.requests[0]["inferenceConfig"]["temperature"] == 0
@@ -266,7 +266,7 @@ def test_no_temperature_is_sent_to_a_model_that_rejects_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Claude 5 and later refuse the request rather than ignoring the setting."""
-    monkeypatch.setattr(index, "BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
+    monkeypatch.setenv("BEDROCK_MODEL_ID", "global.anthropic.claude-haiku-5-5")
     _, bedrock, _ = install(monkeypatch)
     index.handler({"CallId": CALL_ID}, None)
     assert "temperature" not in bedrock.requests[0]["inferenceConfig"]

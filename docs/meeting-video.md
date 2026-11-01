@@ -52,8 +52,9 @@ shows no section at all.
 ## Slide text
 
 Each key frame's text is read once, a few seconds after the frame is stored: a
-vision model (the `KeyframeTextModelId` stack parameter, Amazon Nova Lite by
-default) transcribes the readable text, top to bottom, and adds a line in
+vision model (**Key frame text** in the Amazon Bedrock Models section of the
+[Configuration page](configuration-guide.md), whose default is the
+`KeyframeTextModelId` stack parameter, Amazon Nova Lite unless changed) transcribes the readable text, top to bottom, and adds a line in
 brackets for a chart, diagram or picture, for example
 `[Bar chart of revenue by quarter]`. It is told not to describe or name people.
 The text is stored on the frame (`SlideText`; empty when the frame holds none)

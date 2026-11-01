@@ -19,7 +19,9 @@ its own, for the reason under [Still to come](#still-to-come).
 place, and the **summary prompt templates**, the **Nova Sonic voice assistant
 settings**, the **Meeting Assist chat buttons** and the **ASR engine switches** are
 served from them, alongside the meeting cost estimate's price table, which had no
-earlier store. Every save into the store records a revision — who saved it,
+earlier store, and the Amazon Bedrock model choices, whose defaults are the stack
+parameters that used to be the only way to set them; see
+[Stack parameters as defaults](#stack-parameters-as-defaults). Every save into the store records a revision — who saved it,
 when, which sections it changed, and an optional comment — and an Admin can list,
 compare and restore revisions; see [Revisions and audit](#revisions-and-audit).
 Each section has a JSON Schema document, and every administrator's save is
@@ -184,6 +186,7 @@ Today's sections and their tiers:
 | `asr_engine` | `short` | Read by the WebSocket transcriber at the start of each streaming meeting; 30 seconds keeps a burst of meetings starting together from each doing its own reads, which is the policy that reader has always had. The Virtual Participant reads through the `getAsrConfig` resolver, which caches nothing |
 | `chat_buttons` | `immediate` | Read record by record through the chat panel's resolver, which reads directly and consistently; the Edit Chat Buttons dialog shows the saved buttons straight after a save. The browser holds what it read for the life of the chat panel, as it always has |
 | `call_pricing` | `standard` | Read whenever a meeting's cost estimate is drawn; an estimate priced a few minutes after a price change at the previous price is what [Meeting Cost Estimate](meeting-cost-estimate.md) says happens |
+| `language_models` | `standard` | Read once per summary, answer, agenda pass, naming pass, knowledge-base query or key frame; nobody is waiting on a model change, and the summariser's **Regenerate** drops the cache before reading, as for the prompts |
 
 ### Resolving a read
 
@@ -316,6 +319,7 @@ so a release cannot ship a default its own save would refuse.
 | `chat_buttons` | Keys of the form `N#Label`, each a text prompt |
 | `nova_sonic_config` | The eleven settings the voice assistant reads, nothing else; `promptMode`, `endpointingSensitivity` and `meetingMode` from their fixed lists; model and voice ids and the translator fields non-empty and bounded in length |
 | `asr_engine` | The three switches, each `true` or `false`, nothing else |
+| `language_models` | The four model ids, each one of the models its stack parameter allows, nothing else |
 | `call_pricing` | Prices that are finite and not negative, under `regions › <region or default> › <service>/<api-or-model> › <unit>`; region codes in the form `us-east-1`; the lists and notes as lists and objects of text; `currency` `USD`; no keys the estimator does not read |
 
 ### The validator
@@ -1021,13 +1025,82 @@ earlier store for prices, so nothing is adopted on upgrade, and the shared-profi
 version check above applies to an `updateCallPricing` save as it does to the
 configuration pages' saves.
 
+## Stack parameters as defaults
+
+Some stack parameters only ever reached application code: a model id passed to a
+function as an environment variable and read there. Such a setting moves into a
+section of this store, and its parameter stays, as the setting's **default**.
+Removing the parameter would break every deploy command and pipeline that
+passes it, so it is kept; what changes is what it means.
+
+- `lma_config/parameter_defaults.json` names, for each such parameter, the
+  section and setting it is the default of, and the setting's type (`string`,
+  `integer` or `boolean`). `lma_config/parameters.py` reads it.
+- The AI stack passes the parameters' values to the seeder as the
+  `ParameterDefaults` property of `SeedConfiguration`, keyed by the
+  `lma-main.yaml` parameter name. The seeder writes each into `Config#default`,
+  after reading it back into its type and checking it against the section's
+  schema; a value that fails either is left out and logged. Because the values
+  are properties of the custom resource, a stack update that changes one re-runs
+  the seeder, which is what makes the baseline follow the parameter. The
+  custom resource reports which it wrote as its `ParameterDefaults` attribute.
+- The values go into the **baseline**, never into a profile. The baseline is
+  what the deployment was deployed with; the profile is what an administrator
+  changed. So an administrator's value wins until it is reset, and a later
+  change to the parameter reaches every deployment where nobody has changed the
+  setting.
+- A reader calls `read_setting(section, setting, env_var=...)` where it uses the
+  value, not at import, so the section's tier decides how soon a change is
+  seen. It prefers the resolved section; falls back to the parameter's
+  environment variable, which the function keeps, when the section does not
+  hold the setting or the table cannot be read; and then to its own default. A
+  function that already holds a store passes it, so the read shares that
+  store's cache. `read_setting` refuses a setting that no parameter backs.
+- The section's schema lists, for a setting with a fixed set of choices, exactly
+  the parameter's `AllowedValues`, so the page offers what a stack update could
+  set.
+
+On upgrade there is nothing to do and nothing to adopt: the parameters' values
+are the deployment's current settings, and the first deployment that includes a
+moved parameter writes its value into the baseline. Until that deployment's
+seeder has run, the readers use their environment variable, which holds the same
+value.
+
+`lma-ai-stack/test/test_parameter_backed_settings.py` holds the three halves
+together: every listed parameter is passed from `lma-main.yaml` to the AI stack
+and from there to the seeder; its default and every allowed value are values
+the section accepts, and a listed choice is exactly its allowed values; and
+every `read_setting` call names a listed setting, on a function whose fallback
+environment variable is set from the same parameter and which has the table,
+the layer and read access to it.
+
+### The Amazon Bedrock models
+
+The `language_models` section holds the four Bedrock model ids that were each a
+stack parameter: `summaryModelId` (`BedrockModelId`), read by the summariser and
+the functions that read invitations, name speakers, derive agendas, query the
+transcript knowledge base and serve the MCP search tool; `meetingAssistModelId`
+(`MeetingAssistServiceBedrockModelID`), read by the meeting assistant and the
+troubleshooting agent; `knowledgeBaseModelId`
+(`MeetingAssistKnowledgeBaseModelID`), read by the meeting assistant's
+knowledge-base tools; and `keyframeTextModelId` (`KeyframeTextModelId`). Every
+one of those readers' Bedrock permissions covers all foundation models and
+inference profiles, so a model chosen here never needs a permission the stack
+lacks. The meeting assistant and the troubleshooting agent are in the
+meeting-assist stack, which is given the table's name and the layer's ARN as the
+AI stack's `ConfigurationTableName` and `ConfigurationPythonLayerArn` outputs.
+
+The summariser reads the model once per summary, after its prompt templates, so
+every section of one summary is written by the same model. The troubleshooting
+agent reads it as each run starts.
+
 ## Still to come
 
 | Stage | What it adds |
 |---|---|
 | Named profiles | More than one profile, a way to choose the one in force, and an import that can create one. Export, import and presets work today on the one `custom` profile; see [Export, import and the configuration library](#export-import-and-the-configuration-library) |
 | Moving the troubleshooting agent's prompt | Its `Default`/`Custom` pair in `LLMPromptTemplateTable` becomes a section here; then that table can be retired. It waited for the configuration editor: the custom prompt is edited in the DynamoDB console today, which is exactly the route a compressed body closes, so moving it before there was an editor would have left it with no way to edit it. With the editor in place, it needs a schema and a seeder adoption |
-| Moving CloudFormation parameters | The parameters that are read only at request time and do not gate a resource, a condition or an IAM policy |
+| Moving more CloudFormation parameters | The other parameters that are read only by application code and do not gate a resource, a condition or an IAM policy, in the way described under [Stack parameters as defaults](#stack-parameters-as-defaults) |
 | Replacing the SSM settings blob | The `<stack>-LMASettings` parameter is written only by CloudFormation, at deploy time, and read by the web app for every signed-in user. It is a deployment's wiring rather than something an administrator edits, so it moves with the parameters above, when the web app reads its configuration at run time |
 
 A shipped summary section that has been turned off is listed by the
@@ -1059,6 +1132,7 @@ row of the table above.
 | The configuration library | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/presets/` and `presets.py` |
 | The configuration editor in the web UI | `lma-ai-stack/source/ui/src/components/configuration/`: `ConfigurationPage.jsx`, the controls in `fields.jsx`, the rules in `config-model.js` and the validator copy in `schema-validation.js` |
 | Deploy-time seeder | `lma-ai-stack/source/lambda_functions/configuration_seeder/` |
+| Stack parameters that are defaults, and the reader for them | `lma-ai-stack/source/lambda_layers/configuration_layer/lma_config/parameter_defaults.json` and `parameters.py`; the cross-template test `lma-ai-stack/test/test_parameter_backed_settings.py` |
 | Table, bucket, layer, custom resource and the `ConfigurationRevisionWriteAccess` policy every writer attaches | `lma-ai-stack/deployment/lma-ai-stack.yaml` |
 | Content-hash computation | `lib/lma_sdk/lma_sdk/_core/publish.py` |
 | Cross-language contract test | `lma-ai-stack/test/test_configuration_store_contract.py` |

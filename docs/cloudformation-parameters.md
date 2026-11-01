@@ -25,6 +25,14 @@ Each parameter has a **kind**, which says what changing it does:
   are built — whether a nested stack exists, an IAM permission, networking,
   capacity, a retention rule, an alarm. A stack update that changes one changes
   resources.
+- **Configuration page default** parameters set the default of a setting an
+  Admin can change on the Configuration page while the stack runs. The entry
+  names the setting. The stack writes the parameter's value into the
+  configuration as that setting's default, so a stack update that changes the
+  parameter applies wherever nobody has changed the setting on the page, and a
+  value saved on the page takes precedence until it is reset to the default
+  there. The parameter is kept so that existing deploy commands, pipelines and
+  new installs work as before.
 - **Read at run time** parameters reach the application only as a value it
   reads: an environment variable of a function or task, or a deployment setting.
   A stack update that changes one changes only the configuration of whatever
@@ -51,7 +59,8 @@ The template declares 91 parameters.
 | Kind | Parameters | What changing one does |
 |---|---|---|
 | Resource | 47 | Decides which resources the stack creates or how they are built: whether a nested stack or resource exists, an IAM permission, networking, capacity, a retention rule or an alarm. Changing it is a stack update that changes resources. |
-| Read at run time | 31 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
+| Configuration page default | 4 | The default of a setting an Admin can change on the web UI's Configuration page while the stack runs; see the [Configuration Guide](configuration-guide.md). The stack writes the parameter's value into the configuration as that setting's default, so a stack update that changes it applies wherever the setting has not been changed on the page. A value saved on the page takes precedence until it is reset to the default there. |
+| Read at run time | 27 | Passed to application code as an environment variable or a deployment setting, and only read by that code. Changing it is a stack update that changes only the configuration of whatever reads it; for a value built into the web app, that means the web app is rebuilt. Where the entry says a value is checked while the stack deploys, a value that fails the check fails the update. |
 | Credential | 11 | A secret, the ARN of a secret, or the identifier paired with one. Values are stored in AWS Secrets Manager; see [Integration Credentials](infrastructure-and-security.md#integration-credentials). |
 | Deployment check | 1 | Read only while the stack is deployed, by a check that runs before anything else is created. |
 | No effect | 1 | Declared by the template and read by nothing. Kept so that existing deploy commands and pipelines that pass it keep working. |
@@ -175,8 +184,8 @@ Consecutive polls on which a Teams meeting must show neither a readable attendee
 | Parameter | Default | Kind |
 |---|---|---|
 | [`MeetingAssistService`](#meetingassistservice) | `STRANDS_BEDROCK` | Resource |
-| [`MeetingAssistServiceBedrockModelID`](#meetingassistservicebedrockmodelid) | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Read at run time |
-| [`MeetingAssistKnowledgeBaseModelID`](#meetingassistknowledgebasemodelid) | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Read at run time |
+| [`MeetingAssistServiceBedrockModelID`](#meetingassistservicebedrockmodelid) | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Configuration page default |
+| [`MeetingAssistKnowledgeBaseModelID`](#meetingassistknowledgebasemodelid) | `global.anthropic.claude-haiku-4-5-20251001-v1:0` | Configuration page default |
 | [`TavilyApiKey`](#tavilyapikey) | (empty) | Credential |
 | [`TavilyApiKeySecretArn`](#tavilyapikeysecretarn) | (empty) | Credential |
 | [`AssistantWakePhraseRegEx`](#assistantwakephraseregex) | `(OK\|Okay)[.,! ]*[Aa]ssistant` | Read at run time |
@@ -197,9 +206,9 @@ Console label: *Meeting Assist Service Bedrock Model ID*
 
 - **Default:** `global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - **Allowed values:** `amazon.nova-micro-v1:0`, `amazon.nova-lite-v1:0`, `amazon.nova-pro-v1:0`, `us.amazon.nova-premier-v1:0`, `global.amazon.nova-2-lite-v1:0`, `us.amazon.nova-2-lite-v1:0`, `us.anthropic.claude-opus-4-20250514-v1:0`, `us.anthropic.claude-opus-4-1-20250805-v1:0`, `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-haiku-5-5`, `us.anthropic.claude-sonnet-5-5`, `us.anthropic.claude-opus-5-5`, `global.anthropic.claude-haiku-4-5-20251001-v1:0`, `global.anthropic.claude-sonnet-4-5-20250929-v1:0`, `global.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-opus-4-6-v1`, `global.anthropic.claude-haiku-5-5`, `global.anthropic.claude-sonnet-5-5`, `global.anthropic.claude-opus-5-5`
-- **Kind:** Read at run time. Read by the meeting assistant and the troubleshooting agent. Their Amazon Bedrock permissions cover every model, so the choice changes no permission.
+- **Kind:** Configuration page default. Configuration page: **Amazon Bedrock Models › Meeting assistant**. Read by the meeting assistant and the troubleshooting agent. Their Amazon Bedrock permissions cover every model, so the choice changes no permission.
 
-Select a Bedrock LLM model for the meeting assistant. Includes Nova models (cost-effective) and Claude 4+ models (cutting-edge). Some models require inference profiles. The Claude 5 generation reasons before it answers, which raises answer quality but also raises output token use several-fold, so it costs more per meeting than Claude 4.5 at the same size.
+Select a Bedrock LLM model for the meeting assistant. Includes Nova models (cost-effective) and Claude 4+ models (cutting-edge). Some models require inference profiles. The Claude 5 generation reasons before it answers, which raises answer quality but also raises output token use several-fold, so it costs more per meeting than Claude 4.5 at the same size. This is the default; an Admin can change it at run time on the Configuration page (Amazon Bedrock Models section), which takes precedence.
 
 ### `MeetingAssistKnowledgeBaseModelID`
 
@@ -207,9 +216,9 @@ Console label: *Meeting Assist Knowledge Base Bedrock Model ID*
 
 - **Default:** `global.anthropic.claude-haiku-4-5-20251001-v1:0`
 - **Allowed values:** `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-opus-4-6-v1`, `global.anthropic.claude-haiku-4-5-20251001-v1:0`, `global.anthropic.claude-sonnet-4-5-20250929-v1:0`, `global.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-opus-4-6-v1`
-- **Kind:** Read at run time. Read by the meeting assistant's knowledge-base tools.
+- **Kind:** Configuration page default. Configuration page: **Amazon Bedrock Models › Meeting assistant knowledge bases**. Read by the meeting assistant's knowledge-base tools.
 
-Select the Bedrock model the Meeting Assistant's knowledge bases use to generate an answer from what they retrieve -- the document-search tool and the past-meeting-search tool. This is separate from MeetingAssistServiceBedrockModelID so that the agent can run on any model it supports, including models a knowledge base cannot generate with. Whether a knowledge base can generate with a model is a property of that model, so only models verified against a live knowledge base are offered here. Enable access to the model you pick in the Amazon Bedrock console for your region.
+Select the Bedrock model the Meeting Assistant's knowledge bases use to generate an answer from what they retrieve -- the document-search tool and the past-meeting-search tool. This is separate from MeetingAssistServiceBedrockModelID so that the agent can run on any model it supports, including models a knowledge base cannot generate with. Whether a knowledge base can generate with a model is a property of that model, so only models verified against a live knowledge base are offered here. Enable access to the model you pick in the Amazon Bedrock console for your region. This is the default; an Admin can change it at run time on the Configuration page (Amazon Bedrock Models section), which takes precedence.
 
 ### `TavilyApiKey`
 
@@ -766,8 +775,8 @@ Average CPU utilization that WebSocket transcriber auto scaling aims to hold. Ke
 | [`TranscriptLambdaHookFunctionArn`](#transcriptlambdahookfunctionarn) | (empty) | Resource |
 | [`TranscriptLambdaHookFunctionNonPartialOnly`](#transcriptlambdahookfunctionnonpartialonly) | `true` | Read at run time |
 | [`EndOfCallTranscriptSummary`](#endofcalltranscriptsummary) | `BEDROCK` | Resource |
-| [`BedrockModelId`](#bedrockmodelid) | `global.anthropic.claude-sonnet-5-5` | Read at run time |
-| [`KeyframeTextModelId`](#keyframetextmodelid) | `amazon.nova-lite-v1:0` | Read at run time |
+| [`BedrockModelId`](#bedrockmodelid) | `global.anthropic.claude-sonnet-5-5` | Configuration page default |
+| [`KeyframeTextModelId`](#keyframetextmodelid) | `amazon.nova-lite-v1:0` | Configuration page default |
 | [`EndOfCallLambdaHookFunctionArn`](#endofcalllambdahookfunctionarn) | (empty) | Resource |
 | [`StartOfCallLambdaHookFunctionArn`](#startofcalllambdahookfunctionarn) | (empty) | Resource |
 | [`PostCallSummaryLambdaHookFunctionArn`](#postcallsummarylambdahookfunctionarn) | (empty) | Resource |
@@ -808,9 +817,9 @@ Console label: *Bedrock Model ID for Summaries and Meeting Insights*
 
 - **Default:** `global.anthropic.claude-sonnet-5-5`
 - **Allowed values:** `amazon.nova-micro-v1:0`, `amazon.nova-lite-v1:0`, `amazon.nova-pro-v1:0`, `us.amazon.nova-premier-v1:0`, `global.amazon.nova-2-lite-v1:0`, `us.amazon.nova-2-lite-v1:0`, `us.anthropic.claude-opus-4-20250514-v1:0`, `us.anthropic.claude-opus-4-1-20250805-v1:0`, `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-opus-4-6-v1`, `us.anthropic.claude-haiku-5-5`, `us.anthropic.claude-sonnet-5-5`, `us.anthropic.claude-opus-5-5`, `global.anthropic.claude-haiku-4-5-20251001-v1:0`, `global.anthropic.claude-sonnet-4-5-20250929-v1:0`, `global.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-opus-4-6-v1`, `global.anthropic.claude-haiku-5-5`, `global.anthropic.claude-sonnet-5-5`, `global.anthropic.claude-opus-5-5`
-- **Kind:** Read at run time. Read by the summarizer and the functions that parse invitations, name speakers, derive agendas, answer transcript knowledge-base queries and analyse MCP usage. Their Amazon Bedrock permissions cover every model, so the choice changes no permission.
+- **Kind:** Configuration page default. Configuration page: **Amazon Bedrock Models › Summaries and meeting insights**. Read by the summarizer and the functions that parse invitations, name speakers, derive agendas, answer transcript knowledge-base queries and analyse MCP usage. Their Amazon Bedrock permissions cover every model, so the choice changes no permission.
 
-If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. Includes Nova models (cost-effective) and Claude 4+ (cutting-edge). Some models require inference profiles. The Claude 5 generation reasons before it answers, which raises summary quality but also raises output token use several-fold, so it costs more per meeting than Claude 4.5 at the same size. Defaults to 'global.anthropic.claude-sonnet-5-5'
+If EndOfCallTranscriptSummary is BEDROCK, then choose a model ID from the list of supported models. Includes Nova models (cost-effective) and Claude 4+ (cutting-edge). Some models require inference profiles. The Claude 5 generation reasons before it answers, which raises summary quality but also raises output token use several-fold, so it costs more per meeting than Claude 4.5 at the same size. This is the default; an Admin can change it at run time on the Configuration page (Amazon Bedrock Models section), which takes precedence.
 
 ### `KeyframeTextModelId`
 
@@ -818,9 +827,9 @@ Console label: *Bedrock Model ID for Reading Key Frames of the Shared Screen*
 
 - **Default:** `amazon.nova-lite-v1:0`
 - **Allowed values:** `amazon.nova-lite-v1:0`, `amazon.nova-pro-v1:0`, `us.amazon.nova-premier-v1:0`, `global.amazon.nova-2-lite-v1:0`, `us.amazon.nova-2-lite-v1:0`, `us.anthropic.claude-sonnet-4-5-20250929-v1:0`, `us.anthropic.claude-sonnet-4-6`, `us.anthropic.claude-haiku-5-5`, `us.anthropic.claude-sonnet-5-5`, `global.anthropic.claude-haiku-4-5-20251001-v1:0`, `global.anthropic.claude-sonnet-4-5-20250929-v1:0`, `global.anthropic.claude-sonnet-4-6`, `global.anthropic.claude-haiku-5-5`, `global.anthropic.claude-sonnet-5-5`
-- **Kind:** Read at run time. Read by the function that reads the text of each key frame.
+- **Kind:** Configuration page default. Configuration page: **Amazon Bedrock Models › Key frame text**. Read by the function that reads the text of each key frame.
 
-Bedrock model that reads the text of each key frame of the shared screen, once, when the frame is stored (docs/meeting-video.md). The text is what the meeting assistant reads first, what the meeting page searches, and what the meeting-history knowledge base indexes. Amazon Nova Lite read every word of the measured frames at about $0.0002 a frame.
+Bedrock model that reads the text of each key frame of the shared screen, once, when the frame is stored (docs/meeting-video.md). The text is what the meeting assistant reads first, what the meeting page searches, and what the meeting-history knowledge base indexes. Amazon Nova Lite read every word of the measured frames at about $0.0002 a frame. This is the default; an Admin can change it at run time on the Configuration page (Amazon Bedrock Models section), which takes precedence.
 
 ### `EndOfCallLambdaHookFunctionArn`
 

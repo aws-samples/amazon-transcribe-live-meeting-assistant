@@ -238,3 +238,25 @@ CALL_PRICING = register(
         ),
     )
 )
+
+#: The Amazon Bedrock model each feature calls: the summarizer and the other
+#: meeting-insight functions, the meeting assistant and the troubleshooting
+#: agent, the meeting assistant's knowledge-base tools, and the key-frame text
+#: reader. The baseline holds the values of the stack parameters that used to be
+#: the only way to choose them (see parameter_defaults.json), so a deployment
+#: keeps the models it was deployed with until an administrator picks another.
+#:
+#: Standard tier: a model is read once per summary, answer or frame, nobody is
+#: waiting on a change to it, and five minutes is what the page says. Every
+#: reader's Bedrock permission covers all foundation models and inference
+#: profiles, so a model chosen here never needs a permission the stack lacks.
+LANGUAGE_MODELS = register(
+    SectionSpec(
+        name="language_models",
+        cache_tier=CacheTier.STANDARD,
+        description=(
+            "The Amazon Bedrock model used for summaries and meeting insights, for the "
+            "meeting assistant, for its knowledge bases, and for reading key frames."
+        ),
+    )
+)
