@@ -41,6 +41,8 @@ stack parameter; see
 | Amazon Bedrock Models | The Amazon Bedrock model used for summaries and meeting insights, for the meeting assistant and the troubleshooting agent, for the meeting assistant's knowledge bases, and for reading the text of key frames | To each summary, answer or key frame started about five minutes after the save or later |
 | Amazon Transcribe | The Amazon Transcribe options of meetings streamed from the Stream Audio page, the browser extension and the desktop app: language or language identification, redaction, custom vocabulary and language model, and the default for identifying speakers within a channel | To streaming meetings that start after the save |
 | Meeting Recording | Whether those meetings' audio is recorded when the client does not say | To streaming meetings that start after the save |
+| Meeting Assistant | The regular expression that wakes the meeting assistant in a transcript | To transcript segments processed about five minutes after the save or later |
+| Meeting Processing | Whether a transcript Lambda hook is sent partial segments, and how far back the inactive-meeting reaper looks | Within about five minutes of the save |
 
 Every section is on **Configuration ▸ Configuration**. The pages that each edited
 one section — Transcript Summary, Nova Sonic Config and Transcription Engine — are
@@ -90,6 +92,9 @@ is the default of.
 | Amazon Transcribe › Custom language model | `CustomLanguageModelName` |
 | Amazon Transcribe › Identify speakers within a channel by default | `ShowSpeakerLabel` |
 | Meeting Recording › Record meeting audio | `EnableAudioRecording` |
+| Meeting Assistant › Wake phrase (regular expression) | `AssistantWakePhraseRegEx` |
+| Meeting Processing › Send only finished segments to the transcript Lambda hook | `TranscriptLambdaHookFunctionNonPartialOnly` |
+| Meeting Processing › Days to look back for meetings that were never ended | `MeetingInactivityLookbackInDays` |
 
 The Amazon Transcribe and Meeting Recording settings apply to meetings streamed
 to LMA from the Stream Audio page, the browser extension and the desktop app.

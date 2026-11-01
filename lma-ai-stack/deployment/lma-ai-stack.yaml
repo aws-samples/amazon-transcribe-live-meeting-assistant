@@ -220,8 +220,9 @@ Parameters:
   # the configuration seeder can write them into the baseline as the defaults
   # of the Amazon Transcribe and Meeting Recording sections. lma-main.yaml
   # validates them. Empty, as a standalone deployment of this stack leaves
-  # them, fails the section's schema for the list and switch settings and is not
-  # written, so the transcriber uses its own environment variables for those.
+  # them, is refused for the list settings (by the section's schema) and the
+  # switches (by the type check) and is not written, so the transcriber uses its
+  # own environment variables for those.
   # For the language options, entity types, custom vocabulary and custom
   # language model, empty is a valid value ("none"): it is written, and takes
   # precedence over the transcriber's variable.
@@ -3004,6 +3005,20 @@ Resources:
               Action:
                 - ssm:GetParameter
               Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${LMASettingsParameterName}"
+            # Read-only, on the shared configuration table: the wake phrase and
+            # the transcript hook mode are read from it.
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+              Resource: !GetAtt ConfigurationTable.Arn
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:DescribeKey
+              Resource: !Ref CustomerManagedEncryptionKeyArn
+              Condition:
+                StringEquals:
+                  "kms:ViaService": !Sub "dynamodb.${AWS::Region}.${AWS::URLSuffix}"
             - Effect: Allow
               Action:
                 - appsync:GraphQL
@@ -3135,7 +3150,12 @@ Resources:
           TRANSCRIPT_LAMBDA_HOOK_FUNCTION_ARN: !Ref TranscriptLambdaHookFunctionArn
           START_OF_CALL_LAMBDA_HOOK_FUNCTION_ARN: !Ref StartOfCallLambdaHookFunctionArn
           POST_CALL_SUMMARY_LAMBDA_HOOK_FUNCTION_ARN: !Ref PostCallSummaryLambdaHookFunctionArn
+          # The defaults of the hook mode and the wake phrase, read when the
+          # configuration cannot be; each batch reads the Meeting Processing
+          # and Meeting Assistant sections first.
           TRANSCRIPT_LAMBDA_HOOK_FUNCTION_NONPARTIAL_ONLY: !Ref TranscriptLambdaHookFunctionNonPartialOnly
+          ASSISTANT_WAKE_PHRASE_REGEX: !Ref AssistantWakePhraseRegEx
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           IS_TRANSCRIPT_SUMMARY_ENABLED:
             !If [IsTranscriptSummaryEnabled, "true", "false"]
           ASYNC_TRANSCRIPT_SUMMARY_ORCHESTRATOR_ARN: !GetAtt AsyncTranscriptSummaryOrchestrator.Arn
@@ -3163,6 +3183,8 @@ Resources:
           Fn::Sub: /${AWS::StackName}/lambda/CallEventProcessorFunction
     DependsOn:
       - CallEventProcessorFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   CallEventProcessorFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -3420,6 +3442,9 @@ Resources:
         CustomLanguageModelName: !Ref CustomLanguageModelName
         ShowSpeakerLabel: !Ref ShowSpeakerLabel
         EnableAudioRecording: !Ref EnableAudioRecording
+        AssistantWakePhraseRegEx: !Ref AssistantWakePhraseRegEx
+        TranscriptLambdaHookFunctionNonPartialOnly: !Ref TranscriptLambdaHookFunctionNonPartialOnly
+        MeetingInactivityLookbackInDays: !Ref MeetingInactivityLookbackInDays
 
   # Revision bodies for the configuration history: one gzipped object per
   # revision at config_revisions/<profile>/<nnnnnn>.json.gz, with the metadata
@@ -4380,6 +4405,9 @@ Resources:
         - arm64
       Layers:
         - !Ref TranscriptEnrichmentPythonLayer
+        # lma_config, for the lookback. Pure Python, so compatible with this
+        # function's arm64 architecture.
+        - !Ref ConfigurationPythonLayer
       CodeUri: ../source/lambda_functions/stale_meeting_reaper
       Description: Ends meetings with no recent activity by emitting an END event
       MemorySize: 256
@@ -4391,10 +4419,12 @@ Resources:
           MEETING_INACTIVITY_TIMEOUT_IN_MINUTES: !Ref MeetingInactivityTimeoutInMinutes
           # How far back a run looks for candidates. Has to exceed the longest
           # meeting a deployment expects plus the inactivity timeout, because a
-          # meeting that started before the window is not examined — which is why
-          # it is a parameter: an upgrade that inherits older stuck meetings needs
-          # to widen it once without editing the template.
+          # meeting that started before the window is not examined: an upgrade
+          # that inherits older stuck meetings widens it once. Each run reads it
+          # from the Meeting Processing section first; this is its default, read
+          # when the configuration cannot be.
           REAPER_LOOKBACK_IN_DAYS: !Ref MeetingInactivityLookbackInDays
+          CONFIGURATION_TABLE_NAME: !Ref ConfigurationTable
           # Caps the meeting rows read per run. Candidates cannot be narrowed on
           # the index (it projects no Status), so each one costs part of a
           # BatchGetItem; the newest are read first and the rest wait for the
@@ -4418,6 +4448,8 @@ Resources:
     # checkov:skip=CKV_AWS_173: "Environment variables do not contain sensitive data"
     DependsOn:
       - StaleMeetingReaperFunctionLogGroup
+      # Ordered behind the seeder, like every configuration reader.
+      - SeedConfiguration
 
   StaleMeetingReaperFunctionLogGroup:
     Type: AWS::Logs::LogGroup
@@ -4466,6 +4498,12 @@ Resources:
                 Action:
                   - kinesis:PutRecord
                 Resource: !Ref CallDataStreamArn
+              # Read-only, on the shared configuration table: the lookback is
+              # read from it. The KMS grant below covers decrypting it.
+              - Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource: !GetAtt ConfigurationTable.Arn
               - Effect: Allow
                 Action:
                   - kms:Decrypt

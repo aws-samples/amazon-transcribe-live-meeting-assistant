@@ -120,6 +120,9 @@ _STUBS: Dict[str, Any] = {
 # under test is imported with the stubs in place, so the stubs do not outlive this
 # import and reach a sibling test file that wants the real Powertools.
 try:
+    # The configuration accessor, likewise: a test that stands in for the store
+    # it reads settings through has to reach the module the processor uses.
+    import lma_config.parameters  # noqa: F401
     from gql.transport.exceptions import TransportQueryError
     from graphql import build_ast_schema, parse
     from graphql.language.printer import print_ast

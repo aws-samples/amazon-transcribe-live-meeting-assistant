@@ -11,5 +11,8 @@
   "CustomVocabularyName": {"section": "transcription", "setting": "customVocabularyName", "type": "string"},
   "CustomLanguageModelName": {"section": "transcription", "setting": "customLanguageModelName", "type": "string"},
   "ShowSpeakerLabel": {"section": "transcription", "setting": "showSpeakerLabel", "type": "boolean"},
-  "EnableAudioRecording": {"section": "recording", "setting": "recordAudio", "type": "boolean"}
+  "EnableAudioRecording": {"section": "recording", "setting": "recordAudio", "type": "boolean"},
+  "AssistantWakePhraseRegEx": {"section": "meeting_assist", "setting": "wakePhraseRegex", "type": "string"},
+  "TranscriptLambdaHookFunctionNonPartialOnly": {"section": "meeting_processing", "setting": "transcriptHookNonPartialOnly", "type": "boolean"},
+  "MeetingInactivityLookbackInDays": {"section": "meeting_processing", "setting": "inactiveMeetingLookbackDays", "type": "integer"}
 }

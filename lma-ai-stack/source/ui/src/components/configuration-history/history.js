@@ -88,6 +88,8 @@ const SECTION_LABELS = {
   language_models: 'Amazon Bedrock models',
   transcription: 'Amazon Transcribe',
   recording: 'Meeting recording',
+  meeting_assist: 'Meeting assistant',
+  meeting_processing: 'Meeting processing',
 };
 
 export const sectionLabel = (section) => SECTION_LABELS[section] || section;

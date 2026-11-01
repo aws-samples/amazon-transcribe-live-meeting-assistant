@@ -20,8 +20,11 @@ import pytest
 from botocore.exceptions import ClientError
 
 FUNCTION_DIR = Path(__file__).resolve().parent
-if str(FUNCTION_DIR) not in sys.path:
-    sys.path.insert(0, str(FUNCTION_DIR))
+# The configuration layer the deployed function carries, for lma_config.
+LAYER = FUNCTION_DIR.parents[1] / "lambda_layers" / "configuration_layer"
+for path in (str(FUNCTION_DIR), str(LAYER)):
+    if path not in sys.path:
+        sys.path.insert(0, path)
 
 TABLE_NAME = "test-event-sourcing-table"
 STREAM_NAME = "test-call-data-stream"
@@ -463,3 +466,33 @@ def test_zulu_and_offset_timestamps_both_parse():
     )
     assert reaper._parse_iso("not-a-timestamp") is None
     assert reaper._parse_iso(None) is None
+
+
+class _ConfigurationStore:
+    """Answers the Meeting Processing section from a dict."""
+
+    def __init__(self, values):
+        self.values = values
+
+    def get_section(self, _name):
+        return type("Section", (), {"values": self.values})()
+
+
+def test_the_lookback_comes_from_the_configuration_when_it_names_one(monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setenv("REAPER_LOOKBACK_IN_DAYS", "2")
+    monkeypatch.setattr(
+        parameters, "_SHARED_STORE", _ConfigurationStore({"inactiveMeetingLookbackDays": 30})
+    )
+    assert reaper.lookback_days() == 30
+
+
+def test_without_one_the_lookback_is_the_parameters(monkeypatch):
+    from lma_config import parameters
+
+    monkeypatch.setenv("REAPER_LOOKBACK_IN_DAYS", "7")
+    monkeypatch.setattr(parameters, "_SHARED_STORE", _ConfigurationStore({}))
+    assert reaper.lookback_days() == 7
+    monkeypatch.delenv("REAPER_LOOKBACK_IN_DAYS")
+    assert reaper.lookback_days() == reaper.FALLBACK_LOOKBACK_DAYS

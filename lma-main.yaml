@@ -300,6 +300,8 @@ Parameters:
     Description: >
       A regular expression for the wake phrase that invokes the Meeting Assistant.
       Default is 'OK Assistant'
+      This is the default; an Admin can change it at run time on the Configuration page (Meeting
+      Assistant section), which takes precedence.
 
   TranscriptKnowledgeBase:
     Default: "BEDROCK_KNOWLEDGE_BASE (Create)"
@@ -563,6 +565,8 @@ Parameters:
       Specifies if Transcript Lambda Hook Function (if specified) is invoked for Non-Partial
       transcript segments only (true), or for
       both Partial and Non-Partial transcript segments (false).
+      This is the default; an Admin can change it at run time on the Configuration page (Meeting
+      Processing section), which takes precedence.
 
   EndOfCallTranscriptSummary:
     Default: "BEDROCK"
@@ -886,6 +890,8 @@ Parameters:
       ago than this is never closed automatically, so raise it temporarily if you
       are updating a deployment that has accumulated older meetings stuck in
       progress. Higher values read more meeting records on every run.
+      This is the default; an Admin can change it at run time on the Configuration page (Meeting
+      Processing section), which takes precedence.
 
   CloudWatchLogsExpirationInDays:
     Type: Number
