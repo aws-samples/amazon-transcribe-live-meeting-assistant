@@ -106,6 +106,9 @@ export class KeyframeDetector {
     private previous: Uint8Array | null = null;
     private lastKept: Uint8Array | null = null;
     private lastKeptAtMs: number | null = null;
+    /** The reference before the most recent keep, so forgetLastKept can restore it. */
+    private priorKept: Uint8Array | null = null;
+    private priorKeptAtMs: number | null = null;
     private stillSamples = 0;
     private stillSinceMs = 0;
     /** Per cell, one bit per recent sample: whether the cell changed from the sample before. */
@@ -171,10 +174,25 @@ export class KeyframeDetector {
         const quiet = this.movingFraction <= thresholds.maxMovingFraction;
         const keep = settled && spaced && quiet && change >= thresholds.changeFraction;
         if (keep) {
+            this.priorKept = this.lastKept;
+            this.priorKeptAtMs = this.lastKeptAtMs;
             this.lastKept = current;
             this.lastKeptAtMs = nowMs;
         }
         return { keep, changeFraction: change, firstSeenMs: this.stillSinceMs };
+    }
+
+    /**
+     * Undo the most recent keep, for a frame that could not be saved. The
+     * picture stops being the reference, so if it is still on screen it is
+     * kept again once it has settled, instead of counting as already captured.
+     */
+    forgetLastKept(): void {
+        this.lastKept = this.priorKept;
+        this.lastKeptAtMs = this.priorKeptAtMs;
+        this.priorKept = null;
+        this.priorKeptAtMs = null;
+        this.stillSamples = 0;
     }
 
     /**

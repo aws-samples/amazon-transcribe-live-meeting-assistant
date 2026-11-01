@@ -106,7 +106,7 @@ test('no recording means no video offset', async () => {
     assert.equal(h.frames[0].VideoOffset, null);
 });
 
-test('a failed upload is logged and sampling carries on', async () => {
+test('a frame that could not be saved is captured again while it stays on screen', async () => {
     const h = harness();
     let fail = true;
     (h.sampler as any).io.upload = async () => {
@@ -115,7 +115,8 @@ test('a failed upload is logged and sampling carries on', async () => {
     await h.feed(flat(200), 4);
     assert.equal(h.frames.length, 0);
     fail = false;
-    await h.feed(flat(20), 10);
+    // The same picture, still on screen: not taken as already captured.
+    await h.feed(flat(200), 4);
     assert.equal(h.frames.length, 1);
 });
 

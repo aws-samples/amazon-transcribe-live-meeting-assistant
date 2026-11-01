@@ -12,7 +12,7 @@ the shared screen each time it changes to something new and holds still — each
 slide of a deck, each page of a document, each new view of an application. Key
 frames are stored on the meeting beside the transcript, with times on the
 transcript's clock, so they can be lined up with what was said while each one
-was on screen.
+was on screen. They are read through the AppSync API, described below.
 
 ## Which meetings have key frames
 
@@ -189,8 +189,8 @@ that uploads its own images can send the same event:
 `Timestamp`, both URLs (HTTPS), a known `Source` and a `FrameId` of at most 64
 characters are required; an event without them is logged and dropped, not
 retried. The meeting must
-already exist. Owner, sharing and expiry are taken from the meeting, not from
-the event. `<meeting>` is the CallId with every character other than letters,
+already exist. Owner and sharing are taken from the meeting, and expiry from
+the deployment's transcript retention, not from the event. `<meeting>` is the CallId with every character other than letters,
 digits, `_` and `.` replaced by `_` and any leading and trailing `_` removed,
 which is how meeting deletion finds the
 images.

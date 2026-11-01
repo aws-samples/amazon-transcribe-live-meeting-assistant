@@ -22,7 +22,7 @@ export interface VideoKeyframeEvent {
   Timestamp: number;
   /** Seconds into the meeting's video recording, or null when there is none. */
   VideoOffset: number | null;
-  /** HTTPS S3 URLs, in the shape the UI presigns (as for recordings). */
+  /** HTTPS S3 URLs, in the same shape as the recording URLs. */
   ImageUrl: string;
   ThumbnailUrl: string;
   Width: number;

@@ -37,15 +37,16 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { KeyframeDetector, KeyframeThresholds } from './keyframe-detector.js';
 import type { VideoKeyframeEvent } from './kinesis-stream.js';
 
-const numberEnv = (name: string, fallback: number): number => {
+const numberEnv = (name: string, fallback: number, min = 0): number => {
     const raw = process.env[name];
     if (raw === undefined || raw === '') return fallback;
     const parsed = Number(raw);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+    return Number.isFinite(parsed) && parsed >= min ? parsed : fallback;
 };
 
-export const GRID_WIDTH = numberEnv('KEYFRAME_GRID_WIDTH', 64);
-export const GRID_HEIGHT = numberEnv('KEYFRAME_GRID_HEIGHT', 36);
+// Whole and at least 1: a zero-sized sample would never be consumed from the pipe.
+export const GRID_WIDTH = Math.floor(numberEnv('KEYFRAME_GRID_WIDTH', 64, 1));
+export const GRID_HEIGHT = Math.floor(numberEnv('KEYFRAME_GRID_HEIGHT', 36, 1));
 export const SAMPLE_BYTES = GRID_WIDTH * GRID_HEIGHT;
 
 /*
@@ -76,7 +77,7 @@ export const STRICT_THRESHOLDS: KeyframeThresholds = {
     maxMovingFraction: numberEnv('KEYFRAME_STRICT_MAX_MOVING_FRACTION', 0.25),
 };
 
-const SAMPLE_FPS = numberEnv('KEYFRAME_SAMPLE_FPS', 1);
+const SAMPLE_FPS = numberEnv('KEYFRAME_SAMPLE_FPS', 1, 0.1);
 const PIXEL_DELTA = numberEnv('KEYFRAME_PIXEL_DELTA', 12);
 const MIN_INTERVAL_MS = numberEnv('KEYFRAME_MIN_INTERVAL_MS', 4000);
 const MAX_PER_MEETING = numberEnv('KEYFRAME_MAX_PER_MEETING', 1000);
@@ -305,11 +306,12 @@ export class KeyframeSampler {
         const decision = this.detector.push(sample, nowMs, thresholds);
         if (!decision.keep) return;
         if (this.capturing) {
-            // One capture at a time. The detector has already taken this
-            // picture as the reference, so a skipped one is not retried; with a
-            // minimum interval of seconds and a capture well under one, this is
-            // a guard rather than a path that runs.
+            // One capture at a time. With a minimum interval of seconds and a
+            // capture well under one, this is a guard rather than a path that
+            // runs; the picture is given back to the detector so it is judged
+            // again once the capture in progress is done.
             this.skippedWhileCapturing++;
+            this.detector.forgetLastKept();
             return;
         }
         // The frame is stamped with when its picture first appeared, on both clocks.
@@ -319,7 +321,12 @@ export class KeyframeSampler {
         const videoOffset = recordingStart === null ? null : Math.max(0, (decision.firstSeenMs - recordingStart) / 1000);
         const shareDetected = options.shareActive ? true : null;
         this.capturing = this.capture(options, timestamp, videoOffset, shareDetected, decision.changeFraction)
-            .catch((err) => console.error(`[Keyframes] Key frame not saved: ${err?.message || err}`))
+            .catch((err) => {
+                // Not saved, so not the reference either: a slide still on
+                // screen is captured on the next settle rather than lost.
+                this.detector.forgetLastKept();
+                console.error(`[Keyframes] Key frame not saved: ${err?.message || err}`);
+            })
             .finally(() => {
                 this.capturing = null;
             });

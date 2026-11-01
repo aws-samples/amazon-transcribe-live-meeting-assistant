@@ -185,6 +185,19 @@ test('the strict thresholds need a longer and stiller settle', () => {
     assert.deepEqual(results, [false, false, false, true]);
 });
 
+test('forgetting the last keep makes the same picture new again, and restores the one before', () => {
+    const d = detector();
+    const s1 = slide(1);
+    const s2 = slide(2);
+    [0, 1000, 2000].forEach((t) => d.push(s1, t, SHARE)); // s1 kept
+    [9000, 10000, 11000].forEach((t) => d.push(s2, t, SHARE)); // s2 kept
+    d.forgetLastKept(); // s2 was not saved
+    const again = [12000, 13000, 14000].map((t) => d.push(s2, t, SHARE));
+    // The settle count starts again: two more still samples.
+    assert.deepEqual(again.map((r) => r.keep), [false, true, false], 'kept again after settling, once');
+    assert.ok(again[1].changeFraction > SHARE.changeFraction, 'judged against s1, the frame before');
+});
+
 test('a sample of the wrong size is rejected', () => {
     assert.throws(() => detector().push(new Uint8Array(10), 0, SHARE), /expected 2304/);
 });
