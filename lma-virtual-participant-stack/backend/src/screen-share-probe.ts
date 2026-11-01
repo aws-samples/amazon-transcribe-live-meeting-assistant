@@ -11,7 +11,7 @@
  *
  * Key frames are only sampled while a share is on screen where the platform
  * gives a reliable signal for it, which keeps camera tiles and the gallery out
- * of the timeline. Where it gives none, the sampler runs all the time with
+ * of the key frames. Where it gives none, the sampler runs all the time with
  * stricter thresholds (see keyframe-sampler.ts). The signal per platform:
  *
  *   - Zoom (web client, and the Meeting SDK client view, which renders the

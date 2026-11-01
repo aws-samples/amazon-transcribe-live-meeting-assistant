@@ -13,8 +13,8 @@
  * grid and written to a pipe. keyframe-detector.ts decides from those samples
  * when the picture has changed and settled. For each key frame a single
  * full-resolution grab is taken and written as two JPEGs, a large one for
- * reading the slide and a thumbnail for the timeline, uploaded to the
- * recordings bucket under lma-video-keyframes/<CallId>/, and announced with an
+ * reading the slide and a thumbnail for lists, uploaded to the recordings
+ * bucket under lma-video-keyframes/<posixified CallId>/, and announced with an
  * ADD_VIDEO_KEYFRAME event.
  *
  * Sampling follows the meeting's recording rules: it runs only when video
@@ -23,7 +23,7 @@
  * from chat). Where the platform shows when a screen share is on screen
  * (screen-share-probe.ts), samples are judged only while one is; elsewhere
  * every sample is judged, against stricter thresholds, so camera tiles do not
- * fill the timeline.
+ * become key frames.
  *
  * Measured on the VP image limited to 2 vCPUs (see docs/meeting-video.md):
  * the sampling process uses about 0.6% of one core, against 7% for the

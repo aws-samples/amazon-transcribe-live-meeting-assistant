@@ -1427,7 +1427,7 @@ export class TranscriptionService {
     /**
      * Whether the meeting is being transcribed right now: transcription has
      * started and the meeting is not paused from chat. Key frames are only
-     * sampled while this holds, so the timeline covers what the transcript does.
+     * sampled while this holds, so key frames cover what the transcript does.
      */
     get transcribingLive(): boolean {
         return this.isTranscribing && details.start;

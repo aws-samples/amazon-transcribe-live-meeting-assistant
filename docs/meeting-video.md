@@ -43,7 +43,8 @@ A cell counts as changed when its brightness differs by more than 12 (of 255).
 Cells that keep changing — a strip of cameras beside the share, a video playing
 in one corner — are recognised as moving and left out of both comparisons, so
 they neither stop a slide from settling nor make it look new. No frame is kept
-while more than half the picture is moving.
+while more than half the picture is moving (a quarter without a screen-share
+signal).
 
 Each key frame is stamped with the moment its picture **first appeared**, not
 the moment it was confirmed, so a slide that went up at 12:30 is listed at
@@ -190,7 +191,8 @@ characters are required; an event without them is logged and dropped, not
 retried. The meeting must
 already exist. Owner, sharing and expiry are taken from the meeting, not from
 the event. `<meeting>` is the CallId with every character other than letters,
-digits, `_` and `.` replaced by `_`, which is how meeting deletion finds the
+digits, `_` and `.` replaced by `_` and any leading and trailing `_` removed,
+which is how meeting deletion finds the
 images.
 
 ## What key frames are not used for

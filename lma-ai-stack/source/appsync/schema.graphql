@@ -699,8 +699,7 @@ type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
 	Timestamp: Float!
 	# Seconds into the meeting's video recording, when there is one.
 	VideoOffset: Float
-	# HTTPS S3 URLs of the large image and the thumbnail, in the shape a client
-	# presigns, as for RecordingUrl.
+	# HTTPS S3 URLs of the large image and the thumbnail.
 	ImageUrl: String!
 	ThumbnailUrl: String!
 	Width: Int
