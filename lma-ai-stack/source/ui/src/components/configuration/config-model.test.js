@@ -332,6 +332,25 @@ describe('presets, export and import', () => {
     expect(imported.skipped).toEqual([]);
   });
 
+  it('leaves out an imported setting this deployment does not offer, keeping its value here', () => {
+    const engine = { setting: 'AsrEngineAvailable', value: 'true' };
+    const sections = [
+      { name: 'asr_engine', schema: { ...MERGE, properties: { engine: { availableWhen: engine }, separate: {} } } },
+    ];
+    const defaults = { asr_engine: { engine: false, separate: false } };
+    const file = JSON.stringify({
+      format: 'lma-configuration-profile',
+      formatVersion: 1,
+      sections: { asr_engine: { engine: true, separate: true } },
+    });
+    const here = readExport(file, sections, defaults, {}, { asr_engine: { engine: false, separate: false } });
+    expect(here.values).toEqual({ asr_engine: { engine: false, separate: true } });
+    expect(here.withheld).toEqual([['asr_engine', 'engine']]);
+    const withEngine = readExport(file, sections, defaults, { AsrEngineAvailable: 'true' });
+    expect(withEngine.values).toEqual({ asr_engine: { engine: true, separate: true } });
+    expect(withEngine.withheld).toEqual([]);
+  });
+
   it('reports a section the deployment does not have, and refuses a file that is not an export', () => {
     const file = JSON.stringify({
       format: 'lma-configuration-profile',

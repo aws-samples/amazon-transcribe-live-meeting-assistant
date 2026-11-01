@@ -12,8 +12,8 @@ title: "On-demand ASR & Speaker Diarization (MicroVM)"
 > transcript quality here is below it and defaults may change between releases.
 > Deploying it changes nothing on its own: meetings still use Amazon Transcribe until
 > an admin switches streaming meetings or Virtual Participants onto it in the
-> Transcription Engine section of the Configuration page. Accuracy (WER) and diarization error rate have not yet
-> been benchmarked — see [What is not yet measured](#what-is-not-yet-measured).
+> Transcription Engine section of the Configuration page. Accuracy (WER) and
+> diarization error rate have not yet been benchmarked — see [What is not yet measured](#what-is-not-yet-measured).
 >
 > Because it is experimental, nothing about it is tunable at deploy time:
 > `EnableMicrovmAsr` is the only CloudFormation question, the model bundle ships
@@ -273,7 +273,8 @@ transcript.
 
 The **Transcription Engine** section of **Configuration ▸ Configuration** (admin only)
 has exactly three settings; on a deployment without this engine it shows only the
-third, Virtual Participant voice separation. All are read at the start of each meeting, so a change needs no stack update and no image rebuild. The
+third, Virtual Participant voice separation. All are read at the start of each meeting,
+so a change needs no stack update and no image rebuild. The
 WebSocket transcriber reuses what it read for up to 30 seconds, so a streaming meeting that
 starts within 30 seconds of a save may still use the previous engine; a Virtual Participant
 reads them fresh each time. They are stored in the shared

@@ -361,11 +361,13 @@ export const exportDocument = ({ sections, defaults, values, profile, revision, 
 });
 
 /**
- * The sections an exported file sets, as effective values, and the sections in
- * it that could not be used. Throws, with a message to show, for a file that is
- * not an export.
+ * The sections an exported file sets, as effective values, the sections in it
+ * that could not be used, and, as [section, setting] pairs, the settings in it
+ * that this deployment does not offer. Those are left out, as the form leaves
+ * them out of what it shows: each keeps the value it has in `current`, or the
+ * default. Throws, with a message to show, for a file that is not an export.
  */
-export const readExport = (text, sections, defaults) => {
+export const readExport = (text, sections, defaults, settings = {}, current = {}) => {
   let parsed;
   try {
     parsed = JSON.parse(text);
@@ -384,13 +386,22 @@ export const readExport = (text, sections, defaults) => {
   const byName = Object.fromEntries(sections.map((section) => [section.name, section]));
   const values = {};
   const skipped = [];
+  const withheld = [];
   Object.entries(parsed.sections).forEach(([name, stored]) => {
     const section = byName[name];
     if (!section || !isObject(stored)) {
       skipped.push(name);
       return;
     }
-    values[name] = effectiveSection(section.schema, defaults[name], stored);
+    const used = offered(section.schema, stored, settings);
+    let effective = effectiveSection(section.schema, defaults[name], used);
+    Object.keys(stored)
+      .filter((key) => !Object.prototype.hasOwnProperty.call(used, key))
+      .forEach((key) => {
+        withheld.push([name, key]);
+        if (hasAt(current?.[name], [key])) effective = setAt(effective, [key], clone(current[name][key]));
+      });
+    values[name] = effective;
   });
-  return { values, skipped, source: parsed };
+  return { values, skipped, withheld, source: parsed };
 };

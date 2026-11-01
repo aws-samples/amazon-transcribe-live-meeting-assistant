@@ -142,7 +142,9 @@ select **Save changes**.
   staging deployment, onto the page. Because the file holds changes rather than
   whole settings, importing it into a deployment of a later release keeps that
   release's defaults for everything the file does not change. A section the file
-  holds that this deployment does not have is listed and left out. The save
+  holds that this deployment does not have is listed and left out, and so is a
+  setting the page does not show here, such as the engine choices on a deployment
+  without the on-demand speech engine, which keeps its current value. The save
   comment is filled in with the file's name; change it if you like.
 - **Apply a preset** applies one of the configurations LMA ships:
   - **Healthcare summary** — the summary sections of the healthcare prompt domain,
