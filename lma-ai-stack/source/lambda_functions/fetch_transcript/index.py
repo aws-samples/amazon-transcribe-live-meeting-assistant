@@ -147,6 +147,49 @@ def segment_start(row):
         return 0.0
 
 
+def format_clock(seconds):
+    """A time from the start of the meeting as [MM:SS], or [H:MM:SS] from an hour."""
+    try:
+        total = max(0, int(float(seconds)))
+    except (TypeError, ValueError):
+        total = 0
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"[{hours}:{minutes:02d}:{secs:02d}]" if hours else f"[{minutes:02d}:{secs:02d}]"
+
+
+#: How much of a frame's text names it in the timed transcript.
+SLIDE_MARK_CHARS = 120
+
+
+def timed_transcript(segments, lines, frames):
+    """The transcript with each line's time, and a line where the shared screen changed.
+
+    ``segments`` and ``lines`` are preprocess_transcripts' input, in the order it
+    sorted them, and its output, one line per segment. A key frame adds
+    "[MM:SS] (The shared screen changed: <the start of its text>)" at its
+    time, so the summary's chapters can begin where a new slide did
+    (docs/meeting-video.md).
+    """
+    entries = []
+    for row, line in zip(segments, lines):
+        text = line.strip()
+        if text:
+            entries.append((segment_start(row), f"{format_clock(segment_start(row))} {text}"))
+    for frame in frames or []:
+        first = " ".join((frame.get("SlideText") or "").split())[:SLIDE_MARK_CHARS]
+        shown = f": {first}" if first else ""
+        entries.append(
+            (
+                frame["Timestamp"],
+                f"{format_clock(frame['Timestamp'])} (The shared screen changed{shown})",
+            )
+        )
+    # Stable, so lines that share a time keep the transcript's order.
+    entries.sort(key=lambda entry: entry[0])
+    return "".join("\n" + text for _, text in entries)
+
+
 #: What one frame's "Said" holds at most, the start of what was said; the
 #: summary uses no more than this of it (MAX_SAID_CHARS there), and the bound
 #: keeps the response well inside a synchronous invoke's 6 MB.
@@ -359,9 +402,16 @@ def lambda_handler(event, context):
     transcripts = preprocess_transcripts(segments, preProcess, includeSpeaker, metadata)
     transcript_string = "".join(transcripts)
     response = {"transcript": transcript_string, "metadata": metadata}
+    keyframes = None
+    if data.get("IncludeKeyframes") or data.get("IncludeTimes"):
+        keyframes = get_keyframes(callid)
+    if data.get("IncludeTimes"):
+        # segments and transcripts are in the same order, one line per
+        # segment, as preprocess_transcripts left them.
+        response["timedTranscript"] = timed_transcript(segments, transcripts, keyframes)
     if data.get("IncludeKeyframes"):
         response["keyframes"] = attach_said(
-            get_keyframes(callid), segments, preProcess, includeSpeaker, metadata
+            keyframes, segments, preProcess, includeSpeaker, metadata
         )
     # Log the shape of the response rather than the response. Everything this
     # function returns is meeting content, and the counts are what is actually

@@ -60,7 +60,12 @@ AGENDA_PLACEHOLDER = "{agenda}"
 # while it was up. Run only for a meeting that has key frames, as the agenda
 # section is run only for a meeting that has an agenda. See docs/meeting-video.md.
 SLIDES_PLACEHOLDER = "{slides}"
-PLACEHOLDERS = re.compile(r"\{transcript\}|\{agenda\}|\{slides\}")
+
+# The transcript with the time of each line, and a line at each change of the
+# shared screen: what the shipped CHAPTERS section divides into chapters, whose
+# times the meeting page reads (docs/meeting-video.md).
+TIMED_TRANSCRIPT_PLACEHOLDER = "{timed_transcript}"
+PLACEHOLDERS = re.compile(r"\{transcript\}|\{agenda\}|\{slides\}|\{timed_transcript\}")
 
 #: Bounds on what one meeting's slides add to the prompt. A meeting keeps at
 #: most 1,000 frames; past MAX_SLIDES, the frames on screen for the shortest
@@ -202,8 +207,10 @@ def get_transcripts(callId):
         "ProcessTranscript": PROCESS_TRANSCRIPT,
         "IncludeSpeaker": True,
         # The text of the shared screen's key frames, for the knowledge base
-        # document (docs/meeting-video.md).
+        # document and the slides section, and the timed transcript for the
+        # chapters (docs/meeting-video.md).
         "IncludeKeyframes": True,
+        "IncludeTimes": True,
     }
     print("Invoking lambda", payload)
     response = lambda_client.invoke(
@@ -316,6 +323,7 @@ def generate_summary(
     call_id=None,
     agenda=None,
     keyframes=None,
+    timed_transcript=None,
 ):
     # first check to see if this is one prompt, or many prompts as a json
     templates = get_templates_from_dynamodb(prompt_override, refresh_configuration)
@@ -335,12 +343,16 @@ def generate_summary(
             if not slides_text:
                 print(f"Skipping summary section '{key}': nothing was shared on screen.")
                 continue
+        if TIMED_TRANSCRIPT_PLACEHOLDER in prompt and not (timed_transcript or "").strip():
+            print(f"Skipping summary section '{key}': no timed transcript.")
+            continue
         # All placeholders in one pass, so text inserted for one -- an agenda
         # line that reads "{transcript}", say -- is never read as another.
         values = {
             "{transcript}": transcript,
             AGENDA_PLACEHOLDER: agenda_text,
             SLIDES_PLACEHOLDER: slides_text or "",
+            TIMED_TRANSCRIPT_PLACEHOLDER: timed_transcript or "",
         }
         prompt = PLACEHOLDERS.sub(lambda match: values[match.group(0)], prompt)
         print("Prompt:", prompt)
@@ -470,6 +482,7 @@ def handler(event, context):
             callId,
             agenda=(metadata or {}).get("Agenda"),
             keyframes=transcript_json.get("keyframes"),
+            timed_transcript=transcript_json.get("timedTranscript"),
         )
         if not prompt_override:
             # only write to S3 when using default summary prompt

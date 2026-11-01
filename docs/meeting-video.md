@@ -39,6 +39,10 @@ went up.
   shown are read again if any of them was loaded before its text was read
   (the text follows its frame by a few seconds). A selected frame shows its
   text under the picture.
+- **Chapters**: a frame that begins one of the meeting's
+  [chapters](#chapters) is labelled with the chapter's title.
+- **Export slides (PDF)** opens every frame as a printable deck; see
+  [Exporting the slides](#exporting-the-slides).
 
 The pictures are shown through links signed by the server for whoever opened
 the page, after the same access check as the transcript, and they last an
@@ -133,6 +137,74 @@ A reasonable count is 11 to 13, depending on whether the three document pages
 are taken as one item or three, with the repeated slide merged; every result
 falls in that range. The cost is metered with the rest of the
 summary, under **Summary**.
+
+## Chapters
+
+The summary has a **CHAPTERS** section: one line per main topic of the
+meeting, `- [MM:SS] Title`, at the time the topic was first discussed or a new
+slide started it. The meeting page reads that section and shows a **Chapters**
+list below the summary. Selecting a chapter moves the transcript to its time
+and, after the meeting, plays the video recording from there, as selecting a
+key frame does. In the **Shared screen** strip, the frame that went up within
+30 seconds of a chapter's start is labelled with the chapter; a chapter that
+began without a change of slide labels no frame.
+
+How it is built:
+
+- The fetch-transcript function returns, when asked (`IncludeTimes`), the
+  transcript with each line's time and a line at each change of the shared
+  screen with the start of the new frame's text:
+  `[04:00] (The shared screen changed: Q3 Budget - Spend is 4% under plan)`.
+- The section's prompt names the `{timed_transcript}` placeholder, which the
+  summarizer fills with that text. The prompt asks for one line per chapter,
+  with each time taken from a line of the transcript. Chapters therefore work
+  for any meeting with a transcript, with or without video; the slide changes
+  only help place them.
+- Chapter times are on the transcript's clock. To play the recording from a
+  chapter, the page converts the time to the recording's clock using the key
+  frames, which carry both. A meeting without key frames plays from the
+  transcript time, which can differ from the recording by the moments between
+  the start of the recording and the start of transcription.
+- The page reads the section from a generated summary, or from under its
+  **CHAPTERS** heading once the summary has been edited by hand. It accepts the
+  usual variations of list mark, brackets and bold, and leaves out any line
+  without a readable time.
+
+Measured with the shipped prompt on a synthetic 24-minute meeting with five
+topics (two started by a new slide, three by discussion only), every model
+returned only lines the page reads and took every time from the transcript:
+
+| Model | Chapters | Seconds from each true topic start | Input / output tokens | Cost |
+|---|---|---|---|---|
+| Claude Sonnet 5.5 (the stack's default summary model) | 5 | 0, 0, 0, 0, 0 | 1,795 / 82 | about $0.004 |
+| Claude Haiku 4.5 | 5 | 0, 0, 0, 0, 0 | 1,340 / 65 | about $0.002 |
+| Amazon Nova 2 Lite | 5 | 0, 210, 0, 2, 0 | 1,297 / 50 | about $0.0005 |
+| Amazon Nova Lite | 6 | 0, 2, 0, 2, 0 | 1,383 / 96 | about $0.0001 |
+
+The prompt asks for the line where a topic is first discussed (not where an
+agenda mentions it) and for at least two minutes between chapters, because
+without those instructions the smaller models split the meeting into far more
+chapters or placed them at the agenda's mention of each topic. One synthetic
+meeting is a small sample, so expect chapter boundaries from the smaller models
+to be less reliable on real meetings.
+
+## Exporting the slides
+
+**Export slides (PDF)**, in the **Shared screen** section, opens the meeting's
+key frames in a new tab as a deck, one landscape page per frame in time order,
+each with its picture at full size (1568 pixels wide), its time, the chapter it
+begins, and its [slide text](#slide-text). It then opens the browser's print
+dialog, where **Save as PDF** saves it. All of the meeting's frames are read
+again for the export, so their links are fresh, and the dialog opens once
+the pictures have loaded. The tab opens as soon as the button is selected, and
+shows that the deck is being prepared until then.
+
+The deck is printed by the browser rather than built as a PDF file in the page,
+so any language or script on the slides prints as it shows on screen. A PDF
+library embeds only the fonts it ships, which leaves characters outside them
+blank. The trade-off is that the user takes the last step in the print dialog.
+The browser must allow the page to open a new tab; if it blocks the tab, the
+section says so.
 
 ## Asking the assistant about the shared screen
 
