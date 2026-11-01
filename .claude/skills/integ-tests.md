@@ -39,6 +39,12 @@ AWS_PROFILE=default make integ-tests STACK=lma-integtest1
 LMA_TEST_USERNAME=you@example.com LMA_TEST_PASSWORD=... \
     AWS_PROFILE=default make integ-tests STACK=lma-integtest1
 
+# Desktop capture app video: a narrated slideshow -> one key frame per slide,
+# images in S3, and the assistant reading the last slide (~2 min; Polly+Bedrock).
+# Needs also: pip install -r integ-tests/requirements-video.txt
+LMA_TEST_USER_SECRET_ID=lma/integ-tests/cognito-user \
+    AWS_PROFILE=default make integ-tests STACK=lma-integtest1 LMA_TEST_DESKTOP_VIDEO=1
+
 # Real Virtual Participant join into a live meeting:
 make integ-tests-live STACK=lma-integtest1 PLATFORM=ZOOM \
     MEETING_ID=1234567890 MEETING_PASSWORD=secret
@@ -96,6 +102,7 @@ make docker-build-check-all    # + Virtual Participant image (heavy)
 | `test_ws_stream_transcribes_to_meeting` *(opt-in)* | stream a real WAV → meeting **+ transcript segments** | **@fastify/websocket 11 upgrade + Transcribe + gql** |
 | `test_vp_registry_lifecycle` | VP create→get→list→end (no meeting) | VP CRUD surface |
 | `test_vp_live_join` *(opt-in)* | VP joins a real meeting | `@zoom/meetingsdk` |
+| `test_desktop_video.py` *(opt-in, `LMA_TEST_DESKTOP_VIDEO=1`)* | synthetic slideshow over the desktop app's video socket → 5 key frames at the slide times, both JPEGs in S3, assistant quotes the unspoken last slide | desktop key frames (`videokeyframes.ts`); the assistant's shared-screen tool once #891 is deployed |
 
 `test_ws_stream_transcribes_to_meeting` is the strongest single check — it streams
 `utilities/load-simulator/lma_load/fixtures/stereo-demo-call.wav` (real speech; the
@@ -114,6 +121,15 @@ written, and transcript segments are produced.
   Transcribe streaming or `processTranscriptionResults` is broken; if it 500s on
   connect, check the `@fastify/websocket` route registration ordering (must be in
   `server.after()`). Cross-reference `docs/dependency-upgrade-validation-runbook.md`.
+- **`test_desktop_video_keeps_one_key_frame_per_slide`** → zero frames: the
+  transcriber image predates desktop key frames, or `EnableVideoRecording=false`;
+  look for `[KEYFRAMES]` lines in the transcriber's logs. Wrong count or times:
+  the detector thresholds in `videokeyframes.ts`. Slide times follow Polly's
+  narration lengths; `python integ-tests/desktop_video_probe.py --media-only DIR`
+  prints the generated video's key frame times to compare against.
+- **`test_assistant_reads_the_last_slide`** → skipped means the deployed
+  assistant has no `meeting_frames.py` (the tool comes with #891, not yet merged); a wrong answer means the tool did not
+  run or the model could not read the image (Nova Micro reads no images).
 - **`test_vp_live_join`** → VP never left `INITIALIZING`; inspect VP ECS task logs
   and the Zoom per-signal checklist in the runbook.
 
