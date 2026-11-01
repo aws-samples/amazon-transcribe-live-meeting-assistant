@@ -229,6 +229,9 @@ type Mutation @aws_iam {
 	addIssuesDetected(input: AddIssuesDetectedInput!): Call
 	addCallSummaryText(input: AddCallSummaryTextInput!): Call
 	addTranscriptSegment(input: AddTranscriptSegmentInput!): TranscriptSegment
+	# Written by the call event processor for an ADD_VIDEO_KEYFRAME event; IAM only,
+	# like addTranscriptSegment. See docs/meeting-video.md.
+	addVideoKeyframe(input: AddVideoKeyframeInput!): VideoKeyframe
 	deleteCall(input: DeleteCallInput!): DeleteCallOutput
 	shareCall(input: ShareCallInput!): ShareCallOutput
 	unshareCall(input: UnshareCallInput!): UnshareCallOutput
@@ -300,6 +303,10 @@ type Query @aws_cognito_user_pools
 	voiceEnrollmentTerms: VoiceEnrollmentState @aws_cognito_user_pools
 	getTranscriptSegments(callId: ID!, isPartial: Boolean): TranscriptSegmentList
 	getTranscriptSegmentsWithSentiment(callId: ID!): TranscriptSegmentsWithSentimentList
+	# The meeting's key frames in time order, a page at a time. Visible to the
+	# meeting's owner, the people it is shared with, and admins -- the same rule
+	# as getTranscriptSegments.
+	getVideoKeyframes(callId: ID!, limit: Int, nextToken: String): VideoKeyframeList
 	listCallsDateRange(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!, limit: Int, nextToken: String): CallList
 	getCallCount(startDateTime: AWSDateTime!, endDateTime: AWSDateTime!): CallCount
     queryKnowledgeBase(input: String!, sessionId: String): String
@@ -602,6 +609,8 @@ type Subscription {
 		@aws_subscribe(mutations: ["updateCallStatus","updateCallAggregation","updateRecordingUrl","updateVideoRecordingUrl","updatePcaUrl","updateAgent", "updateSpeakerIdentities", "updateCallSummaryText", "updateCallAgenda", "addCallCategory", "addIssuesDetected", "addCallSummaryText"])
 	onAddTranscriptSegment(CallId: ID, Channel: String): TranscriptSegment
 		@aws_subscribe(mutations: ["addTranscriptSegment"])
+	onAddVideoKeyframe(CallId: ID): VideoKeyframe
+		@aws_subscribe(mutations: ["addVideoKeyframe"])
 	onSendChatMessage(CallId: ID): SendChatMessageOutput
 		@aws_subscribe(mutations: ["sendChatMessage"])
 	onAddChatToken(CallId: ID!, MessageId: ID!): ChatToken
@@ -670,6 +679,64 @@ type TranscriptSegmentsWithSentimentList @aws_cognito_user_pools
 @aws_iam {
 	TranscriptSegmentsWithSentiment: [TranscriptSegmentWithSentiment]
 	nextToken: String
+}
+
+# One picture of the shared screen, kept when it changed and then held still.
+# Stored under the meeting (PK "kf#<CallId>") with the transcript's retention and
+# the meeting's Owner and SharedWith. See docs/meeting-video.md.
+type VideoKeyframe implements DynamoDbBase @aws_cognito_user_pools
+@aws_iam {
+	PK: ID!
+	SK: ID!
+	CreatedAt: AWSDateTime!
+	UpdatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	CallId: ID!
+	# Zero-padded milliseconds on the transcript timeline plus a suffix, so the
+	# sort key orders frames in time.
+	FrameId: ID!
+	# Seconds on the transcript timeline: the clock of a segment's StartTime.
+	Timestamp: Float!
+	# Seconds into the meeting's video recording, when there is one.
+	VideoOffset: Float
+	# HTTPS S3 URLs of the large image and the thumbnail.
+	ImageUrl: String!
+	ThumbnailUrl: String!
+	Width: Int
+	Height: Int
+	# What took the frame: VIRTUAL_PARTICIPANT.
+	Source: String
+	# Whether the meeting platform showed a screen share when the frame was
+	# taken; absent where the platform gives no such signal.
+	ShareDetected: Boolean
+	# Fraction of the picture that differed from the previous key frame.
+	ChangeScore: Float
+	Owner: String
+	SharedWith: String
+}
+
+type VideoKeyframeList @aws_cognito_user_pools
+@aws_iam {
+	VideoKeyframes: [VideoKeyframe]
+	nextToken: String
+}
+
+input AddVideoKeyframeInput {
+	CallId: ID!
+	FrameId: ID!
+	Timestamp: Float!
+	VideoOffset: Float
+	ImageUrl: String!
+	ThumbnailUrl: String!
+	Width: Int
+	Height: Int
+	Source: String
+	ShareDetected: Boolean
+	ChangeScore: Float
+	CreatedAt: AWSDateTime
+	ExpiresAfter: AWSTimestamp
+	Owner: String
+	SharedWith: String
 }
 input UpdateAgentInput {
 	CallId: ID!

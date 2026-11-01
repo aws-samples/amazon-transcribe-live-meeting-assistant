@@ -11,6 +11,8 @@ import { transcriptionService } from './scribe.js';
 import { VirtualParticipantStatusManager, beginShutdown } from './status-manager.js';
 import { recordingService } from './recording.js';
 import { videoRecorder } from './video-recorder.js';
+import { keyframeSampler } from './keyframe-sampler.js';
+import { screenShareProbeFor } from './screen-share-probe.js';
 import {
     installAudioDiagnostics,
     startAudioDeviceSpecPolling,
@@ -737,6 +739,27 @@ const main = async (): Promise<void> => {
             console.error('Error starting video recording:', error);
         }
 
+        // Key frames of the shared screen, stored on the meeting. Same switch
+        // as the screen recording; samples are only judged once the meeting
+        // is being transcribed (see keyframe-sampler.ts).
+        if (details.enableVideoRecording && details.recordingsBucketName) {
+            try {
+                const { kinesisStreamManager } = await import('./kinesis-stream.js');
+                const probe = screenShareProbeFor(details.invite.meetingPlatform, details.teamsMethod);
+                keyframeSampler.start({
+                    callId: kinesisStreamManager.currentCallId,
+                    bucket: details.recordingsBucketName,
+                    isLive: () => transcriptionService.transcribingLive,
+                    timelineSeconds: () => transcriptionService.timelineSeconds(),
+                    recordingStartedAtMs: () => videoRecorder.startedAtMs,
+                    shareActive: probe ? () => probe(page) : undefined,
+                    emit: (frame) => kinesisStreamManager.sendVideoKeyframe(frame),
+                });
+            } catch (error) {
+                console.error('Error starting key frame sampling:', error);
+            }
+        }
+
         // Join the meeting and wait for it to end. The platform handler
         // returns a structured ExitInfo describing WHY the meeting ended;
         // we log it canonically and persist a human-readable form alongside
@@ -796,6 +819,16 @@ const main = async (): Promise<void> => {
             stopSenderBypass();
             stopDeviceSpecs();
         } catch { /* never block cleanup */ }
+
+        // Stop key frame sampling before transcription, which sends the END
+        // event, so a frame being captured is announced while the meeting is
+        // still open; in its own try so a failure cannot leave its FFmpeg
+        // process and share poll running.
+        try {
+            await keyframeSampler.stop();
+        } catch (keyframeError) {
+            console.error('Error stopping key frame sampling:', keyframeError);
+        }
 
         try {
             // Stop transcription service

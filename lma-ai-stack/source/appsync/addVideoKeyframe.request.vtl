@@ -1,0 +1,20 @@
+## One key frame of the shared screen, stored under the meeting. Written only by
+## the call event processor (the mutation is IAM-only), which sets Owner and
+## SharedWith from the meeting. A redelivered event carries the same FrameId and
+## replaces the item with identical content.
+#set( $PK = "kf#${ctx.args.input.CallId}" )
+#set( $SK = "f#${ctx.args.input.FrameId}" )
+
+#set( $CreatedAt = $util.defaultIfNullOrBlank($ctx.args.input.CreatedAt, $util.time.nowISO8601()) )
+$util.qr($ctx.args.input.put("CreatedAt", ${CreatedAt}))
+$util.qr($ctx.args.input.put("UpdatedAt", $util.time.nowISO8601()))
+
+{
+  "version" : "2018-05-29",
+  "operation": "PutItem",
+  "key" : {
+    "PK": $util.dynamodb.toDynamoDBJson($PK),
+    "SK": $util.dynamodb.toDynamoDBJson($SK),
+  },
+  "attributeValues": $util.dynamodb.toMapValuesJson($ctx.args.input),
+}

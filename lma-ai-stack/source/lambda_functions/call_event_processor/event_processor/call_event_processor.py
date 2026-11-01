@@ -25,6 +25,7 @@ from botocore.config import Config as BotoCoreConfig
 from eventprocessor_utils import (
     get_meeting_ttl,
     get_owner_from_jwt,
+    get_transcription_ttl,
     normalize_transcript_segments,
     transform_segment_to_add_sentiment,
     transform_segment_to_categories_agent_assist,
@@ -41,7 +42,11 @@ from graphql_helpers import (
     traceback_frames,
     transcript_segment_fields,
     transcript_segment_sentiment_fields,
+    video_keyframe_fields,
 )
+
+# Validation of ADD_VIDEO_KEYFRAME, AWS-free for the same reason as pure.py below.
+from keyframe_input import KeyframeEventError, build_keyframe_input  # noqa: E402
 from metrics_utils import catalogue as metric_names
 from metrics_utils.emf import METRICS
 
@@ -796,6 +801,73 @@ async def execute_add_s3_video_recording_mutation(
     return result
 
 
+async def execute_add_video_keyframe_mutation(
+    message: Dict[str, Any],
+    appsync_session: AppsyncAsyncClientSession,
+) -> Dict:
+    """Store one key frame of the shared screen on the meeting (ADD_VIDEO_KEYFRAME).
+
+    The frame takes the meeting's Owner and SharedWith, read here rather than
+    trusted from the event, so it is visible to the people who can see the
+    transcript; see keyframe_input.py. A meeting that is not there yet fails the
+    record, which is redelivered, as a transcript segment's would be.
+
+    An event that can never be stored -- a field missing or of the wrong kind --
+    is logged and dropped rather than raised: raising reports the record for
+    redelivery, and it would fail the same way every time while holding up the
+    rest of its shard (see the failure policy in batch_item_failures.py).
+    """
+    try:
+        keyframe = build_keyframe_input(
+            message, owner=None, shared_with=None, expires_after=get_transcription_ttl()
+        )
+    except KeyframeEventError as error:
+        LOGGER.error(
+            "dropping an ADD_VIDEO_KEYFRAME event that cannot be stored: %s",
+            error,
+            extra=dict(call_id=message.get("CallId"), frame_id=message.get("FrameId")),
+        )
+        return {"ok": False, "Dropped": True}
+
+    if not appsync_session.client.schema:
+        raise ValueError("invalid AppSync schema")
+    schema = DSLSchema(appsync_session.client.schema)
+
+    access_query = dsl_gql(
+        DSLQuery(
+            schema.Query.getCall.args(CallId=keyframe["CallId"]).select(
+                schema.Call.CallId,
+                schema.Call.Owner,
+                schema.Call.SharedWith,
+            )
+        )
+    )
+    access = await execute_gql_query_with_retries(
+        access_query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+    call = require_graphql_field(access, "getCall", logger=LOGGER)
+    for field in ("Owner", "SharedWith"):
+        if call.get(field) is not None:
+            keyframe[field] = call[field]
+
+    query = dsl_gql(
+        DSLMutation(
+            schema.Mutation.addVideoKeyframe.args(input=keyframe).select(
+                *video_keyframe_fields(schema)
+            )
+        )
+    )
+    result = await execute_gql_query_with_retries(
+        query,
+        client_session=appsync_session,
+        logger=LOGGER,
+    )
+    LOGGER.debug("video keyframe stored", extra=dict(frame_id=keyframe["FrameId"]))
+    return result
+
+
 async def execute_add_pca_url_mutation(
     message: Dict[str, Any],
     appsync_session: AppsyncAsyncClientSession,
@@ -1469,6 +1541,7 @@ async def execute_process_event_api_mutation(
         ADD_CALL_CATEGORY="ADD_CALL_CATEGORY",
         ADD_S3_RECORDING_URL="ADD_S3_RECORDING_URL",
         ADD_S3_VIDEO_RECORDING_URL="ADD_S3_VIDEO_RECORDING_URL",
+        ADD_VIDEO_KEYFRAME="ADD_VIDEO_KEYFRAME",
         ADD_PCA_URL="ADD_PCA_URL",
         CALL_ANALYTICS_METADATA="CALL_ANALYTICS_METADATA",
     )
@@ -1849,6 +1922,16 @@ async def execute_process_event_api_mutation(
         # ADD S3 VIDEO RECORDING URL
         LOGGER.debug("Add video recording url")
         response = await execute_add_s3_video_recording_mutation(
+            message=message, appsync_session=appsync_session
+        )
+        if isinstance(response, Exception):
+            return_value["errors"].append(response)
+        else:
+            return_value["successes"].append(response)
+
+    elif event_type == "ADD_VIDEO_KEYFRAME":
+        LOGGER.debug("Add video keyframe")
+        response = await execute_add_video_keyframe_mutation(
             message=message, appsync_session=appsync_session
         )
         if isinstance(response, Exception):

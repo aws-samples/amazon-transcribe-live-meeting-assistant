@@ -59,6 +59,7 @@ export default defineConfig({
               slug: "transcript-summarization",
             },
             { label: "Meeting Agenda", slug: "meeting-agenda" },
+            { label: "Meeting Video and Key Frames", slug: "meeting-video" },
             { label: "Meetings Query Tool", slug: "meetings-query-tool" },
           ],
         },
