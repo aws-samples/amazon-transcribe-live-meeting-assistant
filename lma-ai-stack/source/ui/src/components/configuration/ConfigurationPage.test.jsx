@@ -135,7 +135,7 @@ describe('ConfigurationContent', () => {
     graphqlMock.mockReset();
   });
 
-  it('renders one section per schema, with the engine choices only where the on-demand engine is deployed', async () => {
+  it('renders one section per schema, with engine choices only where the on-demand engine is deployed', async () => {
     graphqlMock.mockResolvedValue(answer());
     const { unmount } = renderEditor();
     await screen.findByText('Transcript Summary');
