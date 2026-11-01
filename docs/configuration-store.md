@@ -365,11 +365,14 @@ list, a switch that is not a boolean — before the store sees it. What they kee
 is then checked like any other save. In practice the schema adds these refusals
 to those mutations:
 
-- a chat button or summary prompt key whose label is empty (`3#`), or whose
-  number uses digits other than `0`–`9` — the resolvers' own filters accept both;
+- a chat button or summary prompt key whose label is empty (`3#`), which both
+  resolvers' own filters accept, and a summary prompt key whose number uses digits
+  other than `0`–`9`, which the summary prompt resolver's filter accepts;
 - a chat button prompt that is not text;
-- a Nova Sonic system prompt, model id or voice id that is not text, or an id
-  longer than its limit (256 characters for a model id, 128 for a voice id).
+- a Nova Sonic system prompt, model id or voice id that is not text, and a model
+  id or voice id that is empty or longer than its limit (256 characters for a
+  model id, 128 for a voice id). The Nova Sonic Configuration page never sends an
+  empty one, so this affects only a client calling the mutation directly.
 
 `updateCallPricing` has no checks of its own; the schema is the whole of what it
 enforces.
@@ -381,7 +384,7 @@ for example
 The path separator is ` › ` rather than `/` or `.`, because keys here hold both.
 The message spells out the first ten problems and counts the rest.
 `updateConfiguration` answers such a refusal with an error starting `Invalid: `,
-which the configuration editor matches on.
+for a configuration editor to match on.
 
 ### The editor's read and save
 

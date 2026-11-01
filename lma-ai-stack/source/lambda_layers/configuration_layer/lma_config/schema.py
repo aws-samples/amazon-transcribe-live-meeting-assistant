@@ -12,7 +12,7 @@ beside this module. The same document does two jobs:
   the store on every operator save, whichever resolver it arrives through, so a
   value the readers could not use is refused when it is saved rather than
   discovered when a meeting reads it.
-* **It is what the configuration editor renders.** The documents carry UI-layout
+* **It is what a configuration editor renders.** The documents carry UI-layout
   annotations next to the validation keywords (``order``, ``sectionLabel``,
   ``format: textarea`` and so on, listed in :data:`UI_ANNOTATIONS`), and the
   resolver behind ``Query.getConfiguration`` serves them to the web UI as they
@@ -185,6 +185,26 @@ def _type_matches(expected: str, value: Any) -> bool:
     return expected == "number"
 
 
+#: A ``$`` that is an anchor: not escaped. The shipped patterns use none inside a
+#: character class, which the layer's tests assert.
+_END_ANCHOR = re.compile(r"(?<!\\)\$")
+
+
+@lru_cache(maxsize=None)
+def _compiled(pattern: str) -> "re.Pattern[str]":
+    """``pattern`` as JavaScript reads it, for Python's ``re``.
+
+    The one difference the patterns here can meet: Python's ``$`` also matches
+    just before a final newline, JavaScript's does not, so "us-east-1\\n" would
+    pass the server and fail the editor. ``\\Z`` is Python's end of the text.
+    """
+    return re.compile(_END_ANCHOR.sub(r"\\Z", pattern))
+
+
+def _search(pattern: str, text: str) -> bool:
+    return _compiled(pattern).search(text) is not None
+
+
 def _json(value: Any) -> str:
     """A value as a message quotes it: JSON, with non-ASCII text left as it is.
 
@@ -264,7 +284,7 @@ def check(schema: Mapping[str, Any], value: Any, path: Tuple[str, ...] = ()) -> 
             problems.append(
                 f"{where}: must be at most {schema['maxLength']} characters; got {length}"
             )
-        if "pattern" in schema and not re.search(schema["pattern"], value):
+        if "pattern" in schema and not _search(schema["pattern"], value):
             problems.append(f"{where}: {_json(value)} does not match {schema['pattern']}")
 
     if isinstance(value, (list, tuple)):
@@ -304,7 +324,7 @@ def _check_object(
         child = path + (key,)
         if isinstance(names_schema, Mapping):
             pattern = names_schema.get("pattern")
-            if pattern is not None and not re.search(pattern, key):
+            if pattern is not None and not _search(pattern, key):
                 problems.append(f"{format_path(child)}: the name does not match {pattern}")
                 continue
         matched = False
@@ -312,7 +332,7 @@ def _check_object(
             matched = True
             problems.extend(check(properties[key], item, child))
         for pattern, pattern_schema in patterns.items():
-            if re.search(pattern, key):
+            if _search(pattern, key):
                 matched = True
                 problems.extend(check(pattern_schema, item, child))
         if matched:

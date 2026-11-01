@@ -367,8 +367,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         LOGGER.info("refused a %s against a superseded profile", field)
         raise Exception(f"Conflict: {error}") from error  # pylint: disable=broad-exception-raised
     except (InvalidConfiguration, UnknownConfigurationSection) as error:
-        # The prefix the configuration editor matches on to show the problems
-        # beside the save, rather than as a failure to try again.
+        if field != UPDATE_CONFIGURATION_FIELD:
+            # Not something the caller sent: a read that meets a section with no
+            # schema is a packaging fault, and is reported as one.
+            raise
+        # The prefix a configuration editor is to match on, to show the problems
+        # beside the save rather than as a failure to try again.
         raise Exception(f"Invalid: {error}") from error  # pylint: disable=broad-exception-raised
     except RevisionNotFound as error:
         raise Exception(f"Not found: {error}") from error  # pylint: disable=broad-exception-raised

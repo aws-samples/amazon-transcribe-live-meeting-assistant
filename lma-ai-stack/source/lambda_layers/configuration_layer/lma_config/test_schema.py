@@ -24,6 +24,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -59,6 +60,29 @@ def test_every_registered_section_ships_a_schema_and_nothing_else_does():
 @pytest.mark.parametrize("name", sorted(sections.registered_sections()))
 def test_every_schema_uses_only_keywords_the_validator_implements(name):
     assert schema.unknown_keywords(schema.section_schema(name)) == []
+
+
+@pytest.mark.parametrize("name", sorted(sections.registered_sections()))
+def test_no_pattern_puts_a_dollar_inside_a_character_class(name):
+    """The anchor rewrite that makes ``$`` mean what JavaScript means assumes it."""
+
+    def patterns(node):
+        if not isinstance(node, dict):
+            return []
+        found = [node["pattern"]] if isinstance(node.get("pattern"), str) else []
+        found += list(node.get("patternProperties") or {})
+        for child in list((node.get("properties") or {}).values()) + list(
+            (node.get("patternProperties") or {}).values()
+        ):
+            found += patterns(child)
+        for key in ("additionalProperties", "items", "propertyNames"):
+            found += patterns(node.get(key))
+        return found
+
+    found = patterns(schema.section_schema(name))
+    assert found or name in ("nova_sonic_config", "asr_engine")
+    for pattern in found:
+        assert not re.search(r"\[[^\]]*\$[^\]]*\]", pattern), pattern
 
 
 @pytest.mark.parametrize("name", sorted(sections.registered_sections()))

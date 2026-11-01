@@ -4,10 +4,10 @@
  * See the LICENSE file in the project root for full license information.
  */
 
-// The configuration editor's copy of the validator the configuration store
-// applies to every save (lma_config/schema.py in the configuration layer). The
-// editor runs it on what it is about to send, so a problem is shown beside the
-// setting before the save, rather than coming back as a refusal after it.
+// The web UI's copy of the validator the configuration store applies to every
+// save (lma_config/schema.py in the configuration layer), for a configuration
+// editor to run on what it is about to send, so a problem can be shown beside
+// the setting before the save rather than coming back as a refusal after it.
 //
 // The two copies must report the same problems in the same words and order.
 // lma-ai-stack/test/fixtures/configuration_schema_cases.json is run through

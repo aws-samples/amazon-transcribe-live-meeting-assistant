@@ -270,6 +270,17 @@ def test_an_editor_save_must_name_at_least_one_section(store, sections: Any) -> 
         call("updateConfiguration", input={"Sections": sections, "ExpectedVersion": 2})
 
 
+def test_a_section_with_no_schema_is_not_reported_as_invalid_input(
+    store, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def missing() -> Dict[str, Any]:
+        raise index.UnknownConfigurationSection("no schema shipped")
+
+    monkeypatch.setattr(index, "section_schemas", missing)
+    with pytest.raises(index.UnknownConfigurationSection):
+        call("getConfiguration")
+
+
 def test_the_editor_does_not_create_a_profile(store) -> None:
     with pytest.raises(ValueError, match="no configuration profile"):
         call(

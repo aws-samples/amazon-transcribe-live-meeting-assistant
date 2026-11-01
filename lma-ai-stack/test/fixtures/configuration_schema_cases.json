@@ -225,6 +225,26 @@
       ]
     },
     {
+      "name": "an end anchor does not match before a final newline",
+      "schema": {
+        "type": "string",
+        "pattern": "^[a-z]+$"
+      },
+      "value": "abc\n",
+      "problems": [
+        "(the value): \"abc\\n\" does not match ^[a-z]+$"
+      ]
+    },
+    {
+      "name": "an escaped dollar is a character",
+      "schema": {
+        "type": "string",
+        "pattern": "^x\\$$"
+      },
+      "value": "x$",
+      "problems": []
+    },
+    {
       "name": "unknown property refused",
       "schema": {
         "type": "object",
