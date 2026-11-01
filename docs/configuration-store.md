@@ -329,8 +329,8 @@ of having no third-party dependencies:
 | `enum` | The value is one of the listed ones, compared as JSON compares them, so `true` is not `1` |
 | `minimum`, `maximum` | Inclusive bounds on a number |
 | `minLength`, `maxLength`, `pattern` | Text length in characters, and a regular expression that must match somewhere in the text |
-| `properties`, `patternProperties`, `additionalProperties`, `propertyNames`, `required`, `maxProperties` | Object members, with the standard rule: a member named in `properties` or matching a `patternProperties` pattern is checked against those, and only a member matching neither falls to `additionalProperties` |
-| `items`, `minItems`, `maxItems` | List members and length |
+| `properties`, `patternProperties`, `additionalProperties`, `propertyNames`, `required`, `maxProperties` | Object members, with the standard rule, and of `propertyNames` only its `pattern`: a member named in `properties` or matching a `patternProperties` pattern is checked against those, and only a member matching neither falls to `additionalProperties` |
+| `items`, `minItems`, `maxItems` | List members, with `items` as one schema for every member, and length |
 
 A keyword the validator does not implement is refused by the layer's tests rather
 than ignored, because an ignored keyword is a constraint that looks enforced and
@@ -387,7 +387,7 @@ for example
 `call_pricing › regions › default › transcribe/streaming › seconds: must be at least 0; got -1`.
 The path separator is ` › ` rather than `/` or `.`, because keys here hold both.
 The message spells out the first ten problems and counts the rest.
-`updateConfiguration` answers such a refusal with an error starting `Invalid: `,
+`updateConfiguration` answers such a refusal, and only such a refusal, with an error starting `Invalid: `,
 for a configuration editor to match on.
 
 ### The editor's read and save

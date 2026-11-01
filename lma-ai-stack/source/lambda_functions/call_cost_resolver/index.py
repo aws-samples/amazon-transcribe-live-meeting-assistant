@@ -218,7 +218,8 @@ def update_call_pricing(input_data: Mapping[str, Any], caller: Mapping[str, Any]
     # value stored here that it cannot use makes every estimate wrong at once,
     # with the error far from the save that caused it. A refusal is an
     # InvalidConfiguration, which is a ValueError naming each problem.
-    # Required, unlike on the older configuration fields, which keep it optional
+    #
+    # ExpectedVersion is required, unlike on the older configuration fields, which keep it optional
     # only for clients written before it existed. The save replaces the whole
     # section with this delta, so without the version a save made from a stale
     # read would silently drop another Admin's price changes.

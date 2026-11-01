@@ -152,7 +152,7 @@ export const checkDetailed = (schema, value, path = []) => {
 
   if (isObject(value)) {
     (schema.required || []).forEach((name) => {
-      if (!(name in value)) add(path, `${json(name)} is required`);
+      if (!Object.prototype.hasOwnProperty.call(value, name)) add(path, `${json(name)} is required`);
     });
     if (schema.maxProperties !== undefined && Object.keys(value).length > schema.maxProperties) {
       add(path, `must hold at most ${count(schema.maxProperties, 'entry', 'entries')}`);

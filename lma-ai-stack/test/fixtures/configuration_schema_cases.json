@@ -456,6 +456,19 @@
       ]
     },
     {
+      "name": "required looks only at the value's own keys",
+      "schema": {
+        "type": "object",
+        "required": [
+          "toString"
+        ]
+      },
+      "value": {},
+      "problems": [
+        "(the value): \"toString\" is required"
+      ]
+    },
+    {
       "name": "maxProperties",
       "schema": {
         "type": "object",

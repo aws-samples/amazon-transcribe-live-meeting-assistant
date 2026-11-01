@@ -72,6 +72,15 @@ def test_every_schema_describes_an_object_and_declares_how_it_merges(name):
     assert document.get("sectionLabel"), "the editor heads each section with this"
 
 
+@pytest.mark.parametrize(
+    "fragment",
+    [{"propertyNames": {"maxLength": 40}}, {"items": [{"type": "string"}]}, {"maximun": 3}],
+    ids=["names-max-length", "items-as-a-list", "misspelt"],
+)
+def test_a_constraint_the_validator_would_ignore_is_reported(fragment):
+    assert schema.unknown_keywords({"type": "object", **fragment})
+
+
 def test_the_chat_buttons_are_the_one_section_a_profile_replaces_whole():
     replaced = {
         name

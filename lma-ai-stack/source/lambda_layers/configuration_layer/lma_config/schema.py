@@ -450,6 +450,15 @@ def unknown_keywords(schema: Any, path: Tuple[str, ...] = ()) -> List[str]:
         found.extend(unknown_keywords(child, path + (key,)))
     for pattern, child in (schema.get("patternProperties") or {}).items():
         found.extend(unknown_keywords(child, path + (pattern,)))
-    for key in ("additionalProperties", "items", "propertyNames"):
+    for key in ("additionalProperties", "items"):
         found.extend(unknown_keywords(schema.get(key), path + (key,)))
+    # Only a name's pattern is checked, so any other constraint on names would
+    # be one that looks enforced and is not.
+    names = schema.get("propertyNames")
+    if isinstance(names, Mapping):
+        found.extend(
+            f"{format_path(path + ('propertyNames',))}: {key}" for key in names if key != "pattern"
+        )
+    if "items" in schema and not isinstance(schema["items"], Mapping):
+        found.append(f"{format_path(path)}: items that is not a single schema")
     return found
