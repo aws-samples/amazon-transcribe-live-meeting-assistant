@@ -117,7 +117,7 @@ export const mergeDelta = (base, effective) => {
  * Only what differs from the baseline, so nothing the release ships is pinned.
  * A "replace" section stores its whole value, or nothing when it is the
  * shipped one. An empty object is a section that holds nothing of its own,
- * which is what Reset to Defaults stores.
+ * which is what Reset section to defaults stores.
  */
 export const storedSection = (schema, defaults, effective) => {
   if (isReplace(schema)) return deepEqual(effective, defaults || {}) ? {} : clone(effective);

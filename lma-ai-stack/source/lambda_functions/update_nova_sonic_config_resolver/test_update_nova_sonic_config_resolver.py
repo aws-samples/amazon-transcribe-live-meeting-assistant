@@ -265,7 +265,7 @@ def test_the_legacy_group_flag_is_stored_as_a_boolean(table: FakeConfigurationTa
 
 
 def test_a_reset_stores_an_empty_section(table: FakeConfigurationTable) -> None:
-    """Reset to Defaults saves `{}`; the baseline then supplies every field."""
+    """A reset to defaults saves `{}`; the baseline then supplies every field."""
     save(CONFIG)
     save({})
 
